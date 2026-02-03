@@ -1,6 +1,6 @@
 use crate::provider::{CompletionRequest, CompletionResponse, LlmProvider};
 use async_openai::config::OpenAIConfig;
-use async_openai::types::chat::{
+use async_openai::types::{
     ChatCompletionRequestMessage, ChatCompletionRequestUserMessage, CreateChatCompletionRequest,
 };
 use async_trait::async_trait;
