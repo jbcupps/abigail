@@ -1,40 +1,14 @@
 {
+  "productName": "Abby",
+  "version": "0.1.0",
+  "identifier": "com.abby.app",
   "build": {
     "beforeDevCommand": "",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "",
     "frontendDist": "src-ui/dist"
   },
-  "package": {
-    "productName": "Abby",
-    "version": "0.1.0"
-  },
-  "tauri": {
-    "allowlist": {
-      "all": false,
-      "shell": { "open": false }
-    },
-    "bundle": {
-      "active": true,
-      "targets": "all",
-      "identifier": "com.abby.app",
-      "icon": [],
-      "windows": {
-        "certificateThumbprint": null,
-        "digestAlgorithm": "sha256",
-        "timestampUrl": ""
-      },
-      "longDescription": "Abby - Abigail Normal",
-      "shortDescription": "Abby agent",
-      "resources": [],
-      "externalBin": [],
-      "copyright": "",
-      "category": "Developer",
-      "shortcut": true,
-      "nsis": {
-        "installMode": "currentUser"
-      }
-    },
+  "app": {
     "security": {
       "csp": null
     },
@@ -47,5 +21,25 @@
         "height": 600
       }
     ]
-  }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "longDescription": "Abby - Abigail Normal",
+    "shortDescription": "Abby agent",
+    "resources": [],
+    "externalBin": [],
+    "copyright": "",
+    "category": "Developer"
+  },
+  "plugins": {}
 }
