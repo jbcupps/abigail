@@ -67,3 +67,54 @@ After a release is published, end users can go to the [Abby download page](https
 | 2 | Commit and push the version bump. |
 | 3 | `git tag v0.0.x` and `git push origin v0.0.x`. |
 | 4 | Wait for build-release workflow to finish — release is published automatically. |
+
+---
+
+## Deva (Development) Releases
+
+The Deva branch has its own release workflow for preview/development builds.
+
+### Tag scheme
+
+Deva releases use tags prefixed with `deva-v`: `deva-v0.1.0`, `deva-v0.1.1`, etc.
+
+### How to publish a Deva release
+
+1. **Ensure you're on the Deva branch:**
+   ```bash
+   git checkout Deva
+   ```
+
+2. **Commit your changes and push:**
+   ```bash
+   git add -A
+   git commit -m "feat: description of changes"
+   git push origin Deva
+   ```
+
+3. **Create and push the tag:**
+   ```bash
+   git tag deva-v0.1.0
+   git push origin deva-v0.1.0
+   ```
+
+4. **CI:** `.github/workflows/build-release-deva.yml` runs on `deva-v*` tags:
+   - Builds installers for Windows, Linux, and macOS
+   - Creates a **pre-release** (marked as pre-release, not "latest")
+   - Installers named `Abby-Deva-*` to distinguish from stable
+
+### Manual workflow dispatch
+
+You can also trigger a Deva build without a tag:
+1. Go to **Actions** → **build-release-deva** → **Run workflow**
+2. Select branch `Deva`
+3. Optionally set **Release version** (e.g. `0.1.0-deva`)
+
+### Key differences from stable releases
+
+| Aspect | Stable (master) | Deva |
+|--------|-----------------|------|
+| Tag format | `v0.0.x` | `deva-v0.x.x` |
+| Release type | Release (latest) | Pre-release |
+| Asset names | `Abby-*` | `Abby-Deva-*` |
+| Workflow | `build-release.yml` | `build-release-deva.yml` |

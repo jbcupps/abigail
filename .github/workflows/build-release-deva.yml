@@ -1,0 +1,224 @@
+# Build Abby (Tauri app) from Deva branch and publish to GitHub Releases.
+# This is the development/preview release workflow.
+#
+# Triggers:
+# - Tags matching 'deva-v*' (e.g., deva-v0.1.0)
+# - Manual workflow_dispatch from Deva branch
+#
+# Key features:
+# - Builds unsigned installers for Windows (NSIS), Linux (DEB), macOS (DMG)
+# - Creates pre-release (not latest) so it doesn't override stable releases
+# - Version synced from git tag to tauri.conf.json
+
+name: build-release-deva
+
+on:
+  push:
+    tags:
+      - 'deva-v*' # Only run on Deva version tags (e.g., deva-v0.1.0)
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Release version (e.g. 0.1.0-deva). Leave empty to build only, no release.'
+        required: false
+        type: string
+
+permissions:
+  contents: write # Required to create Releases
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+            target: x86_64-pc-windows-msvc
+            installer_path: target/release/bundle/nsis/*.exe
+          - platform: ubuntu-22.04
+            args: ""
+            target: x86_64-unknown-linux-gnu
+            installer_path: target/release/bundle/deb/*.deb
+          - platform: macos-latest
+            args: ""
+            target: x86_64-apple-darwin
+            installer_path: target/release/bundle/dmg/*.dmg
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Install dependencies (Ubuntu only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev
+
+      - name: Setup Node
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: tauri-app/src-ui/package.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/deva-v* ]]; then
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#deva-v}" # Strip leading 'deva-v'
+          elif [[ -n "${{ github.event.inputs.release_version }}" ]]; then
+            VERSION="${{ github.event.inputs.release_version }}"
+          else
+            VERSION="0.0.0-deva"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building Deva version: $VERSION"
+
+      - name: Update version in tauri.conf.json
+        shell: bash
+        run: |
+          # Update version in tauri.conf.json to match the tag
+          cd tauri-app
+          if command -v jq &> /dev/null; then
+            jq '.version = "${{ steps.version.outputs.version }}"' tauri.conf.json > tauri.conf.json.tmp
+            mv tauri.conf.json.tmp tauri.conf.json
+          else
+            # Fallback: use sed for simple replacement
+            sed -i.bak 's/"version": "[^"]*"/"version": "${{ steps.version.outputs.version }}"/' tauri.conf.json
+            rm -f tauri.conf.json.bak
+          fi
+          cat tauri.conf.json | head -10
+
+      - name: Generate Cargo.lock
+        run: cargo generate-lockfile
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
+        with:
+          workspaces: "."
+
+      - name: Install and build frontend
+        run: |
+          cd tauri-app/src-ui && npm install && npm run build
+
+      - name: Generate app icons
+        run: |
+          npm install -g @tauri-apps/cli@v2
+          cd tauri-app && tauri icon icons/icon.png -o icons
+
+      - name: Ensure icons at repo root (Windows bundler cwd)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path icons | Out-Null
+          Copy-Item tauri-app\icons\icon.ico -Destination icons\
+          Copy-Item tauri-app\icons\icon.icns -Destination icons\ -ErrorAction SilentlyContinue
+          Copy-Item tauri-app\icons\*.png -Destination icons\ -ErrorAction SilentlyContinue
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@063c0231f444e55760d98acb9c469b994269d4a5 # v0.5.6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: tauri-app
+          args: ${{ matrix.args }}
+
+      - name: Upload installers (Artifacts)
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
+        with:
+          name: abby-deva-installer-${{ matrix.platform }}
+          path: ${{ matrix.installer_path }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/deva-v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_version != '')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all installer artifacts
+        uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4.1.4
+        with:
+          path: artifacts
+          pattern: abby-deva-installer-*
+          merge-multiple: false
+
+      - name: Determine version for release
+        id: release_version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/deva-v* ]]; then
+            TAG="${{ github.ref_name }}"
+            VERSION="${TAG#deva-}"  # Strip 'deva-' prefix for display
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "tag=deva-v${{ github.event.inputs.release_version }}" >> $GITHUB_OUTPUT
+            echo "version=v${{ github.event.inputs.release_version }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Rename to stable asset names for download URLs
+        run: |
+          mkdir -p release-assets
+          cp artifacts/abby-deva-installer-windows-latest/*.exe release-assets/Abby-Deva-windows-x64-setup.exe
+          cp artifacts/abby-deva-installer-ubuntu-22.04/*.deb release-assets/Abby-Deva-linux-x64.deb
+          cp artifacts/abby-deva-installer-macos-latest/*.dmg release-assets/Abby-Deva-macos-x64.dmg
+
+      - name: Create GitHub Release (Pre-release)
+        uses: softprops/action-gh-release@9d7c94cfd0a1f3ed45544c887983e9fa900f0564 # v2.0.4
+        with:
+          tag_name: ${{ steps.release_version.outputs.tag }}
+          name: Abby Deva ${{ steps.release_version.outputs.version }}
+          draft: false
+          prerelease: true  # Mark as pre-release so it doesn't become "latest"
+          body: |
+            ## Abby Deva ${{ steps.release_version.outputs.version }}
+
+            **This is a development/preview release from the Deva branch.**
+
+            ### Installation
+            
+            Download the installer for your platform:
+            - **Windows**: `Abby-Deva-windows-x64-setup.exe`
+            - **Linux**: `Abby-Deva-linux-x64.deb`
+            - **macOS**: `Abby-Deva-macos-x64.dmg`
+
+            ### First Run Setup
+            
+            On first launch, Abby will:
+            1. Generate a signing keypair for verifying document integrity
+            2. **Present your private key** - you MUST save this securely
+            3. Run integrity checks and complete the birth sequence
+
+            ### Security Note
+            
+            The private key shown during first run is NEVER stored by Abby.
+            Keep it safe - you'll need it if you ever need to verify your Abby instance
+            or recover from data loss.
+
+            ### Changes in Deva
+
+            This release includes:
+            - First-run external keypair generation
+            - Private key presentation with security disclaimers
+            - Auto-detection of external pubkey path
+            - Updated signature verification flow
+
+            ---
+            
+            **Note:** This is a pre-release. For stable releases, see the [main releases](https://github.com/${{ github.repository }}/releases?q=NOT+Deva&expanded=true).
+          files: |
+            release-assets/Abby-Deva-windows-x64-setup.exe
+            release-assets/Abby-Deva-linux-x64.deb
+            release-assets/Abby-Deva-macos-x64.dmg

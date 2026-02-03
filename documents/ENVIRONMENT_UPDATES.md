@@ -2,6 +2,22 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-03 (Deva release workflow)
+
+Added separate GitHub Actions workflow for Deva branch releases:
+
+- **`.github/workflows/build-release-deva.yml`:** Mirrors `build-release.yml` but configured for Deva branch.
+  - Triggers on `deva-v*` tags (e.g., `deva-v0.1.0`) or manual `workflow_dispatch`
+  - Creates **pre-release** (not marked as latest) so stable releases remain prominent
+  - Artifacts named `Abby-Deva-*` to distinguish from stable releases
+  - Release notes explain this is a development/preview build
+
+To release from Deva:
+```bash
+git tag deva-v0.1.0
+git push origin deva-v0.1.0
+```
+
 ## 2026-02-03 (First-run keypair generation + installer alignment)
 
 Major change to external signing key flow - keypair now generated at first run instead of out-of-band:
