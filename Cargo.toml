@@ -7,6 +7,8 @@ members = [
     "crates/abby-router",
     "crates/abby-birth",
     "crates/abby-senses",
+    "crates/abby-skills",
+    "skills/skill-proton-mail",
     "tauri-app",
 ]
 
@@ -31,3 +33,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
+tokio-util = { version = "0.7", features = ["io", "compat"] }

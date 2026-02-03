@@ -4,7 +4,7 @@ use async_imap::Session;
 use async_native_tls::TlsConnector;
 use futures_util::StreamExt;
 use tokio::net::TcpStream;
-use tokio_util::compat::Tokio02To03Io;
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 #[derive(Debug, Clone)]
 pub struct EmailSummary {
@@ -21,7 +21,7 @@ pub struct ImapClient {
     password: String,
 }
 
-type TlsStream = async_native_tls::TlsStream<Tokio02To03Io<TcpStream>>;
+type TlsStream = async_native_tls::TlsStream<tokio_util::compat::Compat<TcpStream>>;
 
 impl ImapClient {
     pub fn new(host: &str, port: u16, user: &str, password: &str) -> Self {
@@ -36,7 +36,7 @@ impl ImapClient {
     async fn connect(&self) -> anyhow::Result<Session<TlsStream>> {
         let addr = format!("{}:{}", self.host, self.port);
         let stream = TcpStream::connect(&addr).await?;
-        let stream = Tokio02To03Io::new(stream);
+        let stream = stream.compat();
         let tls = TlsConnector::new()
             .connect(&self.host, stream)
             .await?;
