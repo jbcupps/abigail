@@ -98,7 +98,7 @@ impl BirthOrchestrator {
     }
 
     /// Awakening: store email config (MVP: no IMAP/SMTP validation; senses optional).
-    pub async fn configure_email(
+    pub fn configure_email(
         &mut self,
         address: &str,
         imap_host: &str,

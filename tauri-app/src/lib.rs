@@ -113,8 +113,8 @@ fn verify_crypto(state: tauri::State<AppState>, docs_path: PathBuf) -> Result<()
 }
 
 #[tauri::command]
-async fn configure_email(
-    state: tauri::State<'_, AppState>,
+fn configure_email(
+    state: tauri::State<AppState>,
     address: String,
     imap_host: String,
     imap_port: u16,
@@ -132,7 +132,6 @@ async fn configure_email(
         smtp_port,
         &password,
     )
-    .await
     .map_err(|e| e.to_string())
 }
 
@@ -141,8 +140,11 @@ async fn download_model(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<PathBuf, String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    let models_dir = config.models_dir.clone();
+    // Get models_dir and drop the lock before await
+    let models_dir = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        config.models_dir.clone()
+    };
     std::fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
     let downloader = abby_llm::ModelDownloader::new();
     let dest = downloader
