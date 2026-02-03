@@ -4,8 +4,6 @@ import { useEffect, useState } from "react";
 
 type Stage = "Darkness" | "Awakening" | "Cognition" | "Life" | "None";
 
-const DOCS_PATH = ""; // Set at runtime from app data dir; for dev use templates
-
 interface BootSequenceProps {
   onComplete: () => void;
 }
