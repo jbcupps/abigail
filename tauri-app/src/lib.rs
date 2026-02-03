@@ -221,8 +221,11 @@ async fn execute_tool(
 
 #[tauri::command]
 async fn chat(state: tauri::State<'_, AppState>, message: String) -> Result<String, String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
+    // Get store and drop config lock before await
+    let store = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?
+    };
     let messages = vec![abby_llm::Message {
         role: "user".to_string(),
         content: message.clone(),
