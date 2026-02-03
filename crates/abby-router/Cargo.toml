@@ -1,0 +1,13 @@
+[package]
+name = "abby-router"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+abby-core = { path = "../abby-core" }
+abby-llm = { path = "../abby-llm" }
+async-trait.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true

@@ -1,0 +1,21 @@
+# Environment and secrets
+.env
+.env.local
+*.local
+
+# Rust
+target/
+
+# Node / frontend
+tauri-app/src-ui/node_modules/
+tauri-app/src-ui/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

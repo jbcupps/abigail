@@ -1,0 +1,18 @@
+[package]
+name = "abby-senses"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+abby-core = { path = "../abby-core" }
+async-trait.workspace = true
+tokio.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+async-imap = "0.9"
+async-native-tls = "0.5"
+futures-util = "0.3"
+lettre = { version = "0.11", features = ["tokio1-native-tls"] }
+mail-parser = "0.9"

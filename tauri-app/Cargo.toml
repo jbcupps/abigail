@@ -1,0 +1,25 @@
+[package]
+name = "abby-app"
+version.workspace = true
+edition.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+abby-core = { path = "../crates/abby-core" }
+base64 = "0.21"
+abby-memory = { path = "../crates/abby-memory" }
+abby-llm = { path = "../crates/abby-llm" }
+abby-router = { path = "../crates/abby-router" }
+abby-birth = { path = "../crates/abby-birth" }
+abby-senses = { path = "../crates/abby-senses" }
+tauri = { version = "2.0", features = ["tray-icon"] }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
