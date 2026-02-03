@@ -2,6 +2,12 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-03 (Release 0.0.1 and incremental versioning)
+
+- **Version:** Set workspace and app version to **0.0.1** for first release (root `Cargo.toml`, `tauri-app/tauri.conf.json`).
+- **Workflow:** Release step moved to a dedicated `release` job that runs after all `build` matrix jobs. It downloads all installer artifacts (Windows, Ubuntu, macOS), then creates a single draft GitHub Release with all three installers attached (no per-job releases).
+- **Docs:** Added `documents/RELEASE.md` with version scheme (0.0.x incremental), where version is defined, and step-by-step instructions to publish a release and to cut the first release (v0.0.1). Incremental checklist for future 0.0.2, 0.0.3, etc.
+
 ## 2026-02-03 (CI: Windows .ico + Rust warnings)
 
 - **Windows bundle:** CI failed with "Couldn't find a .ico icon" because the Tauri bundler (WiX) runs with cwd at repo root while icons live in tauri-app/icons/. Added workflow step "Ensure icons at repo root (Windows bundler cwd)" (Windows only): copy tauri-app/icons/* to repo root `icons/` so `icons/icon.ico` exists from cwd.
