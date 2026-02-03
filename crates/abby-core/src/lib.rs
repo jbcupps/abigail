@@ -4,7 +4,7 @@ pub mod error;
 pub mod keyring;
 pub mod verifier;
 
-pub use config::AppConfig;
+pub use config::{AppConfig, EmailConfig};
 pub use document::{CoreDocument, DocumentTier};
 pub use error::{CoreError, Result};
 pub use keyring::Keyring;
