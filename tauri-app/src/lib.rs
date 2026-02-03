@@ -10,6 +10,7 @@ use abby_router::IdEgoRouter;
 use abby_skills::{SkillExecutor, SkillRegistry, ToolParams};
 use abby_skills::channel::EventBus;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use ed25519_dalek::Signer;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -219,7 +220,7 @@ async fn execute_tool(
 #[tauri::command]
 async fn chat(state: tauri::State<'_, AppState>, message: String) -> Result<String, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
-    let store = MemoryStore::open_with_config(config).map_err(|e| e.to_string())?;
+    let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
     let messages = vec![abby_llm::Message {
         role: "user".to_string(),
         content: message.clone(),
@@ -251,9 +252,12 @@ pub fn run() {
         event_bus: event_bus.clone(),
     };
 
+    // Clone event_bus before setup since state isn't available inside setup callback
+    let event_bus_for_setup = event_bus.clone();
+
     tauri::Builder::default()
-        .setup(|app| {
-            let event_bus = app.state::<AppState>().event_bus.clone();
+        .setup(move |app| {
+            let event_bus = event_bus_for_setup.clone();
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().expect("runtime");
