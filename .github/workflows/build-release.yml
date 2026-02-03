@@ -52,7 +52,8 @@ jobs:
           cd tauri-app/src-ui && npm install && npm run build
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        # Use @dev so action installs @tauri-apps/cli@v2; @v0 installs v1 and rejects Tauri 2 config.
+        uses: tauri-apps/tauri-action@dev
         with:
           projectPath: tauri-app
           args: ${{ matrix.args }}
