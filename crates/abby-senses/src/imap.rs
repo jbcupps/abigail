@@ -4,6 +4,7 @@ use async_imap::Session;
 use async_native_tls::TlsConnector;
 use futures_util::StreamExt;
 use tokio::net::TcpStream;
+use tokio_util::compat::Tokio02To03Io;
 
 #[derive(Debug, Clone)]
 pub struct EmailSummary {
@@ -20,7 +21,7 @@ pub struct ImapClient {
     password: String,
 }
 
-type TlsStream = async_native_tls::TlsStream<TcpStream>;
+type TlsStream = async_native_tls::TlsStream<Tokio02To03Io<TcpStream>>;
 
 impl ImapClient {
     pub fn new(host: &str, port: u16, user: &str, password: &str) -> Self {
@@ -35,6 +36,7 @@ impl ImapClient {
     async fn connect(&self) -> anyhow::Result<Session<TlsStream>> {
         let addr = format!("{}:{}", self.host, self.port);
         let stream = TcpStream::connect(&addr).await?;
+        let stream = Tokio02To03Io::new(stream);
         let tls = TlsConnector::new()
             .connect(&self.host, stream)
             .await?;
@@ -66,19 +68,18 @@ impl ImapClient {
             while let Some(msg) = stream.next().await {
                 let msg = msg?;
                 let header = msg.header().unwrap_or_default();
-                let (from, subject, date) = if let Some(parsed) = mail_parser::Message::parse(header) {
-                    let from = parsed
-                        .from()
-                        .and_then(|a| a.first())
-                        .and_then(|a| a.address())
-                        .map(|a| a.to_string())
-                        .unwrap_or_default();
-                    let subject = parsed.subject().unwrap_or("").to_string();
-                    let date = parsed.date().map(|d| d.to_rfc3339());
-                    (from, subject, date)
-                } else {
-                    (String::new(), String::new(), None)
-                };
+                let (from, subject, date) =
+                    if let Ok(parsed) = mail_parser::Message::try_from(header.as_ref()) {
+                        let from = parsed
+                            .return_address()
+                            .map(|s| s.to_string())
+                            .unwrap_or_default();
+                        let subject = parsed.subject().unwrap_or("").to_string();
+                        let date = parsed.date().map(|d| d.to_string());
+                        (from, subject, date)
+                    } else {
+                        (String::new(), String::new(), None)
+                    };
                 summaries.push(EmailSummary {
                     id: seq_str.clone(),
                     from,
