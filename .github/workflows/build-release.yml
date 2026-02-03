@@ -113,14 +113,21 @@ jobs:
           pattern: abby-installer-*
           merge-multiple: false
 
+      - name: Rename to stable asset names for latest/download URLs
+        run: |
+          mkdir -p release-assets
+          cp artifacts/abby-installer-windows-latest/*.exe release-assets/Abby-windows-x64-setup.exe
+          cp artifacts/abby-installer-ubuntu-22.04/*.deb release-assets/Abby-linux-x64.deb
+          cp artifacts/abby-installer-macos-latest/*.dmg release-assets/Abby-macos-x64.dmg
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', github.event.inputs.release_version) }}
           name: Release ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', github.event.inputs.release_version) }}
-          draft: true
+          draft: false
           prerelease: false
           files: |
-            artifacts/abby-installer-windows-latest/*.exe
-            artifacts/abby-installer-ubuntu-22.04/*.deb
-            artifacts/abby-installer-macos-latest/*.dmg
+            release-assets/Abby-windows-x64-setup.exe
+            release-assets/Abby-linux-x64.deb
+            release-assets/Abby-macos-x64.dmg

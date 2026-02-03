@@ -2,6 +2,26 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-03 (Auto-publish releases)
+
+- **CI (build-release):** Changed `draft: true` to `draft: false` so releases are published immediately after the workflow completes. Users can now see the release and download installers from the Releases section without manual publishing.
+
+## 2026-02-03 (Download page for installers)
+
+- **CI (build-release):** In the release job, added step "Rename to stable asset names for latest/download URLs" after downloading artifacts. Copies the single .exe, .deb, and .dmg from each artifact dir into `release-assets/` as `Abby-windows-x64-setup.exe`, `Abby-linux-x64.deb`, `Abby-macos-x64.dmg`. Release now attaches these fixed names so `https://github.com/jbcupps/abby/releases/latest/download/<filename>` always points at the latest published release.
+- **Download page:** Added `docs/index.html` — single static page with OS detection (userAgent/platform), one primary "Download for Windows/macOS/Linux" button linking to the stable latest-release URL, and "Other downloads" listing all three platforms. No build step; for GitHub Pages from branch, folder `/docs`. Enable in repo **Settings → Pages → Source:** Deploy from a branch, folder **/docs**.
+- **Docs:** `documents/HOW_TO_RUN_LOCALLY.md` — under Building an installer, added link to the download page and note on enabling GitHub Pages. `documents/RELEASE.md` — added "Where to get installers (end users)" pointing to the download page and stable asset names.
+
+## 2026-02-03 (One-click installer build)
+
+- **tauri-app:** Set `beforeBuildCommand` in `tauri.conf.json` to `cd src-ui && npm run build` so `cargo tauri build` from `tauri-app` builds the frontend automatically (B2: assumes `npm install` already run once in `tauri-app/src-ui`). CI unchanged (still runs frontend install/build explicitly).
+- **Docs:** `documents/HOW_TO_RUN_LOCALLY.md` — added **Building an installer** with Option A (CI: tag or workflow_dispatch → download artifact/Release, then run `.exe`/`.dmg`/`.deb`) and Option B (local: one-time `npm install` in `tauri-app/src-ui`, then `cd tauri-app && cargo tauri build`; installer under `tauri-app/target/release/bundle/` or workspace `target/release/bundle/`).
+- **Scripts:** Added `scripts/build-installer.ps1` (Windows) and `scripts/build-installer.sh` (macOS/Linux) to install frontend deps, run `cargo tauri build` from `tauri-app`, and open the bundle folder. Run from repo root.
+
+## 2026-02-03 (Build and release from workflow_dispatch)
+
+- **workflow_dispatch:** Added optional input `release_version` (e.g. `0.0.1`). When set, the release job runs and creates a draft GitHub Release with tag `v<release_version>` and all installer artifacts. When empty, only build jobs run (no release). Documented in `documents/RELEASE.md`.
+
 ## 2026-02-03 (Release 0.0.1 and incremental versioning)
 
 - **Version:** Set workspace and app version to **0.0.1** for first release (root `Cargo.toml`, `tauri-app/tauri.conf.json`).

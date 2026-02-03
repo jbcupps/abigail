@@ -1,0 +1,59 @@
+﻿build (windows-latest)	Generate Cargo.lock	∩╗┐2026-02-03T15:21:42.6315072Z ##[group]Run cargo generate-lockfile
+build (windows-latest)	Generate Cargo.lock	2026-02-03T15:21:42.6315441Z [36;1mcargo generate-lockfile[0m
+build (windows-latest)	Generate Cargo.lock	2026-02-03T15:21:42.9643251Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+build (windows-latest)	Generate Cargo.lock	2026-02-03T15:21:42.9644932Z env:
+build (windows-latest)	Generate Cargo.lock	2026-02-03T15:21:42.9645262Z   CARGO_HOME: C:\Users\runneradmin\.cargo
+build (windows-latest)	Generate Cargo.lock	2026-02-03T15:21:42.9645711Z   CARGO_INCREMENTAL: 0
+build (windows-latest)	Generate Cargo.lock	2026-02-03T15:21:42.9646029Z   CARGO_TERM_COLOR: always
+build (windows-latest)	Generate Cargo.lock	2026-02-03T15:21:42.9646387Z ##[endgroup]
+build (windows-latest)	Generate Cargo.lock	2026-02-03T15:22:49.9478773Z [1m[91merror[0m: failed to load manifest for workspace member `D:\a\abby\abby\crates/abby-skills`
+build (windows-latest)	Generate Cargo.lock	2026-02-03T15:22:49.9479406Z referenced by workspace at `D:\a\abby\abby\Cargo.toml`
+build (windows-latest)	Generate Cargo.lock	2026-02-03T15:22:49.9986834Z 
+build (windows-latest)	Generate Cargo.lock	2026-02-03T15:22:49.9988635Z Caused by:
+build (windows-latest)	Generate Cargo.lock	2026-02-03T15:22:49.9989538Z   failed to read `D:\a\abby\abby\crates\abby-skills\Cargo.toml`
+build (windows-latest)	Generate Cargo.lock	2026-02-03T15:22:49.9990069Z 
+build (windows-latest)	Generate Cargo.lock	2026-02-03T15:22:49.9990355Z Caused by:
+build (windows-latest)	Generate Cargo.lock	2026-02-03T15:22:49.9990880Z   The system cannot find the path specified. (os error 3)
+build (windows-latest)	Generate Cargo.lock	2026-02-03T15:22:54.1745635Z ##[error]Process completed with exit code 1.
+build (ubuntu-22.04)	Generate Cargo.lock	∩╗┐2026-02-03T15:20:27.4470883Z ##[group]Run cargo generate-lockfile
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:27.4471207Z [36;1mcargo generate-lockfile[0m
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:27.4532531Z shell: /usr/bin/bash -e {0}
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:27.4532777Z env:
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:27.4532954Z   CARGO_HOME: /home/runner/.cargo
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:27.4533208Z   CARGO_INCREMENTAL: 0
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:27.4533409Z   CARGO_TERM_COLOR: always
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:27.4533622Z ##[endgroup]
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:27.5538541Z info: syncing channel updates for 'stable-x86_64-unknown-linux-gnu'
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:27.6015780Z info: latest update on 2026-01-22, rust version 1.93.0 (254b59607 2026-01-19)
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:27.6319648Z info: downloading component 'rust-std' for 'x86_64-pc-windows-msvc'
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:27.8333516Z info: installing component 'rust-std' for 'x86_64-pc-windows-msvc'
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:30.3394172Z [1m[91merror[0m: failed to load manifest for workspace member `/home/runner/work/abby/abby/crates/abby-skills`
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:30.3397136Z referenced by workspace at `/home/runner/work/abby/abby/Cargo.toml`
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:30.3397802Z 
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:30.3397966Z Caused by:
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:30.3398737Z   failed to read `/home/runner/work/abby/abby/crates/abby-skills/Cargo.toml`
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:30.3399405Z 
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:30.3399560Z Caused by:
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:30.3400025Z   No such file or directory (os error 2)
+build (ubuntu-22.04)	Generate Cargo.lock	2026-02-03T15:20:30.3423261Z ##[error]Process completed with exit code 101.
+build (macos-latest)	Generate Cargo.lock	∩╗┐2026-02-03T15:19:52.2479580Z ##[group]Run cargo generate-lockfile
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:52.2479930Z [36;1mcargo generate-lockfile[0m
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:52.2511400Z shell: /bin/bash -e {0}
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:52.2511620Z env:
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:52.2511770Z   CARGO_HOME: /Users/runner/.cargo
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:52.2511950Z   CARGO_INCREMENTAL: 0
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:52.2512120Z   CARGO_TERM_COLOR: always
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:52.2512300Z ##[endgroup]
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:52.4092360Z info: syncing channel updates for 'stable-aarch64-apple-darwin'
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:52.4830480Z info: latest update on 2026-01-22, rust version 1.93.0 (254b59607 2026-01-19)
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:52.5071080Z info: downloading component 'rust-std' for 'x86_64-pc-windows-msvc'
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:52.6794650Z info: installing component 'rust-std' for 'x86_64-pc-windows-msvc'
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:54.7734820Z [1m[91merror[0m: failed to load manifest for workspace member `/Users/runner/work/abby/abby/crates/abby-skills`
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:54.7735900Z referenced by workspace at `/Users/runner/work/abby/abby/Cargo.toml`
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:54.7736370Z 
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:54.7736500Z Caused by:
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:54.7736870Z   failed to read `/Users/runner/work/abby/abby/crates/abby-skills/Cargo.toml`
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:54.7737260Z 
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:54.7737540Z Caused by:
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:54.7740530Z   No such file or directory (os error 2)
+build (macos-latest)	Generate Cargo.lock	2026-02-03T15:19:54.7760530Z ##[error]Process completed with exit code 101.

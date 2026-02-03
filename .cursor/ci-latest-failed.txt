@@ -1,0 +1,850 @@
+﻿build (windows-latest)	Build Tauri app	∩╗┐2026-02-03T16:21:31.5132554Z ##[group]Run tauri-apps/tauri-action@063c0231f444e55760d98acb9c469b994269d4a5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5133295Z with:
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5133576Z   projectPath: tauri-app
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5133910Z   releaseDraft: false
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5134226Z   prerelease: false
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5134538Z   uploadUpdaterJson: true
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5134940Z   updaterJsonPreferNsis: false
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5135297Z   isGitea: false
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5135588Z   uploadPlainBinary: false
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5136239Z   uploadWorkflowArtifacts: false
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5136693Z   uploadUpdaterSignatures: true
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5137107Z   generateReleaseNotes: false
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5137445Z env:
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5137738Z   CARGO_HOME: C:\Users\runneradmin\.cargo
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5138143Z   CARGO_INCREMENTAL: 0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5138478Z   CARGO_TERM_COLOR: always
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5138841Z   CACHE_ON_FAILURE: false
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.5139201Z ##[endgroup]
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.7484891Z Could not detect valid `@tauri-apps/cli` installation. Proceeding to install global npm package...
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:31.7490120Z running npm [ 'install', '-g', '@tauri-apps/cli@v2' ]
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:33.1705534Z 
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:33.1708744Z changed 2 packages in 1s
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:33.1716686Z 
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:33.1717557Z 1 package is looking for funding
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:33.1719001Z   run `npm fund` for details
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:33.2422047Z running tauri [ 'build' ]
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:34.6569347Z         Info Looking up installed tauri packages to check mismatched versions...
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.1324406Z [1m[92m Downloading[0m crates ...
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.3314513Z [1m[92m  Downloaded[0m convert_case v0.4.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.4130724Z [1m[92m  Downloaded[0m phf v0.10.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.4255583Z [1m[92m  Downloaded[0m num-conv v0.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.4533707Z [1m[92m  Downloaded[0m pin-utils v0.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.4714008Z [1m[92m  Downloaded[0m rustc_version v0.4.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.4915915Z [1m[92m  Downloaded[0m reqwest-eventsource v0.4.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.5207428Z [1m[92m  Downloaded[0m smallvec v1.15.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.5474931Z [1m[92m  Downloaded[0m softbuffer v0.4.8
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.5850923Z [1m[92m  Downloaded[0m toml_datetime v0.7.5+spec-1.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.6040578Z [1m[92m  Downloaded[0m sync_wrapper v0.1.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.6160548Z [1m[92m  Downloaded[0m toml_write v0.1.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.6300085Z [1m[92m  Downloaded[0m unic-common v0.9.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.6451989Z [1m[92m  Downloaded[0m windows-strings v0.4.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.6650867Z [1m[92m  Downloaded[0m windows-numerics v0.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.6814883Z [1m[92m  Downloaded[0m zmij v1.0.19
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.7004938Z [1m[92m  Downloaded[0m zerovec-derive v0.11.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.7157618Z [1m[92m  Downloaded[0m zerofrom-derive v0.1.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.7282914Z [1m[92m  Downloaded[0m tauri-runtime-wry v2.10.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.7569943Z [1m[92m  Downloaded[0m tokio-util v0.7.18
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.8374374Z [1m[92m  Downloaded[0m typenum v1.19.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.8607532Z [1m[92m  Downloaded[0m unicode-segmentation v1.12.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:37.8813781Z [1m[92m  Downloaded[0m vcpkg v0.2.15
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:38.6264854Z [1m[92m  Downloaded[0m url v2.5.8
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:38.6720586Z [1m[92m  Downloaded[0m unicode-width v0.2.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:39.0868939Z [1m[92m  Downloaded[0m tracing v0.1.44
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:39.4625860Z [1m[92m  Downloaded[0m tracing-subscriber v0.3.22
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:39.6997136Z [1m[92m  Downloaded[0m tokio v1.49.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:40.7953247Z [1m[92m  Downloaded[0m toml_edit v0.22.27
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:40.9429351Z [1m[92m  Downloaded[0m tauri-utils v2.8.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:41.0457528Z [1m[92m  Downloaded[0m tao v0.34.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:41.2079031Z [1m[92m  Downloaded[0m time v0.3.46
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:41.3401341Z [1m[92m  Downloaded[0m syn v2.0.114
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:41.4298136Z [1m[92m  Downloaded[0m syn v1.0.109
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.2336455Z [1m[92m  Downloaded[0m tauri v2.10.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.4055136Z [1m[92m  Downloaded[0m yoke v0.8.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.4252205Z [1m[92m  Downloaded[0m writeable v0.6.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.4489909Z [1m[92m  Downloaded[0m windows-threading v0.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.4614166Z [1m[92m  Downloaded[0m windows-targets v0.53.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.4708913Z [1m[92m  Downloaded[0m zeroize v1.8.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.4815908Z [1m[92m  Downloaded[0m zerofrom v0.1.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.4966917Z [1m[92m  Downloaded[0m yoke-derive v0.8.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.5074954Z [1m[92m  Downloaded[0m winreg v0.55.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.5426609Z [1m[92m  Downloaded[0m winreg v0.50.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.5802914Z [1m[92m  Downloaded[0m windows-version v0.1.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.5984698Z [1m[92m  Downloaded[0m windows-targets v0.52.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.6093861Z [1m[92m  Downloaded[0m windows-targets v0.48.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.6183857Z [1m[92m  Downloaded[0m webview2-com-macros v0.8.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.6253106Z [1m[92m  Downloaded[0m webview2-com v0.38.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.6383111Z [1m[92m  Downloaded[0m want v0.3.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.6476026Z [1m[92m  Downloaded[0m walkdir v2.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.6695962Z [1m[92m  Downloaded[0m vswhom-sys v0.1.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.6830428Z [1m[92m  Downloaded[0m vswhom v0.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.6965805Z [1m[92m  Downloaded[0m version_check v0.9.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.7144154Z [1m[92m  Downloaded[0m uuid v1.20.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.7446173Z [1m[92m  Downloaded[0m utf8_iter v1.0.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:42.7597388Z [1m[92m  Downloaded[0m webview2-com-sys v0.38.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.1535873Z [1m[92m  Downloaded[0m utf-8 v0.7.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.1684422Z [1m[92m  Downloaded[0m zerovec v0.11.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.2419238Z [1m[92m  Downloaded[0m winnow v0.7.14
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.3594269Z [1m[92m  Downloaded[0m urlpattern v0.3.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.3815724Z [1m[92m  Downloaded[0m untrusted v0.9.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.3980381Z [1m[92m  Downloaded[0m wry v0.54.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.4565311Z [1m[92m  Downloaded[0m unicode-ident v1.0.22
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.4809880Z [1m[92m  Downloaded[0m unicase v2.9.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.4948927Z [1m[92m  Downloaded[0m unic-ucd-version v0.9.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.5034254Z [1m[92m  Downloaded[0m libsqlite3-sys v0.28.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.5880172Z [1m[92m  Downloaded[0m windows-link v0.2.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.5997975Z [1m[92m  Downloaded[0m windows-interface v0.59.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.6081833Z [1m[92m  Downloaded[0m windows-future v0.2.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.6217847Z [1m[92m  Downloaded[0m windows-core v0.61.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.6470076Z [1m[92m  Downloaded[0m windows-core v0.52.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.6798629Z [1m[92m  Downloaded[0m windows-collections v0.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.6897697Z [1m[92m  Downloaded[0m winapi-util v0.1.11
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.7021721Z [1m[92m  Downloaded[0m serde_with v3.16.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.8251833Z [1m[92m  Downloaded[0m serde_json v1.0.149
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.8922440Z [1m[92m  Downloaded[0m windows_x86_64_msvc v0.48.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.9129349Z [1m[92m  Downloaded[0m zerotrie v0.2.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.9450754Z [1m[92m  Downloaded[0m windows_x86_64_msvc v0.53.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.9675934Z [1m[92m  Downloaded[0m windows_x86_64_msvc v0.52.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:43.9877080Z [1m[92m  Downloaded[0m serde v1.0.228
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:44.0135747Z [1m[92m  Downloaded[0m schemars v0.9.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:44.1568600Z [1m[92m  Downloaded[0m zerocopy v0.8.37
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.1513248Z [1m[92m  Downloaded[0m window-vibrancy v0.6.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.1842717Z [1m[92m  Downloaded[0m rustls-webpki v0.101.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.3704677Z [1m[92m  Downloaded[0m windows-result v0.3.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.3837638Z [1m[92m  Downloaded[0m windows-link v0.1.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.3943751Z [1m[92m  Downloaded[0m windows-implement v0.60.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.4031566Z [1m[92m  Downloaded[0m unic-ucd-ident v0.9.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.4175504Z [1m[92m  Downloaded[0m unic-char-range v0.9.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.4333575Z [1m[92m  Downloaded[0m unic-char-property v0.9.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.4470335Z [1m[92m  Downloaded[0m typeid v1.0.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.4594989Z [1m[92m  Downloaded[0m try-lock v0.2.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.4674110Z [1m[92m  Downloaded[0m tracing-log v0.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.4777503Z [1m[92m  Downloaded[0m tracing-core v0.1.36
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.5018623Z [1m[92m  Downloaded[0m tower-service v0.3.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.5106010Z [1m[92m  Downloaded[0m rustls v0.21.12
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.8105073Z [1m[92m  Downloaded[0m tray-icon v0.21.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.8287763Z [1m[92m  Downloaded[0m tracing-attributes v0.1.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.8518471Z [1m[92m  Downloaded[0m toml_writer v1.0.6+spec-1.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.8621396Z [1m[92m  Downloaded[0m toml_parser v1.0.6+spec-1.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.8831321Z [1m[92m  Downloaded[0m toml v0.9.11+spec-1.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.9174346Z [1m[92m  Downloaded[0m tokio-rustls v0.24.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.9400703Z [1m[92m  Downloaded[0m tinystr v0.8.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.9569393Z [1m[92m  Downloaded[0m tauri-winres v0.3.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:45.9713110Z [1m[92m  Downloaded[0m regex-syntax v0.8.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:46.0060509Z [1m[92m  Downloaded[0m regex-automata v0.4.14
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:46.0871418Z [1m[92m  Downloaded[0m encoding_rs v0.8.35
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:46.1692619Z [1m[92m  Downloaded[0m brotli v8.0.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:46.2380203Z [1m[92m  Downloaded[0m toml_datetime v0.6.11
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:46.2477174Z [1m[92m  Downloaded[0m toml v0.8.23
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:46.2671422Z [1m[92m  Downloaded[0m tokio-stream v0.1.18
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.2632948Z [1m[92m  Downloaded[0m tokio-native-tls v0.3.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.2635705Z [1m[92m  Downloaded[0m tokio-macros v2.6.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.2636365Z [1m[92m  Downloaded[0m time-macros v0.2.26
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.2636921Z [1m[92m  Downloaded[0m time-core v0.1.8
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.2637513Z [1m[92m  Downloaded[0m thread_local v1.1.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.2638126Z [1m[92m  Downloaded[0m thiserror-impl v1.0.69
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.2638726Z [1m[92m  Downloaded[0m thiserror v2.0.18
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.2639290Z [1m[92m  Downloaded[0m thiserror v1.0.69
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.2639826Z [1m[92m  Downloaded[0m tendril v0.4.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.2640776Z [1m[92m  Downloaded[0m tauri-runtime v2.10.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.2645117Z [1m[92m  Downloaded[0m tauri-codegen v2.5.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.2645696Z [1m[92m  Downloaded[0m tauri-build v2.5.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.2646214Z [1m[92m  Downloaded[0m subtle v2.6.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.2646695Z [1m[92m  Downloaded[0m ring v0.17.14
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.2647158Z [1m[92m  Downloaded[0m reqwest v0.11.27
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.4611895Z [1m[92m  Downloaded[0m regex v1.12.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.5054357Z [1m[92m  Downloaded[0m thiserror-impl v2.0.18
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.5184692Z [1m[92m  Downloaded[0m tauri-macros v2.5.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.5297547Z [1m[92m  Downloaded[0m synstructure v0.13.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.5376208Z [1m[92m  Downloaded[0m strsim v0.11.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.5482767Z [1m[92m  Downloaded[0m strsim v0.10.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.5599282Z [1m[92m  Downloaded[0m string_cache_codegen v0.5.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:47.5674613Z [1m[92m  Downloaded[0m windows-sys v0.52.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:48.6926963Z [1m[92m  Downloaded[0m windows-sys v0.59.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:48.9992042Z [1m[92m  Downloaded[0m string_cache v0.8.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:49.0162132Z [1m[92m  Downloaded[0m stable_deref_trait v1.2.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:49.0228446Z [1m[92m  Downloaded[0m spki v0.7.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:49.0408110Z [1m[92m  Downloaded[0m socket2 v0.6.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:49.0525772Z [1m[92m  Downloaded[0m slab v0.4.12
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:49.0661887Z [1m[92m  Downloaded[0m sharded-slab v0.1.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:49.0968890Z [1m[92m  Downloaded[0m serde_derive v1.0.228
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:49.1254442Z [1m[92m  Downloaded[0m serde_core v1.0.228
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:49.1478333Z [1m[92m  Downloaded[0m schemars v1.2.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:49.3248637Z [1m[92m  Downloaded[0m libc v0.2.180
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:49.5934791Z [1m[92m  Downloaded[0m h2 v0.3.27
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:49.6454011Z [1m[92m  Downloaded[0m windows-sys v0.60.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.4411029Z [1m[92m  Downloaded[0m futures-util v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.5684195Z [1m[92m  Downloaded[0m curve25519-dalek v4.1.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.6256678Z [1m[92m  Downloaded[0m chrono v0.4.43
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.6673015Z [1m[92m  Downloaded[0m brotli-decompressor v5.0.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.6981302Z [1m[92m  Downloaded[0m aho-corasick v1.1.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.7339312Z [1m[92m  Downloaded[0m socket2 v0.5.10
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.7460201Z [1m[92m  Downloaded[0m simd-adler32 v0.3.8
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.7649432Z [1m[92m  Downloaded[0m signature v2.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.7780689Z [1m[92m  Downloaded[0m shlex v1.3.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.7919343Z [1m[92m  Downloaded[0m sha2 v0.10.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.8192977Z [1m[92m  Downloaded[0m servo_arc v0.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.8260034Z [1m[92m  Downloaded[0m serialize-to-javascript-impl v0.1.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.8327603Z [1m[92m  Downloaded[0m serialize-to-javascript v0.1.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.8429782Z [1m[92m  Downloaded[0m serde_with_macros v3.16.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.8586297Z [1m[92m  Downloaded[0m serde_urlencoded v0.7.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.8723423Z [1m[92m  Downloaded[0m serde_spanned v1.0.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.8812315Z [1m[92m  Downloaded[0m serde_spanned v0.6.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.8895099Z [1m[92m  Downloaded[0m serde_repr v0.1.20
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.9083720Z [1m[92m  Downloaded[0m serde_derive_internals v0.29.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.9223752Z [1m[92m  Downloaded[0m serde-untagged v0.1.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.9354774Z [1m[92m  Downloaded[0m semver v1.0.27
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.9614899Z [1m[92m  Downloaded[0m selectors v0.24.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.9730568Z [1m[92m  Downloaded[0m secrecy v0.8.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:50.9825443Z [1m[92m  Downloaded[0m sct v0.7.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:51.1356217Z [1m[92m  Downloaded[0m scopeguard v1.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:51.4675511Z [1m[92m  Downloaded[0m schemars_derive v0.8.22
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:51.4859827Z [1m[92m  Downloaded[0m schemars v0.8.22
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:51.6266704Z [1m[92m  Downloaded[0m schannel v0.1.28
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:51.6506320Z [1m[92m  Downloaded[0m ryu v1.0.22
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:51.6779850Z [1m[92m  Downloaded[0m rustls-pemfile v1.0.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:51.7009666Z [1m[92m  Downloaded[0m rustls-native-certs v0.6.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:51.7183928Z [1m[92m  Downloaded[0m rusqlite v0.31.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:51.7619192Z [1m[92m  Downloaded[0m rand v0.7.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:51.7993293Z [1m[92m  Downloaded[0m portable-atomic v1.13.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:51.8523550Z [1m[92m  Downloaded[0m png v0.17.16
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:51.8836051Z [1m[92m  Downloaded[0m nom v7.1.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:51.9215102Z [1m[92m  Downloaded[0m mio v1.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:51.9660195Z [1m[92m  Downloaded[0m minimal-lexical v0.2.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:52.0084001Z [1m[92m  Downloaded[0m idna v1.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:52.0270765Z [1m[92m  Downloaded[0m icu_properties_data v2.1.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:52.1241989Z [1m[92m  Downloaded[0m hyper v0.14.32
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:52.1857339Z [1m[92m  Downloaded[0m http v1.4.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:52.2136297Z [1m[92m  Downloaded[0m http v0.2.12
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:52.2415145Z [1m[92m  Downloaded[0m hashbrown v0.16.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:52.2737309Z [1m[92m  Downloaded[0m hashbrown v0.14.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:52.3043094Z [1m[92m  Downloaded[0m hashbrown v0.12.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:52.3442668Z [1m[92m  Downloaded[0m flate2 v1.1.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:52.3770107Z [1m[92m  Downloaded[0m ed25519-dalek v2.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:52.3989924Z [1m[92m  Downloaded[0m der v0.7.10
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:52.4456101Z [1m[92m  Downloaded[0m darling_core v0.14.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:52.9228402Z [1m[92m  Downloaded[0m cssparser v0.29.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:52.9416050Z [1m[92m  Downloaded[0m crossbeam-channel v0.5.15
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:52.9742370Z [1m[92m  Downloaded[0m cfb v0.7.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.0068692Z [1m[92m  Downloaded[0m cc v1.2.55
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.0291840Z [1m[92m  Downloaded[0m siphasher v1.0.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.0403519Z [1m[92m  Downloaded[0m siphasher v0.3.11
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.0508508Z [1m[92m  Downloaded[0m same-file v1.0.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.0625391Z [1m[92m  Downloaded[0m ref-cast-impl v1.0.25
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.0697994Z [1m[92m  Downloaded[0m rand v0.8.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.1001920Z [1m[92m  Downloaded[0m proc-macro2 v1.0.106
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.1269387Z [1m[92m  Downloaded[0m parking_lot_core v0.9.12
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.1464063Z [1m[92m  Downloaded[0m parking_lot v0.12.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.1662599Z [1m[92m  Downloaded[0m num-traits v0.2.19
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.1905269Z [1m[92m  Downloaded[0m nu-ansi-term v0.50.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.2126095Z [1m[92m  Downloaded[0m native-tls v0.2.14
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.2303970Z [1m[92m  Downloaded[0m muda v0.17.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.2758030Z [1m[92m  Downloaded[0m miniz_oxide v0.8.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.2949497Z [1m[92m  Downloaded[0m memchr v2.7.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.3347013Z [1m[92m  Downloaded[0m litemap v0.8.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.3576653Z [1m[92m  Downloaded[0m keyboard-types v0.7.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.3722698Z [1m[92m  Downloaded[0m json-patch v3.0.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.3931344Z [1m[92m  Downloaded[0m indicatif v0.17.11
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.4250469Z [1m[92m  Downloaded[0m indexmap v2.13.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.4563289Z [1m[92m  Downloaded[0m icu_properties v2.1.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.4723851Z [1m[92m  Downloaded[0m icu_normalizer_data v2.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.4866332Z [1m[92m  Downloaded[0m icu_normalizer v2.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.5158854Z [1m[92m  Downloaded[0m icu_locale_core v2.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:53.5809215Z [1m[92m  Downloaded[0m windows-sys v0.61.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:54.6826630Z [1m[92m  Downloaded[0m icu_collections v2.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:54.7403344Z [1m[92m  Downloaded[0m ico v0.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:54.7683700Z [1m[92m  Downloaded[0m httparse v1.10.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:54.7871798Z [1m[92m  Downloaded[0m html5ever v0.29.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:54.8229224Z [1m[92m  Downloaded[0m getrandom v0.3.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:54.8559789Z [1m[92m  Downloaded[0m getrandom v0.2.17
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:54.8842676Z [1m[92m  Downloaded[0m getrandom v0.1.16
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:54.9053186Z [1m[92m  Downloaded[0m futures-timer v3.0.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:54.9213542Z [1m[92m  Downloaded[0m futures v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:54.9655959Z [1m[92m  Downloaded[0m encode_unicode v1.0.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:54.9893933Z [1m[92m  Downloaded[0m darling v0.21.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.0453245Z [1m[92m  Downloaded[0m crc32fast v1.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.0588046Z [1m[92m  Downloaded[0m cookie v0.18.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.0774648Z [1m[92m  Downloaded[0m const-oid v0.9.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.0917090Z [1m[92m  Downloaded[0m cargo_toml v0.22.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.1041722Z [1m[92m  Downloaded[0m camino v1.2.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.1185172Z [1m[92m  Downloaded[0m bytes v1.11.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.1592893Z [1m[92m  Downloaded[0m windows-sys v0.48.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.7874414Z [1m[92m  Downloaded[0m byteorder v1.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.8000668Z [1m[92m  Downloaded[0m bitflags v2.10.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.8394023Z [1m[92m  Downloaded[0m base64 v0.22.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.8667611Z [1m[92m  Downloaded[0m anyhow v1.0.100
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.9072310Z [1m[92m  Downloaded[0m ref-cast v1.0.25
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.9366628Z [1m[92m  Downloaded[0m raw-window-handle v0.6.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.9547023Z [1m[92m  Downloaded[0m rand_core v0.6.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.9652372Z [1m[92m  Downloaded[0m quote v1.0.44
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.9897415Z [1m[92m  Downloaded[0m ppv-lite86 v0.2.21
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:55.9997763Z [1m[92m  Downloaded[0m pkcs8 v0.10.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.0286116Z [1m[92m  Downloaded[0m phf_shared v0.8.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.0344659Z [1m[92m  Downloaded[0m phf_macros v0.11.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.0454181Z [1m[92m  Downloaded[0m phf v0.11.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.0571139Z [1m[92m  Downloaded[0m percent-encoding v2.3.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.0649047Z [1m[92m  Downloaded[0m once_cell v1.21.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.0887398Z [1m[92m  Downloaded[0m nodrop v0.1.14
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.0959102Z [1m[92m  Downloaded[0m mime_guess v2.0.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.1087484Z [1m[92m  Downloaded[0m markup5ever v0.14.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.1211605Z [1m[92m  Downloaded[0m log v0.4.29
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.1380360Z [1m[92m  Downloaded[0m lock_api v0.4.14
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.1485200Z [1m[92m  Downloaded[0m kuchikiki v0.8.8-speedreader
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.1761557Z [1m[92m  Downloaded[0m itoa v1.0.17
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.1898230Z [1m[92m  Downloaded[0m icu_provider v2.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.2164121Z [1m[92m  Downloaded[0m http-body v0.4.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.2325643Z [1m[92m  Downloaded[0m hashlink v0.9.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.2504572Z [1m[92m  Downloaded[0m glob v0.3.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.2626209Z [1m[92m  Downloaded[0m futures-executor v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.2749768Z [1m[92m  Downloaded[0m futures-channel v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.2900653Z [1m[92m  Downloaded[0m find-msvc-tools v0.1.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.3052314Z [1m[92m  Downloaded[0m fallible-iterator v0.3.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.3153045Z [1m[92m  Downloaded[0m erased-serde v0.4.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.3350095Z [1m[92m  Downloaded[0m embed-resource v3.0.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.3516301Z [1m[92m  Downloaded[0m derive_builder v0.12.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.4069150Z [1m[92m  Downloaded[0m darling v0.14.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.4397109Z [1m[92m  Downloaded[0m cargo_metadata v0.19.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.4548042Z [1m[92m  Downloaded[0m cargo-platform v0.1.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.4647182Z [1m[92m  Downloaded[0m backoff v0.4.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.4818212Z [1m[92m  Downloaded[0m ahash v0.8.12
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.5027049Z [1m[92m  Downloaded[0m rand_pcg v0.2.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.5134082Z [1m[92m  Downloaded[0m rand_core v0.5.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.5238715Z [1m[92m  Downloaded[0m rand_chacha v0.3.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.5361289Z [1m[92m  Downloaded[0m rand_chacha v0.2.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.5450787Z [1m[92m  Downloaded[0m proc-macro-hack v0.5.20+deprecated
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.6952423Z [1m[92m  Downloaded[0m precomputed-hash v0.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.9777324Z [1m[92m  Downloaded[0m powerfmt v0.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.9888338Z [1m[92m  Downloaded[0m potential_utf v0.1.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:56.9974258Z [1m[92m  Downloaded[0m pkg-config v0.3.32
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.0102957Z [1m[92m  Downloaded[0m pin-project-lite v0.2.16
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.0795815Z [1m[92m  Downloaded[0m phf_shared v0.11.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.0875348Z [1m[92m  Downloaded[0m phf_shared v0.10.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.0930472Z [1m[92m  Downloaded[0m phf_macros v0.10.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.0987392Z [1m[92m  Downloaded[0m phf_generator v0.11.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.1079330Z [1m[92m  Downloaded[0m phf_generator v0.8.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.1187756Z [1m[92m  Downloaded[0m phf_codegen v0.11.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.1265122Z [1m[92m  Downloaded[0m phf_codegen v0.8.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.1322353Z [1m[92m  Downloaded[0m phf v0.8.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.1386357Z [1m[92m  Downloaded[0m match_token v0.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.1449637Z [1m[92m  Downloaded[0m mac v0.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.1555996Z [1m[92m  Downloaded[0m jsonptr v0.6.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.1784860Z [1m[92m  Downloaded[0m ipnet v2.11.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.1925516Z [1m[92m  Downloaded[0m idna_adapter v1.2.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.2004726Z [1m[92m  Downloaded[0m httpdate v1.0.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.2104684Z [1m[92m  Downloaded[0m hex v0.4.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.2227910Z [1m[92m  Downloaded[0m heck v0.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.2354444Z [1m[92m  Downloaded[0m generic-array v0.14.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.2491692Z [1m[92m  Downloaded[0m fxhash v0.2.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.2554566Z [1m[92m  Downloaded[0m futures-sink v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.2625633Z [1m[92m  Downloaded[0m futures-core v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.2737148Z [1m[92m  Downloaded[0m form_urlencoded v1.2.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.2837905Z [1m[92m  Downloaded[0m fnv v1.0.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.2931404Z [1m[92m  Downloaded[0m fallible-streaming-iterator v0.1.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.3011654Z [1m[92m  Downloaded[0m derive_builder_core v0.12.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.3188519Z [1m[92m  Downloaded[0m deranged v0.5.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.3303951Z [1m[92m  Downloaded[0m darling_macro v0.14.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.3381818Z [1m[92m  Downloaded[0m curve25519-dalek-derive v0.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9289687Z [1m[92m  Downloaded[0m ctor v0.2.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9290474Z [1m[92m  Downloaded[0m console v0.15.11
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9291002Z [1m[92m  Downloaded[0m autocfg v1.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9291595Z [1m[92m  Downloaded[0m phf_generator v0.10.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9292149Z [1m[92m  Downloaded[0m option-ext v0.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9292724Z [1m[92m  Downloaded[0m number_prefix v0.4.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9293392Z [1m[92m  Downloaded[0m new_debug_unreachable v1.0.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9293961Z [1m[92m  Downloaded[0m matches v0.1.10
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9294486Z [1m[92m  Downloaded[0m matchers v0.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9294980Z [1m[92m  Downloaded[0m lazy_static v1.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9295600Z [1m[92m  Downloaded[0m instant v0.1.13
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9296146Z [1m[92m  Downloaded[0m infer v0.19.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9296689Z [1m[92m  Downloaded[0m ident_case v1.0.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9297305Z [1m[92m  Downloaded[0m hyper-rustls v0.24.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9297937Z [1m[92m  Downloaded[0m futures-task v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9298538Z [1m[92m  Downloaded[0m futures-macro v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9299099Z [1m[92m  Downloaded[0m futures-io v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9299740Z [1m[92m  Downloaded[0m eventsource-stream v0.2.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9300579Z [1m[92m  Downloaded[0m ed25519 v2.2.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9301251Z [1m[92m  Downloaded[0m dyn-clone v1.0.20
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9301845Z [1m[92m  Downloaded[0m dtoa v1.0.11
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9302327Z [1m[92m  Downloaded[0m dpi v0.1.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9302935Z [1m[92m  Downloaded[0m displaydoc v0.2.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9303563Z [1m[92m  Downloaded[0m dirs-sys v0.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9304181Z [1m[92m  Downloaded[0m dirs-sys v0.4.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9304767Z [1m[92m  Downloaded[0m dirs v6.0.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9305391Z [1m[92m  Downloaded[0m directories v5.0.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9306014Z [1m[92m  Downloaded[0m digest v0.10.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9306675Z [1m[92m  Downloaded[0m derive_more v0.99.20
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9307414Z [1m[92m  Downloaded[0m derive_builder_macro v0.12.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9308153Z [1m[92m  Downloaded[0m darling_macro v0.21.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9308840Z [1m[92m  Downloaded[0m darling_core v0.21.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9309516Z [1m[92m  Downloaded[0m crypto-common v0.1.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9310146Z [1m[92m  Downloaded[0m cpufeatures v0.2.17
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9314263Z [1m[92m  Downloaded[0m cfg-if v1.0.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9315040Z [1m[92m  Downloaded[0m block-buffer v0.10.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9315713Z [1m[92m  Downloaded[0m alloc-no-stdlib v2.0.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9316381Z [1m[92m  Downloaded[0m dunce v1.0.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9317020Z [1m[92m  Downloaded[0m dtoa-short v0.3.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9318116Z [1m[92m  Downloaded[0m cssparser-macros v0.6.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:57.9318835Z [1m[92m  Downloaded[0m bitflags v1.3.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:58.2736929Z [1m[92m  Downloaded[0m base64ct v1.8.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:58.2993362Z [1m[92m  Downloaded[0m async-trait v0.1.89
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:58.3350417Z [1m[92m  Downloaded[0m async-openai v0.18.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:58.3708008Z [1m[92m  Downloaded[0m async-convert v1.0.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:58.3829576Z [1m[92m  Downloaded[0m adler2 v2.0.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:58.3965316Z [1m[92m  Downloaded[0m mime v0.3.17
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:58.4072127Z [1m[92m  Downloaded[0m indexmap v1.9.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:58.4319990Z [1m[92m  Downloaded[0m hyper-tls v0.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:58.4740944Z [1m[92m  Downloaded[0m futf v0.1.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:58.4825578Z [1m[92m  Downloaded[0m fdeflate v0.3.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:58.4986435Z [1m[92m  Downloaded[0m equivalent v1.0.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:58.5075191Z [1m[92m  Downloaded[0m crossbeam-utils v0.8.21
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:58.5351274Z [1m[92m  Downloaded[0m base64 v0.21.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:58.5626619Z [1m[92m  Downloaded[0m alloc-stdlib v0.2.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:21:58.5865329Z [1m[92m  Downloaded[0m windows v0.61.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:00.5102782Z [1m[92m  Downloaded[0m windows v0.52.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:03.1064676Z [1m[93mwarning[0m: output filename collision at D:\a\abby\abby\target\release\deps\abby_app.pdb
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:03.1065753Z   [1m[96m|[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:03.1068011Z   [1m[96m= [0m[1m[97mnote[0m: the bin target `abby-app` in package `abby-app v0.1.0 (D:\a\abby\abby\tauri-app)` has the same output filename as the lib target `abby_app` in package `abby-app v0.1.0 (D:\a\abby\abby\tauri-app)`
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:03.1070898Z   [1m[96m= [0m[1m[97mnote[0m: if this looks unexpected, it may be a bug in Cargo. Please file a bug report at https://github.com/rust-lang/cargo/issues/ with as much information as you can provide.
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:03.1073083Z   [1m[96m= [0m[1m[97mnote[0m: cargo 1.93.0 (083ac5135 2025-12-15) running on `x86_64-pc-windows-msvc` target `x86_64-pc-windows-msvc`
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:03.1077902Z   [1m[96m= [0m[1m[97mnote[0m: first unit: Unit { pkg: Package { id: PackageId { name: "abby-app", version: "0.1.0", source: "D:\\a\\abby\\abby\\tauri-app" }, ..: ".." }, target: TargetInner { name: "abby-app", doc: true, ..: with_path("D:\\a\\abby\\abby\\tauri-app\\src\\main.rs", Edition2021) }, profile: Profile { strip: Resolved(Named("debuginfo")), ..: default_release() }, kind: Host, mode: Build, features: [], rustflags: [], rustdocflags: [], links_overrides: {}, artifact: false, artifact_target_for_features: None, is_std: false, dep_hash: 2802396397156078784 }
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:03.1085388Z   [1m[96m= [0m[1m[97mnote[0m: second unit: Unit { pkg: Package { id: PackageId { name: "abby-app", version: "0.1.0", source: "D:\\a\\abby\\abby\\tauri-app" }, ..: ".." }, target: TargetInner { name_inferred: true, ..: lib_target("abby_app", ["staticlib", "cdylib", "rlib"], "D:\\a\\abby\\abby\\tauri-app\\src\\lib.rs", Edition2021) }, profile: Profile { strip: Resolved(Named("debuginfo")), ..: default_release() }, kind: Host, mode: Build, features: [], rustflags: [], rustdocflags: [], links_overrides: {}, artifact: false, artifact_target_for_features: None, is_std: false, dep_hash: 13807758841791896277 }
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:03.6656520Z [1m[92m   Compiling[0m proc-macro2 v1.0.106
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:03.6657944Z [1m[92m   Compiling[0m unicode-ident v1.0.22
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:10.7021617Z [1m[92m   Compiling[0m quote v1.0.44
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:13.0039810Z [1m[92m   Compiling[0m cfg-if v1.0.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:13.0985699Z [1m[92m   Compiling[0m zerocopy v0.8.37
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:14.5825744Z [1m[92m   Compiling[0m serde_core v1.0.228
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:16.5804636Z [1m[92m   Compiling[0m syn v2.0.114
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:23.0157742Z [1m[92m   Compiling[0m synstructure v0.13.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:23.9530978Z [1m[92m   Compiling[0m windows-link v0.2.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:24.0688226Z [1m[92m   Compiling[0m parking_lot_core v0.9.12
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:24.4457231Z [1m[92m   Compiling[0m serde_derive v1.0.228
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:29.7936748Z [1m[92m   Compiling[0m zerofrom-derive v0.1.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:33.8654345Z [1m[92m   Compiling[0m yoke-derive v0.8.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:33.8660678Z [1m[92m   Compiling[0m zerovec-derive v0.11.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:33.8797476Z [1m[92m   Compiling[0m displaydoc v0.2.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:33.9085901Z [1m[92m   Compiling[0m ppv-lite86 v0.2.21
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:33.9101575Z [1m[92m   Compiling[0m windows_x86_64_msvc v0.52.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:33.9102682Z [1m[92m   Compiling[0m version_check v0.9.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:33.9117151Z [1m[92m   Compiling[0m icu_normalizer_data v2.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:33.9118413Z [1m[92m   Compiling[0m icu_properties_data v2.1.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:33.9341287Z [1m[92m   Compiling[0m zmij v1.0.19
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:33.9352323Z [1m[92m   Compiling[0m windows-sys v0.61.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:33.9424019Z [1m[92m   Compiling[0m serde v1.0.228
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:33.9993497Z [1m[92m   Compiling[0m find-msvc-tools v0.1.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:38.0957495Z [1m[92m   Compiling[0m shlex v1.3.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:38.0958357Z [1m[92m   Compiling[0m cc v1.2.55
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:38.0976703Z [1m[92m   Compiling[0m memchr v2.7.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:39.8847812Z [1m[92m   Compiling[0m smallvec v1.15.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:41.2140117Z [1m[92m   Compiling[0m getrandom v0.2.17
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:41.3646966Z [1m[92m   Compiling[0m rand_core v0.6.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:41.6023394Z [1m[92m   Compiling[0m fnv v1.0.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:41.6796988Z [1m[92m   Compiling[0m once_cell v1.21.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:41.9835612Z [1m[92m   Compiling[0m rand_chacha v0.3.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:42.5919905Z [1m[92m   Compiling[0m pin-project-lite v0.2.16
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:42.6734273Z [1m[92m   Compiling[0m rand v0.8.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:43.6654486Z [1m[92m   Compiling[0m syn v1.0.109
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:44.0363364Z [1m[92m   Compiling[0m itoa v1.0.17
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:44.3274529Z [1m[92m   Compiling[0m ident_case v1.0.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:44.4550962Z [1m[92m   Compiling[0m stable_deref_trait v1.2.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:45.1814801Z [1m[92m   Compiling[0m thiserror v1.0.69
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:45.5210914Z [1m[92m   Compiling[0m getrandom v0.3.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:45.9027940Z [1m[92m   Compiling[0m zerofrom v0.1.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:46.0383106Z [1m[92m   Compiling[0m windows_x86_64_msvc v0.53.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:46.2785286Z [1m[92m   Compiling[0m bytes v1.11.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:47.8394006Z [1m[92m   Compiling[0m siphasher v1.0.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:48.1116531Z [1m[92m   Compiling[0m yoke v0.8.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:48.3576939Z [1m[92m   Compiling[0m phf_shared v0.11.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:48.7333135Z [1m[92m   Compiling[0m thiserror-impl v1.0.69
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:50.9055098Z [1m[92m   Compiling[0m thiserror v2.0.18
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:51.3200374Z [1m[92m   Compiling[0m typenum v1.19.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:52.0091068Z [1m[92m   Compiling[0m autocfg v1.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:52.1788338Z [1m[92m   Compiling[0m windows-targets v0.53.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:52.5620105Z [1m[92m   Compiling[0m phf_generator v0.11.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:52.8045975Z [1m[92m   Compiling[0m zerovec v0.11.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:53.0590166Z [1m[92m   Compiling[0m generic-array v0.14.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:53.2857840Z [1m[92m   Compiling[0m thiserror-impl v2.0.18
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:53.7599965Z [1m[92m   Compiling[0m semver v1.0.27
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:54.2087413Z [1m[92m   Compiling[0m siphasher v0.3.11
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:54.4354845Z [1m[92m   Compiling[0m scopeguard v1.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:54.5199983Z [1m[92m   Compiling[0m lock_api v0.4.14
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:55.2595376Z [1m[92m   Compiling[0m windows-sys v0.60.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:56.1325816Z [1m[92m   Compiling[0m getrandom v0.1.16
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:56.3942711Z [1m[92m   Compiling[0m anyhow v1.0.100
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:56.7957159Z [1m[92m   Compiling[0m libc v0.2.180
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:57.2617453Z [1m[92m   Compiling[0m windows-targets v0.52.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:57.3164498Z [1m[92m   Compiling[0m parking_lot v0.12.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:59.1660561Z [1m[92m   Compiling[0m typeid v1.0.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:59.6212706Z [1m[92m   Compiling[0m tinystr v0.8.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:22:59.8759253Z [1m[92m   Compiling[0m tracing-core v0.1.36
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:01.4912909Z [1m[92m   Compiling[0m litemap v0.8.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:01.7363531Z [1m[92m   Compiling[0m writeable v0.6.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:01.8042299Z [1m[92m   Compiling[0m socket2 v0.6.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:02.0474597Z [1m[92m   Compiling[0m icu_locale_core v2.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:03.3200828Z [1m[92m   Compiling[0m rand_core v0.5.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:03.7951190Z [1m[92m   Compiling[0m potential_utf v0.1.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:04.1035529Z [1m[92m   Compiling[0m zerotrie v0.2.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:04.8152389Z [1m[92m   Compiling[0m mio v1.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:11.6131776Z [1m[92m   Compiling[0m tracing-attributes v0.1.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:11.6132535Z [1m[92m   Compiling[0m tokio-macros v2.6.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:11.6133133Z [1m[92m   Compiling[0m strsim v0.11.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:11.6133720Z [1m[92m   Compiling[0m futures-core v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:11.6134330Z [1m[92m   Compiling[0m serde_json v1.0.149
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:11.6134922Z [1m[92m   Compiling[0m erased-serde v0.4.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:11.6135480Z [1m[92m   Compiling[0m tracing v0.1.44
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:11.6136019Z [1m[92m   Compiling[0m darling_core v0.21.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:11.6136585Z [1m[92m   Compiling[0m tokio v1.49.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:22.2083412Z [1m[92m   Compiling[0m icu_provider v2.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:22.2084168Z [1m[92m   Compiling[0m icu_collections v2.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:22.2084872Z [1m[92m   Compiling[0m rustc_version v0.4.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:22.2085490Z [1m[92m   Compiling[0m phf_macros v0.11.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:30.5400924Z [1m[92m   Compiling[0m darling_macro v0.21.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:34.7465769Z [1m[92m   Compiling[0m rand_chacha v0.2.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:34.7488594Z [1m[92m   Compiling[0m rand_pcg v0.2.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:34.7489483Z [1m[92m   Compiling[0m phf_shared v0.8.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:34.7490225Z [1m[92m   Compiling[0m proc-macro-hack v0.5.20+deprecated
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:34.7490934Z [1m[92m   Compiling[0m log v0.4.29
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:36.2008659Z [1m[92m   Compiling[0m rand v0.7.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:42.2848387Z [1m[92m   Compiling[0m darling v0.21.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:42.2849152Z [1m[92m   Compiling[0m icu_properties v2.1.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:42.2849804Z [1m[92m   Compiling[0m icu_normalizer v2.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:42.2850428Z [1m[92m   Compiling[0m phf_shared v0.10.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:46.5348920Z [1m[92m   Compiling[0m windows-link v0.1.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:46.5349671Z [1m[92m   Compiling[0m new_debug_unreachable v1.0.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:46.5350383Z [1m[92m   Compiling[0m futures-sink v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:46.5351044Z [1m[92m   Compiling[0m windows_x86_64_msvc v0.48.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:46.5351672Z [1m[92m   Compiling[0m percent-encoding v2.3.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:46.5352282Z [1m[92m   Compiling[0m byteorder v1.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:46.5352865Z [1m[92m   Compiling[0m form_urlencoded v1.2.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:46.5353506Z [1m[92m   Compiling[0m phf_generator v0.10.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:46.5354096Z [1m[92m   Compiling[0m idna_adapter v1.2.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:46.5354714Z [1m[92m   Compiling[0m serde_with_macros v3.16.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:47.4696278Z [1m[92m   Compiling[0m phf_generator v0.8.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:52.3312822Z [1m[92m   Compiling[0m string_cache_codegen v0.5.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:52.3313631Z [1m[92m   Compiling[0m phf_codegen v0.11.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:52.3314295Z [1m[92m   Compiling[0m ring v0.17.14
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:52.9417203Z [1m[92m   Compiling[0m precomputed-hash v0.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:53.0103449Z [1m[92m   Compiling[0m hashbrown v0.16.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:54.0996547Z [1m[92m   Compiling[0m utf8_iter v1.0.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:54.2523075Z [1m[92m   Compiling[0m mac v0.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:54.3001128Z [1m[92m   Compiling[0m equivalent v1.0.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:54.3525354Z [1m[92m   Compiling[0m winnow v0.7.14
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:54.7278067Z [1m[92m   Compiling[0m indexmap v2.13.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:56.0358959Z [1m[92m   Compiling[0m futf v0.1.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:56.1623316Z [1m[92m   Compiling[0m idna v1.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:56.6431860Z [1m[92m   Compiling[0m toml_parser v1.0.6+spec-1.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:23:59.8383016Z [1m[92m   Compiling[0m markup5ever v0.14.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:00.3222912Z [1m[92m   Compiling[0m phf_macros v0.10.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:01.1915826Z [1m[92m   Compiling[0m phf_codegen v0.8.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:03.9919334Z [1m[92m   Compiling[0m futures-channel v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:04.3624837Z [1m[92m   Compiling[0m cssparser v0.29.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:05.4496218Z [1m[92m   Compiling[0m futures-macro v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:06.6254092Z [1m[92m   Compiling[0m serde_spanned v1.0.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:06.7470222Z [1m[92m   Compiling[0m toml_datetime v0.7.5+spec-1.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:06.7693367Z [1m[92m   Compiling[0m futures-io v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:06.9980794Z [1m[92m   Compiling[0m slab v0.4.12
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:07.1240378Z [1m[92m   Compiling[0m pin-utils v0.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:07.1837916Z [1m[92m   Compiling[0m bitflags v1.3.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:07.2428790Z [1m[92m   Compiling[0m futures-task v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:07.4288176Z [1m[92m   Compiling[0m toml_writer v1.0.6+spec-1.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:07.4534960Z [1m[92m   Compiling[0m dtoa v1.0.11
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:07.6788793Z [1m[92m   Compiling[0m utf-8 v0.7.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:07.8460376Z [1m[92m   Compiling[0m tendril v0.4.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:08.1612550Z [1m[92m   Compiling[0m toml v0.9.11+spec-1.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:09.0760227Z [1m[92m   Compiling[0m dtoa-short v0.3.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:09.1923816Z [1m[92m   Compiling[0m futures-util v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:11.4738074Z [1m[92m   Compiling[0m windows-targets v0.48.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:11.5313143Z [1m[92m   Compiling[0m string_cache v0.8.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:11.7720578Z [1m[92m   Compiling[0m selectors v0.24.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:12.3365366Z [1m[92m   Compiling[0m phf v0.10.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:12.9359371Z [1m[92m   Compiling[0m uuid v1.20.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:13.5188446Z [1m[92m   Compiling[0m url v2.5.8
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:13.7135580Z [1m[92m   Compiling[0m windows-result v0.3.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:14.2679975Z [1m[92m   Compiling[0m windows-strings v0.4.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:15.3085134Z [1m[92m   Compiling[0m phf v0.11.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:15.5060152Z [1m[92m   Compiling[0m aho-corasick v1.1.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:20.1494827Z [1m[92m   Compiling[0m indexmap v1.9.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:20.1495568Z [1m[92m   Compiling[0m cssparser-macros v0.6.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:20.1496268Z [1m[92m   Compiling[0m windows-interface v0.59.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:20.1496961Z [1m[92m   Compiling[0m windows-implement v0.60.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:20.1497590Z [1m[92m   Compiling[0m ctor v0.2.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:24.3678854Z [1m[92m   Compiling[0m untrusted v0.9.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:24.3679513Z [1m[92m   Compiling[0m alloc-no-stdlib v2.0.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:24.3680140Z [1m[92m   Compiling[0m unic-char-range v0.9.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:24.3680706Z [1m[92m   Compiling[0m regex-syntax v0.8.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:24.3681330Z [1m[92m   Compiling[0m matches v0.1.10
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:24.3681867Z [1m[92m   Compiling[0m camino v1.2.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:24.3682415Z [1m[92m   Compiling[0m unic-common v0.9.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:24.3682973Z [1m[92m   Compiling[0m convert_case v0.4.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:24.3683493Z [1m[92m   Compiling[0m nodrop v0.1.14
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:24.3684043Z [1m[92m   Compiling[0m servo_arc v0.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:24.3684595Z [1m[92m   Compiling[0m derive_more v0.99.20
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:24.4159299Z [1m[92m   Compiling[0m regex-automata v0.4.14
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:29.6978300Z [1m[92m   Compiling[0m unic-ucd-version v0.9.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:29.6979164Z [1m[92m   Compiling[0m unic-char-property v0.9.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:29.6979843Z [1m[92m   Compiling[0m alloc-stdlib v0.2.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:29.6980462Z [1m[92m   Compiling[0m windows-core v0.61.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:33.3320486Z [1m[92m   Compiling[0m windows-sys v0.48.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:37.0486713Z [1m[92m   Compiling[0m winapi-util v0.1.11
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:37.3092241Z [1m[92m   Compiling[0m fxhash v0.2.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:37.4302964Z [1m[92m   Compiling[0m phf v0.8.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:37.6055770Z [1m[92m   Compiling[0m http v0.2.12
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:39.3958882Z [1m[92m   Compiling[0m vswhom-sys v0.1.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:39.6835809Z [1m[92m   Compiling[0m match_token v0.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:40.2944887Z [1m[92m   Compiling[0m serde_derive_internals v0.29.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:41.1248703Z [1m[92m   Compiling[0m schemars v0.8.22
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:41.3700537Z [1m[92m   Compiling[0m httparse v1.10.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:41.7772334Z [1m[92m   Compiling[0m hashbrown v0.12.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:43.0785893Z [1m[92m   Compiling[0m schemars_derive v0.8.22
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:43.5923767Z [1m[92m   Compiling[0m html5ever v0.29.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:46.4729069Z [1m[92m   Compiling[0m same-file v1.0.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:46.6473596Z [1m[92m   Compiling[0m regex v1.12.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:47.1143557Z [1m[92m   Compiling[0m brotli-decompressor v5.0.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:48.0170214Z [1m[92m   Compiling[0m unic-ucd-ident v0.9.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:48.3352099Z [1m[92m   Compiling[0m cfb v0.7.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:48.8514212Z [1m[92m   Compiling[0m jsonptr v0.6.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:49.3449366Z [1m[92m   Compiling[0m tokio-util v0.7.18
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:49.8025225Z [1m[92m   Compiling[0m windows-sys v0.52.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:51.2697524Z [1m[92m   Compiling[0m cargo-platform v0.1.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:51.3955614Z [1m[92m   Compiling[0m schannel v0.1.28
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:51.5650483Z [1m[92m   Compiling[0m dunce v1.0.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:51.7273283Z [1m[92m   Compiling[0m strsim v0.10.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:52.0990880Z [1m[92m   Compiling[0m native-tls v0.2.14
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:52.3508602Z [1m[92m   Compiling[0m dyn-clone v1.0.20
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:52.4767613Z [1m[92m   Compiling[0m option-ext v0.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:52.5564996Z [1m[92m   Compiling[0m try-lock v0.2.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:52.6587447Z [1m[92m   Compiling[0m rustls v0.21.12
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:52.8893700Z [1m[92m   Compiling[0m base64 v0.21.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:53.7577395Z [1m[92m   Compiling[0m want v0.3.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:53.9472064Z [1m[92m   Compiling[0m http v1.4.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:55.3991028Z [1m[92m   Compiling[0m darling_core v0.14.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:24:56.2554858Z [1m[92m   Compiling[0m cargo_metadata v0.19.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:03.3040920Z [1m[92m   Compiling[0m socket2 v0.5.10
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:03.3041607Z [1m[92m   Compiling[0m h2 v0.3.27
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:03.3042164Z [1m[92m   Compiling[0m json-patch v3.0.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:03.3042730Z [1m[92m   Compiling[0m infer v0.19.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:03.3043360Z [1m[92m   Compiling[0m urlpattern v0.3.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:03.3660993Z [1m[92m   Compiling[0m brotli v8.0.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:10.7104792Z [1m[92m   Compiling[0m windows-sys v0.59.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:11.6542132Z [1m[92m   Compiling[0m walkdir v2.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:12.0733523Z [1m[92m   Compiling[0m kuchikiki v0.8.8-speedreader
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:12.8206614Z [1m[92m   Compiling[0m serde-untagged v0.1.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:13.9251877Z [1m[92m   Compiling[0m http-body v0.4.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:13.9784602Z [1m[92m   Compiling[0m block-buffer v0.10.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:14.1390626Z [1m[92m   Compiling[0m crypto-common v0.1.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:14.2514156Z [1m[92m   Compiling[0m sct v0.7.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:14.2638913Z [1m[92m   Compiling[0m rustls-webpki v0.101.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:15.0831746Z [1m[92m   Compiling[0m serde_with v3.16.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:17.7041637Z [1m[92m   Compiling[0m windows-threading v0.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:17.8410944Z [1m[92m   Compiling[0m num-traits v0.2.19
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:22.4084367Z [1m[92m   Compiling[0m bitflags v2.10.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:29.1936959Z [1m[92m   Compiling[0m unicase v2.9.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:29.4148286Z [1m[92m   Compiling[0m glob v0.3.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:29.9211476Z [1m[92m   Compiling[0m zeroize v1.8.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:30.1501164Z [1m[92m   Compiling[0m httpdate v1.0.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:33.8624962Z [1m[92m   Compiling[0m tower-service v0.3.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:33.9599217Z [1m[92m   Compiling[0m hyper v0.14.32
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:34.2293352Z [1m[92m   Compiling[0m tauri-utils v2.8.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:44.5408629Z [1m[92m   Compiling[0m mime_guess v2.0.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:25:59.8422223Z [1m[92m   Compiling[0m windows-future v0.2.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:17.3981217Z [1m[92m   Compiling[0m digest v0.10.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:17.6720588Z [1m[92m   Compiling[0m winreg v0.55.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:18.1040164Z [1m[92m   Compiling[0m vswhom v0.1.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:18.2218184Z [1m[92m   Compiling[0m darling_macro v0.14.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:19.4200209Z [1m[92m   Compiling[0m windows-numerics v0.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:19.7169328Z [1m[92m   Compiling[0m windows-collections v0.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:20.0669627Z [1m[92m   Compiling[0m curve25519-dalek v4.1.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:20.4932756Z [1m[92m   Compiling[0m crossbeam-utils v0.8.21
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:20.9242842Z [1m[92m   Compiling[0m mime v0.3.17
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:21.7527237Z [1m[92m   Compiling[0m simd-adler32 v0.3.8
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:22.0054560Z [1m[92m   Compiling[0m crc32fast v1.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:22.3032114Z [1m[92m   Compiling[0m cpufeatures v0.2.17
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:22.4098227Z [1m[92m   Compiling[0m dirs-sys v0.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:23.5671452Z [1m[92m   Compiling[0m windows v0.61.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:25.9972487Z [1m[92m   Compiling[0m tokio-native-tls v0.3.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:26.2667715Z [1m[92m   Compiling[0m darling v0.14.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:26.3397399Z [1m[92m   Compiling[0m embed-resource v3.0.6
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:26.7005812Z [1m[92m   Compiling[0m tokio-rustls v0.24.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:29.5838830Z [1m[92m   Compiling[0m rustls-pemfile v1.0.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:30.1550916Z [1m[92m   Compiling[0m webview2-com-sys v0.38.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:32.6083293Z [1m[92m   Compiling[0m dpi v0.1.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:33.0974251Z [1m[92m   Compiling[0m ahash v0.8.12
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:33.3308214Z [1m[92m   Compiling[0m curve25519-dalek-derive v0.1.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:34.1082384Z [1m[92m   Compiling[0m raw-window-handle v0.6.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:34.5002618Z [1m[92m   Compiling[0m powerfmt v0.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:34.8619726Z [1m[92m   Compiling[0m heck v0.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:35.3497561Z [1m[92m   Compiling[0m num-conv v0.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:35.8847552Z [1m[92m   Compiling[0m minimal-lexical v0.2.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:36.3481007Z [1m[92m   Compiling[0m subtle v2.6.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:36.6209195Z [1m[92m   Compiling[0m signature v2.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:36.7651760Z [1m[92m   Compiling[0m ryu v1.0.22
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:37.3253761Z [1m[92m   Compiling[0m time-core v0.1.8
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:37.5050463Z [1m[92m   Compiling[0m adler2 v2.0.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:38.1087151Z [1m[92m   Compiling[0m miniz_oxide v0.8.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:39.0197529Z [1m[92m   Compiling[0m time-macros v0.2.26
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:40.7872706Z [1m[92m   Compiling[0m serde_urlencoded v0.7.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:41.1554835Z [1m[92m   Compiling[0m ed25519 v2.2.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:47.8146613Z [1m[92m   Compiling[0m nom v7.1.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:51.9001992Z [1m[92m   Compiling[0m deranged v0.5.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:54.1237178Z [1m[92m   Compiling[0m rustls-native-certs v0.6.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:26:54.9013330Z [1m[92m   Compiling[0m chrono v0.4.43
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:04.0082742Z [1m[92m   Compiling[0m hyper-rustls v0.24.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:04.0083560Z [1m[92m   Compiling[0m tauri-winres v0.3.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:04.0084278Z [1m[92m   Compiling[0m derive_builder_core v0.12.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:04.0084951Z [1m[92m   Compiling[0m hyper-tls v0.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:04.3320405Z [1m[92m   Compiling[0m dirs v6.0.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:04.6508062Z [1m[92m   Compiling[0m sha2 v0.10.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:11.4422598Z [1m[92m   Compiling[0m dirs-sys v0.4.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:11.4423615Z [1m[92m   Compiling[0m winreg v0.50.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:11.4441589Z [1m[92m   Compiling[0m cargo_toml v0.22.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:14.7367529Z [1m[92m   Compiling[0m windows-core v0.52.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:19.7281328Z [1m[92m   Compiling[0m cookie v0.18.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:19.9562443Z [1m[92m   Compiling[0m async-trait v0.1.89
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:21.4720324Z [1m[92m   Compiling[0m encoding_rs v0.8.35
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:23.8887891Z [1m[92m   Compiling[0m portable-atomic v1.13.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:24.6901186Z [1m[92m   Compiling[0m sync_wrapper v0.1.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:24.7774029Z [1m[92m   Compiling[0m vcpkg v0.2.15
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:26.0718386Z [1m[92m   Compiling[0m unicode-segmentation v1.12.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:27.2332268Z [1m[92m   Compiling[0m ipnet v2.11.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:29.7135377Z [1m[92m   Compiling[0m pkg-config v0.3.32
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:30.4887341Z [1m[92m   Compiling[0m libsqlite3-sys v0.28.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:30.8952092Z [1m[92m   Compiling[0m reqwest v0.11.27
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:31.2400848Z [1m[92m   Compiling[0m time v0.3.46
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:40.6810411Z [1m[92m   Compiling[0m windows v0.52.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:27:51.3971354Z [1m[92m   Compiling[0m tauri-build v2.5.4
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:04.7783026Z [1m[92m   Compiling[0m directories v5.0.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:04.7783902Z [1m[92m   Compiling[0m ed25519-dalek v2.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:04.7784571Z [1m[92m   Compiling[0m flate2 v1.1.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:04.7785620Z [1m[92m   Compiling[0m crossbeam-channel v0.5.15
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:04.7786459Z [1m[92m   Compiling[0m derive_builder_macro v0.12.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:05.0811210Z [1m[92m   Compiling[0m eventsource-stream v0.2.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:13.8518622Z [1m[92m   Compiling[0m fdeflate v0.3.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:19.6842117Z [1m[92m   Compiling[0m futures-executor v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:24.8156745Z [1m[92m   Compiling[0m webview2-com-macros v0.8.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:25.5139836Z [1m[92m   Compiling[0m windows-version v0.1.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:26.9059779Z [1m[92m   Compiling[0m instant v0.1.13
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:27.1324513Z [1m[92m   Compiling[0m encode_unicode v1.0.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:27.7057619Z [1m[92m   Compiling[0m futures-timer v3.0.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:28.6146272Z [1m[92m   Compiling[0m lazy_static v1.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:28.7133226Z [1m[92m   Compiling[0m unicode-width v0.2.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:29.1092705Z [1m[92m   Compiling[0m console v0.15.11
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:29.1185468Z [1m[92m   Compiling[0m reqwest-eventsource v0.4.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:31.6531310Z [1m[92m   Compiling[0m backoff v0.4.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:31.9293873Z [1m[92m   Compiling[0m webview2-com v0.38.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:44.2556507Z [1m[92m   Compiling[0m futures v0.3.31
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:45.1682643Z [1m[92m   Compiling[0m png v0.17.16
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:52.5279520Z [1m[92m   Compiling[0m hashbrown v0.14.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:53.6200705Z [1m[92m   Compiling[0m derive_builder v0.12.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:53.7367729Z [1m[92m   Compiling[0m abby-core v0.1.0 (D:\a\abby\abby\crates\abby-core)
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:53.9610213Z [1m[93mwarning[0m[1m[97m: unused imports: `Engine as _` and `engine::general_purpose::STANDARD as BASE64`[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:53.9643131Z  [1m[96m--> [0mcrates\abby-core\src\keyring.rs:2:14
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:53.9942253Z   [1m[96m|[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:53.9980568Z [1m[96m2[0m [1m[96m|[0m use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:54.0278185Z   [1m[96m|[0m              [1m[93m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m  [1m[93m^^^^^^^^^^^[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:54.0317745Z   [1m[96m|[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:54.0602066Z   [1m[96m= [0m[1m[97mnote[0m: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+build (windows-latest)	Build Tauri app	2026-02-03T16:28:54.0636026Z 
+build (windows-latest)	Build Tauri app	2026-02-03T16:29:00.4952766Z [1m[93mwarning[0m: `abby-core` (lib) generated 1 warning (run `cargo fix --lib -p abby-core` to apply 1 suggestion)
+build (windows-latest)	Build Tauri app	2026-02-03T16:29:06.8148572Z [1m[92m   Compiling[0m async-convert v1.0.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:29:06.9702643Z [1m[92m   Compiling[0m secrecy v0.8.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:29:23.6545318Z [1m[92m   Compiling[0m tokio-stream v0.1.18
+build (windows-latest)	Build Tauri app	2026-02-03T16:29:33.5443145Z [1m[92m   Compiling[0m number_prefix v0.4.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:29:50.7162004Z [1m[92m   Compiling[0m wry v0.54.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:30:00.0822202Z [1m[92m   Compiling[0m tauri-runtime v2.10.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:30:15.3316321Z [1m[92m   Compiling[0m indicatif v0.17.11
+build (windows-latest)	Build Tauri app	2026-02-03T16:30:21.8121448Z [1m[92m   Compiling[0m async-openai v0.18.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:30:36.4446033Z [1m[92m   Compiling[0m hashlink v0.9.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:30:36.9400460Z [1m[92m   Compiling[0m ico v0.5.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:30:37.7971165Z [1m[92m   Compiling[0m tauri v2.10.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:30:43.6547814Z [1m[92m   Compiling[0m keyboard-types v0.7.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:30:47.8447071Z [1m[92m   Compiling[0m serde_spanned v0.6.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:30:47.8447826Z [1m[92m   Compiling[0m toml_datetime v0.6.11
+build (windows-latest)	Build Tauri app	2026-02-03T16:30:47.8448537Z [1m[92m   Compiling[0m base64 v0.22.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:30:47.8449255Z [1m[92m   Compiling[0m tauri-runtime-wry v2.10.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:30:47.8449974Z [1m[92m   Compiling[0m fallible-iterator v0.3.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:30:47.8450680Z [1m[92m   Compiling[0m toml_write v0.1.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:30:47.8451476Z [1m[92m   Compiling[0m fallible-streaming-iterator v0.1.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:30:47.8452194Z [1m[92m   Compiling[0m rusqlite v0.31.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:30:51.2493336Z [1m[92m   Compiling[0m toml_edit v0.22.27
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:12.1099741Z [1m[92m   Compiling[0m tauri-codegen v2.5.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:14.7715337Z [1m[92m   Compiling[0m muda v0.17.1
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:23.0175868Z [1m[92m   Compiling[0m abby-llm v0.1.0 (D:\a\abby\abby\crates\abby-llm)
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:33.6579022Z [1m[92m   Compiling[0m tao v0.34.5
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:34.2264294Z [1m[92m   Compiling[0m softbuffer v0.4.8
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:39.0261149Z [1m[92m   Compiling[0m serialize-to-javascript-impl v0.1.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:39.5667230Z [1m[92m   Compiling[0m serialize-to-javascript v0.1.2
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:44.4975638Z [1m[92m   Compiling[0m tray-icon v0.21.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:45.2119047Z [1m[92m   Compiling[0m tauri-macros v2.5.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:47.0827806Z [1m[92m   Compiling[0m toml v0.8.23
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:47.5076759Z [1m[92m   Compiling[0m abby-memory v0.1.0 (D:\a\abby\abby\crates\abby-memory)
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:49.2426450Z [1m[92m   Compiling[0m sharded-slab v0.1.7
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:50.2889081Z [1m[92m   Compiling[0m window-vibrancy v0.6.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:50.5600975Z [1m[92m   Compiling[0m abby-app v0.1.0 (D:\a\abby\abby\tauri-app)
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:51.7659153Z [1m[92m   Compiling[0m matchers v0.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:51.9223285Z [1m[92m   Compiling[0m tracing-log v0.2.0
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:52.5558288Z [1m[92m   Compiling[0m nu-ansi-term v0.50.3
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:53.0882093Z [1m[92m   Compiling[0m serde_repr v0.1.20
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:53.5433601Z [1m[92m   Compiling[0m thread_local v1.1.9
+build (windows-latest)	Build Tauri app	2026-02-03T16:31:54.6122196Z [1m[92m   Compiling[0m tracing-subscriber v0.3.22
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:07.4389001Z [1m[92m   Compiling[0m abby-skills v0.1.0 (D:\a\abby\abby\crates\abby-skills)
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:07.7056620Z [1m[93mwarning[0m[1m[97m: unused import: `crate::sandbox::ResourceLimits`[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:07.7341979Z  [1m[96m--> [0mcrates\abby-skills\src\manifest.rs:7:5
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:07.7402663Z   [1m[96m|[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:07.7666663Z [1m[96m7[0m [1m[96m|[0m use crate::sandbox::ResourceLimits;
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:07.7729030Z   [1m[96m|[0m     [1m[93m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:07.8012568Z   [1m[96m|[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:07.8088817Z   [1m[96m= [0m[1m[97mnote[0m: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:07.8341475Z 
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.2544724Z [1m[91merror[E0308][0m[1m[97m: mismatched types[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.2546429Z    [1m[96m--> [0mcrates\abby-skills\src\manifest.rs:233:21
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.2548148Z     [1m[96m|[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.2549481Z [1m[96m233[0m [1m[96m|[0m         if let Some(toml::Value::Table(t)) = s.permission.as_table() {
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.2551723Z     [1m[96m|[0m                     [1m[91m^^^^^^^^^^^^^^^^^^^^^[0m    [1m[96m-----------------------[0m [1m[96mthis expression has type `std::option::Option<&toml::map::Map<std::string::String, toml::Value>>`[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.2553652Z     [1m[96m|[0m                     [1m[91m|[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.2554750Z     [1m[96m|[0m                     [1m[91mexpected `Map<String, Value>`, found `Value`[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.2555580Z     [1m[96m|[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.2556845Z     [1m[96m= [0m[1m[97mnote[0m: expected struct `[1m[35mtoml::map::Map<std::string::String[0m, toml::Value[1m[35m>[0m`
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.2558003Z                  found enum `toml::Value`
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.2558586Z 
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4121657Z [1m[91merror[E0599][0m[1m[97m: the method `as_display` exists for reference `&SkillId`, but its trait bounds were not satisfied[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4123288Z   [1m[96m--> [0mcrates\abby-skills\src\skill.rs:15:13
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4124192Z    [1m[96m|[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4125054Z [1m[96m15[0m [1m[96m|[0m     #[error("Skill not found: {0}")]
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4126715Z    [1m[96m|[0m             [1m[91m^^^^^^^^^^^^^^^^^^^^^^[0m [1m[91mmethod cannot be called on `&SkillId` due to unsatisfied trait bounds[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4127889Z    [1m[96m|[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4128800Z   [1m[96m::: [0mcrates\abby-skills\src\manifest.rs:10:1
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4129579Z    [1m[96m|[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4130382Z [1m[96m10[0m [1m[96m|[0m pub struct SkillId(pub String);
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4131693Z    [1m[96m|[0m [1m[96m------------------[0m [1m[96mdoesn't satisfy `SkillId: std::fmt::Display`[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4132640Z    [1m[96m|[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4133515Z    [1m[96m= [0m[1m[97mnote[0m: the following trait bounds were not satisfied:
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4134388Z            `SkillId: std::fmt::Display`
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4135102Z            which is required by `&SkillId: AsDisplay<'_>`
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4136198Z [1m[92mnote[0m: the trait `std::fmt::Display` must be implemented
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4137533Z   [1m[96m--> [0m/rustc/254b59607d4417e9dffbc307138ae5c86280fe4c\library\core\src\fmt\mod.rs:1186:1
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4139075Z    [1m[96m= [0m[1m[97mhelp[0m: items from traits can only be used if the trait is implemented and in scope
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4140648Z    [1m[96m= [0m[1m[97mnote[0m: the following trait defines an item `as_display`, perhaps you need to implement it:
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4141730Z            candidate #1: `AsDisplay`
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.4142276Z 
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.5220264Z [1m[93mwarning[0m[1m[97m: unused import: `Skill`[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.5269001Z  [1m[96m--> [0mcrates\abby-skills\src\executor.rs:9:38
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.5587840Z   [1m[96m|[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.5649220Z [1m[96m9[0m [1m[96m|[0m use crate::skill::{ExecutionContext, Skill, SkillError, SkillResult, ToolParams, ToolOutput};
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.5904803Z   [1m[96m|[0m                                      [1m[93m^^^^^[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.5987183Z 
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.6637039Z [1m[93mwarning[0m[1m[97m: unused variable: `tool_name`[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.6644266Z   [1m[96m--> [0mcrates\abby-skills\src\executor.rs:22:9
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.6993108Z    [1m[96m|[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.7352635Z [1m[96m22[0m [1m[96m|[0m         tool_name: &str,
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.7388908Z    [1m[96m|[0m         [1m[93m^^^^^^^^^[0m [1m[93mhelp: if this is intentional, prefix it with an underscore: `_tool_name`[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.7415949Z    [1m[96m|[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.7419189Z    [1m[96m= [0m[1m[97mnote[0m: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:08.7421358Z 
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:09.1065723Z [1m[97mSome errors have detailed explanations: E0308, E0599.[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:09.1066881Z [1m[97mFor more information about an error, try `rustc --explain E0308`.[0m
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:09.1236349Z [1m[93mwarning[0m: `abby-skills` (lib) generated 3 warnings
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:09.1252932Z [1m[91merror[0m: could not compile `abby-skills` (lib) due to 2 previous errors; 3 warnings emitted
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:09.1256960Z [1m[93mwarning[0m: build failed, waiting for other jobs to finish...
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:22.4529330Z failed to build app: failed to build app
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:22.4548150Z        Error failed to build app: failed to build app
+build (windows-latest)	Build Tauri app	2026-02-03T16:32:22.4838408Z ##[error]Command "tauri ["build"]" failed with exit code 1

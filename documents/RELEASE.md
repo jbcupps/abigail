@@ -17,7 +17,12 @@ Keep these in sync when cutting a release:
 
 All workspace crates use `version.workspace = true`, so they follow the root.
 
-## How to publish a release
+## Build and release from GitHub Actions (no tag push)
+
+- Go to **Actions** → **build-release** → **Run workflow**.
+- Optionally set **Release version** (e.g. `0.0.1`). If set, the workflow will build installers for Windows, Linux, and macOS and **publish** a release with that version (tag `v0.0.1`). If left empty, only the build runs and artifacts are kept in the run (no release).
+
+## How to publish a release (tag-based)
 
 1. **Bump version** (for 0.0.1 you’re already at 0.0.1; for the next release use 0.0.2):
    - In `Cargo.toml`: set `version = "0.0.2"` (or next number).
@@ -38,9 +43,11 @@ All workspace crates use `version.workspace = true`, so they follow the root.
 
 4. **CI:** `.github/workflows/build-release.yml` runs on `v*` tags:
    - Builds installers for Windows (NSIS), Linux (deb), and macOS (dmg).
-   - Creates a **draft** GitHub Release for that tag and attaches all installers.
+   - Creates and **publishes** a GitHub Release for that tag with all installers attached (no manual publish step needed).
 
-5. **Publish the draft:** In the repo, go to **Releases** → open the draft for the tag → review notes/assets → click **Publish release**.
+## Where to get installers (end users)
+
+After a release is published, end users can go to the [Abby download page](https://jbcupps.github.io/abby/). The page detects their OS and offers a single download button; they can also pick Windows, macOS, or Linux from "Other downloads." Stable asset names (`Abby-windows-x64-setup.exe`, etc.) allow `.../releases/latest/download/...` URLs to always point at the latest release.
 
 ## First release (0.0.1)
 
@@ -50,7 +57,7 @@ All workspace crates use `version.workspace = true`, so they follow the root.
   git tag v0.0.1
   git push origin v0.0.1
   ```
-- After the workflow completes, publish the draft release from the GitHub Releases page.
+- After the workflow completes, the release is published automatically and visible in **Releases**.
 
 ## Incremental checklist (each release)
 
@@ -59,5 +66,4 @@ All workspace crates use `version.workspace = true`, so they follow the root.
 | 1 | Bump `version` in `Cargo.toml` and `tauri-app/tauri.conf.json` to next patch (e.g. 0.0.2). |
 | 2 | Commit and push the version bump. |
 | 3 | `git tag v0.0.x` and `git push origin v0.0.x`. |
-| 4 | Wait for build-release workflow to finish. |
-| 5 | Publish the draft release on GitHub. |
+| 4 | Wait for build-release workflow to finish — release is published automatically. |
