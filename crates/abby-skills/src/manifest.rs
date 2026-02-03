@@ -9,6 +9,12 @@ use crate::sandbox::ResourceLimits;
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SkillId(pub String);
 
+impl std::fmt::Display for SkillId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapabilityDescriptor {
     pub capability_type: String,
@@ -230,7 +236,7 @@ impl SkillManifest {
 fn parse_permissions(sections: &[PermissionSection]) -> Vec<Permission> {
     let mut out = Vec::new();
     for s in sections {
-        if let Some(toml::Value::Table(t)) = s.permission.as_table() {
+        if let Some(t) = s.permission.as_table() {
             if let Some(domains) = t.get("Network").and_then(|n| n.get("Domains")).and_then(|d| d.as_array()) {
                 let domains: Vec<String> = domains
                     .iter()
