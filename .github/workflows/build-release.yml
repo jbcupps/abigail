@@ -99,6 +99,17 @@ jobs:
             rm -f tauri.conf.json.bak
           fi
           cat tauri.conf.json | head -10
+      - name: Disable beforeBuildCommand for CI
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = 'tauri-app/tauri.conf.json';
+          const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+          data.build = data.build || {};
+          data.build.beforeBuildCommand = "";
+          fs.writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
+          NODE
 
       - name: Generate Cargo.lock
         run: cargo generate-lockfile
