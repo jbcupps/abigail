@@ -116,7 +116,7 @@ impl Keyring {
 
             let result =
                 std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
-            LocalFree(HLOCAL(output.pbData as *mut _));
+            let _ = LocalFree(HLOCAL(output.pbData as *mut _));
 
             Ok(result)
         }
@@ -149,7 +149,7 @@ impl Keyring {
 
             let result =
                 std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
-            LocalFree(HLOCAL(output.pbData as *mut _));
+            let _ = LocalFree(HLOCAL(output.pbData as *mut _));
 
             Ok(result)
         }

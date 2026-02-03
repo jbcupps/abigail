@@ -2,6 +2,12 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-03 (Build-release remediation)
+
+- **Rust:** Fixed abby-core keyring.rs `LocalFree` unused result (use `let _ = LocalFree(...)` on Windows DPAPI paths). Workflow now runs `cargo generate-lockfile` after Setup Rust so CI uses a consistent lockfile for the run (Cargo.lock not yet committed; generate when Rust/Docker available and commit for full reproducibility).
+- **Tauri:** identifier changed from `com.abby.app` to `com.abby` (avoid macOS .app conflict). Added `tauri-app/icons/icon.png` (minimal PNG) and set `bundle.icon` to `["icons/icon.png"]`.
+- **Workflow:** Pinned tauri-action to SHA `063c0231f444e55760d98acb9c469b994269d4a5` (dev). Pinned Node to `20`. Ubuntu step: added `libgtk-3-dev`. Added step "Generate Cargo.lock" before Rust cache.
+
 ## 2025-02-02 (CI)
 
 - **Added GitHub Actions workflow `build-release.yml`.** Builds Tauri installers (Abby) on push to `master`; artifacts only (no GitHub Release). Matrix: windows-latest, macos-latest, ubuntu-22.04. Steps: checkout, Linux deps (Ubuntu), Node + npm cache, Rust + rust-cache, frontend install/build in `tauri-app/src-ui`, tauri-apps/tauri-action with projectPath `tauri-app`, upload-artifact from `target/release/bundle/`.

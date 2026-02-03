@@ -1,7 +1,7 @@
 {
   "productName": "Abby",
   "version": "0.1.0",
-  "identifier": "com.abby.app",
+  "identifier": "com.abby",
   "build": {
     "beforeDevCommand": "",
     "devUrl": "http://localhost:1420",
@@ -25,7 +25,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": [],
+    "icon": ["icons/icon.png"],
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",

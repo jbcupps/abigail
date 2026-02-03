@@ -31,17 +31,20 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "lts/*"
+          node-version: "20"
           cache: "npm"
           cache-dependency-path: tauri-app/src-ui/package.json
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate Cargo.lock
+        run: cargo generate-lockfile
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -53,8 +56,7 @@ jobs:
           cd tauri-app/src-ui && npm install && npm run build
 
       - name: Build Tauri app
-        # Use @dev so action installs @tauri-apps/cli@v2; @v0 installs v1 and rejects Tauri 2 config.
-        uses: tauri-apps/tauri-action@dev
+        uses: tauri-apps/tauri-action@063c0231f444e55760d98acb9c469b994269d4a5
         with:
           projectPath: tauri-app
           args: ${{ matrix.args }}
