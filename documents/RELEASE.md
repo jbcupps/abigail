@@ -76,7 +76,7 @@ The Deva branch has its own release workflow for preview/development builds.
 
 ### Tag scheme
 
-Deva releases use tags prefixed with `deva-v`: `deva-v0.1.0`, `deva-v0.1.1`, etc.
+Deva releases use tags prefixed with `deva-v`. Default version is **D 0.0.0** (i.e. `0.0.0`): `deva-v0.0.0`, `deva-v0.1.0`, etc.
 
 ### How to publish a Deva release
 
@@ -94,9 +94,10 @@ Deva releases use tags prefixed with `deva-v`: `deva-v0.1.0`, `deva-v0.1.1`, etc
 
 3. **Create and push the tag:**
    ```bash
-   git tag deva-v0.1.0
-   git push origin deva-v0.1.0
+   git tag deva-v0.0.0
+   git push origin deva-v0.0.0
    ```
+   (Use `deva-v0.0.0` for the first Deva release, then bump as needed.)
 
 4. **CI:** `.github/workflows/build-release-deva.yml` runs on `deva-v*` tags:
    - Builds installers for Windows, Linux, and macOS

@@ -2,21 +2,34 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-03 (Deva build troubleshooting and D 0.0.0)
+
+- **Deva workflow (`build-release-deva.yml`):**
+  - Default Deva version set to **D 0.0.0** (version `0.0.0`) when no tag or input.
+  - Checkout uses `ref: ${{ github.ref }}` so both tag (`refs/tags/deva-v*`) and branch (`refs/heads/Deva`) work.
+  - Trigger on **push to branch Deva** added so every push to Deva runs the build (artifacts only; no release). Use this to monitor the build.
+  - Version update step uses Node (instead of jq) so it runs on Windows runners where jq is not installed.
+  - `workflow_dispatch` input default set to `0.0.0`.
+
+- **Past CI failures (from logs):** Build had failed on Windows due to `abby-skills`: (1) `as_table()` returns `Option<&Map>`, not `Option<Value>` — repo already uses `if let Some(t) = s.permission.as_table()`. (2) `SkillId` must implement `Display` for thiserror — repo already has `impl Display for SkillId`. No code change needed if current Deva branch has those fixes.
+
+To release Deva 0.0.0:
+```bash
+git checkout Deva
+git tag deva-v0.0.0
+git push origin deva-v0.0.0
+```
+Or: Actions → build-release-deva → Run workflow (branch: Deva, release version: 0.0.0).
+
 ## 2026-02-03 (Deva release workflow)
 
 Added separate GitHub Actions workflow for Deva branch releases:
 
 - **`.github/workflows/build-release-deva.yml`:** Mirrors `build-release.yml` but configured for Deva branch.
-  - Triggers on `deva-v*` tags (e.g., `deva-v0.1.0`) or manual `workflow_dispatch`
+  - Triggers on `deva-v*` tags (e.g., `deva-v0.0.0`) or manual `workflow_dispatch`
   - Creates **pre-release** (not marked as latest) so stable releases remain prominent
   - Artifacts named `Abby-Deva-*` to distinguish from stable releases
   - Release notes explain this is a development/preview build
-
-To release from Deva:
-```bash
-git tag deva-v0.1.0
-git push origin deva-v0.1.0
-```
 
 ## 2026-02-03 (First-run keypair generation + installer alignment)
 

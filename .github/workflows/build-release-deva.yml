@@ -2,24 +2,28 @@
 # This is the development/preview release workflow.
 #
 # Triggers:
-# - Tags matching 'deva-v*' (e.g., deva-v0.1.0)
-# - Manual workflow_dispatch from Deva branch
+# - Tags matching 'deva-v*' (e.g., deva-v0.0.0)
+# - Manual workflow_dispatch (select branch Deva)
+#
+# Default Deva version: D 0.0.0 (0.0.0 when no tag/input)
 #
 # Key features:
 # - Builds unsigned installers for Windows (NSIS), Linux (DEB), macOS (DMG)
 # - Creates pre-release (not latest) so it doesn't override stable releases
-# - Version synced from git tag to tauri.conf.json
+# - Version synced from git tag or input to tauri.conf.json
 
 name: build-release-deva
 
 on:
   push:
     tags:
-      - 'deva-v*' # Only run on Deva version tags (e.g., deva-v0.1.0)
+      - 'deva-v*' # Only run on Deva version tags (e.g., deva-v0.0.0)
+    branches:
+      - 'Deva'    # Build (no release) on every push to Deva for monitoring
   workflow_dispatch:
     inputs:
       release_version:
-        description: 'Release version (e.g. 0.1.0-deva). Leave empty to build only, no release.'
+        description: 'Release version (e.g. 0.0.0). Leave empty to build only, no release.'
         required: false
         type: string
 
@@ -51,7 +55,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
-          ref: ${{ github.ref_name }}
+          # Use full ref so both tag (refs/tags/deva-v*) and branch (refs/heads/Deva) work
+          ref: ${{ github.ref }}
 
       - name: Install dependencies (Ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
@@ -75,31 +80,28 @@ jobs:
         id: version
         shell: bash
         run: |
+          # D 0.0.0 = Deva default version 0.0.0
           if [[ "${{ github.ref }}" == refs/tags/deva-v* ]]; then
             VERSION="${{ github.ref_name }}"
             VERSION="${VERSION#deva-v}" # Strip leading 'deva-v'
           elif [[ -n "${{ github.event.inputs.release_version }}" ]]; then
             VERSION="${{ github.event.inputs.release_version }}"
           else
-            VERSION="0.0.0-deva"
+            VERSION="0.0.0"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Building Deva version: $VERSION"
 
       - name: Update version in tauri.conf.json
-        shell: bash
         run: |
-          # Update version in tauri.conf.json to match the tag
-          cd tauri-app
-          if command -v jq &> /dev/null; then
-            jq '.version = "${{ steps.version.outputs.version }}"' tauri.conf.json > tauri.conf.json.tmp
-            mv tauri.conf.json.tmp tauri.conf.json
-          else
-            # Fallback: use sed for simple replacement
-            sed -i.bak 's/"version": "[^"]*"/"version": "${{ steps.version.outputs.version }}"/' tauri.conf.json
-            rm -f tauri.conf.json.bak
-          fi
-          cat tauri.conf.json | head -10
+          node -e "
+          const fs = require('fs');
+          const path = 'tauri-app/tauri.conf.json';
+          const c = JSON.parse(fs.readFileSync(path, 'utf8'));
+          c.version = '${{ steps.version.outputs.version }}';
+          fs.writeFileSync(path, JSON.stringify(c, null, 2));
+          console.log('Version set to:', c.version);
+          "
 
       - name: Generate Cargo.lock
         run: cargo generate-lockfile
@@ -160,12 +162,13 @@ jobs:
         run: |
           if [[ "${{ github.ref }}" == refs/tags/deva-v* ]]; then
             TAG="${{ github.ref_name }}"
-            VERSION="${TAG#deva-}"  # Strip 'deva-' prefix for display
+            VERSION="${TAG#deva-v}"  # e.g. v0.0.0 or 0.0.0 for display
             echo "tag=$TAG" >> $GITHUB_OUTPUT
             echo "version=$VERSION" >> $GITHUB_OUTPUT
           else
-            echo "tag=deva-v${{ github.event.inputs.release_version }}" >> $GITHUB_OUTPUT
-            echo "version=v${{ github.event.inputs.release_version }}" >> $GITHUB_OUTPUT
+            VER="${{ github.event.inputs.release_version }}"
+            echo "tag=deva-v${VER}" >> $GITHUB_OUTPUT
+            echo "version=$VER" >> $GITHUB_OUTPUT
           fi
 
       - name: Rename to stable asset names for download URLs
