@@ -51,6 +51,11 @@ jobs:
         run: |
           cd tauri-app/src-ui && npm install && npm run build
 
+      - name: Generate app icons
+        run: |
+          npm install -g @tauri-apps/cli@v2
+          cd tauri-app && tauri icon icons/icon.png -o icons
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@063c0231f444e55760d98acb9c469b994269d4a5
         with:
