@@ -22,6 +22,7 @@ struct AppState {
     router: IdEgoRouter,
     registry: Arc<SkillRegistry>,
     executor: Arc<SkillExecutor>,
+    #[allow(dead_code)] // used for skill-event subscription; keep for future UI wiring
     event_bus: Arc<EventBus>,
 }
 

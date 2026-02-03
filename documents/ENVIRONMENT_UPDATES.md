@@ -2,6 +2,33 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-03 (CI: Windows .ico + Rust warnings)
+
+- **Windows bundle:** CI failed with "Couldn't find a .ico icon" because the Tauri bundler (WiX) runs with cwd at repo root while icons live in tauri-app/icons/. Added workflow step "Ensure icons at repo root (Windows bundler cwd)" (Windows only): copy tauri-app/icons/* to repo root `icons/` so `icons/icon.ico` exists from cwd.
+- **Rust warnings (warning-clean build):** abby-core keyring.rs: removed unused `base64` imports. abby-skills manifest.rs: removed unused `ResourceLimits` import. abby-skills executor.rs: removed unused `Skill` import, prefixed `tool_name` with `_`. tauri-app lib.rs: added `#[allow(dead_code)]` on `event_bus` (kept for future skill-event UI wiring).
+
+## 2026-02-03 (Build-release remediation plan implementation)
+
+- **Rust:** `abby-core` keyring.rs already uses `let _ = LocalFree(...)` on both Windows DPAPI paths (lines 119, 152); no code change. Cargo.lock: workflow already runs `cargo generate-lockfile` in CI. For full reproducibility, generate and commit `Cargo.lock` at repo root when Rust/Docker is available (`cargo generate-lockfile`).
+- **Tauri bundle:** tauri.conf.json already has `identifier: "com.abby"` and `bundle.icon` including `icons/icon.ico`; icons exist under tauri-app/icons. Workflow step "Generate app icons" runs `tauri icon icons/icon.png -o icons` in CI.
+- **Workflow:** Pinned `tauri-apps/tauri-action` to SHA `063c0231f444e55760d98acb9c469b994269d4a5` (reproducible builds). Node already pinned to `20`. Ubuntu step already includes libwebkit2gtk-4.1-dev, libappindicator3-dev, librsvg2-dev, patchelf, libgtk-3-dev; matches Tauri 2 Linux requirements.
+- **Frontend:** `npm run build` in tauri-app/src-ui succeeds (tsc && vite build); no TS/lint fixes required.
+- **Verification:** After push or workflow_dispatch, confirm all three matrix jobs (windows-latest, macos-latest, ubuntu-22.04) pass and artifacts `abby-installer-<platform>` are uploaded.
+
+## 2026-02-03 (Troubleshooting resume)
+
+- **CI failures addressed in repo:** (1) `abby_core::EmailConfig` — `EmailConfig` is defined in `abby-core/src/config.rs` and re-exported in `abby-core/src/lib.rs` via `pub use config::{AppConfig, EmailConfig}`; abby-birth uses `abby_core::EmailConfig` and should resolve. (2) `abby-skills` — `SkillId` has `impl Display` in `manifest.rs`; permission parsing uses `s.permission.as_table()` (returns `Option<&Map>`) not `Value::Table` pattern. If CI still fails, ensure the commit that added these fixes is the one being built.
+- **Workflow:** Release step now sets `tag_name: ${{ github.ref_name }}` so the draft release is explicitly tied to the pushed tag.
+
+## 2026-02-03 (Stable Windows release pipeline)
+
+- **Trigger:** Workflow runs on version tags (`v*`, e.g. `v0.1.0`) and `workflow_dispatch`. No longer runs on every push to master.
+- **Release:** Added `softprops/action-gh-release@v1` to create a draft GitHub Release and attach installer artifacts. Requires `permissions: contents: write`. Release step runs only when `github.ref` is a tag (`refs/tags/`).
+- **Artifacts:** Upload path is now platform-specific: Windows `target/release/bundle/nsis/*.exe`, Linux `target/release/bundle/deb/*.deb`, macOS `target/release/bundle/dmg/*.dmg`.
+- **Rust toolchain:** Removed hardcoded `targets = ["x86_64-pc-windows-msvc"]` from `rust-toolchain.toml`; each matrix job sets `target` via `dtolnay/rust-toolchain` (e.g. `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`) to avoid cross-platform toolchain conflicts.
+- **Tauri action:** Switched to `tauri-apps/tauri-action@v0` with `GITHUB_TOKEN` for release uploads.
+- **To publish a release:** `git tag v0.1.0 && git push origin v0.1.0`. Then open the draft release on the repo Releases page and publish.
+
 ## 2026-02-03 (MVP build: Windows only, senses out of scope)
 
 - **Workflow:** Build only Windows (`windows-latest`); macOS and Ubuntu removed from matrix for initial MVP focus.

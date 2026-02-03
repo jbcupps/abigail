@@ -1,5 +1,5 @@
 use crate::error::{CoreError, Result};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+// base64 kept for future use if key export/import is added
 use ed25519_dalek::{Signer, SigningKey, Signature, VerifyingKey, Verifier as DalekVerifier};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};

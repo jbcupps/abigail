@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::manifest::{NetworkPermission, Permission, SkillId};
 use crate::registry::SkillRegistry;
 use crate::sandbox::{AuditAction, AuditActionKind, ResourceLimits, SkillSandbox};
-use crate::skill::{ExecutionContext, Skill, SkillError, SkillResult, ToolParams, ToolOutput};
+use crate::skill::{ExecutionContext, SkillError, SkillResult, ToolParams, ToolOutput};
 
 pub struct SkillExecutor {
     pub registry: Arc<SkillRegistry>,
@@ -19,7 +19,7 @@ impl SkillExecutor {
 
     /// Build the appropriate audit action for a tool based on its required_permissions (e.g. network domain).
     fn audit_action_for_tool(
-        tool_name: &str,
+        _tool_name: &str,
         required_permissions: &[Permission],
     ) -> Option<AuditAction> {
         for p in required_permissions {
