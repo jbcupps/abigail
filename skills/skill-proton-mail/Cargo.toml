@@ -1,0 +1,17 @@
+[package]
+name = "skill-proton-mail"
+version.workspace = true
+edition.workspace = true
+description = "Proton Mail–style email skill wrapping abby-senses IMAP/SMTP"
+
+[dependencies]
+abby-skills = { path = "../../crates/abby-skills" }
+abby-senses = { path = "../../crates/abby-senses" }
+abby-core = { path = "../../crates/abby-core" }
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+tracing.workspace = true

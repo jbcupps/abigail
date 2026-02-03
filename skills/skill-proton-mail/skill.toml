@@ -1,0 +1,30 @@
+# Proton Mail–style email skill (abby-senses IMAP/SMTP).
+
+[skill]
+id = "com.abby.skills.proton-mail"
+name = "Proton Mail"
+version = "0.1.0"
+description = "Proton Mail–style email: fetch, send, and manage mail via IMAP/SMTP (abby-senses)."
+category = "Communication"
+keywords = ["email", "proton", "imap", "smtp"]
+
+[runtime]
+runtime = "Native"
+min_abby_version = "0.1.0"
+platforms = ["Windows", "macOS", "Linux"]
+
+[[capabilities]]
+capability = "email_transport"
+version = "1.0"
+
+[[permissions]]
+permission = { Network = { Domains = ["mail.proton.me", "smtp.proton.me"] } }
+reason = "IMAP and SMTP for Proton Mail"
+
+[[secrets]]
+name = "imap_password"
+description = "App password or account password for IMAP login"
+required = true
+
+[config]
+defaults = { imap_host = "mail.proton.me", imap_port = 993, smtp_host = "smtp.proton.me", smtp_port = 587 }

@@ -1,0 +1,33 @@
+//! Agent cooperation capability trait (stub).
+
+use async_trait::async_trait;
+
+use crate::SkillResult;
+
+#[derive(Debug, Clone)]
+pub struct AgentInfo;
+
+#[derive(Debug, Clone)]
+pub struct AgentMessage;
+
+#[derive(Debug, Clone)]
+pub struct TaskRequest;
+
+#[derive(Debug, Clone)]
+pub struct TaskHandle;
+
+#[derive(Debug, Clone)]
+pub struct TaskStatus;
+
+#[async_trait]
+pub trait AgentCooperationCapability: Send + Sync {
+    async fn discover_agents(&self) -> SkillResult<Vec<AgentInfo>> {
+        Ok(vec![])
+    }
+    async fn send_message(&self, _agent_id: &str, _message: AgentMessage) -> SkillResult<()> {
+        Err(crate::SkillError::ToolFailed("stub".into()))
+    }
+    async fn delegate_task(&self, _agent_id: &str, _task: TaskRequest) -> SkillResult<TaskHandle> {
+        Err(crate::SkillError::ToolFailed("stub".into()))
+    }
+}
