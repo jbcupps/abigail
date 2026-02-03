@@ -13,7 +13,7 @@ abby-memory = { path = "../crates/abby-memory" }
 abby-llm = { path = "../crates/abby-llm" }
 abby-router = { path = "../crates/abby-router" }
 abby-birth = { path = "../crates/abby-birth" }
-abby-senses = { path = "../crates/abby-senses" }
+abby-skills = { path = "../crates/abby-skills" }
 tauri = { version = "2.0", features = ["tray-icon"] }
 tokio.workspace = true
 serde.workspace = true

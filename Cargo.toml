@@ -6,9 +6,7 @@ members = [
     "crates/abby-llm",
     "crates/abby-router",
     "crates/abby-birth",
-    "crates/abby-senses",
     "crates/abby-skills",
-    "skills/skill-proton-mail",
     "tauri-app",
 ]
 

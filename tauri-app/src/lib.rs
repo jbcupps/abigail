@@ -7,15 +7,21 @@ use abby_core::document::{CoreDocument, DocumentTier};
 use abby_core::{write_sig_file, AppConfig, Keyring};
 use abby_memory::{Memory, MemoryStore};
 use abby_router::IdEgoRouter;
+use abby_skills::{SkillExecutor, SkillRegistry, ToolParams};
+use abby_skills::channel::EventBus;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use tauri::Emitter;
 
 struct AppState {
     config: RwLock<AppConfig>,
     birth: RwLock<Option<BirthOrchestrator>>,
     router: IdEgoRouter,
+    registry: Arc<SkillRegistry>,
+    executor: Arc<SkillExecutor>,
+    event_bus: Arc<EventBus>,
 }
 
 fn get_config() -> AppConfig {
@@ -168,6 +174,49 @@ fn complete_birth(state: tauri::State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn list_skills(state: tauri::State<AppState>) -> Result<Vec<abby_skills::SkillManifest>, String> {
+    state
+        .registry
+        .list()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_discovered_skills(state: tauri::State<AppState>) -> Result<Vec<abby_skills::SkillManifest>, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let paths = vec![config.data_dir.join("skills")];
+    Ok(abby_skills::SkillRegistry::discover(&paths))
+}
+
+#[tauri::command]
+fn list_tools(
+    state: tauri::State<AppState>,
+    skill_id: String,
+) -> Result<Vec<abby_skills::ToolDescriptor>, String> {
+    let id = abby_skills::SkillId(skill_id);
+    let (skill, _) = state.registry.get_skill(&id).map_err(|e| e.to_string())?;
+    Ok(skill.tools())
+}
+
+#[tauri::command]
+async fn execute_tool(
+    state: tauri::State<'_, AppState>,
+    skill_id: String,
+    tool_name: String,
+    params: HashMap<String, serde_json::Value>,
+) -> Result<abby_skills::ToolOutput, String> {
+    let id = abby_skills::SkillId(skill_id);
+    let tool_params = ToolParams {
+        values: params,
+    };
+    state
+        .executor
+        .execute(&id, &tool_name, tool_params)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn chat(state: tauri::State<'_, AppState>, message: String) -> Result<String, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let store = MemoryStore::open_with_config(config).map_err(|e| e.to_string())?;
@@ -189,13 +238,41 @@ async fn chat(state: tauri::State<'_, AppState>, message: String) -> Result<Stri
 pub fn run() {
     let config = get_config();
     let router = IdEgoRouter::new(config.openai_api_key.clone());
+    let registry = Arc::new(SkillRegistry::new());
+    let event_bus = Arc::new(EventBus::new(256));
+    let executor = Arc::new(SkillExecutor::new(registry.clone()));
+
     let state = AppState {
         config: RwLock::new(config),
         birth: RwLock::new(None),
         router,
+        registry,
+        executor,
+        event_bus: event_bus.clone(),
     };
 
     tauri::Builder::default()
+        .setup(|app| {
+            let event_bus = app.state::<AppState>().event_bus.clone();
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().expect("runtime");
+                rt.block_on(async move {
+                    let mut rx = event_bus.subscribe();
+                    while let Ok(ev) = rx.recv().await {
+                        let payload = serde_json::json!({
+                            "skill_id": ev.skill_id.0,
+                            "trigger": ev.trigger,
+                            "payload": ev.payload,
+                            "timestamp": ev.timestamp.to_rfc3339(),
+                            "priority": ev.priority as u8,
+                        });
+                        let _ = handle.emit("skill-event", payload);
+                    }
+                });
+            });
+            Ok(())
+        })
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             get_birth_complete,
@@ -209,6 +286,10 @@ pub fn run() {
             download_model,
             set_api_key,
             complete_birth,
+            list_skills,
+            list_discovered_skills,
+            list_tools,
+            execute_tool,
             chat,
         ])
         .run(tauri::generate_context!())

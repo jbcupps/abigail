@@ -2,7 +2,6 @@
 
 use abby_core::{AppConfig, Keyring, Verifier};
 use abby_memory::{Memory, MemoryStore};
-use abby_senses::ImapClient;
 use std::path::Path;
 use thiserror::Error;
 
@@ -98,7 +97,7 @@ impl BirthOrchestrator {
         Ok(())
     }
 
-    /// Awakening: validate and store email config; test IMAP connection.
+    /// Awakening: store email config (MVP: no IMAP/SMTP validation; senses optional).
     pub async fn configure_email(
         &mut self,
         address: &str,
@@ -111,8 +110,6 @@ impl BirthOrchestrator {
         if self.stage != BirthStage::Awakening {
             return Ok(());
         }
-        let client = ImapClient::new(imap_host, imap_port, address, password);
-        client.test_connection().await.map_err(|e| BirthError::Email(e.to_string()))?;
         let password_encrypted = Keyring::encrypt_bytes(password.as_bytes())
             .map_err(|e| BirthError::Config(e.to_string()))?;
         self.config.email = Some(abby_core::EmailConfig {

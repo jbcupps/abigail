@@ -2,6 +2,11 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-03 (MVP build: Windows only, senses out of scope)
+
+- **Workflow:** Build only Windows (`windows-latest`); macOS and Ubuntu removed from matrix for initial MVP focus.
+- **Senses/SMTP:** Not required for MVP. Removed `abby-senses` and `skill-proton-mail` from workspace members and from `tauri-app` and `abby-birth` deps. Birth `configure_email` now stores email config without IMAP validation. Proton Mail skill registration removed from app startup; registry starts empty. Email/senses can be re-added in a later phase.
+
 ## 2026-02-03 (Build-release remediation)
 
 - **Rust:** Fixed abby-core keyring.rs `LocalFree` unused result (use `let _ = LocalFree(...)` on Windows DPAPI paths). Workflow now runs `cargo generate-lockfile` after Setup Rust so CI uses a consistent lockfile for the run (Cargo.lock not yet committed; generate when Rust/Docker available and commit for full reproducibility).
