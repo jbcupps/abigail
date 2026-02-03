@@ -74,6 +74,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
       - name: Determine version
@@ -93,15 +94,18 @@ jobs:
           echo "Building Deva version: $VERSION"
 
       - name: Update version in tauri.conf.json
+        shell: bash
         run: |
-          node -e "
-          const fs = require('fs');
-          const path = 'tauri-app/tauri.conf.json';
-          const c = JSON.parse(fs.readFileSync(path, 'utf8'));
-          c.version = '${{ steps.version.outputs.version }}';
-          fs.writeFileSync(path, JSON.stringify(c, null, 2));
-          console.log('Version set to:', c.version);
-          "
+          # Update version in tauri.conf.json to match the tag (same as master workflow)
+          cd tauri-app
+          if command -v jq &> /dev/null; then
+            jq '.version = "${{ steps.version.outputs.version }}"' tauri.conf.json > tauri.conf.json.tmp
+            mv tauri.conf.json.tmp tauri.conf.json
+          else
+            sed -i.bak 's/"version": "[^"]*"/"version": "${{ steps.version.outputs.version }}"/' tauri.conf.json
+            rm -f tauri.conf.json.bak
+          fi
+          cat tauri.conf.json | head -10
 
       - name: Generate Cargo.lock
         run: cargo generate-lockfile

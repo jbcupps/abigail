@@ -2,6 +2,12 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-03 (Fix rust-cache "invalid toolchain name ''" on Windows)
+
+- **Cause:** `swatinem/rust-cache` runs `rustc + $toolchain` to build the cache key. When `dtolnay/rust-toolchain` is used without an explicit `toolchain:` input (relying only on `rust-toolchain.toml`), it can leave the toolchain name empty on some runners, so rust-cache fails with `error: invalid toolchain name ''`.
+- **Fix:** Added explicit `toolchain: stable` to the Setup Rust step in both `.github/workflows/build-release.yml` and `.github/workflows/build-release-deva.yml`. Matches `rust-toolchain.toml` (channel = "stable") and ensures rust-cache always has a non-empty toolchain.
+- **Deva:** Also reverted "Update version in tauri.conf.json" to use the same bash/jq/sed approach as master for consistency.
+
 ## 2026-02-03 (Deva build troubleshooting and D 0.0.0)
 
 - **Deva workflow (`build-release-deva.yml`):**
