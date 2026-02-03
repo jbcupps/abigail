@@ -1,6 +1,9 @@
 //! Id/Ego router: classifies with Id (local), routes COMPLEX to Ego (cloud) when configured.
 
-use abby_llm::{CandleProvider, CompletionRequest, CompletionResponse, LlmProvider, Message, OpenAiProvider};
+use abby_llm::{
+    stub_heartbeat, CandleProvider, CompletionRequest, CompletionResponse, LocalHttpProvider,
+    LlmProvider, Message, OpenAiProvider,
+};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10,20 +13,51 @@ pub enum RouteDecision {
 }
 
 /// Routes user messages: Id (local) classifies; ROUTINE stays local, COMPLEX goes to Ego if configured.
+///
+/// Id can be either:
+/// - A local HTTP provider (LiteLLM, Ollama, etc.) when `local_llm_base_url` is set
+/// - An in-process Candle stub when no URL is configured
 pub struct IdEgoRouter {
-    id: Arc<CandleProvider>,
+    id: Arc<dyn LlmProvider>,
     ego: Option<Arc<OpenAiProvider>>,
+    local_http: Option<Arc<LocalHttpProvider>>,
 }
 
 impl IdEgoRouter {
-    pub fn new(openai_api_key: Option<String>) -> Self {
+    /// Create a new router with optional local LLM URL and OpenAI API key.
+    ///
+    /// # Arguments
+    /// * `local_llm_base_url` - Base URL for local LLM server (e.g. "http://localhost:1234")
+    /// * `openai_api_key` - OpenAI API key for Ego (cloud) routing
+    pub fn new(local_llm_base_url: Option<String>, openai_api_key: Option<String>) -> Self {
         let ego = openai_api_key
             .filter(|k| !k.is_empty())
             .map(|k| Arc::new(OpenAiProvider::new(Some(k))));
-        Self {
-            id: Arc::new(CandleProvider::new()),
-            ego,
+
+        let (id, local_http): (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) =
+            match local_llm_base_url.filter(|u| !u.is_empty()) {
+                Some(url) => {
+                    let provider = Arc::new(LocalHttpProvider::with_url(url));
+                    (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
+                }
+                None => (Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>, None),
+            };
+
+        Self { id, ego, local_http }
+    }
+
+    /// Perform a heartbeat check to verify the local LLM is reachable.
+    /// If using HTTP provider, sends a minimal request; if using stub, always succeeds.
+    pub async fn heartbeat(&self) -> anyhow::Result<()> {
+        match &self.local_http {
+            Some(provider) => provider.heartbeat().await,
+            None => stub_heartbeat().await,
         }
+    }
+
+    /// Check if using a local HTTP provider (vs in-process stub).
+    pub fn is_using_http_provider(&self) -> bool {
+        self.local_http.is_some()
     }
 
     /// Classify with Id: ROUTINE or COMPLEX.
@@ -86,11 +120,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_routing_decision() {
-        let router = IdEgoRouter::new(None);
+        // Use stub (no URL) for tests
+        let router = IdEgoRouter::new(None, None);
         let r = router.classify("What time is it?").await.unwrap();
         assert_eq!(r, RouteDecision::Routine);
 
         let r = router.classify("Write an essay on quantum mechanics.").await.unwrap();
         assert_eq!(r, RouteDecision::Complex);
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_stub() {
+        let router = IdEgoRouter::new(None, None);
+        assert!(!router.is_using_http_provider());
+        router.heartbeat().await.unwrap();
     }
 }

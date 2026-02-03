@@ -2,10 +2,15 @@ pub mod config;
 pub mod document;
 pub mod error;
 pub mod keyring;
+pub mod vault;
 pub mod verifier;
 
 pub use config::{AppConfig, EmailConfig};
 pub use document::{CoreDocument, DocumentTier};
 pub use error::{CoreError, Result};
-pub use keyring::Keyring;
+pub use keyring::{
+    generate_external_keypair, parse_private_key, sign_constitutional_documents,
+    sign_document, ExternalKeypairResult, Keyring, SignatureMetadata,
+};
+pub use vault::{ExternalVault, ReadOnlyFileVault};
 pub use verifier::{write_sig_file, Verifier};

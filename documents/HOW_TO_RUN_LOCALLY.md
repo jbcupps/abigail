@@ -4,6 +4,7 @@
 
 - Rust (stable; on Windows use target `x86_64-pc-windows-msvc` if needed)
 - Node.js 20+ (for frontend)
+- (Optional) Local LLM server (LiteLLM, Ollama, LM Studio) for real inference
 - (Optional) OpenAI API key for Ego routing
 
 ## Build and run
@@ -21,12 +22,53 @@
 3. **Config / data**
    - Data dir: `%LOCALAPPDATA%\abby\Abby` (or `directories` crate default)
    - Config: `data_dir/config.json`
-   - First run: birth sequence creates keyring, signed constitutional docs, and DB
+   - First run: birth sequence copies constitutional docs and creates internal keyring
+
+## Startup flow (First Run)
+
+When you click **Start** for the first time, Abby runs through the birth sequence:
+
+1. **Initialize** — Copies constitutional documents (soul.md, ethics.md, instincts.md) to data dir, creates internal keyring.
+2. **Generate signing keypair** — Creates a new Ed25519 keypair for signing constitutional documents.
+3. **CRITICAL: Save your private key** — The private key is displayed ONCE with security warnings. You MUST save it securely before proceeding. Abby does NOT store this key.
+4. **Sign documents** — Constitutional docs are signed with your private key.
+5. **LLM heartbeat** — Verifies the local LLM is reachable (if `local_llm_base_url` is set; otherwise uses in-process stub).
+6. **Signature verification** — Verifies constitutional docs against the stored public key.
+7. **Abby informed OK** — If all checks pass, Abby engages and shows the chat interface.
+
+## Startup flow (Subsequent Runs)
+
+On subsequent runs (already born), Abby runs these checks automatically:
+
+1. **LLM heartbeat** — Verifies local LLM connectivity.
+2. **Signature verification** — Verifies constitutional docs against stored public key.
+3. **Chat** — If checks pass, shows the chat interface.
 
 ## Environment
 
 - `OPENAI_API_KEY` — optional; enables Ego (cloud) for COMPLEX routing
+- `LOCAL_LLM_BASE_URL` — optional; base URL for local LLM server (e.g. `http://localhost:1234`)
+- `EXTERNAL_PUBKEY_PATH` — optional; path to external public key for signature verification
 - See `example.env` for placeholders (no real values)
+
+## External signing key
+
+The signing keypair is now generated automatically at first run:
+
+1. **First run:** Abby generates an Ed25519 keypair and displays the private key ONCE.
+2. **Save it:** Copy the private key and store it securely (password manager, encrypted drive, etc.).
+3. **Public key:** Automatically saved to `{data_dir}/external_pubkey.bin` and auto-detected.
+4. **Private key:** NEVER stored by Abby. You are responsible for keeping it safe.
+
+### Why save the private key?
+
+- **Recovery:** If you reinstall Abby or lose your data, you'll need the private key to re-sign documents.
+- **Verification:** The private key proves you are the original mentor of this Abby instance.
+- **Security:** If compromised, someone could create fake constitutional documents.
+
+### Legacy: Manual keypair generation
+
+The `scripts/generate-signing-key.ps1` script still exists for advanced use cases (signing templates before distribution). For normal use, the automatic first-run generation is recommended.
 
 ## Building an installer
 

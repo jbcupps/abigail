@@ -1,6 +1,6 @@
 //! First-run state machine: Darkness -> Awakening -> Cognition -> Life.
 
-use abby_core::{AppConfig, Keyring, Verifier};
+use abby_core::{AppConfig, Keyring, ReadOnlyFileVault, Verifier};
 use abby_memory::{Memory, MemoryStore};
 use std::path::Path;
 use thiserror::Error;
@@ -85,14 +85,27 @@ impl BirthOrchestrator {
     }
 
     /// Darkness: verify crypto (soul.md, ethics.md, instincts.md).
+    /// Uses external public key from vault if configured/auto-detected, otherwise skips (dev mode).
     pub fn verify_crypto(&mut self, docs_path: &Path) -> anyhow::Result<()> {
         if self.stage != BirthStage::Darkness {
             return Ok(());
         }
-        let keyring = Keyring::load(self.config.data_dir.clone())
-            .map_err(|e| BirthError::Verification(e.to_string()))?;
-        let mut verifier = Verifier::new(keyring);
-        verifier.verify_soul(docs_path).map_err(|e| BirthError::Verification(e.to_string()))?;
+
+        // Use external vault if configured or auto-detected
+        if let Some(ref pubkey_path) = self.config.effective_external_pubkey_path() {
+            let vault = ReadOnlyFileVault::new(pubkey_path);
+            let mut verifier = Verifier::from_vault(&vault)
+                .map_err(|e| BirthError::Verification(e.to_string()))?;
+            verifier
+                .verify_soul(docs_path)
+                .map_err(|e| BirthError::Verification(e.to_string()))?;
+        } else {
+            // Dev mode: skip verification if no external pubkey configured
+            tracing::warn!(
+                "No external_pubkey_path configured; signature verification skipped (dev mode)"
+            );
+        }
+
         self.stage = BirthStage::Awakening;
         Ok(())
     }
@@ -128,6 +141,18 @@ impl BirthOrchestrator {
     /// Cognition: advance to Life (model download is handled by UI; we just advance when ready).
     pub fn advance_cognition(&mut self) {
         if self.stage == BirthStage::Cognition {
+            self.stage = BirthStage::Life;
+        }
+    }
+
+    /// MVP shortcut: skip email and model download, go directly to Life stage.
+    /// Can be called from any stage before Life.
+    pub fn skip_to_life_for_mvp(&mut self) {
+        if self.stage != BirthStage::Life {
+            tracing::info!(
+                "MVP shortcut: skipping from {:?} to Life",
+                self.stage
+            );
             self.stage = BirthStage::Life;
         }
     }

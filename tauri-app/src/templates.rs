@@ -1,4 +1,6 @@
-// Constitutional document content (from spec). Used by init_soul to create signed docs.
+// Constitutional document content (from spec). Used by init_soul to copy to docs_dir.
+// Signatures are generated at first-run by generate_and_sign_constitutional command.
+// The private signing key is presented to the user once and never stored by Abby.
 
 pub const SOUL_MD: &str = r#"# Soul
 
@@ -82,3 +84,7 @@ Pre-cognitive responses. What I do before reasoning.
 - Complex reasoning goes to cloud (Ego)
 - Privacy-sensitive always stays local
 "#;
+
+// Note: Signature files (.sig) are no longer embedded as templates.
+// They are generated at first-run when the user's keypair is created.
+// See generate_and_sign_constitutional in lib.rs.

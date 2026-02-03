@@ -1,28 +1,44 @@
 use crate::document::{CoreDocument, DocumentTier};
 use crate::error::{CoreError, Result};
 use crate::keyring::Keyring;
+use crate::vault::ExternalVault;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use ed25519_dalek::Signature;
+use ed25519_dalek::{Signature, VerifyingKey};
 use std::collections::HashMap;
 use std::path::Path;
 
 /// Metadata stored in .sig files (signature + tier + signed_at; content lives in .md).
 #[derive(serde::Serialize, serde::Deserialize)]
-struct SigMeta {
+pub struct SigMeta {
     pub signature: String,
     pub tier: DocumentTier,
     pub signed_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// Verifier for constitutional documents.
+///
+/// Uses an **external public key** (from vault) as the trust root for signature verification.
+/// The signing private key is never stored in Abby.
 pub struct Verifier {
-    keyring: Keyring,
+    pubkey: VerifyingKey,
     documents: HashMap<String, CoreDocument>,
 }
 
 impl Verifier {
-    pub fn new(keyring: Keyring) -> Self {
+    /// Create a new verifier with a public key from an external vault.
+    pub fn from_vault<V: ExternalVault>(vault: &V) -> Result<Self> {
+        let pubkey = vault.read_public_key()?;
+        Ok(Self {
+            pubkey,
+            documents: HashMap::new(),
+        })
+    }
+
+    /// Create a new verifier with a directly provided public key.
+    /// Useful for testing or when the key is already loaded.
+    pub fn with_pubkey(pubkey: VerifyingKey) -> Self {
         Self {
-            keyring,
+            pubkey,
             documents: HashMap::new(),
         }
     }
@@ -72,7 +88,7 @@ impl Verifier {
             .map_err(|e| CoreError::Crypto(format!("Invalid signature: {}", e)))?;
 
         let signable = doc.signable_bytes();
-        let valid = self.keyring.verify_install_signature(&signable, &signature);
+        let valid = Keyring::verify_signature(&self.pubkey, &signable, &signature);
 
         if !valid {
             return Err(CoreError::SignatureInvalid {
@@ -114,6 +130,8 @@ mod tests {
     use super::*;
     use crate::document::DocumentTier;
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    use ed25519_dalek::{Signer, SigningKey};
+    use rand::rngs::OsRng;
     use std::fs;
 
     #[test]
@@ -122,8 +140,9 @@ mod tests {
         let _ = fs::remove_dir_all(&temp);
         fs::create_dir_all(&temp).unwrap();
 
-        let (keyring, install_signing) = Keyring::generate(temp.clone()).unwrap();
-        keyring.save().unwrap();
+        // Generate an out-of-band signing key (simulating external key creation)
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let pubkey = signing_key.verifying_key();
 
         let content = "I am Abby. This is my soul.";
         let mut doc = CoreDocument::new(
@@ -131,16 +150,17 @@ mod tests {
             DocumentTier::Constitutional,
             content.into(),
         );
-        let sig = install_signing.sign(&doc.signable_bytes());
+        let sig = signing_key.sign(&doc.signable_bytes());
         doc.signature = BASE64.encode(sig.to_bytes());
 
-        let verifier = Verifier::new(Keyring::load(temp.clone()).unwrap());
+        // Verify using the public key directly (simulating external vault)
+        let verifier = Verifier::with_pubkey(pubkey);
         verifier.verify_document(&doc).unwrap();
 
         // Tamper: modify content; signature no longer matches
         doc.content = "I am Abby. This is TAMPERED.".into();
 
-        let verifier2 = Verifier::new(Keyring::load(temp).unwrap());
+        let verifier2 = Verifier::with_pubkey(pubkey);
         let result = verifier2.verify_document(&doc);
         assert!(result.is_err(), "Tampered document should fail verification");
 

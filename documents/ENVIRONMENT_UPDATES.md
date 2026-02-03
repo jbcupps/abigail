@@ -2,6 +2,72 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-03 (First-run keypair generation + installer alignment)
+
+Major change to external signing key flow - keypair now generated at first run instead of out-of-band:
+
+### Backend Changes
+
+- **`abby-core/src/keyring.rs`:** Added `generate_external_keypair()`, `sign_document()`, `sign_constitutional_documents()`, `parse_private_key()` functions. External keypair is generated at first run; private key returned to UI for user to save; only public key stored.
+- **`abby-core/src/document.rs`:** Updated `CoreDocument::signable_bytes()` to use format `{name}|{tier:?}|{content}` for consistency with signing tools.
+- **`abby-core/src/config.rs`:** Added `effective_external_pubkey_path()` method that auto-detects `{data_dir}/external_pubkey.bin` if no explicit path configured.
+- **`abby-birth/src/stages.rs`:** Updated `verify_crypto()` to use `effective_external_pubkey_path()`.
+- **`tauri-app/src/lib.rs`:** New Tauri commands `generate_and_sign_constitutional` and `has_external_keypair`. Modified `init_soul` to no longer copy signature files (signatures generated at first run). Updated `run_startup_checks` to use `effective_external_pubkey_path()`.
+- **`tauri-app/src/templates.rs`:** Removed placeholder signature constants; signatures now generated dynamically.
+
+### Frontend Changes
+
+- **`BootSequence.tsx`:** Added `KeyPresentation` stage with:
+  - Display of base64-encoded private key (Ed25519)
+  - Copy-to-clipboard functionality
+  - Security warnings (red box) explaining key importance
+  - Checkbox acknowledgment required before proceeding
+  - Private key cleared from state after acknowledgment
+
+### CI Changes
+
+- **`.github/workflows/build-release.yml`:**
+  - Pinned all actions by SHA for reproducibility
+  - Added version sync from git tag to `tauri.conf.json`
+  - Added structured release notes explaining first-run key generation
+  - Release body includes installation instructions and security note
+
+### Documentation
+
+- **`documents/SECURITY_NOTES.md`:** Complete rewrite documenting new key management model, first-run security flow, and threat model summary.
+
+### Security Model Change
+
+| Aspect | Before | After |
+|--------|--------|-------|
+| Who generates signing key | Developer (out-of-band) | End user (at first run) |
+| When templates are signed | Build time | First run |
+| Private key location | Developer's secure storage | User's secure storage |
+| Trust model | "Developer signed these docs" | "User owns their instance's integrity" |
+
+## 2026-02-03 (Startup order, external vault, LiteLLM heartbeat)
+
+Major refactor of startup flow and signature verification:
+
+- **External vault:** Added `abby-core/src/vault.rs` with `ExternalVault` trait and `ReadOnlyFileVault` implementation. The signing public key is now read from an external file (outside Abby's data dir) that Abby can read but not write. Private signing key is created out-of-band (GPG, OpenSSL, or `scripts/generate-signing-key.ps1`).
+- **Keyring v2:** Updated `Keyring` to no longer generate or store the install signing key. Only the mentor keypair is stored internally. Legacy v1 format (with install_pubkey) is still readable for migration.
+- **Verifier:** Updated to use external public key from vault instead of internal keyring. `Verifier::from_vault(&vault)` creates a verifier with the external trust root.
+- **LiteLLM HTTP provider:** Added `abby-llm/src/local_http.rs` with `LocalHttpProvider` for OpenAI-compatible local LLM servers (LiteLLM, Ollama, LM Studio). Includes `heartbeat()` method for startup check.
+- **Router:** Updated `IdEgoRouter::new(local_llm_base_url, openai_api_key)` to use HTTP provider when URL is set, otherwise falls back to Candle stub. Added `heartbeat()` and `is_using_http_provider()` methods.
+- **Config:** Added `external_pubkey_path: Option<PathBuf>` and `local_llm_base_url: Option<String>` to `AppConfig`.
+- **Startup checks:** New Tauri command `run_startup_checks` runs LLM heartbeat then signature verification. Returns `{ heartbeat_ok, verification_ok, error }` for UI to show status.
+- **Birth shortcut:** Added `skip_to_life_for_mvp()` to birth orchestrator for streamlined first-run (skips email and model download).
+- **init_soul:** Now copies pre-signed templates + .sig files instead of signing at runtime.
+- **Frontend:** Simplified `BootSequence.tsx` to single Start flow: init_soul → run_startup_checks → show "Abby informed OK" → complete birth → chat. `App.tsx` runs startup checks on every launch when already born.
+- **Scripts:** Added `scripts/generate-signing-key.ps1` to generate Ed25519 keypair and sign templates out-of-band.
+- **Docs:** Updated `example.env`, `HOW_TO_RUN_LOCALLY.md`, `MVP_SCOPE.md` with new startup order and external signing key instructions.
+
+Dev mode: If `external_pubkey_path` is not set, signature verification is skipped with a warning. If `local_llm_base_url` is not set, heartbeat uses in-process stub (always succeeds).
+
+## 2026-02-03 (README)
+
+- **Docs:** Added root `README.md` — project intro, quick start (Rust + Node, `cargo tauri dev`), project layout table, links to documents (HOW_TO_RUN_LOCALLY, MVP_SCOPE, RELEASE, SECURITY_NOTES), license (MIT).
+
 ## 2026-02-03 (Auto-publish releases)
 
 - **CI (build-release):** Changed `draft: true` to `draft: false` so releases are published immediately after the workflow completes. Users can now see the release and download installers from the Releases section without manual publishing.

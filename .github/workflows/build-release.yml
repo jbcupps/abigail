@@ -1,5 +1,11 @@
 # Build Abby (Tauri app) and publish to GitHub Releases on version tags.
 # See: https://tauri.app/distribute/pipelines/github/
+#
+# Key features:
+# - Builds unsigned installers for Windows (NSIS), Linux (DEB), macOS (DMG)
+# - On first run, the installer generates a signing keypair and presents
+#   the private key to the user (see SECURITY_NOTES.md)
+# - Version is synced from the git tag to tauri.conf.json
 
 name: build-release
 
@@ -40,7 +46,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
       - name: Install dependencies (Ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
@@ -49,22 +55,52 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
         with:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: tauri-app/src-ui/package.json
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@21dc36fb71dd22e3317045c0c31a3f4249868b17 # stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#v}" # Strip leading 'v'
+          elif [[ -n "${{ github.event.inputs.release_version }}" ]]; then
+            VERSION="${{ github.event.inputs.release_version }}"
+          else
+            VERSION="0.0.0-dev"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Update version in tauri.conf.json
+        shell: bash
+        run: |
+          # Update version in tauri.conf.json to match the tag
+          cd tauri-app
+          if command -v jq &> /dev/null; then
+            jq '.version = "${{ steps.version.outputs.version }}"' tauri.conf.json > tauri.conf.json.tmp
+            mv tauri.conf.json.tmp tauri.conf.json
+          else
+            # Fallback: use sed for simple replacement
+            sed -i.bak 's/"version": "[^"]*"/"version": "${{ steps.version.outputs.version }}"/' tauri.conf.json
+            rm -f tauri.conf.json.bak
+          fi
+          cat tauri.conf.json | head -10
 
       - name: Generate Cargo.lock
         run: cargo generate-lockfile
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
         with:
           workspaces: "."
 
@@ -79,6 +115,7 @@ jobs:
 
       - name: Ensure icons at repo root (Windows bundler cwd)
         if: matrix.platform == 'windows-latest'
+        shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path icons | Out-Null
           Copy-Item tauri-app\icons\icon.ico -Destination icons\
@@ -86,7 +123,7 @@ jobs:
           Copy-Item tauri-app\icons\*.png -Destination icons\ -ErrorAction SilentlyContinue
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@063c0231f444e55760d98acb9c469b994269d4a5
+        uses: tauri-apps/tauri-action@063c0231f444e55760d98acb9c469b994269d4a5 # v0.5.6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -94,7 +131,7 @@ jobs:
           args: ${{ matrix.args }}
 
       - name: Upload installers (Artifacts)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
         with:
           name: abby-installer-${{ matrix.platform }}
           path: ${{ matrix.installer_path }}
@@ -107,11 +144,22 @@ jobs:
       contents: write
     steps:
       - name: Download all installer artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4.1.4
         with:
           path: artifacts
           pattern: abby-installer-*
           merge-multiple: false
+
+      - name: Determine version for release
+        id: release_version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=v${{ github.event.inputs.release_version }}" >> $GITHUB_OUTPUT
+            echo "version=v${{ github.event.inputs.release_version }}" >> $GITHUB_OUTPUT
+          fi
 
       - name: Rename to stable asset names for latest/download URLs
         run: |
@@ -121,12 +169,36 @@ jobs:
           cp artifacts/abby-installer-macos-latest/*.dmg release-assets/Abby-macos-x64.dmg
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@9d7c94cfd0a1f3ed45544c887983e9fa900f0564 # v2.0.4
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', github.event.inputs.release_version) }}
-          name: Release ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', github.event.inputs.release_version) }}
+          tag_name: ${{ steps.release_version.outputs.tag }}
+          name: Abby ${{ steps.release_version.outputs.version }}
           draft: false
           prerelease: false
+          body: |
+            ## Abby ${{ steps.release_version.outputs.version }}
+
+            ### Installation
+            
+            Download the installer for your platform:
+            - **Windows**: `Abby-windows-x64-setup.exe`
+            - **Linux**: `Abby-linux-x64.deb`
+            - **macOS**: `Abby-macos-x64.dmg`
+
+            ### First Run Setup
+            
+            On first launch, Abby will:
+            1. Generate a signing keypair for verifying document integrity
+            2. **Present your private key** - you MUST save this securely
+            3. Run integrity checks and complete the birth sequence
+
+            ### Security Note
+            
+            The private key shown during first run is NEVER stored by Abby.
+            Keep it safe - you'll need it if you ever need to verify your Abby instance
+            or recover from data loss.
+
+            See [SECURITY_NOTES.md](https://github.com/${{ github.repository }}/blob/main/documents/SECURITY_NOTES.md) for details.
           files: |
             release-assets/Abby-windows-x64-setup.exe
             release-assets/Abby-linux-x64.deb

@@ -30,11 +30,9 @@ impl CoreDocument {
         }
     }
 
-    /// Returns the bytes that should be signed (content + tier + timestamp) for deterministic verification.
+    /// Returns the bytes that should be signed: `{name}|{tier:?}|{content}`
+    /// This format is consistent with the external signing tools.
     pub fn signable_bytes(&self) -> Vec<u8> {
-        let mut bytes = self.content.as_bytes().to_vec();
-        bytes.push(self.tier as u8);
-        bytes.extend_from_slice(&self.signed_at.timestamp().to_le_bytes());
-        bytes
+        format!("{}|{:?}|{}", self.name, self.tier, self.content).into_bytes()
     }
 }

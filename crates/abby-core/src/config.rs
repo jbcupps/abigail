@@ -16,6 +16,17 @@ pub struct AppConfig {
 
     /// Whether birth sequence has completed
     pub birth_complete: bool,
+
+    /// Path to external public key file for signature verification.
+    /// This file should be outside Abby's data directory and read-only.
+    /// If None, falls back to internal keyring (legacy/dev mode).
+    #[serde(default)]
+    pub external_pubkey_path: Option<PathBuf>,
+
+    /// Base URL for local LLM (LiteLLM/Ollama/etc), e.g. "http://localhost:1234".
+    /// If None, uses in-process Candle stub.
+    #[serde(default)]
+    pub local_llm_base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,12 +54,35 @@ impl AppConfig {
             openai_api_key: None,
             email: None,
             birth_complete: false,
+            external_pubkey_path: None,
+            local_llm_base_url: None,
         }
     }
 
     /// Path to the config file (data_dir/config.json).
     pub fn config_path(&self) -> PathBuf {
         self.data_dir.join("config.json")
+    }
+
+    /// Returns the effective external pubkey path.
+    /// 
+    /// Priority:
+    /// 1. Explicitly configured `external_pubkey_path`
+    /// 2. Auto-detected `{data_dir}/external_pubkey.bin` if it exists
+    /// 3. None (dev mode - verification will be skipped)
+    pub fn effective_external_pubkey_path(&self) -> Option<PathBuf> {
+        // If explicitly configured, use that
+        if self.external_pubkey_path.is_some() {
+            return self.external_pubkey_path.clone();
+        }
+        
+        // Auto-detect in data_dir
+        let auto_path = self.data_dir.join("external_pubkey.bin");
+        if auto_path.exists() {
+            return Some(auto_path);
+        }
+        
+        None
     }
 
     pub fn load(path: &PathBuf) -> anyhow::Result<Self> {

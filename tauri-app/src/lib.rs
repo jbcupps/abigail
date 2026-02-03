@@ -3,14 +3,17 @@
 mod templates;
 
 use abby_birth::BirthOrchestrator;
-use abby_core::document::{CoreDocument, DocumentTier};
-use abby_core::{write_sig_file, AppConfig, Keyring};
+use abby_core::{
+    generate_external_keypair, sign_constitutional_documents, AppConfig,
+    Keyring, ReadOnlyFileVault, Verifier,
+};
 use abby_memory::{Memory, MemoryStore};
 use abby_router::IdEgoRouter;
-use abby_skills::{SkillExecutor, SkillRegistry, ToolParams};
 use abby_skills::channel::EventBus;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use ed25519_dalek::Signer;
+use abby_skills::{SkillExecutor, SkillRegistry, ToolParams};
+use base64::Engine as _;
+use ed25519_dalek::SigningKey;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -48,34 +51,197 @@ fn get_docs_path(state: tauri::State<AppState>) -> Result<PathBuf, String> {
     Ok(config.docs_dir.clone())
 }
 
-/// One-time setup: generate keyring, write constitutional docs, sign them. Idempotent if keys exist.
+/// One-time setup: copy constitutional docs (without signatures).
+/// Signatures are generated separately by generate_and_sign_constitutional.
+/// Idempotent if docs already exist.
 #[tauri::command]
 fn init_soul(state: tauri::State<AppState>) -> Result<(), String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let data_dir = config.data_dir.clone();
     let docs_dir = config.docs_dir.clone();
-    let keys_file = data_dir.join("keys.bin");
-    if keys_file.exists() {
-        return Ok(());
-    }
+
     std::fs::create_dir_all(&docs_dir).map_err(|e| e.to_string())?;
-    let (keyring, install_signing) = Keyring::generate(data_dir.clone()).map_err(|e| e.to_string())?;
+
+    // Copy constitutional docs (without signatures - those come from generate_and_sign_constitutional)
     let docs = [
         ("soul.md", templates::SOUL_MD),
         ("ethics.md", templates::ETHICS_MD),
         ("instincts.md", templates::INSTINCTS_MD),
     ];
+
     for (name, content) in docs {
-        let path = docs_dir.join(name);
-        std::fs::write(&path, content).map_err(|e| e.to_string())?;
-        let mut doc = CoreDocument::new(name.to_string(), DocumentTier::Constitutional, content.to_string());
-        let sig = install_signing.sign(&doc.signable_bytes());
-        doc.signature = BASE64.encode(sig.to_bytes());
-        let base = name.strip_suffix(".md").unwrap_or(name);
-        write_sig_file(&docs_dir, base, &doc).map_err(|e| e.to_string())?;
+        let doc_path = docs_dir.join(name);
+
+        // Only write if not already present (idempotent)
+        if !doc_path.exists() {
+            std::fs::write(&doc_path, content).map_err(|e| e.to_string())?;
+        }
     }
-    keyring.save().map_err(|e| e.to_string())?;
+
+    // Generate internal keyring if not present (for mentor key, etc.)
+    let keys_file = data_dir.join("keys.bin");
+    if !keys_file.exists() {
+        let keyring = Keyring::generate(data_dir).map_err(|e| e.to_string())?;
+        keyring.save().map_err(|e| e.to_string())?;
+    }
+
     Ok(())
+}
+
+/// Generate the external signing keypair and sign constitutional documents.
+/// 
+/// This is called during first-run setup. It:
+/// 1. Generates a new Ed25519 keypair (or detects if pubkey already exists)
+/// 2. Signs the constitutional documents (soul.md, ethics.md, instincts.md)
+/// 3. Stores the PUBLIC key in data_dir/external_pubkey.bin
+/// 4. Returns the PRIVATE key as base64 for the user to save
+/// 
+/// CRITICAL: The private key is returned ONCE and never stored by Abby.
+/// The user MUST save it securely. Without it, they cannot verify integrity
+/// after a reinstall or re-sign documents if needed.
+#[tauri::command]
+fn generate_and_sign_constitutional(state: tauri::State<AppState>) -> Result<KeypairGenerationResult, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let data_dir = config.data_dir.clone();
+    let docs_dir = config.docs_dir.clone();
+    drop(config); // Release the lock before doing file I/O
+
+    let pubkey_path = data_dir.join("external_pubkey.bin");
+    
+    // Check if we already have signatures (idempotent - don't regenerate)
+    let sig_exists = docs_dir.join("soul.md.sig").exists()
+        && docs_dir.join("ethics.md.sig").exists()
+        && docs_dir.join("instincts.md.sig").exists()
+        && pubkey_path.exists();
+    
+    if sig_exists {
+        // Already generated - can't return the private key again (it was never stored)
+        return Err(
+            "Constitutional documents are already signed. \
+             The private key was presented during initial setup and is not stored by Abby. \
+             If you need to re-sign, you must use your saved private key."
+                .to_string(),
+        );
+    }
+
+    // Generate the external keypair
+    let keypair_result = generate_external_keypair(&data_dir).map_err(|e| e.to_string())?;
+    
+    // Parse the private key from the result to use for signing
+    let private_key_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&keypair_result.private_key_base64)
+        .map_err(|e| format!("Failed to decode private key: {}", e))?;
+    
+    let key_bytes: [u8; 32] = private_key_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| "Invalid private key length")?;
+    
+    let signing_key = SigningKey::from_bytes(&key_bytes);
+    
+    // Sign the constitutional documents
+    sign_constitutional_documents(&signing_key, &docs_dir).map_err(|e| e.to_string())?;
+    
+    // Update config to point to the new pubkey
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.external_pubkey_path = Some(pubkey_path.clone());
+        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+    }
+    
+    Ok(KeypairGenerationResult {
+        private_key_base64: keypair_result.private_key_base64,
+        public_key_path: pubkey_path.to_string_lossy().to_string(),
+        newly_generated: true,
+    })
+}
+
+/// Check if the external keypair has already been generated.
+/// Returns true if pubkey and all signatures exist.
+#[tauri::command]
+fn has_external_keypair(state: tauri::State<AppState>) -> Result<bool, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let data_dir = config.data_dir.clone();
+    let docs_dir = config.docs_dir.clone();
+    
+    let pubkey_path = data_dir.join("external_pubkey.bin");
+    let sig_exists = docs_dir.join("soul.md.sig").exists()
+        && docs_dir.join("ethics.md.sig").exists()
+        && docs_dir.join("instincts.md.sig").exists()
+        && pubkey_path.exists();
+    
+    Ok(sig_exists)
+}
+
+/// Result of startup checks (heartbeat + signature verification).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StartupCheckResult {
+    pub heartbeat_ok: bool,
+    pub verification_ok: bool,
+    pub error: Option<String>,
+}
+
+/// Result of generating and signing with the external keypair.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeypairGenerationResult {
+    /// Base64-encoded private key. User MUST save this securely.
+    pub private_key_base64: String,
+    /// Path where the public key was saved.
+    pub public_key_path: String,
+    /// Whether this is a fresh generation (true) or existing key was found (false).
+    pub newly_generated: bool,
+}
+
+/// Run startup checks: LLM heartbeat then signature verification.
+/// Returns status for each check so the UI can show appropriate messages.
+#[tauri::command]
+async fn run_startup_checks(state: tauri::State<'_, AppState>) -> Result<StartupCheckResult, String> {
+    // 1. LLM heartbeat
+    let heartbeat_result = state.router.heartbeat().await;
+    let heartbeat_ok = heartbeat_result.is_ok();
+    let heartbeat_error = heartbeat_result.err().map(|e| e.to_string());
+
+    if !heartbeat_ok {
+        return Ok(StartupCheckResult {
+            heartbeat_ok: false,
+            verification_ok: false,
+            error: heartbeat_error,
+        });
+    }
+
+    // 2. Signature verification
+    let verification_result = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let docs_dir = config.docs_dir.clone();
+        let external_pubkey_path = config.effective_external_pubkey_path();
+
+        // Use external vault if configured/auto-detected, otherwise skip (dev mode)
+        match external_pubkey_path {
+            Some(path) => {
+                let vault = ReadOnlyFileVault::new(&path);
+                match Verifier::from_vault(&vault) {
+                    Ok(mut verifier) => verifier.verify_soul(&docs_dir),
+                    Err(e) => Err(e),
+                }
+            }
+            None => {
+                // For MVP/dev: if no external pubkey configured, skip verification with warning
+                tracing::warn!(
+                    "No external_pubkey_path configured; signature verification skipped (dev mode)"
+                );
+                Ok(())
+            }
+        }
+    };
+
+    let verification_ok = verification_result.is_ok();
+    let verification_error = verification_result.err().map(|e| e.to_string());
+
+    Ok(StartupCheckResult {
+        heartbeat_ok,
+        verification_ok,
+        error: verification_error,
+    })
 }
 
 #[tauri::command]
@@ -241,10 +407,23 @@ async fn chat(state: tauri::State<'_, AppState>, message: String) -> Result<Stri
     Ok(response.content)
 }
 
+/// MVP shortcut: skip email and model download, go directly to Life stage.
+/// Used for streamlined first-run experience.
+#[tauri::command]
+fn skip_to_life_for_mvp(state: tauri::State<AppState>) -> Result<(), String> {
+    let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+    let b = birth.as_mut().ok_or("Birth not started")?;
+    b.skip_to_life_for_mvp();
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let config = get_config();
-    let router = IdEgoRouter::new(config.openai_api_key.clone());
+    let router = IdEgoRouter::new(
+        config.local_llm_base_url.clone(),
+        config.openai_api_key.clone(),
+    );
     let registry = Arc::new(SkillRegistry::new());
     let event_bus = Arc::new(EventBus::new(256));
     let executor = Arc::new(SkillExecutor::new(registry.clone()));
@@ -288,6 +467,9 @@ pub fn run() {
             get_birth_complete,
             get_docs_path,
             init_soul,
+            generate_and_sign_constitutional,
+            has_external_keypair,
+            run_startup_checks,
             get_birth_stage,
             get_birth_message,
             start_birth,
@@ -296,6 +478,7 @@ pub fn run() {
             download_model,
             set_api_key,
             complete_birth,
+            skip_to_life_for_mvp,
             list_skills,
             list_discovered_skills,
             list_tools,
