@@ -16,6 +16,7 @@
 2. **Tauri app (desktop)**
    - Install frontend deps: `cd tauri-app/src-ui && npm install`
    - From repo root: `cargo tauri dev` (or from tauri-app if your CLI supports it)
+   - **Pre-built installers:** On push to `master`, GitHub Actions builds installers; download from the [Actions](https://github.com/YOUR_ORG/Abby/actions) tab (workflow **build-release**, artifact **abby-installer-&lt;platform&gt;**).
 
 3. **Config / data**
    - Data dir: `%LOCALAPPDATA%\abby\Abby` (or `directories` crate default)
