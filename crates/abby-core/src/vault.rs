@@ -5,6 +5,7 @@
 //! is created and managed out-of-band (e.g., GPG, OpenSSL) and never stored in Abby.
 
 use crate::error::{CoreError, Result};
+use base64::Engine as _;
 use ed25519_dalek::VerifyingKey;
 use std::path::Path;
 
