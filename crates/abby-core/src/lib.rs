@@ -8,7 +8,7 @@ pub mod templates;
 pub mod vault;
 pub mod verifier;
 
-pub use config::{AppConfig, EmailConfig};
+pub use config::{AppConfig, EmailConfig, RoutingMode};
 pub use document::{CoreDocument, DocumentTier};
 pub use error::{CoreError, Result};
 pub use keyring::{

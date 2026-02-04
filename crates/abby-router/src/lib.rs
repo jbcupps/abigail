@@ -1,3 +1,3 @@
 pub mod router;
 
-pub use router::IdEgoRouter;
+pub use router::{IdEgoRouter, RoutingMode};

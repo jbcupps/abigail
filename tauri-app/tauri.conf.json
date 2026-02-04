@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "identifier": "com.abby",
   "build": {
-    "beforeDevCommand": "",
+    "beforeDevCommand": { "cwd": "src-ui", "script": "npm run dev" },
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "cd src-ui && npm run build",
     "frontendDist": "src-ui/dist"

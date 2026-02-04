@@ -1,5 +1,6 @@
 //! Local Phi-3 via Candle — STUBBED for MVP.
-//! Returns input prefixed with "[LOCAL]". Replace with real Candle inference later.
+//! Handles classification for router, but returns error for actual chat (no local LLM configured).
+//! Replace with real Candle inference later.
 
 use crate::cognitive::provider::{CompletionRequest, CompletionResponse, LlmProvider};
 use async_trait::async_trait;
@@ -21,25 +22,37 @@ impl Default for CandleProvider {
 #[async_trait]
 impl LlmProvider for CandleProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
-        let last = request
-            .messages
-            .last()
-            .map(|m| m.content.as_str())
-            .unwrap_or("");
         // Stub: for classification prompts, return COMPLEX when input suggests complex task (for router test).
-        let full = request.messages.iter().map(|m| m.content.as_str()).collect::<String>();
-        let content = if full.contains("Classify this user request") {
+        let full = request
+            .messages
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect::<String>();
+
+        if full.contains("Classify this user request") {
             // Extract the user request portion (after "User request:") to avoid matching
             // keywords in the classification instructions themselves.
-            let user_request = full.split("User request:").nth(1).unwrap_or("").to_lowercase();
-            if user_request.contains("essay") || user_request.contains("quantum") || user_request.contains("poem") || user_request.contains("analyze") || user_request.contains("explain in detail") {
+            let user_request = full
+                .split("User request:")
+                .nth(1)
+                .unwrap_or("")
+                .to_lowercase();
+            let content = if user_request.contains("essay")
+                || user_request.contains("quantum")
+                || user_request.contains("poem")
+                || user_request.contains("analyze")
+                || user_request.contains("explain in detail")
+            {
                 "COMPLEX".into()
             } else {
                 "ROUTINE".into()
-            }
-        } else {
-            format!("[LOCAL] {}", last)
-        };
-        Ok(CompletionResponse { content })
+            };
+            return Ok(CompletionResponse { content });
+        }
+
+        // For actual chat requests - return error instead of echo
+        Err(anyhow::anyhow!(
+            "No local LLM configured. Please install Ollama or set LOCAL_LLM_BASE_URL environment variable."
+        ))
     }
 }

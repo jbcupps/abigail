@@ -6,6 +6,9 @@ use abby_capabilities::cognitive::{
 };
 use std::sync::Arc;
 
+// Re-export RoutingMode from abby-core for convenience
+pub use abby_core::RoutingMode;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteDecision {
     Routine,
@@ -22,6 +25,7 @@ pub struct IdEgoRouter {
     id: Arc<dyn LlmProvider>,
     ego: Option<Arc<OpenAiProvider>>,
     local_http: Option<Arc<LocalHttpProvider>>,
+    mode: RoutingMode,
 }
 
 impl IdEgoRouter {
@@ -30,7 +34,12 @@ impl IdEgoRouter {
     /// # Arguments
     /// * `local_llm_base_url` - Base URL for local LLM server (e.g. "http://localhost:1234")
     /// * `openai_api_key` - OpenAI API key for Ego (cloud) routing
-    pub fn new(local_llm_base_url: Option<String>, openai_api_key: Option<String>) -> Self {
+    /// * `mode` - Routing mode (EgoPrimary or IdPrimary)
+    pub fn new(
+        local_llm_base_url: Option<String>,
+        openai_api_key: Option<String>,
+        mode: RoutingMode,
+    ) -> Self {
         let ego = openai_api_key
             .filter(|k| !k.is_empty())
             .map(|k| Arc::new(OpenAiProvider::new(Some(k))));
@@ -44,7 +53,12 @@ impl IdEgoRouter {
                 None => (Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>, None),
             };
 
-        Self { id, ego, local_http }
+        Self {
+            id,
+            ego,
+            local_http,
+            mode,
+        }
     }
 
     /// Perform a heartbeat check to verify the local LLM is reachable.
@@ -87,24 +101,54 @@ impl IdEgoRouter {
         Ok(decision)
     }
 
-    /// Route message: Id classifies; COMPLEX goes to Ego if configured, else Id.
+    /// Route message based on configured routing mode.
     pub async fn route(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
-        let last = messages
-            .last()
-            .map(|m| m.content.as_str())
-            .unwrap_or("");
+        match self.mode {
+            RoutingMode::IdPrimary => self.route_id_primary(messages).await,
+            RoutingMode::EgoPrimary => self.route_ego_primary(messages).await,
+        }
+    }
+
+    /// Id-primary routing: Id classifies; COMPLEX goes to Ego if configured, else Id.
+    async fn route_id_primary(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
+        let last = messages.last().map(|m| m.content.as_str()).unwrap_or("");
         let decision = self.classify(last).await?;
 
         let use_ego = matches!(decision, RouteDecision::Complex) && self.ego.is_some();
         if use_ego {
-            tracing::info!("Routing to Ego (cloud)");
+            tracing::info!("Routing to Ego (cloud) - complex request");
             let request = CompletionRequest { messages };
             self.ego.as_ref().unwrap().complete(&request).await
         } else {
-            tracing::info!("Routing to Id (local)");
+            tracing::info!("Routing to Id (local) - routine request");
             let request = CompletionRequest { messages };
             self.id.complete(&request).await
         }
+    }
+
+    /// Ego-primary routing: Try Ego first if configured, fall back to Id on failure.
+    async fn route_ego_primary(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
+        // Try Ego first if configured
+        if let Some(ego) = &self.ego {
+            match ego
+                .complete(&CompletionRequest {
+                    messages: messages.clone(),
+                })
+                .await
+            {
+                Ok(response) => {
+                    tracing::info!("Routed to Ego (cloud) - success");
+                    return Ok(response);
+                }
+                Err(e) => {
+                    tracing::warn!("Ego failed, falling back to Id: {}", e);
+                }
+            }
+        }
+
+        // Fallback to Id (local)
+        tracing::info!("Routing to Id (local fallback)");
+        self.id.complete(&CompletionRequest { messages }).await
     }
 
     /// Privacy-sensitive: always use Id (local), never Ego.
@@ -121,19 +165,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_routing_decision() {
-        // Use stub (no URL) for tests
-        let router = IdEgoRouter::new(None, None);
+        // Use stub (no URL) for tests with id_primary mode
+        let router = IdEgoRouter::new(None, None, RoutingMode::IdPrimary);
         let r = router.classify("What time is it?").await.unwrap();
         assert_eq!(r, RouteDecision::Routine);
 
-        let r = router.classify("Write an essay on quantum mechanics.").await.unwrap();
+        let r = router
+            .classify("Write an essay on quantum mechanics.")
+            .await
+            .unwrap();
         assert_eq!(r, RouteDecision::Complex);
     }
 
     #[tokio::test]
     async fn test_heartbeat_stub() {
-        let router = IdEgoRouter::new(None, None);
+        let router = IdEgoRouter::new(None, None, RoutingMode::default());
         assert!(!router.is_using_http_provider());
         router.heartbeat().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_default_routing_mode_is_ego_primary() {
+        assert_eq!(RoutingMode::default(), RoutingMode::EgoPrimary);
     }
 }

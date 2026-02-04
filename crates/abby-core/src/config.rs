@@ -1,6 +1,17 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RoutingMode {
+    /// Id (local) classifies, routes complex to Ego (legacy behavior)
+    IdPrimary,
+    /// Ego (cloud) is primary when available, Id is fallback (new default)
+    #[default]
+    EgoPrimary,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub data_dir: PathBuf,
@@ -27,6 +38,10 @@ pub struct AppConfig {
     /// If None, uses in-process Candle stub.
     #[serde(default)]
     pub local_llm_base_url: Option<String>,
+
+    /// Routing mode: ego_primary (default) or id_primary
+    #[serde(default)]
+    pub routing_mode: RoutingMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +71,7 @@ impl AppConfig {
             birth_complete: false,
             external_pubkey_path: None,
             local_llm_base_url: None,
+            routing_mode: RoutingMode::default(),
         }
     }
 

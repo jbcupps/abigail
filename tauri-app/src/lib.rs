@@ -30,13 +30,25 @@ struct AppState {
 }
 
 fn get_config() -> AppConfig {
-    let config = AppConfig::default_paths();
+    let mut config = AppConfig::default_paths();
     let path = config.config_path();
     if path.exists() {
-        AppConfig::load(&path).unwrap_or(config)
-    } else {
-        config
+        config = AppConfig::load(&path).unwrap_or(config);
     }
+
+    // Environment variable fallbacks
+    if config.local_llm_base_url.is_none() {
+        config.local_llm_base_url = std::env::var("LOCAL_LLM_BASE_URL")
+            .ok()
+            .filter(|s| !s.is_empty());
+    }
+    if config.openai_api_key.is_none() {
+        config.openai_api_key = std::env::var("OPENAI_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty());
+    }
+
+    config
 }
 
 #[tauri::command]
@@ -428,11 +440,62 @@ fn set_api_key(state: tauri::State<AppState>, key: String) -> Result<(), String>
     let new_router = IdEgoRouter::new(
         config.local_llm_base_url.clone(),
         config.openai_api_key.clone(),
+        config.routing_mode,
     );
     drop(config); // Release config lock before acquiring router lock
     let mut router = state.router.write().map_err(|e| e.to_string())?;
     *router = new_router;
     Ok(())
+}
+
+#[tauri::command]
+fn set_local_llm_url(state: tauri::State<AppState>, url: String) -> Result<(), String> {
+    let mut config = state.config.write().map_err(|e| e.to_string())?;
+    config.local_llm_base_url = if url.is_empty() { None } else { Some(url) };
+    config.save(&config.config_path()).map_err(|e| e.to_string())?;
+
+    // Rebuild the router so it picks up the new URL
+    let new_router = IdEgoRouter::new(
+        config.local_llm_base_url.clone(),
+        config.openai_api_key.clone(),
+        config.routing_mode,
+    );
+    drop(config); // Release config lock before acquiring router lock
+    let mut router = state.router.write().map_err(|e| e.to_string())?;
+    *router = new_router;
+    Ok(())
+}
+
+/// Status of the Id/Ego router for debugging and UI display.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouterStatus {
+    /// Id provider type: "candle_stub", "local_http", or "ollama"
+    pub id_provider: String,
+    /// Local LLM URL if configured
+    pub id_url: Option<String>,
+    /// Whether Ego (OpenAI) is configured
+    pub ego_configured: bool,
+    /// Current routing mode: "ego_primary" or "id_primary"
+    pub routing_mode: String,
+}
+
+#[tauri::command]
+fn get_router_status(state: tauri::State<AppState>) -> Result<RouterStatus, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let router = state.router.read().map_err(|e| e.to_string())?;
+
+    let id_provider = if router.is_using_http_provider() {
+        "local_http".to_string()
+    } else {
+        "candle_stub".to_string()
+    };
+
+    Ok(RouterStatus {
+        id_provider,
+        id_url: config.local_llm_base_url.clone(),
+        ego_configured: config.openai_api_key.is_some(),
+        routing_mode: format!("{:?}", config.routing_mode).to_lowercase(),
+    })
 }
 
 #[tauri::command]
@@ -528,6 +591,7 @@ pub fn run() {
     let router = IdEgoRouter::new(
         config.local_llm_base_url.clone(),
         config.openai_api_key.clone(),
+        config.routing_mode,
     );
     let registry = Arc::new(SkillRegistry::new());
     let event_bus = Arc::new(EventBus::new(256));
@@ -583,6 +647,8 @@ pub fn run() {
             configure_email,
             download_model,
             set_api_key,
+            set_local_llm_url,
+            get_router_status,
             complete_birth,
             skip_to_life_for_mvp,
             list_skills,
