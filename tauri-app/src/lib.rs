@@ -156,21 +156,36 @@ fn generate_and_sign_constitutional(state: tauri::State<AppState>) -> Result<Key
     })
 }
 
-/// Check if the external keypair has already been generated.
-/// Returns true if pubkey and all signatures exist.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum IdentityStatus {
+    Clean,    // No pubkey, no sigs (First Run)
+    Complete, // Pubkey exists, all sigs exist
+    Broken,   // Pubkey exists, but sigs missing
+}
+
+/// Check the identity status of the application.
 #[tauri::command]
-fn has_external_keypair(state: tauri::State<AppState>) -> Result<bool, String> {
+fn check_identity_status(state: tauri::State<AppState>) -> Result<IdentityStatus, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let data_dir = config.data_dir.clone();
     let docs_dir = config.docs_dir.clone();
     
     let pubkey_path = data_dir.join("external_pubkey.bin");
-    let sig_exists = docs_dir.join("soul.md.sig").exists()
+    let pubkey_exists = pubkey_path.exists();
+
+    let sigs_exist = docs_dir.join("soul.md.sig").exists()
         && docs_dir.join("ethics.md.sig").exists()
-        && docs_dir.join("instincts.md.sig").exists()
-        && pubkey_path.exists();
+        && docs_dir.join("instincts.md.sig").exists();
     
-    Ok(sig_exists)
+    if !pubkey_exists {
+        return Ok(IdentityStatus::Clean);
+    }
+
+    if sigs_exist {
+        Ok(IdentityStatus::Complete)
+    } else {
+        Ok(IdentityStatus::Broken)
+    }
 }
 
 /// Result of startup checks (heartbeat + signature verification).
@@ -468,7 +483,8 @@ pub fn run() {
             get_docs_path,
             init_soul,
             generate_and_sign_constitutional,
-            has_external_keypair,
+            check_identity_status,
+            repair_identity,
             run_startup_checks,
             get_birth_stage,
             get_birth_message,

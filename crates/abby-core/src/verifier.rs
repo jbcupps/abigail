@@ -166,4 +166,51 @@ mod tests {
 
         let _ = fs::remove_dir_all(std::env::temp_dir().join("abby_core_tamper_test"));
     }
+
+    #[test]
+    fn test_repair_cycle() {
+        use crate::keyring::{generate_external_keypair, parse_private_key, sign_constitutional_documents};
+        
+        let temp = std::env::temp_dir().join("abby_core_repair_test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).unwrap();
+        
+        let docs_dir = temp.join("docs");
+        let data_dir = temp.join("data");
+        fs::create_dir_all(&docs_dir).unwrap();
+        fs::create_dir_all(&data_dir).unwrap();
+
+        // 1. Create dummy docs
+        for doc in ["soul.md", "ethics.md", "instincts.md"] {
+            fs::write(docs_dir.join(doc), "content").unwrap();
+        }
+
+        // 2. Generate keys (First Run)
+        let key_result = generate_external_keypair(&data_dir).unwrap();
+        let signing_key = parse_private_key(&key_result.private_key_base64).unwrap();
+        
+        // 3. Sign docs
+        sign_constitutional_documents(&signing_key, &docs_dir).unwrap();
+
+        // 4. Verify Success
+        let vault = crate::vault::ReadOnlyFileVault::new(&key_result.public_key_path);
+        let mut verifier = Verifier::from_vault(&vault).unwrap();
+        verifier.verify_soul(&docs_dir).expect("Verification should pass");
+
+        // 5. Delete a sig (Corruption)
+        fs::remove_file(docs_dir.join("soul.md.sig")).unwrap();
+        
+        // 6. Verify Failure
+        let mut verifier2 = Verifier::from_vault(&vault).unwrap();
+        assert!(verifier2.verify_soul(&docs_dir).is_err(), "Verification should fail");
+
+        // 7. Repair (Re-sign)
+        sign_constitutional_documents(&signing_key, &docs_dir).unwrap();
+
+        // 8. Verify Success again
+        let mut verifier3 = Verifier::from_vault(&vault).unwrap();
+        verifier3.verify_soul(&docs_dir).expect("Verification should pass after repair");
+
+        let _ = fs::remove_dir_all(&temp);
+    }
 }

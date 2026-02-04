@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 
-type Stage = "None" | "Starting" | "KeyPresentation" | "Verified" | "Life";
+type Stage = "None" | "Starting" | "KeyPresentation" | "Verified" | "Life" | "Repair";
+type IdentityStatus = "Clean" | "Complete" | "Broken";
 
 interface BootSequenceProps {
   onComplete: () => void;
@@ -19,6 +20,11 @@ interface KeypairGenerationResult {
   newly_generated: boolean;
 }
 
+interface RepairIdentityParams {
+  private_key: string | null;
+  reset: boolean;
+}
+
 export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [stage, setStage] = useState<Stage>("None");
   const [message, setMessage] = useState("");
@@ -27,6 +33,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [publicKeyPath, setPublicKeyPath] = useState("");
   const [keySaved, setKeySaved] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [repairKey, setRepairKey] = useState("");
 
   const handleStart = async () => {
     setError("");
@@ -36,12 +43,12 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     try {
       // 1. Initialize soul (copy templates, create internal keyring)
       await invoke("init_soul");
-      setMessage("Checking for existing keypair...");
+      setMessage("Checking identity status...");
 
-      // 2. Check if external keypair already exists
-      const hasKeypair = await invoke<boolean>("has_external_keypair");
+      // 2. Check identity status
+      const status = await invoke<IdentityStatus>("check_identity_status");
       
-      if (!hasKeypair) {
+      if (status === "Clean") {
         // First run: generate keypair and sign documents
         setMessage("Generating signing keypair...");
         const keypairResult = await invoke<KeypairGenerationResult>("generate_and_sign_constitutional");
@@ -51,13 +58,57 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         setPublicKeyPath(keypairResult.public_key_path);
         setStage("KeyPresentation");
         return; // Wait for user to acknowledge
+      } else if (status === "Broken") {
+        // Identity is broken (pubkey exists, but sigs missing/invalid)
+        setStage("Repair");
+        setError("Identity verification failed. Signatures are missing or invalid.");
+        return;
       }
       
-      // Keypair exists, continue with startup checks
+      // Identity is Complete, continue with startup checks
       await continueAfterKeyPresentation();
     } catch (e) {
       setError(String(e));
       setStage("None");
+    }
+  };
+
+  const handleRepair = async () => {
+    setError("");
+    setMessage("Attempting repair...");
+    
+    try {
+      await invoke("repair_identity", {
+        params: {
+          private_key: repairKey.trim(),
+          reset: false,
+        }
+      });
+      setRepairKey("");
+      handleStart(); // Restart sequence
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const handleReset = async () => {
+    if (!confirm("WARNING: This will delete your identity and reset Abby to a fresh state. You will lose your current trust relationship. Are you sure?")) {
+      return;
+    }
+
+    setError("");
+    setMessage("Resetting identity...");
+    
+    try {
+      await invoke("repair_identity", {
+        params: {
+          private_key: null,
+          reset: true,
+        }
+      });
+      handleStart(); // Restart sequence (should trigger "Clean" state)
+    } catch (e) {
+      setError(String(e));
     }
   };
 
@@ -76,8 +127,9 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
       }
 
       if (!result.verification_ok && result.error) {
+        // If verification fails here (e.g. tampered content), we might want to offer repair too
         setError(result.error);
-        setStage("None");
+        setStage("Repair"); 
         return;
       }
 
@@ -88,9 +140,8 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
       // Start birth and skip to Life for MVP
       await invoke("start_birth");
       
-      // Get docs path and run verify_crypto to advance past Darkness
-      const docsPath = await invoke<string>("get_docs_path").catch(() => ".");
-      await invoke("verify_crypto", { docsPath });
+      // Run verify_crypto to advance past Darkness (no args needed now)
+      await invoke("verify_crypto");
       
       // Skip email and model download for MVP
       await invoke("skip_to_life_for_mvp");
@@ -234,6 +285,60 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
           >
             Continue
           </button>
+        </div>
+      )}
+
+      {stage === "Repair" && (
+        <div className="max-w-2xl">
+          <div className="border border-red-500 bg-red-900/20 p-4 rounded mb-6">
+            <h2 className="text-red-500 text-lg font-bold mb-2">
+              IDENTITY VERIFICATION FAILED
+            </h2>
+            <p className="text-red-400 text-sm mb-4">
+              {error}
+            </p>
+            <p className="text-gray-400 text-sm">
+              Abby's constitutional documents cannot be verified. This usually happens if files were corrupted or tampered with.
+            </p>
+          </div>
+
+          <div className="mb-8">
+            <h3 className="text-green-500 font-bold mb-2">Option 1: Recover Identity</h3>
+            <p className="text-sm text-gray-400 mb-2">
+              If you have your <strong>Private Key</strong> (saved from first run), enter it below to re-sign the documents.
+            </p>
+            <textarea
+              value={repairKey}
+              onChange={(e) => setRepairKey(e.target.value)}
+              placeholder="Paste your private key here..."
+              className="w-full bg-gray-900 border border-green-700 rounded p-3 text-green-300 font-mono text-sm resize-none mb-2"
+              rows={3}
+            />
+            <button
+              onClick={handleRepair}
+              disabled={!repairKey.trim()}
+              className={`px-4 py-2 rounded font-bold text-sm ${
+                repairKey.trim()
+                  ? "bg-green-900/50 border border-green-500 text-green-500 hover:bg-green-500/20"
+                  : "bg-gray-900 border border-gray-700 text-gray-600 cursor-not-allowed"
+              }`}
+            >
+              Recover Identity
+            </button>
+          </div>
+
+          <div className="border-t border-gray-800 pt-6">
+            <h3 className="text-red-400 font-bold mb-2">Option 2: Hard Reset</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              If you lost your key, you must reset Abby. <strong>This destroys the current trust relationship.</strong> You will be treated as a new mentor.
+            </p>
+            <button
+              onClick={handleReset}
+              className="px-4 py-2 rounded font-bold text-sm border border-red-700 text-red-500 hover:bg-red-900/20"
+            >
+              Reset Identity (Destructive)
+            </button>
+          </div>
         </div>
       )}
 
