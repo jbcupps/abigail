@@ -17,6 +17,7 @@ pub enum RouteDecision {
 /// Id can be either:
 /// - A local HTTP provider (LiteLLM, Ollama, etc.) when `local_llm_base_url` is set
 /// - An in-process Candle stub when no URL is configured
+#[derive(Clone)]
 pub struct IdEgoRouter {
     id: Arc<dyn LlmProvider>,
     ego: Option<Arc<OpenAiProvider>>,

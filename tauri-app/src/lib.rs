@@ -22,7 +22,7 @@ use tauri::Emitter;
 struct AppState {
     config: RwLock<AppConfig>,
     birth: RwLock<Option<BirthOrchestrator>>,
-    router: IdEgoRouter,
+    router: RwLock<IdEgoRouter>,
     registry: Arc<SkillRegistry>,
     executor: Arc<SkillExecutor>,
     #[allow(dead_code)] // used for skill-event subscription; keep for future UI wiring
@@ -211,8 +211,9 @@ pub struct KeypairGenerationResult {
 /// Returns status for each check so the UI can show appropriate messages.
 #[tauri::command]
 async fn run_startup_checks(state: tauri::State<'_, AppState>) -> Result<StartupCheckResult, String> {
-    // 1. LLM heartbeat
-    let heartbeat_result = state.router.heartbeat().await;
+    // 1. LLM heartbeat — clone router before async boundary (RwLock is not Send)
+    let router = state.router.read().map_err(|e| e.to_string())?.clone();
+    let heartbeat_result = router.heartbeat().await;
     let heartbeat_ok = heartbeat_result.is_ok();
     let heartbeat_error = heartbeat_result.err().map(|e| e.to_string());
 
@@ -422,6 +423,15 @@ fn set_api_key(state: tauri::State<AppState>, key: String) -> Result<(), String>
     let mut config = state.config.write().map_err(|e| e.to_string())?;
     config.openai_api_key = Some(key);
     config.save(&config.config_path()).map_err(|e| e.to_string())?;
+
+    // Rebuild the router so it picks up the new API key
+    let new_router = IdEgoRouter::new(
+        config.local_llm_base_url.clone(),
+        config.openai_api_key.clone(),
+    );
+    drop(config); // Release config lock before acquiring router lock
+    let mut router = state.router.write().map_err(|e| e.to_string())?;
+    *router = new_router;
     Ok(())
 }
 
@@ -481,17 +491,19 @@ async fn execute_tool(
 
 #[tauri::command]
 async fn chat(state: tauri::State<'_, AppState>, message: String) -> Result<String, String> {
-    // Get store and drop config lock before await
-    let store = {
+    // Get store and clone router before await (RwLock is not Send)
+    let (store, router) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
-        MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?
+        let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
+        drop(config);
+        let router = state.router.read().map_err(|e| e.to_string())?.clone();
+        (store, router)
     };
     let messages = vec![abby_capabilities::cognitive::Message {
         role: "user".to_string(),
         content: message.clone(),
     }];
-    let response = state
-        .router
+    let response = router
         .route(messages.clone())
         .await
         .map_err(|e| e.to_string())?;
@@ -524,7 +536,7 @@ pub fn run() {
     let state = AppState {
         config: RwLock::new(config),
         birth: RwLock::new(None),
-        router,
+        router: RwLock::new(router),
         registry,
         executor,
         event_bus: event_bus.clone(),
