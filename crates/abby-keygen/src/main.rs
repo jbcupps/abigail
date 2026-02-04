@@ -1,11 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use abby_core::{
-    generate_external_keypair, sign_constitutional_documents, AppConfig, Keyring,
+    generate_external_keypair, parse_private_key, sign_constitutional_documents, AppConfig, Keyring,
     templates::CONSTITUTIONAL_DOCS,
 };
-use base64::Engine as _;
-use ed25519_dalek::SigningKey;
 use eframe::egui;
 use std::path::PathBuf;
 
@@ -104,16 +102,8 @@ fn run_setup(data_dir: &PathBuf, docs_dir: &PathBuf) -> Result<SetupResult, Stri
         .map_err(|e| format!("Failed to generate external keypair: {}", e))?;
 
     // 5. Parse private key for signing
-    let private_key_bytes = base64::engine::general_purpose::STANDARD
-        .decode(&keypair_result.private_key_base64)
-        .map_err(|e| format!("Failed to decode private key: {}", e))?;
-
-    let key_bytes: [u8; 32] = private_key_bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| "Invalid private key length".to_string())?;
-
-    let signing_key = SigningKey::from_bytes(&key_bytes);
+    let signing_key = parse_private_key(&keypair_result.private_key_base64)
+        .map_err(|e| format!("Failed to parse private key: {}", e))?;
 
     // 6. Sign constitutional documents
     sign_constitutional_documents(&signing_key, docs_dir)
@@ -215,8 +205,8 @@ impl eframe::App for KeygenApp {
             // Security warning banner
             egui::Frame::none()
                 .fill(egui::Color32::from_rgb(80, 60, 0))
-                .inner_margin(egui::Margin::same(10))
-                .corner_radius(4.0)
+                .inner_margin(egui::Margin::same(10.0))
+                .rounding(4.0)
                 .show(ui, |ui| {
                     ui.colored_label(
                         egui::Color32::YELLOW,
@@ -282,8 +272,8 @@ impl eframe::App for KeygenApp {
             // Security warnings
             egui::Frame::none()
                 .fill(egui::Color32::from_rgb(60, 20, 20))
-                .inner_margin(egui::Margin::same(10))
-                .corner_radius(4.0)
+                .inner_margin(egui::Margin::same(10.0))
+                .rounding(4.0)
                 .show(ui, |ui| {
                     ui.colored_label(
                         egui::Color32::from_rgb(255, 100, 100),
