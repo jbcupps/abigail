@@ -74,7 +74,7 @@ impl LocalHttpProvider {
     /// Perform a heartbeat check to verify the LLM server is reachable.
     /// Sends a minimal completion request and checks for a valid response.
     pub async fn heartbeat(&self) -> anyhow::Result<()> {
-        let request = CompletionRequest {
+        let _request = CompletionRequest {
             messages: vec![Message {
                 role: "user".into(),
                 content: "ping".into(),

@@ -5,7 +5,7 @@ mod templates;
 use abby_birth::BirthOrchestrator;
 use abby_core::{
     generate_external_keypair, sign_constitutional_documents, AppConfig,
-    Keyring, ReadOnlyFileVault, Verifier,
+    CoreError, ExternalVault, Keyring, ReadOnlyFileVault, Verifier,
 };
 use abby_memory::{Memory, MemoryStore};
 use abby_router::IdEgoRouter;
@@ -356,7 +356,7 @@ fn repair_identity(state: tauri::State<AppState>, params: RepairIdentityParams) 
         }
         
         let vault = ReadOnlyFileVault::new(&pubkey_path);
-        let stored_pubkey = vault.read_public_key().map_err(|e| e.to_string())?;
+        let stored_pubkey = vault.read_public_key().map_err(|e: CoreError| e.to_string())?;
         
         if verifying_key != stored_pubkey {
             return Err("Provided private key does not match the stored public key.".to_string());
