@@ -17,7 +17,7 @@ use abby_skills::skill::{
     CostEstimate, ExecutionContext, HealthStatus, Skill, SkillConfig, SkillHealth, SkillError,
     SkillResult, ToolDescriptor, ToolOutput, ToolParams,
 };
-use abby_senses::{ImapClient, SmtpClient};
+use abby_skills::transport::{ImapClient, SmtpClient};
 
 use crate::transport::ProtonMailTransport;
 

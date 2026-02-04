@@ -11,7 +11,7 @@ abby-core = { path = "../crates/abby-core" }
 base64 = "0.21"
 ed25519-dalek.workspace = true
 abby-memory = { path = "../crates/abby-memory" }
-abby-llm = { path = "../crates/abby-llm" }
+abby-capabilities = { path = "../crates/abby-capabilities" }
 abby-router = { path = "../crates/abby-router" }
 abby-birth = { path = "../crates/abby-birth" }
 abby-skills = { path = "../crates/abby-skills" }

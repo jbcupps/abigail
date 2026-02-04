@@ -1,6 +1,6 @@
 //! Thin wrapper over abby-senses ImapClient/SmtpClient for email operations.
 
-use abby_senses::{ImapClient, SmtpClient};
+use abby_skills::transport::{ImapClient, SmtpClient};
 use abby_skills::capability::email::{
     Email, EmailAddress, FetchOptions, OutgoingEmail, SendResult,
 };

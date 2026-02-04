@@ -4,7 +4,7 @@ use async_imap::Session;
 use async_native_tls::TlsConnector;
 use futures_util::StreamExt;
 use tokio::net::TcpStream;
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+use tokio_util::compat::TokioAsyncReadCompatExt;
 
 #[derive(Debug, Clone)]
 pub struct EmailSummary {
@@ -69,7 +69,7 @@ impl ImapClient {
                 let msg = msg?;
                 let header = msg.header().unwrap_or_default();
                 let (from, subject, date) =
-                    if let Ok(parsed) = mail_parser::Message::try_from(header.as_ref()) {
+                    if let Some(parsed) = mail_parser::MessageParser::default().parse(header) {
                         let from = parsed
                             .return_address()
                             .map(|s| s.to_string())

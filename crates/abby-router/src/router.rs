@@ -1,6 +1,6 @@
 //! Id/Ego router: classifies with Id (local), routes COMPLEX to Ego (cloud) when configured.
 
-use abby_llm::{
+use abby_capabilities::cognitive::{
     stub_heartbeat, CandleProvider, CompletionRequest, CompletionResponse, LocalHttpProvider,
     LlmProvider, Message, OpenAiProvider,
 };

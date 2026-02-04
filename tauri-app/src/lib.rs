@@ -406,7 +406,7 @@ async fn download_model(
         config.models_dir.clone()
     };
     std::fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
-    let downloader = abby_llm::ModelDownloader::new();
+    let downloader = abby_capabilities::cognitive::ModelDownloader::new();
     let dest = downloader
         .download_to(&models_dir, |written, total_bytes| {
             let payload = serde_json::json!({ "written": written, "total": total_bytes });
@@ -486,7 +486,7 @@ async fn chat(state: tauri::State<'_, AppState>, message: String) -> Result<Stri
         let config = state.config.read().map_err(|e| e.to_string())?;
         MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?
     };
-    let messages = vec![abby_llm::Message {
+    let messages = vec![abby_capabilities::cognitive::Message {
         role: "user".to_string(),
         content: message.clone(),
     }];

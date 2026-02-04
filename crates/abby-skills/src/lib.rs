@@ -1,6 +1,6 @@
-//! Abby Skills — plugin and capability abstraction layer.
+//! Abby Skills — plugin and tool execution layer.
 
-pub mod capability;
+pub mod protocol;
 pub mod channel;
 pub mod executor;
 pub mod manifest;
@@ -8,8 +8,12 @@ pub mod prelude;
 pub mod registry;
 pub mod sandbox;
 pub mod skill;
+pub mod transport;
 
-pub use capability::*;
+/// Backward-compatible alias: `capability` now lives in `protocol`.
+pub use protocol as capability;
+
+pub use protocol::*;
 pub use channel::*;
 pub use executor::SkillExecutor;
 pub use manifest::*;
@@ -22,7 +26,8 @@ pub use skill::*;
 mod tests {
     use super::*;
     use crate::manifest::SkillId;
-    use crate::skill::{SkillConfig, SkillHealth, SkillManifest, ToolDescriptor, ToolOutput, ToolParams};
+    use crate::manifest::SkillManifest;
+    use crate::skill::{SkillConfig, SkillHealth, ToolDescriptor, ToolOutput, ToolParams};
     use std::collections::HashMap;
     use std::sync::Arc;
 

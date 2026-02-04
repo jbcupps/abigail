@@ -1,4 +1,4 @@
-use crate::provider::{CompletionRequest, CompletionResponse, LlmProvider};
+use crate::cognitive::provider::{CompletionRequest, CompletionResponse, LlmProvider};
 use async_openai::config::OpenAIConfig;
 use async_openai::types::{
     ChatCompletionRequestMessage, ChatCompletionRequestUserMessage, CreateChatCompletionRequest,
@@ -54,7 +54,7 @@ impl LlmProvider for OpenAiProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::{CompletionRequest, Message};
+    use crate::cognitive::provider::{CompletionRequest, Message};
 
     #[tokio::test]
     async fn test_openai_provider() {

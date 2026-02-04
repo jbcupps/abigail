@@ -2,8 +2,6 @@
 
 use async_trait::async_trait;
 
-use crate::SkillResult;
-
 #[derive(Debug, Clone)]
 pub struct CameraInfo;
 
@@ -27,17 +25,17 @@ pub trait VideoInputCapability: Send + Sync {
     fn cameras(&self) -> Vec<CameraInfo> {
         vec![]
     }
-    async fn start(&mut self, _camera_id: Option<&str>) -> SkillResult<()> {
-        Err(crate::SkillError::ToolFailed("stub".into()))
+    async fn start(&mut self, _camera_id: Option<&str>) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!("stub: not implemented"))
     }
-    async fn capture_frame(&self) -> SkillResult<VideoFrame> {
-        Err(crate::SkillError::ToolFailed("stub".into()))
+    async fn capture_frame(&self) -> anyhow::Result<VideoFrame> {
+        Err(anyhow::anyhow!("stub: not implemented"))
     }
 }
 
 #[async_trait]
 pub trait VisionCapability: Send + Sync {
-    async fn analyze(&self, _image: ImageData, _prompt: &str) -> SkillResult<VisionResult> {
-        Err(crate::SkillError::ToolFailed("stub".into()))
+    async fn analyze(&self, _image: ImageData, _prompt: &str) -> anyhow::Result<VisionResult> {
+        Err(anyhow::anyhow!("stub: not implemented"))
     }
 }

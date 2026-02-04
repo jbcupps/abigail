@@ -6,7 +6,7 @@ edition.workspace = true
 [dependencies]
 abby-core = { path = "../abby-core" }
 abby-memory = { path = "../abby-memory" }
-abby-llm = { path = "../abby-llm" }
+abby-capabilities = { path = "../abby-capabilities" }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

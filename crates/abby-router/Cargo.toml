@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 abby-core = { path = "../abby-core" }
-abby-llm = { path = "../abby-llm" }
+abby-capabilities = { path = "../abby-capabilities" }
 async-trait.workspace = true
 tokio.workspace = true
 thiserror.workspace = true

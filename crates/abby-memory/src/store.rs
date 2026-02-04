@@ -214,4 +214,129 @@ mod tests {
             .unwrap();
         assert!(store.has_birth().unwrap());
     }
+
+    #[test]
+    fn test_double_birth_rejected() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        store
+            .record_birth(&Memory::crystallized("I was born".into()))
+            .unwrap();
+        let result = store.record_birth(&Memory::crystallized("Born again".into()));
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            StoreError::BirthAlreadyRecorded => {}
+            e => panic!("Expected BirthAlreadyRecorded, got: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_insert_and_retrieve_ephemeral_memory() {
+        let store = MemoryStore::open_in_memory().unwrap();
+
+        let mem = Memory::ephemeral("user: Hello | assistant: Hi there".into());
+        store.insert_memory(&mem).unwrap();
+
+        let recent = store.recent_memories(10).unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].content, "user: Hello | assistant: Hi there");
+        assert_eq!(recent[0].weight, MemoryWeight::Ephemeral);
+    }
+
+    #[test]
+    fn test_insert_multiple_weights() {
+        let store = MemoryStore::open_in_memory().unwrap();
+
+        store.insert_memory(&Memory::ephemeral("ephemeral msg".into())).unwrap();
+        store.insert_memory(&Memory::distilled("distilled msg".into())).unwrap();
+        store.insert_memory(&Memory::crystallized("crystallized msg".into())).unwrap();
+
+        let recent = store.recent_memories(10).unwrap();
+        assert_eq!(recent.len(), 3);
+
+        // Verify all weight tiers are stored and retrieved correctly
+        let weights: Vec<&MemoryWeight> = recent.iter().map(|m| &m.weight).collect();
+        assert!(weights.contains(&&MemoryWeight::Ephemeral));
+        assert!(weights.contains(&&MemoryWeight::Distilled));
+        assert!(weights.contains(&&MemoryWeight::Crystallized));
+    }
+
+    #[test]
+    fn test_recent_memories_ordering() {
+        let store = MemoryStore::open_in_memory().unwrap();
+
+        // Insert in order — recent_memories should return most recent first
+        store.insert_memory(&Memory::ephemeral("first".into())).unwrap();
+        // Small delay to ensure different timestamps
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        store.insert_memory(&Memory::ephemeral("second".into())).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        store.insert_memory(&Memory::ephemeral("third".into())).unwrap();
+
+        let recent = store.recent_memories(10).unwrap();
+        assert_eq!(recent.len(), 3);
+        assert_eq!(recent[0].content, "third");
+        assert_eq!(recent[1].content, "second");
+        assert_eq!(recent[2].content, "first");
+    }
+
+    #[test]
+    fn test_recent_memories_limit() {
+        let store = MemoryStore::open_in_memory().unwrap();
+
+        for i in 0..10 {
+            store.insert_memory(&Memory::ephemeral(format!("msg {}", i))).unwrap();
+        }
+
+        let recent = store.recent_memories(3).unwrap();
+        assert_eq!(recent.len(), 3);
+    }
+
+    #[test]
+    fn test_recent_memories_empty_store() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        let recent = store.recent_memories(10).unwrap();
+        assert!(recent.is_empty());
+    }
+
+    #[test]
+    fn test_memory_ids_are_unique() {
+        let store = MemoryStore::open_in_memory().unwrap();
+
+        let m1 = Memory::ephemeral("msg1".into());
+        let m2 = Memory::ephemeral("msg2".into());
+        assert_ne!(m1.id, m2.id);
+
+        store.insert_memory(&m1).unwrap();
+        store.insert_memory(&m2).unwrap();
+
+        let recent = store.recent_memories(10).unwrap();
+        assert_eq!(recent.len(), 2);
+    }
+
+    #[test]
+    fn test_file_backed_store() {
+        let tmp = std::env::temp_dir().join("abby_memory_file_test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let db_path = tmp.join("test.db");
+
+        // Open, insert, close
+        {
+            let store = MemoryStore::open(&db_path).unwrap();
+            store.insert_memory(&Memory::ephemeral("persisted msg".into())).unwrap();
+            store.record_birth(&Memory::crystallized("born".into())).unwrap();
+        }
+
+        // Reopen and verify persistence
+        {
+            let store = MemoryStore::open(&db_path).unwrap();
+            assert!(store.has_birth().unwrap());
+            let recent = store.recent_memories(10).unwrap();
+            assert_eq!(recent.len(), 1);
+            assert_eq!(recent[0].content, "persisted msg");
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }

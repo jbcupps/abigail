@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "crates/abby-core",
     "crates/abby-memory",
-    "crates/abby-llm",
+    "crates/abby-capabilities",
     "crates/abby-router",
     "crates/abby-birth",
     "crates/abby-skills",

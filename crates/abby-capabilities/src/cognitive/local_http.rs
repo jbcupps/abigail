@@ -3,7 +3,7 @@
 //! Connects to a local LLM server (LiteLLM, Ollama, LM Studio, etc.) via
 //! the OpenAI-compatible chat completions API.
 
-use crate::provider::{CompletionRequest, CompletionResponse, LlmProvider, Message};
+use crate::cognitive::provider::{CompletionRequest, CompletionResponse, LlmProvider, Message};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;

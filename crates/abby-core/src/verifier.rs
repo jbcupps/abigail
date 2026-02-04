@@ -129,7 +129,7 @@ pub fn write_sig_file(docs_path: &Path, doc_name: &str, doc: &CoreDocument) -> R
 mod tests {
     use super::*;
     use crate::document::DocumentTier;
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    use base64::engine::general_purpose::STANDARD as BASE64;
     use ed25519_dalek::{Signer, SigningKey};
     use rand::rngs::OsRng;
     use std::fs;
@@ -210,6 +210,112 @@ mod tests {
         // 8. Verify Success again
         let mut verifier3 = Verifier::from_vault(&vault).unwrap();
         verifier3.verify_soul(&docs_dir).expect("Verification should pass after repair");
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    /// End-to-end identity lifecycle: keygen → sign → verify → tamper → detect → repair → verify.
+    /// This simulates the full boot-to-verified path without GUI.
+    #[test]
+    fn test_full_identity_lifecycle() {
+        use crate::keyring::{generate_external_keypair, parse_private_key, sign_constitutional_documents};
+
+        let temp = std::env::temp_dir().join("abby_core_lifecycle_test");
+        let _ = fs::remove_dir_all(&temp);
+
+        let data_dir = temp.join("data");
+        let docs_dir = temp.join("docs");
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::create_dir_all(&docs_dir).unwrap();
+
+        // 1. Create realistic constitutional docs
+        fs::write(docs_dir.join("soul.md"), "I am Abby. My full name is Abigail Normal.").unwrap();
+        fs::write(docs_dir.join("ethics.md"), "Triangle Ethic: Deontological, Areteological, Teleological.").unwrap();
+        fs::write(docs_dir.join("instincts.md"), "Privacy Prime: sanitize PII before cloud.").unwrap();
+
+        // 2. Generate keypair (simulates first-run key generation)
+        let key_result = generate_external_keypair(&data_dir).unwrap();
+        assert!(data_dir.join("external_pubkey.bin").exists());
+        assert!(!key_result.private_key_base64.is_empty());
+
+        // 3. Parse private key back (simulates user providing saved key)
+        let signing_key = parse_private_key(&key_result.private_key_base64).unwrap();
+
+        // 4. Sign all constitutional documents
+        sign_constitutional_documents(&signing_key, &docs_dir).unwrap();
+        assert!(docs_dir.join("soul.md.sig").exists());
+        assert!(docs_dir.join("ethics.md.sig").exists());
+        assert!(docs_dir.join("instincts.md.sig").exists());
+
+        // 5. Verify all signatures pass
+        let vault = crate::vault::ReadOnlyFileVault::new(&key_result.public_key_path);
+        let mut verifier = Verifier::from_vault(&vault).unwrap();
+        verifier.verify_soul(&docs_dir).expect("Initial verification should pass");
+
+        // 6. Verify document content is accessible
+        assert!(verifier.soul_content().unwrap().contains("Abigail Normal"));
+        assert!(verifier.ethics_content().unwrap().contains("Triangle Ethic"));
+
+        // 7. Tamper with a document
+        fs::write(docs_dir.join("ethics.md"), "TAMPERED: No ethics apply.").unwrap();
+        let mut verifier2 = Verifier::from_vault(&vault).unwrap();
+        let tamper_result = verifier2.verify_soul(&docs_dir);
+        assert!(tamper_result.is_err(), "Tampered document should fail verification");
+
+        // 8. Restore original content
+        fs::write(docs_dir.join("ethics.md"), "Triangle Ethic: Deontological, Areteological, Teleological.").unwrap();
+
+        // 9. Re-sign (repair) all documents
+        sign_constitutional_documents(&signing_key, &docs_dir).unwrap();
+
+        // 10. Verify passes again after repair
+        let mut verifier3 = Verifier::from_vault(&vault).unwrap();
+        verifier3.verify_soul(&docs_dir).expect("Verification should pass after repair");
+
+        // 11. Test wrong private key is rejected
+        let wrong_key = SigningKey::generate(&mut OsRng);
+        sign_constitutional_documents(&wrong_key, &docs_dir).unwrap();
+        let mut verifier4 = Verifier::from_vault(&vault).unwrap();
+        let wrong_key_result = verifier4.verify_soul(&docs_dir);
+        assert!(wrong_key_result.is_err(), "Wrong key signatures should fail verification");
+
+        // 12. Test missing document detection
+        fs::remove_file(docs_dir.join("instincts.md")).unwrap();
+        let mut verifier5 = Verifier::from_vault(&vault).unwrap();
+        let missing_result = verifier5.verify_soul(&docs_dir);
+        assert!(missing_result.is_err(), "Missing document should fail verification");
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    /// Test cross-document tampering: tamper one doc while others remain valid.
+    #[test]
+    fn test_partial_tampering_detected() {
+        use crate::keyring::{generate_external_keypair, parse_private_key, sign_constitutional_documents};
+
+        let temp = std::env::temp_dir().join("abby_core_partial_tamper");
+        let _ = fs::remove_dir_all(&temp);
+
+        let data_dir = temp.join("data");
+        let docs_dir = temp.join("docs");
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::create_dir_all(&docs_dir).unwrap();
+
+        for doc in ["soul.md", "ethics.md", "instincts.md"] {
+            fs::write(docs_dir.join(doc), format!("{} content", doc)).unwrap();
+        }
+
+        let key_result = generate_external_keypair(&data_dir).unwrap();
+        let signing_key = parse_private_key(&key_result.private_key_base64).unwrap();
+        sign_constitutional_documents(&signing_key, &docs_dir).unwrap();
+
+        // Tamper with only instincts.md — verification should still fail
+        fs::write(docs_dir.join("instincts.md"), "TAMPERED instincts").unwrap();
+
+        let vault = crate::vault::ReadOnlyFileVault::new(&key_result.public_key_path);
+        let mut verifier = Verifier::from_vault(&vault).unwrap();
+        let result = verifier.verify_soul(&docs_dir);
+        assert!(result.is_err(), "Partial tampering should be detected");
 
         let _ = fs::remove_dir_all(&temp);
     }

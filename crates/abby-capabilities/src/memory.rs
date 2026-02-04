@@ -1,8 +1,6 @@
-//! Specialized memory capability trait (stub).
+//! Specialized memory capability traits (stubs).
 
 use async_trait::async_trait;
-
-use crate::SkillResult;
 
 #[derive(Debug, Clone, Copy)]
 pub enum MemoryType {
@@ -31,13 +29,13 @@ pub struct MemorySearchResult;
 #[async_trait]
 pub trait SpecializedMemoryCapability: Send + Sync {
     fn info(&self) -> MemorySystemInfo;
-    async fn store(&self, _entry: MemoryEntry) -> SkillResult<String> {
-        Err(crate::SkillError::ToolFailed("stub".into()))
+    async fn store(&self, _entry: MemoryEntry) -> anyhow::Result<String> {
+        Err(anyhow::anyhow!("stub: not implemented"))
     }
-    async fn retrieve(&self, _id: &str) -> SkillResult<Option<MemoryEntry>> {
-        Err(crate::SkillError::ToolFailed("stub".into()))
+    async fn retrieve(&self, _id: &str) -> anyhow::Result<Option<MemoryEntry>> {
+        Err(anyhow::anyhow!("stub: not implemented"))
     }
-    async fn search(&self, _query: MemoryQuery) -> SkillResult<Vec<MemorySearchResult>> {
-        Err(crate::SkillError::ToolFailed("stub".into()))
+    async fn search(&self, _query: MemoryQuery) -> anyhow::Result<Vec<MemorySearchResult>> {
+        Err(anyhow::anyhow!("stub: not implemented"))
     }
 }
