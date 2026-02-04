@@ -288,10 +288,88 @@ fn start_birth(state: tauri::State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn verify_crypto(state: tauri::State<AppState>, docs_path: PathBuf) -> Result<(), String> {
+fn verify_crypto(state: tauri::State<AppState>) -> Result<(), String> {
     let mut birth = state.birth.write().map_err(|e| e.to_string())?;
     let b = birth.as_mut().ok_or("Birth not started")?;
-    b.verify_crypto(&docs_path).map_err(|e| e.to_string())
+    
+    // Use the config's docs_dir as the source of truth
+    let docs_path = b.config().docs_dir.clone();
+    
+    tracing::info!("Verifying crypto integrity in: {}", docs_path.display());
+    
+    b.verify_crypto(&docs_path).map_err(|e| {
+        tracing::error!("Crypto verification failed: {}", e);
+        e.to_string()
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepairIdentityParams {
+    pub private_key: Option<String>,
+    pub reset: bool,
+}
+
+#[tauri::command]
+fn repair_identity(state: tauri::State<AppState>, params: RepairIdentityParams) -> Result<(), String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let data_dir = config.data_dir.clone();
+    let docs_dir = config.docs_dir.clone();
+    drop(config); // Release lock
+
+    if params.reset {
+        tracing::warn!("Performing identity HARD RESET");
+        // Delete external_pubkey.bin
+        let pubkey_path = data_dir.join("external_pubkey.bin");
+        if pubkey_path.exists() {
+            std::fs::remove_file(&pubkey_path).map_err(|e| e.to_string())?;
+        }
+        // Delete all .sig files
+        for doc in ["soul.md", "ethics.md", "instincts.md"] {
+            let sig_path = docs_dir.join(format!("{}.sig", doc));
+            if sig_path.exists() {
+                std::fs::remove_file(&sig_path).map_err(|e| e.to_string())?;
+            }
+        }
+        return Ok(());
+    }
+
+    if let Some(private_key_base64) = params.private_key {
+        tracing::info!("Attempting identity REPAIR with provided private key");
+        
+        // 1. Validate private key format
+        let private_key_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&private_key_base64)
+            .map_err(|e| format!("Invalid private key format: {}", e))?;
+            
+        let key_bytes: [u8; 32] = private_key_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| "Invalid private key length")?;
+            
+        let signing_key = SigningKey::from_bytes(&key_bytes);
+        let verifying_key = signing_key.verifying_key();
+
+        // 2. Validate against stored public key
+        let pubkey_path = data_dir.join("external_pubkey.bin");
+        if !pubkey_path.exists() {
+            return Err("Public key not found. Cannot verify ownership. Please use Reset.".to_string());
+        }
+        
+        let vault = ReadOnlyFileVault::new(&pubkey_path);
+        let stored_pubkey = vault.read_public_key().map_err(|e| e.to_string())?;
+        
+        if verifying_key != stored_pubkey {
+            return Err("Provided private key does not match the stored public key.".to_string());
+        }
+
+        // 3. Regenerate signatures
+        sign_constitutional_documents(&signing_key, &docs_dir).map_err(|e| e.to_string())?;
+        
+        tracing::info!("Identity repair successful. Signatures regenerated.");
+        return Ok(());
+    }
+
+    Err("Invalid repair parameters: provide either private_key or reset=true".to_string())
 }
 
 #[tauri::command]
