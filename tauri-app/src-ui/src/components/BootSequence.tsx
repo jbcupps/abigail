@@ -20,11 +20,6 @@ interface KeypairGenerationResult {
   newly_generated: boolean;
 }
 
-interface RepairIdentityParams {
-  private_key: string | null;
-  reset: boolean;
-}
-
 export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [stage, setStage] = useState<Stage>("None");
   const [message, setMessage] = useState("");
