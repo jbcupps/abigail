@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 type Stage = "None" | "Starting" | "KeyPresentation" | "Verified" | "Life" | "Repair";
 type IdentityStatus = "Clean" | "Complete" | "Broken";
@@ -30,6 +30,11 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [copied, setCopied] = useState(false);
   const [repairKey, setRepairKey] = useState("");
 
+  // Auto-start boot sequence on mount
+  useEffect(() => {
+    handleStart();
+  }, []);
+
   const handleStart = async () => {
     setError("");
     setStage("Starting");
@@ -42,12 +47,12 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
       // 2. Check identity status
       const status = await invoke<IdentityStatus>("check_identity_status");
-      
+
       if (status === "Clean") {
         // First run: generate keypair and sign documents
         setMessage("Generating signing keypair...");
         const keypairResult = await invoke<KeypairGenerationResult>("generate_and_sign_constitutional");
-        
+
         // Show the private key to the user
         setPrivateKey(keypairResult.private_key_base64);
         setPublicKeyPath(keypairResult.public_key_path);
@@ -59,8 +64,8 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         setError("Identity verification failed. Signatures are missing or invalid.");
         return;
       }
-      
-      // Identity is Complete, continue with startup checks
+
+      // Identity is Complete (installer keygen already ran), skip key presentation
       await continueAfterKeyPresentation();
     } catch (e) {
       setError(String(e));
@@ -71,7 +76,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const handleRepair = async () => {
     setError("");
     setMessage("Attempting repair...");
-    
+
     try {
       await invoke("repair_identity", {
         params: {
@@ -93,7 +98,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
     setError("");
     setMessage("Resetting identity...");
-    
+
     try {
       await invoke("repair_identity", {
         params: {
@@ -110,7 +115,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const continueAfterKeyPresentation = async () => {
     setStage("Starting");
     setMessage("Running startup checks...");
-    
+
     try {
       // Run startup checks (heartbeat + signature verification)
       const result = await invoke<StartupCheckResult>("run_startup_checks");
@@ -124,7 +129,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
       if (!result.verification_ok && result.error) {
         // If verification fails here (e.g. tampered content), we might want to offer repair too
         setError(result.error);
-        setStage("Repair"); 
+        setStage("Repair");
         return;
       }
 
@@ -134,10 +139,10 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
       // Start birth and skip to Life for MVP
       await invoke("start_birth");
-      
+
       // Run verify_crypto to advance past Darkness (no args needed now)
       await invoke("verify_crypto");
-      
+
       // Skip email and model download for MVP
       await invoke("skip_to_life_for_mvp");
 
@@ -190,15 +195,10 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         ==================
       </pre>
 
-      {stage === "None" && (
+      {stage === "None" && !error && (
         <div>
-          <p className="mb-4">Press Start to begin.</p>
-          <button
-            className="border border-green-500 px-4 py-2 rounded hover:bg-green-500/20"
-            onClick={handleStart}
-          >
-            Start
-          </button>
+          <p className="mb-4">Preparing to start...</p>
+          <div className="animate-pulse">...</div>
         </div>
       )}
 
@@ -350,7 +350,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         </div>
       )}
 
-      {error && (
+      {error && stage !== "Repair" && (
         <div className="mt-4">
           <p className="text-red-400">{error}</p>
           <button

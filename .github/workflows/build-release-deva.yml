@@ -1,34 +1,31 @@
-# Build Abby (Tauri app) from Deva branch and publish to GitHub Releases.
+# Build Abby (Tauri app + keygen) from Deva branch and publish to GitHub Releases.
 # This is the development/preview release workflow.
 #
 # Triggers:
-# - Tags matching 'deva-v*' (e.g., deva-v0.0.0)
+# - Every push to the Deva branch (auto-increments deva-v* patch version)
+# - Tags matching 'deva-v*' (e.g., deva-v0.0.3) for explicit versions
 # - Manual workflow_dispatch (select branch Deva)
 #
-# Default Deva version: D 0.0.0 (0.0.0 when no tag/input)
-#
-# Key features:
-# - Builds unsigned Windows installer (NSIS)
-# - Creates pre-release (not latest) so it doesn't override stable releases
-# - Version synced from git tag or input to tauri.conf.json
+# Auto-versioning: on each Deva push, fetches all deva-v* tags, increments
+# the patch number, and creates a new pre-release.
 
 name: build-release-deva
 
 on:
   push:
     tags:
-      - 'deva-v*' # Only run on Deva version tags (e.g., deva-v0.0.0)
+      - 'deva-v*'
     branches:
-      - 'Deva'    # Build (no release) on every push to Deva for monitoring
+      - 'Deva'
   workflow_dispatch:
     inputs:
       release_version:
-        description: 'Release version (e.g. 0.0.0). Leave empty to build only, no release.'
+        description: 'Release version (e.g. 0.0.3). Leave empty for auto-increment.'
         required: false
         type: string
 
 permissions:
-  contents: write # Required to create Releases
+  contents: write
 
 jobs:
   build:
@@ -43,12 +40,16 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
 
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
         with:
-          # Use full ref so both tag (refs/tags/deva-v*) and branch (refs/heads/Deva) work
           ref: ${{ github.ref }}
+          fetch-depth: 0 # Full history for tag discovery
 
       - name: Install dependencies (Windows only)
         if: matrix.platform == 'windows-latest'
@@ -71,22 +72,36 @@ jobs:
         id: version
         shell: bash
         run: |
-          # D 0.0.0 = Deva default version 0.0.0
           if [[ "${{ github.ref }}" == refs/tags/deva-v* ]]; then
+            # Explicit tag push
             VERSION="${{ github.ref_name }}"
-            VERSION="${VERSION#deva-v}" # Strip leading 'deva-v'
+            VERSION="${VERSION#deva-v}"
+            TAG="${{ github.ref_name }}"
           elif [[ -n "${{ github.event.inputs.release_version }}" ]]; then
+            # Manual dispatch with explicit version
             VERSION="${{ github.event.inputs.release_version }}"
+            TAG="deva-v${VERSION}"
           else
-            VERSION="0.0.0"
+            # Auto-increment: find latest deva-v* tag and bump patch
+            git fetch --tags
+            LATEST=$(git tag -l 'deva-v*' --sort=-v:refname | head -n 1)
+            if [[ -z "$LATEST" ]]; then
+              VERSION="0.0.1"
+            else
+              LATEST_VER="${LATEST#deva-v}"
+              IFS='.' read -r MAJOR MINOR PATCH <<< "$LATEST_VER"
+              PATCH=$((PATCH + 1))
+              VERSION="${MAJOR}.${MINOR}.${PATCH}"
+            fi
+            TAG="deva-v${VERSION}"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Building Deva version: $VERSION"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Building Deva version: $VERSION (tag: $TAG)"
 
       - name: Update version in tauri.conf.json
         shell: bash
         run: |
-          # Update version in tauri.conf.json to match the tag (same as master workflow)
           cd tauri-app
           if command -v jq &> /dev/null; then
             jq '.version = "${{ steps.version.outputs.version }}"' tauri.conf.json > tauri.conf.json.tmp
@@ -96,6 +111,7 @@ jobs:
             rm -f tauri.conf.json.bak
           fi
           cat tauri.conf.json | head -10
+
       - name: Disable beforeBuildCommand for CI
         shell: bash
         run: |
@@ -134,6 +150,13 @@ jobs:
           Copy-Item tauri-app\icons\icon.icns -Destination icons\ -ErrorAction SilentlyContinue
           Copy-Item tauri-app\icons\*.png -Destination icons\ -ErrorAction SilentlyContinue
 
+      - name: Build abby-keygen binary
+        shell: bash
+        run: |
+          cargo build --release -p abby-keygen
+          cp target/release/abby-keygen.exe tauri-app/abby-keygen.exe || \
+          cp target/release/abby-keygen tauri-app/abby-keygen || true
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@063c0231f444e55760d98acb9c469b994269d4a5 # v0.5.6
         env:
@@ -151,11 +174,16 @@ jobs:
 
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/deva-v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_version != '')
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
+      - name: Checkout (for tagging)
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
       - name: Download all installer artifacts
         uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4.1.4
         with:
@@ -163,18 +191,16 @@ jobs:
           pattern: abby-deva-installer-*
           merge-multiple: false
 
-      - name: Determine version for release
-        id: release_version
+      - name: Create git tag if needed
+        shell: bash
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/deva-v* ]]; then
-            TAG="${{ github.ref_name }}"
-            VERSION="${TAG#deva-v}"  # e.g. v0.0.0 or 0.0.0 for display
-            echo "tag=$TAG" >> $GITHUB_OUTPUT
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
+          TAG="${{ needs.build.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists, skipping."
           else
-            VER="${{ github.event.inputs.release_version }}"
-            echo "tag=deva-v${VER}" >> $GITHUB_OUTPUT
-            echo "version=$VER" >> $GITHUB_OUTPUT
+            git tag "$TAG"
+            git push origin "$TAG"
+            echo "Created and pushed tag $TAG"
           fi
 
       - name: Rename to stable asset names for download URLs
@@ -185,43 +211,44 @@ jobs:
       - name: Create GitHub Release (Pre-release)
         uses: softprops/action-gh-release@9d7c94cfd0a1f3ed45544c887983e9fa900f0564 # v2.0.4
         with:
-          tag_name: ${{ steps.release_version.outputs.tag }}
-          name: Abby Deva ${{ steps.release_version.outputs.version }}
+          tag_name: ${{ needs.build.outputs.tag }}
+          name: Abby Deva ${{ needs.build.outputs.version }}
           draft: false
-          prerelease: true  # Mark as pre-release so it doesn't become "latest"
+          prerelease: true
           body: |
-            ## Abby Deva ${{ steps.release_version.outputs.version }}
+            ## Abby Deva ${{ needs.build.outputs.version }}
 
             **This is a development/preview release from the Deva branch.**
 
             ### Installation
-            
+
             Download the installer for your platform:
             - **Windows**: `Abby-Deva-windows-x64-setup.exe`
 
-            ### First Run Setup
-            
-            On first launch, Abby will:
-            1. Generate a signing keypair for verifying document integrity
-            2. **Present your private key** - you MUST save this securely
-            3. Run integrity checks and complete the birth sequence
+            ### What's New: Installer Key Generation
+
+            The installer now runs identity setup automatically during installation:
+            1. Generates an Ed25519 signing keypair
+            2. Signs Abby's constitutional documents
+            3. **Presents your private key** in a GUI window - you MUST save this securely
+            4. On first app launch, Abby detects the completed setup and proceeds directly to chat
 
             ### Security Note
-            
-            The private key shown during first run is NEVER stored by Abby.
+
+            The private key shown during installation is NEVER stored by Abby.
             Keep it safe - you'll need it if you ever need to verify your Abby instance
             or recover from data loss.
 
             ### Changes in Deva
 
             This release includes:
-            - First-run external keypair generation
-            - Private key presentation with security disclaimers
-            - Auto-detection of external pubkey path
-            - Updated signature verification flow
+            - Installer-time keypair generation via `abby-keygen` GUI
+            - Auto-start boot sequence (no manual "Start" click)
+            - Streamlined first-launch when identity is already set up
+            - Auto-versioned pre-releases on every Deva push
 
             ---
-            
+
             **Note:** This is a pre-release. For stable releases, see the [main releases](https://github.com/${{ github.repository }}/releases?q=NOT+Deva&expanded=true).
           files: |
             release-assets/Abby-Deva-windows-x64-setup.exe

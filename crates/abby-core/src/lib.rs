@@ -2,6 +2,7 @@ pub mod config;
 pub mod document;
 pub mod error;
 pub mod keyring;
+pub mod templates;
 pub mod vault;
 pub mod verifier;
 

@@ -37,12 +37,13 @@
       "digestAlgorithm": "sha256",
       "timestampUrl": "",
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "nsis-hooks.nsh"
       }
     },
     "longDescription": "Abby - Abigail Normal",
     "shortDescription": "Abby agent",
-    "resources": [],
+    "resources": ["abby-keygen.exe"],
     "externalBin": [],
     "copyright": "",
     "category": "Developer"

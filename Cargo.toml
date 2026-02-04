@@ -7,6 +7,7 @@ members = [
     "crates/abby-router",
     "crates/abby-birth",
     "crates/abby-skills",
+    "crates/abby-keygen",
     "tauri-app",
 ]
 
