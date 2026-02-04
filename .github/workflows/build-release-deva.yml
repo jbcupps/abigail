@@ -206,7 +206,15 @@ jobs:
       - name: Rename to stable asset names for download URLs
         run: |
           mkdir -p release-assets
-          cp artifacts/abby-deva-installer-windows-latest/target/release/bundle/nsis/*.exe release-assets/Abby-Deva-windows-x64-setup.exe
+          # Find the installer exe (may be flat or nested depending on artifact structure)
+          INSTALLER=$(find artifacts/abby-deva-installer-windows-latest -name "*.exe" -type f | head -1)
+          if [ -z "$INSTALLER" ]; then
+            echo "ERROR: No installer exe found in artifacts"
+            find artifacts/ -type f
+            exit 1
+          fi
+          echo "Found installer: $INSTALLER"
+          cp "$INSTALLER" release-assets/Abby-Deva-windows-x64-setup.exe
 
       - name: Create GitHub Release (Pre-release)
         uses: softprops/action-gh-release@9d7c94cfd0a1f3ed45544c887983e9fa900f0564 # v2.0.4
