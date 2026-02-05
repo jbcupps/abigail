@@ -8,6 +8,7 @@ members = [
     "crates/ao-birth",
     "crates/ao-skills",
     "crates/ao-keygen",
+    "skills/skill-web-search",
     "tauri-app",
 ]
 

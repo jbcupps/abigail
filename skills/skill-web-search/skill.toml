@@ -1,0 +1,16 @@
+[skill]
+id = "com.ao.skills.web-search"
+name = "Web Search"
+version = "0.1.0"
+description = "Search the web using Tavily API"
+category = "Sensory"
+keywords = ["search", "web", "tavily"]
+
+[[permissions]]
+permission = { Network = { Domains = ["api.tavily.com"] } }
+reason = "Tavily web search API"
+
+[[secrets]]
+name = "tavily"
+description = "Tavily API key (get one at app.tavily.com)"
+required = true

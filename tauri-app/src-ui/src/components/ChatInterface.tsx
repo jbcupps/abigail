@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useState, useEffect } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import VaultModal, { type MissingSkillSecret } from "./VaultModal";
@@ -33,6 +34,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
   const [configError, setConfigError] = useState("");
   const [missingSecrets, setMissingSecrets] = useState<MissingSkillSecret[]>([]);
   const [activeSecret, setActiveSecret] = useState<MissingSkillSecret | null>(null);
+  const [chatStatus, setChatStatus] = useState<string | null>(null);
 
   const assistantLabel = agentName || "AO";
 
@@ -59,6 +61,17 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
   useEffect(() => {
     refreshRouterStatus();
     refreshMissingSecrets();
+
+    // Listen for chat-status events from backend (e.g. tool execution)
+    const unlisten = listen<{ status: string; tool: string }>("chat-status", (event) => {
+      const { tool } = event.payload;
+      if (tool === "web_search") {
+        setChatStatus("Searching the web...");
+      } else {
+        setChatStatus(`Running ${tool}...`);
+      }
+    });
+    return () => { unlisten.then((f) => f()); };
   }, []);
 
   const handleConfigSelect = (option: number) => {
@@ -131,6 +144,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
       setMessages((m) => [...m, { role: "assistant", content, isError: true }]);
     } finally {
       setLoading(false);
+      setChatStatus(null);
     }
   };
 
@@ -325,7 +339,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
             </span>
           </div>
         ))}
-        {loading && <p className="text-theme-text-dim">...</p>}
+        {loading && <p className="text-theme-text-dim">{chatStatus || "..."}</p>}
       </div>
       <div className="p-4 border-t border-theme-border flex gap-2">
         <input

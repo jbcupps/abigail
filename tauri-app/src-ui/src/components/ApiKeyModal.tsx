@@ -12,6 +12,7 @@ const PROVIDER_INFO: Record<string, { label: string; placeholder: string; prefix
   anthropic: { label: "Anthropic", placeholder: "sk-ant-...", prefix: "sk-ant-" },
   xai: { label: "X.AI (Grok)", placeholder: "xai-...", prefix: "xai-" },
   google: { label: "Google (Gemini)", placeholder: "AIza...", prefix: "AIza" },
+  tavily: { label: "Tavily (Web Search)", placeholder: "tvly-...", prefix: "tvly-" },
 };
 
 export default function ApiKeyModal({ provider, onSaved, onCancel }: ApiKeyModalProps) {

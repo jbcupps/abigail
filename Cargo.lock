@@ -124,6 +124,7 @@ dependencies = [
  "reqwest 0.11.27",
  "serde",
  "serde_json",
+ "skill-web-search",
  "tauri",
  "tauri-build",
  "tokio",
@@ -5601,6 +5602,21 @@ name = "siphasher"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
+
+[[package]]
+name = "skill-web-search"
+version = "0.0.1"
+dependencies = [
+ "ao-capabilities",
+ "ao-core",
+ "ao-skills",
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "slab"

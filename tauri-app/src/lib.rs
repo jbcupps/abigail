@@ -11,6 +11,7 @@ use ao_memory::{Memory, MemoryStore};
 use ao_router::IdEgoRouter;
 use ao_skills::channel::EventBus;
 use ao_skills::{MissingSkillSecret, SkillExecutor, SkillRegistry, ToolParams};
+use skill_web_search::WebSearchSkill;
 use base64::Engine as _;
 use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
@@ -648,19 +649,40 @@ fn list_missing_skill_secrets(
 
 // ── Chat ────────────────────────────────────────────────────────────
 
-/// Build tool definitions for the chat command.
-fn chat_tool_definitions() -> Vec<ao_capabilities::cognitive::ToolDefinition> {
+/// Build tool definitions for the chat command, including registered skills.
+fn chat_tool_definitions(registry: &SkillRegistry) -> Vec<ao_capabilities::cognitive::ToolDefinition> {
+    let mut tools = Vec::new();
+
+    // Built-in: store_provider_key
     let schema = ao_capabilities::cognitive::update_provider_key_schema();
-    vec![ao_capabilities::cognitive::ToolDefinition {
+    tools.push(ao_capabilities::cognitive::ToolDefinition {
         name: schema["name"].as_str().unwrap_or("store_provider_key").to_string(),
         description: schema["description"].as_str().unwrap_or("").to_string(),
         parameters: schema["parameters"].clone(),
-    }]
+    });
+
+    // Skill-provided tools
+    if let Ok(manifests) = registry.list() {
+        for manifest in &manifests {
+            if let Ok((skill, _)) = registry.get_skill(&manifest.id) {
+                for td in skill.tools() {
+                    tools.push(ao_capabilities::cognitive::ToolDefinition {
+                        name: td.name.clone(),
+                        description: td.description.clone(),
+                        parameters: td.parameters.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    tools
 }
 
 /// Execute a tool call from the LLM and return the result string.
 async fn execute_tool_call(
     state: &tauri::State<'_, AppState>,
+    app: &tauri::AppHandle,
     tool_call: &ao_capabilities::cognitive::ToolCall,
 ) -> String {
     match tool_call.name.as_str() {
@@ -707,12 +729,60 @@ async fn execute_tool_call(
 
             format!("Successfully stored {} API key in secure vault.", provider)
         }
-        other => format!("Unknown tool: {}", other),
+        other => {
+            // Check registered skills for matching tool name
+            let _ = app.emit("chat-status", serde_json::json!({
+                "status": "tool_executing",
+                "tool": other,
+            }));
+
+            // Search skills for a tool with this name
+            if let Ok(manifests) = state.registry.list() {
+                for manifest in &manifests {
+                    if let Ok((skill, _)) = state.registry.get_skill(&manifest.id) {
+                        if skill.tools().iter().any(|t| t.name == other) {
+                            // Parse arguments into ToolParams
+                            let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
+                                Ok(v) => v,
+                                Err(e) => return format!("Error parsing arguments: {}", e),
+                            };
+
+                            let mut params = ToolParams::new();
+                            if let Some(obj) = args.as_object() {
+                                for (k, v) in obj {
+                                    params.values.insert(k.clone(), v.clone());
+                                }
+                            }
+
+                            match state.executor.execute(&manifest.id, other, params).await {
+                                Ok(output) => {
+                                    if output.success {
+                                        // Extract formatted text for LLM consumption
+                                        if let Some(ref data) = output.data {
+                                            if let Some(formatted) = data.get("formatted").and_then(|f| f.as_str()) {
+                                                return formatted.to_string();
+                                            }
+                                            return data.to_string();
+                                        }
+                                        return "Tool executed successfully".to_string();
+                                    } else {
+                                        return output.error.unwrap_or_else(|| "Tool failed".to_string());
+                                    }
+                                }
+                                Err(e) => return format!("Tool error: {}", e),
+                            }
+                        }
+                    }
+                }
+            }
+
+            format!("Unknown tool: {}", other)
+        }
     }
 }
 
 #[tauri::command]
-async fn chat(state: tauri::State<'_, AppState>, message: String, target: Option<String>) -> Result<String, String> {
+async fn chat(app: tauri::AppHandle, state: tauri::State<'_, AppState>, message: String, target: Option<String>) -> Result<String, String> {
     // Build system prompt and gather config before async boundary
     let (store, router, system_prompt) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
@@ -733,7 +803,7 @@ async fn chat(state: tauri::State<'_, AppState>, message: String, target: Option
     ];
 
     let target_mode = target.as_deref().unwrap_or("EGO");
-    let tools = chat_tool_definitions();
+    let tools = chat_tool_definitions(&state.registry);
 
     // First request — route based on target
     let response = if target_mode == "ID" {
@@ -750,7 +820,7 @@ async fn chat(state: tauri::State<'_, AppState>, message: String, target: Option
             // Execute each tool call and collect results
             let mut tool_results = Vec::new();
             for tc in tool_calls {
-                let result = execute_tool_call(&state, tc).await;
+                let result = execute_tool_call(&state, &app, tc).await;
                 tool_results.push((tc.clone(), result));
             }
 
@@ -1074,6 +1144,14 @@ pub fn run() {
     ));
 
     let registry = Arc::new(SkillRegistry::with_secrets(secrets.clone()));
+
+    // Register built-in skills
+    {
+        let ws_manifest = WebSearchSkill::default_manifest();
+        let ws = WebSearchSkill::with_secrets(ws_manifest.clone(), secrets.clone());
+        let _ = registry.register(ws_manifest.id.clone(), Arc::new(ws));
+    }
+
     let event_bus = Arc::new(EventBus::new(256));
     let executor = Arc::new(SkillExecutor::new(registry.clone()));
 
