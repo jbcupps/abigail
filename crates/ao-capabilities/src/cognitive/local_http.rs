@@ -72,6 +72,17 @@ struct ChatResponse {
     choices: Vec<ChatChoice>,
 }
 
+/// Response from /v1/models endpoint.
+#[derive(Debug, Deserialize)]
+struct ModelsResponse {
+    data: Vec<ModelInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelInfo {
+    id: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct ChatChoice {
     message: ChatMessageResponse,
@@ -104,8 +115,43 @@ impl LocalHttpProvider {
     }
 
     /// Create a provider with default model name "local-model".
+    /// Note: Use `with_url_auto_model()` for LM Studio which requires actual model names.
     pub fn with_url(base_url: impl Into<String>) -> Self {
         Self::new(base_url, "local-model")
+    }
+
+    /// Create a provider that auto-detects the model name from /v1/models.
+    /// Falls back to "local-model" if detection fails.
+    pub async fn with_url_auto_model(base_url: impl Into<String>) -> Self {
+        let base = base_url.into();
+        let model = Self::detect_model(&base).await.unwrap_or_else(|e| {
+            tracing::warn!("Model auto-detection failed: {}. Using 'local-model'", e);
+            "local-model".to_string()
+        });
+        tracing::info!("Auto-detected model: {}", model);
+        Self::new(base, model)
+    }
+
+    /// Query /v1/models and return the first available model ID.
+    async fn detect_model(base_url: &str) -> anyhow::Result<String> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .connect_timeout(Duration::from_secs(3))
+            .build()?;
+
+        let url = format!("{}/v1/models", base_url.trim_end_matches('/'));
+        let response = client.get(&url).send().await?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!("Models endpoint returned {}", response.status()));
+        }
+
+        let models: ModelsResponse = response.json().await?;
+        models
+            .data
+            .first()
+            .map(|m| m.id.clone())
+            .ok_or_else(|| anyhow::anyhow!("No models available"))
     }
 
     /// Perform a heartbeat check to verify the LLM server is reachable.

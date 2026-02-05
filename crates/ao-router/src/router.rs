@@ -61,6 +61,35 @@ impl IdEgoRouter {
         }
     }
 
+    /// Create a new router with auto-detected model name for local LLM.
+    /// This is the preferred constructor when a local LLM URL is provided.
+    pub async fn new_auto_detect(
+        local_llm_base_url: Option<String>,
+        openai_api_key: Option<String>,
+        mode: RoutingMode,
+    ) -> Self {
+        let ego = openai_api_key
+            .filter(|k| !k.is_empty())
+            .map(|k| Arc::new(OpenAiProvider::new(Some(k))));
+
+        let (id, local_http): (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) =
+            match local_llm_base_url.filter(|u| !u.is_empty()) {
+                Some(url) => {
+                    // Use auto-detection for model name (important for LM Studio)
+                    let provider = Arc::new(LocalHttpProvider::with_url_auto_model(url).await);
+                    (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
+                }
+                None => (Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>, None),
+            };
+
+        Self {
+            id,
+            ego,
+            local_http,
+            mode,
+        }
+    }
+
     /// Perform a heartbeat check to verify the local LLM is reachable.
     /// If using HTTP provider, sends a minimal request; if using stub, always succeeds.
     pub async fn heartbeat(&self) -> anyhow::Result<()> {

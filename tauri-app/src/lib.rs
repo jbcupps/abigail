@@ -509,18 +509,16 @@ fn set_api_key(state: tauri::State<AppState>, key: String) -> Result<(), String>
 }
 
 #[tauri::command]
-fn set_local_llm_url(state: tauri::State<AppState>, url: String) -> Result<(), String> {
-    let mut config = state.config.write().map_err(|e| e.to_string())?;
-    config.local_llm_base_url = if url.is_empty() { None } else { Some(url) };
-    config.save(&config.config_path()).map_err(|e| e.to_string())?;
+async fn set_local_llm_url(state: tauri::State<'_, AppState>, url: String) -> Result<(), String> {
+    let (local_url, api_key, mode) = {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.local_llm_base_url = if url.is_empty() { None } else { Some(url) };
+        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+        (config.local_llm_base_url.clone(), config.openai_api_key.clone(), config.routing_mode)
+    };
 
-    // Rebuild the router so it picks up the new URL
-    let new_router = IdEgoRouter::new(
-        config.local_llm_base_url.clone(),
-        config.openai_api_key.clone(),
-        config.routing_mode,
-    );
-    drop(config); // Release config lock before acquiring router lock
+    // Rebuild the router with auto-detected model name (important for LM Studio)
+    let new_router = IdEgoRouter::new_auto_detect(local_url, api_key, mode).await;
     let mut router = state.router.write().map_err(|e| e.to_string())?;
     *router = new_router;
     Ok(())
@@ -914,18 +912,17 @@ async fn set_local_llm_during_birth(
     state: tauri::State<'_, AppState>,
     url: String,
 ) -> Result<bool, String> {
-    // Set the URL in config and rebuild router
-    {
+    // Set the URL in config
+    let (api_key, mode) = {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         config.local_llm_base_url = Some(url.clone());
         config.save(&config.config_path()).map_err(|e| e.to_string())?;
+        (config.openai_api_key.clone(), config.routing_mode)
+    };
 
-        let new_router = IdEgoRouter::new(
-            config.local_llm_base_url.clone(),
-            config.openai_api_key.clone(),
-            config.routing_mode,
-        );
-        drop(config);
+    // Rebuild router with auto-detected model name (important for LM Studio)
+    let new_router = IdEgoRouter::new_auto_detect(Some(url.clone()), api_key, mode).await;
+    {
         let mut router = state.router.write().map_err(|e| e.to_string())?;
         *router = new_router;
     }
