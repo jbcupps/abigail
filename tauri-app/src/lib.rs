@@ -14,6 +14,7 @@ use ao_skills::{MissingSkillSecret, SkillExecutor, SkillRegistry, ToolParams};
 use skill_web_search::WebSearchSkill;
 use base64::Engine as _;
 use ed25519_dalek::SigningKey;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -722,14 +723,20 @@ async fn execute_tool_call(
                 return "Error: provider and key are required".to_string();
             }
 
+            // Validate the key first
+            if let Err(e) = ao_capabilities::cognitive::validation::validate_api_key(provider, key).await {
+                return format!("API key validation failed: {}. Please check the key and try again.", e);
+            }
+
             // Store in secrets vault
             {
                 let mut vault = match state.secrets.lock() {
                     Ok(v) => v,
                     Err(e) => return format!("Error accessing vault: {}", e),
                 };
-                if let Err(e) = ao_capabilities::cognitive::update_provider_key(&mut vault, provider, key) {
-                    return format!("Error storing key: {}", e);
+                vault.set_secret(provider, key);
+                if let Err(e) = vault.save() {
+                    return format!("Error saving key: {}", e);
                 }
             }
 
@@ -751,7 +758,7 @@ async fn execute_tool_call(
                 }
             }
 
-            format!("Successfully stored {} API key in secure vault.", provider)
+            format!("Successfully validated and stored {} API key in secure vault.", provider)
         }
         other => {
             // Check registered skills for matching tool name
@@ -803,6 +810,87 @@ async fn execute_tool_call(
             format!("Unknown tool: {}", other)
         }
     }
+}
+
+/// Parse text-based tool calls from LLM output.
+/// Supports patterns like:
+/// - ```tool_request\n{"name": "...", "arguments": {...}}\n```
+/// - ```json\n{"name": "...", "arguments": {...}}\n```
+/// - [TOOL_CALL]{"name": "...", "arguments": {...}}[/TOOL_CALL]
+/// - Inline JSON with tool structure
+/// Returns a list of parsed tool calls and the remaining text (without tool blocks).
+fn parse_text_tool_calls(content: &str) -> (Vec<ao_capabilities::cognitive::ToolCall>, String) {
+    let mut tool_calls = Vec::new();
+    let mut cleaned_content = content.to_string();
+
+    // Helper to try parsing a JSON string as a tool call
+    let try_parse_tool = |json_str: &str| -> Option<ao_capabilities::cognitive::ToolCall> {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) {
+            if let Some(name) = parsed.get("name").and_then(|n| n.as_str()) {
+                let arguments = if let Some(args) = parsed.get("arguments") {
+                    args.to_string()
+                } else {
+                    "{}".to_string()
+                };
+                return Some(ao_capabilities::cognitive::ToolCall {
+                    id: String::new(), // Will be assigned later
+                    name: name.to_string(),
+                    arguments,
+                });
+            }
+        }
+        None
+    };
+
+    // Pattern 1: ```tool_request\n...\n``` or ```json\n...\n``` with tool structure
+    // Use greedy matching for nested braces
+    let code_block_re = Regex::new(r"```(?:tool_request|json)?\s*\n([\s\S]*?)\n```").unwrap();
+    for cap in code_block_re.captures_iter(content) {
+        if let Some(json_match) = cap.get(1) {
+            let json_str = json_match.as_str().trim();
+            if let Some(mut tc) = try_parse_tool(json_str) {
+                tc.id = format!("text_call_{}", tool_calls.len());
+                tool_calls.push(tc);
+            }
+        }
+    }
+    cleaned_content = code_block_re.replace_all(&cleaned_content, "").to_string();
+
+    // Pattern 2: [TOOL_CALL]...[/TOOL_CALL]
+    let tag_re = Regex::new(r"\[TOOL_CALL\]([\s\S]*?)\[/TOOL_CALL\]").unwrap();
+    for cap in tag_re.captures_iter(content) {
+        if let Some(json_match) = cap.get(1) {
+            let json_str = json_match.as_str().trim();
+            if let Some(mut tc) = try_parse_tool(json_str) {
+                if !tool_calls.iter().any(|t| t.name == tc.name) {
+                    tc.id = format!("text_call_{}", tool_calls.len());
+                    tool_calls.push(tc);
+                }
+            }
+        }
+    }
+    cleaned_content = tag_re.replace_all(&cleaned_content, "").to_string();
+
+    // Pattern 3: Inline JSON that looks like a tool call (with name and arguments fields)
+    // This catches cases where the LLM outputs JSON without code blocks
+    let inline_json_re = Regex::new(r#"\{[^{}]*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{[^{}]*\}[^{}]*\}"#).unwrap();
+    for mat in inline_json_re.find_iter(content) {
+        let json_str = mat.as_str();
+        if let Some(mut tc) = try_parse_tool(json_str) {
+            if !tool_calls.iter().any(|t| t.name == tc.name) {
+                tc.id = format!("text_call_{}", tool_calls.len());
+                tool_calls.push(tc);
+                cleaned_content = cleaned_content.replace(json_str, "");
+            }
+        }
+    }
+
+    // Clean up [END_TOOL_REQUEST] tags and extra whitespace
+    let end_tag_re = Regex::new(r"\[END_TOOL_REQUEST\]").unwrap();
+    cleaned_content = end_tag_re.replace_all(&cleaned_content, "").to_string();
+    cleaned_content = cleaned_content.trim().to_string();
+
+    (tool_calls, cleaned_content)
 }
 
 #[tauri::command]
@@ -870,7 +958,34 @@ async fn chat(app: tauri::AppHandle, state: tauri::State<'_, AppState>, message:
             response.content
         }
     } else {
-        response.content
+        // ID mode: check for text-based tool calls (for local LLMs without native function calling)
+        let (text_tool_calls, cleaned_content) = parse_text_tool_calls(&response.content);
+
+        if !text_tool_calls.is_empty() {
+            // Execute text-based tool calls
+            let mut tool_results = Vec::new();
+            for tc in &text_tool_calls {
+                let result = execute_tool_call(&state, &app, tc).await;
+                tool_results.push((tc.name.clone(), result));
+            }
+
+            // Build follow-up with tool results for final response
+            messages.push(ao_capabilities::cognitive::Message::new("assistant", &cleaned_content));
+
+            // Add tool results as a system message so the LLM knows what happened
+            let results_summary: String = tool_results
+                .iter()
+                .map(|(name, result)| format!("[Tool '{}' result]: {}", name, result))
+                .collect::<Vec<_>>()
+                .join("\n");
+            messages.push(ao_capabilities::cognitive::Message::new("system", &results_summary));
+
+            // Get follow-up response from Id
+            let follow_up = router.id_only(messages).await.map_err(|e| e.to_string())?;
+            follow_up.content
+        } else {
+            response.content
+        }
     };
 
     // Store memory
@@ -985,8 +1100,10 @@ pub enum BirthAction {
 }
 
 /// Stage-aware chat during birth, routed exclusively through local LLM.
+/// Supports text-based tool calls for LLMs without native function calling.
 #[tauri::command]
 async fn birth_chat(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     message: String,
 ) -> Result<BirthChatResponse, String> {
@@ -1014,7 +1131,7 @@ async fn birth_chat(
     }
 
     // Build messages array with system prompt + conversation history
-    let messages = {
+    let mut messages = {
         let birth = state.birth.read().map_err(|e| e.to_string())?;
         let b = birth.as_ref().ok_or("Birth not started")?;
         let mut msgs = vec![ao_capabilities::cognitive::Message::new("system", &system_prompt)];
@@ -1026,17 +1143,55 @@ async fn birth_chat(
 
     // Route through local LLM only (Id)
     let router = state.router.read().map_err(|e| e.to_string())?.clone();
-    let response = router.id_only(messages).await.map_err(|e| e.to_string())?;
+    let response = router.id_only(messages.clone()).await.map_err(|e| e.to_string())?;
 
-    // Record assistant response
-    {
-        let mut birth = state.birth.write().map_err(|e| e.to_string())?;
-        let b = birth.as_mut().ok_or("Birth not started")?;
-        b.add_message("assistant", &response.content);
-    }
+    // Check for text-based tool calls (for local LLMs without native function calling)
+    let (text_tool_calls, cleaned_content) = parse_text_tool_calls(&response.content);
+
+    let final_content = if !text_tool_calls.is_empty() {
+        // Execute text-based tool calls
+        let mut tool_results = Vec::new();
+        for tc in &text_tool_calls {
+            let result = execute_tool_call(&state, &app, tc).await;
+            tool_results.push((tc.name.clone(), result));
+        }
+
+        // Build follow-up with tool results
+        messages.push(ao_capabilities::cognitive::Message::new("assistant", &cleaned_content));
+
+        // Add tool results as a system message
+        let results_summary: String = tool_results
+            .iter()
+            .map(|(name, result)| format!("[Tool '{}' executed]: {}", name, result))
+            .collect::<Vec<_>>()
+            .join("\n");
+        messages.push(ao_capabilities::cognitive::Message::new("system", &results_summary));
+
+        // Get follow-up response from Id to acknowledge the tool execution
+        let follow_up = router.id_only(messages).await.map_err(|e| e.to_string())?;
+
+        // Record the full exchange in birth conversation
+        {
+            let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+            let b = birth.as_mut().ok_or("Birth not started")?;
+            b.add_message("assistant", &cleaned_content);
+            b.add_message("system", &results_summary);
+            b.add_message("assistant", &follow_up.content);
+        }
+
+        follow_up.content
+    } else {
+        // No tool calls - record response normally
+        {
+            let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+            let b = birth.as_mut().ok_or("Birth not started")?;
+            b.add_message("assistant", &response.content);
+        }
+        response.content
+    };
 
     Ok(BirthChatResponse {
-        message: response.content,
+        message: final_content,
         stage: stage.name().to_string(),
         action: None,
     })
