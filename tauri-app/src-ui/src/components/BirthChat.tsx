@@ -59,15 +59,20 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
     inputRef.current?.focus();
   }, [loading]);
 
-  const sendMessage = async (text: string, isSystemGreeting = false) => {
+  const [retryCount, setRetryCount] = useState(0);
+  const [lastMessage, setLastMessage] = useState<string | null>(null);
+  const MAX_RETRIES = 3;
+
+  const sendMessage = async (text: string, isSystemGreeting = false, isRetry = false) => {
     if (!text.trim()) return;
 
-    if (!isSystemGreeting) {
+    if (!isSystemGreeting && !isRetry) {
       setMessages(m => [...m, { role: "user", content: text }]);
     }
 
     setLoading(true);
     setError("");
+    setLastMessage(text);
 
     try {
       const response = await invoke<BirthChatResponse>("birth_chat", {
@@ -75,15 +80,42 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
       });
 
       setMessages(m => [...m, { role: "assistant", content: response.message }]);
+      setRetryCount(0); // Reset retry count on success
+      setLastMessage(null);
 
       if (response.action && onAction) {
         onAction(response.action);
       }
     } catch (e) {
-      setError(String(e));
-      setMessages(m => [...m, { role: "system", content: `Error: ${String(e)}` }]);
+      const errorMsg = String(e);
+      // Check if it's a network/connection error that might benefit from retry
+      const isNetworkError = errorMsg.toLowerCase().includes("connection") ||
+        errorMsg.toLowerCase().includes("timeout") ||
+        errorMsg.toLowerCase().includes("network") ||
+        errorMsg.toLowerCase().includes("failed to fetch");
+
+      if (isNetworkError && retryCount < MAX_RETRIES) {
+        setError(`Connection error. Retrying... (${retryCount + 1}/${MAX_RETRIES})`);
+        setRetryCount(prev => prev + 1);
+        // Retry after a short delay
+        setTimeout(() => sendMessage(text, isSystemGreeting, true), 1500);
+        return;
+      }
+
+      setError(errorMsg);
+      setMessages(m => [...m, { role: "system", content: `Error: ${errorMsg}` }]);
+      setRetryCount(0);
     } finally {
-      setLoading(false);
+      if (!error?.includes("Retrying")) {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleRetry = () => {
+    if (lastMessage) {
+      setRetryCount(0);
+      sendMessage(lastMessage, false, true);
     }
   };
 
@@ -144,7 +176,17 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
       </div>
 
       {error && (
-        <div className="px-4 py-1 text-red-400 text-xs">{error}</div>
+        <div className="px-4 py-1 text-red-400 text-xs flex items-center gap-2">
+          <span>{error}</span>
+          {lastMessage && !error.includes("Retrying") && (
+            <button
+              className="text-theme-primary hover:underline"
+              onClick={handleRetry}
+            >
+              Retry
+            </button>
+          )}
+        </div>
       )}
 
       <div className="p-4 border-t border-theme-border flex gap-2">

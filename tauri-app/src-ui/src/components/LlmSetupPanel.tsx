@@ -24,25 +24,41 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
   const [showManual, setShowManual] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const MAX_RETRIES = 3;
 
   useEffect(() => {
     probe();
   }, []);
 
-  const probe = async () => {
+  const probe = async (isRetry = false) => {
     setProbing(true);
-    setError("");
+    if (!isRetry) {
+      setError("");
+      setRetryCount(0);
+    }
     try {
       const result = await invoke<ProbeResult>("probe_local_llm");
       setDetected(result.detected);
+      setRetryCount(0);
     } catch (e) {
-      setError(String(e));
+      const errorMsg = String(e);
+      // Auto-retry on network errors
+      if (retryCount < MAX_RETRIES) {
+        setError(`Scanning failed. Retrying... (${retryCount + 1}/${MAX_RETRIES})`);
+        setRetryCount(prev => prev + 1);
+        setTimeout(() => probe(true), 1500 * (retryCount + 1));
+        return;
+      }
+      setError(errorMsg);
     } finally {
-      setProbing(false);
+      if (retryCount >= MAX_RETRIES || !error?.includes("Retrying")) {
+        setProbing(false);
+      }
     }
   };
 
-  const connectTo = async (url: string) => {
+  const connectTo = async (url: string, retries = 0) => {
     setConnecting(true);
     setError("");
     try {
@@ -50,12 +66,31 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
       if (ok) {
         onConnected(url);
       } else {
+        // Retry if server might be starting up
+        if (retries < MAX_RETRIES) {
+          setError(`Connection failed. Retrying... (${retries + 1}/${MAX_RETRIES})`);
+          setTimeout(() => connectTo(url, retries + 1), 1500);
+          return;
+        }
         setError("Could not connect. Is the server running?");
       }
     } catch (e) {
-      setError(String(e));
+      const errorMsg = String(e);
+      // Retry on network errors
+      if (retries < MAX_RETRIES && (
+        errorMsg.toLowerCase().includes("connection") ||
+        errorMsg.toLowerCase().includes("timeout") ||
+        errorMsg.toLowerCase().includes("network")
+      )) {
+        setError(`Connection error. Retrying... (${retries + 1}/${MAX_RETRIES})`);
+        setTimeout(() => connectTo(url, retries + 1), 1500);
+        return;
+      }
+      setError(errorMsg);
     } finally {
-      setConnecting(false);
+      if (!error?.includes("Retrying")) {
+        setConnecting(false);
+      }
     }
   };
 

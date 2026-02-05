@@ -1,128 +1,387 @@
 ; AO NSIS installer hooks
-; Handles identity setup and Ollama detection/installation
+; Handles identity setup, LLM detection/installation, and upgrade detection
+;
+; Note: Tauri NSIS hooks don't support custom pages (nsDialogs).
+; We use MessageBox dialogs and PowerShell for interactive prompts.
 
-Var OllamaDetected
-Var OllamaUrl
+; ============================================================================
+; VARIABLES
+; ============================================================================
+Var OllamaStatus         ; "running", "installed", "not_found"
+Var LmStudioStatus       ; "installed", "not_found"
+Var UpgradeDetected      ; "1" if existing install found, "0" otherwise
+Var PreserveData         ; "1" to preserve, "0" for fresh install
+Var ExistingVersion      ; Version string of existing install
+Var TempResult           ; Temp variable for function results
 
-!macro NSIS_HOOK_POSTINSTALL
-  ; Step 1: Run identity keygen
-  DetailPrint "Running AO identity setup..."
-  ExecWait '"$INSTDIR\ao-keygen.exe"' $0
-  DetailPrint "Identity setup completed (exit code: $0)"
-  ${If} $0 != 0
-    MessageBox MB_OK|MB_ICONEXCLAMATION "Identity setup did not complete. You can run it on first app launch."
-  ${EndIf}
+; ============================================================================
+; LLM DETECTION FUNCTIONS
+; ============================================================================
 
-  ; Step 2: Check for Ollama
-  DetailPrint "Checking for local LLM (Ollama)..."
-  Call CheckOllama
-!macroend
-
-; Check if Ollama is installed and running
-Function CheckOllama
-  ; Try to detect Ollama via PowerShell
-  nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "try { $$r = Invoke-WebRequest -Uri http://localhost:11434/api/tags -TimeoutSec 3 -ErrorAction Stop; if ($$r.StatusCode -eq 200) { Write-Output OLLAMA_FOUND } } catch { Write-Output OLLAMA_NOT_FOUND }"'
+; Detect Ollama via HTTP probe (running), file check (installed), registry
+Function DetectOllama
+  ; Method 1: HTTP probe - check if Ollama is running
+  nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "try { $$r = Invoke-WebRequest -Uri http://localhost:11434/api/tags -TimeoutSec 3 -ErrorAction Stop; if ($$r.StatusCode -eq 200) { Write-Output RUNNING } } catch { Write-Output NOT_RUNNING }"'
   Pop $0  ; exit code
   Pop $1  ; output
 
-  ${If} $1 == "OLLAMA_FOUND"
-    StrCpy $OllamaDetected "1"
-    StrCpy $OllamaUrl "http://localhost:11434"
-    DetailPrint "Ollama detected at localhost:11434"
-    ; Write config with Ollama URL
-    Call WriteOllamaConfig
-  ${Else}
-    StrCpy $OllamaDetected "0"
-    DetailPrint "Ollama not detected"
-    ; Offer to download Ollama
-    MessageBox MB_YESNO|MB_ICONQUESTION "Local LLM (Ollama) not detected.$\n$\nWould you like to download and install Ollama now?$\n$\nThis enables local AI processing without internet." IDYES DownloadOllama IDNO SkipOllama
-
-DownloadOllama:
-    DetailPrint "Downloading Ollama installer..."
-    nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri https://ollama.com/download/OllamaSetup.exe -OutFile $env:TEMP\OllamaSetup.exe -ErrorAction Stop; Write-Output OK } catch { Write-Output FAIL }"'
-    Pop $0  ; exit code
-    Pop $1  ; output (OK or FAIL)
-    ${If} $1 == "OK"
-      DetailPrint "Running Ollama installer..."
-      ExecWait '"$TEMP\OllamaSetup.exe" /S' $0
-      DetailPrint "Ollama installer completed (exit code: $0)"
-
-      ; Wait for Ollama service to start
-      DetailPrint "Waiting for Ollama service..."
-      Sleep 5000
-
-      ; Verify Ollama is now running
-      nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "try { $$r = Invoke-WebRequest -Uri http://localhost:11434/api/tags -TimeoutSec 5 -ErrorAction Stop; if ($$r.StatusCode -eq 200) { Write-Output OLLAMA_FOUND } } catch { Write-Output OLLAMA_NOT_FOUND }"'
-      Pop $0
-      Pop $1
-      ${If} $1 == "OLLAMA_FOUND"
-        StrCpy $OllamaDetected "1"
-        StrCpy $OllamaUrl "http://localhost:11434"
-        DetailPrint "Ollama installed and running"
-        ; Offer to pull a model
-        Call OfferModelPull
-        ; Write config
-        Call WriteOllamaConfig
-      ${Else}
-        MessageBox MB_OK|MB_ICONINFORMATION "Ollama was installed but is not yet running.$\n$\nPlease restart your computer or start Ollama manually."
-      ${EndIf}
-    ${Else}
-      MessageBox MB_OK|MB_ICONEXCLAMATION "Failed to download Ollama. You can install it later from ollama.com"
-    ${EndIf}
-    Goto OllamaDone
-
-SkipOllama:
-    DetailPrint "Skipping Ollama installation"
-
-OllamaDone:
+  ${If} $1 == "RUNNING"
+    StrCpy $OllamaStatus "running"
+    Return
   ${EndIf}
+
+  ; Method 2: File check - common installation paths
+  IfFileExists "$LOCALAPPDATA\Programs\Ollama\ollama.exe" OllamaFileFound 0
+  IfFileExists "$PROGRAMFILES\Ollama\ollama.exe" OllamaFileFound 0
+  IfFileExists "$PROGRAMFILES64\Ollama\ollama.exe" OllamaFileFound OllamaCheckRegistry
+
+OllamaFileFound:
+  StrCpy $OllamaStatus "installed"
+  Return
+
+OllamaCheckRegistry:
+  ; Method 3: Registry check
+  ReadRegStr $0 HKCU "SOFTWARE\Ollama" ""
+  StrCmp $0 "" OllamaNotFound OllamaRegFound
+
+OllamaRegFound:
+  StrCpy $OllamaStatus "installed"
+  Return
+
+OllamaNotFound:
+  StrCpy $OllamaStatus "not_found"
 FunctionEnd
 
-; Offer to pull a recommended model
-Function OfferModelPull
-  MessageBox MB_YESNO|MB_ICONQUESTION "Would you like to download a local AI model now?$\n$\nRecommended: phi3:mini (2.3GB)$\n$\nThis enables offline AI responses." IDYES PullModel IDNO SkipModel
+; Detect LM Studio via file check
+Function DetectLmStudio
+  ; Check common installation paths
+  IfFileExists "$LOCALAPPDATA\Programs\LM Studio\LM Studio.exe" LmStudioFound 0
+  IfFileExists "$PROGRAMFILES\LM Studio\LM Studio.exe" LmStudioFound 0
+  IfFileExists "$LOCALAPPDATA\LM-Studio\LM Studio.exe" LmStudioFound LmStudioNotFound
+
+LmStudioFound:
+  StrCpy $LmStudioStatus "installed"
+  Return
+
+LmStudioNotFound:
+  StrCpy $LmStudioStatus "not_found"
+FunctionEnd
+
+; ============================================================================
+; UPGRADE DETECTION
+; ============================================================================
+
+Function CheckForExistingInstall
+  ; Check registry for existing version
+  ReadRegStr $ExistingVersion HKCU "Software\ao\AO" "Version"
+  StrCmp $ExistingVersion "" CheckDataDir FoundInRegistry
+
+FoundInRegistry:
+  StrCpy $UpgradeDetected "1"
+  Return
+
+CheckDataDir:
+  ; Check if data directory exists with config.json
+  ReadEnvStr $0 LOCALAPPDATA
+  IfFileExists "$0\ao\AO\config.json" FoundDataDir NoExistingInstall
+
+FoundDataDir:
+  StrCpy $UpgradeDetected "1"
+  StrCpy $ExistingVersion "unknown"
+  Return
+
+NoExistingInstall:
+  StrCpy $UpgradeDetected "0"
+FunctionEnd
+
+; ============================================================================
+; DATA BACKUP/RESTORE (for upgrades)
+; ============================================================================
+
+Function BackupUserData
+  ReadEnvStr $0 LOCALAPPDATA
+  StrCpy $1 "$0\ao\AO"
+  StrCpy $2 "$TEMP\ao_upgrade_backup"
+
+  ; Create backup directory
+  CreateDirectory $2
+  CreateDirectory "$2\docs"
+
+  ; Backup files (using PowerShell for reliability)
+  nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "$$src = \"$1\"; $$dst = \"$2\"; if (Test-Path \"$$src\config.json\") { Copy-Item \"$$src\config.json\" \"$$dst\config.json\" -Force }; if (Test-Path \"$$src\memories.db\") { Copy-Item \"$$src\memories.db\" \"$$dst\memories.db\" -Force }; if (Test-Path \"$$src\external_pubkey.bin\") { Copy-Item \"$$src\external_pubkey.bin\" \"$$dst\external_pubkey.bin\" -Force }; if (Test-Path \"$$src\secrets.bin\") { Copy-Item \"$$src\secrets.bin\" \"$$dst\secrets.bin\" -Force }; if (Test-Path \"$$src\docs\") { Copy-Item \"$$src\docs\*\" \"$$dst\docs\\" -Force -Recurse }; Write-Output OK"'
+  Pop $0
+  Pop $1
+
+  DetailPrint "User data backed up for upgrade"
+FunctionEnd
+
+Function RestoreUserData
+  ReadEnvStr $0 LOCALAPPDATA
+  StrCpy $1 "$0\ao\AO"
+  StrCpy $2 "$TEMP\ao_upgrade_backup"
+
+  ; Restore files (using PowerShell for reliability)
+  nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "$$src = \"$2\"; $$dst = \"$1\"; if (Test-Path \"$$src\config.json\") { Copy-Item \"$$src\config.json\" \"$$dst\config.json\" -Force }; if (Test-Path \"$$src\memories.db\") { Copy-Item \"$$src\memories.db\" \"$$dst\memories.db\" -Force }; if (Test-Path \"$$src\external_pubkey.bin\") { Copy-Item \"$$src\external_pubkey.bin\" \"$$dst\external_pubkey.bin\" -Force }; if (Test-Path \"$$src\secrets.bin\") { Copy-Item \"$$src\secrets.bin\" \"$$dst\secrets.bin\" -Force }; if (Test-Path \"$$src\docs\") { New-Item -ItemType Directory -Path \"$$dst\docs\" -Force | Out-Null; Copy-Item \"$$src\docs\*\" \"$$dst\docs\\" -Force -Recurse }; Remove-Item \"$$src\" -Recurse -Force; Write-Output OK"'
+  Pop $0
+  Pop $1
+
+  DetailPrint "User data restored"
+FunctionEnd
+
+; ============================================================================
+; WRITE VERSION TO REGISTRY
+; ============================================================================
+
+Function WriteVersionToRegistry
+  ; Write version and install path to registry
+  WriteRegStr HKCU "Software\ao\AO" "Version" "${VERSION}"
+  WriteRegStr HKCU "Software\ao\AO" "InstallPath" "$INSTDIR"
+FunctionEnd
+
+; ============================================================================
+; OLLAMA INSTALLATION
+; ============================================================================
+
+Function InstallOllama
+  DetailPrint "Downloading Ollama installer..."
+
+  ; Download using PowerShell
+  nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri https://ollama.com/download/OllamaSetup.exe -OutFile $env:TEMP\OllamaSetup.exe -ErrorAction Stop; Write-Output OK } catch { Write-Output FAIL }"'
+  Pop $0  ; exit code
+  Pop $1  ; output
+
+  ${If} $1 == "OK"
+    DetailPrint "Running Ollama installer (silent)..."
+    ExecWait '"$TEMP\OllamaSetup.exe" /S' $0
+    DetailPrint "Ollama installer completed (exit code: $0)"
+
+    ; Wait for Ollama service to start
+    DetailPrint "Waiting for Ollama service to start..."
+    Sleep 5000
+
+    ; Verify Ollama is now running
+    nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "try { $$r = Invoke-WebRequest -Uri http://localhost:11434/api/tags -TimeoutSec 5 -ErrorAction Stop; if ($$r.StatusCode -eq 200) { Write-Output RUNNING } } catch { Write-Output NOT_RUNNING }"'
+    Pop $0
+    Pop $1
+
+    ${If} $1 == "RUNNING"
+      StrCpy $OllamaStatus "running"
+      DetailPrint "Ollama installed and running successfully"
+
+      ; Offer to pull model
+      MessageBox MB_YESNO|MB_ICONQUESTION "Ollama is installed and running!$\n$\nWould you like to download the phi3:mini model (~2.3GB)?$\n$\nThis enables offline AI responses." IDYES PullModel IDNO SkipModel
 
 PullModel:
-  DetailPrint "Pulling phi3:mini model (this may take a few minutes)..."
-  nsExec::ExecToStack 'ollama pull phi3:mini'
-  Pop $0
-  ${If} $0 == 0
-    DetailPrint "Model phi3:mini downloaded successfully"
-  ${Else}
-    DetailPrint "Model download failed (you can run 'ollama pull phi3:mini' later)"
-  ${EndIf}
-  Goto ModelDone
+      DetailPrint "Downloading phi3:mini model..."
+      nsExec::ExecToStack 'ollama pull phi3:mini'
+      Pop $0
+      ${If} $0 == 0
+        DetailPrint "Model phi3:mini downloaded successfully"
+      ${Else}
+        DetailPrint "Model download failed - you can run 'ollama pull phi3:mini' later"
+      ${EndIf}
+      Goto ModelDone
 
 SkipModel:
-  DetailPrint "Skipping model download"
+      DetailPrint "Skipping model download"
 
 ModelDone:
+      ; Write config with Ollama URL
+      Call WriteOllamaConfig
+    ${Else}
+      DetailPrint "Ollama installed but not yet running"
+      MessageBox MB_OK|MB_ICONINFORMATION "Ollama was installed but is not yet running.$\n$\nIt should start automatically on next login, or you can start it manually from the Start menu."
+    ${EndIf}
+  ${Else}
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Failed to download Ollama.$\n$\nYou can install it later from https://ollama.com"
+  ${EndIf}
 FunctionEnd
 
-; Write Ollama configuration to AO's config.json
+; ============================================================================
+; CONFIG WRITING
+; ============================================================================
+
 Function WriteOllamaConfig
   ; Get AppData\Local path
   ReadEnvStr $0 LOCALAPPDATA
   StrCpy $1 "$0\ao\AO\config.json"
 
-  ; Check if config exists
-  IfFileExists $1 ConfigExists CreateConfig
-
-ConfigExists:
-  ; Update existing config - add local_llm_base_url if not present
-  ; Using PowerShell for JSON manipulation
-  nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "$$c = Get-Content -Raw \"$1\" | ConvertFrom-Json; if (-not $$c.local_llm_base_url) { $$c | Add-Member -NotePropertyName local_llm_base_url -NotePropertyValue \"http://localhost:11434\" -Force }; $$c | ConvertTo-Json -Depth 10 | Set-Content \"$1\""'
+  ; Check if config exists and update/create appropriately
+  nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "$$path = \"$1\"; $$dir = Split-Path $$path; if (-not (Test-Path $$dir)) { New-Item -ItemType Directory -Path $$dir -Force | Out-Null }; if (Test-Path $$path) { $$c = Get-Content -Raw $$path | ConvertFrom-Json; if (-not $$c.local_llm_base_url) { $$c | Add-Member -NotePropertyName local_llm_base_url -NotePropertyValue \"http://localhost:11434\" -Force }; if (-not $$c.PSObject.Properties[\"schema_version\"]) { $$c | Add-Member -NotePropertyName schema_version -NotePropertyValue 1 -Force }; $$c | ConvertTo-Json -Depth 10 | Set-Content $$path } else { @{local_llm_base_url=\"http://localhost:11434\"; routing_mode=\"ego_primary\"; schema_version=1} | ConvertTo-Json | Set-Content $$path }; Write-Output OK"'
   Pop $0
-  DetailPrint "Updated config with Ollama URL"
-  Goto ConfigDone
+  Pop $1
 
-CreateConfig:
-  ; Create new config with Ollama URL
-  CreateDirectory "$0\ao\AO"
-  FileOpen $2 $1 w
-  FileWrite $2 '{"local_llm_base_url": "http://localhost:11434", "routing_mode": "ego_primary"}'
-  FileClose $2
-  DetailPrint "Created config with Ollama URL"
-
-ConfigDone:
+  DetailPrint "Config updated with Ollama URL"
 FunctionEnd
+
+; ============================================================================
+; LLM SETUP DIALOG (uses MessageBox since nsDialogs pages not supported in hooks)
+; ============================================================================
+
+Function ShowLlmSetupDialog
+  ; Run detection
+  Call DetectOllama
+  Call DetectLmStudio
+
+  ; Build status message
+  StrCpy $TempResult ""
+
+  ; Ollama status
+  ${If} $OllamaStatus == "running"
+    StrCpy $TempResult "Ollama: Running on port 11434$\n"
+  ${ElseIf} $OllamaStatus == "installed"
+    StrCpy $TempResult "Ollama: Installed (not running)$\n"
+  ${Else}
+    StrCpy $TempResult "Ollama: Not detected$\n"
+  ${EndIf}
+
+  ; LM Studio status
+  ${If} $LmStudioStatus == "installed"
+    StrCpy $TempResult "$TempResultLM Studio: Installed$\n"
+  ${Else}
+    StrCpy $TempResult "$TempResultLM Studio: Not detected$\n"
+  ${EndIf}
+
+  ; If both missing, offer to install Ollama
+  ${If} $OllamaStatus == "not_found"
+  ${AndIf} $LmStudioStatus == "not_found"
+    MessageBox MB_YESNO|MB_ICONQUESTION "Local LLM Status:$\n$\n$TempResult$\nNo local LLM detected. AO works best with a local LLM for privacy and offline use.$\n$\nWould you like to download and install Ollama now (recommended)?" IDYES DoInstallOllama IDNO CheckLmStudio
+
+DoInstallOllama:
+    Call InstallOllama
+    Goto LlmSetupDone
+
+CheckLmStudio:
+    MessageBox MB_YESNO|MB_ICONQUESTION "Would you like to open the LM Studio download page instead?$\n$\nLM Studio is a GUI-based LLM manager with a model browser." IDYES DoLmStudio IDNO LlmSetupDone
+
+DoLmStudio:
+    ExecShell "open" "https://lmstudio.ai/download"
+    MessageBox MB_OK|MB_ICONINFORMATION "LM Studio download page opened in your browser.$\n$\nAfter installing LM Studio:$\n1. Launch LM Studio$\n2. Download a model (e.g., Phi-3 Mini)$\n3. Start the local server (Developer tab > Start Server)$\n4. AO will auto-detect it at http://localhost:1234"
+    Goto LlmSetupDone
+  ${EndIf}
+
+  ; If only Ollama missing but LM Studio installed
+  ${If} $OllamaStatus == "not_found"
+  ${AndIf} $LmStudioStatus == "installed"
+    MessageBox MB_OK|MB_ICONINFORMATION "Local LLM Status:$\n$\n$TempResult$\nLM Studio is installed. Make sure to:$\n1. Load a model$\n2. Start the local server (Developer tab > Start Server)$\n$\nYou can also install Ollama later from https://ollama.com"
+    Goto LlmSetupDone
+  ${EndIf}
+
+  ; If Ollama installed but not running
+  ${If} $OllamaStatus == "installed"
+    MessageBox MB_OK|MB_ICONINFORMATION "Local LLM Status:$\n$\n$TempResult$\nOllama is installed but not running. It should auto-start on login, or you can start it manually from the Start menu.$\n$\nMake sure you have at least one model. Run: ollama pull phi3:mini"
+    Goto LlmSetupDone
+  ${EndIf}
+
+  ; If Ollama is running, just inform
+  ${If} $OllamaStatus == "running"
+    ; Silently write config, don't bother user
+    Call WriteOllamaConfig
+  ${EndIf}
+
+LlmSetupDone:
+FunctionEnd
+
+; ============================================================================
+; UPGRADE DIALOG
+; ============================================================================
+
+Function ShowUpgradeDialog
+  ${If} $UpgradeDetected == "1"
+    ${If} $ExistingVersion != "unknown"
+      MessageBox MB_YESNO|MB_ICONQUESTION "Upgrade Detected$\n$\nAn existing AO installation (v$ExistingVersion) was found.$\n$\nWould you like to preserve your existing data?$\n$\n- Config and settings$\n- Conversation history$\n- Signed documents$\n- Identity keys$\n$\nClick YES to preserve, NO for a fresh install." IDYES PreserveYes IDNO PreserveNo
+    ${Else}
+      MessageBox MB_YESNO|MB_ICONQUESTION "Upgrade Detected$\n$\nAn existing AO installation was found.$\n$\nWould you like to preserve your existing data?$\n$\n- Config and settings$\n- Conversation history$\n- Signed documents$\n- Identity keys$\n$\nClick YES to preserve, NO for a fresh install." IDYES PreserveYes IDNO PreserveNo
+    ${EndIf}
+
+PreserveYes:
+    StrCpy $PreserveData "1"
+    Goto UpgradeDone
+
+PreserveNo:
+    StrCpy $PreserveData "0"
+    MessageBox MB_YESNO|MB_ICONEXCLAMATION "WARNING: Fresh install selected.$\n$\nThis will delete all existing AO data including:$\n- Your identity and trust relationship$\n- All conversation history$\n- Any customizations$\n$\nAre you sure?" IDYES ConfirmFresh IDNO PreserveYes
+
+ConfirmFresh:
+    StrCpy $PreserveData "0"
+
+UpgradeDone:
+  ${Else}
+    StrCpy $PreserveData "0"
+  ${EndIf}
+FunctionEnd
+
+; ============================================================================
+; PRE-INSTALL HOOK
+; ============================================================================
+
+!macro NSIS_HOOK_PREINSTALL
+  ; Check for existing installation
+  Call CheckForExistingInstall
+
+  ; Show upgrade dialog if needed
+  Call ShowUpgradeDialog
+
+  ; If upgrade detected and user chose preserve, backup data
+  ${If} $UpgradeDetected == "1"
+  ${AndIf} $PreserveData == "1"
+    Call BackupUserData
+  ${EndIf}
+!macroend
+
+; ============================================================================
+; POST-INSTALL HOOK
+; ============================================================================
+
+!macro NSIS_HOOK_POSTINSTALL
+  ; Step 1: Run identity keygen (only for fresh installs or no existing identity)
+  ${If} $UpgradeDetected != "1"
+  ${OrIf} $PreserveData != "1"
+    DetailPrint "Running AO identity setup..."
+    ExecWait '"$INSTDIR\ao-keygen.exe"' $0
+    DetailPrint "Identity setup completed (exit code: $0)"
+    ${If} $0 != 0
+      MessageBox MB_OK|MB_ICONEXCLAMATION "Identity setup did not complete.$\n$\nYou can set up your identity on first app launch."
+    ${EndIf}
+  ${Else}
+    DetailPrint "Skipping identity setup (upgrade with preserved data)"
+  ${EndIf}
+
+  ; Step 2: Restore user data if upgrading
+  ${If} $UpgradeDetected == "1"
+  ${AndIf} $PreserveData == "1"
+    Call RestoreUserData
+  ${EndIf}
+
+  ; Step 3: Write version to registry
+  Call WriteVersionToRegistry
+
+  ; Step 4: LLM setup dialog
+  Call ShowLlmSetupDialog
+!macroend
+
+; ============================================================================
+; UNINSTALL HOOKS
+; ============================================================================
+
+!macro NSIS_HOOK_PREUNINSTALL
+  ; Ask if user wants to keep their data
+  MessageBox MB_YESNO|MB_ICONQUESTION "Would you like to keep your AO data (config, memories, documents)?$\n$\nClick YES to keep data for a future reinstall.$\nClick NO to remove everything." IDYES KeepData IDNO RemoveData
+
+KeepData:
+  ; Just remove the version from registry, keep data
+  DeleteRegKey HKCU "Software\ao\AO"
+  Goto UninstallDataDone
+
+RemoveData:
+  ; Remove all data
+  ReadEnvStr $0 LOCALAPPDATA
+  RMDir /r "$0\ao\AO"
+  DeleteRegKey HKCU "Software\ao\AO"
+
+UninstallDataDone:
+!macroend
+
+!macro NSIS_HOOK_POSTUNINSTALL
+  ; Nothing special to do after uninstall
+!macroend

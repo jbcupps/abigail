@@ -61,7 +61,21 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
       await invoke("init_soul");
       setMessage("Checking identity status...");
 
-      // 2. Check identity status
+      // 2. Check for interrupted birth (closed app mid-way through first run)
+      interface InterruptedBirthInfo {
+        was_interrupted: boolean;
+        stage: string | null;
+      }
+      const interrupted = await invoke<InterruptedBirthInfo>("check_interrupted_birth");
+      if (interrupted.was_interrupted) {
+        setError(
+          `Birth was interrupted at stage "${interrupted.stage}". ` +
+          `The signing key from memory was lost. You must restart the birth process.`
+        );
+        // Continue to check identity status - it should now be Clean
+      }
+
+      // 3. Check identity status
       const status = await invoke<IdentityStatus>("check_identity_status");
 
       if (status === "Clean") {

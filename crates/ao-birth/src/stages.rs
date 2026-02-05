@@ -154,24 +154,37 @@ impl BirthOrchestrator {
     }
 
     /// Advance from Darkness to Ignition (after user has saved key).
-    pub fn advance_past_darkness(&mut self) {
+    pub fn advance_past_darkness(&mut self) -> anyhow::Result<()> {
         if self.stage == BirthStage::Darkness {
             self.stage = BirthStage::Ignition;
+            self.persist_stage()?;
         }
+        Ok(())
     }
 
     /// Advance from Ignition to Connectivity (after local LLM is confirmed working).
-    pub fn advance_to_connectivity(&mut self) {
+    pub fn advance_to_connectivity(&mut self) -> anyhow::Result<()> {
         if self.stage == BirthStage::Ignition {
             self.stage = BirthStage::Connectivity;
+            self.persist_stage()?;
         }
+        Ok(())
     }
 
     /// Advance from Connectivity to Genesis (after API keys are stored).
-    pub fn advance_to_genesis(&mut self) {
+    pub fn advance_to_genesis(&mut self) -> anyhow::Result<()> {
         if self.stage == BirthStage::Connectivity {
             self.stage = BirthStage::Genesis;
+            self.persist_stage()?;
         }
+        Ok(())
+    }
+
+    /// Persist current stage to config for recovery/diagnostics.
+    fn persist_stage(&mut self) -> anyhow::Result<()> {
+        self.config.set_birth_stage(self.stage.name());
+        self.config.save(&self.config.config_path())?;
+        Ok(())
     }
 
     /// Add a message to the birth conversation history.
@@ -210,6 +223,7 @@ impl BirthOrchestrator {
         std::fs::write(docs_dir.join("growth.md"), growth_content)?;
 
         self.stage = BirthStage::Emergence;
+        self.persist_stage()?;
         Ok(())
     }
 
@@ -247,8 +261,9 @@ impl BirthOrchestrator {
         let memory = Memory::crystallized(content);
         self.store.record_birth(&memory)?;
 
-        // Save config
+        // Save config - mark birth complete and clear stage
         self.config.birth_complete = true;
+        self.config.clear_birth_stage();
         self.config.save(&self.config.config_path())?;
 
         Ok(())
@@ -303,6 +318,7 @@ impl BirthOrchestrator {
         let memory = Memory::crystallized(content);
         self.store.record_birth(&memory)?;
         self.config.birth_complete = true;
+        self.config.clear_birth_stage();
         self.config.save(&self.config.config_path())?;
         Ok(())
     }
@@ -326,6 +342,7 @@ mod tests {
         let data_dir = base.join("data");
         fs::create_dir_all(&data_dir).unwrap();
         AppConfig {
+            schema_version: ao_core::CONFIG_SCHEMA_VERSION,
             data_dir: data_dir.clone(),
             models_dir: data_dir.join("models"),
             docs_dir: data_dir.join("docs"),
@@ -333,6 +350,7 @@ mod tests {
             openai_api_key: None,
             email: None,
             birth_complete: false,
+            birth_stage: None,
             external_pubkey_path: None,
             local_llm_base_url: None,
             routing_mode: Default::default(),
@@ -383,7 +401,7 @@ mod tests {
 
         let mut orch = BirthOrchestrator::new(config).unwrap();
         orch.generate_identity(&docs_dir).unwrap();
-        orch.advance_past_darkness();
+        orch.advance_past_darkness().unwrap();
         assert_eq!(orch.current_stage(), BirthStage::Ignition);
 
         let _ = fs::remove_dir_all(&tmp);
@@ -398,8 +416,8 @@ mod tests {
 
         let mut orch = BirthOrchestrator::new(config).unwrap();
         orch.generate_identity(&docs_dir).unwrap();
-        orch.advance_past_darkness();
-        orch.advance_to_connectivity();
+        orch.advance_past_darkness().unwrap();
+        orch.advance_to_connectivity().unwrap();
         assert_eq!(orch.current_stage(), BirthStage::Connectivity);
 
         let _ = fs::remove_dir_all(&tmp);
@@ -414,9 +432,9 @@ mod tests {
 
         let mut orch = BirthOrchestrator::new(config).unwrap();
         orch.generate_identity(&docs_dir).unwrap();
-        orch.advance_past_darkness();
-        orch.advance_to_connectivity();
-        orch.advance_to_genesis();
+        orch.advance_past_darkness().unwrap();
+        orch.advance_to_connectivity().unwrap();
+        orch.advance_to_genesis().unwrap();
         assert_eq!(orch.current_stage(), BirthStage::Genesis);
 
         let _ = fs::remove_dir_all(&tmp);
@@ -432,9 +450,9 @@ mod tests {
 
         let mut orch = BirthOrchestrator::new(config).unwrap();
         orch.generate_identity(&docs_dir).unwrap();
-        orch.advance_past_darkness();
-        orch.advance_to_connectivity();
-        orch.advance_to_genesis();
+        orch.advance_past_darkness().unwrap();
+        orch.advance_to_connectivity().unwrap();
+        orch.advance_to_genesis().unwrap();
 
         orch.crystallize_soul("# Soul\nI am Test.", "# Growth\nGrowing.")
             .unwrap();
@@ -464,9 +482,9 @@ mod tests {
 
         let mut orch = BirthOrchestrator::new(config).unwrap();
         orch.generate_identity(&docs_dir).unwrap();
-        orch.advance_past_darkness();
-        orch.advance_to_connectivity();
-        orch.advance_to_genesis();
+        orch.advance_past_darkness().unwrap();
+        orch.advance_to_connectivity().unwrap();
+        orch.advance_to_genesis().unwrap();
         orch.crystallize_soul("# Soul\nI am Test.", "# Growth\nGrowing.")
             .unwrap();
 
@@ -481,6 +499,9 @@ mod tests {
         assert!(docs_dir.join("soul.md.sig").exists());
         assert!(docs_dir.join("ethics.md.sig").exists());
         assert!(docs_dir.join("instincts.md.sig").exists());
+
+        // birth_stage should be cleared
+        assert!(orch.config().birth_stage.is_none());
 
         let _ = fs::remove_dir_all(&tmp);
     }

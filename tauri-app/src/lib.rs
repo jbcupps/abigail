@@ -183,6 +183,32 @@ pub enum IdentityStatus {
     Broken,   // Pubkey exists, but sigs missing
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterruptedBirthInfo {
+    pub was_interrupted: bool,
+    pub stage: Option<String>,
+}
+
+/// Check if birth was interrupted (closed mid-way through the process).
+/// If interrupted, the birth_stage is reset and user must restart from Darkness.
+#[tauri::command]
+fn check_interrupted_birth(state: tauri::State<AppState>) -> Result<InterruptedBirthInfo, String> {
+    let mut config = state.config.write().map_err(|e| e.to_string())?;
+
+    let stage_before = config.birth_stage.clone();
+    let was_interrupted = config.check_interrupted_birth();
+
+    if was_interrupted {
+        // Save the cleared state
+        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+    }
+
+    Ok(InterruptedBirthInfo {
+        was_interrupted,
+        stage: stage_before,
+    })
+}
+
 /// Check the identity status of the application.
 #[tauri::command]
 fn check_identity_status(state: tauri::State<AppState>) -> Result<IdentityStatus, String> {
@@ -370,7 +396,7 @@ fn generate_identity(state: tauri::State<AppState>) -> Result<KeypairGenerationR
 fn advance_past_darkness(state: tauri::State<AppState>) -> Result<(), String> {
     let mut birth = state.birth.write().map_err(|e| e.to_string())?;
     let b = birth.as_mut().ok_or("Birth not started")?;
-    b.advance_past_darkness();
+    b.advance_past_darkness().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -936,7 +962,7 @@ async fn set_local_llm_during_birth(
         let mut birth = state.birth.write().map_err(|e| e.to_string())?;
         if let Some(b) = birth.as_mut() {
             b.config_mut().local_llm_base_url = Some(url);
-            b.advance_to_connectivity();
+            let _ = b.advance_to_connectivity(); // Ignore error if already past this stage
         }
     }
 
@@ -1092,7 +1118,7 @@ fn advance_to_genesis(state: tauri::State<AppState>) -> Result<(), String> {
     let mut birth = state.birth.write().map_err(|e| e.to_string())?;
     let b = birth.as_mut().ok_or("Birth not started")?;
     b.clear_conversation(); // Clear connectivity conversation
-    b.advance_to_genesis();
+    b.advance_to_genesis().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1238,6 +1264,7 @@ pub fn run() {
             init_soul,
             generate_and_sign_constitutional,
             check_identity_status,
+            check_interrupted_birth,
             repair_identity,
             run_startup_checks,
             get_birth_stage,

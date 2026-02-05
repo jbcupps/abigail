@@ -10,7 +10,7 @@ pub mod templates;
 pub mod vault;
 pub mod verifier;
 
-pub use config::{AppConfig, EmailConfig, RoutingMode, TrinityConfig};
+pub use config::{AppConfig, EmailConfig, RoutingMode, TrinityConfig, CONFIG_SCHEMA_VERSION};
 pub use document::{CoreDocument, DocumentTier};
 pub use error::{CoreError, Result};
 pub use keyring::{
