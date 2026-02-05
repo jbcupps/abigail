@@ -12,6 +12,26 @@ pub enum RoutingMode {
     EgoPrimary,
 }
 
+/// Trinity configuration: maps providers to Superego/Ego/Id roles.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TrinityConfig {
+    /// Local LLM URL for Id
+    #[serde(default)]
+    pub id_url: Option<String>,
+    /// Cloud provider name for Ego (e.g. "openai", "anthropic")
+    #[serde(default)]
+    pub ego_provider: Option<String>,
+    /// API key for Ego provider
+    #[serde(default)]
+    pub ego_api_key: Option<String>,
+    /// Cloud provider name for Superego (e.g. "anthropic", "openai")
+    #[serde(default)]
+    pub superego_provider: Option<String>,
+    /// API key for Superego provider
+    #[serde(default)]
+    pub superego_api_key: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub data_dir: PathBuf,
@@ -42,6 +62,14 @@ pub struct AppConfig {
     /// Routing mode: ego_primary (default) or id_primary
     #[serde(default)]
     pub routing_mode: RoutingMode,
+
+    /// Trinity configuration: Superego/Ego/Id provider mapping
+    #[serde(default)]
+    pub trinity: Option<TrinityConfig>,
+
+    /// Agent's chosen name (set during Genesis)
+    #[serde(default)]
+    pub agent_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +100,8 @@ impl AppConfig {
             external_pubkey_path: None,
             local_llm_base_url: None,
             routing_mode: RoutingMode::default(),
+            trinity: None,
+            agent_name: None,
         }
     }
 

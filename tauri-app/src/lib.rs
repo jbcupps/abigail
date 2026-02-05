@@ -5,7 +5,7 @@ mod templates;
 use ao_birth::BirthOrchestrator;
 use ao_core::{
     generate_external_keypair, sign_constitutional_documents, AppConfig,
-    CoreError, ExternalVault, Keyring, ReadOnlyFileVault, SecretsVault, Verifier,
+    CoreError, ExternalVault, Keyring, ReadOnlyFileVault, SecretsVault, TrinityConfig, Verifier,
 };
 use ao_memory::{Memory, MemoryStore};
 use ao_router::IdEgoRouter;
@@ -102,13 +102,13 @@ fn init_soul(state: tauri::State<AppState>) -> Result<(), String> {
 }
 
 /// Generate the external signing keypair and sign constitutional documents.
-/// 
+///
 /// This is called during first-run setup. It:
 /// 1. Generates a new Ed25519 keypair (or detects if pubkey already exists)
 /// 2. Signs the constitutional documents (soul.md, ethics.md, instincts.md)
 /// 3. Stores the PUBLIC key in data_dir/external_pubkey.bin
 /// 4. Returns the PRIVATE key as base64 for the user to save
-/// 
+///
 /// CRITICAL: The private key is returned ONCE and never stored by AO.
 /// The user MUST save it securely. Without it, they cannot verify integrity
 /// after a reinstall or re-sign documents if needed.
@@ -120,13 +120,13 @@ fn generate_and_sign_constitutional(state: tauri::State<AppState>) -> Result<Key
     drop(config); // Release the lock before doing file I/O
 
     let pubkey_path = data_dir.join("external_pubkey.bin");
-    
+
     // Check if we already have signatures (idempotent - don't regenerate)
     let sig_exists = docs_dir.join("soul.md.sig").exists()
         && docs_dir.join("ethics.md.sig").exists()
         && docs_dir.join("instincts.md.sig").exists()
         && pubkey_path.exists();
-    
+
     if sig_exists {
         // Already generated - can't return the private key again (it was never stored)
         return Err(
@@ -139,29 +139,29 @@ fn generate_and_sign_constitutional(state: tauri::State<AppState>) -> Result<Key
 
     // Generate the external keypair
     let keypair_result = generate_external_keypair(&data_dir).map_err(|e| e.to_string())?;
-    
+
     // Parse the private key from the result to use for signing
     let private_key_bytes = base64::engine::general_purpose::STANDARD
         .decode(&keypair_result.private_key_base64)
         .map_err(|e| format!("Failed to decode private key: {}", e))?;
-    
+
     let key_bytes: [u8; 32] = private_key_bytes
         .as_slice()
         .try_into()
         .map_err(|_| "Invalid private key length")?;
-    
+
     let signing_key = SigningKey::from_bytes(&key_bytes);
-    
+
     // Sign the constitutional documents
     sign_constitutional_documents(&signing_key, &docs_dir).map_err(|e| e.to_string())?;
-    
+
     // Update config to point to the new pubkey
     {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         config.external_pubkey_path = Some(pubkey_path.clone());
         config.save(&config.config_path()).map_err(|e| e.to_string())?;
     }
-    
+
     Ok(KeypairGenerationResult {
         private_key_base64: keypair_result.private_key_base64,
         public_key_path: pubkey_path.to_string_lossy().to_string(),
@@ -182,14 +182,14 @@ fn check_identity_status(state: tauri::State<AppState>) -> Result<IdentityStatus
     let config = state.config.read().map_err(|e| e.to_string())?;
     let data_dir = config.data_dir.clone();
     let docs_dir = config.docs_dir.clone();
-    
+
     let pubkey_path = data_dir.join("external_pubkey.bin");
     let pubkey_exists = pubkey_path.exists();
 
     let sigs_exist = docs_dir.join("soul.md.sig").exists()
         && docs_dir.join("ethics.md.sig").exists()
         && docs_dir.join("instincts.md.sig").exists();
-    
+
     if !pubkey_exists {
         return Ok(IdentityStatus::Clean);
     }
@@ -222,15 +222,23 @@ pub struct KeypairGenerationResult {
 
 /// Run startup checks: LLM heartbeat then signature verification.
 /// Returns status for each check so the UI can show appropriate messages.
+/// When birth is not complete, softens heartbeat requirement.
 #[tauri::command]
 async fn run_startup_checks(state: tauri::State<'_, AppState>) -> Result<StartupCheckResult, String> {
+    // Check if birth is complete
+    let birth_complete = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        config.birth_complete
+    };
+
     // 1. LLM heartbeat — clone router before async boundary (RwLock is not Send)
     let router = state.router.read().map_err(|e| e.to_string())?.clone();
     let heartbeat_result = router.heartbeat().await;
     let heartbeat_ok = heartbeat_result.is_ok();
     let heartbeat_error = heartbeat_result.err().map(|e| e.to_string());
 
-    if !heartbeat_ok {
+    // During birth, heartbeat failure is non-fatal (birth handles LLM setup)
+    if !heartbeat_ok && birth_complete {
         return Ok(StartupCheckResult {
             heartbeat_ok: false,
             verification_ok: false,
@@ -267,9 +275,9 @@ async fn run_startup_checks(state: tauri::State<'_, AppState>) -> Result<Startup
     let verification_error = verification_result.err().map(|e| e.to_string());
 
     Ok(StartupCheckResult {
-        heartbeat_ok,
+        heartbeat_ok: heartbeat_ok || !birth_complete,
         verification_ok,
-        error: verification_error,
+        error: verification_error.or(if !heartbeat_ok { heartbeat_error } else { None }),
     })
 }
 
@@ -305,16 +313,58 @@ fn start_birth(state: tauri::State<AppState>) -> Result<(), String> {
 fn verify_crypto(state: tauri::State<AppState>) -> Result<(), String> {
     let mut birth = state.birth.write().map_err(|e| e.to_string())?;
     let b = birth.as_mut().ok_or("Birth not started")?;
-    
+
     // Use the config's docs_dir as the source of truth
     let docs_path = b.config().docs_dir.clone();
-    
+
     tracing::info!("Verifying crypto integrity in: {}", docs_path.display());
-    
-    b.verify_crypto(&docs_path).map_err(|e| {
-        tracing::error!("Crypto verification failed: {}", e);
+
+    // In the new flow, generate_identity replaces verify_crypto for first run
+    // Keep this for legacy/repair path
+    b.generate_identity(&docs_path).map_err(|e| {
+        tracing::error!("Identity generation failed: {}", e);
         e.to_string()
     })
+}
+
+/// Generate identity during Darkness stage: keypair generation, hold signing key.
+/// Returns the private key base64 and public key path.
+#[tauri::command]
+fn generate_identity(state: tauri::State<AppState>) -> Result<KeypairGenerationResult, String> {
+    let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+    let b = birth.as_mut().ok_or("Birth not started")?;
+
+    let docs_path = b.config().docs_dir.clone();
+    b.generate_identity(&docs_path).map_err(|e| e.to_string())?;
+
+    let private_key = b.get_private_key_base64()
+        .ok_or("No private key generated")?
+        .to_string();
+
+    let data_dir = b.config().data_dir.clone();
+    let pubkey_path = data_dir.join("external_pubkey.bin");
+
+    // Also sync config to AppState
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.external_pubkey_path = Some(pubkey_path.clone());
+        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+    }
+
+    Ok(KeypairGenerationResult {
+        private_key_base64: private_key,
+        public_key_path: pubkey_path.to_string_lossy().to_string(),
+        newly_generated: true,
+    })
+}
+
+/// Advance past Darkness after user has saved their private key.
+#[tauri::command]
+fn advance_past_darkness(state: tauri::State<AppState>) -> Result<(), String> {
+    let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+    let b = birth.as_mut().ok_or("Birth not started")?;
+    b.advance_past_darkness();
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -349,17 +399,17 @@ fn repair_identity(state: tauri::State<AppState>, params: RepairIdentityParams) 
 
     if let Some(private_key_base64) = params.private_key {
         tracing::info!("Attempting identity REPAIR with provided private key");
-        
+
         // 1. Validate private key format
         let private_key_bytes = base64::engine::general_purpose::STANDARD
             .decode(&private_key_base64)
             .map_err(|e| format!("Invalid private key format: {}", e))?;
-            
+
         let key_bytes: [u8; 32] = private_key_bytes
             .as_slice()
             .try_into()
             .map_err(|_| "Invalid private key length")?;
-            
+
         let signing_key = SigningKey::from_bytes(&key_bytes);
         let verifying_key = signing_key.verifying_key();
 
@@ -368,17 +418,17 @@ fn repair_identity(state: tauri::State<AppState>, params: RepairIdentityParams) 
         if !pubkey_path.exists() {
             return Err("Public key not found. Cannot verify ownership. Please use Reset.".to_string());
         }
-        
+
         let vault = ReadOnlyFileVault::new(&pubkey_path);
         let stored_pubkey = vault.read_public_key().map_err(|e: CoreError| e.to_string())?;
-        
+
         if verifying_key != stored_pubkey {
             return Err("Provided private key does not match the stored public key.".to_string());
         }
 
         // 3. Regenerate signatures
         sign_constitutional_documents(&signing_key, &docs_dir).map_err(|e| e.to_string())?;
-        
+
         tracing::info!("Identity repair successful. Signatures regenerated.");
         return Ok(());
     }
@@ -396,17 +446,19 @@ fn configure_email(
     smtp_port: u16,
     password: String,
 ) -> Result<(), String> {
-    let mut birth = state.birth.write().map_err(|e| e.to_string())?;
-    let b = birth.as_mut().ok_or("Birth not started")?;
-    b.configure_email(
-        &address,
-        &imap_host,
+    let mut config = state.config.write().map_err(|e| e.to_string())?;
+    let password_encrypted = Keyring::encrypt_bytes(password.as_bytes())
+        .map_err(|e| e.to_string())?;
+    config.email = Some(ao_core::EmailConfig {
+        address,
+        imap_host,
         imap_port,
-        &smtp_host,
+        smtp_host,
         smtp_port,
-        &password,
-    )
-    .map_err(|e| e.to_string())
+        password_encrypted,
+    });
+    config.save(&config.config_path()).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -613,13 +665,282 @@ async fn chat(state: tauri::State<'_, AppState>, message: String) -> Result<Stri
     Ok(response.content)
 }
 
-/// MVP shortcut: skip email and model download, go directly to Life stage.
+/// MVP shortcut: skip email and model download, go directly to Emergence stage.
 /// Used for streamlined first-run experience.
 #[tauri::command]
 fn skip_to_life_for_mvp(state: tauri::State<AppState>) -> Result<(), String> {
     let mut birth = state.birth.write().map_err(|e| e.to_string())?;
     let b = birth.as_mut().ok_or("Birth not started")?;
     b.skip_to_life_for_mvp();
+    Ok(())
+}
+
+// ── New Birth Flow Commands ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetectedLlm {
+    pub name: String,
+    pub url: String,
+    pub reachable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProbeResult {
+    pub detected: Vec<DetectedLlm>,
+}
+
+/// Auto-detect local LLM servers on common ports.
+#[tauri::command]
+async fn probe_local_llm() -> Result<ProbeResult, String> {
+    let candidates = vec![
+        ("Ollama", "http://localhost:11434"),
+        ("LM Studio", "http://localhost:1234"),
+    ];
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .connect_timeout(std::time::Duration::from_secs(2))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let mut detected = Vec::new();
+
+    for (name, url) in candidates {
+        let probe_url = format!("{}/v1/models", url);
+        let reachable = client.get(&probe_url).send().await.is_ok();
+        detected.push(DetectedLlm {
+            name: name.to_string(),
+            url: url.to_string(),
+            reachable,
+        });
+    }
+
+    Ok(ProbeResult { detected })
+}
+
+/// Set local LLM URL during birth, heartbeat it, and advance past Ignition.
+#[tauri::command]
+async fn set_local_llm_during_birth(
+    state: tauri::State<'_, AppState>,
+    url: String,
+) -> Result<bool, String> {
+    // Set the URL in config and rebuild router
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.local_llm_base_url = Some(url.clone());
+        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+
+        let new_router = IdEgoRouter::new(
+            config.local_llm_base_url.clone(),
+            config.openai_api_key.clone(),
+            config.routing_mode,
+        );
+        drop(config);
+        let mut router = state.router.write().map_err(|e| e.to_string())?;
+        *router = new_router;
+    }
+
+    // Heartbeat the new provider
+    let router = state.router.read().map_err(|e| e.to_string())?.clone();
+    let heartbeat_ok = router.heartbeat().await.is_ok();
+
+    if heartbeat_ok {
+        // Also update birth orchestrator config
+        let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+        if let Some(b) = birth.as_mut() {
+            b.config_mut().local_llm_base_url = Some(url);
+            b.advance_to_connectivity();
+        }
+    }
+
+    Ok(heartbeat_ok)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BirthChatResponse {
+    pub message: String,
+    pub stage: String,
+    pub action: Option<BirthAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum BirthAction {
+    RequestApiKey { provider: String },
+    SoulReady { preview: String },
+    StageComplete,
+}
+
+/// Stage-aware chat during birth, routed exclusively through local LLM.
+#[tauri::command]
+async fn birth_chat(
+    state: tauri::State<'_, AppState>,
+    message: String,
+) -> Result<BirthChatResponse, String> {
+    // Get stage and system prompt
+    let (stage, system_prompt) = {
+        let birth = state.birth.read().map_err(|e| e.to_string())?;
+        let b = birth.as_ref().ok_or("Birth not started")?;
+        let stage = b.current_stage();
+        let prompt = ao_birth::prompts::system_prompt_for_stage(stage)
+            .unwrap_or("You are AO, a newborn AI agent.");
+        (stage, prompt.to_string())
+    };
+
+    // Record user message
+    {
+        let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+        let b = birth.as_mut().ok_or("Birth not started")?;
+        b.add_message("user", &message);
+    }
+
+    // Build messages array with system prompt + conversation history
+    let messages = {
+        let birth = state.birth.read().map_err(|e| e.to_string())?;
+        let b = birth.as_ref().ok_or("Birth not started")?;
+        let mut msgs = vec![ao_capabilities::cognitive::Message {
+            role: "system".to_string(),
+            content: system_prompt,
+        }];
+        for (role, content) in b.get_conversation() {
+            msgs.push(ao_capabilities::cognitive::Message {
+                role: role.clone(),
+                content: content.clone(),
+            });
+        }
+        msgs
+    };
+
+    // Route through local LLM only (Id)
+    let router = state.router.read().map_err(|e| e.to_string())?.clone();
+    let response = router.id_only(messages).await.map_err(|e| e.to_string())?;
+
+    // Record assistant response
+    {
+        let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+        let b = birth.as_mut().ok_or("Birth not started")?;
+        b.add_message("assistant", &response.content);
+    }
+
+    Ok(BirthChatResponse {
+        message: response.content,
+        stage: stage.name().to_string(),
+        action: None,
+    })
+}
+
+/// Store a provider API key in the vault during Connectivity.
+#[tauri::command]
+fn store_provider_key(
+    state: tauri::State<AppState>,
+    provider: String,
+    key: String,
+) -> Result<bool, String> {
+    // Store in secrets vault
+    {
+        let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
+        vault.set_secret(&provider, &key);
+        vault.save().map_err(|e| e.to_string())?;
+    }
+
+    // If it's an OpenAI key, also set it as the main API key and rebuild router
+    if provider == "openai" {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.openai_api_key = Some(key.clone());
+        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+
+        let new_router = IdEgoRouter::new(
+            config.local_llm_base_url.clone(),
+            config.openai_api_key.clone(),
+            config.routing_mode,
+        );
+        drop(config);
+        let mut router = state.router.write().map_err(|e| e.to_string())?;
+        *router = new_router;
+    }
+
+    Ok(true)
+}
+
+/// Advance from Connectivity to Genesis.
+#[tauri::command]
+fn advance_to_genesis(state: tauri::State<AppState>) -> Result<(), String> {
+    let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+    let b = birth.as_mut().ok_or("Birth not started")?;
+    b.clear_conversation(); // Clear connectivity conversation
+    b.advance_to_genesis();
+    Ok(())
+}
+
+/// Generate soul.md from template with name, purpose, personality.
+/// Returns the generated content for preview.
+#[tauri::command]
+fn crystallize_soul(
+    state: tauri::State<AppState>,
+    name: String,
+    purpose: String,
+    personality: String,
+) -> Result<String, String> {
+    let soul_content = ao_core::templates::fill_soul_template(&name, &purpose, &personality);
+    let growth_content = ao_core::templates::GROWTH_MD.to_string();
+
+    // Update agent name in config
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.agent_name = Some(name.clone());
+        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+    }
+
+    // Write to disk and advance stage
+    {
+        let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+        let b = birth.as_mut().ok_or("Birth not started")?;
+        b.crystallize_soul(&soul_content, &growth_content)
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(soul_content)
+}
+
+/// Sign all docs, finalize birth, write Trinity config.
+#[tauri::command]
+fn complete_emergence(state: tauri::State<AppState>) -> Result<(), String> {
+    // Build Trinity config from current state
+    let trinity = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let vault = state.secrets.lock().map_err(|e| e.to_string())?;
+
+        TrinityConfig {
+            id_url: config.local_llm_base_url.clone(),
+            ego_provider: if config.openai_api_key.is_some() {
+                Some("openai".to_string())
+            } else {
+                vault.get_secret("anthropic").map(|_| "anthropic".to_string())
+                    .or_else(|| vault.get_secret("xai").map(|_| "xai".to_string()))
+            },
+            ego_api_key: config.openai_api_key.clone()
+                .or_else(|| vault.get_secret("anthropic").map(|s| s.to_string()))
+                .or_else(|| vault.get_secret("xai").map(|s| s.to_string())),
+            superego_provider: None, // Follow-up: 3-way routing
+            superego_api_key: None,
+        }
+    };
+
+    // Complete emergence (sign docs, write birth memory)
+    {
+        let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+        let b = birth.as_mut().ok_or("Birth not started")?;
+        b.complete_emergence().map_err(|e| e.to_string())?;
+    }
+
+    // Write trinity config
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.trinity = Some(trinity);
+        config.birth_complete = true;
+        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+    }
+
     Ok(())
 }
 
@@ -690,6 +1011,8 @@ pub fn run() {
             get_birth_message,
             start_birth,
             verify_crypto,
+            generate_identity,
+            advance_past_darkness,
             configure_email,
             download_model,
             set_api_key,
@@ -706,6 +1029,14 @@ pub fn run() {
             remove_secret,
             list_missing_skill_secrets,
             chat,
+            // New birth flow commands
+            probe_local_llm,
+            set_local_llm_during_birth,
+            birth_chat,
+            store_provider_key,
+            advance_to_genesis,
+            crystallize_soul,
+            complete_emergence,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

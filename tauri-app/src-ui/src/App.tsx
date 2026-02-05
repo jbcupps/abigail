@@ -24,7 +24,7 @@ function App() {
           setAppState("startup_check");
           await runStartupChecks();
         } else {
-          // First run: show boot sequence
+          // First run: show boot sequence (handles its own LLM setup)
           setAppState("boot");
         }
       } catch {
