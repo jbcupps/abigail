@@ -36,7 +36,8 @@ function AppInner() {
         // No existing identity - check if birth is complete
         const complete = await invoke<boolean>("get_birth_complete");
         if (complete) {
-          // Already born: run startup checks before showing chat
+          // Already born: switch to ego mode immediately to avoid amber flash
+          setMode("ego");
           setAppState("startup_check");
           await refreshAgentName();
           await runStartupChecks();
@@ -66,8 +67,7 @@ function AppInner() {
         return;
       }
 
-      // All checks passed — switch to ego mode for chat
-      setMode("ego");
+      // All checks passed — go to chat (ego mode already set)
       setAppState("chat");
     } catch (e) {
       setStartupError(String(e));
@@ -96,6 +96,7 @@ function AppInner() {
   // Handlers for identity conflict screen
   const handleIdentityResume = async () => {
     setExistingIdentity(null);
+    setMode("ego"); // Switch to ego immediately for resuming identity
     setAppState("startup_check");
     await refreshAgentName();
     await runStartupChecks();
@@ -115,7 +116,7 @@ function AppInner() {
 
   if (appState === "loading") {
     return (
-      <div className="min-h-screen bg-black text-theme-text font-mono flex items-center justify-center">
+      <div className="min-h-screen bg-black text-gray-500 font-mono flex items-center justify-center">
         Loading...
       </div>
     );
@@ -138,7 +139,7 @@ function AppInner() {
 
   if (appState === "startup_check") {
     return (
-      <div className="min-h-screen bg-black text-theme-text font-mono flex flex-col items-center justify-center">
+      <div className="min-h-screen bg-black text-gray-400 font-mono flex flex-col items-center justify-center">
         <pre className="text-sm mb-4">
           AO STARTUP
           ============

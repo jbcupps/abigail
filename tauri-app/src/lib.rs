@@ -250,12 +250,20 @@ pub struct IdentitySummary {
 
 /// Check for existing completed identity. Returns summary if found.
 /// Used at startup to detect if user should be shown the identity conflict screen.
+/// Checks both the birth_complete config flag AND signed identity files on disk
+/// to catch stale/interrupted births and version upgrades.
 #[tauri::command]
 fn check_existing_identity(state: tauri::State<AppState>) -> Result<Option<IdentitySummary>, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
 
-    // Only return summary if birth is complete
-    if !config.birth_complete {
+    // Check for signed identity files on disk (catches upgrades and stale state)
+    let has_signed_identity = config.data_dir.join("external_pubkey.bin").exists()
+        && config.docs_dir.join("soul.md.sig").exists()
+        && config.docs_dir.join("ethics.md.sig").exists()
+        && config.docs_dir.join("instincts.md.sig").exists();
+
+    // Return None only if birth is not complete AND no signed identity exists on disk
+    if !config.birth_complete && !has_signed_identity {
         return Ok(None);
     }
 
@@ -1529,6 +1537,97 @@ fn advance_to_genesis(state: tauri::State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Extract name, purpose, and personality from the Genesis conversation.
+/// Sends the conversation to the local LLM with an extraction prompt,
+/// parses the JSON response, and returns the values for the SoulPreview form.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenesisIdentity {
+    pub name: Option<String>,
+    pub purpose: Option<String>,
+    pub personality: Option<String>,
+}
+
+#[tauri::command]
+async fn extract_genesis_identity(
+    state: tauri::State<'_, AppState>,
+) -> Result<GenesisIdentity, String> {
+    // Get conversation history from birth orchestrator
+    let conversation = {
+        let birth = state.birth.read().map_err(|e| e.to_string())?;
+        let b = birth.as_ref().ok_or("Birth not started")?;
+        b.get_conversation().to_vec()
+    };
+
+    if conversation.is_empty() {
+        return Ok(GenesisIdentity { name: None, purpose: None, personality: None });
+    }
+
+    // Build conversation transcript for the extraction prompt
+    let mut conv_text = String::new();
+    for (role, content) in &conversation {
+        let label = match role.as_str() {
+            "user" => "Mentor",
+            "assistant" => "AO",
+            _ => role.as_str(),
+        };
+        conv_text.push_str(&format!("{}: {}\n", label, content));
+    }
+
+    let extraction_prompt = format!(
+        "Below is a conversation between a mentor and their AI agent during the agent's birth.\n\n\
+         CONVERSATION:\n{}\n\n\
+         Extract the following from the conversation and return ONLY a JSON object:\n\
+         - \"name\": The name the mentor chose for the agent\n\
+         - \"purpose\": What the agent's purpose should be\n\
+         - \"personality\": The personality or tone the mentor described\n\n\
+         If a value was not discussed, use null.\n\
+         Return ONLY valid JSON, no other text. Example:\n\
+         {{\"name\": \"Atlas\", \"purpose\": \"help with research\", \"personality\": \"witty and direct\"}}",
+        conv_text
+    );
+
+    let messages = vec![
+        ao_capabilities::cognitive::Message::new("user", &extraction_prompt),
+    ];
+
+    let router = state.router.read().map_err(|e| e.to_string())?.clone();
+    let response = router.id_only(messages).await.map_err(|e| e.to_string())?;
+
+    // Parse JSON from LLM response (best-effort)
+    Ok(parse_identity_json(&response.content))
+}
+
+fn parse_identity_json(text: &str) -> GenesisIdentity {
+    let empty = GenesisIdentity { name: None, purpose: None, personality: None };
+
+    // Try parsing the whole text as JSON
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(text.trim()) {
+        return value_to_identity(&v);
+    }
+
+    // Try to find a JSON object in the text
+    if let Some(start) = text.find('{') {
+        if let Some(end) = text.rfind('}') {
+            if end > start {
+                let json_str = &text[start..=end];
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
+                    return value_to_identity(&v);
+                }
+            }
+        }
+    }
+
+    empty
+}
+
+fn value_to_identity(v: &serde_json::Value) -> GenesisIdentity {
+    GenesisIdentity {
+        name: v.get("name").and_then(|v| v.as_str()).map(String::from),
+        purpose: v.get("purpose").and_then(|v| v.as_str()).map(String::from),
+        personality: v.get("personality").and_then(|v| v.as_str()).map(String::from),
+    }
+}
+
 /// Generate soul.md from template with name, purpose, personality.
 /// Returns the generated content for preview.
 #[tauri::command]
@@ -1713,6 +1812,7 @@ pub fn run() {
             store_provider_key,
             get_stored_providers,
             advance_to_genesis,
+            extract_genesis_identity,
             crystallize_soul,
             complete_emergence,
         ])

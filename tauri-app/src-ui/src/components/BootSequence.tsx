@@ -267,8 +267,24 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     }
   };
 
-  const handleGenesisDone = () => {
-    // Show a form for name/purpose/personality extracted from conversation
+  const handleGenesisDone = async () => {
+    // Extract identity from Genesis conversation via LLM
+    setMessage("Extracting identity from conversation...");
+    try {
+      const identity = await invoke<{
+        name: string | null;
+        purpose: string | null;
+        personality: string | null;
+      }>("extract_genesis_identity");
+
+      if (identity.name) setGenesisName(identity.name);
+      if (identity.purpose) setGenesisPurpose(identity.purpose);
+      if (identity.personality) setGenesisPersonality(identity.personality);
+    } catch (e) {
+      console.warn("Could not extract identity from conversation:", e);
+      // Continue to SoulPreview with empty form — user fills in manually
+    }
+    setMessage("");
     setStage("SoulPreview");
   };
 
@@ -487,8 +503,9 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               Genesis: Define Your Agent
             </h2>
             <p className="text-theme-text-dim text-sm mb-6">
-              Based on your conversation, fill in the details below. These will
-              become part of AO's soul document.
+              Review the details extracted from your conversation below. Edit
+              anything that needs adjustment — these will become part of AO's
+              soul document.
             </p>
 
             <div className="space-y-4 mb-6">
