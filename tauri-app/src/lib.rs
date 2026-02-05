@@ -59,6 +59,12 @@ fn get_birth_complete(state: tauri::State<AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
+fn get_agent_name(state: tauri::State<AppState>) -> Result<Option<String>, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    Ok(config.agent_name.clone())
+}
+
+#[tauri::command]
 fn get_docs_path(state: tauri::State<AppState>) -> Result<PathBuf, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     Ok(config.docs_dir.clone())
@@ -706,7 +712,7 @@ async fn execute_tool_call(
 }
 
 #[tauri::command]
-async fn chat(state: tauri::State<'_, AppState>, message: String) -> Result<String, String> {
+async fn chat(state: tauri::State<'_, AppState>, message: String, target: Option<String>) -> Result<String, String> {
     // Build system prompt and gather config before async boundary
     let (store, router, system_prompt) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
@@ -726,40 +732,49 @@ async fn chat(state: tauri::State<'_, AppState>, message: String) -> Result<Stri
         ao_capabilities::cognitive::Message::new("user", &message),
     ];
 
+    let target_mode = target.as_deref().unwrap_or("EGO");
     let tools = chat_tool_definitions();
 
-    // First request — may return tool calls
-    let response = router
-        .route_with_tools(messages.clone(), tools.clone())
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let final_content = if let Some(ref tool_calls) = response.tool_calls {
-        // Execute each tool call and collect results
-        let mut tool_results = Vec::new();
-        for tc in tool_calls {
-            let result = execute_tool_call(&state, tc).await;
-            tool_results.push((tc.clone(), result));
-        }
-
-        // Build follow-up: original messages + assistant with tool_calls + tool results
-        messages.push(ao_capabilities::cognitive::Message {
-            role: "assistant".to_string(),
-            content: response.content.clone(),
-            tool_call_id: None,
-            tool_calls: Some(tool_calls.clone()),
-        });
-
-        for (tc, result) in &tool_results {
-            messages.push(ao_capabilities::cognitive::Message::tool_result(&tc.id, result));
-        }
-
-        // Send follow-up for final natural-language response
-        let follow_up = router
-            .route_with_tools(messages, tools)
+    // First request — route based on target
+    let response = if target_mode == "ID" {
+        router.id_only(messages.clone()).await.map_err(|e| e.to_string())?
+    } else {
+        router
+            .route_with_tools(messages.clone(), tools.clone())
             .await
-            .map_err(|e| e.to_string())?;
-        follow_up.content
+            .map_err(|e| e.to_string())?
+    };
+
+    let final_content = if target_mode != "ID" {
+        if let Some(ref tool_calls) = response.tool_calls {
+            // Execute each tool call and collect results
+            let mut tool_results = Vec::new();
+            for tc in tool_calls {
+                let result = execute_tool_call(&state, tc).await;
+                tool_results.push((tc.clone(), result));
+            }
+
+            // Build follow-up: original messages + assistant with tool_calls + tool results
+            messages.push(ao_capabilities::cognitive::Message {
+                role: "assistant".to_string(),
+                content: response.content.clone(),
+                tool_call_id: None,
+                tool_calls: Some(tool_calls.clone()),
+            });
+
+            for (tc, result) in &tool_results {
+                messages.push(ao_capabilities::cognitive::Message::tool_result(&tc.id, result));
+            }
+
+            // Send follow-up for final natural-language response
+            let follow_up = router
+                .route_with_tools(messages, tools)
+                .await
+                .map_err(|e| e.to_string())?;
+            follow_up.content
+        } else {
+            response.content
+        }
     } else {
         response.content
     };
@@ -1100,6 +1115,7 @@ pub fn run() {
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             get_birth_complete,
+            get_agent_name,
             get_docs_path,
             init_soul,
             generate_and_sign_constitutional,

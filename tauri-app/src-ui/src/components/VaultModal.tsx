@@ -50,21 +50,21 @@ export default function VaultModal({ secret, onSaved, onCancel }: VaultModalProp
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-      <div className="bg-black border border-green-500 rounded-lg p-6 max-w-md w-full mx-4">
-        <h2 className="text-green-400 text-lg mb-2">Setup Required</h2>
-        <p className="text-green-600 text-sm mb-4">
-          AO needs access to <span className="text-green-300">{secret.secret_name}</span> to
-          enable the <span className="text-green-300">{secret.skill_name}</span> skill.
+      <div className="bg-black border border-theme-primary rounded-lg p-6 max-w-md w-full mx-4">
+        <h2 className="text-theme-primary-dim text-lg mb-2">Setup Required</h2>
+        <p className="text-theme-text-dim text-sm mb-4">
+          AO needs access to <span className="text-theme-text-bright">{secret.secret_name}</span> to
+          enable the <span className="text-theme-text-bright">{secret.skill_name}</span> skill.
           This will be encrypted securely on your device.
         </p>
         {secret.secret_description && (
-          <p className="text-green-700 text-xs mb-4">{secret.secret_description}</p>
+          <p className="text-theme-primary-faint text-xs mb-4">{secret.secret_description}</p>
         )}
         <div className="mb-4">
-          <label className="block text-green-500 text-xs mb-1">{secret.secret_name}</label>
+          <label className="block text-theme-text text-xs mb-1">{secret.secret_name}</label>
           <input
             type="password"
-            className="w-full bg-black border border-green-500 text-green-500 px-3 py-2 rounded focus:border-green-400 focus:outline-none"
+            className="w-full bg-black border border-theme-primary text-theme-text px-3 py-2 rounded focus:border-theme-primary-dim focus:outline-none"
             placeholder="Enter value..."
             value={value}
             onChange={(e) => setValue(e.target.value)}
@@ -76,20 +76,20 @@ export default function VaultModal({ secret, onSaved, onCancel }: VaultModalProp
         <div className="flex gap-3 justify-end">
           {!secret.required && (
             <button
-              className="border border-green-700 text-green-600 px-4 py-2 rounded hover:bg-green-900/50 text-sm"
+              className="border border-theme-primary-faint text-theme-text-dim px-4 py-2 rounded hover:bg-theme-surface text-sm"
               onClick={onCancel}
             >
               Skip
             </button>
           )}
           <button
-            className="border border-green-700 text-green-600 px-4 py-2 rounded hover:bg-green-900/50 text-sm"
+            className="border border-theme-primary-faint text-theme-text-dim px-4 py-2 rounded hover:bg-theme-surface text-sm"
             onClick={onCancel}
           >
             Cancel
           </button>
           <button
-            className="border border-green-500 text-green-500 px-4 py-2 rounded hover:bg-green-500/20 text-sm"
+            className="border border-theme-primary text-theme-text px-4 py-2 rounded hover:bg-theme-primary-glow text-sm"
             onClick={handleSave}
             disabled={saving}
           >

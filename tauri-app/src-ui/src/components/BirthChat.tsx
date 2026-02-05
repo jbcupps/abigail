@@ -96,8 +96,8 @@ export default function BirthChat({ stage, onAction, onStageAdvance, initialMess
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 py-2 border-b border-green-800 bg-green-950/30">
-        <p className="text-green-500 text-xs">{stageLabel}</p>
+      <div className="px-4 py-2 border-b border-theme-border bg-theme-surface">
+        <p className="text-theme-text text-xs">{stageLabel}</p>
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -105,14 +105,14 @@ export default function BirthChat({ stage, onAction, onStageAdvance, initialMess
           <div key={i}>
             {msg.role === "user" && (
               <div className="text-right">
-                <span className="text-green-600">Mentor: </span>
-                <span className="text-green-400">{msg.content}</span>
+                <span className="text-theme-text-dim">Mentor: </span>
+                <span className="text-theme-primary-dim">{msg.content}</span>
               </div>
             )}
             {msg.role === "assistant" && (
               <div>
-                <span className="text-green-500">AO: </span>
-                <span className="text-green-300">
+                <span className="text-theme-text">AO: </span>
+                <span className="text-theme-text-bright">
                   {msg.content.split("\n").map((line, j) => (
                     <span key={j}>
                       {line}
@@ -127,18 +127,18 @@ export default function BirthChat({ stage, onAction, onStageAdvance, initialMess
             )}
           </div>
         ))}
-        {loading && <p className="text-green-600 animate-pulse">AO is thinking...</p>}
+        {loading && <p className="text-theme-text-dim animate-pulse">AO is thinking...</p>}
       </div>
 
       {error && (
         <div className="px-4 py-1 text-red-400 text-xs">{error}</div>
       )}
 
-      <div className="p-4 border-t border-green-800 flex gap-2">
+      <div className="p-4 border-t border-theme-border flex gap-2">
         <input
           ref={inputRef}
           type="text"
-          className="flex-1 bg-black border border-green-500 text-green-500 px-3 py-2 rounded text-sm"
+          className="flex-1 bg-black border border-theme-primary text-theme-text px-3 py-2 rounded text-sm"
           placeholder="Speak to AO..."
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -146,7 +146,7 @@ export default function BirthChat({ stage, onAction, onStageAdvance, initialMess
           disabled={loading}
         />
         <button
-          className="border border-green-500 px-4 py-2 rounded hover:bg-green-500/20 text-sm disabled:opacity-50"
+          className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow text-sm disabled:opacity-50"
           onClick={handleSend}
           disabled={loading || !input.trim()}
         >
@@ -154,9 +154,9 @@ export default function BirthChat({ stage, onAction, onStageAdvance, initialMess
         </button>
       </div>
 
-      <div className="px-4 py-2 border-t border-green-900 flex justify-end">
+      <div className="px-4 py-2 border-t border-theme-border-dim flex justify-end">
         <button
-          className="text-green-600 text-xs hover:text-green-400"
+          className="text-theme-text-dim text-xs hover:text-theme-primary-dim"
           onClick={onStageAdvance}
         >
           {stage === "Connectivity" ? "Continue to Genesis >" : "Finalize >"}

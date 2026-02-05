@@ -272,8 +272,8 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   };
 
   return (
-    <div className="min-h-screen bg-black text-green-500 font-mono flex flex-col">
-      <pre className="text-sm p-4 border-b border-green-900">
+    <div className="min-h-screen bg-black text-theme-text font-mono flex flex-col">
+      <pre className="text-sm p-4 border-b border-theme-border-dim">
         AO BOOT SEQUENCE
         ==================
       </pre>
@@ -308,13 +308,13 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 <textarea
                   readOnly
                   value={privateKey}
-                  className="w-full bg-gray-900 border border-green-700 rounded p-3 text-green-300 font-mono text-sm resize-none"
+                  className="w-full bg-gray-900 border border-theme-primary-faint rounded p-3 text-theme-text-bright font-mono text-sm resize-none"
                   rows={3}
                   onClick={(e) => (e.target as HTMLTextAreaElement).select()}
                 />
                 <button
                   onClick={handleCopyKey}
-                  className="absolute top-2 right-2 px-2 py-1 text-xs border border-green-500 rounded hover:bg-green-500/20"
+                  className="absolute top-2 right-2 px-2 py-1 text-xs border border-theme-primary rounded hover:bg-theme-primary-glow"
                 >
                   {copied ? "Copied!" : "Copy"}
                 </button>
@@ -323,7 +323,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
             <div className="mb-6 text-sm">
               <p className="text-gray-400 mb-1">Public key saved to:</p>
-              <code className="text-green-300 text-xs break-all">
+              <code className="text-theme-text-bright text-xs break-all">
                 {publicKeyPath}
               </code>
             </div>
@@ -359,7 +359,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                   type="checkbox"
                   checked={keySaved}
                   onChange={(e) => setKeySaved(e.target.checked)}
-                  className="w-5 h-5 accent-green-500"
+                  className="w-5 h-5 accent-[var(--color-primary)]"
                 />
                 <span className="text-sm">
                   I have saved my private key securely and understand I will not
@@ -373,7 +373,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               onClick={handleContinueFromKeyPresentation}
               className={`px-6 py-3 rounded font-bold ${
                 keySaved
-                  ? "border border-green-500 hover:bg-green-500/20 text-green-500"
+                  ? "border border-theme-primary hover:bg-theme-primary-glow text-theme-text"
                   : "border border-gray-600 text-gray-600 cursor-not-allowed"
               }`}
             >
@@ -395,15 +395,15 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         {stage === "Connectivity" && (
           <div className="flex flex-col h-full" style={{ minHeight: "60vh" }}>
             {/* API Key buttons */}
-            <div className="px-4 py-2 border-b border-green-800 bg-green-950/30 flex gap-2 flex-wrap">
-              <span className="text-green-600 text-xs self-center mr-2">Add key:</span>
+            <div className="px-4 py-2 border-b border-theme-border bg-theme-surface flex gap-2 flex-wrap">
+              <span className="text-theme-text-dim text-xs self-center mr-2">Add key:</span>
               {["openai", "anthropic", "xai", "google"].map((p) => (
                 <button
                   key={p}
                   className={`text-xs px-2 py-1 rounded border ${
                     storedProviders.includes(p)
-                      ? "border-green-700 text-green-700"
-                      : "border-green-500 text-green-500 hover:bg-green-500/20"
+                      ? "border-theme-primary-faint text-theme-primary-faint"
+                      : "border-theme-primary text-theme-text hover:bg-theme-primary-glow"
                   }`}
                   onClick={() => setActiveApiKeyProvider(p)}
                   disabled={storedProviders.includes(p)}
@@ -441,20 +441,20 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         {/* ── SOUL PREVIEW ── */}
         {stage === "SoulPreview" && (
           <div className="p-6 max-w-2xl">
-            <h2 className="text-green-400 text-lg mb-4">
+            <h2 className="text-theme-primary-dim text-lg mb-4">
               Genesis: Define Your Agent
             </h2>
-            <p className="text-green-600 text-sm mb-6">
+            <p className="text-theme-text-dim text-sm mb-6">
               Based on your conversation, fill in the details below. These will
               become part of AO's soul document.
             </p>
 
             <div className="space-y-4 mb-6">
               <div>
-                <label className="block text-green-500 text-sm mb-1">Name</label>
+                <label className="block text-theme-text text-sm mb-1">Name</label>
                 <input
                   type="text"
-                  className="w-full bg-black border border-green-500 text-green-400 px-3 py-2 rounded"
+                  className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
                   placeholder="AO"
                   value={genesisName}
                   onChange={(e) => setGenesisName(e.target.value)}
@@ -462,24 +462,24 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 />
               </div>
               <div>
-                <label className="block text-green-500 text-sm mb-1">
+                <label className="block text-theme-text text-sm mb-1">
                   Purpose
                 </label>
                 <input
                   type="text"
-                  className="w-full bg-black border border-green-500 text-green-400 px-3 py-2 rounded"
+                  className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
                   placeholder="assist, retrieve, connect, and surface information"
                   value={genesisPurpose}
                   onChange={(e) => setGenesisPurpose(e.target.value)}
                 />
               </div>
               <div>
-                <label className="block text-green-500 text-sm mb-1">
+                <label className="block text-theme-text text-sm mb-1">
                   Personality / Tone
                 </label>
                 <input
                   type="text"
-                  className="w-full bg-black border border-green-500 text-green-400 px-3 py-2 rounded"
+                  className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
                   placeholder="helpful, clear, and honest"
                   value={genesisPersonality}
                   onChange={(e) => setGenesisPersonality(e.target.value)}
@@ -491,7 +491,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
             <button
               onClick={handleCrystallize}
-              className="border border-green-500 px-6 py-3 rounded font-bold hover:bg-green-500/20"
+              className="border border-theme-primary px-6 py-3 rounded font-bold hover:bg-theme-primary-glow"
             >
               Crystallize Soul
             </button>
@@ -503,20 +503,20 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
           <div className="p-6">
             {soulPreview && (
               <div className="mb-6">
-                <h2 className="text-green-400 text-lg mb-2">Soul Document</h2>
-                <pre className="bg-green-950/30 border border-green-800 rounded p-4 text-green-300 text-sm whitespace-pre-wrap max-h-64 overflow-auto">
+                <h2 className="text-theme-primary-dim text-lg mb-2">Soul Document</h2>
+                <pre className="bg-theme-surface border border-theme-border rounded p-4 text-theme-text-bright text-sm whitespace-pre-wrap max-h-64 overflow-auto">
                   {soulPreview}
                 </pre>
               </div>
             )}
 
             <div className="text-center">
-              <p className="text-green-500 mb-4">
+              <p className="text-theme-text mb-4">
                 Ready to sign and come alive.
               </p>
               <button
                 onClick={handleCompleteEmergence}
-                className="border border-green-500 px-8 py-3 rounded font-bold hover:bg-green-500/20 text-lg"
+                className="border border-theme-primary px-8 py-3 rounded font-bold hover:bg-theme-primary-glow text-lg"
               >
                 Emerge
               </button>
@@ -529,8 +529,8 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         {/* ── LIFE ── */}
         {stage === "Life" && (
           <div className="p-6 text-center">
-            <p className="text-green-400 text-xl mb-2">{message}</p>
-            <div className="animate-pulse text-green-600">...</div>
+            <p className="text-theme-primary-dim text-xl mb-2">{message}</p>
+            <div className="animate-pulse text-theme-text-dim">...</div>
           </div>
         )}
 
@@ -549,7 +549,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
             </div>
 
             <div className="mb-8">
-              <h3 className="text-green-500 font-bold mb-2">
+              <h3 className="text-theme-text font-bold mb-2">
                 Option 1: Recover Identity
               </h3>
               <p className="text-sm text-gray-400 mb-2">
@@ -560,7 +560,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 value={repairKey}
                 onChange={(e) => setRepairKey(e.target.value)}
                 placeholder="Paste your private key here..."
-                className="w-full bg-gray-900 border border-green-700 rounded p-3 text-green-300 font-mono text-sm resize-none mb-2"
+                className="w-full bg-gray-900 border border-theme-primary-faint rounded p-3 text-theme-text-bright font-mono text-sm resize-none mb-2"
                 rows={3}
               />
               <button
@@ -568,7 +568,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 disabled={!repairKey.trim()}
                 className={`px-4 py-2 rounded font-bold text-sm ${
                   repairKey.trim()
-                    ? "bg-green-900/50 border border-green-500 text-green-500 hover:bg-green-500/20"
+                    ? "bg-theme-surface border border-theme-primary text-theme-text hover:bg-theme-primary-glow"
                     : "bg-gray-900 border border-gray-700 text-gray-600 cursor-not-allowed"
                 }`}
               >
@@ -602,7 +602,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
           <div className="p-4">
             <p className="text-red-400">{error}</p>
             <button
-              className="border border-green-500 px-4 py-2 rounded hover:bg-green-500/20 mt-2"
+              className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow mt-2"
               onClick={handleStart}
             >
               Retry
@@ -614,7 +614,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
           <div className="p-6">
             <p className="text-red-400 mb-4">{error}</p>
             <button
-              className="border border-green-500 px-4 py-2 rounded hover:bg-green-500/20"
+              className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
               onClick={handleStart}
             >
               Retry

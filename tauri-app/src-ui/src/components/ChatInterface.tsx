@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useState, useEffect } from "react";
+import { useTheme } from "../contexts/ThemeContext";
 import VaultModal, { type MissingSkillSecret } from "./VaultModal";
 
 interface Message {
@@ -17,7 +18,12 @@ interface RouterStatus {
 
 type ConfigStep = "menu" | "ollama" | "lmstudio" | "openai" | null;
 
-export default function ChatInterface() {
+interface ChatInterfaceProps {
+  target?: "ID" | "EGO";
+}
+
+export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
+  const { agentName } = useTheme();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -27,6 +33,8 @@ export default function ChatInterface() {
   const [configError, setConfigError] = useState("");
   const [missingSecrets, setMissingSecrets] = useState<MissingSkillSecret[]>([]);
   const [activeSecret, setActiveSecret] = useState<MissingSkillSecret | null>(null);
+
+  const assistantLabel = agentName || "AO";
 
   const refreshRouterStatus = () => {
     invoke<RouterStatus>("get_router_status")
@@ -109,7 +117,7 @@ export default function ChatInterface() {
     setInput("");
     setLoading(true);
     try {
-      const reply = await invoke<string>("chat", { message: userMessage.content });
+      const reply = await invoke<string>("chat", { message: userMessage.content, target });
       setMessages((m) => [...m, { role: "assistant", content: reply }]);
     } catch (e) {
       const errorMsg = String(e);
@@ -138,13 +146,13 @@ export default function ChatInterface() {
 
     if (hasEgo && hasLocal) {
       statusText = `[${mode}] Cloud + Local`;
-      statusColor = "text-green-500";
+      statusColor = "text-theme-text";
     } else if (hasEgo) {
       statusText = "[cloud] OpenAI";
       statusColor = "text-blue-400";
     } else if (hasLocal) {
       statusText = `[local] ${routerStatus.id_url}`;
-      statusColor = "text-green-400";
+      statusColor = "text-theme-primary-dim";
     } else {
       statusText = "[no LLM] Press 1-3 to configure";
       statusColor = "text-red-400";
@@ -152,7 +160,7 @@ export default function ChatInterface() {
 
     return (
       <div
-        className={`text-xs ${statusColor} px-4 py-1 border-b border-green-800 cursor-pointer hover:bg-green-900/30`}
+        className={`text-xs ${statusColor} px-4 py-1 border-b border-theme-border cursor-pointer hover:bg-theme-surface`}
         onClick={() => setConfigStep("menu")}
       >
         {statusText}
@@ -163,31 +171,31 @@ export default function ChatInterface() {
   const renderConfigMenu = () => {
     if (configStep === "menu") {
       return (
-        <div className="p-4 border-b border-green-800 bg-green-950/30">
-          <p className="text-green-400 mb-3">Configure LLM Provider:</p>
+        <div className="p-4 border-b border-theme-border bg-theme-surface">
+          <p className="text-theme-primary-dim mb-3">Configure LLM Provider:</p>
           <div className="space-y-2">
             <button
-              className="block w-full text-left px-3 py-2 border border-green-700 rounded hover:bg-green-900/50"
+              className="block w-full text-left px-3 py-2 border border-theme-primary-faint rounded hover:bg-theme-surface"
               onClick={() => handleConfigSelect(1)}
             >
-              <span className="text-green-300">[1]</span> Ollama (local, default port 11434)
+              <span className="text-theme-text-bright">[1]</span> Ollama (local, default port 11434)
             </button>
             <button
-              className="block w-full text-left px-3 py-2 border border-green-700 rounded hover:bg-green-900/50"
+              className="block w-full text-left px-3 py-2 border border-theme-primary-faint rounded hover:bg-theme-surface"
               onClick={() => handleConfigSelect(2)}
             >
-              <span className="text-green-300">[2]</span> LM Studio (local, default port 1234)
+              <span className="text-theme-text-bright">[2]</span> LM Studio (local, default port 1234)
             </button>
             <button
-              className="block w-full text-left px-3 py-2 border border-green-700 rounded hover:bg-green-900/50"
+              className="block w-full text-left px-3 py-2 border border-theme-primary-faint rounded hover:bg-theme-surface"
               onClick={() => handleConfigSelect(3)}
             >
-              <span className="text-green-300">[3]</span> OpenAI (cloud, requires API key)
+              <span className="text-theme-text-bright">[3]</span> OpenAI (cloud, requires API key)
             </button>
           </div>
           {routerStatus && (routerStatus.ego_configured || routerStatus.id_provider === "local_http") && (
             <button
-              className="mt-3 text-xs text-green-600 hover:text-green-400"
+              className="mt-3 text-xs text-theme-text-dim hover:text-theme-primary-dim"
               onClick={() => setConfigStep(null)}
             >
               [ESC] Cancel
@@ -201,13 +209,13 @@ export default function ChatInterface() {
       const label = configStep === "ollama" ? "Ollama" : "LM Studio";
       const defaultPort = configStep === "ollama" ? "11434" : "1234";
       return (
-        <div className="p-4 border-b border-green-800 bg-green-950/30">
-          <p className="text-green-400 mb-2">{label} Configuration:</p>
+        <div className="p-4 border-b border-theme-border bg-theme-surface">
+          <p className="text-theme-primary-dim mb-2">{label} Configuration:</p>
           <div className="flex gap-2 items-center">
-            <span className="text-green-600">http://localhost:</span>
+            <span className="text-theme-text-dim">http://localhost:</span>
             <input
               type="text"
-              className="flex-1 bg-black border border-green-500 text-green-500 px-3 py-2 rounded max-w-[100px]"
+              className="flex-1 bg-black border border-theme-primary text-theme-text px-3 py-2 rounded max-w-[100px]"
               placeholder={defaultPort}
               value={configInput}
               onChange={(e) => setConfigInput(e.target.value)}
@@ -215,13 +223,13 @@ export default function ChatInterface() {
               autoFocus
             />
             <button
-              className="border border-green-500 px-4 py-2 rounded hover:bg-green-500/20"
+              className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
               onClick={handleConfigSubmit}
             >
               Connect
             </button>
             <button
-              className="border border-green-700 px-3 py-2 rounded hover:bg-green-900/50 text-green-600"
+              className="border border-theme-primary-faint px-3 py-2 rounded hover:bg-theme-surface text-theme-text-dim"
               onClick={() => setConfigStep("menu")}
             >
               Back
@@ -234,12 +242,12 @@ export default function ChatInterface() {
 
     if (configStep === "openai") {
       return (
-        <div className="p-4 border-b border-green-800 bg-green-950/30">
-          <p className="text-green-400 mb-2">OpenAI Configuration:</p>
+        <div className="p-4 border-b border-theme-border bg-theme-surface">
+          <p className="text-theme-primary-dim mb-2">OpenAI Configuration:</p>
           <div className="flex gap-2">
             <input
               type="password"
-              className="flex-1 bg-black border border-green-500 text-green-500 px-3 py-2 rounded"
+              className="flex-1 bg-black border border-theme-primary text-theme-text px-3 py-2 rounded"
               placeholder="sk-..."
               value={configInput}
               onChange={(e) => setConfigInput(e.target.value)}
@@ -247,13 +255,13 @@ export default function ChatInterface() {
               autoFocus
             />
             <button
-              className="border border-green-500 px-4 py-2 rounded hover:bg-green-500/20"
+              className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
               onClick={handleConfigSubmit}
             >
               Save
             </button>
             <button
-              className="border border-green-700 px-3 py-2 rounded hover:bg-green-900/50 text-green-600"
+              className="border border-theme-primary-faint px-3 py-2 rounded hover:bg-theme-surface text-theme-text-dim"
               onClick={() => setConfigStep("menu")}
             >
               Back
@@ -268,7 +276,7 @@ export default function ChatInterface() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-green-500 font-mono flex flex-col">
+    <div className="min-h-screen bg-black text-theme-text font-mono flex flex-col">
       {getStatusIndicator()}
       {renderConfigMenu()}
       {missingSecrets.length > 0 && (
@@ -297,15 +305,15 @@ export default function ChatInterface() {
       )}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
-          <p className="text-green-600">Say something to AO.</p>
+          <p className="text-theme-text-dim">Say something to {assistantLabel}.</p>
         )}
         {messages.map((msg, i) => (
           <div
             key={i}
             className={msg.role === "user" ? "text-right" : ""}
           >
-            <span className={msg.isError ? "text-red-400" : "text-green-400"}>
-              {msg.role === "user" ? "You" : "AO"}:{" "}
+            <span className={msg.isError ? "text-red-400" : "text-theme-primary-dim"}>
+              {msg.role === "user" ? "You" : assistantLabel}:{" "}
             </span>
             <span className={msg.isError ? "text-red-300" : ""}>
               {msg.content.split("\n").map((line, j) => (
@@ -317,19 +325,19 @@ export default function ChatInterface() {
             </span>
           </div>
         ))}
-        {loading && <p className="text-green-600">...</p>}
+        {loading && <p className="text-theme-text-dim">...</p>}
       </div>
-      <div className="p-4 border-t border-green-800 flex gap-2">
+      <div className="p-4 border-t border-theme-border flex gap-2">
         <input
           type="text"
-          className="flex-1 bg-black border border-green-500 text-green-500 px-3 py-2 rounded"
+          className="flex-1 bg-black border border-theme-primary text-theme-text px-3 py-2 rounded"
           placeholder="Message"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
         />
         <button
-          className="border border-green-500 px-4 py-2 rounded hover:bg-green-500/20"
+          className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
           onClick={send}
         >
           Send

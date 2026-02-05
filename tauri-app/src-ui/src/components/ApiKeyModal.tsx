@@ -50,15 +50,15 @@ export default function ApiKeyModal({ provider, onSaved, onCancel }: ApiKeyModal
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-      <div className="bg-black border border-green-500 rounded-lg p-6 max-w-md w-full mx-4">
-        <h2 className="text-green-400 text-lg mb-2">{info.label} API Key</h2>
-        <p className="text-green-600 text-sm mb-4">
+      <div className="bg-black border border-theme-primary rounded-lg p-6 max-w-md w-full mx-4">
+        <h2 className="text-theme-primary-dim text-lg mb-2">{info.label} API Key</h2>
+        <p className="text-theme-text-dim text-sm mb-4">
           Enter your {info.label} API key. It will be encrypted securely on your device.
         </p>
         <div className="mb-4">
           <input
             type="password"
-            className="w-full bg-black border border-green-500 text-green-500 px-3 py-2 rounded focus:border-green-400 focus:outline-none"
+            className="w-full bg-black border border-theme-primary text-theme-text px-3 py-2 rounded focus:border-theme-primary-dim focus:outline-none"
             placeholder={info.placeholder}
             value={value}
             onChange={(e) => setValue(e.target.value)}
@@ -69,13 +69,13 @@ export default function ApiKeyModal({ provider, onSaved, onCancel }: ApiKeyModal
         {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
         <div className="flex gap-3 justify-end">
           <button
-            className="border border-green-700 text-green-600 px-4 py-2 rounded hover:bg-green-900/50 text-sm"
+            className="border border-theme-primary-faint text-theme-text-dim px-4 py-2 rounded hover:bg-theme-surface text-sm"
             onClick={onCancel}
           >
             Cancel
           </button>
           <button
-            className="border border-green-500 text-green-500 px-4 py-2 rounded hover:bg-green-500/20 text-sm"
+            className="border border-theme-primary text-theme-text px-4 py-2 rounded hover:bg-theme-primary-glow text-sm"
             onClick={handleSave}
             disabled={saving}
           >

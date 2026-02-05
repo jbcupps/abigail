@@ -74,33 +74,33 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
 
   return (
     <div className="p-6">
-      <h2 className="text-green-400 text-lg mb-4">Ignition: Connect Your Local Mind</h2>
-      <p className="text-green-600 text-sm mb-6">
+      <h2 className="text-theme-primary-dim text-lg mb-4">Ignition: Connect Your Local Mind</h2>
+      <p className="text-theme-text-dim text-sm mb-6">
         AO needs a local LLM to think independently. This is your Id — it runs on your machine,
         keeps your data private, and never leaves your network.
       </p>
 
       {probing && (
         <div className="mb-4">
-          <p className="text-green-500">Scanning for local LLM servers...</p>
+          <p className="text-theme-text">Scanning for local LLM servers...</p>
           <div className="animate-pulse mt-1">...</div>
         </div>
       )}
 
       {!probing && reachable.length > 0 && (
         <div className="mb-6">
-          <p className="text-green-400 mb-2">Detected:</p>
+          <p className="text-theme-primary-dim mb-2">Detected:</p>
           <div className="space-y-2">
             {reachable.map((llm, i) => (
               <button
                 key={i}
                 disabled={connecting}
-                className="block w-full text-left px-4 py-3 border border-green-500 rounded hover:bg-green-500/20 disabled:opacity-50"
+                className="block w-full text-left px-4 py-3 border border-theme-primary rounded hover:bg-theme-primary-glow disabled:opacity-50"
                 onClick={() => connectTo(llm.url)}
               >
-                <span className="text-green-300 font-bold">{llm.name}</span>
-                <span className="text-green-600 text-sm ml-2">{llm.url}</span>
-                <span className="text-green-500 text-xs ml-2">[online]</span>
+                <span className="text-theme-text-bright font-bold">{llm.name}</span>
+                <span className="text-theme-text-dim text-sm ml-2">{llm.url}</span>
+                <span className="text-theme-text text-xs ml-2">[online]</span>
               </button>
             ))}
           </div>
@@ -119,7 +119,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
             </ul>
           </div>
           <button
-            className="text-green-600 text-sm hover:text-green-400"
+            className="text-theme-text-dim text-sm hover:text-theme-primary-dim"
             onClick={probe}
           >
             Re-scan
@@ -129,18 +129,18 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
 
       {!showManual ? (
         <button
-          className="text-green-600 text-xs hover:text-green-400 mb-4"
+          className="text-theme-text-dim text-xs hover:text-theme-primary-dim mb-4"
           onClick={() => setShowManual(true)}
         >
           Enter URL manually
         </button>
       ) : (
         <div className="mb-4">
-          <p className="text-green-500 text-sm mb-2">Custom LLM URL:</p>
+          <p className="text-theme-text text-sm mb-2">Custom LLM URL:</p>
           <div className="flex gap-2">
             <input
               type="text"
-              className="flex-1 bg-black border border-green-500 text-green-500 px-3 py-2 rounded text-sm"
+              className="flex-1 bg-black border border-theme-primary text-theme-text px-3 py-2 rounded text-sm"
               placeholder="http://localhost:1234"
               value={manualUrl}
               onChange={(e) => setManualUrl(e.target.value)}
@@ -149,7 +149,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
             />
             <button
               disabled={connecting}
-              className="border border-green-500 px-4 py-2 rounded hover:bg-green-500/20 text-sm disabled:opacity-50"
+              className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow text-sm disabled:opacity-50"
               onClick={handleManualConnect}
             >
               {connecting ? "..." : "Connect"}
@@ -161,9 +161,9 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
       {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
 
       {showSkip && onSkip && (
-        <div className="mt-8 pt-4 border-t border-green-900">
+        <div className="mt-8 pt-4 border-t border-theme-border-dim">
           <button
-            className="text-green-700 text-xs hover:text-green-500"
+            className="text-theme-primary-faint text-xs hover:text-theme-text"
             onClick={onSkip}
           >
             Skip interactive setup (use default birth)

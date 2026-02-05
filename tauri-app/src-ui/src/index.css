@@ -2,6 +2,37 @@
 @tailwind components;
 @tailwind utilities;
 
+:root,
+.theme-ego {
+  --color-primary: #22c55e;       /* green-500 */
+  --color-primary-dim: #4ade80;   /* green-400 */
+  --color-primary-muted: #16a34a; /* green-600 */
+  --color-primary-faint: #15803d; /* green-700 */
+  --color-primary-glow: rgba(34, 197, 94, 0.2);
+  --color-bg: #000000;
+  --color-surface: rgba(5, 46, 22, 0.3);   /* green-950/30 */
+  --color-border: #166534;        /* green-800 */
+  --color-border-dim: #14532d;    /* green-900 */
+  --color-text: #22c55e;          /* green-500 */
+  --color-text-bright: #86efac;   /* green-300 */
+  --color-text-dim: #16a34a;      /* green-600 */
+}
+
+.theme-id {
+  --color-primary: #f59e0b;       /* amber-500 */
+  --color-primary-dim: #fbbf24;   /* amber-400 */
+  --color-primary-muted: #d97706; /* amber-600 */
+  --color-primary-faint: #b45309; /* amber-700 */
+  --color-primary-glow: rgba(245, 158, 11, 0.2);
+  --color-bg: #000000;
+  --color-surface: rgba(69, 26, 3, 0.3);   /* amber-950/30 */
+  --color-border: #92400e;        /* amber-800 */
+  --color-border-dim: #78350f;    /* amber-900 */
+  --color-text: #f59e0b;          /* amber-500 */
+  --color-text-bright: #fcd34d;   /* amber-300 */
+  --color-text-dim: #d97706;      /* amber-600 */
+}
+
 body {
   margin: 0;
   font-family: ui-monospace, monospace;
