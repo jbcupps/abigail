@@ -39,9 +39,10 @@ Function CheckOllama
 
 DownloadOllama:
     DetailPrint "Downloading Ollama installer..."
-    inetc::get /NOCANCEL "https://ollama.com/download/OllamaSetup.exe" "$TEMP\OllamaSetup.exe" /END
-    Pop $0
-    ${If} $0 == "OK"
+    nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri https://ollama.com/download/OllamaSetup.exe -OutFile $env:TEMP\OllamaSetup.exe -ErrorAction Stop; Write-Output OK } catch { Write-Output FAIL }"'
+    Pop $0  ; exit code
+    Pop $1  ; output (OK or FAIL)
+    ${If} $1 == "OK"
       DetailPrint "Running Ollama installer..."
       ExecWait '"$TEMP\OllamaSetup.exe" /S' $0
       DetailPrint "Ollama installer completed (exit code: $0)"
