@@ -1,9 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 
+interface StoreKeyResult {
+  success: boolean;
+  provider: string;
+  validated: boolean;
+  error: string | null;
+}
+
 interface ApiKeyModalProps {
   provider: string;
-  onSaved: () => void;
+  onSaved: (result: StoreKeyResult) => void;
   onCancel: () => void;
 }
 
@@ -18,6 +25,7 @@ const PROVIDER_INFO: Record<string, { label: string; placeholder: string; prefix
 export default function ApiKeyModal({ provider, onSaved, onCancel }: ApiKeyModalProps) {
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
+  const [validating, setValidating] = useState(false);
   const [error, setError] = useState("");
 
   const info = PROVIDER_INFO[provider] || {
@@ -32,15 +40,26 @@ export default function ApiKeyModal({ provider, onSaved, onCancel }: ApiKeyModal
       return;
     }
     setSaving(true);
+    setValidating(true);
     setError("");
     try {
-      await invoke("store_provider_key", { provider, key: value.trim() });
-      setValue("");
-      onSaved();
+      const result = await invoke<StoreKeyResult>("store_provider_key", {
+        provider,
+        key: value.trim(),
+        validate: true,
+      });
+
+      if (result.success) {
+        setValue("");
+        onSaved(result);
+      } else {
+        setError(result.error || "Validation failed");
+      }
     } catch (e) {
       setError(String(e));
     } finally {
       setSaving(false);
+      setValidating(false);
     }
   };
 
@@ -80,7 +99,7 @@ export default function ApiKeyModal({ provider, onSaved, onCancel }: ApiKeyModal
             onClick={handleSave}
             disabled={saving}
           >
-            {saving ? "Encrypting..." : "Save"}
+            {validating ? "Validating..." : saving ? "Saving..." : "Save & Validate"}
           </button>
         </div>
       </div>

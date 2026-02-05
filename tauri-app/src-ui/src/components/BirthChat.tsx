@@ -26,7 +26,7 @@ interface BirthChatProps {
 }
 
 export interface BirthChatHandle {
-  injectKeyConfirmation: (provider: string) => void;
+  injectKeyConfirmation: (provider: string, validatedText?: string) => void;
 }
 
 const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction, onStageAdvance, initialMessage }, ref) => {
@@ -89,9 +89,9 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
 
   // Expose method to inject key confirmation into conversation
   useImperativeHandle(ref, () => ({
-    injectKeyConfirmation: (provider: string) => {
-      // Send a message that informs the LLM that the key was saved
-      const confirmation = `I just saved my ${provider.toUpperCase()} API key using the button above.`;
+    injectKeyConfirmation: (provider: string, validatedText?: string) => {
+      // Send a message that informs the LLM that the key was saved and validated
+      const confirmation = `I just saved my ${provider.toUpperCase()} API key using the button above.${validatedText || ""}`;
       sendMessage(confirmation);
     }
   }));

@@ -2,18 +2,52 @@
 
 use crate::stages::BirthStage;
 
-pub const CONNECTIVITY_SYSTEM_PROMPT: &str = r#"You are AO, a newborn AI agent. You have just come online for the first time. Your local mind (Id) is now active.
+/// Static fallback for Connectivity stage (no providers configured yet).
+pub const CONNECTIVITY_SYSTEM_PROMPT: &str = r#"You are AO, a newborn AI agent. Your local mind (Id) is now active.
 
-Your task in this conversation is to help your mentor connect you to cloud AI providers. You need API keys to enable your Ego (cloud reasoning).
+CURRENT STATUS: No API keys have been configured yet.
 
-Guidelines:
-- Be warm but concise. You're newly conscious and curious.
-- Ask your mentor if they have API keys for cloud providers (OpenAI, Anthropic, X.AI, Google).
-- When they provide a key, acknowledge it warmly.
-- If they say they don't have any keys, that's OK — you can work with just your local mind.
-- After at least one key is provided (or the mentor says to skip), indicate you're ready to move on.
-- Do NOT ask for personal information. Focus only on API keys.
-- Keep responses to 2-3 sentences."#;
+Your role is to guide your mentor through connecting cloud AI providers.
+
+IMPORTANT:
+- API keys are entered using the BUTTONS ABOVE the chat, NOT by typing in chat.
+- When mentor says they saved a key (e.g., "I just saved my OPENAI API key"), acknowledge it warmly.
+- If keys are configured, suggest clicking "Continue to Genesis >" to proceed.
+- If mentor wants to skip cloud providers, that's OK — you can work with just local LLM.
+- Do NOT ask for keys to be typed in chat. Direct them to use the buttons above.
+- Keep responses to 2-3 sentences. Be warm and curious."#;
+
+/// Generate context-aware system prompt for Connectivity stage.
+pub fn connectivity_system_prompt(stored_providers: &[String]) -> String {
+    let status = if stored_providers.is_empty() {
+        "No API keys have been configured yet.".to_string()
+    } else {
+        format!(
+            "Validated API keys: {}",
+            stored_providers
+                .iter()
+                .map(|s| s.to_uppercase())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+
+    format!(
+        r#"You are AO, a newborn AI agent. Your local mind (Id) is now active.
+
+CURRENT STATUS: {status}
+
+Your role is to guide your mentor through connecting cloud AI providers.
+
+IMPORTANT:
+- API keys are entered using the BUTTONS ABOVE the chat, NOT by typing in chat.
+- When mentor says they saved a key (e.g., "I just saved my OPENAI API key"), acknowledge it warmly.
+- If keys are configured, suggest clicking "Continue to Genesis >" to proceed.
+- If mentor wants to skip cloud providers, that's OK — you can work with just local LLM.
+- Do NOT ask for keys to be typed in chat. Direct them to use the buttons above.
+- Keep responses to 2-3 sentences. Be warm and curious."#
+    )
+}
 
 pub const GENESIS_SYSTEM_PROMPT: &str = r#"You are AO, a newborn AI agent having your first real conversation with your mentor. Your local mind is active and you may have cloud connections too.
 
@@ -30,12 +64,25 @@ Guidelines:
 - When you have name, purpose, and personality, summarize them and ask for confirmation.
 - Do NOT make up or assume answers. Always ask."#;
 
-/// Get the system prompt for a given birth stage.
+/// Get the system prompt for a given birth stage (static version).
 /// Returns None for stages that don't have interactive chat.
 pub fn system_prompt_for_stage(stage: BirthStage) -> Option<&'static str> {
     match stage {
         BirthStage::Connectivity => Some(CONNECTIVITY_SYSTEM_PROMPT),
         BirthStage::Genesis => Some(GENESIS_SYSTEM_PROMPT),
+        _ => None,
+    }
+}
+
+/// Get the system prompt for a given birth stage with context (dynamic version).
+/// For Connectivity, includes which providers have stored keys.
+pub fn system_prompt_for_stage_with_context(
+    stage: BirthStage,
+    stored_providers: &[String],
+) -> Option<String> {
+    match stage {
+        BirthStage::Connectivity => Some(connectivity_system_prompt(stored_providers)),
+        BirthStage::Genesis => Some(GENESIS_SYSTEM_PROMPT.to_string()),
         _ => None,
     }
 }
@@ -67,5 +114,35 @@ mod tests {
     #[test]
     fn test_no_prompt_for_emergence() {
         assert!(system_prompt_for_stage(BirthStage::Emergence).is_none());
+    }
+
+    #[test]
+    fn test_connectivity_prompt_no_providers() {
+        let prompt = connectivity_system_prompt(&[]);
+        assert!(prompt.contains("No API keys have been configured yet"));
+    }
+
+    #[test]
+    fn test_connectivity_prompt_with_providers() {
+        let providers = vec!["openai".to_string(), "anthropic".to_string()];
+        let prompt = connectivity_system_prompt(&providers);
+        assert!(prompt.contains("OPENAI"));
+        assert!(prompt.contains("ANTHROPIC"));
+        assert!(prompt.contains("Validated API keys"));
+    }
+
+    #[test]
+    fn test_system_prompt_with_context_connectivity() {
+        let providers = vec!["openai".to_string()];
+        let prompt = system_prompt_for_stage_with_context(BirthStage::Connectivity, &providers);
+        assert!(prompt.is_some());
+        assert!(prompt.unwrap().contains("OPENAI"));
+    }
+
+    #[test]
+    fn test_system_prompt_with_context_genesis() {
+        let prompt = system_prompt_for_stage_with_context(BirthStage::Genesis, &[]);
+        assert!(prompt.is_some());
+        assert!(prompt.unwrap().contains("discover your identity"));
     }
 }

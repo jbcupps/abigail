@@ -964,14 +964,20 @@ async fn birth_chat(
     state: tauri::State<'_, AppState>,
     message: String,
 ) -> Result<BirthChatResponse, String> {
-    // Get stage and system prompt
+    // Get stored providers for context-aware prompt
+    let stored_providers: Vec<String> = {
+        let vault = state.secrets.lock().map_err(|e| e.to_string())?;
+        vault.list_providers().iter().map(|s| s.to_string()).collect()
+    };
+
+    // Get stage and system prompt with context
     let (stage, system_prompt) = {
         let birth = state.birth.read().map_err(|e| e.to_string())?;
         let b = birth.as_ref().ok_or("Birth not started")?;
         let stage = b.current_stage();
-        let prompt = ao_birth::prompts::system_prompt_for_stage(stage)
-            .unwrap_or("You are AO, a newborn AI agent.");
-        (stage, prompt.to_string())
+        let prompt = ao_birth::prompts::system_prompt_for_stage_with_context(stage, &stored_providers)
+            .unwrap_or_else(|| "You are AO, a newborn AI agent.".to_string());
+        (stage, prompt)
     };
 
     // Record user message
@@ -1010,13 +1016,38 @@ async fn birth_chat(
     })
 }
 
+/// Result of storing a provider API key with optional validation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoreKeyResult {
+    pub success: bool,
+    pub provider: String,
+    pub validated: bool,
+    pub error: Option<String>,
+}
+
 /// Store a provider API key in the vault during Connectivity.
+/// Validates the key first if `validate` is true (default).
 #[tauri::command]
-fn store_provider_key(
-    state: tauri::State<AppState>,
+async fn store_provider_key(
+    state: tauri::State<'_, AppState>,
     provider: String,
     key: String,
-) -> Result<bool, String> {
+    validate: Option<bool>,
+) -> Result<StoreKeyResult, String> {
+    let should_validate = validate.unwrap_or(true);
+
+    // Validate if requested
+    if should_validate {
+        if let Err(e) = ao_capabilities::cognitive::validation::validate_api_key(&provider, &key).await {
+            return Ok(StoreKeyResult {
+                success: false,
+                provider,
+                validated: false,
+                error: Some(e.to_string()),
+            });
+        }
+    }
+
     // Store in secrets vault
     {
         let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
@@ -1040,7 +1071,19 @@ fn store_provider_key(
         *router = new_router;
     }
 
-    Ok(true)
+    Ok(StoreKeyResult {
+        success: true,
+        provider,
+        validated: should_validate,
+        error: None,
+    })
+}
+
+/// Get list of providers that have stored API keys.
+#[tauri::command]
+fn get_stored_providers(state: tauri::State<AppState>) -> Result<Vec<String>, String> {
+    let vault = state.secrets.lock().map_err(|e| e.to_string())?;
+    Ok(vault.list_providers().iter().map(|s| s.to_string()).collect())
 }
 
 /// Advance from Connectivity to Genesis.
@@ -1224,6 +1267,7 @@ pub fn run() {
             set_local_llm_during_birth,
             birth_chat,
             store_provider_key,
+            get_stored_providers,
             advance_to_genesis,
             crystallize_soul,
             complete_emergence,

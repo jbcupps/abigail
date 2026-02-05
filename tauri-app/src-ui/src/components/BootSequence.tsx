@@ -216,17 +216,31 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     setStage("Ignition");
   };
 
-  const handleLlmConnected = (_url: string) => {
+  const handleLlmConnected = async (_url: string) => {
+    // Fetch existing stored providers when entering Connectivity
+    try {
+      const providers = await invoke<string[]>("get_stored_providers");
+      setStoredProviders(providers);
+    } catch (e) {
+      console.error("Failed to fetch stored providers:", e);
+    }
     setStage("Connectivity");
   };
 
-  const handleApiKeySaved = () => {
-    const provider = activeApiKeyProvider;
+  interface StoreKeyResult {
+    success: boolean;
+    provider: string;
+    validated: boolean;
+    error: string | null;
+  }
+
+  const handleApiKeySaved = (result: StoreKeyResult) => {
     setActiveApiKeyProvider(null);
-    if (provider) {
-      setStoredProviders((prev) => [...prev, provider]);
-      // Inject message into BirthChat so LLM knows the key was saved
-      birthChatRef.current?.injectKeyConfirmation(provider);
+    if (result.success) {
+      setStoredProviders((prev) => [...prev, result.provider]);
+      // Inject message into BirthChat so LLM knows the key was saved and validated
+      const validatedText = result.validated ? " It's been validated and is working!" : "";
+      birthChatRef.current?.injectKeyConfirmation(result.provider, validatedText);
     }
   };
 
@@ -400,23 +414,30 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         {/* ── CONNECTIVITY ── */}
         {stage === "Connectivity" && (
           <div className="flex flex-col h-full" style={{ minHeight: "60vh" }}>
-            {/* API Key buttons */}
-            <div className="px-4 py-2 border-b border-theme-border bg-theme-surface flex gap-2 flex-wrap">
-              <span className="text-theme-text-dim text-xs self-center mr-2">Add key:</span>
-              {["openai", "anthropic", "xai", "google"].map((p) => (
-                <button
-                  key={p}
-                  className={`text-xs px-2 py-1 rounded border ${
-                    storedProviders.includes(p)
-                      ? "border-theme-primary-faint text-theme-primary-faint"
-                      : "border-theme-primary text-theme-text hover:bg-theme-primary-glow"
-                  }`}
-                  onClick={() => setActiveApiKeyProvider(p)}
-                  disabled={storedProviders.includes(p)}
-                >
-                  {storedProviders.includes(p) ? `${p} [saved]` : p}
-                </button>
-              ))}
+            {/* API Key buttons and status */}
+            <div className="px-4 py-2 border-b border-theme-border bg-theme-surface">
+              <div className="flex gap-2 flex-wrap items-center">
+                <span className="text-theme-text-dim text-xs mr-2">Add key:</span>
+                {["openai", "anthropic", "xai", "google", "tavily"].map((p) => (
+                  <button
+                    key={p}
+                    className={`text-xs px-2 py-1 rounded border ${
+                      storedProviders.includes(p)
+                        ? "border-green-600 text-green-500"
+                        : "border-theme-primary text-theme-text hover:bg-theme-primary-glow"
+                    }`}
+                    onClick={() => setActiveApiKeyProvider(p)}
+                    disabled={storedProviders.includes(p)}
+                  >
+                    {storedProviders.includes(p) ? `✓ ${p}` : p}
+                  </button>
+                ))}
+              </div>
+              {storedProviders.length > 0 && (
+                <p className="text-green-500 text-xs mt-2">
+                  ✓ {storedProviders.length} provider{storedProviders.length !== 1 ? "s" : ""} configured and validated. Click "Continue to Genesis &gt;" when ready.
+                </p>
+              )}
             </div>
 
             <BirthChat

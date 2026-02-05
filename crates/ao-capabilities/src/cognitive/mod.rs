@@ -6,6 +6,7 @@ pub mod local_http;
 pub mod openai;
 pub mod provider;
 pub mod types;
+pub mod validation;
 
 pub use candle::CandleProvider;
 pub use download::ModelDownloader;
