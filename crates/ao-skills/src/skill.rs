@@ -22,6 +22,8 @@ pub enum SkillError {
     PermissionDenied(String),
     #[error("Timeout: {0}")]
     Timeout(String),
+    #[error("Missing secret: {0}")]
+    MissingSecret(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

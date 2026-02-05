@@ -5,18 +5,18 @@ mod templates;
 use ao_birth::BirthOrchestrator;
 use ao_core::{
     generate_external_keypair, sign_constitutional_documents, AppConfig,
-    CoreError, ExternalVault, Keyring, ReadOnlyFileVault, Verifier,
+    CoreError, ExternalVault, Keyring, ReadOnlyFileVault, SecretsVault, Verifier,
 };
 use ao_memory::{Memory, MemoryStore};
 use ao_router::IdEgoRouter;
 use ao_skills::channel::EventBus;
-use ao_skills::{SkillExecutor, SkillRegistry, ToolParams};
+use ao_skills::{MissingSkillSecret, SkillExecutor, SkillRegistry, ToolParams};
 use base64::Engine as _;
 use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use tauri::Emitter;
 
 struct AppState {
@@ -27,6 +27,7 @@ struct AppState {
     executor: Arc<SkillExecutor>,
     #[allow(dead_code)] // used for skill-event subscription; keep for future UI wiring
     event_bus: Arc<EventBus>,
+    secrets: Arc<Mutex<SecretsVault>>,
 }
 
 fn get_config() -> AppConfig {
@@ -552,6 +553,43 @@ async fn execute_tool(
         .map_err(|e| e.to_string())
 }
 
+// ── Secrets Management ──────────────────────────────────────────────
+
+#[tauri::command]
+fn check_secret(state: tauri::State<AppState>, key: String) -> Result<bool, String> {
+    let vault = state.secrets.lock().map_err(|e| e.to_string())?;
+    Ok(vault.exists(&key))
+}
+
+#[tauri::command]
+fn store_secret(state: tauri::State<AppState>, key: String, value: String) -> Result<(), String> {
+    let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
+    vault.set_secret(&key, &value);
+    vault.save().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_secret(state: tauri::State<AppState>, key: String) -> Result<bool, String> {
+    let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
+    let removed = vault.remove_secret(&key);
+    if removed {
+        vault.save().map_err(|e| e.to_string())?;
+    }
+    Ok(removed)
+}
+
+#[tauri::command]
+fn list_missing_skill_secrets(
+    state: tauri::State<AppState>,
+) -> Result<Vec<MissingSkillSecret>, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let paths = vec![config.data_dir.join("skills")];
+    Ok(state.registry.list_all_missing_secrets(&paths))
+}
+
+// ── Chat ────────────────────────────────────────────────────────────
+
 #[tauri::command]
 async fn chat(state: tauri::State<'_, AppState>, message: String) -> Result<String, String> {
     // Get store and clone router before await (RwLock is not Send)
@@ -593,7 +631,14 @@ pub fn run() {
         config.openai_api_key.clone(),
         config.routing_mode,
     );
-    let registry = Arc::new(SkillRegistry::new());
+
+    // Initialize the secrets vault (DPAPI-encrypted on Windows)
+    let secrets = Arc::new(Mutex::new(
+        SecretsVault::load(config.data_dir.clone())
+            .unwrap_or_else(|_| SecretsVault::new(config.data_dir.clone())),
+    ));
+
+    let registry = Arc::new(SkillRegistry::with_secrets(secrets.clone()));
     let event_bus = Arc::new(EventBus::new(256));
     let executor = Arc::new(SkillExecutor::new(registry.clone()));
 
@@ -604,6 +649,7 @@ pub fn run() {
         registry,
         executor,
         event_bus: event_bus.clone(),
+        secrets,
     };
 
     // Clone event_bus before setup since state isn't available inside setup callback
@@ -655,6 +701,10 @@ pub fn run() {
             list_discovered_skills,
             list_tools,
             execute_tool,
+            check_secret,
+            store_secret,
+            remove_secret,
+            list_missing_skill_secrets,
             chat,
         ])
         .run(tauri::generate_context!())

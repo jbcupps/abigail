@@ -18,7 +18,7 @@ pub use channel::*;
 pub use executor::SkillExecutor;
 pub use manifest::*;
 pub use prelude::*;
-pub use registry::{RegisteredSkill, SkillRegistry};
+pub use registry::{MissingSkillSecret, RegisteredSkill, SkillRegistry};
 pub use sandbox::*;
 pub use skill::*;
 

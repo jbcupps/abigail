@@ -76,6 +76,11 @@ impl SecretsVault {
         self.secrets.remove(provider).is_some()
     }
 
+    /// Returns true if a secret exists for the given key (without decrypting).
+    pub fn exists(&self, key: &str) -> bool {
+        self.secrets.contains_key(key)
+    }
+
     /// List all provider names that have stored secrets.
     pub fn list_providers(&self) -> Vec<&str> {
         self.secrets.keys().map(|s| s.as_str()).collect()
