@@ -2,8 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { useState, useEffect } from "react";
 import LlmSetupPanel from "./LlmSetupPanel";
 import ApiKeyModal from "./ApiKeyModal";
+import DataSourcesPanel from "./DataSourcesPanel";
 
-type Tab = "status" | "llm" | "keys" | "identity" | "repair";
+type Tab = "status" | "llm" | "keys" | "data" | "identity" | "repair";
 
 interface RouterStatus {
   id_provider: string;
@@ -121,6 +122,7 @@ export default function IdentityPanel() {
     { id: "status", label: "Status" },
     { id: "llm", label: "LLM Setup" },
     { id: "keys", label: "API Keys" },
+    { id: "data", label: "Data" },
     { id: "identity", label: "Identity" },
     { id: "repair", label: "Repair" },
   ];
@@ -242,6 +244,9 @@ export default function IdentityPanel() {
             )}
           </div>
         )}
+
+        {/* ── DATA ── */}
+        {tab === "data" && <DataSourcesPanel />}
 
         {/* ── IDENTITY ── */}
         {tab === "identity" && (

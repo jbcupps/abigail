@@ -398,6 +398,95 @@ fn wipe_identity(state: tauri::State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+// ── SQLite Management (The Archives) ────────────────────────────────────
+
+/// Statistics about the SQLite memory database.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SqliteStats {
+    pub size_bytes: u64,
+    pub memory_count: u64,
+    pub has_birth: bool,
+}
+
+/// Get statistics about the SQLite memory database.
+#[tauri::command]
+fn get_sqlite_stats(state: tauri::State<AppState>) -> Result<SqliteStats, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let db_path = config.db_path.clone();
+
+    let size_bytes = std::fs::metadata(&db_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
+    let memory_count = store.count_memories().map_err(|e| e.to_string())?;
+    let has_birth = store.has_birth().map_err(|e| e.to_string())?;
+
+    Ok(SqliteStats {
+        size_bytes,
+        memory_count,
+        has_birth,
+    })
+}
+
+/// Optimize the SQLite database by running VACUUM.
+/// Returns the number of bytes saved (before - after).
+#[tauri::command]
+fn optimize_sqlite(state: tauri::State<AppState>) -> Result<i64, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let db_path = config.db_path.clone();
+
+    let size_before = std::fs::metadata(&db_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
+    store.vacuum().map_err(|e| e.to_string())?;
+
+    // Need to drop the store to release the lock before checking size
+    drop(store);
+
+    let size_after = std::fs::metadata(&db_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    let saved = size_before as i64 - size_after as i64;
+    tracing::info!("SQLite optimized: {} bytes saved", saved);
+    Ok(saved)
+}
+
+/// Backup the SQLite database to the specified path.
+#[tauri::command]
+fn backup_sqlite(state: tauri::State<AppState>, dest_path: String) -> Result<(), String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let db_path = config.db_path.clone();
+
+    // Also copy WAL and SHM files if they exist
+    std::fs::copy(&db_path, &dest_path)
+        .map_err(|e| format!("Failed to copy database: {}", e))?;
+
+    // Copy WAL file if it exists
+    let wal_path = db_path.with_extension("db-wal");
+    let dest_wal = std::path::Path::new(&dest_path).with_extension("db-wal");
+    if wal_path.exists() {
+        let _ = std::fs::copy(&wal_path, &dest_wal);
+    }
+
+    tracing::info!("SQLite backed up to: {}", dest_path);
+    Ok(())
+}
+
+/// Reset all memories (but keep birth record).
+/// Returns the number of memories deleted.
+#[tauri::command]
+fn reset_memories(state: tauri::State<AppState>) -> Result<u64, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
+    let deleted = store.clear_memories().map_err(|e| e.to_string())?;
+    tracing::warn!("Reset memories: {} memories deleted", deleted);
+    Ok(deleted)
+}
+
 /// Result of startup checks (heartbeat + signature verification).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StartupCheckResult {
@@ -1587,6 +1676,11 @@ pub fn run() {
             check_existing_identity,
             archive_identity,
             wipe_identity,
+            // SQLite management
+            get_sqlite_stats,
+            optimize_sqlite,
+            backup_sqlite,
+            reset_memories,
             check_interrupted_birth,
             repair_identity,
             run_startup_checks,

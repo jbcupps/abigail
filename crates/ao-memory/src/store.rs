@@ -161,6 +161,46 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// Count total memories in the store.
+    pub fn count_memories(&self) -> Result<u64> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )))
+        })?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM memories",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count as u64)
+    }
+
+    /// Run VACUUM to reclaim space and optimize the database.
+    pub fn vacuum(&self) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )))
+        })?;
+        conn.execute("VACUUM", [])?;
+        Ok(())
+    }
+
+    /// Clear all memories but keep the birth record.
+    pub fn clear_memories(&self) -> Result<u64> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )))
+        })?;
+        let deleted = conn.execute("DELETE FROM memories", [])?;
+        Ok(deleted as u64)
+    }
+
     /// Recent memories (MVP: by created_at DESC; sqlite-vec stubbed).
     pub fn recent_memories(&self, limit: usize) -> Result<Vec<Memory>> {
         let conn = self.conn.lock().map_err(|e| {
@@ -338,5 +378,53 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_count_memories() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        assert_eq!(store.count_memories().unwrap(), 0);
+
+        store.insert_memory(&Memory::ephemeral("msg1".into())).unwrap();
+        assert_eq!(store.count_memories().unwrap(), 1);
+
+        store.insert_memory(&Memory::ephemeral("msg2".into())).unwrap();
+        store.insert_memory(&Memory::distilled("msg3".into())).unwrap();
+        assert_eq!(store.count_memories().unwrap(), 3);
+    }
+
+    #[test]
+    fn test_clear_memories() {
+        let store = MemoryStore::open_in_memory().unwrap();
+
+        // Add some memories and a birth record
+        store.insert_memory(&Memory::ephemeral("msg1".into())).unwrap();
+        store.insert_memory(&Memory::ephemeral("msg2".into())).unwrap();
+        store.record_birth(&Memory::crystallized("born".into())).unwrap();
+
+        assert_eq!(store.count_memories().unwrap(), 2);
+        assert!(store.has_birth().unwrap());
+
+        // Clear memories
+        let deleted = store.clear_memories().unwrap();
+        assert_eq!(deleted, 2);
+
+        // Memories gone, but birth still there
+        assert_eq!(store.count_memories().unwrap(), 0);
+        assert!(store.has_birth().unwrap());
+    }
+
+    #[test]
+    fn test_vacuum() {
+        let store = MemoryStore::open_in_memory().unwrap();
+
+        // Insert and delete some data
+        for i in 0..10 {
+            store.insert_memory(&Memory::ephemeral(format!("msg {}", i))).unwrap();
+        }
+        store.clear_memories().unwrap();
+
+        // VACUUM should succeed
+        assert!(store.vacuum().is_ok());
     }
 }
