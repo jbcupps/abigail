@@ -19,144 +19,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
-name = "abby-app"
-version = "0.0.1"
-dependencies = [
- "abby-birth",
- "abby-capabilities",
- "abby-core",
- "abby-memory",
- "abby-router",
- "abby-skills",
- "base64 0.21.7",
- "ed25519-dalek",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "abby-birth"
-version = "0.0.1"
-dependencies = [
- "abby-capabilities",
- "abby-core",
- "abby-memory",
- "anyhow",
- "chrono",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "abby-capabilities"
-version = "0.0.1"
-dependencies = [
- "abby-core",
- "anyhow",
- "async-openai",
- "async-trait",
- "chrono",
- "futures-util",
- "indicatif",
- "reqwest 0.11.27",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "abby-core"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "base64 0.21.7",
- "chrono",
- "directories",
- "ed25519-dalek",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tracing",
- "windows 0.52.0",
-]
-
-[[package]]
-name = "abby-keygen"
-version = "0.0.1"
-dependencies = [
- "abby-core",
- "directories",
- "eframe",
- "rfd",
- "serde",
- "serde_json",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "abby-memory"
-version = "0.0.1"
-dependencies = [
- "abby-core",
- "anyhow",
- "chrono",
- "rusqlite",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "abby-router"
-version = "0.0.1"
-dependencies = [
- "abby-capabilities",
- "abby-core",
- "anyhow",
- "async-trait",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "abby-skills"
-version = "0.0.1"
-dependencies = [
- "abby-core",
- "anyhow",
- "async-imap",
- "async-native-tls",
- "async-trait",
- "chrono",
- "futures-util",
- "lettre",
- "mail-parser",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tokio-util",
- "toml 0.8.23",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -246,6 +108,144 @@ name = "anyhow"
 version = "1.0.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
+
+[[package]]
+name = "ao-app"
+version = "0.0.1"
+dependencies = [
+ "ao-birth",
+ "ao-capabilities",
+ "ao-core",
+ "ao-memory",
+ "ao-router",
+ "ao-skills",
+ "base64 0.21.7",
+ "ed25519-dalek",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "ao-birth"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "ao-capabilities",
+ "ao-core",
+ "ao-memory",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "ao-capabilities"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "ao-core",
+ "async-openai",
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "indicatif",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "ao-core"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "base64 0.21.7",
+ "chrono",
+ "directories",
+ "ed25519-dalek",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+ "windows 0.52.0",
+]
+
+[[package]]
+name = "ao-keygen"
+version = "0.0.1"
+dependencies = [
+ "ao-core",
+ "directories",
+ "eframe",
+ "rfd",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "ao-memory"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "ao-core",
+ "chrono",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ao-router"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "ao-capabilities",
+ "ao-core",
+ "async-trait",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "ao-skills"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "ao-core",
+ "async-imap",
+ "async-native-tls",
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "lettre",
+ "mail-parser",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "toml 0.8.23",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "ar_archive_writer"

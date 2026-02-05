@@ -47,7 +47,7 @@ All workspace crates use `version.workspace = true`, so they follow the root.
 
 ## Where to get installers (end users)
 
-After a release is published, end users can go to the [Abby download page](https://jbcupps.github.io/abby/). The page detects their OS and offers a single download button; they can also pick Windows, macOS, or Linux from "Other downloads." Stable asset names (`Abby-windows-x64-setup.exe`, etc.) allow `.../releases/latest/download/...` URLs to always point at the latest release.
+After a release is published, end users can go to the [AO download page](https://jbcupps.github.io/ao/). The page detects their OS and offers a single download button; they can also pick Windows, macOS, or Linux from "Other downloads." Stable asset names (`AO-windows-x64-setup.exe`, etc.) allow `.../releases/latest/download/...` URLs to always point at the latest release.
 
 ## First release (0.0.1)
 
@@ -102,7 +102,7 @@ Deva releases use tags prefixed with `deva-v`. Default version is **D 0.0.0** (i
 4. **CI:** `.github/workflows/build-release-deva.yml` runs on `deva-v*` tags:
    - Builds installers for Windows, Linux, and macOS
    - Creates a **pre-release** (marked as pre-release, not "latest")
-   - Installers named `Abby-Deva-*` to distinguish from stable
+   - Installers named `AO-Deva-*` to distinguish from stable
 
 ### Manual workflow dispatch
 
@@ -117,5 +117,5 @@ You can also trigger a Deva build without a tag:
 |--------|-----------------|------|
 | Tag format | `v0.0.x` | `deva-v0.x.x` |
 | Release type | Release (latest) | Pre-release |
-| Asset names | `Abby-*` | `Abby-Deva-*` |
+| Asset names | `AO-*` | `AO-Deva-*` |
 | Workflow | `build-release.yml` | `build-release-deva.yml` |

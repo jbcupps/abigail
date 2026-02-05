@@ -1,0 +1,13 @@
+[package]
+name = "ao-router"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ao-core = { path = "../ao-core" }
+ao-capabilities = { path = "../ao-capabilities" }
+async-trait.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true

@@ -1,4 +1,4 @@
-# Build Abby installer and open the bundle folder.
+# Build AO installer and open the bundle folder.
 # Run from repo root. Requires: Rust, Node.js 20+, npm.
 
 $ErrorActionPreference = "Stop"

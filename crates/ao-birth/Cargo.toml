@@ -1,0 +1,16 @@
+[package]
+name = "ao-birth"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ao-core = { path = "../ao-core" }
+ao-memory = { path = "../ao-memory" }
+ao-capabilities = { path = "../ao-capabilities" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+chrono.workspace = true

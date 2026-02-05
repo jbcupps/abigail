@@ -1,20 +1,20 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/abby-core",
-    "crates/abby-memory",
-    "crates/abby-capabilities",
-    "crates/abby-router",
-    "crates/abby-birth",
-    "crates/abby-skills",
-    "crates/abby-keygen",
+    "crates/ao-core",
+    "crates/ao-memory",
+    "crates/ao-capabilities",
+    "crates/ao-router",
+    "crates/ao-birth",
+    "crates/ao-skills",
+    "crates/ao-keygen",
     "tauri-app",
 ]
 
 [workspace.package]
 version = "0.0.1"
 edition = "2021"
-authors = ["Abby's Mentor"]
+authors = ["AO's Mentor"]
 license = "MIT"
 
 [workspace.dependencies]

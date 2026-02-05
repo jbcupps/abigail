@@ -1,4 +1,4 @@
-; Abby NSIS installer hooks
+; AO NSIS installer hooks
 ; Handles identity setup and Ollama detection/installation
 
 Var OllamaDetected
@@ -6,8 +6,8 @@ Var OllamaUrl
 
 !macro NSIS_HOOK_POSTINSTALL
   ; Step 1: Run identity keygen
-  DetailPrint "Running Abby identity setup..."
-  ExecWait '"$INSTDIR\abby-keygen.exe"' $0
+  DetailPrint "Running AO identity setup..."
+  ExecWait '"$INSTDIR\ao-keygen.exe"' $0
   DetailPrint "Identity setup completed (exit code: $0)"
   ${If} $0 != 0
     MessageBox MB_OK|MB_ICONEXCLAMATION "Identity setup did not complete. You can run it on first app launch."
@@ -99,11 +99,11 @@ SkipModel:
 ModelDone:
 FunctionEnd
 
-; Write Ollama configuration to Abby's config.json
+; Write Ollama configuration to AO's config.json
 Function WriteOllamaConfig
   ; Get AppData\Local path
   ReadEnvStr $0 LOCALAPPDATA
-  StrCpy $1 "$0\abby\Abby\config.json"
+  StrCpy $1 "$0\ao\AO\config.json"
 
   ; Check if config exists
   IfFileExists $1 ConfigExists CreateConfig
@@ -118,7 +118,7 @@ ConfigExists:
 
 CreateConfig:
   ; Create new config with Ollama URL
-  CreateDirectory "$0\abby\Abby"
+  CreateDirectory "$0\ao\AO"
   FileOpen $2 $1 w
   FileWrite $2 '{"local_llm_base_url": "http://localhost:11434", "routing_mode": "ego_primary"}'
   FileClose $2

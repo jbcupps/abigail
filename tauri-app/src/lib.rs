@@ -2,15 +2,15 @@
 
 mod templates;
 
-use abby_birth::BirthOrchestrator;
-use abby_core::{
+use ao_birth::BirthOrchestrator;
+use ao_core::{
     generate_external_keypair, sign_constitutional_documents, AppConfig,
     CoreError, ExternalVault, Keyring, ReadOnlyFileVault, Verifier,
 };
-use abby_memory::{Memory, MemoryStore};
-use abby_router::IdEgoRouter;
-use abby_skills::channel::EventBus;
-use abby_skills::{SkillExecutor, SkillRegistry, ToolParams};
+use ao_memory::{Memory, MemoryStore};
+use ao_router::IdEgoRouter;
+use ao_skills::channel::EventBus;
+use ao_skills::{SkillExecutor, SkillRegistry, ToolParams};
 use base64::Engine as _;
 use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
@@ -108,7 +108,7 @@ fn init_soul(state: tauri::State<AppState>) -> Result<(), String> {
 /// 3. Stores the PUBLIC key in data_dir/external_pubkey.bin
 /// 4. Returns the PRIVATE key as base64 for the user to save
 /// 
-/// CRITICAL: The private key is returned ONCE and never stored by Abby.
+/// CRITICAL: The private key is returned ONCE and never stored by AO.
 /// The user MUST save it securely. Without it, they cannot verify integrity
 /// after a reinstall or re-sign documents if needed.
 #[tauri::command]
@@ -130,7 +130,7 @@ fn generate_and_sign_constitutional(state: tauri::State<AppState>) -> Result<Key
         // Already generated - can't return the private key again (it was never stored)
         return Err(
             "Constitutional documents are already signed. \
-             The private key was presented during initial setup and is not stored by Abby. \
+             The private key was presented during initial setup and is not stored by AO. \
              If you need to re-sign, you must use your saved private key."
                 .to_string(),
         );
@@ -419,7 +419,7 @@ async fn download_model(
         config.models_dir.clone()
     };
     std::fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
-    let downloader = abby_capabilities::cognitive::ModelDownloader::new();
+    let downloader = ao_capabilities::cognitive::ModelDownloader::new();
     let dest = downloader
         .download_to(&models_dir, |written, total_bytes| {
             let payload = serde_json::json!({ "written": written, "total": total_bytes });
@@ -510,7 +510,7 @@ fn complete_birth(state: tauri::State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn list_skills(state: tauri::State<AppState>) -> Result<Vec<abby_skills::SkillManifest>, String> {
+fn list_skills(state: tauri::State<AppState>) -> Result<Vec<ao_skills::SkillManifest>, String> {
     state
         .registry
         .list()
@@ -518,18 +518,18 @@ fn list_skills(state: tauri::State<AppState>) -> Result<Vec<abby_skills::SkillMa
 }
 
 #[tauri::command]
-fn list_discovered_skills(state: tauri::State<AppState>) -> Result<Vec<abby_skills::SkillManifest>, String> {
+fn list_discovered_skills(state: tauri::State<AppState>) -> Result<Vec<ao_skills::SkillManifest>, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let paths = vec![config.data_dir.join("skills")];
-    Ok(abby_skills::SkillRegistry::discover(&paths))
+    Ok(ao_skills::SkillRegistry::discover(&paths))
 }
 
 #[tauri::command]
 fn list_tools(
     state: tauri::State<AppState>,
     skill_id: String,
-) -> Result<Vec<abby_skills::ToolDescriptor>, String> {
-    let id = abby_skills::SkillId(skill_id);
+) -> Result<Vec<ao_skills::ToolDescriptor>, String> {
+    let id = ao_skills::SkillId(skill_id);
     let (skill, _) = state.registry.get_skill(&id).map_err(|e| e.to_string())?;
     Ok(skill.tools())
 }
@@ -540,8 +540,8 @@ async fn execute_tool(
     skill_id: String,
     tool_name: String,
     params: HashMap<String, serde_json::Value>,
-) -> Result<abby_skills::ToolOutput, String> {
-    let id = abby_skills::SkillId(skill_id);
+) -> Result<ao_skills::ToolOutput, String> {
+    let id = ao_skills::SkillId(skill_id);
     let tool_params = ToolParams {
         values: params,
     };
@@ -562,7 +562,7 @@ async fn chat(state: tauri::State<'_, AppState>, message: String) -> Result<Stri
         let router = state.router.read().map_err(|e| e.to_string())?.clone();
         (store, router)
     };
-    let messages = vec![abby_capabilities::cognitive::Message {
+    let messages = vec![ao_capabilities::cognitive::Message {
         role: "user".to_string(),
         content: message.clone(),
     }];

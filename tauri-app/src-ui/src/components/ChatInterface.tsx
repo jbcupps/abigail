@@ -263,7 +263,7 @@ export default function ChatInterface() {
       {renderConfigMenu()}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
-          <p className="text-green-600">Say something to Abby.</p>
+          <p className="text-green-600">Say something to AO.</p>
         )}
         {messages.map((msg, i) => (
           <div
@@ -271,7 +271,7 @@ export default function ChatInterface() {
             className={msg.role === "user" ? "text-right" : ""}
           >
             <span className={msg.isError ? "text-red-400" : "text-green-400"}>
-              {msg.role === "user" ? "You" : "Abby"}:{" "}
+              {msg.role === "user" ? "You" : "AO"}:{" "}
             </span>
             <span className={msg.isError ? "text-red-300" : ""}>
               {msg.content.split("\n").map((line, j) => (

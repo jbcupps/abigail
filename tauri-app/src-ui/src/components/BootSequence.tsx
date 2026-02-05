@@ -92,7 +92,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   };
 
   const handleReset = async () => {
-    if (!confirm("WARNING: This will delete your identity and reset Abby to a fresh state. You will lose your current trust relationship. Are you sure?")) {
+    if (!confirm("WARNING: This will delete your identity and reset AO to a fresh state. You will lose your current trust relationship. Are you sure?")) {
       return;
     }
 
@@ -133,7 +133,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         return;
       }
 
-      // Show "Abby is informed they're OK"
+      // Show "AO is informed they're OK"
       setStage("Verified");
       setMessage("Integrity verified. Engaging...");
 
@@ -191,7 +191,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   return (
     <div className="min-h-screen bg-black text-green-500 font-mono p-6 overflow-auto">
       <pre className="text-sm">
-        ABBY BOOT SEQUENCE
+        AO BOOT SEQUENCE
         ==================
       </pre>
 
@@ -216,7 +216,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               CRITICAL: SAVE YOUR PRIVATE KEY
             </h2>
             <p className="text-yellow-400 text-sm mb-2">
-              This is the ONLY time you will see this key. Abby does NOT store it.
+              This is the ONLY time you will see this key. AO does NOT store it.
             </p>
           </div>
 
@@ -247,10 +247,10 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
           <div className="border border-red-700 bg-red-900/20 p-4 rounded mb-6">
             <h3 className="text-red-400 font-bold mb-2">SECURITY WARNINGS</h3>
             <ul className="text-red-300 text-sm space-y-2">
-              <li>• <strong>This key proves you are Abby's legitimate mentor.</strong></li>
+              <li>• <strong>This key proves you are AO's legitimate mentor.</strong></li>
               <li>• <strong>Store it securely</strong> (password manager, encrypted drive, offline backup).</li>
               <li>• <strong>Never share this key</strong> with anyone or any service.</li>
-              <li>• <strong>If you lose this key:</strong> You cannot re-verify Abby's integrity after reinstall.</li>
+              <li>• <strong>If you lose this key:</strong> You cannot re-verify AO's integrity after reinstall.</li>
               <li>• <strong>If this key is compromised:</strong> Someone could create fake constitutional documents.</li>
             </ul>
           </div>
@@ -293,7 +293,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               {error}
             </p>
             <p className="text-gray-400 text-sm">
-              Abby's constitutional documents cannot be verified. This usually happens if files were corrupted or tampered with.
+              AO's constitutional documents cannot be verified. This usually happens if files were corrupted or tampered with.
             </p>
           </div>
 
@@ -325,7 +325,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
           <div className="border-t border-gray-800 pt-6">
             <h3 className="text-red-400 font-bold mb-2">Option 2: Hard Reset</h3>
             <p className="text-sm text-gray-400 mb-4">
-              If you lost your key, you must reset Abby. <strong>This destroys the current trust relationship.</strong> You will be treated as a new mentor.
+              If you lost your key, you must reset AO. <strong>This destroys the current trust relationship.</strong> You will be treated as a new mentor.
             </p>
             <button
               onClick={handleReset}

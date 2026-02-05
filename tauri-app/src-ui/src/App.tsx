@@ -89,7 +89,7 @@ function App() {
     return (
       <div className="min-h-screen bg-black text-green-500 font-mono flex flex-col items-center justify-center">
         <pre className="text-sm mb-4">
-          ABBY STARTUP
+          AO STARTUP
           ============
         </pre>
         <p>Running startup checks...</p>
@@ -102,7 +102,7 @@ function App() {
     return (
       <div className="min-h-screen bg-black text-green-500 font-mono flex flex-col items-center justify-center p-6">
         <pre className="text-sm mb-4">
-          ABBY STARTUP
+          AO STARTUP
           ============
         </pre>
         <p className="text-red-400 mb-4">{startupError}</p>

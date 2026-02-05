@@ -1,6 +1,6 @@
-# Abby
+# AO
 
-Abby is a desktop agent application built with [Tauri](https://tauri.app/) and Rust. The MVP provides startup, a local built-in LLM (Id/Candle), signature verification of constitutional docs, and chat in the UI.
+AO is a desktop agent application built with [Tauri](https://tauri.app/) and Rust. The MVP provides startup, a local built-in LLM (Id/Candle), signature verification of constitutional docs, and chat in the UI.
 
 ## Quick start
 
@@ -19,7 +19,7 @@ Full instructions, installer options, and tests: [documents/HOW_TO_RUN_LOCALLY.m
 
 | Path | Description |
 |------|-------------|
-| `crates/` | Rust workspace: abby-core, abby-memory, abby-llm, abby-router, abby-birth, abby-skills |
+| `crates/` | Rust workspace: ao-core, ao-memory, ao-llm, ao-router, ao-birth, ao-skills |
 | `tauri-app/` | Tauri desktop app and React frontend (`tauri-app/src-ui`) |
 | `templates/` | Constitutional docs (soul, ethics, instincts) |
 | `documents/` | Runbooks, scope, release, and environment notes |

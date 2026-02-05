@@ -1,4 +1,4 @@
-//! Proton Mail–style skill: implements Skill and EmailTransportCapability, wrapping abby-senses IMAP/SMTP.
+//! Proton Mail–style skill: implements Skill and EmailTransportCapability, wrapping ao-senses IMAP/SMTP.
 
 mod transport;
 
@@ -6,23 +6,23 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use abby_skills::capability::email::{
+use ao_skills::capability::email::{
     EmailTransportCapability, EmailTransportInfo, FetchOptions, OutgoingEmail,
 };
-use abby_skills::manifest::{
+use ao_skills::manifest::{
     CapabilityDescriptor, NetworkPermission, Permission, SkillId, SkillManifest,
 };
-use abby_skills::channel::{SkillEvent, TriggerDescriptor, TriggerFrequency, TriggerPriority};
-use abby_skills::skill::{
+use ao_skills::channel::{SkillEvent, TriggerDescriptor, TriggerFrequency, TriggerPriority};
+use ao_skills::skill::{
     CostEstimate, ExecutionContext, HealthStatus, Skill, SkillConfig, SkillHealth, SkillError,
     SkillResult, ToolDescriptor, ToolOutput, ToolParams,
 };
-use abby_skills::transport::{ImapClient, SmtpClient};
+use ao_skills::transport::{ImapClient, SmtpClient};
 
 use crate::transport::ProtonMailTransport;
 
 /// Default skill ID for Proton Mail.
-pub const PROTON_MAIL_SKILL_ID: &str = "com.abby.skills.proton-mail";
+pub const PROTON_MAIL_SKILL_ID: &str = "com.ao.skills.proton-mail";
 
 /// Proton Mail skill: Skill + EmailTransportCapability.
 pub struct ProtonMailSkill {
@@ -47,7 +47,7 @@ impl ProtonMailSkill {
             category: "Communication".to_string(),
             keywords: vec!["email".into(), "proton".into(), "imap".into(), "smtp".into()],
             runtime: "Native".to_string(),
-            min_abby_version: "0.1.0".to_string(),
+            min_ao_version: "0.1.0".to_string(),
             platforms: vec!["Windows".into(), "macOS".into(), "Linux".into()],
             capabilities: vec![CapabilityDescriptor {
                 capability_type: "email_transport".to_string(),
@@ -57,7 +57,7 @@ impl ProtonMailSkill {
                 "mail.proton.me".into(),
                 "smtp.proton.me".into(),
             ]))],
-            secrets: vec![abby_skills::SecretDescriptor {
+            secrets: vec![ao_skills::SecretDescriptor {
                 name: "imap_password".to_string(),
                 description: "App password for IMAP".to_string(),
                 required: true,
@@ -337,7 +337,7 @@ impl EmailTransportCapability for ProtonMailSkill {
         Ok(())
     }
 
-    async fn fetch_emails(&self, options: FetchOptions) -> SkillResult<Vec<abby_skills::capability::email::Email>> {
+    async fn fetch_emails(&self, options: FetchOptions) -> SkillResult<Vec<ao_skills::capability::email::Email>> {
         let transport = self
             .transport
             .as_ref()
@@ -346,7 +346,7 @@ impl EmailTransportCapability for ProtonMailSkill {
         guard.fetch_emails(options).await
     }
 
-    async fn send_email(&self, email: OutgoingEmail) -> SkillResult<abby_skills::capability::email::SendResult> {
+    async fn send_email(&self, email: OutgoingEmail) -> SkillResult<ao_skills::capability::email::SendResult> {
         let transport = self
             .transport
             .as_ref()

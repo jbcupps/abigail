@@ -2,11 +2,11 @@
 name = "skill-proton-mail"
 version.workspace = true
 edition.workspace = true
-description = "Proton Mail–style email skill wrapping abby-senses IMAP/SMTP"
+description = "Proton Mail-style email skill wrapping ao-skills IMAP/SMTP"
 
 [dependencies]
-abby-skills = { path = "../../crates/abby-skills" }
-abby-core = { path = "../../crates/abby-core" }
+ao-skills = { path = "../../crates/ao-skills" }
+ao-core = { path = "../../crates/ao-core" }
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true

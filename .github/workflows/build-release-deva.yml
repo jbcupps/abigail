@@ -1,4 +1,4 @@
-# Build Abby (Tauri app + keygen) from Deva branch and publish to GitHub Releases.
+# Build AO (Tauri app + keygen) from Deva branch and publish to GitHub Releases.
 # This is the development/preview release workflow.
 #
 # Triggers:
@@ -150,12 +150,12 @@ jobs:
           Copy-Item tauri-app\icons\icon.icns -Destination icons\ -ErrorAction SilentlyContinue
           Copy-Item tauri-app\icons\*.png -Destination icons\ -ErrorAction SilentlyContinue
 
-      - name: Build abby-keygen binary
+      - name: Build ao-keygen binary
         shell: bash
         run: |
-          cargo build --release -p abby-keygen
-          cp target/release/abby-keygen.exe tauri-app/abby-keygen.exe || \
-          cp target/release/abby-keygen tauri-app/abby-keygen || true
+          cargo build --release -p ao-keygen
+          cp target/release/ao-keygen.exe tauri-app/ao-keygen.exe || \
+          cp target/release/ao-keygen tauri-app/ao-keygen || true
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@063c0231f444e55760d98acb9c469b994269d4a5 # v0.5.6
@@ -168,7 +168,7 @@ jobs:
       - name: Upload installers (Artifacts)
         uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
         with:
-          name: abby-deva-installer-${{ matrix.platform }}
+          name: ao-deva-installer-${{ matrix.platform }}
           path: ${{ matrix.installer_path }}
           if-no-files-found: error
 
@@ -188,7 +188,7 @@ jobs:
         uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4.1.4
         with:
           path: artifacts
-          pattern: abby-deva-installer-*
+          pattern: ao-deva-installer-*
           merge-multiple: false
 
       - name: Create git tag if needed
@@ -207,50 +207,50 @@ jobs:
         run: |
           mkdir -p release-assets
           # Find the installer exe (may be flat or nested depending on artifact structure)
-          INSTALLER=$(find artifacts/abby-deva-installer-windows-latest -name "*.exe" -type f | head -1)
+          INSTALLER=$(find artifacts/ao-deva-installer-windows-latest -name "*.exe" -type f | head -1)
           if [ -z "$INSTALLER" ]; then
             echo "ERROR: No installer exe found in artifacts"
             find artifacts/ -type f
             exit 1
           fi
           echo "Found installer: $INSTALLER"
-          cp "$INSTALLER" release-assets/Abby-Deva-windows-x64-setup.exe
+          cp "$INSTALLER" release-assets/AO-Deva-windows-x64-setup.exe
 
       - name: Create GitHub Release (Pre-release)
         uses: softprops/action-gh-release@9d7c94cfd0a1f3ed45544c887983e9fa900f0564 # v2.0.4
         with:
           tag_name: ${{ needs.build.outputs.tag }}
-          name: Abby Deva ${{ needs.build.outputs.version }}
+          name: AO Deva ${{ needs.build.outputs.version }}
           draft: false
           prerelease: true
           body: |
-            ## Abby Deva ${{ needs.build.outputs.version }}
+            ## AO Deva ${{ needs.build.outputs.version }}
 
             **This is a development/preview release from the Deva branch.**
 
             ### Installation
 
             Download the installer for your platform:
-            - **Windows**: `Abby-Deva-windows-x64-setup.exe`
+            - **Windows**: `AO-Deva-windows-x64-setup.exe`
 
             ### What's New: Installer Key Generation
 
             The installer now runs identity setup automatically during installation:
             1. Generates an Ed25519 signing keypair
-            2. Signs Abby's constitutional documents
+            2. Signs AO's constitutional documents
             3. **Presents your private key** in a GUI window - you MUST save this securely
-            4. On first app launch, Abby detects the completed setup and proceeds directly to chat
+            4. On first app launch, AO detects the completed setup and proceeds directly to chat
 
             ### Security Note
 
-            The private key shown during installation is NEVER stored by Abby.
-            Keep it safe - you'll need it if you ever need to verify your Abby instance
+            The private key shown during installation is NEVER stored by AO.
+            Keep it safe - you'll need it if you ever need to verify your AO instance
             or recover from data loss.
 
             ### Changes in Deva
 
             This release includes:
-            - Installer-time keypair generation via `abby-keygen` GUI
+            - Installer-time keypair generation via `ao-keygen` GUI
             - Auto-start boot sequence (no manual "Start" click)
             - Streamlined first-launch when identity is already set up
             - Auto-versioned pre-releases on every Deva push
@@ -259,4 +259,4 @@ jobs:
 
             **Note:** This is a pre-release. For stable releases, see the [main releases](https://github.com/${{ github.repository }}/releases?q=NOT+Deva&expanded=true).
           files: |
-            release-assets/Abby-Deva-windows-x64-setup.exe
+            release-assets/AO-Deva-windows-x64-setup.exe

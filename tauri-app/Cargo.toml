@@ -1,5 +1,5 @@
 [package]
-name = "abby-app"
+name = "ao-app"
 version.workspace = true
 edition.workspace = true
 
@@ -7,14 +7,14 @@ edition.workspace = true
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-abby-core = { path = "../crates/abby-core" }
+ao-core = { path = "../crates/ao-core" }
 base64 = "0.21"
 ed25519-dalek.workspace = true
-abby-memory = { path = "../crates/abby-memory" }
-abby-capabilities = { path = "../crates/abby-capabilities" }
-abby-router = { path = "../crates/abby-router" }
-abby-birth = { path = "../crates/abby-birth" }
-abby-skills = { path = "../crates/abby-skills" }
+ao-memory = { path = "../crates/ao-memory" }
+ao-capabilities = { path = "../crates/ao-capabilities" }
+ao-router = { path = "../crates/ao-router" }
+ao-birth = { path = "../crates/ao-birth" }
+ao-skills = { path = "../crates/ao-skills" }
 tauri = { version = "2.0", features = ["tray-icon"] }
 tokio.workspace = true
 serde.workspace = true

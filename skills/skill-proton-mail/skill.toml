@@ -1,16 +1,16 @@
-# Proton Mail–style email skill (abby-senses IMAP/SMTP).
+# Proton Mail-style email skill (ao-skills IMAP/SMTP).
 
 [skill]
-id = "com.abby.skills.proton-mail"
+id = "com.ao.skills.proton-mail"
 name = "Proton Mail"
 version = "0.1.0"
-description = "Proton Mail–style email: fetch, send, and manage mail via IMAP/SMTP (abby-senses)."
+description = "Proton Mail-style email: fetch, send, and manage mail via IMAP/SMTP (ao-skills)."
 category = "Communication"
 keywords = ["email", "proton", "imap", "smtp"]
 
 [runtime]
 runtime = "Native"
-min_abby_version = "0.1.0"
+min_ao_version = "0.1.0"
 platforms = ["Windows", "macOS", "Linux"]
 
 [[capabilities]]
