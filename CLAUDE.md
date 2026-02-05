@@ -121,4 +121,4 @@ All workspace crates inherit via `version.workspace = true`.
 - macOS: `~/Library/Application Support/ao/AO/`
 - Linux: `~/.local/share/ao/AO/`
 
-Contains: `config.json`, `keys.bin` (DPAPI), `external_pubkey.bin`, `memories.db` (SQLite), `docs/` (signed constitutional docs)
+Contains: `config.json`, `keys.bin` (DPAPI), `secrets.bin` (DPAPI), `external_pubkey.bin`, `ao_seed.db` (SQLite), `docs/` (signed constitutional docs)

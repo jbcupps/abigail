@@ -108,7 +108,9 @@ Function BackupUserData
   CreateDirectory "$2\docs"
 
   ; Backup files (using PowerShell for reliability)
-  nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "$$src = \"$1\"; $$dst = \"$2\"; if (Test-Path \"$$src\config.json\") { Copy-Item \"$$src\config.json\" \"$$dst\config.json\" -Force }; if (Test-Path \"$$src\memories.db\") { Copy-Item \"$$src\memories.db\" \"$$dst\memories.db\" -Force }; if (Test-Path \"$$src\external_pubkey.bin\") { Copy-Item \"$$src\external_pubkey.bin\" \"$$dst\external_pubkey.bin\" -Force }; if (Test-Path \"$$src\secrets.bin\") { Copy-Item \"$$src\secrets.bin\" \"$$dst\secrets.bin\" -Force }; if (Test-Path \"$$src\docs\") { Copy-Item \"$$src\docs\*\" \"$$dst\docs\\" -Force -Recurse }; Write-Output OK"'
+  ; Files: config.json, ao_seed.db (SQLite), ao_seed.db-wal, ao_seed.db-shm (WAL files),
+  ;        external_pubkey.bin, secrets.bin, keys.bin, docs/
+  nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "$$src = \"$1\"; $$dst = \"$2\"; if (Test-Path \"$$src\config.json\") { Copy-Item \"$$src\config.json\" \"$$dst\config.json\" -Force }; if (Test-Path \"$$src\ao_seed.db\") { Copy-Item \"$$src\ao_seed.db\" \"$$dst\ao_seed.db\" -Force }; if (Test-Path \"$$src\ao_seed.db-wal\") { Copy-Item \"$$src\ao_seed.db-wal\" \"$$dst\ao_seed.db-wal\" -Force }; if (Test-Path \"$$src\ao_seed.db-shm\") { Copy-Item \"$$src\ao_seed.db-shm\" \"$$dst\ao_seed.db-shm\" -Force }; if (Test-Path \"$$src\external_pubkey.bin\") { Copy-Item \"$$src\external_pubkey.bin\" \"$$dst\external_pubkey.bin\" -Force }; if (Test-Path \"$$src\secrets.bin\") { Copy-Item \"$$src\secrets.bin\" \"$$dst\secrets.bin\" -Force }; if (Test-Path \"$$src\keys.bin\") { Copy-Item \"$$src\keys.bin\" \"$$dst\keys.bin\" -Force }; if (Test-Path \"$$src\docs\") { Copy-Item \"$$src\docs\*\" \"$$dst\docs\\" -Force -Recurse }; Write-Output OK"'
   Pop $0
   Pop $1
 
@@ -121,7 +123,8 @@ Function RestoreUserData
   StrCpy $2 "$TEMP\ao_upgrade_backup"
 
   ; Restore files (using PowerShell for reliability)
-  nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "$$src = \"$2\"; $$dst = \"$1\"; if (Test-Path \"$$src\config.json\") { Copy-Item \"$$src\config.json\" \"$$dst\config.json\" -Force }; if (Test-Path \"$$src\memories.db\") { Copy-Item \"$$src\memories.db\" \"$$dst\memories.db\" -Force }; if (Test-Path \"$$src\external_pubkey.bin\") { Copy-Item \"$$src\external_pubkey.bin\" \"$$dst\external_pubkey.bin\" -Force }; if (Test-Path \"$$src\secrets.bin\") { Copy-Item \"$$src\secrets.bin\" \"$$dst\secrets.bin\" -Force }; if (Test-Path \"$$src\docs\") { New-Item -ItemType Directory -Path \"$$dst\docs\" -Force | Out-Null; Copy-Item \"$$src\docs\*\" \"$$dst\docs\\" -Force -Recurse }; Remove-Item \"$$src\" -Recurse -Force; Write-Output OK"'
+  ; Files: config.json, ao_seed.db (SQLite + WAL files), external_pubkey.bin, secrets.bin, keys.bin, docs/
+  nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "$$src = \"$2\"; $$dst = \"$1\"; if (Test-Path \"$$src\config.json\") { Copy-Item \"$$src\config.json\" \"$$dst\config.json\" -Force }; if (Test-Path \"$$src\ao_seed.db\") { Copy-Item \"$$src\ao_seed.db\" \"$$dst\ao_seed.db\" -Force }; if (Test-Path \"$$src\ao_seed.db-wal\") { Copy-Item \"$$src\ao_seed.db-wal\" \"$$dst\ao_seed.db-wal\" -Force }; if (Test-Path \"$$src\ao_seed.db-shm\") { Copy-Item \"$$src\ao_seed.db-shm\" \"$$dst\ao_seed.db-shm\" -Force }; if (Test-Path \"$$src\external_pubkey.bin\") { Copy-Item \"$$src\external_pubkey.bin\" \"$$dst\external_pubkey.bin\" -Force }; if (Test-Path \"$$src\secrets.bin\") { Copy-Item \"$$src\secrets.bin\" \"$$dst\secrets.bin\" -Force }; if (Test-Path \"$$src\keys.bin\") { Copy-Item \"$$src\keys.bin\" \"$$dst\keys.bin\" -Force }; if (Test-Path \"$$src\docs\") { New-Item -ItemType Directory -Path \"$$dst\docs\" -Force | Out-Null; Copy-Item \"$$src\docs\*\" \"$$dst\docs\\" -Force -Recurse }; Remove-Item \"$$src\" -Recurse -Force; Write-Output OK"'
   Pop $0
   Pop $1
 
@@ -207,7 +210,8 @@ Function WriteOllamaConfig
   StrCpy $1 "$0\ao\AO\config.json"
 
   ; Check if config exists and update/create appropriately
-  nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "$$path = \"$1\"; $$dir = Split-Path $$path; if (-not (Test-Path $$dir)) { New-Item -ItemType Directory -Path $$dir -Force | Out-Null }; if (Test-Path $$path) { $$c = Get-Content -Raw $$path | ConvertFrom-Json; if (-not $$c.local_llm_base_url) { $$c | Add-Member -NotePropertyName local_llm_base_url -NotePropertyValue \"http://localhost:11434\" -Force }; if (-not $$c.PSObject.Properties[\"schema_version\"]) { $$c | Add-Member -NotePropertyName schema_version -NotePropertyValue 1 -Force }; $$c | ConvertTo-Json -Depth 10 | Set-Content $$path } else { @{local_llm_base_url=\"http://localhost:11434\"; routing_mode=\"ego_primary\"; schema_version=1} | ConvertTo-Json | Set-Content $$path }; Write-Output OK"'
+  ; Note: schema_version=2 matches CONFIG_SCHEMA_VERSION in ao-core/src/config.rs
+  nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "$$path = \"$1\"; $$dir = Split-Path $$path; if (-not (Test-Path $$dir)) { New-Item -ItemType Directory -Path $$dir -Force | Out-Null }; if (Test-Path $$path) { $$c = Get-Content -Raw $$path | ConvertFrom-Json; if (-not $$c.local_llm_base_url) { $$c | Add-Member -NotePropertyName local_llm_base_url -NotePropertyValue \"http://localhost:11434\" -Force }; if (-not $$c.PSObject.Properties[\"schema_version\"]) { $$c | Add-Member -NotePropertyName schema_version -NotePropertyValue 2 -Force }; $$c | ConvertTo-Json -Depth 10 | Set-Content $$path } else { @{local_llm_base_url=\"http://localhost:11434\"; routing_mode=\"ego_primary\"; schema_version=2} | ConvertTo-Json | Set-Content $$path }; Write-Output OK"'
   Pop $0
   Pop $1
 
