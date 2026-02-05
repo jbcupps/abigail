@@ -155,7 +155,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
           </div>
           <button
             className="text-theme-text-dim text-sm hover:text-theme-primary-dim"
-            onClick={probe}
+            onClick={() => probe()}
           >
             Re-scan
           </button>
