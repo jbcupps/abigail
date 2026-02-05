@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import LlmSetupPanel from "./LlmSetupPanel";
-import BirthChat from "./BirthChat";
+import BirthChat, { BirthChatHandle } from "./BirthChat";
 import ApiKeyModal from "./ApiKeyModal";
 
 type Stage =
@@ -42,6 +42,9 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [genesisName, setGenesisName] = useState("");
   const [genesisPurpose, setGenesisPurpose] = useState("");
   const [genesisPersonality, setGenesisPersonality] = useState("");
+
+  // Ref to BirthChat for injecting key confirmations
+  const birthChatRef = useRef<BirthChatHandle>(null);
 
   // Auto-start boot sequence on mount
   useEffect(() => {
@@ -218,9 +221,12 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   };
 
   const handleApiKeySaved = () => {
+    const provider = activeApiKeyProvider;
     setActiveApiKeyProvider(null);
-    if (activeApiKeyProvider) {
-      setStoredProviders((prev) => [...prev, activeApiKeyProvider]);
+    if (provider) {
+      setStoredProviders((prev) => [...prev, provider]);
+      // Inject message into BirthChat so LLM knows the key was saved
+      birthChatRef.current?.injectKeyConfirmation(provider);
     }
   };
 
@@ -414,6 +420,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
             </div>
 
             <BirthChat
+              ref={birthChatRef}
               stage="Connectivity"
               onStageAdvance={handleConnectivityAdvance}
             />

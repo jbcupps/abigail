@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useImperativeHandle, forwardRef } from "react";
 
 interface BirthChatResponse {
   message: string;
@@ -25,7 +25,11 @@ interface BirthChatProps {
   initialMessage?: string;
 }
 
-export default function BirthChat({ stage, onAction, onStageAdvance, initialMessage }: BirthChatProps) {
+export interface BirthChatHandle {
+  injectKeyConfirmation: (provider: string) => void;
+}
+
+const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction, onStageAdvance, initialMessage }, ref) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -82,6 +86,15 @@ export default function BirthChat({ stage, onAction, onStageAdvance, initialMess
       setLoading(false);
     }
   };
+
+  // Expose method to inject key confirmation into conversation
+  useImperativeHandle(ref, () => ({
+    injectKeyConfirmation: (provider: string) => {
+      // Send a message that informs the LLM that the key was saved
+      const confirmation = `I just saved my ${provider.toUpperCase()} API key using the button above.`;
+      sendMessage(confirmation);
+    }
+  }));
 
   const handleSend = () => {
     if (!input.trim() || loading) return;
@@ -164,4 +177,6 @@ export default function BirthChat({ stage, onAction, onStageAdvance, initialMess
       </div>
     </div>
   );
-}
+});
+
+export default BirthChat;
