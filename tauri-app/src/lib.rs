@@ -7,6 +7,7 @@ use ao_core::{
     generate_external_keypair, sign_constitutional_documents, AppConfig,
     CoreError, ExternalVault, Keyring, ReadOnlyFileVault, SecretsVault, TrinityConfig, Verifier,
 };
+use chrono::Utc;
 use ao_memory::{Memory, MemoryStore};
 use ao_router::IdEgoRouter;
 use ao_skills::channel::EventBus;
@@ -233,6 +234,168 @@ fn check_identity_status(state: tauri::State<AppState>) -> Result<IdentityStatus
     } else {
         Ok(IdentityStatus::Broken)
     }
+}
+
+// ── Identity Collision Protocol ─────────────────────────────────────────
+
+/// Summary of an existing identity for the conflict screen.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdentitySummary {
+    pub name: String,
+    pub birth_date: String,
+    pub data_path: String,
+    pub has_memories: bool,
+    pub has_signatures: bool,
+}
+
+/// Check for existing completed identity. Returns summary if found.
+/// Used at startup to detect if user should be shown the identity conflict screen.
+#[tauri::command]
+fn check_existing_identity(state: tauri::State<AppState>) -> Result<Option<IdentitySummary>, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+
+    // Only return summary if birth is complete
+    if !config.birth_complete {
+        return Ok(None);
+    }
+
+    let name = config.agent_name.clone().unwrap_or_else(|| "Unknown".to_string());
+
+    // Get birth date from config or fall back to soul.md file modification time
+    let birth_date = config.birth_timestamp.clone().unwrap_or_else(|| {
+        let soul_path = config.docs_dir.join("soul.md");
+        if let Ok(meta) = std::fs::metadata(&soul_path) {
+            if let Ok(mtime) = meta.modified() {
+                return chrono::DateTime::<chrono::Utc>::from(mtime)
+                    .format("%Y-%m-%d")
+                    .to_string();
+            }
+        }
+        "Unknown".to_string()
+    });
+
+    let db_path = config.db_path.clone();
+    let has_memories = db_path.exists();
+    let has_signatures = config.docs_dir.join("soul.md.sig").exists()
+        && config.docs_dir.join("ethics.md.sig").exists()
+        && config.docs_dir.join("instincts.md.sig").exists();
+
+    Ok(Some(IdentitySummary {
+        name,
+        birth_date,
+        data_path: config.data_dir.to_string_lossy().to_string(),
+        has_memories,
+        has_signatures,
+    }))
+}
+
+/// Archive the current identity to a backup folder.
+/// Moves all identity files to backups/{timestamp}_{AgentName}/.
+/// Returns the backup path on success.
+#[tauri::command]
+fn archive_identity(state: tauri::State<AppState>) -> Result<String, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let data_dir = config.data_dir.clone();
+    let agent_name = config.agent_name.clone().unwrap_or_else(|| "agent".to_string());
+    drop(config);
+
+    // Create backup folder: backups/{timestamp}_{AgentName}/
+    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let safe_name = agent_name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
+    let backup_name = format!("{}_{}", timestamp, safe_name);
+    let backups_dir = data_dir.join("backups");
+    let backup_path = backups_dir.join(&backup_name);
+
+    std::fs::create_dir_all(&backup_path).map_err(|e| format!("Failed to create backup dir: {}", e))?;
+
+    // Files to archive
+    let files_to_move = [
+        "config.json",
+        "ao_seed.db",
+        "ao_seed.db-wal",
+        "ao_seed.db-shm",
+        "secrets.bin",
+        "keys.bin",
+        "external_pubkey.bin",
+    ];
+
+    for file in &files_to_move {
+        let src = data_dir.join(file);
+        if src.exists() {
+            let dst = backup_path.join(file);
+            std::fs::rename(&src, &dst).map_err(|e| format!("Failed to move {}: {}", file, e))?;
+        }
+    }
+
+    // Move docs/ folder
+    let docs_src = data_dir.join("docs");
+    if docs_src.exists() {
+        let docs_dst = backup_path.join("docs");
+        std::fs::rename(&docs_src, &docs_dst).map_err(|e| format!("Failed to move docs: {}", e))?;
+    }
+
+    // Reset config in memory to fresh state
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        *config = AppConfig::default_paths();
+    }
+
+    // Reset secrets vault
+    {
+        let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
+        *vault = ao_core::SecretsVault::new(data_dir.clone());
+    }
+
+    tracing::info!("Identity archived to: {}", backup_path.display());
+    Ok(backup_path.to_string_lossy().to_string())
+}
+
+/// Completely wipe the current identity. This is irreversible.
+/// Deletes all identity files from the data directory.
+#[tauri::command]
+fn wipe_identity(state: tauri::State<AppState>) -> Result<(), String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let data_dir = config.data_dir.clone();
+    drop(config);
+
+    // Files to delete
+    let files_to_delete = [
+        "config.json",
+        "ao_seed.db",
+        "ao_seed.db-wal",
+        "ao_seed.db-shm",
+        "secrets.bin",
+        "keys.bin",
+        "external_pubkey.bin",
+    ];
+
+    for file in &files_to_delete {
+        let path = data_dir.join(file);
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| format!("Failed to delete {}: {}", file, e))?;
+        }
+    }
+
+    // Delete docs/ folder
+    let docs_path = data_dir.join("docs");
+    if docs_path.exists() {
+        std::fs::remove_dir_all(&docs_path).map_err(|e| format!("Failed to delete docs: {}", e))?;
+    }
+
+    // Reset config in memory to fresh state
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        *config = AppConfig::default_paths();
+    }
+
+    // Reset secrets vault
+    {
+        let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
+        *vault = ao_core::SecretsVault::new(data_dir);
+    }
+
+    tracing::warn!("Identity wiped - all data deleted");
+    Ok(())
 }
 
 /// Result of startup checks (heartbeat + signature verification).
@@ -1338,11 +1501,13 @@ fn complete_emergence(state: tauri::State<AppState>) -> Result<(), String> {
         b.complete_emergence().map_err(|e| e.to_string())?;
     }
 
-    // Write trinity config
+    // Write trinity config and mark birth complete with timestamp
     {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         config.trinity = Some(trinity);
         config.birth_complete = true;
+        config.birth_timestamp = Some(Utc::now().to_rfc3339());
+        config.clear_birth_stage();
         config.save(&config.config_path()).map_err(|e| e.to_string())?;
     }
 
@@ -1419,6 +1584,9 @@ pub fn run() {
             init_soul,
             generate_and_sign_constitutional,
             check_identity_status,
+            check_existing_identity,
+            archive_identity,
+            wipe_identity,
             check_interrupted_birth,
             repair_identity,
             run_startup_checks,

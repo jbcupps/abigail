@@ -356,6 +356,7 @@ mod tests {
             routing_mode: Default::default(),
             trinity: None,
             agent_name: None,
+            birth_timestamp: None,
         }
     }
 

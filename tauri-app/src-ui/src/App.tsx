@@ -5,8 +5,9 @@ import BootSequence from "./components/BootSequence";
 import ChatInterface from "./components/ChatInterface";
 import PersonaToggle from "./components/PersonaToggle";
 import IdentityPanel from "./components/IdentityPanel";
+import IdentityConflictPanel, { IdentitySummary } from "./components/IdentityConflictPanel";
 
-type AppState = "loading" | "boot" | "startup_check" | "startup_failed" | "chat";
+type AppState = "loading" | "identity_conflict" | "boot" | "startup_check" | "startup_failed" | "chat";
 
 interface StartupCheckResult {
   heartbeat_ok: boolean;
@@ -17,11 +18,22 @@ interface StartupCheckResult {
 function AppInner() {
   const [appState, setAppState] = useState<AppState>("loading");
   const [startupError, setStartupError] = useState<string | null>(null);
+  const [existingIdentity, setExistingIdentity] = useState<IdentitySummary | null>(null);
   const { mode, setMode, refreshAgentName } = useTheme();
 
   useEffect(() => {
     (async () => {
       try {
+        // First, check for existing completed identity
+        const identity = await invoke<IdentitySummary | null>("check_existing_identity");
+        if (identity) {
+          // Show identity conflict screen
+          setExistingIdentity(identity);
+          setAppState("identity_conflict");
+          return;
+        }
+
+        // No existing identity - check if birth is complete
         const complete = await invoke<boolean>("get_birth_complete");
         if (complete) {
           // Already born: run startup checks before showing chat
@@ -81,11 +93,42 @@ function AppInner() {
     setAppState("chat");
   };
 
+  // Handlers for identity conflict screen
+  const handleIdentityResume = async () => {
+    setExistingIdentity(null);
+    setAppState("startup_check");
+    await refreshAgentName();
+    await runStartupChecks();
+  };
+
+  const handleIdentityArchive = () => {
+    // Identity has been archived, start fresh birth
+    setExistingIdentity(null);
+    setAppState("boot");
+  };
+
+  const handleIdentityWipe = () => {
+    // Identity has been wiped, start fresh birth
+    setExistingIdentity(null);
+    setAppState("boot");
+  };
+
   if (appState === "loading") {
     return (
       <div className="min-h-screen bg-black text-theme-text font-mono flex items-center justify-center">
         Loading...
       </div>
+    );
+  }
+
+  if (appState === "identity_conflict" && existingIdentity) {
+    return (
+      <IdentityConflictPanel
+        identity={existingIdentity}
+        onResume={handleIdentityResume}
+        onArchive={handleIdentityArchive}
+        onWipe={handleIdentityWipe}
+      />
     );
   }
 

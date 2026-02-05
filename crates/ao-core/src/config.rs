@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 1;
+pub const CONFIG_SCHEMA_VERSION: u32 = 2;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -86,6 +86,10 @@ pub struct AppConfig {
     /// Agent's chosen name (set during Genesis)
     #[serde(default)]
     pub agent_name: Option<String>,
+
+    /// Timestamp when birth was completed (ISO 8601 format)
+    #[serde(default)]
+    pub birth_timestamp: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,6 +124,7 @@ impl AppConfig {
             routing_mode: RoutingMode::default(),
             trinity: None,
             agent_name: None,
+            birth_timestamp: None,
         }
     }
 
@@ -186,12 +191,14 @@ impl AppConfig {
             tracing::debug!("Migrated config from pre-v1 to v1");
         }
 
-        // Future migrations:
-        // if self.schema_version < 2 {
-        //     // Migration logic for v2
-        //     self.schema_version = 2;
-        //     migrated = true;
-        // }
+        // Migration from v1 to v2
+        if self.schema_version < 2 {
+            // v2 adds: birth_timestamp
+            // birth_timestamp defaults to None via serde, so just update version
+            self.schema_version = 2;
+            migrated = true;
+            tracing::debug!("Migrated config from v1 to v2");
+        }
 
         migrated
     }
@@ -245,6 +252,7 @@ mod tests {
             routing_mode: RoutingMode::default(),
             trinity: None,
             agent_name: None,
+            birth_timestamp: None,
         }
     }
 
