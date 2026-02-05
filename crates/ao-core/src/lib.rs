@@ -4,6 +4,7 @@ pub mod dpapi;
 pub mod error;
 pub mod keyring;
 pub mod secrets;
+pub mod system_prompt;
 pub mod templates;
 pub mod vault;
 pub mod verifier;

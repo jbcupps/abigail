@@ -2,7 +2,7 @@
 
 use ao_capabilities::cognitive::{
     stub_heartbeat, CandleProvider, CompletionRequest, CompletionResponse, LocalHttpProvider,
-    LlmProvider, Message, OpenAiProvider,
+    LlmProvider, Message, OpenAiProvider, ToolDefinition,
 };
 use std::sync::Arc;
 
@@ -84,12 +84,7 @@ impl IdEgoRouter {
              User request: {}\n\nYour classification:",
             user_message
         );
-        let request = CompletionRequest {
-            messages: vec![Message {
-                role: "user".into(),
-                content: prompt,
-            }],
-        };
+        let request = CompletionRequest::simple(vec![Message::new("user", prompt)]);
         let response = self.id.complete(&request).await?;
         let content = response.content.to_uppercase();
         let decision = if content.contains("COMPLEX") {
@@ -117,11 +112,11 @@ impl IdEgoRouter {
         let use_ego = matches!(decision, RouteDecision::Complex) && self.ego.is_some();
         if use_ego {
             tracing::info!("Routing to Ego (cloud) - complex request");
-            let request = CompletionRequest { messages };
+            let request = CompletionRequest { messages, tools: None };
             self.ego.as_ref().unwrap().complete(&request).await
         } else {
             tracing::info!("Routing to Id (local) - routine request");
-            let request = CompletionRequest { messages };
+            let request = CompletionRequest { messages, tools: None };
             self.id.complete(&request).await
         }
     }
@@ -133,6 +128,7 @@ impl IdEgoRouter {
             match ego
                 .complete(&CompletionRequest {
                     messages: messages.clone(),
+                    tools: None,
                 })
                 .await
             {
@@ -148,13 +144,35 @@ impl IdEgoRouter {
 
         // Fallback to Id (local)
         tracing::info!("Routing to Id (local fallback)");
-        self.id.complete(&CompletionRequest { messages }).await
+        self.id.complete(&CompletionRequest { messages, tools: None }).await
+    }
+
+    /// Route message with tool definitions attached.
+    pub async fn route_with_tools(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+    ) -> anyhow::Result<CompletionResponse> {
+        let request = CompletionRequest {
+            messages,
+            tools: Some(tools),
+        };
+        // For tool-calling, use Ego if available (better tool support), else Id.
+        if let Some(ego) = &self.ego {
+            match ego.complete(&request).await {
+                Ok(response) => return Ok(response),
+                Err(e) => {
+                    tracing::warn!("Ego failed for tool call, falling back to Id: {}", e);
+                }
+            }
+        }
+        self.id.complete(&request).await
     }
 
     /// Privacy-sensitive: always use Id (local), never Ego.
     pub async fn id_only(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
         tracing::info!("id_only: using Id (local) only");
-        let request = CompletionRequest { messages };
+        let request = CompletionRequest::simple(messages);
         self.id.complete(&request).await
     }
 }

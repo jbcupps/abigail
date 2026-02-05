@@ -11,7 +11,7 @@ pub use candle::CandleProvider;
 pub use download::ModelDownloader;
 pub use local_http::{stub_heartbeat, LocalHttpProvider};
 pub use openai::OpenAiProvider;
-pub use provider::{CompletionRequest, CompletionResponse, LlmProvider, Message};
+pub use provider::{CompletionRequest, CompletionResponse, LlmProvider, Message, ToolCall, ToolDefinition};
 pub use types::*;
 
 use ao_core::secrets::SecretsVault;

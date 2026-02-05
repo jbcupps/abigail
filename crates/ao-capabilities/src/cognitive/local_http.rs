@@ -3,7 +3,9 @@
 //! Connects to a local LLM server (LiteLLM, Ollama, LM Studio, etc.) via
 //! the OpenAI-compatible chat completions API.
 
-use crate::cognitive::provider::{CompletionRequest, CompletionResponse, LlmProvider, Message};
+use crate::cognitive::provider::{
+    CompletionRequest, CompletionResponse, LlmProvider, Message, ToolCall,
+};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -22,12 +24,46 @@ struct ChatRequest {
     messages: Vec<ChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<ChatTool>>,
 }
 
 #[derive(Debug, Serialize)]
 struct ChatMessage {
     role: String,
     content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<Vec<ChatToolCall>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ChatTool {
+    r#type: String,
+    function: ChatFunction,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ChatFunction {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parameters: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChatToolCall {
+    id: String,
+    r#type: String,
+    function: ChatFunctionCall,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChatFunctionCall {
+    name: String,
+    arguments: String,
 }
 
 /// OpenAI-compatible chat completion response.
@@ -44,6 +80,7 @@ struct ChatChoice {
 #[derive(Debug, Deserialize)]
 struct ChatMessageResponse {
     content: Option<String>,
+    tool_calls: Option<Vec<ChatToolCall>>,
 }
 
 impl LocalHttpProvider {
@@ -74,12 +111,7 @@ impl LocalHttpProvider {
     /// Perform a heartbeat check to verify the LLM server is reachable.
     /// Sends a minimal completion request and checks for a valid response.
     pub async fn heartbeat(&self) -> anyhow::Result<()> {
-        let _request = CompletionRequest {
-            messages: vec![Message {
-                role: "user".into(),
-                content: "ping".into(),
-            }],
-        };
+        let _request = CompletionRequest::simple(vec![Message::new("user", "ping")]);
 
         // Use a shorter timeout for heartbeat
         let client = reqwest::Client::builder()
@@ -92,8 +124,11 @@ impl LocalHttpProvider {
             messages: vec![ChatMessage {
                 role: "user".into(),
                 content: "ping".into(),
+                tool_call_id: None,
+                tool_calls: None,
             }],
             max_tokens: Some(10), // Minimal response for heartbeat
+            tools: None,
         };
 
         let url = format!("{}/v1/chat/completions", self.base_url.trim_end_matches('/'));
@@ -139,13 +174,40 @@ impl LlmProvider for LocalHttpProvider {
             .map(|m| ChatMessage {
                 role: m.role.clone(),
                 content: m.content.clone(),
+                tool_call_id: m.tool_call_id.clone(),
+                tool_calls: m.tool_calls.as_ref().map(|tcs| {
+                    tcs.iter()
+                        .map(|tc| ChatToolCall {
+                            id: tc.id.clone(),
+                            r#type: "function".to_string(),
+                            function: ChatFunctionCall {
+                                name: tc.name.clone(),
+                                arguments: tc.arguments.clone(),
+                            },
+                        })
+                        .collect()
+                }),
             })
             .collect();
+
+        let tools: Option<Vec<ChatTool>> = request.tools.as_ref().map(|defs| {
+            defs.iter()
+                .map(|td| ChatTool {
+                    r#type: "function".to_string(),
+                    function: ChatFunction {
+                        name: td.name.clone(),
+                        description: Some(td.description.clone()),
+                        parameters: Some(td.parameters.clone()),
+                    },
+                })
+                .collect()
+        });
 
         let chat_request = ChatRequest {
             model: self.model.clone(),
             messages,
             max_tokens: None,
+            tools,
         };
 
         let url = format!("{}/v1/chat/completions", self.base_url.trim_end_matches('/'));
@@ -169,13 +231,29 @@ impl LlmProvider for LocalHttpProvider {
             .await
             .map_err(|e| anyhow::anyhow!("LLM response parse failed: {}", e))?;
 
-        let content = chat_response
-            .choices
-            .first()
+        let choice = chat_response.choices.first();
+
+        let content = choice
             .and_then(|c| c.message.content.clone())
             .unwrap_or_default();
 
-        Ok(CompletionResponse { content })
+        let tool_calls = choice
+            .and_then(|c| c.message.tool_calls.as_ref())
+            .map(|tcs| {
+                tcs.iter()
+                    .map(|tc| ToolCall {
+                        id: tc.id.clone(),
+                        name: tc.function.name.clone(),
+                        arguments: tc.function.arguments.clone(),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .filter(|v| !v.is_empty());
+
+        Ok(CompletionResponse {
+            content,
+            tool_calls,
+        })
     }
 }
 

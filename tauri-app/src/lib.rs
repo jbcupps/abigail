@@ -642,27 +642,132 @@ fn list_missing_skill_secrets(
 
 // ── Chat ────────────────────────────────────────────────────────────
 
+/// Build tool definitions for the chat command.
+fn chat_tool_definitions() -> Vec<ao_capabilities::cognitive::ToolDefinition> {
+    let schema = ao_capabilities::cognitive::update_provider_key_schema();
+    vec![ao_capabilities::cognitive::ToolDefinition {
+        name: schema["name"].as_str().unwrap_or("store_provider_key").to_string(),
+        description: schema["description"].as_str().unwrap_or("").to_string(),
+        parameters: schema["parameters"].clone(),
+    }]
+}
+
+/// Execute a tool call from the LLM and return the result string.
+async fn execute_tool_call(
+    state: &tauri::State<'_, AppState>,
+    tool_call: &ao_capabilities::cognitive::ToolCall,
+) -> String {
+    match tool_call.name.as_str() {
+        "update_provider_key" | "store_provider_key" => {
+            let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
+                Ok(v) => v,
+                Err(e) => return format!("Error parsing arguments: {}", e),
+            };
+            let provider = args["provider"].as_str().unwrap_or("");
+            let key = args["key"].as_str().unwrap_or("");
+
+            if provider.is_empty() || key.is_empty() {
+                return "Error: provider and key are required".to_string();
+            }
+
+            // Store in secrets vault
+            {
+                let mut vault = match state.secrets.lock() {
+                    Ok(v) => v,
+                    Err(e) => return format!("Error accessing vault: {}", e),
+                };
+                if let Err(e) = ao_capabilities::cognitive::update_provider_key(&mut vault, provider, key) {
+                    return format!("Error storing key: {}", e);
+                }
+            }
+
+            // If it's an OpenAI key, also update config and rebuild router
+            if provider == "openai" {
+                if let Ok(mut config) = state.config.write() {
+                    config.openai_api_key = Some(key.to_string());
+                    let _ = config.save(&config.config_path());
+
+                    let new_router = IdEgoRouter::new(
+                        config.local_llm_base_url.clone(),
+                        config.openai_api_key.clone(),
+                        config.routing_mode,
+                    );
+                    drop(config);
+                    if let Ok(mut router) = state.router.write() {
+                        *router = new_router;
+                    }
+                }
+            }
+
+            format!("Successfully stored {} API key in secure vault.", provider)
+        }
+        other => format!("Unknown tool: {}", other),
+    }
+}
+
 #[tauri::command]
 async fn chat(state: tauri::State<'_, AppState>, message: String) -> Result<String, String> {
-    // Get store and clone router before await (RwLock is not Send)
-    let (store, router) = {
+    // Build system prompt and gather config before async boundary
+    let (store, router, system_prompt) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
         let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
+        let prompt = ao_core::system_prompt::build_system_prompt(
+            &config.docs_dir,
+            &config.agent_name,
+        );
         drop(config);
         let router = state.router.read().map_err(|e| e.to_string())?.clone();
-        (store, router)
+        (store, router, prompt)
     };
-    let messages = vec![ao_capabilities::cognitive::Message {
-        role: "user".to_string(),
-        content: message.clone(),
-    }];
+
+    // Build messages with system prompt
+    let mut messages = vec![
+        ao_capabilities::cognitive::Message::new("system", &system_prompt),
+        ao_capabilities::cognitive::Message::new("user", &message),
+    ];
+
+    let tools = chat_tool_definitions();
+
+    // First request — may return tool calls
     let response = router
-        .route(messages.clone())
+        .route_with_tools(messages.clone(), tools.clone())
         .await
         .map_err(|e| e.to_string())?;
-    let memory = Memory::ephemeral(format!("user: {} | assistant: {}", message, response.content));
+
+    let final_content = if let Some(ref tool_calls) = response.tool_calls {
+        // Execute each tool call and collect results
+        let mut tool_results = Vec::new();
+        for tc in tool_calls {
+            let result = execute_tool_call(&state, tc).await;
+            tool_results.push((tc.clone(), result));
+        }
+
+        // Build follow-up: original messages + assistant with tool_calls + tool results
+        messages.push(ao_capabilities::cognitive::Message {
+            role: "assistant".to_string(),
+            content: response.content.clone(),
+            tool_call_id: None,
+            tool_calls: Some(tool_calls.clone()),
+        });
+
+        for (tc, result) in &tool_results {
+            messages.push(ao_capabilities::cognitive::Message::tool_result(&tc.id, result));
+        }
+
+        // Send follow-up for final natural-language response
+        let follow_up = router
+            .route_with_tools(messages, tools)
+            .await
+            .map_err(|e| e.to_string())?;
+        follow_up.content
+    } else {
+        response.content
+    };
+
+    // Store memory
+    let memory = Memory::ephemeral(format!("user: {} | assistant: {}", message, final_content));
     let _ = store.insert_memory(&memory);
-    Ok(response.content)
+    Ok(final_content)
 }
 
 /// MVP shortcut: skip email and model download, go directly to Emergence stage.
@@ -798,15 +903,9 @@ async fn birth_chat(
     let messages = {
         let birth = state.birth.read().map_err(|e| e.to_string())?;
         let b = birth.as_ref().ok_or("Birth not started")?;
-        let mut msgs = vec![ao_capabilities::cognitive::Message {
-            role: "system".to_string(),
-            content: system_prompt,
-        }];
+        let mut msgs = vec![ao_capabilities::cognitive::Message::new("system", &system_prompt)];
         for (role, content) in b.get_conversation() {
-            msgs.push(ao_capabilities::cognitive::Message {
-                role: role.clone(),
-                content: content.clone(),
-            });
+            msgs.push(ao_capabilities::cognitive::Message::new(role, content));
         }
         msgs
     };
