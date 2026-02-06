@@ -265,7 +265,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
 
         let response = self
             .client
-            .post(&self.completions_url())
+            .post(self.completions_url())
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .json(&body)
@@ -327,7 +327,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
 
         let response = self
             .client
-            .post(&self.completions_url())
+            .post(self.completions_url())
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .json(&body)

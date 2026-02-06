@@ -120,7 +120,7 @@ impl HttpSkill {
     /// Execute an HTTP GET request.
     async fn http_get(&self, url_str: &str, headers: Option<HashMap<String, String>>) -> SkillResult<ToolOutput> {
         let url = Self::validate_url(url_str)
-            .map_err(|e| SkillError::ToolFailed(e))?;
+            .map_err(SkillError::ToolFailed)?;
 
         let mut request = self.client.get(url.as_str());
 
@@ -142,7 +142,7 @@ impl HttpSkill {
         headers: Option<HashMap<String, String>>,
     ) -> SkillResult<ToolOutput> {
         let url = Self::validate_url(url_str)
-            .map_err(|e| SkillError::ToolFailed(e))?;
+            .map_err(SkillError::ToolFailed)?;
 
         let mut request = self.client.post(url.as_str());
 
@@ -199,7 +199,7 @@ async fn execute_request(request: reqwest::RequestBuilder) -> SkillResult<ToolOu
 
     let body = String::from_utf8_lossy(body_bytes).to_string();
 
-    let formatted = if status >= 200 && status < 300 {
+    let formatted = if (200..300).contains(&status) {
         if body.len() > 2000 {
             format!("{} ({})\n{}...\n[truncated at 2000 chars, full body in 'body' field]",
                 status, status_text, &body[..2000])
