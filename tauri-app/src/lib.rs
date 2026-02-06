@@ -2168,6 +2168,34 @@ pub fn run() {
     // Clone event_bus before setup since state isn't available inside setup callback
     let event_bus_for_setup = event_bus.clone();
 
+    // Start the skills directory watcher for hot-reload
+    let skills_dir = config.data_dir.join("skills");
+    let _skills_watcher = match ao_skills::SkillsWatcher::start(vec![skills_dir]) {
+        Ok((watcher, mut rx)) => {
+            // Spawn a thread to forward skill file events to the Tauri event system
+            // The watcher must be kept alive for the duration of the app
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().expect("runtime");
+                rt.block_on(async move {
+                    while let Ok(event) = rx.recv().await {
+                        let (event_type, path) = match event {
+                            ao_skills::SkillFileEvent::Changed(p) => ("changed", p),
+                            ao_skills::SkillFileEvent::Removed(p) => ("removed", p),
+                        };
+                        tracing::info!("Skill file {}: {}", event_type, path.display());
+                        // Note: actual re-registration of skills would go here.
+                        // For now we just log; full hot-reload requires dynamic loading.
+                    }
+                });
+            });
+            Some(watcher)
+        }
+        Err(e) => {
+            tracing::warn!("Failed to start skills watcher: {}", e);
+            None
+        }
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
