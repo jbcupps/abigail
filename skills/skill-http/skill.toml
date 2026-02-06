@@ -1,0 +1,11 @@
+[skill]
+id = "com.ao.skills.http"
+name = "HTTP"
+version = "0.1.0"
+description = "Make HTTP requests (GET, POST) with SSRF protection"
+category = "Sensory"
+keywords = ["http", "api", "web", "request", "fetch"]
+
+[[permissions]]
+permission = { Network = "Full" }
+reason = "Make HTTP requests to external services"

@@ -11,6 +11,7 @@ members = [
     "skills/skill-web-search",
     "skills/skill-filesystem",
     "skills/skill-shell",
+    "skills/skill-http",
     "tauri-app",
 ]
 
