@@ -1,8 +1,9 @@
 //! Id/Ego router: classifies with Id (local), routes COMPLEX to Ego (cloud) when configured.
 
 use ao_capabilities::cognitive::{
-    stub_heartbeat, AnthropicProvider, CandleProvider, CompletionRequest, CompletionResponse,
-    LocalHttpProvider, LlmProvider, Message, OpenAiProvider, StreamEvent, ToolDefinition,
+    stub_heartbeat, AnthropicProvider, CandleProvider, CompatibleProvider, CompletionRequest,
+    CompletionResponse, LocalHttpProvider, LlmProvider, Message, OpenAiCompatibleProvider,
+    OpenAiProvider, StreamEvent, ToolDefinition,
 };
 use std::sync::Arc;
 
@@ -29,6 +30,9 @@ pub enum SuperegoResult {
 pub enum EgoProvider {
     OpenAi,
     Anthropic,
+    Perplexity,
+    Xai,
+    Google,
 }
 
 impl std::fmt::Display for EgoProvider {
@@ -36,6 +40,9 @@ impl std::fmt::Display for EgoProvider {
         match self {
             EgoProvider::OpenAi => write!(f, "openai"),
             EgoProvider::Anthropic => write!(f, "anthropic"),
+            EgoProvider::Perplexity => write!(f, "perplexity"),
+            EgoProvider::Xai => write!(f, "xai"),
+            EgoProvider::Google => write!(f, "google"),
         }
     }
 }
@@ -495,6 +502,27 @@ fn build_ego_provider(
             Some(Arc::new(AnthropicProvider::new(key)) as Arc<dyn LlmProvider>),
             Some(EgoProvider::Anthropic),
         ),
+        Some("perplexity") | Some("pplx") => (
+            Some(Arc::new(OpenAiCompatibleProvider::new(
+                CompatibleProvider::Perplexity,
+                key,
+            )) as Arc<dyn LlmProvider>),
+            Some(EgoProvider::Perplexity),
+        ),
+        Some("xai") | Some("grok") => (
+            Some(Arc::new(OpenAiCompatibleProvider::new(
+                CompatibleProvider::Xai,
+                key,
+            )) as Arc<dyn LlmProvider>),
+            Some(EgoProvider::Xai),
+        ),
+        Some("google") | Some("gemini") => (
+            Some(Arc::new(OpenAiCompatibleProvider::new(
+                CompatibleProvider::Google,
+                key,
+            )) as Arc<dyn LlmProvider>),
+            Some(EgoProvider::Google),
+        ),
         Some("openai") | None => (
             Some(Arc::new(OpenAiProvider::new(Some(key))) as Arc<dyn LlmProvider>),
             Some(EgoProvider::OpenAi),
@@ -575,6 +603,42 @@ mod tests {
         );
         assert!(router.has_ego());
         assert_eq!(router.ego_provider_name(), Some(&EgoProvider::Anthropic));
+    }
+
+    #[tokio::test]
+    async fn test_with_provider_perplexity() {
+        let router = IdEgoRouter::with_provider(
+            None,
+            Some("perplexity"),
+            Some("pplx-key".to_string()),
+            RoutingMode::EgoPrimary,
+        );
+        assert!(router.has_ego());
+        assert_eq!(router.ego_provider_name(), Some(&EgoProvider::Perplexity));
+    }
+
+    #[tokio::test]
+    async fn test_with_provider_xai() {
+        let router = IdEgoRouter::with_provider(
+            None,
+            Some("xai"),
+            Some("xai-key".to_string()),
+            RoutingMode::EgoPrimary,
+        );
+        assert!(router.has_ego());
+        assert_eq!(router.ego_provider_name(), Some(&EgoProvider::Xai));
+    }
+
+    #[tokio::test]
+    async fn test_with_provider_google() {
+        let router = IdEgoRouter::with_provider(
+            None,
+            Some("google"),
+            Some("google-key".to_string()),
+            RoutingMode::EgoPrimary,
+        );
+        assert!(router.has_ego());
+        assert_eq!(router.ego_provider_name(), Some(&EgoProvider::Google));
     }
 
     #[tokio::test]

@@ -913,13 +913,19 @@ fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let vault = state.secrets.lock().map_err(|e| e.to_string())?;
 
-    // Determine ego provider
+    // Determine ego provider (priority: config key > vault keys by preference)
     let (ego_name, ego_key) = if let Some(ref key) = config.openai_api_key {
         (Some("openai"), Some(key.clone()))
     } else if let Some(key) = vault.get_secret("anthropic") {
         (Some("anthropic"), Some(key.to_string()))
     } else if let Some(key) = vault.get_secret("openai") {
         (Some("openai"), Some(key.to_string()))
+    } else if let Some(key) = vault.get_secret("xai") {
+        (Some("xai"), Some(key.to_string()))
+    } else if let Some(key) = vault.get_secret("perplexity") {
+        (Some("perplexity"), Some(key.to_string()))
+    } else if let Some(key) = vault.get_secret("google") {
+        (Some("google"), Some(key.to_string()))
     } else {
         (None, None)
     };
@@ -942,6 +948,17 @@ fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
                         "anthropic" => std::sync::Arc::new(
                             ao_capabilities::cognitive::AnthropicProvider::new(se_key.clone()),
                         ),
+                        "perplexity" | "xai" | "google" => {
+                            if let Some(cp) = ao_capabilities::cognitive::CompatibleProvider::from_name(se_provider) {
+                                std::sync::Arc::new(
+                                    ao_capabilities::cognitive::OpenAiCompatibleProvider::new(cp, se_key.clone()),
+                                )
+                            } else {
+                                std::sync::Arc::new(
+                                    ao_capabilities::cognitive::OpenAiProvider::new(Some(se_key.clone())),
+                                )
+                            }
+                        }
                         _ => std::sync::Arc::new(
                             ao_capabilities::cognitive::OpenAiProvider::new(Some(se_key.clone())),
                         ),
@@ -2087,6 +2104,27 @@ pub fn run() {
             IdEgoRouter::with_provider(
                 config.local_llm_base_url.clone(),
                 Some("openai"),
+                Some(key.to_string()),
+                config.routing_mode,
+            )
+        } else if let Some(key) = vault.get_secret("xai") {
+            IdEgoRouter::with_provider(
+                config.local_llm_base_url.clone(),
+                Some("xai"),
+                Some(key.to_string()),
+                config.routing_mode,
+            )
+        } else if let Some(key) = vault.get_secret("perplexity") {
+            IdEgoRouter::with_provider(
+                config.local_llm_base_url.clone(),
+                Some("perplexity"),
+                Some(key.to_string()),
+                config.routing_mode,
+            )
+        } else if let Some(key) = vault.get_secret("google") {
+            IdEgoRouter::with_provider(
+                config.local_llm_base_url.clone(),
+                Some("google"),
                 Some(key.to_string()),
                 config.routing_mode,
             )
