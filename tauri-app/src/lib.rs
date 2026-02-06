@@ -13,6 +13,7 @@ use ao_router::IdEgoRouter;
 use ao_skills::channel::EventBus;
 use ao_skills::{MissingSkillSecret, SkillExecutor, SkillRegistry, ToolParams};
 use skill_filesystem::FilesystemSkill;
+use skill_shell::ShellSkill;
 use skill_web_search::WebSearchSkill;
 use base64::Engine as _;
 use ed25519_dalek::SigningKey;
@@ -2138,6 +2139,11 @@ pub fn run() {
         }
         let fs_skill = FilesystemSkill::new(fs_manifest.clone(), allowed_roots);
         let _ = registry.register(fs_manifest.id.clone(), Arc::new(fs_skill));
+    }
+    {
+        let sh_manifest = ShellSkill::default_manifest();
+        let sh_skill = ShellSkill::new(sh_manifest.clone());
+        let _ = registry.register(sh_manifest.id.clone(), Arc::new(sh_skill));
     }
 
     let event_bus = Arc::new(EventBus::new(256));

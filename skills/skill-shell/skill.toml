@@ -1,0 +1,11 @@
+[skill]
+id = "com.ao.skills.shell"
+name = "Shell"
+version = "0.1.0"
+description = "Execute shell commands with safety controls (timeout, blocklist, output capture)"
+category = "Capability"
+keywords = ["shell", "command", "execute", "terminal"]
+
+[[permissions]]
+permission = "ShellExecute"
+reason = "Execute shell commands on the host system"

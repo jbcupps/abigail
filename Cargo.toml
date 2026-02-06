@@ -10,6 +10,7 @@ members = [
     "crates/ao-keygen",
     "skills/skill-web-search",
     "skills/skill-filesystem",
+    "skills/skill-shell",
     "tauri-app",
 ]
 
