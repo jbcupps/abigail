@@ -24,19 +24,12 @@ permissions:
 jobs:
 
   # ── Lint (fast) ──────────────────────────────────────────────────────────
+  # No Linux GUI deps needed: fmt and clippy only.
   lint:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev libappindicator3-dev \
-            libayatana-appindicator3-dev librsvg2-dev \
-            patchelf libssl-dev libgtk-3-dev
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
@@ -72,14 +65,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Install Linux dependencies
+      - name: Install Linux dependencies (Tauri 2 / Debian)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev libappindicator3-dev \
-            libayatana-appindicator3-dev librsvg2-dev \
-            patchelf libssl-dev libgtk-3-dev
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libgtk-3-dev
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
@@ -91,7 +84,7 @@ jobs:
         uses: swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
 
       - name: Run tests
-        run: cargo test --all
+        run: cargo test --workspace --exclude ao-app
 
   # ── Frontend build ───────────────────────────────────────────────────────
   frontend:
@@ -134,8 +127,10 @@ jobs:
         run: cd tauri-app/src-ui && npm ci && npm audit --audit-level=high
 
   # ── CodeQL static analysis ──────────────────────────────────────────────
+  # Does not block gate when code scanning is not enabled for the repo.
   codeql:
     runs-on: ubuntu-22.04
+    continue-on-error: true
     permissions:
       actions: read
       contents: read

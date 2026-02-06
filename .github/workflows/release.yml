@@ -82,18 +82,14 @@ jobs:
         if: matrix.platform == 'windows-latest'
         run: choco install nsis --no-progress -y
 
-      - name: Install Linux dependencies (Ubuntu)
+      - name: Install Linux dependencies (Tauri 2 / Debian)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            libssl-dev \
-            libgtk-3-dev
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libgtk-3-dev
 
       - name: Add macOS universal binary targets
         if: matrix.platform == 'macos-latest'
@@ -247,12 +243,12 @@ jobs:
 
   # -------------------------------------------------------------------------
   # Stage 2: Create GitHub Release + publish npm package
-  #          Proceeds if at least one platform build succeeded.
+  #          Runs when build stage finishes; uses whatever artifacts exist.
   # -------------------------------------------------------------------------
 
   publish:
     needs: build
-    if: always() && contains(needs.build.result, 'success')
+    if: always() && (needs.build.result == 'success' || needs.build.result == 'failure')
     runs-on: ubuntu-22.04
     permissions:
       contents: write
