@@ -222,8 +222,10 @@ impl FilesystemSkill {
             )));
         }
 
-        // Build full glob pattern rooted at the validated directory
-        let full_pattern = format!("{}/{}", root.display(), pattern_str);
+        // Build full glob pattern rooted at the validated directory.
+        // Use forward slashes for the glob crate (works cross-platform).
+        let root_str_normalized = root.display().to_string().replace('\\', "/");
+        let full_pattern = format!("{}/{}", root_str_normalized, pattern_str);
 
         let matches: Vec<String> = glob::glob(&full_pattern)
             .map_err(|e| SkillError::ToolFailed(format!("Invalid glob pattern: {}", e)))?
