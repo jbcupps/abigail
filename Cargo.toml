@@ -9,6 +9,7 @@ members = [
     "crates/ao-skills",
     "crates/ao-keygen",
     "skills/skill-web-search",
+    "skills/skill-filesystem",
     "tauri-app",
 ]
 

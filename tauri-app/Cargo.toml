@@ -16,6 +16,7 @@ ao-router = { path = "../crates/ao-router" }
 ao-birth = { path = "../crates/ao-birth" }
 ao-skills = { path = "../crates/ao-skills" }
 skill-web-search = { path = "../skills/skill-web-search" }
+skill-filesystem = { path = "../skills/skill-filesystem" }
 tauri = { version = "2.0", features = ["tray-icon"] }
 tauri-plugin-dialog = "2.0"
 tokio.workspace = true

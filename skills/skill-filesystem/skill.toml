@@ -1,0 +1,15 @@
+[skill]
+id = "com.ao.skills.filesystem"
+name = "Filesystem"
+version = "0.1.0"
+description = "Read, write, list, and search files within sandboxed directories"
+category = "Capability"
+keywords = ["files", "filesystem", "read", "write", "search"]
+
+[[permissions]]
+permission = { FileSystem = { Read = ["~"] } }
+reason = "Read files within allowed directories"
+
+[[permissions]]
+permission = { FileSystem = { Write = ["~"] } }
+reason = "Write files within allowed directories"

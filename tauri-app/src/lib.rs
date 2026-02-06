@@ -12,6 +12,7 @@ use ao_memory::{Memory, MemoryStore};
 use ao_router::IdEgoRouter;
 use ao_skills::channel::EventBus;
 use ao_skills::{MissingSkillSecret, SkillExecutor, SkillRegistry, ToolParams};
+use skill_filesystem::FilesystemSkill;
 use skill_web_search::WebSearchSkill;
 use base64::Engine as _;
 use ed25519_dalek::SigningKey;
@@ -2127,6 +2128,16 @@ pub fn run() {
         let ws_manifest = WebSearchSkill::default_manifest();
         let ws = WebSearchSkill::with_secrets(ws_manifest.clone(), secrets.clone());
         let _ = registry.register(ws_manifest.id.clone(), Arc::new(ws));
+    }
+    {
+        let fs_manifest = FilesystemSkill::default_manifest();
+        // Sandbox to the user's home directory and AO data directory
+        let mut allowed_roots = vec![config.data_dir.clone()];
+        if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+            allowed_roots.push(PathBuf::from(home));
+        }
+        let fs_skill = FilesystemSkill::new(fs_manifest.clone(), allowed_roots);
+        let _ = registry.register(fs_manifest.id.clone(), Arc::new(fs_skill));
     }
 
     let event_bus = Arc::new(EventBus::new(256));
