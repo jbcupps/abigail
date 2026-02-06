@@ -171,11 +171,11 @@ impl SkillRegistry {
                         }
                     }
                 }
-            } else if path.is_file() {
-                if path.file_name().and_then(|n| n.to_str()) == Some("skill.toml") {
-                    if let Ok(m) = SkillManifest::load_from_path(path) {
-                        manifests.push(m);
-                    }
+            } else if path.is_file()
+                && path.file_name().and_then(|n| n.to_str()) == Some("skill.toml")
+            {
+                if let Ok(m) = SkillManifest::load_from_path(path) {
+                    manifests.push(m);
                 }
             }
         }

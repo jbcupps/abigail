@@ -3,7 +3,10 @@
 //! On Windows, uses CryptProtectData/CryptUnprotectData.
 //! On other platforms, uses plaintext passthrough (dev only).
 
-use crate::error::{CoreError, Result};
+use crate::error::Result;
+
+#[cfg(windows)]
+use crate::error::CoreError;
 
 #[cfg(windows)]
 pub fn dpapi_encrypt(data: &[u8]) -> Result<Vec<u8>> {
