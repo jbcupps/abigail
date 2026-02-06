@@ -1,3 +1,3 @@
 pub mod router;
 
-pub use router::{EgoProvider, IdEgoRouter, RoutingMode};
+pub use router::{EgoProvider, IdEgoRouter, RoutingMode, SuperegoResult};

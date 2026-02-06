@@ -881,7 +881,81 @@ async fn set_local_llm_url(state: tauri::State<'_, AppState>, url: String) -> Re
     Ok(())
 }
 
-/// Status of the Id/Ego router for debugging and UI display.
+/// Configure the Superego (safety) layer.
+/// Accepts a provider name ("openai", "anthropic") and API key.
+/// Rebuilds the router with the Superego attached.
+#[tauri::command]
+fn set_superego_provider(
+    state: tauri::State<AppState>,
+    provider: String,
+    key: String,
+) -> Result<(), String> {
+    // Store superego config in TrinityConfig
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        let trinity = config.trinity.get_or_insert_with(TrinityConfig::default);
+        trinity.superego_provider = Some(provider.clone());
+        trinity.superego_api_key = Some(key.clone());
+        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+    }
+
+    // Rebuild router with superego
+    rebuild_router_with_superego(&state)?;
+    Ok(())
+}
+
+/// Rebuild the router from current config + vault state, attaching Superego if configured.
+fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let vault = state.secrets.lock().map_err(|e| e.to_string())?;
+
+    // Determine ego provider
+    let (ego_name, ego_key) = if let Some(ref key) = config.openai_api_key {
+        (Some("openai"), Some(key.clone()))
+    } else if let Some(key) = vault.get_secret("anthropic") {
+        (Some("anthropic"), Some(key.to_string()))
+    } else if let Some(key) = vault.get_secret("openai") {
+        (Some("openai"), Some(key.to_string()))
+    } else {
+        (None, None)
+    };
+
+    let mut new_router = IdEgoRouter::with_provider(
+        config.local_llm_base_url.clone(),
+        ego_name,
+        ego_key,
+        config.routing_mode,
+    );
+
+    // Attach Superego if configured in TrinityConfig
+    if let Some(ref trinity) = config.trinity {
+        if let (Some(ref se_provider), Some(ref se_key)) =
+            (&trinity.superego_provider, &trinity.superego_api_key)
+        {
+            if !se_key.is_empty() {
+                let superego: std::sync::Arc<dyn ao_capabilities::cognitive::LlmProvider> =
+                    match se_provider.as_str() {
+                        "anthropic" => std::sync::Arc::new(
+                            ao_capabilities::cognitive::AnthropicProvider::new(se_key.clone()),
+                        ),
+                        _ => std::sync::Arc::new(
+                            ao_capabilities::cognitive::OpenAiProvider::new(Some(se_key.clone())),
+                        ),
+                    };
+                new_router = new_router.with_superego(superego);
+                tracing::info!("Superego attached: provider={}", se_provider);
+            }
+        }
+    }
+
+    drop(vault);
+    drop(config);
+    let mut router = state.router.write().map_err(|e| e.to_string())?;
+    *router = new_router;
+    Ok(())
+}
+
+/// Status of the Id/Ego/Superego router for debugging and UI display.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterStatus {
     /// Id provider type: "candle_stub", "local_http", or "ollama"
@@ -892,6 +966,8 @@ pub struct RouterStatus {
     pub ego_configured: bool,
     /// Which cloud provider backs Ego: "openai", "anthropic", or null
     pub ego_provider: Option<String>,
+    /// Whether Superego (safety layer) is configured
+    pub superego_configured: bool,
     /// Current routing mode: "ego_primary" or "id_primary"
     pub routing_mode: String,
 }
@@ -912,6 +988,7 @@ fn get_router_status(state: tauri::State<AppState>) -> Result<RouterStatus, Stri
         id_url: config.local_llm_base_url.clone(),
         ego_configured: router.has_ego(),
         ego_provider: router.ego_provider_name().map(|p| p.to_string()),
+        superego_configured: router.has_superego(),
         routing_mode: format!("{:?}", config.routing_mode).to_lowercase(),
     })
 }
@@ -1947,8 +2024,10 @@ fn complete_emergence(state: tauri::State<AppState>) -> Result<(), String> {
             ego_api_key: config.openai_api_key.clone()
                 .or_else(|| vault.get_secret("anthropic").map(|s| s.to_string()))
                 .or_else(|| vault.get_secret("xai").map(|s| s.to_string())),
-            superego_provider: None, // Follow-up: 3-way routing
-            superego_api_key: None,
+            superego_provider: vault.get_secret("anthropic").map(|_| "anthropic".to_string())
+                .or_else(|| vault.get_secret("openai").map(|_| "openai".to_string())),
+            superego_api_key: vault.get_secret("anthropic").map(|s| s.to_string())
+                .or_else(|| vault.get_secret("openai").map(|s| s.to_string())),
         }
     };
 
@@ -1985,7 +2064,7 @@ pub fn run() {
     // Build router, selecting best available Ego provider from vault/config
     let router = {
         let vault = secrets.lock().unwrap();
-        if let Some(ref key) = config.openai_api_key {
+        let mut r = if let Some(ref key) = config.openai_api_key {
             // Explicit OpenAI key in config takes precedence
             IdEgoRouter::with_provider(
                 config.local_llm_base_url.clone(),
@@ -2009,7 +2088,30 @@ pub fn run() {
             )
         } else {
             IdEgoRouter::new(config.local_llm_base_url.clone(), None, config.routing_mode)
+        };
+
+        // Attach Superego if configured in TrinityConfig
+        if let Some(ref trinity) = config.trinity {
+            if let (Some(ref se_provider), Some(ref se_key)) =
+                (&trinity.superego_provider, &trinity.superego_api_key)
+            {
+                if !se_key.is_empty() {
+                    let superego: Arc<dyn ao_capabilities::cognitive::LlmProvider> =
+                        match se_provider.as_str() {
+                            "anthropic" => Arc::new(
+                                ao_capabilities::cognitive::AnthropicProvider::new(se_key.clone()),
+                            ),
+                            _ => Arc::new(
+                                ao_capabilities::cognitive::OpenAiProvider::new(Some(se_key.clone())),
+                            ),
+                        };
+                    r = r.with_superego(superego);
+                    tracing::info!("Superego configured at startup: provider={}", se_provider);
+                }
+            }
         }
+
+        r
     };
 
     #[cfg(not(windows))]
@@ -2096,6 +2198,7 @@ pub fn run() {
             set_api_key,
             set_local_llm_url,
             get_router_status,
+            set_superego_provider,
             complete_birth,
             skip_to_life_for_mvp,
             list_skills,

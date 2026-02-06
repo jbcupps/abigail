@@ -20,5 +20,6 @@ pub use keyring::{
 };
 pub use secrets::SecretsVault;
 pub use local_llm_url::validate_local_llm_url;
+pub use superego::{check_message, check_search_query, SuperegoVerdict};
 pub use vault::{ExternalVault, ReadOnlyFileVault};
 pub use verifier::{write_sig_file, Verifier};

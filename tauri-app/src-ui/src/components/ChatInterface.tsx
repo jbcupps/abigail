@@ -15,6 +15,7 @@ interface RouterStatus {
   id_url: string | null;
   ego_configured: boolean;
   ego_provider: string | null;
+  superego_configured: boolean;
   routing_mode: string;
 }
 
