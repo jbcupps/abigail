@@ -5,17 +5,17 @@
 //! parameter, not a message in the array.
 
 use crate::cognitive::provider::{
-    CompletionRequest, CompletionResponse, LlmProvider, StreamEvent, ToolCall,
+    CompletionRequest, CompletionResponse, LlmProvider, StreamEvent, ToolCall, ToolDefinition,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
-const ANTHROPIC_VERSION: &str = "2023-06-01";
+const API_URL: &str = "https://api.anthropic.com/v1/messages";
+const API_VERSION: &str = "2023-06-01";
 const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
-const DEFAULT_MAX_TOKENS: u32 = 4096;
+const MAX_TOKENS: u32 = 4096;
 
 pub struct AnthropicProvider {
     api_key: String,
@@ -41,7 +41,7 @@ impl AnthropicProvider {
     }
 }
 
-// ── Anthropic API request/response types ─────────────────────────────
+// ── Anthropic API request/response types ────────────────────────────
 
 #[derive(Debug, Serialize)]
 struct AnthropicRequest {
@@ -175,38 +175,33 @@ enum SseDelta {
     InputJsonDelta { partial_json: String },
 }
 
-// ── Message mapping ─────────────────────────────────────────────────
+// ── Conversion helpers ──────────────────────────────────────────────
 
-/// Convert AO messages to Anthropic format.
-/// Anthropic requires:
-/// - System prompt as a top-level field (not in messages array)
-/// - Messages alternate user/assistant (tool results go inside user messages)
-/// - tool_calls from assistant become content blocks with type "tool_use"
-/// - tool results become content blocks with type "tool_result" inside user messages
-fn map_messages(
-    ao_messages: &[crate::cognitive::provider::Message],
+/// Convert our Message list into Anthropic format.
+/// Extracts system messages to top-level field; converts tool messages
+/// to user-role content blocks with tool_result type.
+fn convert_messages(
+    messages: &[crate::cognitive::provider::Message],
 ) -> (Option<String>, Vec<AnthropicMessage>) {
-    let mut system_prompt = None;
-    let mut messages: Vec<AnthropicMessage> = Vec::new();
+    let mut system_text: Option<String> = None;
+    let mut anthropic_msgs: Vec<AnthropicMessage> = Vec::new();
 
-    for msg in ao_messages {
+    for msg in messages {
         match msg.role.as_str() {
             "system" => {
-                // Anthropic: system prompt is a top-level field, not a message.
-                // If multiple system messages, concatenate them.
-                match &mut system_prompt {
+                // Anthropic wants system as a top-level param, not in messages
+                match &mut system_text {
                     Some(existing) => {
-                        *existing = format!("{}\n\n{}", existing, msg.content);
+                        existing.push_str("\n\n");
+                        existing.push_str(&msg.content);
                     }
-                    None => {
-                        system_prompt = Some(msg.content.clone());
-                    }
+                    None => system_text = Some(msg.content.clone()),
                 }
             }
             "assistant" => {
-                // If the assistant message has tool_calls, represent them as content blocks
+                // Check if this assistant message has tool_calls
                 if let Some(ref tool_calls) = msg.tool_calls {
-                    let mut blocks: Vec<ContentBlock> = Vec::new();
+                    let mut blocks = Vec::new();
                     if !msg.content.is_empty() {
                         blocks.push(ContentBlock::Text {
                             text: msg.content.clone(),
@@ -214,34 +209,33 @@ fn map_messages(
                     }
                     for tc in tool_calls {
                         let input: serde_json::Value =
-                            serde_json::from_str(&tc.arguments).unwrap_or(serde_json::json!({}));
+                            serde_json::from_str(&tc.arguments).unwrap_or_default();
                         blocks.push(ContentBlock::ToolUse {
                             id: tc.id.clone(),
                             name: tc.name.clone(),
                             input,
                         });
                     }
-                    messages.push(AnthropicMessage {
+                    anthropic_msgs.push(AnthropicMessage {
                         role: "assistant".to_string(),
                         content: AnthropicContent::Blocks(blocks),
                     });
                 } else {
-                    messages.push(AnthropicMessage {
+                    anthropic_msgs.push(AnthropicMessage {
                         role: "assistant".to_string(),
                         content: AnthropicContent::Text(msg.content.clone()),
                     });
                 }
             }
             "tool" => {
-                // Anthropic requires tool results inside a "user" message with tool_result blocks.
-                let tool_call_id = msg.tool_call_id.clone().unwrap_or_default();
+                // Anthropic: tool results are sent as user messages with tool_result content blocks
+                let tool_use_id = msg.tool_call_id.clone().unwrap_or_default();
                 let block = ContentBlock::ToolResult {
-                    tool_use_id: tool_call_id,
+                    tool_use_id,
                     content: msg.content.clone(),
                 };
-                // If the last message is already a user message with blocks, append to it.
-                // Otherwise create a new user message.
-                if let Some(last) = messages.last_mut() {
+                // If the last message is already a user message with blocks, append to it
+                if let Some(last) = anthropic_msgs.last_mut() {
                     if last.role == "user" {
                         if let AnthropicContent::Blocks(ref mut blocks) = last.content {
                             blocks.push(block);
@@ -249,14 +243,14 @@ fn map_messages(
                         }
                     }
                 }
-                messages.push(AnthropicMessage {
+                anthropic_msgs.push(AnthropicMessage {
                     role: "user".to_string(),
                     content: AnthropicContent::Blocks(vec![block]),
                 });
             }
             _ => {
                 // "user" and anything else → user message
-                messages.push(AnthropicMessage {
+                anthropic_msgs.push(AnthropicMessage {
                     role: "user".to_string(),
                     content: AnthropicContent::Text(msg.content.clone()),
                 });
@@ -264,28 +258,65 @@ fn map_messages(
         }
     }
 
-    (system_prompt, messages)
+    // Anthropic requires messages to start with a user message and alternate roles.
+    // Merge consecutive same-role messages if needed.
+    let merged = merge_consecutive_roles(anthropic_msgs);
+
+    (system_text, merged)
 }
+
+/// Merge consecutive messages with the same role into a single message with blocks.
+fn merge_consecutive_roles(msgs: Vec<AnthropicMessage>) -> Vec<AnthropicMessage> {
+    let mut result: Vec<AnthropicMessage> = Vec::new();
+    for msg in msgs {
+        if let Some(last) = result.last_mut() {
+            if last.role == msg.role {
+                // Merge into blocks
+                let mut blocks = to_blocks(&last.content);
+                blocks.extend(to_blocks(&msg.content));
+                last.content = AnthropicContent::Blocks(blocks);
+                continue;
+            }
+        }
+        result.push(msg);
+    }
+    result
+}
+
+fn to_blocks(content: &AnthropicContent) -> Vec<ContentBlock> {
+    match content {
+        AnthropicContent::Text(t) => vec![ContentBlock::Text { text: t.clone() }],
+        AnthropicContent::Blocks(b) => {
+            // We need to clone the blocks; since ContentBlock doesn't derive Clone,
+            // re-serialize/deserialize. This is only for the rare merge case.
+            let json = serde_json::to_value(b).unwrap_or_default();
+            serde_json::from_value(json).unwrap_or_default()
+        }
+    }
+}
+
+fn convert_tools(tools: &[ToolDefinition]) -> Vec<AnthropicTool> {
+    tools
+        .iter()
+        .map(|td| AnthropicTool {
+            name: td.name.clone(),
+            description: td.description.clone(),
+            input_schema: td.parameters.clone(),
+        })
+        .collect()
+}
+
+// ── LlmProvider impl ───────────────────────────────────────────────
 
 #[async_trait]
 impl LlmProvider for AnthropicProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
-        let (system, messages) = map_messages(&request.messages);
+        let (system, messages) = convert_messages(&request.messages);
+        let tools = request.tools.as_ref().map(|t| convert_tools(t));
 
-        // Map tool definitions to Anthropic format
-        let tools: Option<Vec<AnthropicTool>> = request.tools.as_ref().map(|defs| {
-            defs.iter()
-                .map(|td| AnthropicTool {
-                    name: td.name.clone(),
-                    description: td.description.clone(),
-                    input_schema: td.parameters.clone(),
-                })
-                .collect()
-        });
-
-        let api_request = AnthropicRequest {
+        let body = AnthropicRequest {
             model: self.model.clone(),
-            max_tokens: DEFAULT_MAX_TOKENS,
+            max_tokens: MAX_TOKENS,
             system,
             messages,
             tools,
@@ -294,18 +325,18 @@ impl LlmProvider for AnthropicProvider {
 
         let response = self
             .client
-            .post(ANTHROPIC_API_URL)
+            .post(API_URL)
             .header("x-api-key", &self.api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("anthropic-version", API_VERSION)
             .header("content-type", "application/json")
-            .json(&api_request)
+            .json(&body)
             .send()
             .await?;
 
         let status = response.status();
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            if let Ok(err) = serde_json::from_str::<AnthropicError>(&body) {
+            let body_text = response.text().await.unwrap_or_default();
+            if let Ok(err) = serde_json::from_str::<AnthropicError>(&body_text) {
                 return Err(anyhow::anyhow!(
                     "Anthropic API error ({}): {} - {}",
                     status,
@@ -316,21 +347,19 @@ impl LlmProvider for AnthropicProvider {
             return Err(anyhow::anyhow!(
                 "Anthropic API error ({}): {}",
                 status,
-                body
+                body_text
             ));
         }
 
         let api_response: AnthropicResponse = response.json().await?;
 
         // Extract text content and tool calls from response blocks
-        let mut text_parts: Vec<String> = Vec::new();
-        let mut tool_calls: Vec<ToolCall> = Vec::new();
+        let mut text_parts = Vec::new();
+        let mut tool_calls = Vec::new();
 
         for block in &api_response.content {
             match block {
-                ResponseContentBlock::Text { text } => {
-                    text_parts.push(text.clone());
-                }
+                ResponseContentBlock::Text { text } => text_parts.push(text.clone()),
                 ResponseContentBlock::ToolUse { id, name, input } => {
                     tool_calls.push(ToolCall {
                         id: id.clone(),
@@ -364,21 +393,12 @@ impl LlmProvider for AnthropicProvider {
         request: &CompletionRequest,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
-        let (system, messages) = map_messages(&request.messages);
-
-        let tools: Option<Vec<AnthropicTool>> = request.tools.as_ref().map(|defs| {
-            defs.iter()
-                .map(|td| AnthropicTool {
-                    name: td.name.clone(),
-                    description: td.description.clone(),
-                    input_schema: td.parameters.clone(),
-                })
-                .collect()
-        });
+        let (system, messages) = convert_messages(&request.messages);
+        let tools = request.tools.as_ref().map(|t| convert_tools(t));
 
         let api_request = AnthropicRequest {
             model: self.model.clone(),
-            max_tokens: DEFAULT_MAX_TOKENS,
+            max_tokens: MAX_TOKENS,
             system,
             messages,
             tools,
@@ -387,9 +407,9 @@ impl LlmProvider for AnthropicProvider {
 
         let response = self
             .client
-            .post(ANTHROPIC_API_URL)
+            .post(API_URL)
             .header("x-api-key", &self.api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("anthropic-version", API_VERSION)
             .header("content-type", "application/json")
             .json(&api_request)
             .send()
@@ -521,10 +541,10 @@ mod tests {
             Message::new("system", "You are helpful."),
             Message::new("user", "Hello"),
         ];
-        let (system, mapped) = map_messages(&messages);
+        let (system, msgs) = convert_messages(&messages);
         assert_eq!(system, Some("You are helpful.".to_string()));
-        assert_eq!(mapped.len(), 1);
-        assert_eq!(mapped[0].role, "user");
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].role, "user");
     }
 
     #[test]
@@ -534,9 +554,9 @@ mod tests {
             Message::new("system", "Be concise."),
             Message::new("user", "Hello"),
         ];
-        let (system, mapped) = map_messages(&messages);
+        let (system, msgs) = convert_messages(&messages);
         assert_eq!(system, Some("You are helpful.\n\nBe concise.".to_string()));
-        assert_eq!(mapped.len(), 1);
+        assert_eq!(msgs.len(), 1);
     }
 
     #[test]
@@ -555,38 +575,23 @@ mod tests {
             },
             Message::tool_result("call_1", "Found 10 results about cats"),
         ];
-        let (_, mapped) = map_messages(&messages);
-        assert_eq!(mapped.len(), 3);
-        assert_eq!(mapped[0].role, "user");
-        assert_eq!(mapped[1].role, "assistant");
-        assert_eq!(mapped[2].role, "user"); // tool result wrapped in user message
+        let (_, msgs) = convert_messages(&messages);
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[0].role, "user");
+        assert_eq!(msgs[1].role, "assistant");
+        assert_eq!(msgs[2].role, "user"); // tool result wrapped in user message
     }
 
     #[test]
-    fn test_tool_definition_mapping() {
+    fn test_convert_tools() {
         let tools = vec![ToolDefinition {
-            name: "web_search".to_string(),
+            name: "search".to_string(),
             description: "Search the web".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"}
-                },
-                "required": ["query"]
-            }),
+            parameters: serde_json::json!({"type": "object"}),
         }];
-
-        let mapped: Vec<AnthropicTool> = tools
-            .iter()
-            .map(|td| AnthropicTool {
-                name: td.name.clone(),
-                description: td.description.clone(),
-                input_schema: td.parameters.clone(),
-            })
-            .collect();
-
-        assert_eq!(mapped.len(), 1);
-        assert_eq!(mapped[0].name, "web_search");
+        let result = convert_tools(&tools);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "search");
     }
 
     #[tokio::test]

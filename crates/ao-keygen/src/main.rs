@@ -5,7 +5,7 @@ use ao_core::{
     templates::CONSTITUTIONAL_DOCS, AppConfig, Keyring,
 };
 use eframe::egui;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn main() -> eframe::Result<()> {
     tracing_subscriber::fmt::init();
@@ -74,7 +74,7 @@ struct SetupResult {
     public_key_path: String,
 }
 
-fn run_setup(data_dir: &PathBuf, docs_dir: &PathBuf) -> Result<SetupResult, String> {
+fn run_setup(data_dir: &Path, docs_dir: &Path) -> Result<SetupResult, String> {
     // 1. Create directories
     std::fs::create_dir_all(docs_dir).map_err(|e| format!("Failed to create docs dir: {}", e))?;
 
@@ -90,7 +90,7 @@ fn run_setup(data_dir: &PathBuf, docs_dir: &PathBuf) -> Result<SetupResult, Stri
     // 3. Generate internal keyring if not present
     let keys_file = data_dir.join("keys.bin");
     if !keys_file.exists() {
-        let keyring = Keyring::generate(data_dir.clone())
+        let keyring = Keyring::generate(data_dir.to_path_buf())
             .map_err(|e| format!("Failed to generate keyring: {}", e))?;
         keyring
             .save()

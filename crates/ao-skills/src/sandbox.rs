@@ -95,8 +95,8 @@ impl SkillSandbox {
         match &action.kind {
             AuditActionKind::NetworkRequest { domain } => {
                 for p in &self.granted_permissions {
-                    match p {
-                        Permission::Network(np) => match np {
+                    if let Permission::Network(np) = p {
+                        match np {
                             crate::manifest::NetworkPermission::Full => return true,
                             crate::manifest::NetworkPermission::LocalOnly => {
                                 if domain == "localhost" || domain.starts_with("127.") {
@@ -108,8 +108,7 @@ impl SkillSandbox {
                                     return true;
                                 }
                             }
-                        },
-                        _ => {}
+                        }
                     }
                 }
                 false

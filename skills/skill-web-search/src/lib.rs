@@ -160,7 +160,7 @@ impl Skill for WebSearchSkill {
         // Execute search
         let response = web_search::tavily_search(&api_key, &query, max_results)
             .await
-            .map_err(|e| SkillError::ToolFailed(e))?;
+            .map_err(SkillError::ToolFailed)?;
 
         let formatted = web_search::format_search_results(&response);
 

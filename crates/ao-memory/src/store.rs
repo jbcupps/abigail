@@ -111,10 +111,7 @@ impl MemoryStore {
 
     pub fn has_birth(&self) -> Result<bool> {
         let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )))
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
         })?;
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM birth WHERE id = 1", [], |row| {
             row.get(0)
@@ -127,10 +124,7 @@ impl MemoryStore {
             return Err(StoreError::BirthAlreadyRecorded);
         }
         let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )))
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
         })?;
         conn.execute(
             "INSERT INTO birth (id, content, created_at) VALUES (1, ?1, ?2)",
@@ -144,10 +138,7 @@ impl MemoryStore {
 
     pub fn insert_memory(&self, memory: &Memory) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )))
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
         })?;
         conn.execute(
             "INSERT INTO memories (id, content, weight, created_at) VALUES (?1, ?2, ?3, ?4)",
@@ -164,10 +155,7 @@ impl MemoryStore {
     /// Count total memories in the store.
     pub fn count_memories(&self) -> Result<u64> {
         let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )))
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
         })?;
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))?;
         Ok(count as u64)
@@ -176,10 +164,7 @@ impl MemoryStore {
     /// Run VACUUM to reclaim space and optimize the database.
     pub fn vacuum(&self) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )))
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
         })?;
         conn.execute("VACUUM", [])?;
         Ok(())
@@ -188,10 +173,7 @@ impl MemoryStore {
     /// Clear all memories but keep the birth record.
     pub fn clear_memories(&self) -> Result<u64> {
         let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )))
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
         })?;
         let deleted = conn.execute("DELETE FROM memories", [])?;
         Ok(deleted as u64)
@@ -200,10 +182,7 @@ impl MemoryStore {
     /// Recent memories (MVP: by created_at DESC; sqlite-vec stubbed).
     pub fn recent_memories(&self, limit: usize) -> Result<Vec<Memory>> {
         let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )))
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
         })?;
         let mut stmt = conn.prepare(
             "SELECT id, content, weight, created_at FROM memories ORDER BY created_at DESC LIMIT ?1",
