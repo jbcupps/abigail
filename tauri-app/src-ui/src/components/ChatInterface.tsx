@@ -14,6 +14,7 @@ interface RouterStatus {
   id_provider: string;
   id_url: string | null;
   ego_configured: boolean;
+  ego_provider: string | null;
   routing_mode: string;
 }
 
@@ -129,20 +130,57 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
     setMessages((m) => [...m, userMessage]);
     setInput("");
     setLoading(true);
+
+    // Add a placeholder assistant message for streaming
+    setMessages((m) => [...m, { role: "assistant", content: "" }]);
+
+    // Listen for streaming tokens
+    let streamContent = "";
+    const unlisten = await listen<{ token?: string; done?: boolean }>("chat-token", (event) => {
+      if (event.payload.token) {
+        streamContent += event.payload.token;
+        setMessages((m) => {
+          const updated = [...m];
+          const lastAssistant = updated[updated.length - 1];
+          if (lastAssistant && lastAssistant.role === "assistant") {
+            updated[updated.length - 1] = { ...lastAssistant, content: streamContent };
+          }
+          return updated;
+        });
+      }
+    });
+
     try {
-      const reply = await invoke<string>("chat", { message: userMessage.content, target });
-      setMessages((m) => [...m, { role: "assistant", content: reply }]);
+      const reply = await invoke<string>("chat_stream", { message: userMessage.content, target });
+      // If streaming didn't produce content (fallback), use the return value
+      if (!streamContent) {
+        setMessages((m) => {
+          const updated = [...m];
+          const lastAssistant = updated[updated.length - 1];
+          if (lastAssistant && lastAssistant.role === "assistant") {
+            updated[updated.length - 1] = { ...lastAssistant, content: reply };
+          }
+          return updated;
+        });
+      }
     } catch (e) {
       const errorMsg = String(e);
-      // Provide helpful guidance for common errors
       let content = errorMsg;
       if (errorMsg.includes("No local LLM configured")) {
         content = "No LLM available. Please either:\n" +
           "1. Set OPENAI_API_KEY environment variable, or\n" +
           "2. Install Ollama and set LOCAL_LLM_BASE_URL=http://localhost:11434";
       }
-      setMessages((m) => [...m, { role: "assistant", content, isError: true }]);
+      setMessages((m) => {
+        const updated = [...m];
+        const lastAssistant = updated[updated.length - 1];
+        if (lastAssistant && lastAssistant.role === "assistant") {
+          updated[updated.length - 1] = { ...lastAssistant, content, isError: true };
+        }
+        return updated;
+      });
     } finally {
+      unlisten();
       setLoading(false);
       setChatStatus(null);
     }
@@ -158,11 +196,14 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
     let statusText = "";
     let statusColor = "text-yellow-500";
 
+    const egoName = routerStatus.ego_provider || "Cloud";
+    const egoLabel = egoName.charAt(0).toUpperCase() + egoName.slice(1);
+
     if (hasEgo && hasLocal) {
-      statusText = `[${mode}] Cloud + Local`;
+      statusText = `[${mode}] ${egoLabel} + Local`;
       statusColor = "text-theme-text";
     } else if (hasEgo) {
-      statusText = "[cloud] OpenAI";
+      statusText = `[cloud] ${egoLabel}`;
       statusColor = "text-blue-400";
     } else if (hasLocal) {
       statusText = `[local] ${routerStatus.id_url}`;

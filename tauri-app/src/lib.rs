@@ -1384,6 +1384,129 @@ async fn chat(app: tauri::AppHandle, state: tauri::State<'_, AppState>, message:
     Ok(final_content)
 }
 
+/// Streaming version of chat: emits "chat-token" events as tokens arrive.
+/// Falls back to non-streaming for tool-calling follow-ups.
+#[tauri::command]
+async fn chat_stream(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    message: String,
+    target: Option<String>,
+) -> Result<String, String> {
+    use ao_capabilities::cognitive::StreamEvent;
+
+    let (store, router, system_prompt) = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
+        let prompt = ao_core::system_prompt::build_system_prompt(
+            &config.docs_dir,
+            &config.agent_name,
+        );
+        drop(config);
+        let router = state.router.read().map_err(|e| e.to_string())?.clone();
+        (store, router, prompt)
+    };
+
+    let mut messages = vec![
+        ao_capabilities::cognitive::Message::new("system", &system_prompt),
+        ao_capabilities::cognitive::Message::new("user", &message),
+    ];
+
+    let target_mode = target.as_deref().unwrap_or("EGO");
+    let tools = chat_tool_definitions(&state.registry);
+
+    // For simple (no-tool) streaming, use the streaming path.
+    // For tool-calling, we do a non-streaming initial request then stream the follow-up.
+    let final_content = if target_mode == "ID" {
+        // Id-only: stream directly (no tool calling)
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+        let app_clone = app.clone();
+
+        // Spawn a task to forward stream events to the frontend
+        let forward_handle = tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                match event {
+                    StreamEvent::Token(token) => {
+                        let _ = app_clone.emit("chat-token", serde_json::json!({ "token": token }));
+                    }
+                    StreamEvent::Done(_) => {
+                        let _ = app_clone.emit("chat-token", serde_json::json!({ "done": true }));
+                    }
+                }
+            }
+        });
+
+        let request = ao_capabilities::cognitive::CompletionRequest::simple(messages.clone());
+        let response = router
+            .route_stream(messages, tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        let _ = forward_handle.await;
+        response.content
+    } else {
+        // Ego mode: first request with tools (non-streaming to capture tool calls)
+        let response = router
+            .route_with_tools(messages.clone(), tools.clone())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if let Some(ref tool_calls) = response.tool_calls {
+            // Execute tools (non-streaming)
+            let mut tool_results = Vec::new();
+            for tc in tool_calls {
+                let result = execute_tool_call(&state, &app, tc).await;
+                tool_results.push((tc.clone(), result));
+            }
+
+            messages.push(ao_capabilities::cognitive::Message {
+                role: "assistant".to_string(),
+                content: response.content.clone(),
+                tool_call_id: None,
+                tool_calls: Some(tool_calls.clone()),
+            });
+
+            for (tc, result) in &tool_results {
+                messages.push(ao_capabilities::cognitive::Message::tool_result(&tc.id, result));
+            }
+
+            // Stream the follow-up response
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+            let app_clone = app.clone();
+
+            let forward_handle = tokio::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        StreamEvent::Token(token) => {
+                            let _ = app_clone.emit("chat-token", serde_json::json!({ "token": token }));
+                        }
+                        StreamEvent::Done(_) => {
+                            let _ = app_clone.emit("chat-token", serde_json::json!({ "done": true }));
+                        }
+                    }
+                }
+            });
+
+            let follow_up = router
+                .route_stream_with_tools(messages, tools, tx)
+                .await
+                .map_err(|e| e.to_string())?;
+            let _ = forward_handle.await;
+            follow_up.content
+        } else {
+            // No tool calls — the initial response was already the final answer.
+            // We didn't stream it, so emit it now as a single token.
+            let _ = app.emit("chat-token", serde_json::json!({ "token": response.content }));
+            let _ = app.emit("chat-token", serde_json::json!({ "done": true }));
+            response.content
+        }
+    };
+
+    // Store memory
+    let memory = Memory::ephemeral(format!("user: {} | assistant: {}", message, final_content));
+    let _ = store.insert_memory(&memory);
+    Ok(final_content)
+}
+
 /// MVP shortcut: skip email and model download, go directly to Emergence stage.
 /// Used for streamlined first-run experience.
 #[tauri::command]
@@ -1984,6 +2107,7 @@ pub fn run() {
             remove_secret,
             list_missing_skill_secrets,
             chat,
+            chat_stream,
             // New birth flow commands
             probe_local_llm,
             set_local_llm_during_birth,

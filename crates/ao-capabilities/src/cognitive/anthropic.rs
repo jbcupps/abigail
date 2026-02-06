@@ -5,9 +5,10 @@
 //! parameter, not a message in the array.
 
 use crate::cognitive::provider::{
-    CompletionRequest, CompletionResponse, LlmProvider, ToolCall,
+    CompletionRequest, CompletionResponse, LlmProvider, StreamEvent, ToolCall,
 };
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -51,6 +52,8 @@ struct AnthropicRequest {
     messages: Vec<AnthropicMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<AnthropicTool>>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    stream: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -122,6 +125,54 @@ struct AnthropicErrorDetail {
     message: String,
     #[serde(rename = "type")]
     error_type: String,
+}
+
+// ── Streaming SSE event types ────────────────────────────────────────
+
+/// Top-level SSE event from Anthropic's streaming API.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+enum SseEvent {
+    #[serde(rename = "message_start")]
+    MessageStart {},
+    #[serde(rename = "content_block_start")]
+    ContentBlockStart {
+        index: usize,
+        content_block: SseContentBlock,
+    },
+    #[serde(rename = "content_block_delta")]
+    ContentBlockDelta { index: usize, delta: SseDelta },
+    #[serde(rename = "content_block_stop")]
+    ContentBlockStop { index: usize },
+    #[serde(rename = "message_delta")]
+    MessageDelta {},
+    #[serde(rename = "message_stop")]
+    MessageStop {},
+    #[serde(rename = "ping")]
+    Ping {},
+    #[serde(rename = "error")]
+    Error { error: AnthropicErrorDetail },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+enum SseContentBlock {
+    #[serde(rename = "text")]
+    Text {
+        #[allow(dead_code)]
+        text: String,
+    },
+    #[serde(rename = "tool_use")]
+    ToolUse { id: String, name: String },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+enum SseDelta {
+    #[serde(rename = "text_delta")]
+    TextDelta { text: String },
+    #[serde(rename = "input_json_delta")]
+    InputJsonDelta { partial_json: String },
 }
 
 // ── Message mapping ─────────────────────────────────────────────────
@@ -238,6 +289,7 @@ impl LlmProvider for AnthropicProvider {
             system,
             messages,
             tools,
+            stream: false,
         };
 
         let response = self
@@ -301,6 +353,153 @@ impl LlmProvider for AnthropicProvider {
             content,
             tool_calls,
         })
+    }
+
+    async fn stream(
+        &self,
+        request: &CompletionRequest,
+        tx: tokio::sync::mpsc::Sender<StreamEvent>,
+    ) -> anyhow::Result<CompletionResponse> {
+        let (system, messages) = map_messages(&request.messages);
+
+        let tools: Option<Vec<AnthropicTool>> = request.tools.as_ref().map(|defs| {
+            defs.iter()
+                .map(|td| AnthropicTool {
+                    name: td.name.clone(),
+                    description: td.description.clone(),
+                    input_schema: td.parameters.clone(),
+                })
+                .collect()
+        });
+
+        let api_request = AnthropicRequest {
+            model: self.model.clone(),
+            max_tokens: DEFAULT_MAX_TOKENS,
+            system,
+            messages,
+            tools,
+            stream: true,
+        };
+
+        let response = self
+            .client
+            .post(ANTHROPIC_API_URL)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("content-type", "application/json")
+            .json(&api_request)
+            .send()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            if let Ok(err) = serde_json::from_str::<AnthropicError>(&body) {
+                return Err(anyhow::anyhow!(
+                    "Anthropic API error ({}): {} - {}",
+                    status,
+                    err.error.error_type,
+                    err.error.message
+                ));
+            }
+            return Err(anyhow::anyhow!("Anthropic API error ({}): {}", status, body));
+        }
+
+        // Parse SSE stream
+        let mut full_text = String::new();
+        let mut tool_calls: Vec<ToolCall> = Vec::new();
+        // Track in-progress tool calls by content block index
+        let mut tool_ids: std::collections::HashMap<usize, (String, String)> =
+            std::collections::HashMap::new();
+        let mut tool_args: std::collections::HashMap<usize, String> =
+            std::collections::HashMap::new();
+
+        let mut byte_stream = response.bytes_stream();
+        let mut buffer = String::new();
+
+        while let Some(chunk) = byte_stream.next().await {
+            let chunk = chunk?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            // Process complete SSE lines from buffer
+            while let Some(pos) = buffer.find("\n\n") {
+                let event_block = buffer[..pos].to_string();
+                buffer = buffer[pos + 2..].to_string();
+
+                // Parse SSE event lines
+                let mut data_line = None;
+                for line in event_block.lines() {
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        data_line = Some(data.to_string());
+                    }
+                }
+
+                if let Some(data) = data_line {
+                    if data == "[DONE]" {
+                        break;
+                    }
+
+                    match serde_json::from_str::<SseEvent>(&data) {
+                        Ok(event) => match event {
+                            SseEvent::ContentBlockStart {
+                                index,
+                                content_block: SseContentBlock::ToolUse { id, name },
+                            } => {
+                                tool_ids.insert(index, (id, name));
+                                tool_args.insert(index, String::new());
+                            }
+                            SseEvent::ContentBlockDelta { index, delta } => match delta {
+                                SseDelta::TextDelta { text } => {
+                                    full_text.push_str(&text);
+                                    let _ = tx.send(StreamEvent::Token(text)).await;
+                                }
+                                SseDelta::InputJsonDelta { partial_json } => {
+                                    if let Some(args) = tool_args.get_mut(&index) {
+                                        args.push_str(&partial_json);
+                                    }
+                                }
+                            },
+                            SseEvent::ContentBlockStop { index } => {
+                                if let Some((id, name)) = tool_ids.remove(&index) {
+                                    let arguments =
+                                        tool_args.remove(&index).unwrap_or_default();
+                                    tool_calls.push(ToolCall {
+                                        id,
+                                        name,
+                                        arguments,
+                                    });
+                                }
+                            }
+                            SseEvent::Error { error } => {
+                                return Err(anyhow::anyhow!(
+                                    "Anthropic stream error: {} - {}",
+                                    error.error_type,
+                                    error.message
+                                ));
+                            }
+                            _ => {} // MessageStart, MessageDelta, MessageStop, Ping
+                        },
+                        Err(e) => {
+                            tracing::debug!("Skipping unparseable SSE event: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+
+        let tool_calls = if tool_calls.is_empty() {
+            None
+        } else {
+            Some(tool_calls)
+        };
+
+        let response = CompletionResponse {
+            content: full_text,
+            tool_calls,
+        };
+
+        let _ = tx.send(StreamEvent::Done(response.clone())).await;
+        Ok(response)
     }
 }
 

@@ -2,7 +2,7 @@
 
 use ao_capabilities::cognitive::{
     stub_heartbeat, AnthropicProvider, CandleProvider, CompletionRequest, CompletionResponse,
-    LocalHttpProvider, LlmProvider, Message, OpenAiProvider, ToolDefinition,
+    LocalHttpProvider, LlmProvider, Message, OpenAiProvider, StreamEvent, ToolDefinition,
 };
 use std::sync::Arc;
 
@@ -273,6 +273,66 @@ impl IdEgoRouter {
     pub async fn id_only(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
         tracing::info!("id_only: using Id (local) only");
         let request = CompletionRequest::simple(messages);
+        self.id.complete(&request).await
+    }
+
+    /// Streaming version of route(). Sends token events through the channel.
+    /// Uses the same routing logic as route() but calls stream() instead of complete().
+    pub async fn route_stream(
+        &self,
+        messages: Vec<Message>,
+        tx: tokio::sync::mpsc::Sender<StreamEvent>,
+    ) -> anyhow::Result<CompletionResponse> {
+        // Determine which provider to use (same logic as route)
+        let provider: &Arc<dyn LlmProvider> = match self.mode {
+            RoutingMode::EgoPrimary => {
+                if let Some(ref ego) = self.ego {
+                    ego
+                } else {
+                    &self.id
+                }
+            }
+            RoutingMode::IdPrimary => {
+                let last = messages.last().map(|m| m.content.as_str()).unwrap_or("");
+                let decision = self.classify(last).await?;
+                if matches!(decision, RouteDecision::Complex) {
+                    if let Some(ref ego) = self.ego {
+                        ego
+                    } else {
+                        &self.id
+                    }
+                } else {
+                    &self.id
+                }
+            }
+        };
+
+        let request = CompletionRequest { messages, tools: None };
+        provider.stream(&request, tx).await
+    }
+
+    /// Streaming version of route_with_tools().
+    pub async fn route_stream_with_tools(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        tx: tokio::sync::mpsc::Sender<StreamEvent>,
+    ) -> anyhow::Result<CompletionResponse> {
+        let request = CompletionRequest {
+            messages,
+            tools: Some(tools),
+        };
+        // For tool-calling, prefer Ego if available
+        if let Some(ref ego) = self.ego {
+            match ego.stream(&request, tx).await {
+                Ok(response) => return Ok(response),
+                Err(e) => {
+                    tracing::warn!("Ego stream failed for tool call, falling back to complete: {}", e);
+                    // Fall back to non-streaming complete
+                    return self.id.complete(&request).await;
+                }
+            }
+        }
         self.id.complete(&request).await
     }
 }
