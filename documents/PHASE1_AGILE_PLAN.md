@@ -65,6 +65,57 @@ Evening check-in  ←── you             You say "merge it"
 
 ---
 
+## Release & Package Paths (Cross-Cutting Requirement)
+
+AO ships through **6 release/package paths** today. This is a strategic advantage — OpenClaw only has `npm install`. Every feature we build must work across all paths, and new binaries get their own path added.
+
+### Current Paths (Must Not Break)
+
+| # | Path | Format | Trigger | Pipeline |
+|---|------|--------|---------|----------|
+| 1 | **Windows installer** | NSIS `.exe` | `v*` tag on main | `release.yml` → `tauri-action` |
+| 2 | **macOS installer** | Universal `.dmg` (Intel + Apple Silicon) | `v*` tag on main | `release.yml` → `tauri-action` |
+| 3 | **Linux installer** | `.deb` (Ubuntu 22.04+) | `v*` tag on main | `release.yml` → `tauri-action` |
+| 4 | **npm package** | `npx ao-desktop install` | `release.yml` → `npm publish` | Downloads correct platform binary |
+| 5 | **GitHub Release** | All 3 platform artifacts + notes | `release.yml` Stage 2 | `softprops/action-gh-release` |
+| 6 | **ao-keygen** | Bundled egui binary (per-platform) | Built as resource in release | `cargo build -p ao-keygen` |
+
+### New Path Added in Phase 1
+
+| # | Path | Format | Trigger | Pipeline |
+|---|------|--------|---------|----------|
+| 7 | **ao-cli** | Standalone binary (Win/Mac/Linux) | `v*` tag on main | New job in `release.yml` |
+
+### CI Quality Gate (Must Pass Every PR)
+
+The existing CI runs **5 parallel checks** on every PR to main:
+
+```
+┌──────────┐  ┌────────────────────┐  ┌──────────┐  ┌─────────┐  ┌────────┐
+│   Lint   │  │  Tests (3 platforms)│  │ Frontend │  │  Audit  │  │ CodeQL │
+│ fmt+clip │  │  Win/Mac/Linux     │  │ tsc+vite │  │cargo+npm│  │  SAST  │
+└────┬─────┘  └─────────┬──────────┘  └────┬─────┘  └────┬────┘  └───┬────┘
+     └──────────────────┼──────────────────┼─────────────┼────────────┘
+                        ▼                  ▼             ▼
+                   ┌─────────┐
+                   │  Gate   │  ← branch protection requires this
+                   │(any pass)│
+                   └─────────┘
+```
+
+### Rule: No Feature Ships Without All Paths Green
+
+For every cycle/PR:
+1. `cargo test --all` passes (covers new crate code)
+2. `cargo clippy` clean (no warnings)
+3. Frontend builds (`npm run build`)
+4. New binaries (ao-cli) added to release workflow when they exist
+5. Demo runs on at least one platform before merge
+
+This means the **Definition of Done** includes: "doesn't break any existing release path, and new artifacts have their release path defined."
+
+---
+
 ## Phase 1 Feature Backlog
 
 Six deliverables, ordered by dependency and value. Each is sized to fit a 2-day cycle (or split across cycles if larger).
@@ -184,7 +235,7 @@ Six deliverables, ordered by dependency and value. Each is sized to fit a 2-day 
 ---
 
 ### Feature 6: CLI Interface (Headless Operation)
-**Why:** Enables AO to run without the desktop GUI — foundation for server/gateway deployment later.
+**Why:** Enables AO to run without the desktop GUI — foundation for server/gateway deployment later. Also adds a **new release artifact** to AO's multi-path distribution.
 **What you'll see in demo:** Run `ao-cli chat "What is 2+2?"` in a terminal and get a response. No window opens.
 **Cycles:** 1.5 (3 days)
 
@@ -192,6 +243,7 @@ Six deliverables, ordered by dependency and value. Each is sized to fit a 2-day 
 - All logic is in library crates (`ao-router`, `ao-skills`, `ao-memory`, `ao-core`)
 - But wired together only in `tauri-app/src/lib.rs`
 - No standalone CLI binary
+- `npm-package/` already has a CLI pattern (`ao-desktop`) we can extend
 
 **Work items:**
 - [ ] New crate: `ao-cli` (or binary in existing crate)
@@ -200,6 +252,12 @@ Six deliverables, ordered by dependency and value. Each is sized to fit a 2-day 
 - [ ] Interactive REPL mode: `ao-cli` with no args drops into a chat loop
 - [ ] Add to workspace `Cargo.toml`
 - [ ] Output formatting (colored terminal output with streaming)
+
+**Release path work items (new!):**
+- [ ] Add `ao-cli` build step to `release.yml` (3-platform matrix, like ao-keygen)
+- [ ] Upload `ao-cli` binaries as GitHub Release assets (ao-cli-windows-x64.exe, ao-cli-macos-universal, ao-cli-linux-x64)
+- [ ] Update `npm-package/` to also offer `npx ao-desktop cli` as a subcommand
+- [ ] Add `ao-cli` to CI test matrix (ensure `cargo build -p ao-cli` passes on all 3 platforms)
 
 ---
 
@@ -348,6 +406,8 @@ This plan is designed to flex:
 - [ ] Existing tests still pass (`cargo test --all`)
 - [ ] New tests cover the happy path
 - [ ] Feature works in the running Tauri app (or CLI)
+- [ ] **All existing release paths unbroken** (NSIS, DMG, deb, npm, GitHub Release, ao-keygen)
+- [ ] **New release artifacts have pipeline coverage** (if applicable)
 - [ ] You've walked through the demo and approved
 - [ ] PR merged to main
 

@@ -47,6 +47,8 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 | **Scheduling** | None | Cron-based task scheduling |
 | **Mobile** | None | iOS/Android companion apps |
 | **Community** | Solo/small team | 900+ contributors, ClawCon meetups |
+| **Release paths** | 6 paths: NSIS, DMG, deb, npm, GitHub Release, ao-keygen | 1 path: `npm install -g openclaw` |
+| **CI/CD** | 5-job gate: lint, 3-platform tests, frontend, audit, CodeQL | GitHub Actions (details vary) |
 
 ---
 
@@ -327,6 +329,8 @@ AO has several features that OpenClaw lacks. These are differentiators worth pre
 | **Memory weight tiers** | Ephemeral/Distilled/Crystallized importance levels | Flat Markdown files |
 | **Identity repair flow** | Recovery from broken state with private key or hard reset | No equivalent |
 | **Rust-native security** | Memory safety, SSRF protection, path traversal prevention at the type level | Node.js with Docker isolation |
+| **Multi-path distribution** | 6 release paths: NSIS installer, macOS DMG (universal), Linux deb, npm CLI, GitHub Release, ao-keygen — all automated in CI | Single npm install path |
+| **5-job CI quality gate** | Lint, 3-platform tests, frontend build, cargo+npm audit, CodeQL SAST — gated branch protection | Standard CI (varies) |
 
 **Recommendation:** These features should be preserved and enhanced, not replaced, during the parity effort. They represent AO's philosophical and architectural differentiation.
 
