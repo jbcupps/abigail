@@ -14,6 +14,7 @@ use ao_skills::channel::EventBus;
 use ao_skills::{MissingSkillSecret, SkillExecutor, SkillRegistry, ToolParams};
 use skill_filesystem::FilesystemSkill;
 use skill_http::HttpSkill;
+use skill_perplexity_search::PerplexitySearchSkill;
 use skill_shell::ShellSkill;
 use skill_web_search::WebSearchSkill;
 use base64::Engine as _;
@@ -2150,6 +2151,11 @@ pub fn run() {
         let http_manifest = HttpSkill::default_manifest();
         let http_skill = HttpSkill::new(http_manifest.clone());
         let _ = registry.register(http_manifest.id.clone(), Arc::new(http_skill));
+    }
+    {
+        let pplx_manifest = PerplexitySearchSkill::default_manifest();
+        let pplx_skill = PerplexitySearchSkill::with_secrets(pplx_manifest.clone(), secrets.clone());
+        let _ = registry.register(pplx_manifest.id.clone(), Arc::new(pplx_skill));
     }
 
     let event_bus = Arc::new(EventBus::new(256));

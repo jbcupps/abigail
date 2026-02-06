@@ -1,0 +1,15 @@
+[package]
+name = "skill-perplexity-search"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ao-skills = { path = "../../crates/ao-skills" }
+ao-core = { path = "../../crates/ao-core" }
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+reqwest = { version = "0.11", features = ["json"] }

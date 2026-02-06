@@ -19,6 +19,7 @@ skill-web-search = { path = "../skills/skill-web-search" }
 skill-filesystem = { path = "../skills/skill-filesystem" }
 skill-shell = { path = "../skills/skill-shell" }
 skill-http = { path = "../skills/skill-http" }
+skill-perplexity-search = { path = "../skills/skill-perplexity-search" }
 tauri = { version = "2.0", features = ["tray-icon"] }
 tauri-plugin-dialog = "2.0"
 tokio.workspace = true

@@ -12,6 +12,7 @@ members = [
     "skills/skill-filesystem",
     "skills/skill-shell",
     "skills/skill-http",
+    "skills/skill-perplexity-search",
     "tauri-app",
 ]
 
