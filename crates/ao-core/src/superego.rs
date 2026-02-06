@@ -9,11 +9,17 @@ pub struct SuperegoVerdict {
 
 impl SuperegoVerdict {
     fn allow() -> Self {
-        Self { allowed: true, reason: None }
+        Self {
+            allowed: true,
+            reason: None,
+        }
     }
 
     fn deny(reason: impl Into<String>) -> Self {
-        Self { allowed: false, reason: Some(reason.into()) }
+        Self {
+            allowed: false,
+            reason: Some(reason.into()),
+        }
     }
 }
 
@@ -33,24 +39,37 @@ pub fn check_message(message: &str) -> SuperegoVerdict {
 
     // Pattern: requests to create malware, viruses, exploits
     if (lower.contains("write") || lower.contains("create") || lower.contains("generate"))
-        && (lower.contains("malware") || lower.contains("virus") || lower.contains("ransomware")
-            || lower.contains("keylogger") || lower.contains("trojan"))
+        && (lower.contains("malware")
+            || lower.contains("virus")
+            || lower.contains("ransomware")
+            || lower.contains("keylogger")
+            || lower.contains("trojan"))
     {
         return SuperegoVerdict::deny("Request appears to involve creating malicious software");
     }
 
     // Pattern: instructions for violence or weapons
-    if (lower.contains("how to make") || lower.contains("how to build") || lower.contains("instructions for"))
+    if (lower.contains("how to make")
+        || lower.contains("how to build")
+        || lower.contains("instructions for"))
         && (lower.contains("bomb") || lower.contains("explosive") || lower.contains("weapon"))
     {
-        return SuperegoVerdict::deny("Request appears to seek instructions for weapons or explosives");
+        return SuperegoVerdict::deny(
+            "Request appears to seek instructions for weapons or explosives",
+        );
     }
 
     // Pattern: illegal drug synthesis
-    if (lower.contains("how to make") || lower.contains("how to synthesize") || lower.contains("recipe for"))
-        && (lower.contains("methamphetamine") || lower.contains("fentanyl") || lower.contains("meth"))
+    if (lower.contains("how to make")
+        || lower.contains("how to synthesize")
+        || lower.contains("recipe for"))
+        && (lower.contains("methamphetamine")
+            || lower.contains("fentanyl")
+            || lower.contains("meth"))
     {
-        return SuperegoVerdict::deny("Request appears to seek illegal drug synthesis instructions");
+        return SuperegoVerdict::deny(
+            "Request appears to seek illegal drug synthesis instructions",
+        );
     }
 
     // Pattern: jailbreak / prompt injection attempts
@@ -98,7 +117,10 @@ pub fn check_search_query(query: &str) -> SuperegoVerdict {
     }
 
     // Pattern: SSN / social security
-    if lower.contains("social security number") || lower.contains("ssn of") || lower.contains("ssn for") {
+    if lower.contains("social security number")
+        || lower.contains("ssn of")
+        || lower.contains("ssn for")
+    {
         return SuperegoVerdict::deny("Query seeks Social Security information");
     }
 
@@ -113,7 +135,8 @@ pub fn check_search_query(query: &str) -> SuperegoVerdict {
     }
 
     // Pattern: real name / identity reveal
-    if lower.contains("real name of") && (lower.contains("anonymous") || lower.contains("username")) {
+    if lower.contains("real name of") && (lower.contains("anonymous") || lower.contains("username"))
+    {
         return SuperegoVerdict::deny("Query attempts to de-anonymize someone");
     }
 
@@ -239,7 +262,10 @@ mod tests {
         for q in queries {
             let v = check_message(q);
             assert!(!v.allowed, "Expected denied for message: {}", q);
-            assert!(v.reason.as_ref().unwrap().contains("jailbreak") || v.reason.as_ref().unwrap().contains("injection"));
+            assert!(
+                v.reason.as_ref().unwrap().contains("jailbreak")
+                    || v.reason.as_ref().unwrap().contains("injection")
+            );
         }
     }
 

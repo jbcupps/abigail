@@ -213,9 +213,16 @@ impl SkillManifest {
             version: raw.skill.version.clone(),
             description: raw.skill.description.clone(),
             license: raw.skill.license.clone(),
-            category: raw.skill.category.clone().unwrap_or_else(|| "General".to_string()),
+            category: raw
+                .skill
+                .category
+                .clone()
+                .unwrap_or_else(|| "General".to_string()),
             keywords: raw.skill.keywords.clone(),
-            runtime: runtime.as_ref().map(|r| r.runtime.clone()).unwrap_or_else(|| "Native".to_string()),
+            runtime: runtime
+                .as_ref()
+                .map(|r| r.runtime.clone())
+                .unwrap_or_else(|| "Native".to_string()),
             min_ao_version: runtime
                 .and_then(|r| r.min_ao_version.clone())
                 .unwrap_or_else(|| "0.1.0".to_string()),
@@ -235,7 +242,11 @@ fn parse_permissions(sections: &[PermissionSection]) -> Vec<Permission> {
     let mut out = Vec::new();
     for s in sections {
         if let Some(t) = s.permission.as_table() {
-            if let Some(domains) = t.get("Network").and_then(|n| n.get("Domains")).and_then(|d| d.as_array()) {
+            if let Some(domains) = t
+                .get("Network")
+                .and_then(|n| n.get("Domains"))
+                .and_then(|d| d.as_array())
+            {
                 let domains: Vec<String> = domains
                     .iter()
                     .filter_map(|v| v.as_str().map(String::from))
@@ -246,7 +257,9 @@ fn parse_permissions(sections: &[PermissionSection]) -> Vec<Permission> {
             }
             if let Some(mem) = t.get("Memory") {
                 if let Some(s) = mem.as_str() {
-                    out.push(Permission::Memory(MemoryPermission::Namespace(s.to_string())));
+                    out.push(Permission::Memory(MemoryPermission::Namespace(
+                        s.to_string(),
+                    )));
                 } else {
                     out.push(Permission::Memory(MemoryPermission::ReadWrite));
                 }

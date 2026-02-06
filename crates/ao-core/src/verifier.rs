@@ -80,9 +80,9 @@ impl Verifier {
     }
 
     pub fn verify_document(&self, doc: &CoreDocument) -> Result<()> {
-        let signature_bytes = BASE64.decode(&doc.signature).map_err(|e| {
-            CoreError::Crypto(format!("Invalid signature encoding: {}", e))
-        })?;
+        let signature_bytes = BASE64
+            .decode(&doc.signature)
+            .map_err(|e| CoreError::Crypto(format!("Invalid signature encoding: {}", e)))?;
 
         let signature = Signature::from_slice(&signature_bytes)
             .map_err(|e| CoreError::Crypto(format!("Invalid signature: {}", e)))?;
@@ -162,19 +162,24 @@ mod tests {
 
         let verifier2 = Verifier::with_pubkey(pubkey);
         let result = verifier2.verify_document(&doc);
-        assert!(result.is_err(), "Tampered document should fail verification");
+        assert!(
+            result.is_err(),
+            "Tampered document should fail verification"
+        );
 
         let _ = fs::remove_dir_all(std::env::temp_dir().join("ao_core_tamper_test"));
     }
 
     #[test]
     fn test_repair_cycle() {
-        use crate::keyring::{generate_external_keypair, parse_private_key, sign_constitutional_documents};
-        
+        use crate::keyring::{
+            generate_external_keypair, parse_private_key, sign_constitutional_documents,
+        };
+
         let temp = std::env::temp_dir().join("ao_core_repair_test");
         let _ = fs::remove_dir_all(&temp);
         fs::create_dir_all(&temp).unwrap();
-        
+
         let docs_dir = temp.join("docs");
         let data_dir = temp.join("data");
         fs::create_dir_all(&docs_dir).unwrap();
@@ -188,28 +193,35 @@ mod tests {
         // 2. Generate keys (First Run)
         let key_result = generate_external_keypair(&data_dir).unwrap();
         let signing_key = parse_private_key(&key_result.private_key_base64).unwrap();
-        
+
         // 3. Sign docs
         sign_constitutional_documents(&signing_key, &docs_dir).unwrap();
 
         // 4. Verify Success
         let vault = crate::vault::ReadOnlyFileVault::new(&key_result.public_key_path);
         let mut verifier = Verifier::from_vault(&vault).unwrap();
-        verifier.verify_soul(&docs_dir).expect("Verification should pass");
+        verifier
+            .verify_soul(&docs_dir)
+            .expect("Verification should pass");
 
         // 5. Delete a sig (Corruption)
         fs::remove_file(docs_dir.join("soul.md.sig")).unwrap();
-        
+
         // 6. Verify Failure
         let mut verifier2 = Verifier::from_vault(&vault).unwrap();
-        assert!(verifier2.verify_soul(&docs_dir).is_err(), "Verification should fail");
+        assert!(
+            verifier2.verify_soul(&docs_dir).is_err(),
+            "Verification should fail"
+        );
 
         // 7. Repair (Re-sign)
         sign_constitutional_documents(&signing_key, &docs_dir).unwrap();
 
         // 8. Verify Success again
         let mut verifier3 = Verifier::from_vault(&vault).unwrap();
-        verifier3.verify_soul(&docs_dir).expect("Verification should pass after repair");
+        verifier3
+            .verify_soul(&docs_dir)
+            .expect("Verification should pass after repair");
 
         let _ = fs::remove_dir_all(&temp);
     }
@@ -218,7 +230,9 @@ mod tests {
     /// This simulates the full boot-to-verified path without GUI.
     #[test]
     fn test_full_identity_lifecycle() {
-        use crate::keyring::{generate_external_keypair, parse_private_key, sign_constitutional_documents};
+        use crate::keyring::{
+            generate_external_keypair, parse_private_key, sign_constitutional_documents,
+        };
 
         let temp = std::env::temp_dir().join("ao_core_lifecycle_test");
         let _ = fs::remove_dir_all(&temp);
@@ -230,8 +244,16 @@ mod tests {
 
         // 1. Create realistic constitutional docs
         fs::write(docs_dir.join("soul.md"), "I am AO. My designation is AO.").unwrap();
-        fs::write(docs_dir.join("ethics.md"), "Triangle Ethic: Deontological, Areteological, Teleological.").unwrap();
-        fs::write(docs_dir.join("instincts.md"), "Privacy Prime: sanitize PII before cloud.").unwrap();
+        fs::write(
+            docs_dir.join("ethics.md"),
+            "Triangle Ethic: Deontological, Areteological, Teleological.",
+        )
+        .unwrap();
+        fs::write(
+            docs_dir.join("instincts.md"),
+            "Privacy Prime: sanitize PII before cloud.",
+        )
+        .unwrap();
 
         // 2. Generate keypair (simulates first-run key generation)
         let key_result = generate_external_keypair(&data_dir).unwrap();
@@ -250,40 +272,60 @@ mod tests {
         // 5. Verify all signatures pass
         let vault = crate::vault::ReadOnlyFileVault::new(&key_result.public_key_path);
         let mut verifier = Verifier::from_vault(&vault).unwrap();
-        verifier.verify_soul(&docs_dir).expect("Initial verification should pass");
+        verifier
+            .verify_soul(&docs_dir)
+            .expect("Initial verification should pass");
 
         // 6. Verify document content is accessible
         assert!(verifier.soul_content().unwrap().contains("AO"));
-        assert!(verifier.ethics_content().unwrap().contains("Triangle Ethic"));
+        assert!(verifier
+            .ethics_content()
+            .unwrap()
+            .contains("Triangle Ethic"));
 
         // 7. Tamper with a document
         fs::write(docs_dir.join("ethics.md"), "TAMPERED: No ethics apply.").unwrap();
         let mut verifier2 = Verifier::from_vault(&vault).unwrap();
         let tamper_result = verifier2.verify_soul(&docs_dir);
-        assert!(tamper_result.is_err(), "Tampered document should fail verification");
+        assert!(
+            tamper_result.is_err(),
+            "Tampered document should fail verification"
+        );
 
         // 8. Restore original content
-        fs::write(docs_dir.join("ethics.md"), "Triangle Ethic: Deontological, Areteological, Teleological.").unwrap();
+        fs::write(
+            docs_dir.join("ethics.md"),
+            "Triangle Ethic: Deontological, Areteological, Teleological.",
+        )
+        .unwrap();
 
         // 9. Re-sign (repair) all documents
         sign_constitutional_documents(&signing_key, &docs_dir).unwrap();
 
         // 10. Verify passes again after repair
         let mut verifier3 = Verifier::from_vault(&vault).unwrap();
-        verifier3.verify_soul(&docs_dir).expect("Verification should pass after repair");
+        verifier3
+            .verify_soul(&docs_dir)
+            .expect("Verification should pass after repair");
 
         // 11. Test wrong private key is rejected
         let wrong_key = SigningKey::generate(&mut OsRng);
         sign_constitutional_documents(&wrong_key, &docs_dir).unwrap();
         let mut verifier4 = Verifier::from_vault(&vault).unwrap();
         let wrong_key_result = verifier4.verify_soul(&docs_dir);
-        assert!(wrong_key_result.is_err(), "Wrong key signatures should fail verification");
+        assert!(
+            wrong_key_result.is_err(),
+            "Wrong key signatures should fail verification"
+        );
 
         // 12. Test missing document detection
         fs::remove_file(docs_dir.join("instincts.md")).unwrap();
         let mut verifier5 = Verifier::from_vault(&vault).unwrap();
         let missing_result = verifier5.verify_soul(&docs_dir);
-        assert!(missing_result.is_err(), "Missing document should fail verification");
+        assert!(
+            missing_result.is_err(),
+            "Missing document should fail verification"
+        );
 
         let _ = fs::remove_dir_all(&temp);
     }
@@ -291,7 +333,9 @@ mod tests {
     /// Test cross-document tampering: tamper one doc while others remain valid.
     #[test]
     fn test_partial_tampering_detected() {
-        use crate::keyring::{generate_external_keypair, parse_private_key, sign_constitutional_documents};
+        use crate::keyring::{
+            generate_external_keypair, parse_private_key, sign_constitutional_documents,
+        };
 
         let temp = std::env::temp_dir().join("ao_core_partial_tamper");
         let _ = fs::remove_dir_all(&temp);

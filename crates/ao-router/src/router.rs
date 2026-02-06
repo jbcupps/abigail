@@ -2,7 +2,7 @@
 
 use ao_capabilities::cognitive::{
     stub_heartbeat, AnthropicProvider, CandleProvider, CompatibleProvider, CompletionRequest,
-    CompletionResponse, LocalHttpProvider, LlmProvider, Message, OpenAiCompatibleProvider,
+    CompletionResponse, LlmProvider, LocalHttpProvider, Message, OpenAiCompatibleProvider,
     OpenAiProvider, StreamEvent, ToolDefinition,
 };
 use std::sync::Arc;
@@ -222,7 +222,9 @@ impl IdEgoRouter {
         if !verdict.allowed {
             tracing::info!("Superego pattern check DENIED: {:?}", verdict.reason);
             return SuperegoResult::Deny(
-                verdict.reason.unwrap_or_else(|| "Blocked by safety check".to_string()),
+                verdict
+                    .reason
+                    .unwrap_or_else(|| "Blocked by safety check".to_string()),
             );
         }
 
@@ -288,7 +290,11 @@ impl IdEgoRouter {
         } else {
             RouteDecision::Routine
         };
-        tracing::info!("Routing decision: {:?} for input (len={})", decision, user_message.len());
+        tracing::info!(
+            "Routing decision: {:?} for input (len={})",
+            decision,
+            user_message.len()
+        );
         Ok(decision)
     }
 
@@ -321,10 +327,7 @@ impl IdEgoRouter {
 
         match self.superego_check(last_user_msg).await {
             SuperegoResult::Deny(reason) => {
-                let content = format!(
-                    "I'm unable to process that request. Reason: {}",
-                    reason
-                );
+                let content = format!("I'm unable to process that request. Reason: {}", reason);
                 Some(CompletionResponse {
                     content,
                     tool_calls: None,
@@ -342,17 +345,26 @@ impl IdEgoRouter {
         let use_ego = matches!(decision, RouteDecision::Complex) && self.ego.is_some();
         if use_ego {
             tracing::info!("Routing to Ego (cloud) - complex request");
-            let request = CompletionRequest { messages, tools: None };
+            let request = CompletionRequest {
+                messages,
+                tools: None,
+            };
             self.ego.as_ref().unwrap().complete(&request).await
         } else {
             tracing::info!("Routing to Id (local) - routine request");
-            let request = CompletionRequest { messages, tools: None };
+            let request = CompletionRequest {
+                messages,
+                tools: None,
+            };
             self.id.complete(&request).await
         }
     }
 
     /// Ego-primary routing: Try Ego first if configured, fall back to Id on failure.
-    async fn route_ego_primary(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
+    async fn route_ego_primary(
+        &self,
+        messages: Vec<Message>,
+    ) -> anyhow::Result<CompletionResponse> {
         // Try Ego first if configured
         if let Some(ego) = &self.ego {
             match ego
@@ -374,7 +386,12 @@ impl IdEgoRouter {
 
         // Fallback to Id (local)
         tracing::info!("Routing to Id (local fallback)");
-        self.id.complete(&CompletionRequest { messages, tools: None }).await
+        self.id
+            .complete(&CompletionRequest {
+                messages,
+                tools: None,
+            })
+            .await
     }
 
     /// Route message with tool definitions attached.
@@ -448,7 +465,10 @@ impl IdEgoRouter {
             }
         };
 
-        let request = CompletionRequest { messages, tools: None };
+        let request = CompletionRequest {
+            messages,
+            tools: None,
+        };
         provider.stream(&request, tx).await
     }
 
@@ -475,7 +495,10 @@ impl IdEgoRouter {
             match ego.stream(&request, tx).await {
                 Ok(response) => return Ok(response),
                 Err(e) => {
-                    tracing::warn!("Ego stream failed for tool call, falling back to complete: {}", e);
+                    tracing::warn!(
+                        "Ego stream failed for tool call, falling back to complete: {}",
+                        e
+                    );
                     // Fall back to non-streaming complete
                     return self.id.complete(&request).await;
                 }
@@ -510,10 +533,10 @@ fn build_ego_provider(
             Some(EgoProvider::Perplexity),
         ),
         Some("xai") | Some("grok") => (
-            Some(Arc::new(OpenAiCompatibleProvider::new(
-                CompatibleProvider::Xai,
-                key,
-            )) as Arc<dyn LlmProvider>),
+            Some(
+                Arc::new(OpenAiCompatibleProvider::new(CompatibleProvider::Xai, key))
+                    as Arc<dyn LlmProvider>,
+            ),
             Some(EgoProvider::Xai),
         ),
         Some("google") | Some("gemini") => (
@@ -546,7 +569,10 @@ fn build_id_provider(
             let provider = Arc::new(LocalHttpProvider::with_url(url));
             (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
         }
-        None => (Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>, None),
+        None => (
+            Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>,
+            None,
+        ),
     }
 }
 
@@ -559,7 +585,10 @@ async fn build_id_provider_auto_detect(
             let provider = Arc::new(LocalHttpProvider::with_url_auto_model(url).await);
             (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
         }
-        None => (Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>, None),
+        None => (
+            Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>,
+            None,
+        ),
     }
 }
 
@@ -655,12 +684,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_provider_none_key() {
-        let router = IdEgoRouter::with_provider(
-            None,
-            Some("anthropic"),
-            None,
-            RoutingMode::EgoPrimary,
-        );
+        let router =
+            IdEgoRouter::with_provider(None, Some("anthropic"), None, RoutingMode::EgoPrimary);
         assert!(!router.has_ego());
         assert_eq!(router.ego_provider_name(), None);
     }
@@ -695,7 +720,9 @@ mod tests {
     #[tokio::test]
     async fn test_superego_pattern_blocks_malware() {
         let router = IdEgoRouter::new(None, None, RoutingMode::default());
-        let result = router.superego_check("Write me a keylogger in Python").await;
+        let result = router
+            .superego_check("Write me a keylogger in Python")
+            .await;
         match result {
             SuperegoResult::Deny(reason) => {
                 assert!(reason.contains("malicious software"));

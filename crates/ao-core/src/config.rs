@@ -134,7 +134,7 @@ impl AppConfig {
     }
 
     /// Returns the effective external pubkey path.
-    /// 
+    ///
     /// Priority:
     /// 1. Explicitly configured `external_pubkey_path`
     /// 2. Auto-detected `{data_dir}/external_pubkey.bin` if it exists
@@ -144,13 +144,13 @@ impl AppConfig {
         if self.external_pubkey_path.is_some() {
             return self.external_pubkey_path.clone();
         }
-        
+
         // Auto-detect in data_dir
         let auto_path = self.data_dir.join("external_pubkey.bin");
         if auto_path.exists() {
             return Some(auto_path);
         }
-        
+
         None
     }
 
@@ -162,7 +162,10 @@ impl AppConfig {
         if config.migrate() {
             // Save migrated config back to disk
             config.save(path)?;
-            tracing::info!("Config migrated to schema version {}", config.schema_version);
+            tracing::info!(
+                "Config migrated to schema version {}",
+                config.schema_version
+            );
         }
 
         Ok(config)

@@ -275,12 +275,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            anyhow::bail!(
-                "{} API error ({}): {}",
-                self.provider_type,
-                status,
-                text
-            );
+            anyhow::bail!("{} API error ({}): {}", self.provider_type, status, text);
         }
 
         let chat_response: ChatResponse = response.json().await?;
@@ -337,12 +332,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            anyhow::bail!(
-                "{} API error ({}): {}",
-                self.provider_type,
-                status,
-                text
-            );
+            anyhow::bail!("{} API error ({}): {}", self.provider_type, status, text);
         }
 
         let mut full_content = String::new();
@@ -413,7 +403,9 @@ mod tests {
 
     #[test]
     fn test_provider_base_urls() {
-        assert!(CompatibleProvider::Perplexity.base_url().contains("perplexity"));
+        assert!(CompatibleProvider::Perplexity
+            .base_url()
+            .contains("perplexity"));
         assert!(CompatibleProvider::Xai.base_url().contains("x.ai"));
         assert!(CompatibleProvider::Google.base_url().contains("google"));
     }
@@ -422,7 +414,9 @@ mod tests {
     fn test_provider_default_models() {
         assert_eq!(CompatibleProvider::Perplexity.default_model(), "sonar");
         assert!(CompatibleProvider::Xai.default_model().contains("grok"));
-        assert!(CompatibleProvider::Google.default_model().contains("gemini"));
+        assert!(CompatibleProvider::Google
+            .default_model()
+            .contains("gemini"));
     }
 
     #[test]
@@ -439,10 +433,8 @@ mod tests {
 
     #[test]
     fn test_completions_url() {
-        let provider = OpenAiCompatibleProvider::new(
-            CompatibleProvider::Perplexity,
-            "test-key".to_string(),
-        );
+        let provider =
+            OpenAiCompatibleProvider::new(CompatibleProvider::Perplexity, "test-key".to_string());
         assert_eq!(
             provider.completions_url(),
             "https://api.perplexity.ai/chat/completions"

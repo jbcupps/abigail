@@ -5,9 +5,9 @@
 //! and cloud metadata endpoints.
 
 use ao_skills::{
-    CapabilityDescriptor, CostEstimate, ExecutionContext, HealthStatus, Permission,
-    NetworkPermission, Skill, SkillConfig, SkillError, SkillHealth, SkillManifest,
-    SkillResult, ToolDescriptor, ToolOutput, ToolParams, TriggerDescriptor,
+    CapabilityDescriptor, CostEstimate, ExecutionContext, HealthStatus, NetworkPermission,
+    Permission, Skill, SkillConfig, SkillError, SkillHealth, SkillManifest, SkillResult,
+    ToolDescriptor, ToolOutput, ToolParams, TriggerDescriptor,
 };
 use async_trait::async_trait;
 use std::any::Any;
@@ -56,8 +56,7 @@ impl HttpSkill {
     /// Validate a URL for SSRF safety.
     /// Blocks private IPs, loopback, link-local, and cloud metadata endpoints.
     fn validate_url(url_str: &str) -> Result<url::Url, String> {
-        let url = url::Url::parse(url_str)
-            .map_err(|e| format!("Invalid URL: {}", e))?;
+        let url = url::Url::parse(url_str).map_err(|e| format!("Invalid URL: {}", e))?;
 
         // Only allow http and https
         let scheme = url.scheme();
@@ -65,9 +64,7 @@ impl HttpSkill {
             return Err(format!("Only http/https allowed, got: {}", scheme));
         }
 
-        let host = url
-            .host_str()
-            .ok_or("URL must have a host")?;
+        let host = url.host_str().ok_or("URL must have a host")?;
 
         // Check blocked hostnames
         let host_lower = host.to_lowercase();
@@ -118,9 +115,12 @@ impl HttpSkill {
     }
 
     /// Execute an HTTP GET request.
-    async fn http_get(&self, url_str: &str, headers: Option<HashMap<String, String>>) -> SkillResult<ToolOutput> {
-        let url = Self::validate_url(url_str)
-            .map_err(SkillError::ToolFailed)?;
+    async fn http_get(
+        &self,
+        url_str: &str,
+        headers: Option<HashMap<String, String>>,
+    ) -> SkillResult<ToolOutput> {
+        let url = Self::validate_url(url_str).map_err(SkillError::ToolFailed)?;
 
         let mut request = self.client.get(url.as_str());
 
@@ -141,8 +141,7 @@ impl HttpSkill {
         content_type: Option<&str>,
         headers: Option<HashMap<String, String>>,
     ) -> SkillResult<ToolOutput> {
-        let url = Self::validate_url(url_str)
-            .map_err(SkillError::ToolFailed)?;
+        let url = Self::validate_url(url_str).map_err(SkillError::ToolFailed)?;
 
         let mut request = self.client.post(url.as_str());
 
@@ -172,7 +171,11 @@ async fn execute_request(request: reqwest::RequestBuilder) -> SkillResult<ToolOu
         .map_err(|e| SkillError::ToolFailed(format!("Request failed: {}", e)))?;
 
     let status = response.status().as_u16();
-    let status_text = response.status().canonical_reason().unwrap_or("").to_string();
+    let status_text = response
+        .status()
+        .canonical_reason()
+        .unwrap_or("")
+        .to_string();
 
     let response_headers: HashMap<String, String> = response
         .headers()
@@ -201,8 +204,12 @@ async fn execute_request(request: reqwest::RequestBuilder) -> SkillResult<ToolOu
 
     let formatted = if (200..300).contains(&status) {
         if body.len() > 2000 {
-            format!("{} ({})\n{}...\n[truncated at 2000 chars, full body in 'body' field]",
-                status, status_text, &body[..2000])
+            format!(
+                "{} ({})\n{}...\n[truncated at 2000 chars, full body in 'body' field]",
+                status,
+                status_text,
+                &body[..2000]
+            )
         } else {
             body.clone()
         }
@@ -290,7 +297,9 @@ impl Skill for HttpSkill {
         vec![
             ToolDescriptor {
                 name: "http_get".to_string(),
-                description: "Make an HTTP GET request to a URL. Returns status, headers, and body.".to_string(),
+                description:
+                    "Make an HTTP GET request to a URL. Returns status, headers, and body."
+                        .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -390,13 +399,8 @@ impl Skill for HttpSkill {
                 let body: Option<String> = params.get("body");
                 let content_type: Option<String> = params.get("content_type");
                 let headers: Option<HashMap<String, String>> = params.get("headers");
-                self.http_post(
-                    &url,
-                    body.as_deref(),
-                    content_type.as_deref(),
-                    headers,
-                )
-                .await
+                self.http_post(&url, body.as_deref(), content_type.as_deref(), headers)
+                    .await
             }
             other => Err(SkillError::ToolFailed(format!("Unknown tool: {}", other))),
         }
@@ -483,7 +487,9 @@ mod tests {
         assert!(is_private_ip(&IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))));
         assert!(is_private_ip(&IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1))));
         assert!(is_private_ip(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
-        assert!(is_private_ip(&IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254))));
+        assert!(is_private_ip(&IpAddr::V4(Ipv4Addr::new(
+            169, 254, 169, 254
+        ))));
         assert!(is_private_ip(&IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))));
 
         // Public IPs should not be private

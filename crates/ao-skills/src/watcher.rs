@@ -32,7 +32,9 @@ impl SkillsWatcher {
     ///
     /// The watcher runs on a background thread and sends events through
     /// a tokio broadcast channel.
-    pub fn start(watch_paths: Vec<PathBuf>) -> anyhow::Result<(Self, broadcast::Receiver<SkillFileEvent>)> {
+    pub fn start(
+        watch_paths: Vec<PathBuf>,
+    ) -> anyhow::Result<(Self, broadcast::Receiver<SkillFileEvent>)> {
         let (tx, rx) = broadcast::channel::<SkillFileEvent>(64);
         let tx_clone = tx.clone();
 
@@ -51,7 +53,10 @@ impl SkillsWatcher {
                 watcher.watch(path, RecursiveMode::Recursive)?;
                 tracing::info!("Skills watcher: watching {}", path.display());
             } else {
-                tracing::debug!("Skills watcher: path does not exist yet: {}", path.display());
+                tracing::debug!(
+                    "Skills watcher: path does not exist yet: {}",
+                    path.display()
+                );
             }
         }
 
@@ -100,7 +105,13 @@ impl SkillsWatcher {
             }
         });
 
-        Ok((Self { _watcher: watcher, tx }, rx))
+        Ok((
+            Self {
+                _watcher: watcher,
+                tx,
+            },
+            rx,
+        ))
     }
 
     /// Get a new subscriber for skill file events.
@@ -166,7 +177,9 @@ mod tests {
             Err(_) => {
                 // Timeout - filesystem events can be slow on some systems
                 // This is a known issue with notify in CI/containers
-                tracing::warn!("Timeout waiting for filesystem event - skipping (expected in containers)");
+                tracing::warn!(
+                    "Timeout waiting for filesystem event - skipping (expected in containers)"
+                );
             }
         }
 

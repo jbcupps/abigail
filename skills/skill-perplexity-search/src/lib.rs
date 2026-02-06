@@ -3,12 +3,12 @@
 //! Uses the Perplexity Sonar API to perform research queries that return
 //! answers grounded in real-time web data, with source citations.
 
-use ao_skills::{
-    CapabilityDescriptor, CostEstimate, ExecutionContext, HealthStatus, Permission,
-    NetworkPermission, Skill, SkillConfig, SkillError, SkillHealth, SkillManifest,
-    SkillResult, ToolDescriptor, ToolOutput, ToolParams, TriggerDescriptor,
-};
 use ao_core::SecretsVault;
+use ao_skills::{
+    CapabilityDescriptor, CostEstimate, ExecutionContext, HealthStatus, NetworkPermission,
+    Permission, Skill, SkillConfig, SkillError, SkillHealth, SkillManifest, SkillResult,
+    ToolDescriptor, ToolOutput, ToolParams, TriggerDescriptor,
+};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
@@ -85,15 +85,17 @@ impl PerplexitySearchSkill {
     }
 
     fn get_api_key(&self) -> SkillResult<String> {
-        let vault = self.vault.lock().map_err(|e| {
-            SkillError::ToolFailed(format!("Failed to lock vault: {}", e))
-        })?;
+        let vault = self
+            .vault
+            .lock()
+            .map_err(|e| SkillError::ToolFailed(format!("Failed to lock vault: {}", e)))?;
         vault
             .get_secret("perplexity")
             .map(|s| s.to_string())
             .ok_or_else(|| {
                 SkillError::MissingSecret(
-                    "Perplexity API key not configured. Store it with key name 'perplexity'.".into(),
+                    "Perplexity API key not configured. Store it with key name 'perplexity'."
+                        .into(),
                 )
             })
     }
@@ -229,60 +231,58 @@ impl Skill for PerplexitySearchSkill {
     }
 
     fn tools(&self) -> Vec<ToolDescriptor> {
-        vec![
-            ToolDescriptor {
-                name: "perplexity_search".to_string(),
-                description: "Search the web using Perplexity AI. Returns an AI-generated answer \
+        vec![ToolDescriptor {
+            name: "perplexity_search".to_string(),
+            description: "Search the web using Perplexity AI. Returns an AI-generated answer \
                     grounded in real-time web data with source citations. Best for research \
                     questions, fact-checking, and getting up-to-date information."
-                    .to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The search/research query"
-                        },
-                        "model": {
-                            "type": "string",
-                            "description": "Model to use: 'sonar' (fast, default) or 'sonar-pro' (higher quality)",
-                            "enum": ["sonar", "sonar-pro"]
-                        },
-                        "domain_filter": {
-                            "type": "array",
-                            "items": { "type": "string" },
-                            "description": "Domains to include (e.g. ['github.com']) or exclude (prefix with '-', e.g. ['-reddit.com'])"
-                        },
-                        "recency_filter": {
-                            "type": "string",
-                            "description": "Only include sources from this time period",
-                            "enum": ["hour", "day", "week", "month"]
-                        }
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search/research query"
                     },
-                    "required": ["query"]
-                }),
-                returns: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "formatted": { "type": "string", "description": "Answer with citations" },
-                        "answer": { "type": "string" },
-                        "citations": { "type": "array", "items": { "type": "string" } },
-                        "search_results": { "type": "array" },
-                        "citation_count": { "type": "integer" }
+                    "model": {
+                        "type": "string",
+                        "description": "Model to use: 'sonar' (fast, default) or 'sonar-pro' (higher quality)",
+                        "enum": ["sonar", "sonar-pro"]
+                    },
+                    "domain_filter": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Domains to include (e.g. ['github.com']) or exclude (prefix with '-', e.g. ['-reddit.com'])"
+                    },
+                    "recency_filter": {
+                        "type": "string",
+                        "description": "Only include sources from this time period",
+                        "enum": ["hour", "day", "week", "month"]
                     }
-                }),
-                cost_estimate: CostEstimate {
-                    latency_ms: 3000,
-                    network_bound: true,
-                    token_cost: Some(100), // approximate
                 },
-                required_permissions: vec![Permission::Network(NetworkPermission::Domains(
-                    vec!["api.perplexity.ai".to_string()],
-                ))],
-                autonomous: true,
-                requires_confirmation: false,
+                "required": ["query"]
+            }),
+            returns: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "formatted": { "type": "string", "description": "Answer with citations" },
+                    "answer": { "type": "string" },
+                    "citations": { "type": "array", "items": { "type": "string" } },
+                    "search_results": { "type": "array" },
+                    "citation_count": { "type": "integer" }
+                }
+            }),
+            cost_estimate: CostEstimate {
+                latency_ms: 3000,
+                network_bound: true,
+                token_cost: Some(100), // approximate
             },
-        ]
+            required_permissions: vec![Permission::Network(NetworkPermission::Domains(vec![
+                "api.perplexity.ai".to_string(),
+            ]))],
+            autonomous: true,
+            requires_confirmation: false,
+        }]
     }
 
     async fn execute_tool(
@@ -292,7 +292,10 @@ impl Skill for PerplexitySearchSkill {
         _context: &ExecutionContext,
     ) -> SkillResult<ToolOutput> {
         if tool_name != "perplexity_search" {
-            return Err(SkillError::ToolFailed(format!("Unknown tool: {}", tool_name)));
+            return Err(SkillError::ToolFailed(format!(
+                "Unknown tool: {}",
+                tool_name
+            )));
         }
 
         let query: String = params.get("query").ok_or_else(|| {
@@ -335,9 +338,9 @@ mod tests {
     }
 
     fn test_skill() -> PerplexitySearchSkill {
-        let vault = Arc::new(Mutex::new(
-            SecretsVault::new(std::env::temp_dir().join("ao_pplx_test")),
-        ));
+        let vault = Arc::new(Mutex::new(SecretsVault::new(
+            std::env::temp_dir().join("ao_pplx_test"),
+        )));
         PerplexitySearchSkill::with_secrets(test_manifest(), vault)
     }
 
@@ -367,9 +370,7 @@ mod tests {
     #[tokio::test]
     async fn test_missing_key_error() {
         let skill = test_skill();
-        let result = skill
-            .search("test query", None, None, None, false)
-            .await;
+        let result = skill.search("test query", None, None, None, false).await;
         assert!(result.is_err());
     }
 
@@ -378,24 +379,29 @@ mod tests {
         let _skill = test_skill();
         // Even without a key, the superego check should run first
         // and block PII queries before we hit the missing key error
-        let vault = Arc::new(Mutex::new(
-            SecretsVault::new(std::env::temp_dir().join("ao_pplx_test_block")),
-        ));
+        let vault = Arc::new(Mutex::new(SecretsVault::new(
+            std::env::temp_dir().join("ao_pplx_test_block"),
+        )));
         {
             let mut v = vault.lock().unwrap();
             v.set_secret("perplexity", "fake-key-for-test");
         }
         let skill = PerplexitySearchSkill::with_secrets(test_manifest(), vault);
         let result = skill
-            .search("where does John Smith live home address", None, None, None, false)
+            .search(
+                "where does John Smith live home address",
+                None,
+                None,
+                None,
+                false,
+            )
             .await
             .unwrap();
-        assert!(!result.success || result.error.is_some() || {
-            let data = result.data.as_ref().unwrap();
-            data["formatted"]
-                .as_str()
-                .unwrap_or("")
-                .contains("blocked")
-        });
+        assert!(
+            !result.success || result.error.is_some() || {
+                let data = result.data.as_ref().unwrap();
+                data["formatted"].as_str().unwrap_or("").contains("blocked")
+            }
+        );
     }
 }

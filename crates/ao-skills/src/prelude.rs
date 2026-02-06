@@ -2,7 +2,7 @@
 
 pub use crate::channel::{SkillEvent, TriggerDescriptor, TriggerFrequency, TriggerPriority};
 pub use crate::manifest::{
-    CapabilityDescriptor, Permission, SkillId, SkillManifest, SecretDescriptor,
+    CapabilityDescriptor, Permission, SecretDescriptor, SkillId, SkillManifest,
 };
 pub use crate::sandbox::ResourceLimits;
 pub use crate::skill::{

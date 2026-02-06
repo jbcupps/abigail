@@ -313,7 +313,11 @@ impl LlmProvider for AnthropicProvider {
                     err.error.message
                 ));
             }
-            return Err(anyhow::anyhow!("Anthropic API error ({}): {}", status, body));
+            return Err(anyhow::anyhow!(
+                "Anthropic API error ({}): {}",
+                status,
+                body
+            ));
         }
 
         let api_response: AnthropicResponse = response.json().await?;
@@ -402,7 +406,11 @@ impl LlmProvider for AnthropicProvider {
                     err.error.message
                 ));
             }
-            return Err(anyhow::anyhow!("Anthropic API error ({}): {}", status, body));
+            return Err(anyhow::anyhow!(
+                "Anthropic API error ({}): {}",
+                status,
+                body
+            ));
         }
 
         // Parse SSE stream
@@ -461,8 +469,7 @@ impl LlmProvider for AnthropicProvider {
                             },
                             SseEvent::ContentBlockStop { index } => {
                                 if let Some((id, name)) = tool_ids.remove(&index) {
-                                    let arguments =
-                                        tool_args.remove(&index).unwrap_or_default();
+                                    let arguments = tool_args.remove(&index).unwrap_or_default();
                                     tool_calls.push(ToolCall {
                                         id,
                                         name,
@@ -528,10 +535,7 @@ mod tests {
             Message::new("user", "Hello"),
         ];
         let (system, mapped) = map_messages(&messages);
-        assert_eq!(
-            system,
-            Some("You are helpful.\n\nBe concise.".to_string())
-        );
+        assert_eq!(system, Some("You are helpful.\n\nBe concise.".to_string()));
         assert_eq!(mapped.len(), 1);
     }
 

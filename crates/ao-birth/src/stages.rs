@@ -234,10 +234,7 @@ impl BirthOrchestrator {
             return Err(BirthError::StageGuard(self.stage.name().to_string()).into());
         }
 
-        let signing_key = self
-            .signing_key
-            .take()
-            .ok_or(BirthError::NoSigningKey)?;
+        let signing_key = self.signing_key.take().ok_or(BirthError::NoSigningKey)?;
 
         let docs_dir = self.config.docs_dir.clone();
 
@@ -273,10 +270,7 @@ impl BirthOrchestrator {
     /// Can be called from any stage before Emergence.
     pub fn skip_to_emergence(&mut self) {
         if self.stage != BirthStage::Emergence {
-            tracing::info!(
-                "Skip shortcut: skipping from {:?} to Emergence",
-                self.stage
-            );
+            tracing::info!("Skip shortcut: skipping from {:?} to Emergence", self.stage);
             self.stage = BirthStage::Emergence;
         }
     }
@@ -285,10 +279,7 @@ impl BirthOrchestrator {
     /// Generates identity if not done, skips to Emergence, and completes.
     pub fn skip_to_life_for_mvp(&mut self) {
         if self.stage != BirthStage::Emergence {
-            tracing::info!(
-                "MVP shortcut: skipping from {:?} to Emergence",
-                self.stage
-            );
+            tracing::info!("MVP shortcut: skipping from {:?} to Emergence", self.stage);
             self.stage = BirthStage::Emergence;
         }
     }
@@ -565,10 +556,7 @@ mod tests {
     fn test_stage_transitions() {
         assert_eq!(BirthStage::Darkness.next(), Some(BirthStage::Ignition));
         assert_eq!(BirthStage::Ignition.next(), Some(BirthStage::Connectivity));
-        assert_eq!(
-            BirthStage::Connectivity.next(),
-            Some(BirthStage::Genesis)
-        );
+        assert_eq!(BirthStage::Connectivity.next(), Some(BirthStage::Genesis));
         assert_eq!(BirthStage::Genesis.next(), Some(BirthStage::Emergence));
         assert_eq!(BirthStage::Emergence.next(), None);
     }

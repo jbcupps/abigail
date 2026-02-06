@@ -16,7 +16,10 @@ pub use download::ModelDownloader;
 pub use local_http::{stub_heartbeat, LocalHttpProvider};
 pub use openai::OpenAiProvider;
 pub use openai_compatible::{CompatibleProvider, OpenAiCompatibleProvider};
-pub use provider::{CompletionRequest, CompletionResponse, LlmProvider, Message, StreamEvent, ToolCall, ToolDefinition};
+pub use provider::{
+    CompletionRequest, CompletionResponse, LlmProvider, Message, StreamEvent, ToolCall,
+    ToolDefinition,
+};
 pub use types::*;
 
 use ao_core::secrets::SecretsVault;

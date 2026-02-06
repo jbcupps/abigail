@@ -74,7 +74,13 @@ pub fn format_search_results(response: &TavilySearchResponse) -> String {
     if !response.results.is_empty() {
         out.push_str("Sources:\n");
         for (i, r) in response.results.iter().enumerate() {
-            out.push_str(&format!("{}. {} — {}\n   {}\n", i + 1, r.title, r.url, r.content));
+            out.push_str(&format!(
+                "{}. {} — {}\n   {}\n",
+                i + 1,
+                r.title,
+                r.url,
+                r.content
+            ));
         }
     }
 
@@ -89,14 +95,12 @@ mod tests {
     fn test_format_search_results_with_answer() {
         let response = TavilySearchResponse {
             answer: Some("NVIDIA stock is at $120.".to_string()),
-            results: vec![
-                TavilyResult {
-                    title: "NVIDIA Stock Price".to_string(),
-                    url: "https://example.com/nvidia".to_string(),
-                    content: "NVIDIA (NVDA) is trading at $120.".to_string(),
-                    score: Some(0.95),
-                },
-            ],
+            results: vec![TavilyResult {
+                title: "NVIDIA Stock Price".to_string(),
+                url: "https://example.com/nvidia".to_string(),
+                content: "NVIDIA (NVDA) is trading at $120.".to_string(),
+                score: Some(0.95),
+            }],
         };
 
         let formatted = format_search_results(&response);

@@ -1,10 +1,10 @@
 //! AO Skills — plugin and tool execution layer.
 
-pub mod protocol;
 pub mod channel;
 pub mod executor;
 pub mod manifest;
 pub mod prelude;
+pub mod protocol;
 pub mod registry;
 pub mod sandbox;
 pub mod skill;
@@ -14,11 +14,11 @@ pub mod watcher;
 /// Backward-compatible alias: `capability` now lives in `protocol`.
 pub use protocol as capability;
 
-pub use protocol::*;
 pub use channel::*;
 pub use executor::SkillExecutor;
 pub use manifest::*;
 pub use prelude::*;
+pub use protocol::*;
 pub use registry::{MissingSkillSecret, RegisteredSkill, SkillRegistry};
 pub use sandbox::*;
 pub use skill::*;

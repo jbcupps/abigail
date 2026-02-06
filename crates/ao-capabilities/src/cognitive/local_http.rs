@@ -184,7 +184,10 @@ impl LocalHttpProvider {
         let response = client.get(&url).send().await?;
 
         if !response.status().is_success() {
-            return Err(anyhow::anyhow!("Models endpoint returned {}", response.status()));
+            return Err(anyhow::anyhow!(
+                "Models endpoint returned {}",
+                response.status()
+            ));
         }
 
         let models: ModelsResponse = response.json().await?;
@@ -220,7 +223,10 @@ impl LocalHttpProvider {
             stream: false,
         };
 
-        let url = format!("{}/v1/chat/completions", self.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/v1/chat/completions",
+            self.base_url.trim_end_matches('/')
+        );
 
         let response = client
             .post(&url)
@@ -308,7 +314,10 @@ impl LlmProvider for LocalHttpProvider {
             stream: false,
         };
 
-        let url = format!("{}/v1/chat/completions", self.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/v1/chat/completions",
+            self.base_url.trim_end_matches('/')
+        );
 
         let response = self
             .client
@@ -321,7 +330,11 @@ impl LlmProvider for LocalHttpProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("LLM request failed: HTTP {} - {}", status, body));
+            return Err(anyhow::anyhow!(
+                "LLM request failed: HTTP {} - {}",
+                status,
+                body
+            ));
         }
 
         let chat_response: ChatResponse = response
@@ -369,7 +382,10 @@ impl LlmProvider for LocalHttpProvider {
             stream: true,
         };
 
-        let url = format!("{}/v1/chat/completions", self.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/v1/chat/completions",
+            self.base_url.trim_end_matches('/')
+        );
 
         let response = self
             .client
@@ -382,7 +398,11 @@ impl LlmProvider for LocalHttpProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("LLM request failed: HTTP {} - {}", status, body));
+            return Err(anyhow::anyhow!(
+                "LLM request failed: HTTP {} - {}",
+                status,
+                body
+            ));
         }
 
         let mut full_text = String::new();
@@ -419,11 +439,10 @@ impl LlmProvider for LocalHttpProvider {
                                 // Handle tool call deltas
                                 if let Some(ref tc_deltas) = choice.delta.tool_calls {
                                     for tc_delta in tc_deltas {
-                                        let entry = tool_call_map
-                                            .entry(tc_delta.index)
-                                            .or_insert_with(|| {
-                                                (String::new(), String::new(), String::new())
-                                            });
+                                        let entry =
+                                            tool_call_map.entry(tc_delta.index).or_insert_with(
+                                                || (String::new(), String::new(), String::new()),
+                                            );
                                         if let Some(ref id) = tc_delta.id {
                                             entry.0 = id.clone();
                                         }

@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::manifest::{NetworkPermission, Permission, SkillId};
 use crate::registry::SkillRegistry;
 use crate::sandbox::{AuditAction, AuditActionKind, ResourceLimits, SkillSandbox};
-use crate::skill::{ExecutionContext, SkillError, SkillResult, ToolParams, ToolOutput};
+use crate::skill::{ExecutionContext, SkillError, SkillResult, ToolOutput, ToolParams};
 
 pub struct SkillExecutor {
     pub registry: Arc<SkillRegistry>,
@@ -72,8 +72,6 @@ impl SkillExecutor {
             user_id: None,
         };
 
-        skill
-            .execute_tool(tool_name, params, &context)
-            .await
+        skill.execute_tool(tool_name, params, &context).await
     }
 }

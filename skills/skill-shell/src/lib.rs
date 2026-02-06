@@ -7,9 +7,9 @@
 //! - Working directory validation
 
 use ao_skills::{
-    CapabilityDescriptor, CostEstimate, ExecutionContext, HealthStatus, Permission,
-    Skill, SkillConfig, SkillError, SkillHealth, SkillManifest, SkillResult,
-    ToolDescriptor, ToolOutput, ToolParams, TriggerDescriptor,
+    CapabilityDescriptor, CostEstimate, ExecutionContext, HealthStatus, Permission, Skill,
+    SkillConfig, SkillError, SkillHealth, SkillManifest, SkillResult, ToolDescriptor, ToolOutput,
+    ToolParams, TriggerDescriptor,
 };
 use async_trait::async_trait;
 use std::any::Any;
@@ -46,13 +46,7 @@ const BLOCKED_PATTERNS: &[&str] = &[
 ];
 
 /// Commands that require explicit allowlisting (blocked by default).
-const ELEVATED_COMMANDS: &[&str] = &[
-    "sudo",
-    "su ",
-    "pkill",
-    "kill -9",
-    "killall",
-];
+const ELEVATED_COMMANDS: &[&str] = &["sudo", "su ", "pkill", "kill -9", "killall"];
 
 /// Shell command skill with safety controls.
 pub struct ShellSkill {
@@ -206,7 +200,10 @@ impl ShellSkill {
                     "stderr_truncated": stderr_truncated,
                 })))
             }
-            Ok(Err(e)) => Ok(ToolOutput::error(format!("Failed to execute command: {}", e))),
+            Ok(Err(e)) => Ok(ToolOutput::error(format!(
+                "Failed to execute command: {}",
+                e
+            ))),
             Err(_) => Ok(ToolOutput::error(format!(
                 "Command timed out after {} seconds",
                 timeout.as_secs()
@@ -288,7 +285,10 @@ impl Skill for ShellSkill {
         _context: &ExecutionContext,
     ) -> SkillResult<ToolOutput> {
         if tool_name != "run_command" {
-            return Err(SkillError::ToolFailed(format!("Unknown tool: {}", tool_name)));
+            return Err(SkillError::ToolFailed(format!(
+                "Unknown tool: {}",
+                tool_name
+            )));
         }
 
         let command: String = params.get("command").ok_or_else(|| {
@@ -379,7 +379,10 @@ mod tests {
     #[tokio::test]
     async fn test_run_echo() {
         let skill = test_skill();
-        let result = skill.run_command("echo hello", None, Some(5)).await.unwrap();
+        let result = skill
+            .run_command("echo hello", None, Some(5))
+            .await
+            .unwrap();
         assert!(result.success);
         let data = result.data.unwrap();
         assert!(data["stdout"].as_str().unwrap().contains("hello"));
@@ -409,7 +412,10 @@ mod tests {
     #[tokio::test]
     async fn test_run_with_working_dir() {
         let skill = test_skill();
-        let result = skill.run_command("pwd", Some("/tmp"), Some(5)).await.unwrap();
+        let result = skill
+            .run_command("pwd", Some("/tmp"), Some(5))
+            .await
+            .unwrap();
         assert!(result.success);
         let data = result.data.unwrap();
         // Should contain /tmp (or its canonical form)

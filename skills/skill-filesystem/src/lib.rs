@@ -4,9 +4,9 @@
 //! path traversal and unauthorized file access.
 
 use ao_skills::{
-    CapabilityDescriptor, CostEstimate, ExecutionContext, HealthStatus, Permission,
-    FileSystemPermission, Skill, SkillConfig, SkillError, SkillHealth, SkillManifest,
-    SkillResult, ToolDescriptor, ToolOutput, ToolParams, TriggerDescriptor,
+    CapabilityDescriptor, CostEstimate, ExecutionContext, FileSystemPermission, HealthStatus,
+    Permission, Skill, SkillConfig, SkillError, SkillHealth, SkillManifest, SkillResult,
+    ToolDescriptor, ToolOutput, ToolParams, TriggerDescriptor,
 };
 use async_trait::async_trait;
 use std::any::Any;
@@ -50,9 +50,9 @@ impl FilesystemSkill {
 
         // For existing paths, canonicalize and check containment
         if path.exists() {
-            let canonical = path.canonicalize().map_err(|e| {
-                SkillError::ToolFailed(format!("Cannot resolve path: {}", e))
-            })?;
+            let canonical = path
+                .canonicalize()
+                .map_err(|e| SkillError::ToolFailed(format!("Cannot resolve path: {}", e)))?;
             if self.is_within_allowed_roots(&canonical) {
                 return Ok(canonical);
             }
@@ -151,7 +151,10 @@ impl FilesystemSkill {
         let path = self.validate_path(path_str)?;
 
         if !path.is_dir() {
-            return Ok(ToolOutput::error(format!("'{}' is not a directory", path_str)));
+            return Ok(ToolOutput::error(format!(
+                "'{}' is not a directory",
+                path_str
+            )));
         }
 
         let entries = std::fs::read_dir(&path)
@@ -180,7 +183,10 @@ impl FilesystemSkill {
             let a_dir = a["is_directory"].as_bool().unwrap_or(false);
             let b_dir = b["is_directory"].as_bool().unwrap_or(false);
             b_dir.cmp(&a_dir).then_with(|| {
-                a["name"].as_str().unwrap_or("").cmp(b["name"].as_str().unwrap_or(""))
+                a["name"]
+                    .as_str()
+                    .unwrap_or("")
+                    .cmp(b["name"].as_str().unwrap_or(""))
             })
         });
 
@@ -210,7 +216,10 @@ impl FilesystemSkill {
         let root = self.validate_path(root_str)?;
 
         if !root.is_dir() {
-            return Ok(ToolOutput::error(format!("'{}' is not a directory", root_str)));
+            return Ok(ToolOutput::error(format!(
+                "'{}' is not a directory",
+                root_str
+            )));
         }
 
         // Build full glob pattern rooted at the validated directory
@@ -534,7 +543,9 @@ mod tests {
         fs::write(tmp.join("test.txt"), "Hello, AO!").unwrap();
 
         let skill = test_skill(vec![tmp.clone()]);
-        let result = skill.read_file(&tmp.join("test.txt").display().to_string()).unwrap();
+        let result = skill
+            .read_file(&tmp.join("test.txt").display().to_string())
+            .unwrap();
 
         assert!(result.success);
         let data = result.data.unwrap();

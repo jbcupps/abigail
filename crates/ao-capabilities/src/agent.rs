@@ -25,7 +25,11 @@ pub trait AgentCooperationCapability: Send + Sync {
     async fn send_message(&self, _agent_id: &str, _message: AgentMessage) -> anyhow::Result<()> {
         Err(anyhow::anyhow!("stub: not implemented"))
     }
-    async fn delegate_task(&self, _agent_id: &str, _task: TaskRequest) -> anyhow::Result<TaskHandle> {
+    async fn delegate_task(
+        &self,
+        _agent_id: &str,
+        _task: TaskRequest,
+    ) -> anyhow::Result<TaskHandle> {
         Err(anyhow::anyhow!("stub: not implemented"))
     }
 }
