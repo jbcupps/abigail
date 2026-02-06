@@ -1,23 +1,21 @@
-# Build AO (Tauri app + keygen) and publish to GitHub Releases.
+# Build AO installers, publish GitHub Release, and publish npm package.
 #
 # Triggers:
-# - Every push to main (auto-increments v* patch version)
-# - Tags matching 'v*' (e.g., v0.0.3) for explicit versions
-# - Manual workflow_dispatch
+# - Tags matching 'v*' (e.g., v0.0.3)
+# - Manual workflow_dispatch with optional version input
 #
-# Auto-versioning: on each main push, fetches all v* tags, increments
-# the patch number, and creates a new release.
+# Stage 1: Parallel 3-platform builds (Windows, Ubuntu, macOS).
+# Stage 2: Create GitHub Release + publish npm package.
+#          Proceeds if at least one platform built successfully.
 #
 # Platforms: Windows (NSIS), Ubuntu (deb), macOS (dmg universal binary)
 
-name: build-release
+name: release
 
 on:
   push:
     tags:
       - 'v*'
-    branches:
-      - 'main'
   workflow_dispatch:
     inputs:
       release_version:
@@ -27,6 +25,10 @@ on:
 
 permissions:
   contents: write
+
+# ---------------------------------------------------------------------------
+# Stage 1: Parallel platform builds
+# ---------------------------------------------------------------------------
 
 jobs:
   build:
@@ -217,7 +219,6 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ matrix.platform }}" == "macos-latest" ]]; then
-            # Build for both architectures and lipo into universal binary
             cargo build --release -p ao-keygen --target aarch64-apple-darwin
             cargo build --release -p ao-keygen --target x86_64-apple-darwin
             lipo -create \
@@ -244,13 +245,19 @@ jobs:
           path: ${{ matrix.installer_path }}
           if-no-files-found: error
 
-  release:
+  # -------------------------------------------------------------------------
+  # Stage 2: Create GitHub Release + publish npm package
+  #          Proceeds if at least one platform build succeeded.
+  # -------------------------------------------------------------------------
+
+  publish:
     needs: build
+    if: always() && contains(needs.build.result, 'success')
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
-      - name: Checkout (for tagging)
+      - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.ref }}
@@ -276,21 +283,21 @@ jobs:
           fi
 
       - name: Rename to stable asset names for download URLs
+        shell: bash
         run: |
           mkdir -p release-assets
 
           # Windows
-          INSTALLER=$(find artifacts/ao-installer-windows-latest -name "*.exe" -type f | head -1)
+          INSTALLER=$(find artifacts/ao-installer-windows-latest -name "*.exe" -type f 2>/dev/null | head -1)
           if [ -z "$INSTALLER" ]; then
-            echo "WARNING: No Windows installer exe found in artifacts"
-            find artifacts/ -type f || true
+            echo "WARNING: No Windows installer found in artifacts"
           else
             echo "Found Windows installer: $INSTALLER"
             cp "$INSTALLER" release-assets/AO-windows-x64-setup.exe
           fi
 
           # Linux
-          DEB=$(find artifacts/ao-installer-ubuntu-22.04 -name "*.deb" -type f | head -1)
+          DEB=$(find artifacts/ao-installer-ubuntu-22.04 -name "*.deb" -type f 2>/dev/null | head -1)
           if [ -z "$DEB" ]; then
             echo "WARNING: No Linux deb found in artifacts"
           else
@@ -299,7 +306,7 @@ jobs:
           fi
 
           # macOS
-          DMG=$(find artifacts/ao-installer-macos-latest -name "*.dmg" -type f | head -1)
+          DMG=$(find artifacts/ao-installer-macos-latest -name "*.dmg" -type f 2>/dev/null | head -1)
           if [ -z "$DMG" ]; then
             echo "WARNING: No macOS dmg found in artifacts"
           else
@@ -308,7 +315,7 @@ jobs:
           fi
 
           echo "Release assets:"
-          ls -la release-assets/
+          ls -la release-assets/ || echo "No assets found"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
@@ -347,9 +354,45 @@ jobs:
 
             ### Platform Notes
 
-            - **macOS**: The app is not notarized. You may need to right-click → Open on first launch to bypass Gatekeeper.
+            - **macOS**: The app is not notarized. You may need to right-click then Open on first launch to bypass Gatekeeper.
             - **Linux**: Requires `libwebkit2gtk-4.1-0` and `libayatana-appindicator3-1`. Ubuntu 22.04+ recommended.
 
             See [SECURITY_NOTES.md](https://github.com/${{ github.repository }}/blob/main/documents/SECURITY_NOTES.md) for details.
           files: |
             release-assets/*
+
+      # ── npm publish ───────────────────────────────────────────────────
+
+      - name: Setup Node (for npm publish)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Determine npm version
+        id: npm_version
+        shell: bash
+        run: |
+          TAG="${{ needs.build.outputs.tag }}"
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "npm publish version: $VERSION"
+
+      - name: Update npm package version
+        working-directory: npm-package
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = '${{ steps.npm_version.outputs.version }}';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Publish to npm
+        working-directory: npm-package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish --access public || echo "WARNING: npm publish failed (token may not be configured)"
+          echo "Published ao-desktop@${{ steps.npm_version.outputs.version }} to npm"

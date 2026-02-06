@@ -12,10 +12,7 @@ Manual configuration steps for the GitHub repository. These settings cannot be m
 - [ ] **Require status checks to pass before merging**
   - [x] Require branches to be up to date before merging
   - Required checks:
-    - `check (windows-latest, x86_64-pc-windows-msvc)` (from ci.yml)
-    - `check (ubuntu-22.04, x86_64-unknown-linux-gnu)` (from ci.yml)
-    - `cargo-audit` (from security-audit.yml)
-    - `npm-audit` (from security-audit.yml)
+    - `gate` (from ci.yml -- aggregates lint, test, frontend, audit, codeql)
 - [ ] **Require conversation resolution before merging**
 - [ ] **Do not allow bypassing the above settings**
 - [ ] **Restrict force pushes**
@@ -28,7 +25,7 @@ Manual configuration steps for the GitHub repository. These settings cannot be m
 - [ ] **Dependabot security updates**: Enabled
 - [ ] **Secret scanning**: Enabled
 - [ ] **Push protection**: Enabled (blocks commits containing detected secrets)
-- [ ] **CodeQL analysis**: Enabled (configured via `.github/workflows/codeql.yml`)
+- [ ] **CodeQL analysis**: Enabled (configured via `codeql` job in `.github/workflows/ci.yml`)
 
 ## Repository Settings (Settings > General)
 
@@ -51,7 +48,7 @@ Manual configuration steps for the GitHub repository. These settings cannot be m
 
 - [ ] **Actions permissions**: Allow all actions and reusable workflows (or restrict to verified creators)
 - [ ] **Fork pull request workflows**: Require approval for first-time contributors
-- [ ] **Workflow permissions**: Read repository contents (default). The `build-release.yml` workflow explicitly sets `contents: write`.
+- [ ] **Workflow permissions**: Read repository contents (default). The `release.yml` workflow explicitly sets `contents: write`.
 
 ## Secrets (Settings > Secrets and variables > Actions)
 
@@ -72,4 +69,4 @@ Optional. If you want deployment protection:
 
 ---
 
-Last reviewed: 2026-02-05
+Last reviewed: 2026-02-06

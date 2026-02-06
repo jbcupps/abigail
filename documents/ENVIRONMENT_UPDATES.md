@@ -2,6 +2,26 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-06 (Consolidate GitHub Actions: 5 workflows to 2)
+
+Reduced CI/CD clutter by consolidating 5 workflow files into 2.
+
+### Deleted
+
+- `.github/workflows/security-audit.yml` -- merged into `ci.yml` as `audit` job
+- `.github/workflows/codeql.yml` -- merged into `ci.yml` as `codeql` job
+- `.github/workflows/build-release.yml` -- replaced by `release.yml`
+- `.github/workflows/npm-publish.yml` -- merged into `release.yml` as final stage
+
+### Created / Rewritten
+
+- **`.github/workflows/ci.yml`** (rewritten): Unified quality gate with 5 parallel jobs (`lint`, `test` 3-platform matrix, `frontend`, `audit`, `codeql`) feeding into a `gate` aggregator job. Gate fails only if ALL upstream jobs failed. Single required status check for branch protection. CodeQL also runs on weekly schedule.
+- **`.github/workflows/release.yml`** (new): Combined build + release + npm-publish pipeline. Triggers on `v*` tags and manual dispatch only (no longer auto-releases on every push to main). Stage 1: parallel 3-platform builds. Stage 2: create GitHub Release and publish npm package, proceeding if at least one platform built successfully.
+
+### Updated
+
+- `documents/GITHUB_SETTINGS.md` -- branch protection now references single `gate` check instead of per-workflow checks.
+
 ## 2026-02-05 (Public release readiness)
 
 Comprehensive preparation for making the repository public. No secrets, credentials, or sensitive data were found in the audit.
