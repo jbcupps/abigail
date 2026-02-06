@@ -2338,6 +2338,9 @@ pub fn run() {
     let event_bus = Arc::new(EventBus::new(256));
     let executor = Arc::new(SkillExecutor::new(registry.clone()));
 
+    // Capture data_dir before config is moved into AppState
+    let data_dir = config.data_dir.clone();
+
     let state = AppState {
         config: RwLock::new(config),
         birth: RwLock::new(None),
@@ -2352,7 +2355,7 @@ pub fn run() {
     let event_bus_for_setup = event_bus.clone();
 
     // Start the skills directory watcher for hot-reload
-    let skills_dir = config.data_dir.join("skills");
+    let skills_dir = data_dir.join("skills");
     let _skills_watcher = match ao_skills::SkillsWatcher::start(vec![skills_dir]) {
         Ok((watcher, mut rx)) => {
             // Spawn a thread to forward skill file events to the Tauri event system
