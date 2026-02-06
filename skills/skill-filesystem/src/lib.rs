@@ -80,11 +80,28 @@ impl FilesystemSkill {
         )))
     }
 
+    /// Strip the Windows extended-length path prefix (`\\?\`) if present.
+    #[cfg(target_os = "windows")]
+    fn strip_unc_prefix(p: &Path) -> PathBuf {
+        let s = p.to_string_lossy();
+        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+            PathBuf::from(stripped)
+        } else {
+            p.to_path_buf()
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn strip_unc_prefix(p: &Path) -> PathBuf {
+        p.to_path_buf()
+    }
+
     /// Check if a canonicalized path is within any allowed root.
     fn is_within_allowed_roots(&self, canonical_path: &Path) -> bool {
+        let canonical_path = Self::strip_unc_prefix(canonical_path);
         for root in &self.allowed_roots {
             let canonical_root = match root.canonicalize() {
-                Ok(r) => r,
+                Ok(r) => Self::strip_unc_prefix(&r),
                 Err(_) => root.clone(),
             };
             if canonical_path.starts_with(&canonical_root) {
@@ -222,8 +239,16 @@ impl FilesystemSkill {
             )));
         }
 
-        // Build full glob pattern rooted at the validated directory
-        let full_pattern = format!("{}/{}", root.display(), pattern_str);
+        // Build full glob pattern rooted at the validated directory.
+        // On Windows, canonicalize() returns UNC paths like \\?\C:\... where
+        // the '?' is a glob metacharacter. Strip the prefix, then normalise
+        // to forward slashes so the glob crate works cross-platform.
+        let mut root_str_normalized = root.display().to_string();
+        if root_str_normalized.starts_with(r"\\?\") {
+            root_str_normalized = root_str_normalized[4..].to_string();
+        }
+        let root_str_normalized = root_str_normalized.replace('\\', "/");
+        let full_pattern = format!("{}/{}", root_str_normalized, pattern_str);
 
         let matches: Vec<String> = glob::glob(&full_pattern)
             .map_err(|e| SkillError::ToolFailed(format!("Invalid glob pattern: {}", e)))?
