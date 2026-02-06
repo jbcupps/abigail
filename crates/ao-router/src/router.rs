@@ -1,8 +1,8 @@
 //! Id/Ego router: classifies with Id (local), routes COMPLEX to Ego (cloud) when configured.
 
 use ao_capabilities::cognitive::{
-    stub_heartbeat, CandleProvider, CompletionRequest, CompletionResponse, LlmProvider,
-    LocalHttpProvider, Message, OpenAiProvider, ToolDefinition,
+    stub_heartbeat, AnthropicProvider, CandleProvider, CompletionRequest, CompletionResponse,
+    LlmProvider, LocalHttpProvider, Message, OpenAiProvider, ToolDefinition,
 };
 use std::sync::Arc;
 
@@ -23,26 +23,39 @@ pub enum RouteDecision {
 #[derive(Clone)]
 pub struct IdEgoRouter {
     id: Arc<dyn LlmProvider>,
-    ego: Option<Arc<OpenAiProvider>>,
+    ego: Option<Arc<dyn LlmProvider>>,
     local_http: Option<Arc<LocalHttpProvider>>,
     mode: RoutingMode,
 }
 
+/// Create the appropriate Ego provider based on provider name and API key.
+fn create_ego_provider(
+    ego_provider: Option<&str>,
+    ego_api_key: Option<String>,
+) -> Option<Arc<dyn LlmProvider>> {
+    let key = ego_api_key.filter(|k| !k.is_empty())?;
+    match ego_provider {
+        Some("anthropic") => Some(Arc::new(AnthropicProvider::new(key))),
+        // Default to OpenAI for "openai", None, or any other value
+        _ => Some(Arc::new(OpenAiProvider::new(Some(key)))),
+    }
+}
+
 impl IdEgoRouter {
-    /// Create a new router with optional local LLM URL and OpenAI API key.
+    /// Create a new router with optional local LLM URL and Ego cloud provider.
     ///
     /// # Arguments
     /// * `local_llm_base_url` - Base URL for local LLM server (e.g. "http://localhost:1234")
-    /// * `openai_api_key` - OpenAI API key for Ego (cloud) routing
+    /// * `ego_provider` - Cloud provider name for Ego (e.g. "openai", "anthropic")
+    /// * `ego_api_key` - API key for Ego (cloud) routing
     /// * `mode` - Routing mode (EgoPrimary or IdPrimary)
     pub fn new(
         local_llm_base_url: Option<String>,
-        openai_api_key: Option<String>,
+        ego_provider: Option<&str>,
+        ego_api_key: Option<String>,
         mode: RoutingMode,
     ) -> Self {
-        let ego = openai_api_key
-            .filter(|k| !k.is_empty())
-            .map(|k| Arc::new(OpenAiProvider::new(Some(k))));
+        let ego = create_ego_provider(ego_provider, ego_api_key);
 
         let (id, local_http): (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) =
             match local_llm_base_url.filter(|u| !u.is_empty()) {
@@ -68,12 +81,11 @@ impl IdEgoRouter {
     /// This is the preferred constructor when a local LLM URL is provided.
     pub async fn new_auto_detect(
         local_llm_base_url: Option<String>,
-        openai_api_key: Option<String>,
+        ego_provider: Option<&str>,
+        ego_api_key: Option<String>,
         mode: RoutingMode,
     ) -> Self {
-        let ego = openai_api_key
-            .filter(|k| !k.is_empty())
-            .map(|k| Arc::new(OpenAiProvider::new(Some(k))));
+        let ego = create_ego_provider(ego_provider, ego_api_key);
 
         let (id, local_http): (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) =
             match local_llm_base_url.filter(|u| !u.is_empty()) {
@@ -237,7 +249,7 @@ mod tests {
     #[tokio::test]
     async fn test_routing_decision() {
         // Use stub (no URL) for tests with id_primary mode
-        let router = IdEgoRouter::new(None, None, RoutingMode::IdPrimary);
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::IdPrimary);
         let r = router.classify("What time is it?").await.unwrap();
         assert_eq!(r, RouteDecision::Routine);
 
@@ -250,7 +262,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_heartbeat_stub() {
-        let router = IdEgoRouter::new(None, None, RoutingMode::default());
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::default());
         assert!(!router.is_using_http_provider());
         router.heartbeat().await.unwrap();
     }

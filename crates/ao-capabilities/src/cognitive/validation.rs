@@ -45,15 +45,27 @@ async fn validate_anthropic(key: &str) -> anyhow::Result<()> {
         .header("x-api-key", key)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
-        .body(r#"{"model":"claude-3-haiku-20240307","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}"#)
+        .body(r#"{"model":"claude-3-5-haiku-latest","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}"#)
         .send()
         .await?;
 
     match response.status().as_u16() {
         200 => Ok(()),
         401 => Err(anyhow::anyhow!("Invalid API key")),
+        403 => Err(anyhow::anyhow!(
+            "API key lacks permission (billing or access issue)"
+        )),
         429 | 529 => Ok(()), // Rate limited / overloaded but key is valid
-        _ => Err(anyhow::anyhow!("API error: {}", response.status())),
+        400 => {
+            // Parse body to distinguish auth-adjacent errors from model issues
+            let body = response.text().await.unwrap_or_default();
+            if body.contains("invalid x-api-key") || body.contains("invalid api key") {
+                Err(anyhow::anyhow!("Invalid API key"))
+            } else {
+                Err(anyhow::anyhow!("Anthropic API error (400): {}", body))
+            }
+        }
+        status => Err(anyhow::anyhow!("API error: {}", status)),
     }
 }
 
