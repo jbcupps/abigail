@@ -1,8 +1,8 @@
 //! Id/Ego router: classifies with Id (local), routes COMPLEX to Ego (cloud) when configured.
 
 use ao_capabilities::cognitive::{
-    stub_heartbeat, CandleProvider, CompletionRequest, CompletionResponse, LocalHttpProvider,
-    LlmProvider, Message, OpenAiProvider, ToolDefinition,
+    stub_heartbeat, AnthropicProvider, CandleProvider, CompletionRequest, CompletionResponse,
+    LocalHttpProvider, LlmProvider, Message, OpenAiProvider, ToolDefinition,
 };
 use std::sync::Arc;
 
@@ -15,21 +15,41 @@ pub enum RouteDecision {
     Complex,
 }
 
+/// Which cloud provider is backing the Ego slot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EgoProvider {
+    OpenAi,
+    Anthropic,
+}
+
+impl std::fmt::Display for EgoProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EgoProvider::OpenAi => write!(f, "openai"),
+            EgoProvider::Anthropic => write!(f, "anthropic"),
+        }
+    }
+}
+
 /// Routes user messages: Id (local) classifies; ROUTINE stays local, COMPLEX goes to Ego if configured.
 ///
 /// Id can be either:
 /// - A local HTTP provider (LiteLLM, Ollama, etc.) when `local_llm_base_url` is set
 /// - An in-process Candle stub when no URL is configured
+///
+/// Ego can be any cloud LLM provider implementing the LlmProvider trait.
 #[derive(Clone)]
 pub struct IdEgoRouter {
     id: Arc<dyn LlmProvider>,
-    ego: Option<Arc<OpenAiProvider>>,
+    ego: Option<Arc<dyn LlmProvider>>,
+    ego_provider: Option<EgoProvider>,
     local_http: Option<Arc<LocalHttpProvider>>,
     mode: RoutingMode,
 }
 
 impl IdEgoRouter {
     /// Create a new router with optional local LLM URL and OpenAI API key.
+    /// This is the backward-compatible constructor (defaults Ego to OpenAI).
     ///
     /// # Arguments
     /// * `local_llm_base_url` - Base URL for local LLM server (e.g. "http://localhost:1234")
@@ -40,22 +60,46 @@ impl IdEgoRouter {
         openai_api_key: Option<String>,
         mode: RoutingMode,
     ) -> Self {
-        let ego = openai_api_key
-            .filter(|k| !k.is_empty())
-            .map(|k| Arc::new(OpenAiProvider::new(Some(k))));
-
-        let (id, local_http): (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) =
-            match local_llm_base_url.filter(|u| !u.is_empty()) {
-                Some(url) => {
-                    let provider = Arc::new(LocalHttpProvider::with_url(url));
-                    (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
-                }
-                None => (Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>, None),
+        let (ego, ego_provider): (Option<Arc<dyn LlmProvider>>, Option<EgoProvider>) =
+            match openai_api_key.filter(|k| !k.is_empty()) {
+                Some(k) => (
+                    Some(Arc::new(OpenAiProvider::new(Some(k)))),
+                    Some(EgoProvider::OpenAi),
+                ),
+                None => (None, None),
             };
+
+        let (id, local_http) = build_id_provider(local_llm_base_url);
 
         Self {
             id,
             ego,
+            ego_provider,
+            local_http,
+            mode,
+        }
+    }
+
+    /// Create a new router with a specific cloud provider for Ego.
+    ///
+    /// # Arguments
+    /// * `local_llm_base_url` - Base URL for local LLM server
+    /// * `ego_provider_name` - Provider name: "openai", "anthropic"
+    /// * `ego_api_key` - API key for the chosen provider
+    /// * `mode` - Routing mode (EgoPrimary or IdPrimary)
+    pub fn with_provider(
+        local_llm_base_url: Option<String>,
+        ego_provider_name: Option<&str>,
+        ego_api_key: Option<String>,
+        mode: RoutingMode,
+    ) -> Self {
+        let (ego, ego_provider) = build_ego_provider(ego_provider_name, ego_api_key);
+        let (id, local_http) = build_id_provider(local_llm_base_url);
+
+        Self {
+            id,
+            ego,
+            ego_provider,
             local_http,
             mode,
         }
@@ -68,23 +112,40 @@ impl IdEgoRouter {
         openai_api_key: Option<String>,
         mode: RoutingMode,
     ) -> Self {
-        let ego = openai_api_key
-            .filter(|k| !k.is_empty())
-            .map(|k| Arc::new(OpenAiProvider::new(Some(k))));
-
-        let (id, local_http): (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) =
-            match local_llm_base_url.filter(|u| !u.is_empty()) {
-                Some(url) => {
-                    // Use auto-detection for model name (important for LM Studio)
-                    let provider = Arc::new(LocalHttpProvider::with_url_auto_model(url).await);
-                    (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
-                }
-                None => (Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>, None),
+        let (ego, ego_provider): (Option<Arc<dyn LlmProvider>>, Option<EgoProvider>) =
+            match openai_api_key.filter(|k| !k.is_empty()) {
+                Some(k) => (
+                    Some(Arc::new(OpenAiProvider::new(Some(k)))),
+                    Some(EgoProvider::OpenAi),
+                ),
+                None => (None, None),
             };
+
+        let (id, local_http) = build_id_provider_auto_detect(local_llm_base_url).await;
 
         Self {
             id,
             ego,
+            ego_provider,
+            local_http,
+            mode,
+        }
+    }
+
+    /// Create a new router with auto-detected local LLM and a specific cloud provider.
+    pub async fn with_provider_auto_detect(
+        local_llm_base_url: Option<String>,
+        ego_provider_name: Option<&str>,
+        ego_api_key: Option<String>,
+        mode: RoutingMode,
+    ) -> Self {
+        let (ego, ego_provider) = build_ego_provider(ego_provider_name, ego_api_key);
+        let (id, local_http) = build_id_provider_auto_detect(local_llm_base_url).await;
+
+        Self {
+            id,
+            ego,
+            ego_provider,
             local_http,
             mode,
         }
@@ -102,6 +163,16 @@ impl IdEgoRouter {
     /// Check if using a local HTTP provider (vs in-process stub).
     pub fn is_using_http_provider(&self) -> bool {
         self.local_http.is_some()
+    }
+
+    /// Check if Ego (cloud) is configured.
+    pub fn has_ego(&self) -> bool {
+        self.ego.is_some()
+    }
+
+    /// Get the name of the Ego provider, if configured.
+    pub fn ego_provider_name(&self) -> Option<&EgoProvider> {
+        self.ego_provider.as_ref()
     }
 
     /// Classify with Id: ROUTINE or COMPLEX.
@@ -206,6 +277,63 @@ impl IdEgoRouter {
     }
 }
 
+// ── Helper functions for building providers ──────────────────────────
+
+/// Build the Ego (cloud) provider from a provider name and API key.
+fn build_ego_provider(
+    provider_name: Option<&str>,
+    api_key: Option<String>,
+) -> (Option<Arc<dyn LlmProvider>>, Option<EgoProvider>) {
+    let key = match api_key.filter(|k| !k.is_empty()) {
+        Some(k) => k,
+        None => return (None, None),
+    };
+
+    match provider_name {
+        Some("anthropic") => (
+            Some(Arc::new(AnthropicProvider::new(key)) as Arc<dyn LlmProvider>),
+            Some(EgoProvider::Anthropic),
+        ),
+        Some("openai") | None => (
+            Some(Arc::new(OpenAiProvider::new(Some(key))) as Arc<dyn LlmProvider>),
+            Some(EgoProvider::OpenAi),
+        ),
+        Some(unknown) => {
+            tracing::warn!("Unknown ego provider '{}', falling back to OpenAI", unknown);
+            (
+                Some(Arc::new(OpenAiProvider::new(Some(key))) as Arc<dyn LlmProvider>),
+                Some(EgoProvider::OpenAi),
+            )
+        }
+    }
+}
+
+/// Build the Id (local) provider synchronously.
+fn build_id_provider(
+    local_llm_base_url: Option<String>,
+) -> (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) {
+    match local_llm_base_url.filter(|u| !u.is_empty()) {
+        Some(url) => {
+            let provider = Arc::new(LocalHttpProvider::with_url(url));
+            (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
+        }
+        None => (Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>, None),
+    }
+}
+
+/// Build the Id (local) provider with auto-detected model name.
+async fn build_id_provider_auto_detect(
+    local_llm_base_url: Option<String>,
+) -> (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) {
+    match local_llm_base_url.filter(|u| !u.is_empty()) {
+        Some(url) => {
+            let provider = Arc::new(LocalHttpProvider::with_url_auto_model(url).await);
+            (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
+        }
+        None => (Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>, None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +362,49 @@ mod tests {
     #[tokio::test]
     async fn test_default_routing_mode_is_ego_primary() {
         assert_eq!(RoutingMode::default(), RoutingMode::EgoPrimary);
+    }
+
+    #[tokio::test]
+    async fn test_with_provider_anthropic() {
+        let router = IdEgoRouter::with_provider(
+            None,
+            Some("anthropic"),
+            Some("test-key".to_string()),
+            RoutingMode::EgoPrimary,
+        );
+        assert!(router.has_ego());
+        assert_eq!(router.ego_provider_name(), Some(&EgoProvider::Anthropic));
+    }
+
+    #[tokio::test]
+    async fn test_with_provider_openai() {
+        let router = IdEgoRouter::with_provider(
+            None,
+            Some("openai"),
+            Some("test-key".to_string()),
+            RoutingMode::EgoPrimary,
+        );
+        assert!(router.has_ego());
+        assert_eq!(router.ego_provider_name(), Some(&EgoProvider::OpenAi));
+    }
+
+    #[tokio::test]
+    async fn test_with_provider_none_key() {
+        let router = IdEgoRouter::with_provider(
+            None,
+            Some("anthropic"),
+            None,
+            RoutingMode::EgoPrimary,
+        );
+        assert!(!router.has_ego());
+        assert_eq!(router.ego_provider_name(), None);
+    }
+
+    #[tokio::test]
+    async fn test_backward_compat_new() {
+        // Existing code calling new() should still work and default to OpenAI
+        let router = IdEgoRouter::new(None, Some("test-key".to_string()), RoutingMode::EgoPrimary);
+        assert!(router.has_ego());
+        assert_eq!(router.ego_provider_name(), Some(&EgoProvider::OpenAi));
     }
 }

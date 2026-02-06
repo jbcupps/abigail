@@ -1,5 +1,6 @@
 //! Cognitive capabilities — LLM providers, reasoning, classification.
 
+pub mod anthropic;
 pub mod candle;
 pub mod download;
 pub mod local_http;
@@ -8,6 +9,7 @@ pub mod provider;
 pub mod types;
 pub mod validation;
 
+pub use anthropic::AnthropicProvider;
 pub use candle::CandleProvider;
 pub use download::ModelDownloader;
 pub use local_http::{stub_heartbeat, LocalHttpProvider};

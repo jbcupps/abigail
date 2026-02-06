@@ -888,8 +888,10 @@ pub struct RouterStatus {
     pub id_provider: String,
     /// Local LLM URL if configured
     pub id_url: Option<String>,
-    /// Whether Ego (OpenAI) is configured
+    /// Whether Ego (cloud) is configured
     pub ego_configured: bool,
+    /// Which cloud provider backs Ego: "openai", "anthropic", or null
+    pub ego_provider: Option<String>,
     /// Current routing mode: "ego_primary" or "id_primary"
     pub routing_mode: String,
 }
@@ -908,7 +910,8 @@ fn get_router_status(state: tauri::State<AppState>) -> Result<RouterStatus, Stri
     Ok(RouterStatus {
         id_provider,
         id_url: config.local_llm_base_url.clone(),
-        ego_configured: config.openai_api_key.is_some(),
+        ego_configured: router.has_ego(),
+        ego_provider: router.ego_provider_name().map(|p| p.to_string()),
         routing_mode: format!("{:?}", config.routing_mode).to_lowercase(),
     })
 }
@@ -1109,22 +1112,40 @@ async fn execute_tool_call(
                 }
             }
 
-            // If it's an OpenAI key, also update config and rebuild router
-            if provider == "openai" {
-                if let Ok(mut config) = state.config.write() {
-                    config.openai_api_key = Some(key.to_string());
-                    let _ = config.save(&config.config_path());
+            // Rebuild router for cloud provider keys
+            match provider {
+                "openai" => {
+                    if let Ok(mut config) = state.config.write() {
+                        config.openai_api_key = Some(key.to_string());
+                        let _ = config.save(&config.config_path());
 
-                    let new_router = IdEgoRouter::new(
-                        config.local_llm_base_url.clone(),
-                        config.openai_api_key.clone(),
-                        config.routing_mode,
-                    );
-                    drop(config);
-                    if let Ok(mut router) = state.router.write() {
-                        *router = new_router;
+                        let new_router = IdEgoRouter::with_provider(
+                            config.local_llm_base_url.clone(),
+                            Some("openai"),
+                            Some(key.to_string()),
+                            config.routing_mode,
+                        );
+                        drop(config);
+                        if let Ok(mut router) = state.router.write() {
+                            *router = new_router;
+                        }
                     }
                 }
+                "anthropic" => {
+                    if let Ok(config) = state.config.read() {
+                        let new_router = IdEgoRouter::with_provider(
+                            config.local_llm_base_url.clone(),
+                            Some("anthropic"),
+                            Some(key.to_string()),
+                            config.routing_mode,
+                        );
+                        drop(config);
+                        if let Ok(mut router) = state.router.write() {
+                            *router = new_router;
+                        }
+                    }
+                }
+                _ => {}
             }
 
             format!("Successfully validated and stored {} API key in secure vault.", provider)
@@ -1606,20 +1627,36 @@ async fn store_provider_key(
         vault.save().map_err(|e| e.to_string())?;
     }
 
-    // If it's an OpenAI key, also set it as the main API key and rebuild router
-    if provider == "openai" {
-        let mut config = state.config.write().map_err(|e| e.to_string())?;
-        config.openai_api_key = Some(key.clone());
-        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+    // Rebuild router for cloud provider keys
+    match provider.as_str() {
+        "openai" => {
+            let mut config = state.config.write().map_err(|e| e.to_string())?;
+            config.openai_api_key = Some(key.clone());
+            config.save(&config.config_path()).map_err(|e| e.to_string())?;
 
-        let new_router = IdEgoRouter::new(
-            config.local_llm_base_url.clone(),
-            config.openai_api_key.clone(),
-            config.routing_mode,
-        );
-        drop(config);
-        let mut router = state.router.write().map_err(|e| e.to_string())?;
-        *router = new_router;
+            let new_router = IdEgoRouter::with_provider(
+                config.local_llm_base_url.clone(),
+                Some("openai"),
+                Some(key.clone()),
+                config.routing_mode,
+            );
+            drop(config);
+            let mut router = state.router.write().map_err(|e| e.to_string())?;
+            *router = new_router;
+        }
+        "anthropic" => {
+            let config = state.config.read().map_err(|e| e.to_string())?;
+            let new_router = IdEgoRouter::with_provider(
+                config.local_llm_base_url.clone(),
+                Some("anthropic"),
+                Some(key.clone()),
+                config.routing_mode,
+            );
+            drop(config);
+            let mut router = state.router.write().map_err(|e| e.to_string())?;
+            *router = new_router;
+        }
+        _ => {} // Other providers don't need router rebuild
     }
 
     Ok(StoreKeyResult {
@@ -1815,17 +1852,42 @@ fn complete_emergence(state: tauri::State<AppState>) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let config = get_config();
-    let router = IdEgoRouter::new(
-        config.local_llm_base_url.clone(),
-        config.openai_api_key.clone(),
-        config.routing_mode,
-    );
 
     // Initialize the secrets vault (DPAPI-encrypted on Windows)
     let secrets = Arc::new(Mutex::new(
         SecretsVault::load(config.data_dir.clone())
             .unwrap_or_else(|_| SecretsVault::new(config.data_dir.clone())),
     ));
+
+    // Build router, selecting best available Ego provider from vault/config
+    let router = {
+        let vault = secrets.lock().unwrap();
+        if let Some(ref key) = config.openai_api_key {
+            // Explicit OpenAI key in config takes precedence
+            IdEgoRouter::with_provider(
+                config.local_llm_base_url.clone(),
+                Some("openai"),
+                Some(key.clone()),
+                config.routing_mode,
+            )
+        } else if let Some(key) = vault.get_secret("anthropic") {
+            IdEgoRouter::with_provider(
+                config.local_llm_base_url.clone(),
+                Some("anthropic"),
+                Some(key.to_string()),
+                config.routing_mode,
+            )
+        } else if let Some(key) = vault.get_secret("openai") {
+            IdEgoRouter::with_provider(
+                config.local_llm_base_url.clone(),
+                Some("openai"),
+                Some(key.to_string()),
+                config.routing_mode,
+            )
+        } else {
+            IdEgoRouter::new(config.local_llm_base_url.clone(), None, config.routing_mode)
+        }
+    };
 
     #[cfg(not(windows))]
     tracing::warn!(
