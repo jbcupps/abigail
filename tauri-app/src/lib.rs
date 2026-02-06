@@ -7,16 +7,16 @@ use ao_core::{
     generate_external_keypair, sign_constitutional_documents, validate_local_llm_url, AppConfig,
     CoreError, ExternalVault, Keyring, ReadOnlyFileVault, SecretsVault, TrinityConfig, Verifier,
 };
-use chrono::Utc;
 use ao_memory::{Memory, MemoryStore};
 use ao_router::IdEgoRouter;
 use ao_skills::channel::EventBus;
 use ao_skills::{MissingSkillSecret, SkillExecutor, SkillRegistry, ToolParams};
-use skill_web_search::WebSearchSkill;
 use base64::Engine as _;
+use chrono::Utc;
 use ed25519_dalek::SigningKey;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use skill_web_search::WebSearchSkill;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
@@ -51,9 +51,9 @@ fn validate_backup_dest_path(dest_path: &str, data_dir: &Path) -> Result<PathBuf
         return Err("Invalid backup path".into());
     }
     let parent = path.parent().ok_or("Invalid path: no parent directory")?;
-    let canonical_parent = parent.canonicalize().map_err(|e| {
-        format!("Path parent is not accessible or does not exist: {}", e)
-    })?;
+    let canonical_parent = parent
+        .canonicalize()
+        .map_err(|e| format!("Path parent is not accessible or does not exist: {}", e))?;
     let permitted = permitted_backup_bases(data_dir);
     for base in &permitted {
         let canonical_base = match base.canonicalize() {
@@ -183,7 +183,9 @@ fn init_soul(state: tauri::State<AppState>) -> Result<(), String> {
 /// The user MUST save it securely. Without it, they cannot verify integrity
 /// after a reinstall or re-sign documents if needed.
 #[tauri::command]
-fn generate_and_sign_constitutional(state: tauri::State<AppState>) -> Result<KeypairGenerationResult, String> {
+fn generate_and_sign_constitutional(
+    state: tauri::State<AppState>,
+) -> Result<KeypairGenerationResult, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let data_dir = config.data_dir.clone();
     let docs_dir = config.docs_dir.clone();
@@ -199,12 +201,10 @@ fn generate_and_sign_constitutional(state: tauri::State<AppState>) -> Result<Key
 
     if sig_exists {
         // Already generated - can't return the private key again (it was never stored)
-        return Err(
-            "Constitutional documents are already signed. \
+        return Err("Constitutional documents are already signed. \
              The private key was presented during initial setup and is not stored by AO. \
              If you need to re-sign, you must use your saved private key."
-                .to_string(),
-        );
+            .to_string());
     }
 
     // Generate the external keypair
@@ -229,7 +229,9 @@ fn generate_and_sign_constitutional(state: tauri::State<AppState>) -> Result<Key
     {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         config.external_pubkey_path = Some(pubkey_path.clone());
-        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
     }
 
     Ok(KeypairGenerationResult {
@@ -263,7 +265,9 @@ fn check_interrupted_birth(state: tauri::State<AppState>) -> Result<InterruptedB
 
     if was_interrupted {
         // Save the cleared state
-        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
     }
 
     Ok(InterruptedBirthInfo {
@@ -314,7 +318,9 @@ pub struct IdentitySummary {
 /// Checks both the birth_complete config flag AND signed identity files on disk
 /// to catch stale/interrupted births and version upgrades.
 #[tauri::command]
-fn check_existing_identity(state: tauri::State<AppState>) -> Result<Option<IdentitySummary>, String> {
+fn check_existing_identity(
+    state: tauri::State<AppState>,
+) -> Result<Option<IdentitySummary>, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
 
     // Check for signed identity files on disk (catches upgrades and stale state)
@@ -328,7 +334,10 @@ fn check_existing_identity(state: tauri::State<AppState>) -> Result<Option<Ident
         return Ok(None);
     }
 
-    let name = config.agent_name.clone().unwrap_or_else(|| "Unknown".to_string());
+    let name = config
+        .agent_name
+        .clone()
+        .unwrap_or_else(|| "Unknown".to_string());
 
     // Get birth date from config or fall back to soul.md file modification time
     let birth_date = config.birth_timestamp.clone().unwrap_or_else(|| {
@@ -365,7 +374,10 @@ fn check_existing_identity(state: tauri::State<AppState>) -> Result<Option<Ident
 fn archive_identity(state: tauri::State<AppState>) -> Result<String, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let data_dir = config.data_dir.clone();
-    let agent_name = config.agent_name.clone().unwrap_or_else(|| "agent".to_string());
+    let agent_name = config
+        .agent_name
+        .clone()
+        .unwrap_or_else(|| "agent".to_string());
     drop(config);
 
     // Create backup folder: backups/{timestamp}_{AgentName}/
@@ -375,7 +387,8 @@ fn archive_identity(state: tauri::State<AppState>) -> Result<String, String> {
     let backups_dir = data_dir.join("backups");
     let backup_path = backups_dir.join(&backup_name);
 
-    std::fs::create_dir_all(&backup_path).map_err(|e| format!("Failed to create backup dir: {}", e))?;
+    std::fs::create_dir_all(&backup_path)
+        .map_err(|e| format!("Failed to create backup dir: {}", e))?;
 
     // Files to archive
     let files_to_move = [
@@ -483,9 +496,7 @@ fn get_sqlite_stats(state: tauri::State<AppState>) -> Result<SqliteStats, String
     let config = state.config.read().map_err(|e| e.to_string())?;
     let db_path = config.db_path.clone();
 
-    let size_bytes = std::fs::metadata(&db_path)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let size_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
 
     let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
     let memory_count = store.count_memories().map_err(|e| e.to_string())?;
@@ -505,9 +516,7 @@ fn optimize_sqlite(state: tauri::State<AppState>) -> Result<i64, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let db_path = config.db_path.clone();
 
-    let size_before = std::fs::metadata(&db_path)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let size_before = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
 
     let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
     store.vacuum().map_err(|e| e.to_string())?;
@@ -515,9 +524,7 @@ fn optimize_sqlite(state: tauri::State<AppState>) -> Result<i64, String> {
     // Need to drop the store to release the lock before checking size
     drop(store);
 
-    let size_after = std::fs::metadata(&db_path)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let size_after = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
 
     let saved = size_before as i64 - size_after as i64;
     tracing::info!("SQLite optimized: {} bytes saved", saved);
@@ -535,8 +542,7 @@ fn backup_sqlite(state: tauri::State<AppState>, dest_path: String) -> Result<(),
     let dest_path = validate_backup_dest_path(dest_path.trim(), &data_dir)?;
 
     // Also copy WAL and SHM files if they exist
-    std::fs::copy(&db_path, &dest_path)
-        .map_err(|e| format!("Failed to copy database: {}", e))?;
+    std::fs::copy(&db_path, &dest_path).map_err(|e| format!("Failed to copy database: {}", e))?;
 
     // Copy WAL file if it exists
     let wal_path = db_path.with_extension("db-wal");
@@ -583,7 +589,9 @@ pub struct KeypairGenerationResult {
 /// Returns status for each check so the UI can show appropriate messages.
 /// When birth is not complete, softens heartbeat requirement.
 #[tauri::command]
-async fn run_startup_checks(state: tauri::State<'_, AppState>) -> Result<StartupCheckResult, String> {
+async fn run_startup_checks(
+    state: tauri::State<'_, AppState>,
+) -> Result<StartupCheckResult, String> {
     // Check if birth is complete
     let birth_complete = {
         let config = state.config.read().map_err(|e| e.to_string())?;
@@ -696,7 +704,8 @@ fn generate_identity(state: tauri::State<AppState>) -> Result<KeypairGenerationR
     let docs_path = b.config().docs_dir.clone();
     b.generate_identity(&docs_path).map_err(|e| e.to_string())?;
 
-    let private_key = b.get_private_key_base64()
+    let private_key = b
+        .get_private_key_base64()
         .ok_or("No private key generated")?
         .to_string();
 
@@ -707,7 +716,9 @@ fn generate_identity(state: tauri::State<AppState>) -> Result<KeypairGenerationR
     {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         config.external_pubkey_path = Some(pubkey_path.clone());
-        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
     }
 
     Ok(KeypairGenerationResult {
@@ -733,7 +744,10 @@ pub struct RepairIdentityParams {
 }
 
 #[tauri::command]
-fn repair_identity(state: tauri::State<AppState>, params: RepairIdentityParams) -> Result<(), String> {
+fn repair_identity(
+    state: tauri::State<AppState>,
+    params: RepairIdentityParams,
+) -> Result<(), String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let data_dir = config.data_dir.clone();
     let docs_dir = config.docs_dir.clone();
@@ -775,11 +789,15 @@ fn repair_identity(state: tauri::State<AppState>, params: RepairIdentityParams) 
         // 2. Validate against stored public key
         let pubkey_path = data_dir.join("external_pubkey.bin");
         if !pubkey_path.exists() {
-            return Err("Public key not found. Cannot verify ownership. Please use Reset.".to_string());
+            return Err(
+                "Public key not found. Cannot verify ownership. Please use Reset.".to_string(),
+            );
         }
 
         let vault = ReadOnlyFileVault::new(&pubkey_path);
-        let stored_pubkey = vault.read_public_key().map_err(|e: CoreError| e.to_string())?;
+        let stored_pubkey = vault
+            .read_public_key()
+            .map_err(|e: CoreError| e.to_string())?;
 
         if verifying_key != stored_pubkey {
             return Err("Provided private key does not match the stored public key.".to_string());
@@ -806,8 +824,8 @@ fn configure_email(
     password: String,
 ) -> Result<(), String> {
     let mut config = state.config.write().map_err(|e| e.to_string())?;
-    let password_encrypted = Keyring::encrypt_bytes(password.as_bytes())
-        .map_err(|e| e.to_string())?;
+    let password_encrypted =
+        Keyring::encrypt_bytes(password.as_bytes()).map_err(|e| e.to_string())?;
     config.email = Some(ao_core::EmailConfig {
         address,
         imap_host,
@@ -816,7 +834,9 @@ fn configure_email(
         smtp_port,
         password_encrypted,
     });
-    config.save(&config.config_path()).map_err(|e| e.to_string())?;
+    config
+        .save(&config.config_path())
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -846,7 +866,9 @@ async fn download_model(
 fn set_api_key(state: tauri::State<AppState>, key: String) -> Result<(), String> {
     let mut config = state.config.write().map_err(|e| e.to_string())?;
     config.openai_api_key = Some(key);
-    config.save(&config.config_path()).map_err(|e| e.to_string())?;
+    config
+        .save(&config.config_path())
+        .map_err(|e| e.to_string())?;
 
     // Rebuild the router so it picks up the new API key
     let new_router = IdEgoRouter::new(
@@ -870,8 +892,14 @@ async fn set_local_llm_url(state: tauri::State<'_, AppState>, url: String) -> Re
             let normalized = validate_local_llm_url(&url).map_err(|e| e.to_string())?;
             Some(normalized)
         };
-        config.save(&config.config_path()).map_err(|e| e.to_string())?;
-        (config.local_llm_base_url.clone(), config.openai_api_key.clone(), config.routing_mode)
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
+        (
+            config.local_llm_base_url.clone(),
+            config.openai_api_key.clone(),
+            config.routing_mode,
+        )
     };
 
     // Rebuild the router with auto-detected model name (important for LM Studio)
@@ -920,20 +948,21 @@ fn complete_birth(state: tauri::State<AppState>) -> Result<(), String> {
     b.complete_birth().map_err(|e| e.to_string())?;
     let mut config = state.config.write().map_err(|e| e.to_string())?;
     config.birth_complete = true;
-    config.save(&config.config_path()).map_err(|e| e.to_string())?;
+    config
+        .save(&config.config_path())
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
 fn list_skills(state: tauri::State<AppState>) -> Result<Vec<ao_skills::SkillManifest>, String> {
-    state
-        .registry
-        .list()
-        .map_err(|e| e.to_string())
+    state.registry.list().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn list_discovered_skills(state: tauri::State<AppState>) -> Result<Vec<ao_skills::SkillManifest>, String> {
+fn list_discovered_skills(
+    state: tauri::State<AppState>,
+) -> Result<Vec<ao_skills::SkillManifest>, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let paths = vec![config.data_dir.join("skills")];
     Ok(ao_skills::SkillRegistry::discover(&paths))
@@ -957,9 +986,7 @@ async fn execute_tool(
     params: HashMap<String, serde_json::Value>,
 ) -> Result<ao_skills::ToolOutput, String> {
     let id = ao_skills::SkillId(skill_id);
-    let tool_params = ToolParams {
-        values: params,
-    };
+    let tool_params = ToolParams { values: params };
     state
         .executor
         .execute(&id, &tool_name, tool_params)
@@ -973,7 +1000,10 @@ async fn execute_tool(
 const ALLOWED_PROVIDER_SECRET_KEYS: &[&str] = &["openai", "anthropic", "xai", "google", "tavily"];
 
 /// Returns the set of allowed secret keys: reserved provider names + skill-declared secret names.
-fn allowed_secret_keys(registry: &SkillRegistry, skill_paths: &[PathBuf]) -> std::collections::HashSet<String> {
+fn allowed_secret_keys(
+    registry: &SkillRegistry,
+    skill_paths: &[PathBuf],
+) -> std::collections::HashSet<String> {
     let mut allowed: std::collections::HashSet<String> = ALLOWED_PROVIDER_SECRET_KEYS
         .iter()
         .map(|s| (*s).to_string())
@@ -1022,7 +1052,10 @@ fn remove_secret(state: tauri::State<AppState>, key: String) -> Result<bool, Str
     let paths = vec![config.data_dir.join("skills")];
     let allowed = allowed_secret_keys(&state.registry, &paths);
     if !allowed.contains(&key) {
-        return Err("Secret key not allowed. Use a reserved provider name or a skill-declared secret name.".to_string());
+        return Err(
+            "Secret key not allowed. Use a reserved provider name or a skill-declared secret name."
+                .to_string(),
+        );
     }
     let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
     let removed = vault.remove_secret(&key);
@@ -1044,13 +1077,18 @@ fn list_missing_skill_secrets(
 // ── Chat ────────────────────────────────────────────────────────────
 
 /// Build tool definitions for the chat command, including registered skills.
-fn chat_tool_definitions(registry: &SkillRegistry) -> Vec<ao_capabilities::cognitive::ToolDefinition> {
+fn chat_tool_definitions(
+    registry: &SkillRegistry,
+) -> Vec<ao_capabilities::cognitive::ToolDefinition> {
     let mut tools = Vec::new();
 
     // Built-in: store_provider_key
     let schema = ao_capabilities::cognitive::update_provider_key_schema();
     tools.push(ao_capabilities::cognitive::ToolDefinition {
-        name: schema["name"].as_str().unwrap_or("store_provider_key").to_string(),
+        name: schema["name"]
+            .as_str()
+            .unwrap_or("store_provider_key")
+            .to_string(),
         description: schema["description"].as_str().unwrap_or("").to_string(),
         parameters: schema["parameters"].clone(),
     });
@@ -1093,8 +1131,13 @@ async fn execute_tool_call(
             }
 
             // Validate the key first
-            if let Err(e) = ao_capabilities::cognitive::validation::validate_api_key(provider, key).await {
-                return format!("API key validation failed: {}. Please check the key and try again.", e);
+            if let Err(e) =
+                ao_capabilities::cognitive::validation::validate_api_key(provider, key).await
+            {
+                return format!(
+                    "API key validation failed: {}. Please check the key and try again.",
+                    e
+                );
             }
 
             // Store in secrets vault
@@ -1127,14 +1170,20 @@ async fn execute_tool_call(
                 }
             }
 
-            format!("Successfully validated and stored {} API key in secure vault.", provider)
+            format!(
+                "Successfully validated and stored {} API key in secure vault.",
+                provider
+            )
         }
         other => {
             // Check registered skills for matching tool name
-            let _ = app.emit("chat-status", serde_json::json!({
-                "status": "tool_executing",
-                "tool": other,
-            }));
+            let _ = app.emit(
+                "chat-status",
+                serde_json::json!({
+                    "status": "tool_executing",
+                    "tool": other,
+                }),
+            );
 
             // Search skills for a tool with this name
             if let Ok(manifests) = state.registry.list() {
@@ -1142,10 +1191,11 @@ async fn execute_tool_call(
                     if let Ok((skill, _)) = state.registry.get_skill(&manifest.id) {
                         if skill.tools().iter().any(|t| t.name == other) {
                             // Parse arguments into ToolParams
-                            let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
-                                Ok(v) => v,
-                                Err(e) => return format!("Error parsing arguments: {}", e),
-                            };
+                            let args: serde_json::Value =
+                                match serde_json::from_str(&tool_call.arguments) {
+                                    Ok(v) => v,
+                                    Err(e) => return format!("Error parsing arguments: {}", e),
+                                };
 
                             let mut params = ToolParams::new();
                             if let Some(obj) = args.as_object() {
@@ -1159,14 +1209,18 @@ async fn execute_tool_call(
                                     if output.success {
                                         // Extract formatted text for LLM consumption
                                         if let Some(ref data) = output.data {
-                                            if let Some(formatted) = data.get("formatted").and_then(|f| f.as_str()) {
+                                            if let Some(formatted) =
+                                                data.get("formatted").and_then(|f| f.as_str())
+                                            {
                                                 return formatted.to_string();
                                             }
                                             return data.to_string();
                                         }
                                         return "Tool executed successfully".to_string();
                                     } else {
-                                        return output.error.unwrap_or_else(|| "Tool failed".to_string());
+                                        return output
+                                            .error
+                                            .unwrap_or_else(|| "Tool failed".to_string());
                                     }
                                 }
                                 Err(e) => return format!("Tool error: {}", e),
@@ -1242,7 +1296,9 @@ fn parse_text_tool_calls(content: &str) -> (Vec<ao_capabilities::cognitive::Tool
 
     // Pattern 3: Inline JSON that looks like a tool call (with name and arguments fields)
     // This catches cases where the LLM outputs JSON without code blocks
-    let inline_json_re = Regex::new(r#"\{[^{}]*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{[^{}]*\}[^{}]*\}"#).unwrap();
+    let inline_json_re =
+        Regex::new(r#"\{[^{}]*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{[^{}]*\}[^{}]*\}"#)
+            .unwrap();
     for mat in inline_json_re.find_iter(content) {
         let json_str = mat.as_str();
         if let Some(mut tc) = try_parse_tool(json_str) {
@@ -1263,15 +1319,18 @@ fn parse_text_tool_calls(content: &str) -> (Vec<ao_capabilities::cognitive::Tool
 }
 
 #[tauri::command]
-async fn chat(app: tauri::AppHandle, state: tauri::State<'_, AppState>, message: String, target: Option<String>) -> Result<String, String> {
+async fn chat(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    message: String,
+    target: Option<String>,
+) -> Result<String, String> {
     // Build system prompt and gather config before async boundary
     let (store, router, system_prompt) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
         let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
-        let prompt = ao_core::system_prompt::build_system_prompt(
-            &config.docs_dir,
-            &config.agent_name,
-        );
+        let prompt =
+            ao_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
         drop(config);
         let router = state.router.read().map_err(|e| e.to_string())?.clone();
         (store, router, prompt)
@@ -1288,7 +1347,10 @@ async fn chat(app: tauri::AppHandle, state: tauri::State<'_, AppState>, message:
 
     // First request — route based on target
     let response = if target_mode == "ID" {
-        router.id_only(messages.clone()).await.map_err(|e| e.to_string())?
+        router
+            .id_only(messages.clone())
+            .await
+            .map_err(|e| e.to_string())?
     } else {
         router
             .route_with_tools(messages.clone(), tools.clone())
@@ -1314,7 +1376,9 @@ async fn chat(app: tauri::AppHandle, state: tauri::State<'_, AppState>, message:
             });
 
             for (tc, result) in &tool_results {
-                messages.push(ao_capabilities::cognitive::Message::tool_result(&tc.id, result));
+                messages.push(ao_capabilities::cognitive::Message::tool_result(
+                    &tc.id, result,
+                ));
             }
 
             // Send follow-up for final natural-language response
@@ -1339,7 +1403,10 @@ async fn chat(app: tauri::AppHandle, state: tauri::State<'_, AppState>, message:
             }
 
             // Build follow-up with tool results for final response
-            messages.push(ao_capabilities::cognitive::Message::new("assistant", &cleaned_content));
+            messages.push(ao_capabilities::cognitive::Message::new(
+                "assistant",
+                &cleaned_content,
+            ));
 
             // Add tool results as a system message so the LLM knows what happened
             let results_summary: String = tool_results
@@ -1347,7 +1414,10 @@ async fn chat(app: tauri::AppHandle, state: tauri::State<'_, AppState>, message:
                 .map(|(name, result)| format!("[Tool '{}' result]: {}", name, result))
                 .collect::<Vec<_>>()
                 .join("\n");
-            messages.push(ao_capabilities::cognitive::Message::new("system", &results_summary));
+            messages.push(ao_capabilities::cognitive::Message::new(
+                "system",
+                &results_summary,
+            ));
 
             // Get follow-up response from Id
             let follow_up = router.id_only(messages).await.map_err(|e| e.to_string())?;
@@ -1427,12 +1497,15 @@ async fn set_local_llm_during_birth(
     let (api_key, mode) = {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         config.local_llm_base_url = Some(normalized_url.clone());
-        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
         (config.openai_api_key.clone(), config.routing_mode)
     };
 
     // Rebuild router with auto-detected model name (important for LM Studio)
-    let new_router = IdEgoRouter::new_auto_detect(Some(normalized_url.clone()), api_key, mode).await;
+    let new_router =
+        IdEgoRouter::new_auto_detect(Some(normalized_url.clone()), api_key, mode).await;
     {
         let mut router = state.router.write().map_err(|e| e.to_string())?;
         *router = new_router;
@@ -1480,7 +1553,11 @@ async fn birth_chat(
     // Get stored providers for context-aware prompt
     let stored_providers: Vec<String> = {
         let vault = state.secrets.lock().map_err(|e| e.to_string())?;
-        vault.list_providers().iter().map(|s| s.to_string()).collect()
+        vault
+            .list_providers()
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
     };
 
     // Get stage and system prompt with context
@@ -1488,8 +1565,9 @@ async fn birth_chat(
         let birth = state.birth.read().map_err(|e| e.to_string())?;
         let b = birth.as_ref().ok_or("Birth not started")?;
         let stage = b.current_stage();
-        let prompt = ao_birth::prompts::system_prompt_for_stage_with_context(stage, &stored_providers)
-            .unwrap_or_else(|| "You are AO, a newborn AI agent.".to_string());
+        let prompt =
+            ao_birth::prompts::system_prompt_for_stage_with_context(stage, &stored_providers)
+                .unwrap_or_else(|| "You are AO, a newborn AI agent.".to_string());
         (stage, prompt)
     };
 
@@ -1504,7 +1582,10 @@ async fn birth_chat(
     let mut messages = {
         let birth = state.birth.read().map_err(|e| e.to_string())?;
         let b = birth.as_ref().ok_or("Birth not started")?;
-        let mut msgs = vec![ao_capabilities::cognitive::Message::new("system", &system_prompt)];
+        let mut msgs = vec![ao_capabilities::cognitive::Message::new(
+            "system",
+            &system_prompt,
+        )];
         for (role, content) in b.get_conversation() {
             msgs.push(ao_capabilities::cognitive::Message::new(role, content));
         }
@@ -1513,7 +1594,10 @@ async fn birth_chat(
 
     // Route through local LLM only (Id)
     let router = state.router.read().map_err(|e| e.to_string())?.clone();
-    let response = router.id_only(messages.clone()).await.map_err(|e| e.to_string())?;
+    let response = router
+        .id_only(messages.clone())
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Check for text-based tool calls (for local LLMs without native function calling)
     let (text_tool_calls, cleaned_content) = parse_text_tool_calls(&response.content);
@@ -1527,7 +1611,10 @@ async fn birth_chat(
         }
 
         // Build follow-up with tool results
-        messages.push(ao_capabilities::cognitive::Message::new("assistant", &cleaned_content));
+        messages.push(ao_capabilities::cognitive::Message::new(
+            "assistant",
+            &cleaned_content,
+        ));
 
         // Add tool results as a system message
         let results_summary: String = tool_results
@@ -1535,7 +1622,10 @@ async fn birth_chat(
             .map(|(name, result)| format!("[Tool '{}' executed]: {}", name, result))
             .collect::<Vec<_>>()
             .join("\n");
-        messages.push(ao_capabilities::cognitive::Message::new("system", &results_summary));
+        messages.push(ao_capabilities::cognitive::Message::new(
+            "system",
+            &results_summary,
+        ));
 
         // Get follow-up response from Id to acknowledge the tool execution
         let follow_up = router.id_only(messages).await.map_err(|e| e.to_string())?;
@@ -1589,7 +1679,9 @@ async fn store_provider_key(
 
     // Validate if requested
     if should_validate {
-        if let Err(e) = ao_capabilities::cognitive::validation::validate_api_key(&provider, &key).await {
+        if let Err(e) =
+            ao_capabilities::cognitive::validation::validate_api_key(&provider, &key).await
+        {
             return Ok(StoreKeyResult {
                 success: false,
                 provider,
@@ -1610,7 +1702,9 @@ async fn store_provider_key(
     if provider == "openai" {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         config.openai_api_key = Some(key.clone());
-        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
 
         let new_router = IdEgoRouter::new(
             config.local_llm_base_url.clone(),
@@ -1634,7 +1728,11 @@ async fn store_provider_key(
 #[tauri::command]
 fn get_stored_providers(state: tauri::State<AppState>) -> Result<Vec<String>, String> {
     let vault = state.secrets.lock().map_err(|e| e.to_string())?;
-    Ok(vault.list_providers().iter().map(|s| s.to_string()).collect())
+    Ok(vault
+        .list_providers()
+        .iter()
+        .map(|s| s.to_string())
+        .collect())
 }
 
 /// Advance from Connectivity to Genesis.
@@ -1669,7 +1767,11 @@ async fn extract_genesis_identity(
     };
 
     if conversation.is_empty() {
-        return Ok(GenesisIdentity { name: None, purpose: None, personality: None });
+        return Ok(GenesisIdentity {
+            name: None,
+            purpose: None,
+            personality: None,
+        });
     }
 
     // Build conversation transcript for the extraction prompt
@@ -1696,9 +1798,10 @@ async fn extract_genesis_identity(
         conv_text
     );
 
-    let messages = vec![
-        ao_capabilities::cognitive::Message::new("user", &extraction_prompt),
-    ];
+    let messages = vec![ao_capabilities::cognitive::Message::new(
+        "user",
+        &extraction_prompt,
+    )];
 
     let router = state.router.read().map_err(|e| e.to_string())?.clone();
     let response = router.id_only(messages).await.map_err(|e| e.to_string())?;
@@ -1708,7 +1811,11 @@ async fn extract_genesis_identity(
 }
 
 fn parse_identity_json(text: &str) -> GenesisIdentity {
-    let empty = GenesisIdentity { name: None, purpose: None, personality: None };
+    let empty = GenesisIdentity {
+        name: None,
+        purpose: None,
+        personality: None,
+    };
 
     // Try parsing the whole text as JSON
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(text.trim()) {
@@ -1734,7 +1841,10 @@ fn value_to_identity(v: &serde_json::Value) -> GenesisIdentity {
     GenesisIdentity {
         name: v.get("name").and_then(|v| v.as_str()).map(String::from),
         purpose: v.get("purpose").and_then(|v| v.as_str()).map(String::from),
-        personality: v.get("personality").and_then(|v| v.as_str()).map(String::from),
+        personality: v
+            .get("personality")
+            .and_then(|v| v.as_str())
+            .map(String::from),
     }
 }
 
@@ -1754,7 +1864,9 @@ fn crystallize_soul(
     {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         config.agent_name = Some(name.clone());
-        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
     }
 
     // Write to disk and advance stage
@@ -1781,10 +1893,14 @@ fn complete_emergence(state: tauri::State<AppState>) -> Result<(), String> {
             ego_provider: if config.openai_api_key.is_some() {
                 Some("openai".to_string())
             } else {
-                vault.get_secret("anthropic").map(|_| "anthropic".to_string())
+                vault
+                    .get_secret("anthropic")
+                    .map(|_| "anthropic".to_string())
                     .or_else(|| vault.get_secret("xai").map(|_| "xai".to_string()))
             },
-            ego_api_key: config.openai_api_key.clone()
+            ego_api_key: config
+                .openai_api_key
+                .clone()
                 .or_else(|| vault.get_secret("anthropic").map(|s| s.to_string()))
                 .or_else(|| vault.get_secret("xai").map(|s| s.to_string())),
             superego_provider: None, // Follow-up: 3-way routing
@@ -1806,7 +1922,9 @@ fn complete_emergence(state: tauri::State<AppState>) -> Result<(), String> {
         config.birth_complete = true;
         config.birth_timestamp = Some(Utc::now().to_rfc3339());
         config.clear_birth_stage();
-        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
     }
 
     Ok(())

@@ -47,7 +47,10 @@ impl LlmProvider for CandleProvider {
             } else {
                 "ROUTINE".into()
             };
-            return Ok(CompletionResponse { content, tool_calls: None });
+            return Ok(CompletionResponse {
+                content,
+                tool_calls: None,
+            });
         }
 
         // For actual chat requests - return error instead of echo

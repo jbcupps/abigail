@@ -9,7 +9,11 @@ pub trait McpClientCapability: Send + Sync {
     async fn list_tools(&self) -> SkillResult<Vec<McpTool>> {
         Ok(vec![])
     }
-    async fn call_tool(&self, _tool: &str, _args: serde_json::Value) -> SkillResult<serde_json::Value> {
+    async fn call_tool(
+        &self,
+        _tool: &str,
+        _args: serde_json::Value,
+    ) -> SkillResult<serde_json::Value> {
         Err(crate::SkillError::ToolFailed("stub".into()))
     }
 }

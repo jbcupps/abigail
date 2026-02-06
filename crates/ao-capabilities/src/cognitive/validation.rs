@@ -104,7 +104,10 @@ async fn validate_tavily(key: &str) -> anyhow::Result<()> {
     let response = client
         .post("https://api.tavily.com/search")
         .header("content-type", "application/json")
-        .body(format!(r#"{{"api_key":"{}","query":"test","max_results":1}}"#, key))
+        .body(format!(
+            r#"{{"api_key":"{}","query":"test","max_results":1}}"#,
+            key
+        ))
         .send()
         .await?;
 

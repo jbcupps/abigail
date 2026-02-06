@@ -30,8 +30,7 @@ pub fn dpapi_encrypt(data: &[u8]) -> Result<Vec<u8>> {
         )
         .map_err(|e| CoreError::Crypto(format!("DPAPI encrypt failed: {}", e)))?;
 
-        let result =
-            std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+        let result = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
         let _ = LocalFree(HLOCAL(output.pbData as *mut _));
 
         Ok(result)
@@ -63,8 +62,7 @@ pub fn dpapi_decrypt(data: &[u8]) -> Result<Vec<u8>> {
         )
         .map_err(|e| CoreError::Crypto(format!("DPAPI decrypt failed: {}", e)))?;
 
-        let result =
-            std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+        let result = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
         let _ = LocalFree(HLOCAL(output.pbData as *mut _));
 
         Ok(result)

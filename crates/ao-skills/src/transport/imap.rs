@@ -37,9 +37,7 @@ impl ImapClient {
         let addr = format!("{}:{}", self.host, self.port);
         let stream = TcpStream::connect(&addr).await?;
         let stream = stream.compat();
-        let tls = TlsConnector::new()
-            .connect(&self.host, stream)
-            .await?;
+        let tls = TlsConnector::new().connect(&self.host, stream).await?;
         let mut client = async_imap::Client::new(tls);
         let _ = client.read_response().await;
         let session = client

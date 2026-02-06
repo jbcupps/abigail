@@ -2,7 +2,7 @@ use crate::document::DocumentTier;
 use crate::dpapi::{dpapi_decrypt, dpapi_encrypt};
 use crate::error::{CoreError, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use ed25519_dalek::{Signer, SigningKey, Signature, VerifyingKey, Verifier as DalekVerifier};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier as DalekVerifier, VerifyingKey};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -70,8 +70,8 @@ impl Keyring {
         }
 
         // Fall back to v1 format (legacy migration)
-        let stored: StoredKeysV1 = serde_json::from_slice(&decrypted)
-            .map_err(|e| CoreError::Keyring(e.to_string()))?;
+        let stored: StoredKeysV1 =
+            serde_json::from_slice(&decrypted).map_err(|e| CoreError::Keyring(e.to_string()))?;
 
         let mentor_slice: [u8; 32] = stored
             .mentor_secret
@@ -110,7 +110,6 @@ impl Keyring {
     pub fn verify_signature(pubkey: &VerifyingKey, data: &[u8], signature: &Signature) -> bool {
         pubkey.verify(data, signature).is_ok()
     }
-
 }
 
 impl Keyring {
@@ -151,26 +150,26 @@ pub struct SignatureMetadata {
 }
 
 /// Generate an external Ed25519 signing keypair for constitutional documents.
-/// 
+///
 /// This function:
 /// 1. Generates a new Ed25519 keypair
 /// 2. Saves the PUBLIC key to `{data_dir}/external_pubkey.bin`
 /// 3. Returns the PRIVATE key as base64 (user must save this themselves)
-/// 
+///
 /// The private key is NEVER stored by AO. The user is responsible for
 /// keeping it secure. Without it, they cannot re-sign documents if needed.
 pub fn generate_external_keypair(data_dir: &Path) -> Result<ExternalKeypairResult> {
     let signing_key = SigningKey::generate(&mut OsRng);
     let verifying_key = signing_key.verifying_key();
-    
+
     // Save public key to data directory
     std::fs::create_dir_all(data_dir)?;
     let pubkey_path = data_dir.join("external_pubkey.bin");
     std::fs::write(&pubkey_path, verifying_key.to_bytes())?;
-    
+
     // Return private key as base64 for user to save
     let private_key_base64 = BASE64.encode(signing_key.to_bytes());
-    
+
     Ok(ExternalKeypairResult {
         private_key_base64,
         public_key_path: pubkey_path,
@@ -178,7 +177,7 @@ pub fn generate_external_keypair(data_dir: &Path) -> Result<ExternalKeypairResul
 }
 
 /// Sign a constitutional document with a signing key.
-/// 
+///
 /// Creates a signature over: `{doc_name}|{tier:?}|{content}`
 /// This matches the format used by the verification system.
 pub fn sign_document(
@@ -189,7 +188,7 @@ pub fn sign_document(
 ) -> SignatureMetadata {
     let signable = format!("{}|{:?}|{}", doc_name, tier, content);
     let signature = signing_key.sign(signable.as_bytes());
-    
+
     SignatureMetadata {
         signature: BASE64.encode(signature.to_bytes()),
         tier,
@@ -198,15 +197,12 @@ pub fn sign_document(
 }
 
 /// Sign all constitutional documents in a directory using a signing key.
-/// 
+///
 /// Signs: soul.md, ethics.md, instincts.md
 /// Creates corresponding .sig files with JSON metadata.
-pub fn sign_constitutional_documents(
-    signing_key: &SigningKey,
-    docs_dir: &Path,
-) -> Result<()> {
+pub fn sign_constitutional_documents(signing_key: &SigningKey, docs_dir: &Path) -> Result<()> {
     let docs = ["soul.md", "ethics.md", "instincts.md"];
-    
+
     for doc_name in docs {
         let doc_path = docs_dir.join(doc_name);
         if !doc_path.exists() {
@@ -215,26 +211,34 @@ pub fn sign_constitutional_documents(
                 format!("Constitutional document not found: {}", doc_path.display()),
             )));
         }
-        
+
         let content = std::fs::read_to_string(&doc_path)?;
-        let sig_meta = sign_document(signing_key, doc_name, &content, DocumentTier::Constitutional);
-        
+        let sig_meta = sign_document(
+            signing_key,
+            doc_name,
+            &content,
+            DocumentTier::Constitutional,
+        );
+
         let sig_path = docs_dir.join(format!("{}.sig", doc_name));
         let json = serde_json::to_string_pretty(&sig_meta)?;
         std::fs::write(&sig_path, json)?;
     }
-    
+
     Ok(())
 }
 
 /// Parse a base64-encoded private key back into a SigningKey.
 /// Used when the user provides their saved private key for re-signing.
 pub fn parse_private_key(base64_key: &str) -> Result<SigningKey> {
-    let bytes = BASE64.decode(base64_key)
+    let bytes = BASE64
+        .decode(base64_key)
         .map_err(|e| CoreError::Crypto(format!("Invalid base64 private key: {}", e)))?;
-    
-    let key_bytes: [u8; 32] = bytes.as_slice().try_into()
+
+    let key_bytes: [u8; 32] = bytes
+        .as_slice()
+        .try_into()
         .map_err(|_| CoreError::Crypto("Private key must be exactly 32 bytes".into()))?;
-    
+
     Ok(SigningKey::from_bytes(&key_bytes))
 }

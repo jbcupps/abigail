@@ -61,10 +61,7 @@ impl SkillRegistry {
             .skills
             .write()
             .map_err(|e| SkillError::InitFailed(e.to_string()))?;
-        skills.insert(
-            skill_id,
-            RegisteredSkill { skill, manifest },
-        );
+        skills.insert(skill_id, RegisteredSkill { skill, manifest });
         Ok(())
     }
 
@@ -78,7 +75,10 @@ impl SkillRegistry {
     }
 
     pub fn list(&self) -> SkillResult<Vec<SkillManifest>> {
-        let skills = self.skills.read().map_err(|e| SkillError::InitFailed(e.to_string()))?;
+        let skills = self
+            .skills
+            .read()
+            .map_err(|e| SkillError::InitFailed(e.to_string()))?;
         Ok(skills.values().map(|r| r.manifest.clone()).collect())
     }
 
@@ -101,8 +101,13 @@ impl SkillRegistry {
 
     /// Get a clone of the skill Arc and its manifest for execution. Caller can then call execute_tool without holding the lock.
     pub fn get_skill(&self, skill_id: &SkillId) -> SkillResult<(Arc<dyn Skill>, SkillManifest)> {
-        let skills = self.skills.read().map_err(|e| SkillError::InitFailed(e.to_string()))?;
-        let reg = skills.get(skill_id).ok_or_else(|| SkillError::NotFound(skill_id.clone()))?;
+        let skills = self
+            .skills
+            .read()
+            .map_err(|e| SkillError::InitFailed(e.to_string()))?;
+        let reg = skills
+            .get(skill_id)
+            .ok_or_else(|| SkillError::NotFound(skill_id.clone()))?;
         Ok((reg.skill.clone(), reg.manifest.clone()))
     }
 

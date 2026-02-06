@@ -29,7 +29,7 @@ impl Default for ResourceLimits {
     fn default() -> Self {
         Self {
             max_memory_bytes: 256 * 1024 * 1024, // 256MB
-            max_cpu_ms: 30_000,                   // 30s
+            max_cpu_ms: 30_000,                  // 30s
             max_concurrency: 10,
             network_bandwidth: None,
             storage_quota: 100 * 1024 * 1024, // 100MB
@@ -66,7 +66,11 @@ pub struct SkillSandbox {
 }
 
 impl SkillSandbox {
-    pub fn new(skill_id: SkillId, granted_permissions: Vec<Permission>, resource_limits: ResourceLimits) -> Self {
+    pub fn new(
+        skill_id: SkillId,
+        granted_permissions: Vec<Permission>,
+        resource_limits: ResourceLimits,
+    ) -> Self {
         let granted_permissions = granted_permissions.into_iter().collect();
         Self {
             skill_id,
@@ -113,9 +117,16 @@ impl SkillSandbox {
             AuditActionKind::FileRead { path } => {
                 for p in &self.granted_permissions {
                     match p {
-                        Permission::FileSystem(crate::manifest::FileSystemPermission::Full) => return true,
-                        Permission::FileSystem(crate::manifest::FileSystemPermission::Read(allowed)) => {
-                            if allowed.iter().any(|a| path == a || path.starts_with(&format!("{}/", a))) {
+                        Permission::FileSystem(crate::manifest::FileSystemPermission::Full) => {
+                            return true
+                        }
+                        Permission::FileSystem(crate::manifest::FileSystemPermission::Read(
+                            allowed,
+                        )) => {
+                            if allowed
+                                .iter()
+                                .any(|a| path == a || path.starts_with(&format!("{}/", a)))
+                            {
                                 return true;
                             }
                         }
@@ -127,9 +138,16 @@ impl SkillSandbox {
             AuditActionKind::FileWrite { path } => {
                 for p in &self.granted_permissions {
                     match p {
-                        Permission::FileSystem(crate::manifest::FileSystemPermission::Full) => return true,
-                        Permission::FileSystem(crate::manifest::FileSystemPermission::Write(allowed)) => {
-                            if allowed.iter().any(|a| path == a || path.starts_with(&format!("{}/", a))) {
+                        Permission::FileSystem(crate::manifest::FileSystemPermission::Full) => {
+                            return true
+                        }
+                        Permission::FileSystem(crate::manifest::FileSystemPermission::Write(
+                            allowed,
+                        )) => {
+                            if allowed
+                                .iter()
+                                .any(|a| path == a || path.starts_with(&format!("{}/", a)))
+                            {
                                 return true;
                             }
                         }
@@ -142,7 +160,9 @@ impl SkillSandbox {
                 for p in &self.granted_permissions {
                     match p {
                         Permission::Memory(crate::manifest::MemoryPermission::ReadOnly)
-                        | Permission::Memory(crate::manifest::MemoryPermission::ReadWrite) => return true,
+                        | Permission::Memory(crate::manifest::MemoryPermission::ReadWrite) => {
+                            return true
+                        }
                         Permission::Memory(crate::manifest::MemoryPermission::Namespace(ns)) => {
                             if namespace.as_ref().map(|n| n == ns).unwrap_or(false) {
                                 return true;

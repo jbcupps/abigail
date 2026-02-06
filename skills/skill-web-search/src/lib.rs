@@ -73,7 +73,9 @@ impl Skill for WebSearchSkill {
     fn tools(&self) -> Vec<ToolDescriptor> {
         vec![ToolDescriptor {
             name: "web_search".to_string(),
-            description: "Search the web for current information. Returns an answer and numbered sources.".to_string(),
+            description:
+                "Search the web for current information. Returns an answer and numbered sources."
+                    .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -100,9 +102,9 @@ impl Skill for WebSearchSkill {
                 network_bound: true,
                 token_cost: None,
             },
-            required_permissions: vec![Permission::Network(NetworkPermission::Domains(
-                vec!["api.tavily.com".to_string()],
-            ))],
+            required_permissions: vec![Permission::Network(NetworkPermission::Domains(vec![
+                "api.tavily.com".to_string(),
+            ]))],
             autonomous: true,
             requires_confirmation: false,
         }]
@@ -122,9 +124,9 @@ impl Skill for WebSearchSkill {
         }
 
         // Extract query
-        let query: String = params
-            .get("query")
-            .ok_or_else(|| SkillError::ToolFailed("Missing required parameter: query".to_string()))?;
+        let query: String = params.get("query").ok_or_else(|| {
+            SkillError::ToolFailed("Missing required parameter: query".to_string())
+        })?;
 
         let max_results: u32 = params.get("max_results").unwrap_or(5);
 
@@ -149,7 +151,8 @@ impl Skill for WebSearchSkill {
                 .map(|s| s.to_string())
                 .ok_or_else(|| {
                     SkillError::MissingSecret(
-                        "Tavily API key not configured. Add it in The Forge > API Keys.".to_string(),
+                        "Tavily API key not configured. Add it in The Forge > API Keys."
+                            .to_string(),
                     )
                 })?
         };
@@ -228,7 +231,10 @@ mod tests {
             user_id: None,
         };
 
-        let result = skill.execute_tool("web_search", params, &ctx).await.unwrap();
+        let result = skill
+            .execute_tool("web_search", params, &ctx)
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.error.unwrap().contains("Search blocked"));
 

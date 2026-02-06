@@ -1,8 +1,8 @@
 //! Id/Ego router: classifies with Id (local), routes COMPLEX to Ego (cloud) when configured.
 
 use ao_capabilities::cognitive::{
-    stub_heartbeat, CandleProvider, CompletionRequest, CompletionResponse, LocalHttpProvider,
-    LlmProvider, Message, OpenAiProvider, ToolDefinition,
+    stub_heartbeat, CandleProvider, CompletionRequest, CompletionResponse, LlmProvider,
+    LocalHttpProvider, Message, OpenAiProvider, ToolDefinition,
 };
 use std::sync::Arc;
 
@@ -50,7 +50,10 @@ impl IdEgoRouter {
                     let provider = Arc::new(LocalHttpProvider::with_url(url));
                     (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
                 }
-                None => (Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>, None),
+                None => (
+                    Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>,
+                    None,
+                ),
             };
 
         Self {
@@ -79,7 +82,10 @@ impl IdEgoRouter {
                     let provider = Arc::new(LocalHttpProvider::with_url_auto_model(url).await);
                     (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
                 }
-                None => (Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>, None),
+                None => (
+                    Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>,
+                    None,
+                ),
             };
 
         Self {
@@ -121,7 +127,11 @@ impl IdEgoRouter {
         } else {
             RouteDecision::Routine
         };
-        tracing::info!("Routing decision: {:?} for input (len={})", decision, user_message.len());
+        tracing::info!(
+            "Routing decision: {:?} for input (len={})",
+            decision,
+            user_message.len()
+        );
         Ok(decision)
     }
 
@@ -141,17 +151,26 @@ impl IdEgoRouter {
         let use_ego = matches!(decision, RouteDecision::Complex) && self.ego.is_some();
         if use_ego {
             tracing::info!("Routing to Ego (cloud) - complex request");
-            let request = CompletionRequest { messages, tools: None };
+            let request = CompletionRequest {
+                messages,
+                tools: None,
+            };
             self.ego.as_ref().unwrap().complete(&request).await
         } else {
             tracing::info!("Routing to Id (local) - routine request");
-            let request = CompletionRequest { messages, tools: None };
+            let request = CompletionRequest {
+                messages,
+                tools: None,
+            };
             self.id.complete(&request).await
         }
     }
 
     /// Ego-primary routing: Try Ego first if configured, fall back to Id on failure.
-    async fn route_ego_primary(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
+    async fn route_ego_primary(
+        &self,
+        messages: Vec<Message>,
+    ) -> anyhow::Result<CompletionResponse> {
         // Try Ego first if configured
         if let Some(ego) = &self.ego {
             match ego
@@ -173,7 +192,12 @@ impl IdEgoRouter {
 
         // Fallback to Id (local)
         tracing::info!("Routing to Id (local fallback)");
-        self.id.complete(&CompletionRequest { messages, tools: None }).await
+        self.id
+            .complete(&CompletionRequest {
+                messages,
+                tools: None,
+            })
+            .await
     }
 
     /// Route message with tool definitions attached.

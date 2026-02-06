@@ -17,8 +17,8 @@ pub fn validate_local_llm_url(url_str: &str) -> Result<String> {
         return Err(CoreError::Config("Local LLM URL cannot be empty".into()));
     }
 
-    let url = Url::parse(s)
-        .map_err(|e| CoreError::Config(format!("Invalid local LLM URL: {}", e)))?;
+    let url =
+        Url::parse(s).map_err(|e| CoreError::Config(format!("Invalid local LLM URL: {}", e)))?;
 
     if url.cannot_be_a_base() {
         return Err(CoreError::Config(
@@ -39,9 +39,7 @@ pub fn validate_local_llm_url(url_str: &str) -> Result<String> {
         .ok_or_else(|| CoreError::Config("Local LLM URL must have a host".into()))?;
 
     let allowed = match url.host() {
-        Some(url::Host::Domain(d)) => ALLOWED_HOSTS
-            .iter()
-            .any(|h| d.eq_ignore_ascii_case(h)),
+        Some(url::Host::Domain(d)) => ALLOWED_HOSTS.iter().any(|h| d.eq_ignore_ascii_case(h)),
         Some(url::Host::Ipv4(ip)) => {
             let octets = ip.octets();
             octets[0] == 127 // 127.0.0.0/8 loopback

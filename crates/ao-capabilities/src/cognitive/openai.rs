@@ -1,13 +1,10 @@
-use crate::cognitive::provider::{
-    CompletionRequest, CompletionResponse, LlmProvider, ToolCall,
-};
+use crate::cognitive::provider::{CompletionRequest, CompletionResponse, LlmProvider, ToolCall};
 use async_openai::config::OpenAIConfig;
 use async_openai::types::{
     ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage,
     ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage,
-    ChatCompletionRequestToolMessage, ChatCompletionRequestUserMessage,
-    ChatCompletionTool, ChatCompletionToolType, CreateChatCompletionRequest, FunctionCall,
-    FunctionObject,
+    ChatCompletionRequestToolMessage, ChatCompletionRequestUserMessage, ChatCompletionTool,
+    ChatCompletionToolType, CreateChatCompletionRequest, FunctionCall, FunctionObject,
 };
 use async_trait::async_trait;
 
@@ -132,7 +129,8 @@ mod tests {
         }
         let key = std::env::var("OPENAI_API_KEY").unwrap();
         let provider = OpenAiProvider::new(Some(key));
-        let request = CompletionRequest::simple(vec![Message::new("user", "Say hello in one word.")]);
+        let request =
+            CompletionRequest::simple(vec![Message::new("user", "Say hello in one word.")]);
         let response = provider.complete(&request).await.unwrap();
         assert!(!response.content.is_empty());
     }

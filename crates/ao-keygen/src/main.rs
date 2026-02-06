@@ -1,8 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use ao_core::{
-    generate_external_keypair, parse_private_key, sign_constitutional_documents, AppConfig, Keyring,
-    templates::CONSTITUTIONAL_DOCS,
+    generate_external_keypair, parse_private_key, sign_constitutional_documents,
+    templates::CONSTITUTIONAL_DOCS, AppConfig, Keyring,
 };
 use eframe::egui;
 use std::path::PathBuf;
@@ -112,8 +112,8 @@ fn run_setup(data_dir: &PathBuf, docs_dir: &PathBuf) -> Result<SetupResult, Stri
     // 7. Write config.json with external_pubkey_path set (birth_complete stays false)
     let config_path = data_dir.join("config.json");
     let config = if config_path.exists() {
-        let mut c = AppConfig::load(&config_path)
-            .map_err(|e| format!("Failed to load config: {}", e))?;
+        let mut c =
+            AppConfig::load(&config_path).map_err(|e| format!("Failed to load config: {}", e))?;
         c.external_pubkey_path = Some(keypair_result.public_key_path.clone());
         c
     } else {
@@ -235,7 +235,11 @@ impl eframe::App for KeygenApp {
 
             // Copy + Save buttons
             ui.horizontal(|ui| {
-                let copy_label = if self.copied { "Copied!" } else { "Copy to Clipboard" };
+                let copy_label = if self.copied {
+                    "Copied!"
+                } else {
+                    "Copy to Clipboard"
+                };
                 if ui.button(copy_label).clicked() {
                     ui.output_mut(|o| o.copied_text = private_key.clone());
                     self.copied = true;

@@ -103,9 +103,8 @@ impl MemoryStore {
 
     pub fn open_with_config(config: &AppConfig) -> Result<Self> {
         if let Some(parent) = config.db_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                rusqlite::Error::ToSqlConversionFailure(Box::new(e))
-            })?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         }
         Self::open(&config.db_path)
     }
@@ -117,11 +116,9 @@ impl MemoryStore {
                 e.to_string(),
             )))
         })?;
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM birth WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )?;
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM birth WHERE id = 1", [], |row| {
+            row.get(0)
+        })?;
         Ok(count > 0)
     }
 
@@ -137,7 +134,10 @@ impl MemoryStore {
         })?;
         conn.execute(
             "INSERT INTO birth (id, content, created_at) VALUES (1, ?1, ?2)",
-            [memory.content.as_str(), memory.created_at.to_rfc3339().as_str()],
+            [
+                memory.content.as_str(),
+                memory.created_at.to_rfc3339().as_str(),
+            ],
         )?;
         Ok(())
     }
@@ -169,11 +169,7 @@ impl MemoryStore {
                 e.to_string(),
             )))
         })?;
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM memories",
-            [],
-            |row| row.get(0),
-        )?;
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))?;
         Ok(count as u64)
     }
 
@@ -222,9 +218,11 @@ impl MemoryStore {
                 "ephemeral" => MemoryWeight::Ephemeral,
                 "distilled" => MemoryWeight::Distilled,
                 "crystallized" => MemoryWeight::Crystallized,
-                w => return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                    StoreError::InvalidData(format!("unknown weight: {}", w)),
-                ))),
+                w => {
+                    return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+                        StoreError::InvalidData(format!("unknown weight: {}", w)),
+                    )))
+                }
             };
             Ok(Memory {
                 id: row.get(0)?,
@@ -286,9 +284,15 @@ mod tests {
     fn test_insert_multiple_weights() {
         let store = MemoryStore::open_in_memory().unwrap();
 
-        store.insert_memory(&Memory::ephemeral("ephemeral msg".into())).unwrap();
-        store.insert_memory(&Memory::distilled("distilled msg".into())).unwrap();
-        store.insert_memory(&Memory::crystallized("crystallized msg".into())).unwrap();
+        store
+            .insert_memory(&Memory::ephemeral("ephemeral msg".into()))
+            .unwrap();
+        store
+            .insert_memory(&Memory::distilled("distilled msg".into()))
+            .unwrap();
+        store
+            .insert_memory(&Memory::crystallized("crystallized msg".into()))
+            .unwrap();
 
         let recent = store.recent_memories(10).unwrap();
         assert_eq!(recent.len(), 3);
@@ -305,12 +309,18 @@ mod tests {
         let store = MemoryStore::open_in_memory().unwrap();
 
         // Insert in order — recent_memories should return most recent first
-        store.insert_memory(&Memory::ephemeral("first".into())).unwrap();
+        store
+            .insert_memory(&Memory::ephemeral("first".into()))
+            .unwrap();
         // Small delay to ensure different timestamps
         std::thread::sleep(std::time::Duration::from_millis(10));
-        store.insert_memory(&Memory::ephemeral("second".into())).unwrap();
+        store
+            .insert_memory(&Memory::ephemeral("second".into()))
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
-        store.insert_memory(&Memory::ephemeral("third".into())).unwrap();
+        store
+            .insert_memory(&Memory::ephemeral("third".into()))
+            .unwrap();
 
         let recent = store.recent_memories(10).unwrap();
         assert_eq!(recent.len(), 3);
@@ -324,7 +334,9 @@ mod tests {
         let store = MemoryStore::open_in_memory().unwrap();
 
         for i in 0..10 {
-            store.insert_memory(&Memory::ephemeral(format!("msg {}", i))).unwrap();
+            store
+                .insert_memory(&Memory::ephemeral(format!("msg {}", i)))
+                .unwrap();
         }
 
         let recent = store.recent_memories(3).unwrap();
@@ -364,8 +376,12 @@ mod tests {
         // Open, insert, close
         {
             let store = MemoryStore::open(&db_path).unwrap();
-            store.insert_memory(&Memory::ephemeral("persisted msg".into())).unwrap();
-            store.record_birth(&Memory::crystallized("born".into())).unwrap();
+            store
+                .insert_memory(&Memory::ephemeral("persisted msg".into()))
+                .unwrap();
+            store
+                .record_birth(&Memory::crystallized("born".into()))
+                .unwrap();
         }
 
         // Reopen and verify persistence
@@ -385,11 +401,17 @@ mod tests {
         let store = MemoryStore::open_in_memory().unwrap();
         assert_eq!(store.count_memories().unwrap(), 0);
 
-        store.insert_memory(&Memory::ephemeral("msg1".into())).unwrap();
+        store
+            .insert_memory(&Memory::ephemeral("msg1".into()))
+            .unwrap();
         assert_eq!(store.count_memories().unwrap(), 1);
 
-        store.insert_memory(&Memory::ephemeral("msg2".into())).unwrap();
-        store.insert_memory(&Memory::distilled("msg3".into())).unwrap();
+        store
+            .insert_memory(&Memory::ephemeral("msg2".into()))
+            .unwrap();
+        store
+            .insert_memory(&Memory::distilled("msg3".into()))
+            .unwrap();
         assert_eq!(store.count_memories().unwrap(), 3);
     }
 
@@ -398,9 +420,15 @@ mod tests {
         let store = MemoryStore::open_in_memory().unwrap();
 
         // Add some memories and a birth record
-        store.insert_memory(&Memory::ephemeral("msg1".into())).unwrap();
-        store.insert_memory(&Memory::ephemeral("msg2".into())).unwrap();
-        store.record_birth(&Memory::crystallized("born".into())).unwrap();
+        store
+            .insert_memory(&Memory::ephemeral("msg1".into()))
+            .unwrap();
+        store
+            .insert_memory(&Memory::ephemeral("msg2".into()))
+            .unwrap();
+        store
+            .record_birth(&Memory::crystallized("born".into()))
+            .unwrap();
 
         assert_eq!(store.count_memories().unwrap(), 2);
         assert!(store.has_birth().unwrap());
@@ -420,7 +448,9 @@ mod tests {
 
         // Insert and delete some data
         for i in 0..10 {
-            store.insert_memory(&Memory::ephemeral(format!("msg {}", i))).unwrap();
+            store
+                .insert_memory(&Memory::ephemeral(format!("msg {}", i)))
+                .unwrap();
         }
         store.clear_memories().unwrap();
 

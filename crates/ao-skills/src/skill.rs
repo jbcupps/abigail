@@ -34,7 +34,8 @@ pub struct SkillConfig {
     pub permissions: Vec<crate::manifest::Permission>,
     /// Optional event bus sender so the skill can publish events (e.g. email_received).
     #[serde(skip, default)]
-    pub event_sender: Option<std::sync::Arc<tokio::sync::broadcast::Sender<crate::channel::SkillEvent>>>,
+    pub event_sender:
+        Option<std::sync::Arc<tokio::sync::broadcast::Sender<crate::channel::SkillEvent>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

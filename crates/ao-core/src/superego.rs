@@ -9,11 +9,17 @@ pub struct SuperegoVerdict {
 
 impl SuperegoVerdict {
     fn allow() -> Self {
-        Self { allowed: true, reason: None }
+        Self {
+            allowed: true,
+            reason: None,
+        }
     }
 
     fn deny(reason: impl Into<String>) -> Self {
-        Self { allowed: false, reason: Some(reason.into()) }
+        Self {
+            allowed: false,
+            reason: Some(reason.into()),
+        }
     }
 }
 
@@ -48,7 +54,10 @@ pub fn check_search_query(query: &str) -> SuperegoVerdict {
     }
 
     // Pattern: SSN / social security
-    if lower.contains("social security number") || lower.contains("ssn of") || lower.contains("ssn for") {
+    if lower.contains("social security number")
+        || lower.contains("ssn of")
+        || lower.contains("ssn for")
+    {
         return SuperegoVerdict::deny("Query seeks Social Security information");
     }
 
@@ -63,7 +72,8 @@ pub fn check_search_query(query: &str) -> SuperegoVerdict {
     }
 
     // Pattern: real name / identity reveal
-    if lower.contains("real name of") && (lower.contains("anonymous") || lower.contains("username")) {
+    if lower.contains("real name of") && (lower.contains("anonymous") || lower.contains("username"))
+    {
         return SuperegoVerdict::deny("Query attempts to de-anonymize someone");
     }
 

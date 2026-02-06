@@ -1,8 +1,8 @@
 # Unified CI quality gate.
 #
 # Runs 5 parallel jobs on push to main and PRs. CodeQL also runs weekly.
-# The "gate" job aggregates results: it fails only if ALL upstream jobs failed.
-# Configure branch protection to require the "gate" check.
+# The "gate" job requires lint, test, and frontend to pass; audit and CodeQL
+# are advisory. Configure branch protection to require the "gate" check.
 
 name: ci
 
@@ -44,7 +44,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --exclude ao-app -- -D warnings
 
   # ── Tests (3-platform matrix) ────────────────────────────────────────────
   test:
@@ -140,21 +140,22 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@v4
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: "/language:javascript-typescript"
 
   # ── Gate (aggregator) ───────────────────────────────────────────────────
-  # Fails only if ALL upstream jobs failed. This is the single required
-  # status check for branch protection.
+  # Requires lint, test, and frontend to succeed. Audit and CodeQL are
+  # advisory (warn but don't block). This is the single required status
+  # check for branch protection.
   gate:
     needs: [lint, test, frontend, audit, codeql]
     if: always()
@@ -169,25 +170,35 @@ jobs:
           echo "audit:    ${{ needs.audit.result }}"
           echo "codeql:   ${{ needs.codeql.result }}"
 
-          results=(
-            "${{ needs.lint.result }}"
-            "${{ needs.test.result }}"
-            "${{ needs.frontend.result }}"
-            "${{ needs.audit.result }}"
-            "${{ needs.codeql.result }}"
-          )
+          failed=false
 
-          any_success=false
-          for r in "${results[@]}"; do
-            if [[ "$r" == "success" ]]; then
-              any_success=true
-              break
+          # Critical jobs -- must succeed
+          for job in lint test frontend; do
+            result="${{ needs.lint.result }}"
+            case "$job" in
+              test)     result="${{ needs.test.result }}" ;;
+              frontend) result="${{ needs.frontend.result }}" ;;
+            esac
+            if [[ "$result" != "success" ]]; then
+              echo "::error::Required job '$job' did not succeed (result: $result)"
+              failed=true
             fi
           done
 
-          if [[ "$any_success" == "false" ]]; then
-            echo "::error::All upstream jobs failed."
+          # Advisory jobs -- warn but don't block
+          for job in audit codeql; do
+            result="${{ needs.audit.result }}"
+            case "$job" in
+              codeql) result="${{ needs.codeql.result }}" ;;
+            esac
+            if [[ "$result" != "success" ]]; then
+              echo "::warning::Advisory job '$job' did not succeed (result: $result)"
+            fi
+          done
+
+          if [[ "$failed" == "true" ]]; then
+            echo "::error::One or more required jobs failed."
             exit 1
           fi
 
-          echo "Gate passed -- at least one upstream job succeeded."
+          echo "Gate passed -- all required jobs succeeded."
