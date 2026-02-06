@@ -44,6 +44,15 @@ pub struct CompletionResponse {
     pub tool_calls: Option<Vec<ToolCall>>,
 }
 
+/// Events emitted during streaming.
+#[derive(Debug, Clone, Serialize)]
+pub enum StreamEvent {
+    /// A chunk of text content (delta).
+    Token(String),
+    /// Stream is complete with the final assembled response.
+    Done(CompletionResponse),
+}
+
 impl Message {
     /// Create a simple text message (no tool metadata).
     pub fn new(role: impl Into<String>, content: impl Into<String>) -> Self {
@@ -78,7 +87,24 @@ impl CompletionRequest {
 
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
+    /// Non-streaming completion. Returns the full response at once.
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse>;
+
+    /// Streaming completion. Sends token events through the channel as they arrive.
+    /// Returns the final assembled CompletionResponse.
+    ///
+    /// Default implementation falls back to non-streaming `complete()` and sends
+    /// the full response as a single token event.
+    async fn stream(
+        &self,
+        request: &CompletionRequest,
+        tx: tokio::sync::mpsc::Sender<StreamEvent>,
+    ) -> anyhow::Result<CompletionResponse> {
+        let response = self.complete(request).await?;
+        let _ = tx.send(StreamEvent::Token(response.content.clone())).await;
+        let _ = tx.send(StreamEvent::Done(response.clone())).await;
+        Ok(response)
+    }
 }
 
 #[cfg(test)]

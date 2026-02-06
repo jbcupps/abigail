@@ -16,6 +16,10 @@ use chrono::Utc;
 use ed25519_dalek::SigningKey;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use skill_filesystem::FilesystemSkill;
+use skill_http::HttpSkill;
+use skill_perplexity_search::PerplexitySearchSkill;
+use skill_shell::ShellSkill;
 use skill_web_search::WebSearchSkill;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -914,7 +918,109 @@ async fn set_local_llm_url(state: tauri::State<'_, AppState>, url: String) -> Re
     Ok(())
 }
 
-/// Status of the Id/Ego router for debugging and UI display.
+/// Configure the Superego (safety) layer.
+/// Accepts a provider name ("openai", "anthropic") and API key.
+/// Rebuilds the router with the Superego attached.
+#[tauri::command]
+fn set_superego_provider(
+    state: tauri::State<AppState>,
+    provider: String,
+    key: String,
+) -> Result<(), String> {
+    // Store superego config in TrinityConfig
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        let trinity = config.trinity.get_or_insert_with(TrinityConfig::default);
+        trinity.superego_provider = Some(provider.clone());
+        trinity.superego_api_key = Some(key.clone());
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
+    }
+
+    // Rebuild router with superego
+    rebuild_router_with_superego(&state)?;
+    Ok(())
+}
+
+/// Rebuild the router from current config + vault state, attaching Superego if configured.
+fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let vault = state.secrets.lock().map_err(|e| e.to_string())?;
+
+    // Determine ego provider (priority: config key > vault keys by preference)
+    let (ego_name, ego_key) = if let Some(ref key) = config.openai_api_key {
+        (Some("openai"), Some(key.clone()))
+    } else if let Some(key) = vault.get_secret("anthropic") {
+        (Some("anthropic"), Some(key.to_string()))
+    } else if let Some(key) = vault.get_secret("openai") {
+        (Some("openai"), Some(key.to_string()))
+    } else if let Some(key) = vault.get_secret("xai") {
+        (Some("xai"), Some(key.to_string()))
+    } else if let Some(key) = vault.get_secret("perplexity") {
+        (Some("perplexity"), Some(key.to_string()))
+    } else if let Some(key) = vault.get_secret("google") {
+        (Some("google"), Some(key.to_string()))
+    } else {
+        (None, None)
+    };
+
+    let mut new_router = IdEgoRouter::with_provider(
+        config.local_llm_base_url.clone(),
+        ego_name,
+        ego_key,
+        config.routing_mode,
+    );
+
+    // Attach Superego if configured in TrinityConfig
+    if let Some(ref trinity) = config.trinity {
+        if let (Some(ref se_provider), Some(ref se_key)) =
+            (&trinity.superego_provider, &trinity.superego_api_key)
+        {
+            if !se_key.is_empty() {
+                let superego: std::sync::Arc<dyn ao_capabilities::cognitive::LlmProvider> =
+                    match se_provider.as_str() {
+                        "anthropic" => std::sync::Arc::new(
+                            ao_capabilities::cognitive::AnthropicProvider::new(se_key.clone()),
+                        ),
+                        "perplexity" | "xai" | "google" => {
+                            if let Some(cp) =
+                                ao_capabilities::cognitive::CompatibleProvider::from_name(
+                                    se_provider,
+                                )
+                            {
+                                std::sync::Arc::new(
+                                    ao_capabilities::cognitive::OpenAiCompatibleProvider::new(
+                                        cp,
+                                        se_key.clone(),
+                                    ),
+                                )
+                            } else {
+                                std::sync::Arc::new(
+                                    ao_capabilities::cognitive::OpenAiProvider::new(Some(
+                                        se_key.clone(),
+                                    )),
+                                )
+                            }
+                        }
+                        _ => std::sync::Arc::new(ao_capabilities::cognitive::OpenAiProvider::new(
+                            Some(se_key.clone()),
+                        )),
+                    };
+                new_router = new_router.with_superego(superego);
+                tracing::info!("Superego attached: provider={}", se_provider);
+            }
+        }
+    }
+
+    drop(vault);
+    drop(config);
+    let mut router = state.router.write().map_err(|e| e.to_string())?;
+    *router = new_router;
+    Ok(())
+}
+
+/// Status of the Id/Ego/Superego router for debugging and UI display.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterStatus {
     /// Id provider type: "candle_stub", "local_http", or "ollama"
@@ -923,8 +1029,10 @@ pub struct RouterStatus {
     pub id_url: Option<String>,
     /// Whether Ego (cloud) is configured
     pub ego_configured: bool,
-    /// Which cloud provider is used for Ego (e.g. "openai", "anthropic")
-    pub ego_provider: String,
+    /// Which cloud provider backs Ego: "openai", "anthropic", or null
+    pub ego_provider: Option<String>,
+    /// Whether Superego (safety layer) is configured
+    pub superego_configured: bool,
     /// Current routing mode: "ego_primary" or "id_primary"
     pub routing_mode: String,
 }
@@ -949,7 +1057,8 @@ fn get_router_status(state: tauri::State<AppState>) -> Result<RouterStatus, Stri
         id_provider,
         id_url: config.local_llm_base_url.clone(),
         ego_configured: ego_key.is_some(),
-        ego_provider: ego_provider.unwrap_or_else(|| "none".to_string()),
+        ego_provider: ego_provider,
+        superego_configured: state.router.read().map(|r| r.has_superego()).unwrap_or(false),
         routing_mode: format!("{:?}", config.routing_mode).to_lowercase(),
     })
 }
@@ -1166,7 +1275,7 @@ async fn execute_tool_call(
             }
 
             // For known Ego providers, rebuild router so Ego is active immediately
-            if provider == "openai" || provider == "anthropic" {
+            if matches!(provider, "openai" | "anthropic" | "perplexity" | "xai" | "google") {
                 if let Ok(mut config) = state.config.write() {
                     if provider == "openai" {
                         config.openai_api_key = Some(key.to_string());
@@ -1439,6 +1548,134 @@ async fn chat(
             let follow_up = router.id_only(messages).await.map_err(|e| e.to_string())?;
             follow_up.content
         } else {
+            response.content
+        }
+    };
+
+    // Store memory
+    let memory = Memory::ephemeral(format!("user: {} | assistant: {}", message, final_content));
+    let _ = store.insert_memory(&memory);
+    Ok(final_content)
+}
+
+/// Streaming version of chat: emits "chat-token" events as tokens arrive.
+/// Falls back to non-streaming for tool-calling follow-ups.
+#[tauri::command]
+async fn chat_stream(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    message: String,
+    target: Option<String>,
+) -> Result<String, String> {
+    use ao_capabilities::cognitive::StreamEvent;
+
+    let (store, router, system_prompt) = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
+        let prompt =
+            ao_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
+        drop(config);
+        let router = state.router.read().map_err(|e| e.to_string())?.clone();
+        (store, router, prompt)
+    };
+
+    let mut messages = vec![
+        ao_capabilities::cognitive::Message::new("system", &system_prompt),
+        ao_capabilities::cognitive::Message::new("user", &message),
+    ];
+
+    let target_mode = target.as_deref().unwrap_or("EGO");
+    let tools = chat_tool_definitions(&state.registry);
+
+    // For simple (no-tool) streaming, use the streaming path.
+    // For tool-calling, we do a non-streaming initial request then stream the follow-up.
+    let final_content = if target_mode == "ID" {
+        // Id-only: stream directly (no tool calling)
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+        let app_clone = app.clone();
+
+        // Spawn a task to forward stream events to the frontend
+        let forward_handle = tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                match event {
+                    StreamEvent::Token(token) => {
+                        let _ = app_clone.emit("chat-token", serde_json::json!({ "token": token }));
+                    }
+                    StreamEvent::Done(_) => {
+                        let _ = app_clone.emit("chat-token", serde_json::json!({ "done": true }));
+                    }
+                }
+            }
+        });
+
+        let request = ao_capabilities::cognitive::CompletionRequest::simple(messages.clone());
+        let response = router
+            .route_stream(messages, tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        let _ = forward_handle.await;
+        response.content
+    } else {
+        // Ego mode: first request with tools (non-streaming to capture tool calls)
+        let response = router
+            .route_with_tools(messages.clone(), tools.clone())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if let Some(ref tool_calls) = response.tool_calls {
+            // Execute tools (non-streaming)
+            let mut tool_results = Vec::new();
+            for tc in tool_calls {
+                let result = execute_tool_call(&state, &app, tc).await;
+                tool_results.push((tc.clone(), result));
+            }
+
+            messages.push(ao_capabilities::cognitive::Message {
+                role: "assistant".to_string(),
+                content: response.content.clone(),
+                tool_call_id: None,
+                tool_calls: Some(tool_calls.clone()),
+            });
+
+            for (tc, result) in &tool_results {
+                messages.push(ao_capabilities::cognitive::Message::tool_result(
+                    &tc.id, result,
+                ));
+            }
+
+            // Stream the follow-up response
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+            let app_clone = app.clone();
+
+            let forward_handle = tokio::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        StreamEvent::Token(token) => {
+                            let _ =
+                                app_clone.emit("chat-token", serde_json::json!({ "token": token }));
+                        }
+                        StreamEvent::Done(_) => {
+                            let _ =
+                                app_clone.emit("chat-token", serde_json::json!({ "done": true }));
+                        }
+                    }
+                }
+            });
+
+            let follow_up = router
+                .route_stream_with_tools(messages, tools, tx)
+                .await
+                .map_err(|e| e.to_string())?;
+            let _ = forward_handle.await;
+            follow_up.content
+        } else {
+            // No tool calls — the initial response was already the final answer.
+            // We didn't stream it, so emit it now as a single token.
+            let _ = app.emit(
+                "chat-token",
+                serde_json::json!({ "token": response.content }),
+            );
+            let _ = app.emit("chat-token", serde_json::json!({ "done": true }));
             response.content
         }
     };
@@ -1722,7 +1959,7 @@ async fn store_provider_key(
     }
 
     // For known Ego providers, update config and rebuild router
-    if provider == "openai" || provider == "anthropic" {
+    if matches!(provider.as_str(), "openai" | "anthropic" | "perplexity" | "xai" | "google") {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         if provider == "openai" {
             config.openai_api_key = Some(key.clone());
@@ -1929,8 +2166,14 @@ fn complete_emergence(state: tauri::State<AppState>) -> Result<(), String> {
                 .clone()
                 .or_else(|| vault.get_secret("anthropic").map(|s| s.to_string()))
                 .or_else(|| vault.get_secret("xai").map(|s| s.to_string())),
-            superego_provider: None, // Follow-up: 3-way routing
-            superego_api_key: None,
+            superego_provider: vault
+                .get_secret("anthropic")
+                .map(|_| "anthropic".to_string())
+                .or_else(|| vault.get_secret("openai").map(|_| "openai".to_string())),
+            superego_api_key: vault
+                .get_secret("anthropic")
+                .map(|s| s.to_string())
+                .or_else(|| vault.get_secret("openai").map(|s| s.to_string())),
         }
     };
 
@@ -2020,12 +2263,38 @@ pub fn run() {
         determine_ego_provider(&config, &vault)
     };
 
-    let router = IdEgoRouter::new(
-        config.local_llm_base_url.clone(),
-        ego_provider.as_deref(),
-        ego_api_key,
-        config.routing_mode,
-    );
+    let router = {
+        let mut r = IdEgoRouter::new(
+            config.local_llm_base_url.clone(),
+            ego_provider.as_deref(),
+            ego_api_key,
+            config.routing_mode,
+        );
+
+        // Attach Superego if configured in TrinityConfig
+        if let Some(ref trinity) = config.trinity {
+            if let (Some(ref se_provider), Some(ref se_key)) =
+                (&trinity.superego_provider, &trinity.superego_api_key)
+            {
+                if !se_key.is_empty() {
+                    let superego: Arc<dyn ao_capabilities::cognitive::LlmProvider> =
+                        match se_provider.as_str() {
+                            "anthropic" => Arc::new(
+                                ao_capabilities::cognitive::AnthropicProvider::new(se_key.clone()),
+                            ),
+                            _ => Arc::new(ao_capabilities::cognitive::OpenAiProvider::new(Some(
+                                se_key.clone(),
+                            ))),
+                        };
+                    r = r.with_superego(superego);
+                    tracing::info!("Superego configured at startup: provider={}", se_provider);
+                }
+            }
+        }
+
+        r
+    };
+
 
     #[cfg(not(windows))]
     tracing::warn!(
@@ -2041,9 +2310,38 @@ pub fn run() {
         let ws = WebSearchSkill::with_secrets(ws_manifest.clone(), secrets.clone());
         let _ = registry.register(ws_manifest.id.clone(), Arc::new(ws));
     }
+    {
+        let fs_manifest = FilesystemSkill::default_manifest();
+        // Sandbox to the user's home directory and AO data directory
+        let mut allowed_roots = vec![config.data_dir.clone()];
+        if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+            allowed_roots.push(PathBuf::from(home));
+        }
+        let fs_skill = FilesystemSkill::new(fs_manifest.clone(), allowed_roots);
+        let _ = registry.register(fs_manifest.id.clone(), Arc::new(fs_skill));
+    }
+    {
+        let sh_manifest = ShellSkill::default_manifest();
+        let sh_skill = ShellSkill::new(sh_manifest.clone());
+        let _ = registry.register(sh_manifest.id.clone(), Arc::new(sh_skill));
+    }
+    {
+        let http_manifest = HttpSkill::default_manifest();
+        let http_skill = HttpSkill::new(http_manifest.clone());
+        let _ = registry.register(http_manifest.id.clone(), Arc::new(http_skill));
+    }
+    {
+        let pplx_manifest = PerplexitySearchSkill::default_manifest();
+        let pplx_skill =
+            PerplexitySearchSkill::with_secrets(pplx_manifest.clone(), secrets.clone());
+        let _ = registry.register(pplx_manifest.id.clone(), Arc::new(pplx_skill));
+    }
 
     let event_bus = Arc::new(EventBus::new(256));
     let executor = Arc::new(SkillExecutor::new(registry.clone()));
+
+    // Capture data_dir before config is moved into AppState
+    let data_dir = config.data_dir.clone();
 
     let state = AppState {
         config: RwLock::new(config),
@@ -2057,6 +2355,34 @@ pub fn run() {
 
     // Clone event_bus before setup since state isn't available inside setup callback
     let event_bus_for_setup = event_bus.clone();
+
+    // Start the skills directory watcher for hot-reload
+    let skills_dir = data_dir.join("skills");
+    let _skills_watcher = match ao_skills::SkillsWatcher::start(vec![skills_dir]) {
+        Ok((watcher, mut rx)) => {
+            // Spawn a thread to forward skill file events to the Tauri event system
+            // The watcher must be kept alive for the duration of the app
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().expect("runtime");
+                rt.block_on(async move {
+                    while let Ok(event) = rx.recv().await {
+                        let (event_type, path) = match event {
+                            ao_skills::SkillFileEvent::Changed(p) => ("changed", p),
+                            ao_skills::SkillFileEvent::Removed(p) => ("removed", p),
+                        };
+                        tracing::info!("Skill file {}: {}", event_type, path.display());
+                        // Note: actual re-registration of skills would go here.
+                        // For now we just log; full hot-reload requires dynamic loading.
+                    }
+                });
+            });
+            Some(watcher)
+        }
+        Err(e) => {
+            tracing::warn!("Failed to start skills watcher: {}", e);
+            None
+        }
+    };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -2111,6 +2437,7 @@ pub fn run() {
             set_api_key,
             set_local_llm_url,
             get_router_status,
+            set_superego_provider,
             complete_birth,
             skip_to_life_for_mvp,
             list_skills,
@@ -2122,6 +2449,7 @@ pub fn run() {
             remove_secret,
             list_missing_skill_secrets,
             chat,
+            chat_stream,
             // New birth flow commands
             probe_local_llm,
             set_local_llm_during_birth,

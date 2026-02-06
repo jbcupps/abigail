@@ -1,0 +1,14 @@
+[package]
+name = "skill-shell"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ao-skills = { path = "../../crates/ao-skills" }
+ao-core = { path = "../../crates/ao-core" }
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tokio = { workspace = true, features = ["process"] }
+tracing.workspace = true

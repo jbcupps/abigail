@@ -1,0 +1,16 @@
+[skill]
+id = "com.ao.skills.perplexity-search"
+name = "Perplexity Search"
+version = "0.1.0"
+description = "AI-powered web search with citations via Perplexity Sonar API"
+category = "Sensory"
+keywords = ["search", "web", "perplexity", "research", "citations"]
+
+[[permissions]]
+permission = { Network = { Domains = ["api.perplexity.ai"] } }
+reason = "Perplexity Sonar search API"
+
+[[secrets]]
+name = "perplexity"
+description = "Perplexity API key (get one at perplexity.ai/settings/api)"
+required = true

@@ -1,0 +1,15 @@
+[package]
+name = "skill-filesystem"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ao-skills = { path = "../../crates/ao-skills" }
+ao-core = { path = "../../crates/ao-core" }
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+glob = "0.3"

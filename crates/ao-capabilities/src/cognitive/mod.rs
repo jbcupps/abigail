@@ -5,6 +5,7 @@ pub mod candle;
 pub mod download;
 pub mod local_http;
 pub mod openai;
+pub mod openai_compatible;
 pub mod provider;
 pub mod types;
 pub mod validation;
@@ -14,8 +15,10 @@ pub use candle::CandleProvider;
 pub use download::ModelDownloader;
 pub use local_http::{stub_heartbeat, LocalHttpProvider};
 pub use openai::OpenAiProvider;
+pub use openai_compatible::{CompatibleProvider, OpenAiCompatibleProvider};
 pub use provider::{
-    CompletionRequest, CompletionResponse, LlmProvider, Message, ToolCall, ToolDefinition,
+    CompletionRequest, CompletionResponse, LlmProvider, Message, StreamEvent, ToolCall,
+    ToolDefinition,
 };
 pub use types::*;
 
@@ -45,7 +48,7 @@ pub fn update_provider_key_schema() -> serde_json::Value {
                 "provider": {
                     "type": "string",
                     "description": "Provider name, e.g. 'openai', 'anthropic'",
-                    "enum": ["openai", "anthropic", "google", "mistral"]
+                    "enum": ["openai", "anthropic", "perplexity", "xai", "google", "mistral"]
                 },
                 "key": {
                     "type": "string",

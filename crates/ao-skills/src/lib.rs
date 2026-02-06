@@ -9,6 +9,7 @@ pub mod registry;
 pub mod sandbox;
 pub mod skill;
 pub mod transport;
+pub mod watcher;
 
 /// Backward-compatible alias: `capability` now lives in `protocol`.
 pub use protocol as capability;
@@ -21,6 +22,7 @@ pub use protocol::*;
 pub use registry::{MissingSkillSecret, RegisteredSkill, SkillRegistry};
 pub use sandbox::*;
 pub use skill::*;
+pub use watcher::{SkillFileEvent, SkillsWatcher};
 
 #[cfg(test)]
 mod tests {
