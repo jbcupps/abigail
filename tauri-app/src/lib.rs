@@ -1058,7 +1058,11 @@ fn get_router_status(state: tauri::State<AppState>) -> Result<RouterStatus, Stri
         id_url: config.local_llm_base_url.clone(),
         ego_configured: ego_key.is_some(),
         ego_provider: ego_provider,
-        superego_configured: state.router.read().map(|r| r.has_superego()).unwrap_or(false),
+        superego_configured: state
+            .router
+            .read()
+            .map(|r| r.has_superego())
+            .unwrap_or(false),
         routing_mode: format!("{:?}", config.routing_mode).to_lowercase(),
     })
 }
@@ -1275,7 +1279,10 @@ async fn execute_tool_call(
             }
 
             // For known Ego providers, rebuild router so Ego is active immediately
-            if matches!(provider, "openai" | "anthropic" | "perplexity" | "xai" | "google") {
+            if matches!(
+                provider,
+                "openai" | "anthropic" | "perplexity" | "xai" | "google"
+            ) {
                 if let Ok(mut config) = state.config.write() {
                     if provider == "openai" {
                         config.openai_api_key = Some(key.to_string());
@@ -1959,7 +1966,10 @@ async fn store_provider_key(
     }
 
     // For known Ego providers, update config and rebuild router
-    if matches!(provider.as_str(), "openai" | "anthropic" | "perplexity" | "xai" | "google") {
+    if matches!(
+        provider.as_str(),
+        "openai" | "anthropic" | "perplexity" | "xai" | "google"
+    ) {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         if provider == "openai" {
             config.openai_api_key = Some(key.clone());
@@ -2294,7 +2304,6 @@ pub fn run() {
 
         r
     };
-
 
     #[cfg(not(windows))]
     tracing::warn!(
