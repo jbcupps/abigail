@@ -7,6 +7,8 @@
 #
 # Auto-versioning: on each main push, fetches all v* tags, increments
 # the patch number, and creates a new release.
+#
+# Platforms: Windows (NSIS), Ubuntu (deb), macOS (dmg universal binary)
 
 name: build-release
 
@@ -28,7 +30,6 @@ permissions:
 
 jobs:
   build:
-    # TODO: add ubuntu-22.04 and macos-latest when cross-platform builds are fixed
     strategy:
       fail-fast: false
       matrix:
@@ -37,6 +38,28 @@ jobs:
             args: ""
             target: x86_64-pc-windows-msvc
             installer_path: target/release/bundle/nsis/*.exe
+            asset_name: AO-windows-x64-setup.exe
+            asset_glob: "*.exe"
+            keygen_bin: ao-keygen.exe
+            resource_name: ao-keygen.exe
+
+          - platform: ubuntu-22.04
+            args: ""
+            target: x86_64-unknown-linux-gnu
+            installer_path: target/release/bundle/deb/*.deb
+            asset_name: AO-linux-x64.deb
+            asset_glob: "*.deb"
+            keygen_bin: ao-keygen
+            resource_name: ao-keygen
+
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+            target: universal-apple-darwin
+            installer_path: target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            asset_name: AO-macos-universal.dmg
+            asset_glob: "*.dmg"
+            keygen_bin: ao-keygen
+            resource_name: ao-keygen
 
     runs-on: ${{ matrix.platform }}
 
@@ -46,25 +69,52 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.ref }}
           fetch-depth: 0
 
+      # ── Platform-specific system dependencies ──────────────────────────
+
       - name: Install NSIS (Windows)
+        if: matrix.platform == 'windows-latest'
         run: choco install nsis --no-progress -y
 
+      - name: Install Linux dependencies (Ubuntu)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libgtk-3-dev
+
+      - name: Add macOS universal binary targets
+        if: matrix.platform == 'macos-latest'
+        run: |
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
+
+      # ── Toolchains ────────────────────────────────────────────────────
+
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: tauri-app/src-ui/package.json
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
+
+      # ── Version determination ─────────────────────────────────────────
 
       - name: Determine version
         id: version
@@ -97,6 +147,8 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "Building version: $VERSION (tag: $TAG)"
 
+      # ── Tauri config patching ─────────────────────────────────────────
+
       - name: Update version in tauri.conf.json
         shell: bash
         run: |
@@ -122,11 +174,25 @@ jobs:
           fs.writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
           NODE
 
+      - name: Set platform-specific resources in tauri.conf.json
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = 'tauri-app/tauri.conf.json';
+          const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+          data.bundle = data.bundle || {};
+          data.bundle.resources = ["${{ matrix.resource_name }}"];
+          fs.writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
+          NODE
+
+      # ── Build ─────────────────────────────────────────────────────────
+
       - name: Generate Cargo.lock
         run: cargo generate-lockfile
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
           workspaces: "."
 
@@ -139,20 +205,29 @@ jobs:
           npm install -g @tauri-apps/cli@v2
           cd tauri-app && tauri icon icons/icon.png -o icons
 
-      - name: Ensure icons at repo root (Windows bundler cwd)
-        shell: pwsh
+      - name: Ensure icons at repo root (bundler cwd workaround)
+        shell: bash
         run: |
-          New-Item -ItemType Directory -Force -Path icons | Out-Null
-          Copy-Item tauri-app\icons\icon.ico -Destination icons\
-          Copy-Item tauri-app\icons\icon.icns -Destination icons\ -ErrorAction SilentlyContinue
-          Copy-Item tauri-app\icons\*.png -Destination icons\ -ErrorAction SilentlyContinue
+          mkdir -p icons
+          cp tauri-app/icons/icon.ico icons/ 2>/dev/null || true
+          cp tauri-app/icons/icon.icns icons/ 2>/dev/null || true
+          cp tauri-app/icons/*.png icons/ 2>/dev/null || true
 
       - name: Build ao-keygen binary
         shell: bash
         run: |
-          cargo build --release -p ao-keygen
-          cp target/release/ao-keygen.exe tauri-app/ao-keygen.exe || \
-          cp target/release/ao-keygen tauri-app/ao-keygen || true
+          if [[ "${{ matrix.platform }}" == "macos-latest" ]]; then
+            # Build for both architectures and lipo into universal binary
+            cargo build --release -p ao-keygen --target aarch64-apple-darwin
+            cargo build --release -p ao-keygen --target x86_64-apple-darwin
+            lipo -create \
+              target/aarch64-apple-darwin/release/ao-keygen \
+              target/x86_64-apple-darwin/release/ao-keygen \
+              -output tauri-app/ao-keygen
+          else
+            cargo build --release -p ao-keygen
+            cp target/release/${{ matrix.keygen_bin }} tauri-app/${{ matrix.resource_name }}
+          fi
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@063c0231f444e55760d98acb9c469b994269d4a5 # v0.5.6
@@ -163,7 +238,7 @@ jobs:
           args: ${{ matrix.args }}
 
       - name: Upload installers (Artifacts)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ao-installer-${{ matrix.platform }}
           path: ${{ matrix.installer_path }}
@@ -176,13 +251,13 @@ jobs:
       contents: write
     steps:
       - name: Checkout (for tagging)
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.ref }}
           fetch-depth: 0
 
       - name: Download all installer artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
           pattern: ao-installer-*
@@ -207,18 +282,36 @@ jobs:
           # Windows
           INSTALLER=$(find artifacts/ao-installer-windows-latest -name "*.exe" -type f | head -1)
           if [ -z "$INSTALLER" ]; then
-            echo "ERROR: No installer exe found in artifacts"
-            find artifacts/ -type f
-            exit 1
+            echo "WARNING: No Windows installer exe found in artifacts"
+            find artifacts/ -type f || true
+          else
+            echo "Found Windows installer: $INSTALLER"
+            cp "$INSTALLER" release-assets/AO-windows-x64-setup.exe
           fi
-          echo "Found installer: $INSTALLER"
-          cp "$INSTALLER" release-assets/AO-windows-x64-setup.exe
+
+          # Linux
+          DEB=$(find artifacts/ao-installer-ubuntu-22.04 -name "*.deb" -type f | head -1)
+          if [ -z "$DEB" ]; then
+            echo "WARNING: No Linux deb found in artifacts"
+          else
+            echo "Found Linux deb: $DEB"
+            cp "$DEB" release-assets/AO-linux-x64.deb
+          fi
+
+          # macOS
+          DMG=$(find artifacts/ao-installer-macos-latest -name "*.dmg" -type f | head -1)
+          if [ -z "$DMG" ]; then
+            echo "WARNING: No macOS dmg found in artifacts"
+          else
+            echo "Found macOS dmg: $DMG"
+            cp "$DMG" release-assets/AO-macos-universal.dmg
+          fi
 
           echo "Release assets:"
           ls -la release-assets/
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
         with:
           tag_name: ${{ needs.build.outputs.tag }}
           name: AO ${{ needs.build.outputs.tag }}
@@ -231,6 +324,13 @@ jobs:
 
             Download the installer for your platform:
             - **Windows**: `AO-windows-x64-setup.exe`
+            - **macOS**: `AO-macos-universal.dmg` (Intel + Apple Silicon)
+            - **Linux**: `AO-linux-x64.deb` (Ubuntu 22.04+)
+
+            Or install via npm:
+            ```bash
+            npx ao-desktop install
+            ```
 
             ### First Run Setup
 
@@ -244,6 +344,11 @@ jobs:
             The private key shown during first run is NEVER stored by AO.
             Keep it safe - you'll need it if you ever need to verify your AO instance
             or recover from data loss.
+
+            ### Platform Notes
+
+            - **macOS**: The app is not notarized. You may need to right-click → Open on first launch to bypass Gatekeeper.
+            - **Linux**: Requires `libwebkit2gtk-4.1-0` and `libayatana-appindicator3-1`. Ubuntu 22.04+ recommended.
 
             See [SECURITY_NOTES.md](https://github.com/${{ github.repository }}/blob/main/documents/SECURITY_NOTES.md) for details.
           files: |

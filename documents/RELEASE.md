@@ -47,7 +47,45 @@ All workspace crates use `version.workspace = true`, so they follow the root.
 
 ## Where to get installers (end users)
 
-After a release is published, end users can go to the [AO download page](https://jbcupps.github.io/ao/). The page detects their OS and offers a single download button; they can also pick Windows, macOS, or Linux from "Other downloads." Stable asset names (`AO-windows-x64-setup.exe`, etc.) allow `.../releases/latest/download/...` URLs to always point at the latest release.
+After a release is published, end users can get AO through any of these channels:
+
+### Direct download
+
+Go to the [AO download page](https://jbcupps.github.io/ao/). The page detects their OS and offers a single download button; they can also pick Windows, macOS, or Linux from "Other downloads." Stable asset names allow `.../releases/latest/download/...` URLs to always point at the latest release:
+
+- `https://github.com/jbcupps/ao/releases/latest/download/AO-windows-x64-setup.exe`
+- `https://github.com/jbcupps/ao/releases/latest/download/AO-macos-universal.dmg`
+- `https://github.com/jbcupps/ao/releases/latest/download/AO-linux-x64.deb`
+
+### npm CLI
+
+Install with a single command (requires Node.js 18+):
+
+```bash
+npx ao-desktop
+```
+
+This detects your OS, downloads the correct installer, and runs it. See `npm-package/README.md` for all commands.
+
+### Docker (development)
+
+For building/developing AO in a container:
+
+```bash
+docker compose -f docker/docker-compose.yml up -d ao-dev
+docker compose -f docker/docker-compose.yml exec ao-dev bash
+# Inside container: cargo build && cargo test --all
+```
+
+See `documents/HOW_TO_RUN_LOCALLY.md` for full Docker development instructions.
+
+## Platform-specific notes
+
+| Platform | Installer | Notes |
+|----------|-----------|-------|
+| Windows (x64) | `AO-windows-x64-setup.exe` | NSIS installer, user-level (no admin) |
+| macOS (Intel + Apple Silicon) | `AO-macos-universal.dmg` | Universal binary. Not notarized -- right-click > Open on first launch |
+| Ubuntu/Debian (x64) | `AO-linux-x64.deb` | Requires `libwebkit2gtk-4.1-0`, `libayatana-appindicator3-1`. Ubuntu 22.04+ |
 
 ## First release (0.0.1)
 
@@ -119,3 +157,19 @@ You can also trigger a Deva build without a tag:
 | Release type | Release (latest) | Pre-release |
 | Asset names | `AO-*` | `AO-Deva-*` |
 | Workflow | `build-release.yml` | `build-release-deva.yml` |
+
+---
+
+## npm publishing
+
+The `ao-desktop` npm package is published automatically when a GitHub Release is created:
+
+1. `.github/workflows/npm-publish.yml` triggers on `release: published` events.
+2. It reads the version from the release tag and updates `npm-package/package.json`.
+3. Publishes to npm (requires `NPM_TOKEN` secret in repo settings).
+
+To set up npm publishing:
+1. Create an npm access token at [npmjs.com](https://www.npmjs.com/settings/~/tokens).
+2. Add it as a repository secret named `NPM_TOKEN` in **Settings > Secrets and variables > Actions**.
+
+Manual republish: **Actions > npm-publish > Run workflow**.

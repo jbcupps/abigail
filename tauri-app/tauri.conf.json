@@ -10,7 +10,7 @@
   },
   "app": {
     "security": {
-      "csp": null
+      "csp": { "default-src": "'self'", "script-src": "'self'", "style-src": "'self' 'unsafe-inline'", "connect-src": "'self' http://localhost:* http://127.0.0.1:*", "img-src": "'self' data: blob:", "font-src": "'self'" }
     },
     "windows": [
       {
@@ -41,11 +41,23 @@
         "installerHooks": "nsis-hooks.nsh"
       }
     },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libayatana-appindicator3-1"
+        ],
+        "section": "utils"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
     "longDescription": "AO - Desktop AI Agent",
     "shortDescription": "AO agent",
     "resources": ["ao-keygen.exe"],
     "externalBin": [],
-    "copyright": "",
+    "copyright": "Copyright (c) 2025-2026 Jim Cupps",
     "category": "Developer"
   },
   "plugins": {}

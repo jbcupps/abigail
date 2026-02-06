@@ -1,0 +1,44 @@
+# Changelog
+
+All notable changes to AO are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+### Added
+
+- Public release readiness: LICENSE, CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md
+- CI workflow for pull request validation (cargo fmt, clippy, test, frontend build)
+- CodeQL static analysis workflow
+- GitHub issue and PR templates
+- CODEOWNERS file
+- All GitHub Actions pinned by commit SHA for supply chain security
+
+### Changed
+
+- Enhanced README.md with badges, system requirements, and troubleshooting
+- Updated .gitignore with additional patterns for generated and data files
+
+## [0.0.1] - 2026-02-03
+
+### Added
+
+- Initial release of AO desktop agent
+- Interactive birth flow with staged onboarding
+- First-run Ed25519 signing key generation with one-time private key presentation
+- Constitutional document signing and verification (soul.md, ethics.md, instincts.md)
+- Local LLM discovery and manual connect for Ollama/LM Studio-compatible endpoints
+- In-app API key vaulting and validation for cloud/model/search providers
+- Dual persona UI modes (surface chat and Forge mode toggle)
+- Id/Ego routing: local LLM (Id) for routine queries, cloud LLM (Ego) for complex queries
+- Skill-based tool execution with web-search capability
+- DPAPI-encrypted secrets storage on Windows
+- Cross-platform builds: Windows (NSIS), Ubuntu (deb), macOS (dmg universal binary)
+- npm CLI installer (`npx ao-desktop`)
+- Docker development and build containers
+- Security audit CI (cargo audit, npm audit)
+- Dependabot configuration for Cargo, npm, and GitHub Actions
+
+[Unreleased]: https://github.com/jbcupps/ao/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/jbcupps/ao/releases/tag/v0.0.1

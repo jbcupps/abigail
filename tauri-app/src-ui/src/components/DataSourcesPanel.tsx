@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+﻿import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import { useState, useEffect } from "react";
 
 interface SqliteStats {
@@ -7,66 +8,12 @@ interface SqliteStats {
   has_birth: boolean;
 }
 
-interface BackupDialogProps {
-  onBackup: (path: string) => void;
-  onCancel: () => void;
-}
-
-function BackupDialog({ onBackup, onCancel }: BackupDialogProps) {
-  const [path, setPath] = useState("");
-
-  const handleSubmit = () => {
-    if (path.trim()) {
-      // Ensure .db extension
-      const finalPath = path.trim().endsWith(".db") ? path.trim() : `${path.trim()}.db`;
-      onBackup(finalPath);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-      <div className="bg-black border border-theme-border rounded-lg p-6 max-w-md w-full mx-4">
-        <h3 className="text-theme-text font-bold mb-4">Backup Database</h3>
-        <p className="text-theme-text-dim text-sm mb-4">
-          Enter the full path where you want to save the backup:
-        </p>
-        <input
-          type="text"
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-          placeholder="C:\Users\...\ao_backup.db"
-          className="w-full bg-black border border-theme-primary text-theme-text px-3 py-2 rounded mb-4 text-sm"
-          autoFocus
-          onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-        />
-        <div className="flex gap-2">
-          <button
-            onClick={handleSubmit}
-            disabled={!path.trim()}
-            className="flex-1 py-2 border border-theme-primary rounded hover:bg-theme-primary-glow disabled:opacity-50"
-          >
-            Backup
-          </button>
-          <button
-            onClick={onCancel}
-            className="flex-1 py-2 border border-theme-border rounded hover:border-theme-primary"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function DataSourcesPanel() {
   const [stats, setStats] = useState<SqliteStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
-  const [showBackupDialog, setShowBackupDialog] = useState(false);
-
   useEffect(() => {
     refreshStats();
   }, []);
@@ -109,17 +56,17 @@ export default function DataSourcesPanel() {
     }
   };
 
-  const handleBackup = () => {
-    setShowBackupDialog(true);
-  };
-
-  const doBackup = async (destPath: string) => {
-    setShowBackupDialog(false);
+  const handleBackup = async () => {
+    const path = await save({
+      defaultPath: "ao_backup.db",
+      filters: [{ name: "Database", extensions: ["db"] }],
+    });
+    if (path == null) return;
     setActionInProgress("backup");
     setMessage(null);
     try {
-      await invoke("backup_sqlite", { destPath });
-      setMessage({ type: "success", text: `Backup saved to ${destPath}` });
+      await invoke("backup_sqlite", { destPath: path });
+      setMessage({ type: "success", text: `Backup saved.` });
     } catch (e) {
       setMessage({ type: "error", text: `Backup failed: ${e}` });
     } finally {
@@ -278,13 +225,6 @@ export default function DataSourcesPanel() {
         </p>
       </div>
 
-      {/* Backup Dialog */}
-      {showBackupDialog && (
-        <BackupDialog
-          onBackup={doBackup}
-          onCancel={() => setShowBackupDialog(false)}
-        />
-      )}
     </div>
   );
 }

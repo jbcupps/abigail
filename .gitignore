@@ -2,13 +2,26 @@
 .env
 .env.local
 *.local
+secrets.bin
+keys.bin
 
 # Rust
 target/
+*.pdb
 
 # Node / frontend
 tauri-app/src-ui/node_modules/
 tauri-app/src-ui/dist/
+
+# Tauri generated files
+tauri-app/gen/
+
+# Application data files (created at runtime, not in repo)
+config.json
+ao_seed.db
+ao_seed.db-wal
+ao_seed.db-shm
+external_pubkey.bin
 
 # IDE
 .idea/

@@ -1,4 +1,15 @@
 //! Security sandbox and resource limits.
+//!
+//! **Permission checks:** Network access is enforced by the executor before each tool run (see
+//! `SkillExecutor::audit_action_for_tool` and `check_permission`). File and memory permission
+//! logic exists here (`AuditActionKind::FileRead`, `FileWrite`, `MemoryAccess`) but must be
+//! invoked by the code path that actually performs file or memory I/O on behalf of a skill (e.g. a
+//! capability layer). Skills that do raw file or network I/O should go through such a layer so the
+//! sandbox is checked.
+//!
+//! **Resource limits:** `ResourceLimits` (max_memory_bytes, max_cpu_ms, etc.) are not currently
+//! enforced at runtime (no timeout or memory cap on tool execution). They are defined for future
+//! use and for documentation. Consider enforcing timeouts per tool call in the executor.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -65,7 +76,7 @@ impl SkillSandbox {
         }
     }
 
-    /// Check if action is permitted. Stub: allow all and log.
+    /// Check if action is permitted. Denies when not granted; logs to audit_log.
     pub fn check_permission(&mut self, action: &AuditAction) -> bool {
         let allowed = self.check_permission_inner(action);
         self.audit_log.push(AuditEntry {

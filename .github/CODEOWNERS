@@ -1,0 +1,19 @@
+# Code Owners for AO
+# These users will be automatically requested for review on PRs.
+# Ref: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+* @jbcupps
+
+# Rust crates
+/crates/ @jbcupps
+/skills/ @jbcupps
+
+# Tauri app
+/tauri-app/ @jbcupps
+
+# CI/CD and GitHub config
+/.github/ @jbcupps
+
+# Documentation
+/documents/ @jbcupps

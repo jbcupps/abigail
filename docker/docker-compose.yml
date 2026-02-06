@@ -1,0 +1,41 @@
+# AO Local Development Environment
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml up -d ao-dev
+#   docker compose -f docker/docker-compose.yml exec ao-dev bash
+#
+# Inside the container:
+#   cd tauri-app/src-ui && npm install && cd ../..
+#   cargo build
+#   cargo test --all
+#
+# Note: GUI (cargo tauri dev) requires X11/Wayland forwarding, which is
+# platform-specific. See documents/HOW_TO_RUN_LOCALLY.md for details.
+
+services:
+  # ── Development shell ─────────────────────────────────────────────────
+  ao-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    volumes:
+      - ..:/workspace
+    working_dir: /workspace
+    stdin_open: true   # -i
+    tty: true          # -t
+    ports:
+      - "1420:1420"    # Vite dev server
+    environment:
+      - RUST_LOG=info
+      - CARGO_HOME=/workspace/.cargo-docker
+    # Persist cargo registry/build cache between container restarts
+    tmpfs:
+      - /tmp
+
+  # ── Build validation ──────────────────────────────────────────────────
+  ao-build:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    # This service is run-once for CI-style validation
+    # docker compose -f docker/docker-compose.yml run --rm ao-build

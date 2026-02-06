@@ -4,7 +4,7 @@ mod templates;
 
 use ao_birth::BirthOrchestrator;
 use ao_core::{
-    generate_external_keypair, sign_constitutional_documents, AppConfig,
+    generate_external_keypair, sign_constitutional_documents, validate_local_llm_url, AppConfig,
     CoreError, ExternalVault, Keyring, ReadOnlyFileVault, SecretsVault, TrinityConfig, Verifier,
 };
 use chrono::Utc;
@@ -18,9 +18,54 @@ use ed25519_dalek::SigningKey;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use tauri::Emitter;
+
+/// Returns permitted base directories for backup destinations (canonicalized where possible).
+/// Backup is allowed only under: data_dir, or user's Documents/Home.
+fn permitted_backup_bases(data_dir: &Path) -> Vec<PathBuf> {
+    let mut bases = Vec::new();
+    if let Ok(canon) = data_dir.canonicalize() {
+        bases.push(canon);
+    } else {
+        bases.push(data_dir.to_path_buf());
+    }
+    #[cfg(windows)]
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        bases.push(PathBuf::from(&profile).join("Documents"));
+    }
+    #[cfg(not(windows))]
+    if let Ok(home) = std::env::var("HOME") {
+        bases.push(PathBuf::from(&home).join("Documents"));
+        bases.push(PathBuf::from(&home));
+    }
+    bases
+}
+
+/// Validates that dest_path is under a permitted base (data_dir or user Documents/Home).
+/// Prevents path traversal and arbitrary file write.
+fn validate_backup_dest_path(dest_path: &str, data_dir: &Path) -> Result<PathBuf, String> {
+    let path = Path::new(dest_path);
+    if path.has_root() && path.components().count() == 0 {
+        return Err("Invalid backup path".into());
+    }
+    let parent = path.parent().ok_or("Invalid path: no parent directory")?;
+    let canonical_parent = parent.canonicalize().map_err(|e| {
+        format!("Path parent is not accessible or does not exist: {}", e)
+    })?;
+    let permitted = permitted_backup_bases(data_dir);
+    for base in &permitted {
+        let canonical_base = match base.canonicalize() {
+            Ok(b) => b,
+            Err(_) => base.clone(),
+        };
+        if canonical_parent.starts_with(&canonical_base) {
+            return Ok(path.to_path_buf());
+        }
+    }
+    Err("Backup path must be under the app data directory or your Documents/Home folder".into())
+}
 
 struct AppState {
     config: RwLock<AppConfig>,
@@ -40,11 +85,27 @@ fn get_config() -> AppConfig {
         config = AppConfig::load(&path).unwrap_or(config);
     }
 
+    // SSRF: ensure loaded local LLM URL is still valid (e.g. config may have been tampered)
+    if let Some(ref url) = config.local_llm_base_url {
+        if let Ok(normalized) = validate_local_llm_url(url) {
+            config.local_llm_base_url = Some(normalized);
+        } else {
+            tracing::warn!("Config local_llm_base_url rejected (SSRF validation), clearing");
+            config.local_llm_base_url = None;
+        }
+    }
+
     // Environment variable fallbacks
     if config.local_llm_base_url.is_none() {
-        config.local_llm_base_url = std::env::var("LOCAL_LLM_BASE_URL")
-            .ok()
-            .filter(|s| !s.is_empty());
+        if let Ok(env_url) = std::env::var("LOCAL_LLM_BASE_URL") {
+            if !env_url.is_empty() {
+                if let Ok(normalized) = validate_local_llm_url(&env_url) {
+                    config.local_llm_base_url = Some(normalized);
+                } else {
+                    tracing::warn!("LOCAL_LLM_BASE_URL from env rejected (SSRF validation)");
+                }
+            }
+        }
     }
     if config.openai_api_key.is_none() {
         config.openai_api_key = std::env::var("OPENAI_API_KEY")
@@ -354,7 +415,7 @@ fn archive_identity(state: tauri::State<AppState>) -> Result<String, String> {
         *vault = ao_core::SecretsVault::new(data_dir.clone());
     }
 
-    tracing::info!("Identity archived to: {}", backup_path.display());
+    tracing::info!("Identity archived");
     Ok(backup_path.to_string_lossy().to_string())
 }
 
@@ -464,10 +525,14 @@ fn optimize_sqlite(state: tauri::State<AppState>) -> Result<i64, String> {
 }
 
 /// Backup the SQLite database to the specified path.
+/// Path must be under data_dir or user Documents/Home (validated to prevent path traversal).
 #[tauri::command]
 fn backup_sqlite(state: tauri::State<AppState>, dest_path: String) -> Result<(), String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let db_path = config.db_path.clone();
+    let data_dir = config.data_dir.clone();
+
+    let dest_path = validate_backup_dest_path(dest_path.trim(), &data_dir)?;
 
     // Also copy WAL and SHM files if they exist
     std::fs::copy(&db_path, &dest_path)
@@ -475,12 +540,12 @@ fn backup_sqlite(state: tauri::State<AppState>, dest_path: String) -> Result<(),
 
     // Copy WAL file if it exists
     let wal_path = db_path.with_extension("db-wal");
-    let dest_wal = std::path::Path::new(&dest_path).with_extension("db-wal");
+    let dest_wal = dest_path.with_extension("db-wal");
     if wal_path.exists() {
         let _ = std::fs::copy(&wal_path, &dest_wal);
     }
 
-    tracing::info!("SQLite backed up to: {}", dest_path);
+    tracing::info!("SQLite backup completed");
     Ok(())
 }
 
@@ -611,7 +676,7 @@ fn verify_crypto(state: tauri::State<AppState>) -> Result<(), String> {
     // Use the config's docs_dir as the source of truth
     let docs_path = b.config().docs_dir.clone();
 
-    tracing::info!("Verifying crypto integrity in: {}", docs_path.display());
+    tracing::info!("Verifying crypto integrity");
 
     // In the new flow, generate_identity replaces verify_crypto for first run
     // Keep this for legacy/repair path
@@ -799,7 +864,12 @@ fn set_api_key(state: tauri::State<AppState>, key: String) -> Result<(), String>
 async fn set_local_llm_url(state: tauri::State<'_, AppState>, url: String) -> Result<(), String> {
     let (local_url, api_key, mode) = {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
-        config.local_llm_base_url = if url.is_empty() { None } else { Some(url) };
+        config.local_llm_base_url = if url.is_empty() {
+            None
+        } else {
+            let normalized = validate_local_llm_url(&url).map_err(|e| e.to_string())?;
+            Some(normalized)
+        };
         config.save(&config.config_path()).map_err(|e| e.to_string())?;
         (config.local_llm_base_url.clone(), config.openai_api_key.clone(), config.routing_mode)
     };
@@ -899,14 +969,47 @@ async fn execute_tool(
 
 // ── Secrets Management ──────────────────────────────────────────────
 
+/// Reserved provider names for API keys (must match validation.rs known providers).
+const ALLOWED_PROVIDER_SECRET_KEYS: &[&str] = &["openai", "anthropic", "xai", "google", "tavily"];
+
+/// Returns the set of allowed secret keys: reserved provider names + skill-declared secret names.
+fn allowed_secret_keys(registry: &SkillRegistry, skill_paths: &[PathBuf]) -> std::collections::HashSet<String> {
+    let mut allowed: std::collections::HashSet<String> = ALLOWED_PROVIDER_SECRET_KEYS
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+    let manifests = ao_skills::SkillRegistry::discover(skill_paths);
+    for m in manifests {
+        for s in &m.secrets {
+            allowed.insert(s.name.clone());
+        }
+    }
+    allowed
+}
+
 #[tauri::command]
 fn check_secret(state: tauri::State<AppState>, key: String) -> Result<bool, String> {
-    let vault = state.secrets.lock().map_err(|e| e.to_string())?;
-    Ok(vault.exists(&key))
+    let (allowed, exists) = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let paths = vec![config.data_dir.join("skills")];
+        let allowed = allowed_secret_keys(&state.registry, &paths);
+        let vault = state.secrets.lock().map_err(|e| e.to_string())?;
+        (allowed, vault.exists(&key))
+    };
+    if !allowed.contains(&key) {
+        return Err("Secret key not allowed. Use a reserved provider name (e.g. openai, anthropic) or a skill-declared secret name.".to_string());
+    }
+    Ok(exists)
 }
 
 #[tauri::command]
 fn store_secret(state: tauri::State<AppState>, key: String, value: String) -> Result<(), String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let paths = vec![config.data_dir.join("skills")];
+    let allowed = allowed_secret_keys(&state.registry, &paths);
+    if !allowed.contains(&key) {
+        return Err("Secret key not allowed. Use a reserved provider name (e.g. openai, anthropic) or a skill-declared secret name.".to_string());
+    }
     let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
     vault.set_secret(&key, &value);
     vault.save().map_err(|e| e.to_string())?;
@@ -915,6 +1018,12 @@ fn store_secret(state: tauri::State<AppState>, key: String, value: String) -> Re
 
 #[tauri::command]
 fn remove_secret(state: tauri::State<AppState>, key: String) -> Result<bool, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let paths = vec![config.data_dir.join("skills")];
+    let allowed = allowed_secret_keys(&state.registry, &paths);
+    if !allowed.contains(&key) {
+        return Err("Secret key not allowed. Use a reserved provider name or a skill-declared secret name.".to_string());
+    }
     let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
     let removed = vault.remove_secret(&key);
     if removed {
@@ -1313,16 +1422,17 @@ async fn set_local_llm_during_birth(
     state: tauri::State<'_, AppState>,
     url: String,
 ) -> Result<bool, String> {
+    let normalized_url = validate_local_llm_url(&url).map_err(|e| e.to_string())?;
     // Set the URL in config
     let (api_key, mode) = {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
-        config.local_llm_base_url = Some(url.clone());
+        config.local_llm_base_url = Some(normalized_url.clone());
         config.save(&config.config_path()).map_err(|e| e.to_string())?;
         (config.openai_api_key.clone(), config.routing_mode)
     };
 
     // Rebuild router with auto-detected model name (important for LM Studio)
-    let new_router = IdEgoRouter::new_auto_detect(Some(url.clone()), api_key, mode).await;
+    let new_router = IdEgoRouter::new_auto_detect(Some(normalized_url.clone()), api_key, mode).await;
     {
         let mut router = state.router.write().map_err(|e| e.to_string())?;
         *router = new_router;
@@ -1336,7 +1446,7 @@ async fn set_local_llm_during_birth(
         // Also update birth orchestrator config
         let mut birth = state.birth.write().map_err(|e| e.to_string())?;
         if let Some(b) = birth.as_mut() {
-            b.config_mut().local_llm_base_url = Some(url);
+            b.config_mut().local_llm_base_url = Some(normalized_url);
             let _ = b.advance_to_connectivity(); // Ignore error if already past this stage
         }
     }
@@ -1717,6 +1827,12 @@ pub fn run() {
             .unwrap_or_else(|_| SecretsVault::new(config.data_dir.clone())),
     ));
 
+    #[cfg(not(windows))]
+    tracing::warn!(
+        "Secrets are stored in plaintext on this platform (DPAPI is Windows-only). \
+         Do not use for production; suitable for development only."
+    );
+
     let registry = Arc::new(SkillRegistry::with_secrets(secrets.clone()));
 
     // Register built-in skills
@@ -1743,6 +1859,7 @@ pub fn run() {
     let event_bus_for_setup = event_bus.clone();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             let event_bus = event_bus_for_setup.clone();
             let handle = app.handle().clone();

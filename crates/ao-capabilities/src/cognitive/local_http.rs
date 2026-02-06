@@ -6,6 +6,7 @@
 use crate::cognitive::provider::{
     CompletionRequest, CompletionResponse, LlmProvider, Message, ToolCall,
 };
+use ao_core::validate_local_llm_url;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -157,6 +158,7 @@ impl LocalHttpProvider {
     /// Perform a heartbeat check to verify the LLM server is reachable.
     /// Sends a minimal completion request and checks for a valid response.
     pub async fn heartbeat(&self) -> anyhow::Result<()> {
+        validate_local_llm_url(&self.base_url).map_err(|e| anyhow::anyhow!("{}", e))?;
         let _request = CompletionRequest::simple(vec![Message::new("user", "ping")]);
 
         // Use a shorter timeout for heartbeat
@@ -214,6 +216,7 @@ impl LocalHttpProvider {
 #[async_trait]
 impl LlmProvider for LocalHttpProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
+        validate_local_llm_url(&self.base_url).map_err(|e| anyhow::anyhow!("{}", e))?;
         let messages: Vec<ChatMessage> = request
             .messages
             .iter()

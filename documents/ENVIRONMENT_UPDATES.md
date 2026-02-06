@@ -2,6 +2,88 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-05 (Public release readiness)
+
+Comprehensive preparation for making the repository public. No secrets, credentials, or sensitive data were found in the audit.
+
+### New Files Created
+
+- **`LICENSE`**: MIT license file (was declared in Cargo.toml but file was missing).
+- **`CONTRIBUTING.md`**: Contribution guidelines covering dev setup, branching strategy, Conventional Commits, PR process, and code style.
+- **`CODE_OF_CONDUCT.md`**: References Contributor Covenant v2.1 with project-specific reporting instructions.
+- **`CHANGELOG.md`**: Version history in Keep a Changelog format, documenting v0.0.1 and unreleased changes.
+- **`.github/SECURITY.md`**: Vulnerability reporting policy with responsible disclosure instructions, scope, and security practices summary.
+- **`.github/PULL_REQUEST_TEMPLATE.md`**: PR template with type checkboxes, testing checklist, and review checklist.
+- **`.github/ISSUE_TEMPLATE/bug_report.yml`**: Structured bug report form (version, platform, steps to reproduce).
+- **`.github/ISSUE_TEMPLATE/feature_request.yml`**: Feature request form (problem, solution, area).
+- **`.github/ISSUE_TEMPLATE/config.yml`**: Issue template config with security and docs contact links.
+- **`.github/CODEOWNERS`**: Default code owner (@jbcupps) for all paths.
+- **`.github/workflows/ci.yml`**: New CI workflow for PR validation -- runs `cargo fmt --check`, `cargo clippy`, `cargo test --all`, and frontend build on Windows, Ubuntu, and macOS matrix.
+- **`.github/workflows/codeql.yml`**: CodeQL static analysis for JavaScript/TypeScript on PRs, pushes to main, and weekly schedule.
+- **`documents/GITHUB_SETTINGS.md`**: Checklist of manual GitHub repository settings (branch protection, security features, actions config, secrets).
+
+### Modified Files
+
+- **`.github/workflows/build-release.yml`**: All GitHub Actions pinned by commit SHA (actions/checkout, actions/setup-node, dtolnay/rust-toolchain, swatinem/rust-cache, actions/upload-artifact, actions/download-artifact, softprops/action-gh-release). Version tag preserved in comment for readability.
+- **`.github/workflows/npm-publish.yml`**: Pinned actions/checkout and actions/setup-node by commit SHA.
+- **`.github/workflows/security-audit.yml`**: Pinned actions/checkout and actions/setup-node by commit SHA.
+- **`.gitignore`**: Added patterns for `secrets.bin`, `keys.bin`, `*.pdb`, `tauri-app/gen/`, `config.json`, `ao_seed.db` (and WAL/SHM), `external_pubkey.bin`.
+- **`tauri-app/tauri.conf.json`**: Set `copyright` field to "Copyright (c) 2025-2026 Jim Cupps".
+- **`README.md`**: Added CI/security/license badges, system requirements table, end-user vs developer quick start, environment variables table, troubleshooting section, links to all new documentation.
+
+### Security Audit Findings
+
+- No real secrets, API keys, passwords, or sensitive data found in the repository.
+- Test credentials in unit tests are clearly placeholder values (e.g., `sk-test-key-123`).
+- All API endpoints are public (OpenAI, Anthropic, Tavily, Google).
+- `.env` files properly gitignored; `example.env` contains only empty placeholders.
+- GitHub Actions use `secrets.GITHUB_TOKEN` and `secrets.NPM_TOKEN` correctly via GitHub Secrets.
+
+## 2026-02-05 (Multi-platform delivery: macOS, Ubuntu, Docker, npm)
+
+Expanded AO distribution from Windows-only to four delivery channels.
+
+### CI/CD: Cross-platform builds (`.github/workflows/build-release.yml`)
+
+- **Build matrix expanded** from Windows-only to three platforms:
+  - `windows-latest` (x86_64, NSIS `.exe`)
+  - `ubuntu-22.04` (x86_64, `.deb`)
+  - `macos-latest` (universal binary via `lipo`, `.dmg`)
+- **Platform-specific CI steps**: Ubuntu installs `libwebkit2gtk-4.1-dev` and Tauri Linux deps; macOS adds `aarch64-apple-darwin` + `x86_64-apple-darwin` targets; Windows installs NSIS (conditionally).
+- **ao-keygen**: Built as universal binary on macOS (`lipo`); binary name set per-platform via matrix variable (`ao-keygen.exe` on Windows, `ao-keygen` elsewhere).
+- **`tauri.conf.json` resources**: Patched dynamically in CI per platform to use correct binary name.
+- **Icons step**: Changed from PowerShell to cross-platform bash.
+- **Release job**: Collects artifacts from all three platforms; renames to stable asset names (`AO-windows-x64-setup.exe`, `AO-linux-x64.deb`, `AO-macos-universal.dmg`). Release notes updated with all platform download links and platform-specific notes (Gatekeeper, Linux deps).
+
+### Tauri config (`tauri-app/tauri.conf.json`)
+
+- Added `bundle.linux.deb` config: `depends` lists `libwebkit2gtk-4.1-0` and `libayatana-appindicator3-1`; `section: "utils"`.
+- Added `bundle.macOS.minimumSystemVersion: "10.15"`.
+
+### Docker (`docker/`)
+
+- **`docker/Dockerfile.dev`**: Development container based on `rust:1.84-bookworm` with Node.js 20, Tauri Linux system deps, `cargo-audit`, `tauri-cli`. Non-root user. Entrypoint: bash.
+- **`docker/Dockerfile`**: Multi-stage build for validation. Builder stage compiles workspace + runs tests. Runtime stage uses `debian:bookworm-slim` with minimal deps, non-root user.
+- **`docker/docker-compose.yml`**: `ao-dev` service (bind-mount dev shell, port 1420) and `ao-build` service (one-shot validation).
+- **`docker/.dockerignore`**: Excludes `target/`, `node_modules/`, `.git/`, secrets, IDE files.
+
+### npm package (`npm-package/`)
+
+- **`ao-desktop`** npm package: CLI wrapper (`npx ao-desktop`) that detects OS/arch, downloads the correct installer from GitHub Releases latest, and runs platform-specific install logic (NSIS on Windows, DMG mount+copy on macOS, dpkg on Linux).
+- Zero runtime dependencies; uses only Node.js built-ins (`node:https`, `node:fs`, `node:child_process`, `node:os`).
+- Commands: `install` (default), `version`, `help`.
+- **`.github/workflows/npm-publish.yml`**: Publishes `ao-desktop` to npm when a GitHub Release is published. Requires `NPM_TOKEN` repo secret.
+
+### Documentation
+
+- **`documents/RELEASE.md`**: Updated with all four delivery channels (direct download, npm CLI, Docker), platform-specific notes table, and npm publishing instructions.
+- **`documents/HOW_TO_RUN_LOCALLY.md`**: Added Docker quick-start section, platform-specific prerequisites, npm install instructions.
+
+## 2026-02-05 (Security audit CI and Dependabot)
+
+- **`.github/workflows/security-audit.yml`:** New workflow runs on push to main and on pull requests. Runs `cargo audit` and `npm audit --audit-level=high` (tauri-app/src-ui). Fails on high/critical advisories.
+- **`.github/dependabot.yml`:** Added for Cargo, npm (tauri-app/src-ui), and GitHub Actions with weekly schedule and PR labels. See SECURITY_NOTES.md for dependency and CI security.
+
 ## 2026-02-03 (Fix rust-cache "invalid toolchain name ''" on Windows)
 
 - **Cause:** `swatinem/rust-cache` runs `rustc + $toolchain` to build the cache key. When `dtolnay/rust-toolchain` is used without an explicit `toolchain:` input (relying only on `rust-toolchain.toml`), it can leave the toolchain name empty on some runners, so rust-cache fails with `error: invalid toolchain name ''`.

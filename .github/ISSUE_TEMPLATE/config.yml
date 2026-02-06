@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security Vulnerability
+    url: https://github.com/jbcupps/ao/security/advisories/new
+    about: Report security vulnerabilities privately (do NOT open a public issue).
+  - name: Documentation
+    url: https://github.com/jbcupps/ao/tree/main/documents
+    about: Browse existing documentation before opening an issue.
