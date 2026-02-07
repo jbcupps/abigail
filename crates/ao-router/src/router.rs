@@ -287,6 +287,13 @@ impl IdEgoRouter {
     /// Route message based on configured routing mode.
     /// Runs Superego pre-check before routing; returns a deny response if blocked.
     pub async fn route(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
+        tracing::debug!(
+            "route: mode={:?}, has_ego={}, has_superego={}, msg_count={}",
+            self.mode,
+            self.ego.is_some(),
+            self.superego.is_some(),
+            messages.len()
+        );
         // Superego pre-check on the last user message
         if let Some(deny) = self.run_superego_precheck(&messages).await {
             return Ok(deny);
@@ -387,6 +394,12 @@ impl IdEgoRouter {
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
     ) -> anyhow::Result<CompletionResponse> {
+        tracing::debug!(
+            "route_with_tools: has_ego={}, tool_count={}, msg_count={}",
+            self.ego.is_some(),
+            tools.len(),
+            messages.len()
+        );
         // Superego pre-check
         if let Some(deny) = self.run_superego_precheck(&messages).await {
             return Ok(deny);
@@ -397,12 +410,21 @@ impl IdEgoRouter {
         };
         // For tool-calling, use Ego if available (better tool support), else Id.
         if let Some(ego) = &self.ego {
+            tracing::info!("route_with_tools: attempting Ego (cloud) for tool call");
             match ego.complete(&request).await {
-                Ok(response) => return Ok(response),
+                Ok(response) => {
+                    tracing::info!(
+                        "route_with_tools: Ego success, tool_calls={}",
+                        response.tool_calls.as_ref().map_or(0, |t| t.len())
+                    );
+                    return Ok(response);
+                }
                 Err(e) => {
                     tracing::warn!("Ego failed for tool call, falling back to Id: {}", e);
                 }
             }
+        } else {
+            tracing::info!("route_with_tools: no Ego configured, using Id directly");
         }
         self.id.complete(&request).await
     }
@@ -478,19 +500,36 @@ impl IdEgoRouter {
         };
         // For tool-calling, prefer Ego if available
         if let Some(ref ego) = self.ego {
-            match ego.stream(&request, tx).await {
+            tracing::info!("route_stream_with_tools: attempting Ego stream");
+            match ego.stream(&request, tx.clone()).await {
                 Ok(response) => return Ok(response),
                 Err(e) => {
                     tracing::warn!(
-                        "Ego stream failed for tool call, falling back to complete: {}",
+                        "Ego stream failed for tool call, falling back to Id stream: {}",
                         e
                     );
-                    // Fall back to non-streaming complete
-                    return self.id.complete(&request).await;
+                    // Fall back to Id streaming (not non-streaming) so tokens reach frontend
+                    match self.id.stream(&request, tx.clone()).await {
+                        Ok(response) => return Ok(response),
+                        Err(e2) => {
+                            tracing::warn!(
+                                "Id stream also failed, falling back to non-streaming: {}",
+                                e2
+                            );
+                            // Last resort: non-streaming complete, send result through channel
+                            let response = self.id.complete(&request).await?;
+                            let _ = tx
+                                .send(StreamEvent::Token(response.content.clone()))
+                                .await;
+                            let _ = tx.send(StreamEvent::Done(response.clone())).await;
+                            return Ok(response);
+                        }
+                    }
                 }
             }
         }
-        self.id.complete(&request).await
+        tracing::info!("route_stream_with_tools: no Ego, using Id stream");
+        self.id.stream(&request, tx).await
     }
 }
 
@@ -503,8 +542,20 @@ fn build_ego_provider(
 ) -> (Option<Arc<dyn LlmProvider>>, Option<EgoProvider>) {
     let key = match api_key.filter(|k| !k.is_empty()) {
         Some(k) => k,
-        None => return (None, None),
+        None => {
+            tracing::info!(
+                "build_ego_provider: no API key provided (provider_name={:?}), Ego will be None",
+                provider_name
+            );
+            return (None, None);
+        }
     };
+
+    tracing::info!(
+        "build_ego_provider: building Ego with provider={:?}, key_len={}",
+        provider_name,
+        key.len()
+    );
 
     match provider_name {
         Some("anthropic") => (
@@ -552,13 +603,17 @@ fn build_id_provider(
 ) -> (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) {
     match local_llm_base_url.filter(|u| !u.is_empty()) {
         Some(url) => {
+            tracing::info!("build_id_provider: using LocalHttpProvider at {}", url);
             let provider = Arc::new(LocalHttpProvider::with_url(url));
             (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
         }
-        None => (
-            Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>,
-            None,
-        ),
+        None => {
+            tracing::info!("build_id_provider: no local URL, using CandleProvider stub");
+            (
+                Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>,
+                None,
+            )
+        }
     }
 }
 
@@ -568,13 +623,18 @@ async fn build_id_provider_auto_detect(
 ) -> (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) {
     match local_llm_base_url.filter(|u| !u.is_empty()) {
         Some(url) => {
+            tracing::info!("build_id_provider_auto_detect: querying {} for model name", url);
             let provider = Arc::new(LocalHttpProvider::with_url_auto_model(url).await);
+            tracing::info!("build_id_provider_auto_detect: local provider ready");
             (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
         }
-        None => (
-            Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>,
-            None,
-        ),
+        None => {
+            tracing::info!("build_id_provider_auto_detect: no local URL, using CandleProvider stub");
+            (
+                Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>,
+                None,
+            )
+        }
     }
 }
 
