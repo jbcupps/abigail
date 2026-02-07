@@ -120,10 +120,7 @@ fn run_gen_master(args: &[String]) -> eframe::Result<()> {
     // Generate master key
     let result = generate_master_key(&data_dir).map_err(|e| {
         eprintln!("Failed to generate master key: {}", e);
-        eframe::Error::AppCreation(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            e.to_string(),
-        )))
+        eframe::Error::AppCreation(Box::new(std::io::Error::other(e.to_string())))
     })?;
 
     // Create identities directory
@@ -137,10 +134,7 @@ fn run_gen_master(args: &[String]) -> eframe::Result<()> {
     let global_config = GlobalConfig::new(&data_dir);
     global_config.save(&data_dir).map_err(|e| {
         eprintln!("Failed to save global settings: {}", e);
-        eframe::Error::AppCreation(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            e.to_string(),
-        )))
+        eframe::Error::AppCreation(Box::new(std::io::Error::other(e.to_string())))
     })?;
 
     eprintln!(
