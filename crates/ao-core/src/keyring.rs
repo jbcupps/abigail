@@ -190,7 +190,9 @@ pub fn verify_agent_signature(
     let Ok(signature) = Signature::from_slice(signature_bytes) else {
         return false;
     };
-    master_pubkey.verify(agent_pubkey.as_bytes(), &signature).is_ok()
+    master_pubkey
+        .verify(agent_pubkey.as_bytes(), &signature)
+        .is_ok()
 }
 
 #[derive(Serialize, Deserialize)]

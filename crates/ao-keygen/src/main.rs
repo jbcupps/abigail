@@ -2,7 +2,8 @@
 
 use ao_core::{
     generate_external_keypair, generate_master_key, parse_private_key,
-    sign_constitutional_documents, templates::CONSTITUTIONAL_DOCS, AppConfig, GlobalConfig, Keyring,
+    sign_constitutional_documents, templates::CONSTITUTIONAL_DOCS, AppConfig, GlobalConfig,
+    Keyring,
 };
 use eframe::egui;
 use std::path::{Path, PathBuf};
@@ -88,13 +89,11 @@ fn main() -> eframe::Result<()> {
 fn run_gen_master(args: &[String]) -> eframe::Result<()> {
     // Parse optional --path argument
     let data_dir = if let Some(pos) = args.iter().position(|a| a == "--path") {
-        args.get(pos + 1)
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                directories::ProjectDirs::from("com", "ao", "AO")
-                    .map(|d| d.data_local_dir().to_path_buf())
-                    .unwrap_or_else(|| PathBuf::from("."))
-            })
+        args.get(pos + 1).map(PathBuf::from).unwrap_or_else(|| {
+            directories::ProjectDirs::from("com", "ao", "AO")
+                .map(|d| d.data_local_dir().to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."))
+        })
     } else {
         directories::ProjectDirs::from("com", "ao", "AO")
             .map(|d| d.data_local_dir().to_path_buf())
