@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+pub mod identity_manager;
 mod templates;
 
 use ao_birth::BirthOrchestrator;
@@ -14,6 +15,7 @@ use ao_skills::{MissingSkillSecret, SkillExecutor, SkillRegistry, ToolParams};
 use base64::Engine as _;
 use chrono::Utc;
 use ed25519_dalek::SigningKey;
+use identity_manager::{AgentIdentityInfo, IdentityManager};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use skill_filesystem::FilesystemSkill;
@@ -80,6 +82,10 @@ struct AppState {
     #[allow(dead_code)] // used for skill-event subscription; keep for future UI wiring
     event_bus: Arc<EventBus>,
     secrets: Arc<Mutex<SecretsVault>>,
+    /// Identity manager for the Hive multi-agent system
+    identity_manager: Arc<IdentityManager>,
+    /// Currently active agent UUID (None if no agent loaded)
+    active_agent_id: RwLock<Option<String>>,
 }
 
 fn get_config() -> AppConfig {
@@ -118,6 +124,91 @@ fn get_config() -> AppConfig {
     }
 
     config
+}
+
+// ── Hive Identity Management ─────────────────────────────────────────
+
+/// Check if the Hive has been initialized (master key + global settings exist).
+#[tauri::command]
+fn check_hive_status(state: tauri::State<AppState>) -> Result<bool, String> {
+    Ok(state.identity_manager.has_agents()
+        || state
+            .identity_manager
+            .data_root()
+            .join("master.key")
+            .exists())
+}
+
+/// Get the list of all registered agent identities.
+#[tauri::command]
+fn get_identities(state: tauri::State<AppState>) -> Result<Vec<AgentIdentityInfo>, String> {
+    state.identity_manager.list_agents()
+}
+
+/// Get the currently active agent UUID.
+#[tauri::command]
+fn get_active_agent(state: tauri::State<AppState>) -> Result<Option<String>, String> {
+    let active = state.active_agent_id.read().map_err(|e| e.to_string())?;
+    Ok(active.clone())
+}
+
+/// Load an agent by UUID. Verifies signature, loads config into AppState.
+#[tauri::command]
+fn load_agent(state: tauri::State<AppState>, agent_id: String) -> Result<(), String> {
+    // Verify and load agent config
+    let agent_config = state.identity_manager.load_agent(&agent_id)?;
+
+    // Update AppState with the loaded agent's config
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        *config = agent_config;
+    }
+
+    // Update secrets vault to point to agent's data directory
+    {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
+        *vault = SecretsVault::load(config.data_dir.clone())
+            .unwrap_or_else(|_| SecretsVault::new(config.data_dir.clone()));
+    }
+
+    // Rebuild router with new agent's config
+    rebuild_router_with_superego(&state)?;
+
+    // Set active agent
+    {
+        let mut active = state.active_agent_id.write().map_err(|e| e.to_string())?;
+        *active = Some(agent_id);
+    }
+
+    Ok(())
+}
+
+/// Create a new agent identity. Returns the UUID of the created agent.
+#[tauri::command]
+fn create_agent(state: tauri::State<AppState>, name: String) -> Result<String, String> {
+    let (uuid, _agent_dir) = state.identity_manager.create_agent(&name)?;
+    Ok(uuid)
+}
+
+/// Disconnect from the current agent (return to management screen).
+#[tauri::command]
+fn disconnect_agent(state: tauri::State<AppState>) -> Result<(), String> {
+    let mut active = state.active_agent_id.write().map_err(|e| e.to_string())?;
+    *active = None;
+
+    // Reset birth orchestrator
+    let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+    *birth = None;
+
+    Ok(())
+}
+
+/// Attempt to migrate a legacy single-identity installation to the Hive format.
+/// Returns the migrated agent UUID if successful, null if no legacy identity found.
+#[tauri::command]
+fn migrate_legacy_identity(state: tauri::State<AppState>) -> Result<Option<String>, String> {
+    state.identity_manager.migrate_legacy_identity()
 }
 
 #[tauri::command]
@@ -2210,6 +2301,21 @@ fn complete_emergence(state: tauri::State<AppState>) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
+    // Sync agent name to IdentityManager's global config
+    {
+        let active_agent = state
+            .active_agent_id
+            .read()
+            .map_err(|e| e.to_string())?
+            .clone();
+        if let Some(agent_id) = active_agent {
+            let config = state.config.read().map_err(|e| e.to_string())?;
+            if let Some(name) = &config.agent_name {
+                let _ = state.identity_manager.update_agent_name(&agent_id, name);
+            }
+        }
+    }
+
     // Rebuild router so Ego is active immediately after birth
     {
         let config = state.config.read().map_err(|e| e.to_string())?;
@@ -2274,6 +2380,19 @@ fn determine_ego_provider(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let config = get_config();
+
+    // Initialize the Hive Identity Manager
+    let identity_manager = Arc::new(
+        IdentityManager::new(config.data_dir.clone()).unwrap_or_else(|e| {
+            tracing::error!(
+                "Failed to initialize IdentityManager: {}. Proceeding with default.",
+                e
+            );
+            // Fall back to creating a basic manager
+            IdentityManager::new(config.data_dir.clone())
+                .expect("IdentityManager initialization failed fatally")
+        }),
+    );
 
     // Initialize the secrets vault (DPAPI-encrypted on Windows)
     let secrets = Arc::new(Mutex::new(
@@ -2373,6 +2492,8 @@ pub fn run() {
         executor,
         event_bus: event_bus.clone(),
         secrets,
+        identity_manager,
+        active_agent_id: RwLock::new(None),
     };
 
     // Clone event_bus before setup since state isn't available inside setup callback
@@ -2431,6 +2552,15 @@ pub fn run() {
         })
         .manage(state)
         .invoke_handler(tauri::generate_handler![
+            // Hive identity management
+            check_hive_status,
+            get_identities,
+            get_active_agent,
+            load_agent,
+            create_agent,
+            disconnect_agent,
+            migrate_legacy_identity,
+            // Existing commands
             get_birth_complete,
             get_agent_name,
             get_docs_path,

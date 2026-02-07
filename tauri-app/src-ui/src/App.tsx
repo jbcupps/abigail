@@ -6,8 +6,16 @@ import ChatInterface from "./components/ChatInterface";
 import PersonaToggle from "./components/PersonaToggle";
 import IdentityPanel from "./components/IdentityPanel";
 import IdentityConflictPanel, { IdentitySummary } from "./components/IdentityConflictPanel";
+import ManagementScreen from "./components/ManagementScreen";
 
-type AppState = "loading" | "identity_conflict" | "boot" | "startup_check" | "startup_failed" | "chat";
+type AppState =
+  | "loading"
+  | "management"
+  | "identity_conflict"
+  | "boot"
+  | "startup_check"
+  | "startup_failed"
+  | "chat";
 
 interface StartupCheckResult {
   heartbeat_ok: boolean;
@@ -24,29 +32,41 @@ function AppInner() {
   useEffect(() => {
     (async () => {
       try {
-        // First, check for existing completed identity
-        const identity = await invoke<IdentitySummary | null>("check_existing_identity");
-        if (identity) {
-          // Show identity conflict screen
-          setExistingIdentity(identity);
-          setAppState("identity_conflict");
+        // Check if an agent is already active (e.g. resumed session)
+        const activeAgent = await invoke<string | null>("get_active_agent");
+        if (activeAgent) {
+          // Agent already loaded, go to startup checks
+          const complete = await invoke<boolean>("get_birth_complete");
+          if (complete) {
+            setMode("ego");
+            setAppState("startup_check");
+            await refreshAgentName();
+            await runStartupChecks();
+          } else {
+            setAppState("boot");
+          }
           return;
         }
 
-        // No existing identity - check if birth is complete
-        const complete = await invoke<boolean>("get_birth_complete");
-        if (complete) {
-          // Already born: switch to ego mode immediately to avoid amber flash
-          setMode("ego");
-          setAppState("startup_check");
-          await refreshAgentName();
-          await runStartupChecks();
-        } else {
-          // First run: show boot sequence (handles its own LLM setup)
-          setAppState("boot");
+        // Check if Hive has any agents
+        const identities = await invoke<unknown[]>("get_identities");
+
+        if (identities.length === 0) {
+          // Check for legacy single-identity installation
+          const identity = await invoke<IdentitySummary | null>("check_existing_identity");
+          if (identity) {
+            // Show identity conflict/migration screen
+            setExistingIdentity(identity);
+            setAppState("identity_conflict");
+            return;
+          }
         }
+
+        // Default: show the management screen (identity selector)
+        setAppState("management");
       } catch {
-        setAppState("boot");
+        // Fallback to management screen on error
+        setAppState("management");
       }
     })();
   }, []);
@@ -93,25 +113,69 @@ function AppInner() {
     setAppState("chat");
   };
 
-  // Handlers for identity conflict screen
+  // Handlers for identity conflict screen (legacy migration path)
   const handleIdentityResume = async () => {
-    setExistingIdentity(null);
-    setMode("ego"); // Switch to ego immediately for resuming identity
-    setAppState("startup_check");
-    await refreshAgentName();
-    await runStartupChecks();
+    // Migrate legacy identity to Hive format, then load it
+    try {
+      const uuid = await invoke<string | null>("migrate_legacy_identity");
+      if (uuid) {
+        await invoke("load_agent", { agentId: uuid });
+        setExistingIdentity(null);
+        setMode("ego");
+        setAppState("startup_check");
+        await refreshAgentName();
+        await runStartupChecks();
+      } else {
+        // No legacy identity found, go to management
+        setExistingIdentity(null);
+        setAppState("management");
+      }
+    } catch {
+      setExistingIdentity(null);
+      setAppState("management");
+    }
   };
 
   const handleIdentityArchive = () => {
-    // Identity has been archived, start fresh birth
+    // Identity has been archived, go to management screen
     setExistingIdentity(null);
-    setAppState("boot");
+    setAppState("management");
   };
 
   const handleIdentityWipe = () => {
-    // Identity has been wiped, start fresh birth
+    // Identity has been wiped, go to management screen
     setExistingIdentity(null);
+    setAppState("management");
+  };
+
+  // Handler for agent selection from management screen
+  const handleAgentSelected = async (_agentId: string) => {
+    const complete = await invoke<boolean>("get_birth_complete");
+    if (complete) {
+      setMode("ego");
+      setAppState("startup_check");
+      await refreshAgentName();
+      await runStartupChecks();
+    } else {
+      // Agent exists but not born yet, go to boot
+      setAppState("boot");
+    }
+  };
+
+  // Handler for creating a new agent from management screen
+  const handleCreateAgent = () => {
+    // Agent was just created and loaded, go to boot sequence
     setAppState("boot");
+  };
+
+  // Handler for disconnecting from agent (back to management)
+  const handleDisconnect = async () => {
+    try {
+      await invoke("disconnect_agent");
+    } catch {
+      // Ignore errors during disconnect
+    }
+    setAppState("management");
   };
 
   if (appState === "loading") {
@@ -119,6 +183,15 @@ function AppInner() {
       <div className="min-h-screen bg-black text-gray-500 font-mono flex items-center justify-center">
         Loading...
       </div>
+    );
+  }
+
+  if (appState === "management") {
+    return (
+      <ManagementScreen
+        onAgentSelected={handleAgentSelected}
+        onCreateAgent={handleCreateAgent}
+      />
     );
   }
 
@@ -184,6 +257,14 @@ function AppInner() {
         <ChatInterface target="EGO" />
       </div>
       {mode === "id" && <IdentityPanel />}
+      {/* Disconnect button */}
+      <button
+        className="fixed top-2 right-2 text-gray-600 hover:text-gray-400 text-xs font-mono z-50"
+        onClick={handleDisconnect}
+        title="Return to identity selector"
+      >
+        [disconnect]
+      </button>
     </>
   );
 }

@@ -2,6 +2,18 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-07 (Fix PR test failures on claude/refactor-hive-architecture-PglPx)
+
+- **Tests**: Replaced Unix-only paths in unit tests so CI passes on Windows (and all platforms).
+  - **ao-core** `global_config.rs`: `test_find_and_remove_agent` no longer uses `PathBuf::from("/tmp")`; uses `std::env::temp_dir().join("ao_global_config_find_remove")` with create/cleanup.
+  - **ao-skills** `watcher.rs`: `test_watcher_handles_nonexistent_dir` no longer uses `PathBuf::from("/tmp/ao_watcher_nonexistent_12345")`; uses `std::env::temp_dir().join("ao_watcher_nonexistent_12345")`.
+- **Note**: CI runs `cargo test --workspace --exclude ao-app`; the Tauri app build (e.g. Docker full build) still expects resource `ao-keygen.exe` and may fail on Linux until bundle config is made cross-platform (e.g. externalBin).
+
+## 2026-02-07 (Tabula rosa UAT skill and findings folder)
+
+- **New**: `.cursor/skills/tabula-rosa-uat/SKILL.md` — Cursor skill for running tabula-rosa UAT: clean environment, Windows installer + Docker + npm testing, findings backup, cleanup.
+- **.gitignore**: Added `uat-findings/` so UAT run reports can be written to a gitignored folder at repo root.
+
 ## 2026-02-06 (Fix CI workflow failures after consolidation)
 
 - **lint**: Removed "Install Linux dependencies" step; lint only runs fmt/clippy and does not need WebKit/GTK.

@@ -15,6 +15,12 @@ Set-Location "$RepoRoot\tauri-app"
 cargo tauri build
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+# Generate the Hive master key (idempotent - won't overwrite existing)
+Write-Host "Generating Hive master key..."
+Set-Location $RepoRoot
+cargo run -p ao-keygen -- --gen-master
+# Non-fatal if master key already exists
+
 # Bundle output: workspace target or tauri-app/target
 $BundleNsis = "$RepoRoot\target\release\bundle\nsis"
 if (-not (Test-Path $BundleNsis)) {

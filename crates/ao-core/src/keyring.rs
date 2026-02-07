@@ -125,6 +125,82 @@ impl Keyring {
 }
 
 // ============================================================================
+// Master Key Generation (for Hive identity signing)
+// ============================================================================
+
+/// Result of generating a master key for the Hive.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MasterKeyResult {
+    /// Path where the master key was saved (contains both signing + verifying key).
+    pub master_key_path: PathBuf,
+}
+
+/// Generate a Hive master key and save it to `{data_dir}/master.key`.
+///
+/// The master key is an Ed25519 signing key stored on disk. It is used to sign
+/// agent public keys, creating a chain of trust: Master Key → Agent Key.
+///
+/// Unlike the external signing keypair (where the private key is never stored),
+/// the master key IS stored because it must be available to sign new agents.
+/// On Windows, it will be DPAPI-encrypted. On other platforms, plaintext (dev only).
+pub fn generate_master_key(data_dir: &Path) -> Result<MasterKeyResult> {
+    let signing_key = SigningKey::generate(&mut OsRng);
+
+    std::fs::create_dir_all(data_dir)?;
+    let master_key_path = data_dir.join("master.key");
+
+    // Store as DPAPI-encrypted JSON containing the secret bytes
+    let stored = MasterKeyStored {
+        secret: signing_key.to_bytes().to_vec(),
+    };
+    let serialized = serde_json::to_vec(&stored)?;
+    let encrypted = dpapi_encrypt(&serialized)?;
+    std::fs::write(&master_key_path, encrypted)?;
+
+    Ok(MasterKeyResult { master_key_path })
+}
+
+/// Load a master key from disk.
+pub fn load_master_key(path: &Path) -> Result<SigningKey> {
+    let encrypted = std::fs::read(path)?;
+    let decrypted = dpapi_decrypt(&encrypted)?;
+    let stored: MasterKeyStored =
+        serde_json::from_slice(&decrypted).map_err(|e| CoreError::Keyring(e.to_string()))?;
+    let key_bytes: [u8; 32] = stored
+        .secret
+        .as_slice()
+        .try_into()
+        .map_err(|_| CoreError::Crypto("Invalid master key length".into()))?;
+    Ok(SigningKey::from_bytes(&key_bytes))
+}
+
+/// Sign an agent's public key with the master key.
+/// Creates a signature proving this agent belongs to this Hive.
+pub fn sign_agent_key(master_key: &SigningKey, agent_pubkey: &VerifyingKey) -> Vec<u8> {
+    let signature = master_key.sign(agent_pubkey.as_bytes());
+    signature.to_bytes().to_vec()
+}
+
+/// Verify an agent's public key signature against the master key's public key.
+pub fn verify_agent_signature(
+    master_pubkey: &VerifyingKey,
+    agent_pubkey: &VerifyingKey,
+    signature_bytes: &[u8],
+) -> bool {
+    let Ok(signature) = Signature::from_slice(signature_bytes) else {
+        return false;
+    };
+    master_pubkey
+        .verify(agent_pubkey.as_bytes(), &signature)
+        .is_ok()
+}
+
+#[derive(Serialize, Deserialize)]
+struct MasterKeyStored {
+    secret: Vec<u8>,
+}
+
+// ============================================================================
 // External Signing Keypair Generation (for constitutional document signing)
 // ============================================================================
 

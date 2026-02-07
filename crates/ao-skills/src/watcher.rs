@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     fn test_watcher_handles_nonexistent_dir() {
-        let nonexistent = PathBuf::from("/tmp/ao_watcher_nonexistent_12345");
+        let nonexistent = std::env::temp_dir().join("ao_watcher_nonexistent_12345");
         // Should not error - just skip non-existent paths
         let result = SkillsWatcher::start(vec![nonexistent]);
         assert!(result.is_ok());
