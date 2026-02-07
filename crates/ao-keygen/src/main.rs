@@ -1,14 +1,20 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use ao_core::{
-    generate_external_keypair, parse_private_key, sign_constitutional_documents,
-    templates::CONSTITUTIONAL_DOCS, AppConfig, Keyring,
+    generate_external_keypair, generate_master_key, parse_private_key,
+    sign_constitutional_documents, templates::CONSTITUTIONAL_DOCS, AppConfig, GlobalConfig, Keyring,
 };
 use eframe::egui;
 use std::path::{Path, PathBuf};
 
 fn main() -> eframe::Result<()> {
     tracing_subscriber::fmt::init();
+
+    // Check for --gen-master flag (headless master key generation)
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--gen-master") {
+        return run_gen_master(&args);
+    }
 
     // Resolve data directory
     let data_dir = directories::ProjectDirs::from("com", "ao", "AO")
@@ -67,6 +73,80 @@ fn main() -> eframe::Result<()> {
             )
         }
     }
+}
+
+/// Headless master key generation for the Hive architecture.
+///
+/// Usage: ao-keygen --gen-master [--path <data_dir>]
+///
+/// Generates:
+///   - master.key (DPAPI-encrypted Ed25519 signing key)
+///   - global_settings.json (empty agent registry)
+///   - identities/ directory (empty)
+///
+/// Does NOT create any agent folders or constitutional documents.
+fn run_gen_master(args: &[String]) -> eframe::Result<()> {
+    // Parse optional --path argument
+    let data_dir = if let Some(pos) = args.iter().position(|a| a == "--path") {
+        args.get(pos + 1)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                directories::ProjectDirs::from("com", "ao", "AO")
+                    .map(|d| d.data_local_dir().to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from("."))
+            })
+    } else {
+        directories::ProjectDirs::from("com", "ao", "AO")
+            .map(|d| d.data_local_dir().to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."))
+    };
+
+    // Check if master key already exists
+    let master_key_path = data_dir.join("master.key");
+    if master_key_path.exists() {
+        eprintln!("Master key already exists at: {}", master_key_path.display());
+        eprintln!("Remove it manually if you want to regenerate.");
+        std::process::exit(1);
+    }
+
+    // Create data directory
+    std::fs::create_dir_all(&data_dir).map_err(|e| {
+        eprintln!("Failed to create data directory: {}", e);
+        eframe::Error::from(e)
+    })?;
+
+    // Generate master key
+    let result = generate_master_key(&data_dir).map_err(|e| {
+        eprintln!("Failed to generate master key: {}", e);
+        eframe::Error::from(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            e.to_string(),
+        ))
+    })?;
+
+    // Create identities directory
+    let identities_dir = data_dir.join("identities");
+    std::fs::create_dir_all(&identities_dir).map_err(|e| {
+        eprintln!("Failed to create identities directory: {}", e);
+        eframe::Error::from(e)
+    })?;
+
+    // Create global_settings.json
+    let global_config = GlobalConfig::new(&data_dir);
+    global_config.save(&data_dir).map_err(|e| {
+        eprintln!("Failed to save global settings: {}", e);
+        eframe::Error::from(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            e.to_string(),
+        ))
+    })?;
+
+    eprintln!("Hive master key generated: {}", result.master_key_path.display());
+    eprintln!("Global settings created: {}", GlobalConfig::config_path(&data_dir).display());
+    eprintln!("Identities directory: {}", identities_dir.display());
+    eprintln!("Ready for agent creation.");
+
+    Ok(())
 }
 
 struct SetupResult {
