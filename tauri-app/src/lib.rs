@@ -868,28 +868,21 @@ async fn download_model(
 
 #[tauri::command]
 fn set_api_key(state: tauri::State<AppState>, key: String) -> Result<(), String> {
-    let mut config = state.config.write().map_err(|e| e.to_string())?;
-    config.openai_api_key = Some(key);
-    config
-        .save(&config.config_path())
-        .map_err(|e| e.to_string())?;
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.openai_api_key = Some(key);
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
+    }
 
-    // Rebuild the router so it picks up the new API key
-    let new_router = IdEgoRouter::new(
-        config.local_llm_base_url.clone(),
-        Some("openai"),
-        config.openai_api_key.clone(),
-        config.routing_mode,
-    );
-    drop(config); // Release config lock before acquiring router lock
-    let mut router = state.router.write().map_err(|e| e.to_string())?;
-    *router = new_router;
-    Ok(())
+    // Rebuild router using centralized logic (preserves Superego, uses correct provider)
+    rebuild_router_with_superego(&state)
 }
 
 #[tauri::command]
 async fn set_local_llm_url(state: tauri::State<'_, AppState>, url: String) -> Result<(), String> {
-    let (local_url, ego_provider, ego_api_key, mode) = {
+    let (local_url, ego_provider, ego_api_key, mode, superego_config) = {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         config.local_llm_base_url = if url.is_empty() {
             None
@@ -902,17 +895,37 @@ async fn set_local_llm_url(state: tauri::State<'_, AppState>, url: String) -> Re
             .map_err(|e| e.to_string())?;
         let vault = state.secrets.lock().map_err(|e| e.to_string())?;
         let (ep, ek) = determine_ego_provider(&config, &vault);
+        let se = extract_superego_config(&config);
         (
             config.local_llm_base_url.clone(),
             ep,
             ek,
             config.routing_mode,
+            se,
         )
     };
 
+    tracing::info!(
+        "set_local_llm_url: rebuilding router with local_url={:?}, ego={:?}, mode={:?}",
+        local_url,
+        ego_provider,
+        mode
+    );
+
     // Rebuild the router with auto-detected model name (important for LM Studio)
-    let new_router =
+    let mut new_router =
         IdEgoRouter::new_auto_detect(local_url, ego_provider.as_deref(), ego_api_key, mode).await;
+
+    // Preserve Superego if configured
+    if let Some((se_provider, se_key)) = superego_config {
+        let superego = build_superego_llm_provider(&se_provider, &se_key);
+        new_router = new_router.with_superego(superego);
+        tracing::info!(
+            "set_local_llm_url: Superego preserved (provider={})",
+            se_provider
+        );
+    }
+
     let mut router = state.router.write().map_err(|e| e.to_string())?;
     *router = new_router;
     Ok(())
@@ -943,74 +956,70 @@ fn set_superego_provider(
     Ok(())
 }
 
+/// Extract Superego provider name and key from TrinityConfig if configured.
+fn extract_superego_config(config: &AppConfig) -> Option<(String, String)> {
+    config.trinity.as_ref().and_then(|trinity| {
+        match (&trinity.superego_provider, &trinity.superego_api_key) {
+            (Some(provider), Some(key)) if !key.is_empty() => Some((provider.clone(), key.clone())),
+            _ => None,
+        }
+    })
+}
+
+/// Build a Superego LLM provider from provider name and API key.
+fn build_superego_llm_provider(
+    provider: &str,
+    key: &str,
+) -> Arc<dyn ao_capabilities::cognitive::LlmProvider> {
+    match provider {
+        "anthropic" => Arc::new(ao_capabilities::cognitive::AnthropicProvider::new(
+            key.to_string(),
+        )),
+        "perplexity" | "xai" | "google" => {
+            if let Some(cp) = ao_capabilities::cognitive::CompatibleProvider::from_name(provider) {
+                Arc::new(ao_capabilities::cognitive::OpenAiCompatibleProvider::new(
+                    cp,
+                    key.to_string(),
+                ))
+            } else {
+                Arc::new(ao_capabilities::cognitive::OpenAiProvider::new(Some(
+                    key.to_string(),
+                )))
+            }
+        }
+        _ => Arc::new(ao_capabilities::cognitive::OpenAiProvider::new(Some(
+            key.to_string(),
+        ))),
+    }
+}
+
 /// Rebuild the router from current config + vault state, attaching Superego if configured.
 fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let vault = state.secrets.lock().map_err(|e| e.to_string())?;
 
-    // Determine ego provider (priority: config key > vault keys by preference)
-    let (ego_name, ego_key) = if let Some(ref key) = config.openai_api_key {
-        (Some("openai"), Some(key.clone()))
-    } else if let Some(key) = vault.get_secret("anthropic") {
-        (Some("anthropic"), Some(key.to_string()))
-    } else if let Some(key) = vault.get_secret("openai") {
-        (Some("openai"), Some(key.to_string()))
-    } else if let Some(key) = vault.get_secret("xai") {
-        (Some("xai"), Some(key.to_string()))
-    } else if let Some(key) = vault.get_secret("perplexity") {
-        (Some("perplexity"), Some(key.to_string()))
-    } else if let Some(key) = vault.get_secret("google") {
-        (Some("google"), Some(key.to_string()))
-    } else {
-        (None, None)
-    };
+    // Use centralized ego provider determination (TrinityConfig > config key > vault)
+    let (ego_name, ego_key) = determine_ego_provider(&config, &vault);
+
+    tracing::info!(
+        "rebuild_router_with_superego: ego_provider={:?}, local_url={:?}, mode={:?}",
+        ego_name,
+        config.local_llm_base_url,
+        config.routing_mode
+    );
 
     let mut new_router = IdEgoRouter::with_provider(
         config.local_llm_base_url.clone(),
-        ego_name,
+        ego_name.as_deref(),
         ego_key,
         config.routing_mode,
     );
 
-    // Attach Superego if configured in TrinityConfig
-    if let Some(ref trinity) = config.trinity {
-        if let (Some(ref se_provider), Some(ref se_key)) =
-            (&trinity.superego_provider, &trinity.superego_api_key)
-        {
-            if !se_key.is_empty() {
-                let superego: std::sync::Arc<dyn ao_capabilities::cognitive::LlmProvider> =
-                    match se_provider.as_str() {
-                        "anthropic" => std::sync::Arc::new(
-                            ao_capabilities::cognitive::AnthropicProvider::new(se_key.clone()),
-                        ),
-                        "perplexity" | "xai" | "google" => {
-                            if let Some(cp) =
-                                ao_capabilities::cognitive::CompatibleProvider::from_name(
-                                    se_provider,
-                                )
-                            {
-                                std::sync::Arc::new(
-                                    ao_capabilities::cognitive::OpenAiCompatibleProvider::new(
-                                        cp,
-                                        se_key.clone(),
-                                    ),
-                                )
-                            } else {
-                                std::sync::Arc::new(
-                                    ao_capabilities::cognitive::OpenAiProvider::new(Some(
-                                        se_key.clone(),
-                                    )),
-                                )
-                            }
-                        }
-                        _ => std::sync::Arc::new(ao_capabilities::cognitive::OpenAiProvider::new(
-                            Some(se_key.clone()),
-                        )),
-                    };
-                new_router = new_router.with_superego(superego);
-                tracing::info!("Superego attached: provider={}", se_provider);
-            }
-        }
+    // Attach Superego if configured in TrinityConfig (uses shared helper)
+    if let Some((se_provider, se_key)) = extract_superego_config(&config) {
+        let superego = build_superego_llm_provider(&se_provider, &se_key);
+        new_router = new_router.with_superego(superego);
+        tracing::info!("Superego attached: provider={}", se_provider);
     }
 
     drop(vault);
@@ -1965,28 +1974,23 @@ async fn store_provider_key(
         vault.save().map_err(|e| e.to_string())?;
     }
 
-    // For known Ego providers, update config and rebuild router
+    // For known Ego providers, update config and rebuild router (preserving Superego)
     if matches!(
         provider.as_str(),
         "openai" | "anthropic" | "perplexity" | "xai" | "google"
     ) {
-        let mut config = state.config.write().map_err(|e| e.to_string())?;
-        if provider == "openai" {
-            config.openai_api_key = Some(key.clone());
+        {
+            let mut config = state.config.write().map_err(|e| e.to_string())?;
+            if provider == "openai" {
+                config.openai_api_key = Some(key.clone());
+            }
+            config
+                .save(&config.config_path())
+                .map_err(|e| e.to_string())?;
         }
-        config
-            .save(&config.config_path())
-            .map_err(|e| e.to_string())?;
 
-        let new_router = IdEgoRouter::new(
-            config.local_llm_base_url.clone(),
-            Some(provider.as_str()),
-            Some(key.clone()),
-            config.routing_mode,
-        );
-        drop(config);
-        let mut router = state.router.write().map_err(|e| e.to_string())?;
-        *router = new_router;
+        // Rebuild router using centralized logic (preserves Superego)
+        rebuild_router_with_superego(&state)?;
     }
 
     Ok(StoreKeyResult {
@@ -2236,6 +2240,10 @@ fn determine_ego_provider(
     // 1. TrinityConfig takes priority (set after birth)
     if let Some(ref trinity) = config.trinity {
         if trinity.ego_api_key.is_some() {
+            tracing::info!(
+                "determine_ego_provider: using TrinityConfig ego_provider={:?}",
+                trinity.ego_provider
+            );
             return (trinity.ego_provider.clone(), trinity.ego_api_key.clone());
         }
     }
@@ -2243,17 +2251,23 @@ fn determine_ego_provider(
     // 2. Legacy openai_api_key in config
     if let Some(ref key) = config.openai_api_key {
         if !key.is_empty() {
+            tracing::info!("determine_ego_provider: using legacy openai_api_key from config");
             return (Some("openai".to_string()), Some(key.clone()));
         }
     }
 
-    // 3. Check secrets vault for provider keys
-    for provider in &["anthropic", "openai", "xai"] {
+    // 3. Check secrets vault for provider keys (all supported Ego providers)
+    for provider in &["anthropic", "openai", "xai", "perplexity", "google"] {
         if let Some(key) = secrets.get_secret(provider) {
+            tracing::info!(
+                "determine_ego_provider: found key in vault for '{}'",
+                provider
+            );
             return (Some(provider.to_string()), Some(key.to_string()));
         }
     }
 
+    tracing::warn!("determine_ego_provider: no Ego provider configured (no TrinityConfig, no API key, no vault secrets)");
     (None, None)
 }
 
@@ -2273,6 +2287,19 @@ pub fn run() {
         determine_ego_provider(&config, &vault)
     };
 
+    tracing::info!(
+        "Startup: ego_provider={:?}, local_url={:?}, mode={:?}",
+        ego_provider,
+        config.local_llm_base_url,
+        config.routing_mode
+    );
+    if config.local_llm_base_url.is_some() {
+        tracing::info!(
+            "Startup: local LLM model name will be auto-detected on first set_local_llm_url call. \
+             Until then, using default name 'local-model'."
+        );
+    }
+
     let router = {
         let mut r = IdEgoRouter::new(
             config.local_llm_base_url.clone(),
@@ -2281,25 +2308,11 @@ pub fn run() {
             config.routing_mode,
         );
 
-        // Attach Superego if configured in TrinityConfig
-        if let Some(ref trinity) = config.trinity {
-            if let (Some(ref se_provider), Some(ref se_key)) =
-                (&trinity.superego_provider, &trinity.superego_api_key)
-            {
-                if !se_key.is_empty() {
-                    let superego: Arc<dyn ao_capabilities::cognitive::LlmProvider> =
-                        match se_provider.as_str() {
-                            "anthropic" => Arc::new(
-                                ao_capabilities::cognitive::AnthropicProvider::new(se_key.clone()),
-                            ),
-                            _ => Arc::new(ao_capabilities::cognitive::OpenAiProvider::new(Some(
-                                se_key.clone(),
-                            ))),
-                        };
-                    r = r.with_superego(superego);
-                    tracing::info!("Superego configured at startup: provider={}", se_provider);
-                }
-            }
+        // Attach Superego if configured in TrinityConfig (uses shared helper)
+        if let Some((se_provider, se_key)) = extract_superego_config(&config) {
+            let superego = build_superego_llm_provider(&se_provider, &se_key);
+            r = r.with_superego(superego);
+            tracing::info!("Superego configured at startup: provider={}", se_provider);
         }
 
         r
