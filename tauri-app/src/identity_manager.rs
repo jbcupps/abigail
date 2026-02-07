@@ -146,8 +146,8 @@ impl IdentityManager {
             .as_slice()
             .try_into()
             .map_err(|_| "Invalid public key length")?;
-        let agent_pubkey =
-            VerifyingKey::from_bytes(&pubkey_array).map_err(|e| format!("Invalid public key: {}", e))?;
+        let agent_pubkey = VerifyingKey::from_bytes(&pubkey_array)
+            .map_err(|e| format!("Invalid public key: {}", e))?;
 
         // Read the signature
         let sig_path = agent_dir.join("signature.sig");
@@ -209,8 +209,7 @@ impl IdentityManager {
         std::fs::create_dir_all(&docs_dir).map_err(|e| e.to_string())?;
 
         // Generate agent keypair
-        let keypair_result =
-            generate_external_keypair(&agent_dir).map_err(|e| e.to_string())?;
+        let keypair_result = generate_external_keypair(&agent_dir).map_err(|e| e.to_string())?;
 
         // Read the generated public key to sign it
         let pubkey_bytes =
@@ -230,8 +229,7 @@ impl IdentityManager {
         // Generate internal keyring for this agent
         let keys_file = agent_dir.join("keys.bin");
         if !keys_file.exists() {
-            let keyring =
-                Keyring::generate(agent_dir.clone()).map_err(|e| e.to_string())?;
+            let keyring = Keyring::generate(agent_dir.clone()).map_err(|e| e.to_string())?;
             keyring.save().map_err(|e| e.to_string())?;
         }
 
@@ -318,8 +316,7 @@ impl IdentityManager {
             return Ok(None); // No legacy identity
         }
 
-        let legacy_config =
-            AppConfig::load(&legacy_config_path).map_err(|e| e.to_string())?;
+        let legacy_config = AppConfig::load(&legacy_config_path).map_err(|e| e.to_string())?;
 
         // Only migrate if birth was complete
         if !legacy_config.birth_complete {
@@ -352,9 +349,8 @@ impl IdentityManager {
             let src = self.data_root.join(file);
             let dst = agent_dir.join(file);
             if src.exists() {
-                std::fs::copy(&src, &dst).map_err(|e| {
-                    format!("Failed to copy legacy file {}: {}", file, e)
-                })?;
+                std::fs::copy(&src, &dst)
+                    .map_err(|e| format!("Failed to copy legacy file {}: {}", file, e))?;
             }
         }
 

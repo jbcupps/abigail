@@ -104,7 +104,10 @@ fn run_gen_master(args: &[String]) -> eframe::Result<()> {
     // Check if master key already exists
     let master_key_path = data_dir.join("master.key");
     if master_key_path.exists() {
-        eprintln!("Master key already exists at: {}", master_key_path.display());
+        eprintln!(
+            "Master key already exists at: {}",
+            master_key_path.display()
+        );
         eprintln!("Remove it manually if you want to regenerate.");
         std::process::exit(1);
     }
@@ -141,8 +144,14 @@ fn run_gen_master(args: &[String]) -> eframe::Result<()> {
         )))
     })?;
 
-    eprintln!("Hive master key generated: {}", result.master_key_path.display());
-    eprintln!("Global settings created: {}", GlobalConfig::config_path(&data_dir).display());
+    eprintln!(
+        "Hive master key generated: {}",
+        result.master_key_path.display()
+    );
+    eprintln!(
+        "Global settings created: {}",
+        GlobalConfig::config_path(&data_dir).display()
+    );
     eprintln!("Identities directory: {}", identities_dir.display());
     eprintln!("Ready for agent creation.");
 
