@@ -2,6 +2,11 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-07 (Fix release build failure: missing anyhow)
+
+- **CI/Release**: Added `anyhow` dependency to `tauri-app/Cargo.toml` so `identity_manager.rs` can compile during `tauri build`.
+- **Context**: Release workflow failed on Windows/macOS/Linux in "Build Tauri app" with `E0433` (unresolved crate `anyhow`).
+
 ## 2026-02-07 (Fix PR test failures on claude/refactor-hive-architecture-PglPx)
 
 - **Tests**: Replaced Unix-only paths in unit tests so CI passes on Windows (and all platforms).
