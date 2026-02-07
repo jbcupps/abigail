@@ -518,9 +518,7 @@ impl IdEgoRouter {
                             );
                             // Last resort: non-streaming complete, send result through channel
                             let response = self.id.complete(&request).await?;
-                            let _ = tx
-                                .send(StreamEvent::Token(response.content.clone()))
-                                .await;
+                            let _ = tx.send(StreamEvent::Token(response.content.clone())).await;
                             let _ = tx.send(StreamEvent::Done(response.clone())).await;
                             return Ok(response);
                         }
@@ -623,13 +621,18 @@ async fn build_id_provider_auto_detect(
 ) -> (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) {
     match local_llm_base_url.filter(|u| !u.is_empty()) {
         Some(url) => {
-            tracing::info!("build_id_provider_auto_detect: querying {} for model name", url);
+            tracing::info!(
+                "build_id_provider_auto_detect: querying {} for model name",
+                url
+            );
             let provider = Arc::new(LocalHttpProvider::with_url_auto_model(url).await);
             tracing::info!("build_id_provider_auto_detect: local provider ready");
             (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
         }
         None => {
-            tracing::info!("build_id_provider_auto_detect: no local URL, using CandleProvider stub");
+            tracing::info!(
+                "build_id_provider_auto_detect: no local URL, using CandleProvider stub"
+            );
             (
                 Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>,
                 None,

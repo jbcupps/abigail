@@ -920,7 +920,10 @@ async fn set_local_llm_url(state: tauri::State<'_, AppState>, url: String) -> Re
     if let Some((se_provider, se_key)) = superego_config {
         let superego = build_superego_llm_provider(&se_provider, &se_key);
         new_router = new_router.with_superego(superego);
-        tracing::info!("set_local_llm_url: Superego preserved (provider={})", se_provider);
+        tracing::info!(
+            "set_local_llm_url: Superego preserved (provider={})",
+            se_provider
+        );
     }
 
     let mut router = state.router.write().map_err(|e| e.to_string())?;
@@ -957,9 +960,7 @@ fn set_superego_provider(
 fn extract_superego_config(config: &AppConfig) -> Option<(String, String)> {
     config.trinity.as_ref().and_then(|trinity| {
         match (&trinity.superego_provider, &trinity.superego_api_key) {
-            (Some(provider), Some(key)) if !key.is_empty() => {
-                Some((provider.clone(), key.clone()))
-            }
+            (Some(provider), Some(key)) if !key.is_empty() => Some((provider.clone(), key.clone())),
             _ => None,
         }
     })
@@ -975,9 +976,7 @@ fn build_superego_llm_provider(
             key.to_string(),
         )),
         "perplexity" | "xai" | "google" => {
-            if let Some(cp) =
-                ao_capabilities::cognitive::CompatibleProvider::from_name(provider)
-            {
+            if let Some(cp) = ao_capabilities::cognitive::CompatibleProvider::from_name(provider) {
                 Arc::new(ao_capabilities::cognitive::OpenAiCompatibleProvider::new(
                     cp,
                     key.to_string(),
@@ -2260,7 +2259,10 @@ fn determine_ego_provider(
     // 3. Check secrets vault for provider keys (all supported Ego providers)
     for provider in &["anthropic", "openai", "xai", "perplexity", "google"] {
         if let Some(key) = secrets.get_secret(provider) {
-            tracing::info!("determine_ego_provider: found key in vault for '{}'", provider);
+            tracing::info!(
+                "determine_ego_provider: found key in vault for '{}'",
+                provider
+            );
             return (Some(provider.to_string()), Some(key.to_string()));
         }
     }
