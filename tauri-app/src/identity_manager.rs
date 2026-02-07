@@ -369,8 +369,7 @@ impl IdentityManager {
         // Update agent config paths
         let agent_config_path = agent_dir.join("config.json");
         if agent_config_path.exists() {
-            let mut config =
-                AppConfig::load(&agent_config_path).map_err(|e| e.to_string())?;
+            let mut config = AppConfig::load(&agent_config_path).map_err(|e| e.to_string())?;
             config.data_dir = agent_dir.clone();
             config.models_dir = agent_dir.join("models");
             config.docs_dir = agent_dir.join("docs");
@@ -378,16 +377,13 @@ impl IdentityManager {
             if legacy_pubkey.exists() {
                 config.external_pubkey_path = Some(agent_dir.join("external_pubkey.bin"));
             }
-            config
-                .save(&agent_config_path)
-                .map_err(|e| e.to_string())?;
+            config.save(&agent_config_path).map_err(|e| e.to_string())?;
         }
 
         // Sign the agent's public key with master key (if pubkey exists)
         let agent_pubkey_path = agent_dir.join("external_pubkey.bin");
         if agent_pubkey_path.exists() {
-            let pubkey_bytes =
-                std::fs::read(&agent_pubkey_path).map_err(|e| e.to_string())?;
+            let pubkey_bytes = std::fs::read(&agent_pubkey_path).map_err(|e| e.to_string())?;
             if pubkey_bytes.len() == 32 {
                 let pubkey_array: [u8; 32] = pubkey_bytes.as_slice().try_into().unwrap();
                 if let Ok(agent_pubkey) = VerifyingKey::from_bytes(&pubkey_array) {

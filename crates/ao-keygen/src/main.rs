@@ -112,33 +112,33 @@ fn run_gen_master(args: &[String]) -> eframe::Result<()> {
     // Create data directory
     std::fs::create_dir_all(&data_dir).map_err(|e| {
         eprintln!("Failed to create data directory: {}", e);
-        eframe::Error::from(e)
+        eframe::Error::AppCreation(Box::new(e))
     })?;
 
     // Generate master key
     let result = generate_master_key(&data_dir).map_err(|e| {
         eprintln!("Failed to generate master key: {}", e);
-        eframe::Error::from(std::io::Error::new(
+        eframe::Error::AppCreation(Box::new(std::io::Error::new(
             std::io::ErrorKind::Other,
             e.to_string(),
-        ))
+        )))
     })?;
 
     // Create identities directory
     let identities_dir = data_dir.join("identities");
     std::fs::create_dir_all(&identities_dir).map_err(|e| {
         eprintln!("Failed to create identities directory: {}", e);
-        eframe::Error::from(e)
+        eframe::Error::AppCreation(Box::new(e))
     })?;
 
     // Create global_settings.json
     let global_config = GlobalConfig::new(&data_dir);
     global_config.save(&data_dir).map_err(|e| {
         eprintln!("Failed to save global settings: {}", e);
-        eframe::Error::from(std::io::Error::new(
+        eframe::Error::AppCreation(Box::new(std::io::Error::new(
             std::io::ErrorKind::Other,
             e.to_string(),
-        ))
+        )))
     })?;
 
     eprintln!("Hive master key generated: {}", result.master_key_path.display());

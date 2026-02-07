@@ -4,7 +4,6 @@ pub mod identity_manager;
 mod templates;
 
 use ao_birth::BirthOrchestrator;
-use identity_manager::{AgentIdentityInfo, IdentityManager};
 use ao_core::{
     generate_external_keypair, sign_constitutional_documents, validate_local_llm_url, AppConfig,
     CoreError, ExternalVault, Keyring, ReadOnlyFileVault, SecretsVault, TrinityConfig, Verifier,
@@ -16,6 +15,7 @@ use ao_skills::{MissingSkillSecret, SkillExecutor, SkillRegistry, ToolParams};
 use base64::Engine as _;
 use chrono::Utc;
 use ed25519_dalek::SigningKey;
+use identity_manager::{AgentIdentityInfo, IdentityManager};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use skill_filesystem::FilesystemSkill;
@@ -2311,9 +2311,7 @@ fn complete_emergence(state: tauri::State<AppState>) -> Result<(), String> {
         if let Some(agent_id) = active_agent {
             let config = state.config.read().map_err(|e| e.to_string())?;
             if let Some(name) = &config.agent_name {
-                let _ = state
-                    .identity_manager
-                    .update_agent_name(&agent_id, name);
+                let _ = state.identity_manager.update_agent_name(&agent_id, name);
             }
         }
     }
@@ -2385,13 +2383,15 @@ pub fn run() {
 
     // Initialize the Hive Identity Manager
     let identity_manager = Arc::new(
-        IdentityManager::new(config.data_dir.clone())
-            .unwrap_or_else(|e| {
-                tracing::error!("Failed to initialize IdentityManager: {}. Proceeding with default.", e);
-                // Fall back to creating a basic manager
-                IdentityManager::new(config.data_dir.clone())
-                    .expect("IdentityManager initialization failed fatally")
-            }),
+        IdentityManager::new(config.data_dir.clone()).unwrap_or_else(|e| {
+            tracing::error!(
+                "Failed to initialize IdentityManager: {}. Proceeding with default.",
+                e
+            );
+            // Fall back to creating a basic manager
+            IdentityManager::new(config.data_dir.clone())
+                .expect("IdentityManager initialization failed fatally")
+        }),
     );
 
     // Initialize the secrets vault (DPAPI-encrypted on Windows)
