@@ -131,7 +131,10 @@ mod tests {
 
     #[test]
     fn test_find_and_remove_agent() {
-        let mut config = GlobalConfig::new(&PathBuf::from("/tmp"));
+        let tmp = std::env::temp_dir().join("ao_global_config_find_remove");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let mut config = GlobalConfig::new(&tmp);
         config
             .register_agent(AgentEntry {
                 id: "a1".to_string(),
@@ -153,5 +156,7 @@ mod tests {
         assert!(config.remove_agent("a1"));
         assert!(config.find_agent("a1").is_none());
         assert_eq!(config.agents.len(), 1);
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 }
