@@ -13,7 +13,7 @@ anyhow.workspace = true
 chrono.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-toml = "0.8"
+toml = "0.9"
 uuid = { version = "1.6", features = ["v4"] }
 async-imap = "0.9"
 async-native-tls = "0.5"
