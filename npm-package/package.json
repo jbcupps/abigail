@@ -1,0 +1,28 @@
+{
+  "name": "abigail-desktop",
+  "version": "0.0.1",
+  "description": "Abigail - Desktop AI Agent with constitutional integrity and ethical alignment",
+  "bin": {
+    "abigail": "bin/run.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "desktop",
+    "ethical",
+    "tauri"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jbcupps/abigail"
+  }
+}
