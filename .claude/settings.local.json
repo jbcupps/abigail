@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh pr list:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh run view:*)",
+      "Bash(git stash:*)",
+      "Bash(cargo check:*)",
+      "Bash(where:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(cargo tree:*)",
+      "Bash(ls:*)",
+      "Bash(find E:/Agents/abigail/skills -name \"skill.toml\" -exec sh -c 'echo \"\"=== {} ===\"\" && head -20 \"\"{}\"\"' ;)",
+      "Bash(git -C E:Agentsabigail ls-files)",
+      "Bash(npm install:*)",
+      "Bash(git push:*)",
+      "Bash(gh run list:*)"
+    ]
+  }
+}
