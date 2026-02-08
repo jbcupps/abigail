@@ -218,6 +218,14 @@ jobs:
           path: ${{ matrix.installer_path }}
           if-no-files-found: error
 
+      - name: Upload MSI installer (Windows)
+        if: matrix.platform == 'windows-latest'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: abigail-msi-windows-latest
+          path: target/release/bundle/msi/*.msi
+          if-no-files-found: warn
+
   # -- Stage 2: Create GitHub Release + publish npm package -------------------
   publish:
     needs: build
@@ -238,6 +246,14 @@ jobs:
           path: artifacts
           pattern: abigail-installer-*
           merge-multiple: false
+
+      - name: Download MSI artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+          pattern: abigail-msi-*
+          merge-multiple: false
+        continue-on-error: true
 
       - name: Create git tag if needed
         shell: bash
@@ -262,6 +278,14 @@ jobs:
           else
             echo "Found Windows installer: $INSTALLER"
             cp "$INSTALLER" release-assets/Abigail-windows-x64-setup.exe
+          fi
+
+          MSI=$(find artifacts/abigail-msi-windows-latest -name "*.msi" -type f 2>/dev/null | head -1 || true)
+          if [ -z "$MSI" ]; then
+            echo "WARNING: No Windows MSI found in artifacts"
+          else
+            echo "Found Windows MSI: $MSI"
+            cp "$MSI" release-assets/Abigail-windows-x64.msi
           fi
 
           DEB=$(find artifacts/abigail-installer-ubuntu-22.04 -name "*.deb" -type f 2>/dev/null | head -1 || true)
@@ -297,6 +321,7 @@ jobs:
 
             Download the installer for your platform:
             - **Windows**: `Abigail-windows-x64-setup.exe` (NSIS installer)
+            - **Windows (MSI)**: `Abigail-windows-x64.msi` (Windows Installer)
             - **macOS**: `Abigail-macos-universal.dmg` (Intel + Apple Silicon)
             - **Linux**: `Abigail-linux-x64.deb` (Ubuntu 22.04+)
 
