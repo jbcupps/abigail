@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 2;
+pub const CONFIG_SCHEMA_VERSION: u32 = 3;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -90,6 +90,12 @@ pub struct AppConfig {
     /// Timestamp when birth was completed (ISO 8601 format)
     #[serde(default)]
     pub birth_timestamp: Option<String>,
+
+    /// SAO orchestrator endpoint (e.g. "http://localhost:3030").
+    /// When set, Abigail will register with SAO on startup and send
+    /// periodic status heartbeats. When None, Abigail runs standalone.
+    #[serde(default)]
+    pub sao_endpoint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,6 +131,7 @@ impl AppConfig {
             trinity: None,
             agent_name: None,
             birth_timestamp: None,
+            sao_endpoint: None,
         }
     }
 
@@ -203,6 +210,15 @@ impl AppConfig {
             tracing::debug!("Migrated config from v1 to v2");
         }
 
+        // Migration from v2 to v3
+        if self.schema_version < 3 {
+            // v3 adds: sao_endpoint
+            // sao_endpoint defaults to None via serde, so just update version
+            self.schema_version = 3;
+            migrated = true;
+            tracing::debug!("Migrated config from v2 to v3");
+        }
+
         migrated
     }
 
@@ -256,6 +272,7 @@ mod tests {
             trinity: None,
             agent_name: None,
             birth_timestamp: None,
+            sao_endpoint: None,
         }
     }
 
