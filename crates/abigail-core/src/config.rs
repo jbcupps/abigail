@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 2;
+pub const CONFIG_SCHEMA_VERSION: u32 = 4;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -17,6 +17,38 @@ pub enum RoutingMode {
 
 fn default_schema_version() -> u32 {
     CONFIG_SCHEMA_VERSION
+}
+
+/// MCP server definition for Model Context Protocol integration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerDefinition {
+    /// Unique id (e.g. "filesystem", "github").
+    pub id: String,
+    /// Human-readable name.
+    pub name: String,
+    /// Transport: "stdio" (subprocess) or "http".
+    #[serde(default = "default_mcp_transport")]
+    pub transport: String,
+    /// For stdio: command line (e.g. "npx", "-y", "mcp-server-foo"). For http: base URL (e.g. "http://localhost:3000/mcp").
+    pub command_or_url: String,
+    /// Optional env vars for stdio (e.g. API keys). Keys are secret names; values are not stored in plaintext in config.
+    #[serde(default)]
+    pub env: std::collections::HashMap<String, String>,
+}
+
+fn default_mcp_transport() -> String {
+    "http".to_string()
+}
+
+/// Trust policy for MCP servers (e.g. which domains are allowed for HTTP).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct McpTrustPolicy {
+    /// If true, only servers in the configured list are allowed; no ad-hoc URLs.
+    #[serde(default)]
+    pub allow_list_only: bool,
+    /// For HTTP transport: allowed hostnames (e.g. "localhost", "127.0.0.1"). Empty means no HTTP allowed or use default localhost.
+    #[serde(default)]
+    pub allowed_http_hosts: Vec<String>,
 }
 
 /// Trinity configuration: maps providers to Superego/Ego/Id roles.
@@ -90,6 +122,22 @@ pub struct AppConfig {
     /// Timestamp when birth was completed (ISO 8601 format)
     #[serde(default)]
     pub birth_timestamp: Option<String>,
+
+    /// MCP servers to connect (Model Context Protocol).
+    #[serde(default)]
+    pub mcp_servers: Vec<McpServerDefinition>,
+
+    /// Trust policy for MCP (allowed hosts, allow-list-only).
+    #[serde(default)]
+    pub mcp_trust_policy: McpTrustPolicy,
+
+    /// Skill IDs that are approved for execution. If non-empty, only these skills may run; if empty, all registered skills are allowed (backward compat).
+    #[serde(default)]
+    pub approved_skill_ids: Vec<String>,
+
+    /// Trusted signer public keys (base64 Ed25519) for signed skill packages. Optional.
+    #[serde(default)]
+    pub trusted_skill_signers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,6 +173,10 @@ impl AppConfig {
             trinity: None,
             agent_name: None,
             birth_timestamp: None,
+            mcp_servers: Vec::new(),
+            mcp_trust_policy: McpTrustPolicy::default(),
+            approved_skill_ids: Vec::new(),
+            trusted_skill_signers: Vec::new(),
         }
     }
 
@@ -197,10 +249,25 @@ impl AppConfig {
         // Migration from v1 to v2
         if self.schema_version < 2 {
             // v2 adds: birth_timestamp
-            // birth_timestamp defaults to None via serde, so just update version
             self.schema_version = 2;
             migrated = true;
             tracing::debug!("Migrated config from v1 to v2");
+        }
+
+        // Migration from v2 to v3
+        if self.schema_version < 3 {
+            // v3 adds: mcp_servers, mcp_trust_policy
+            self.schema_version = 3;
+            migrated = true;
+            tracing::debug!("Migrated config from v2 to v3");
+        }
+
+        // Migration from v3 to v4
+        if self.schema_version < 4 {
+            // v4 adds: approved_skill_ids, trusted_skill_signers
+            self.schema_version = 4;
+            migrated = true;
+            tracing::debug!("Migrated config from v3 to v4");
         }
 
         migrated
@@ -256,6 +323,10 @@ mod tests {
             trinity: None,
             agent_name: None,
             birth_timestamp: None,
+            mcp_servers: Vec::new(),
+            mcp_trust_policy: McpTrustPolicy::default(),
+            approved_skill_ids: Vec::new(),
+            trusted_skill_signers: Vec::new(),
         }
     }
 

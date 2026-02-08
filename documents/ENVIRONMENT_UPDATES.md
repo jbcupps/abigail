@@ -2,6 +2,23 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-08 (Tests: executor timeout/sandbox, MCP schema mapping)
+
+- **abigail-skills**: `SkillExecutor::with_limits(registry, limits)` added for tests. Executor now uses stored `default_timeout_ms` for per-call timeout. Tests added: `executor_enforces_timeout` (short limit + sleeping skill → timeout error), `executor_denies_network_when_not_granted` (tool requires network, manifest has no permission → PermissionDenied). MCP: `mcp_tool_to_descriptor_maps_name_and_schema` in `protocol/mcp.rs` for schema mapping.
+
+## 2026-02-08 (Docs, threat model, Docker-first dev)
+
+- **Security docs**: `documents/SECURITY_NOTES.md` updated with skill packaging and approval, audit log, signing path, MCP trust (server definitions, trust policy, tool confirmation), and resource limits (timeouts and concurrency enforced in executor). Threat table extended for skill supply-chain, MCP exfiltration, and UI sandbox escape.
+- **Threat model**: Added `documents/THREAT_MODEL.md` covering skill supply-chain abuse, MCP server trust, UI sandbox escape (MCP Apps), and data exfiltration, with mitigations and abuse cases.
+- **Docker**: Added `docker/Dockerfile` (Rust + Node + Tauri system deps for Debian), `docker/docker-compose.yml` (services `abigail-dev` and `abigail-build` with repo bind-mount and cargo cache volume), and `docker/.dockerignore`. `documents/HOW_TO_RUN_LOCALLY.md` updated to reference `docker/` and a build step before starting the dev container.
+
+## 2026-02-08 (Align CI and release with jbcupps/AO model)
+
+- **CI (`.github/workflows/ci.yml`)**: Aligned with AO-style quality gate. Triggers on push to main, pull_request to main, and weekly schedule (CodeQL). Runners set to `ubuntu-22.04` where applicable. All actions pinned by commit SHA (checkout, rust-toolchain, rust-cache, setup-node, codeql-action). CodeQL job added (JavaScript/TypeScript, advisory, weekly). Gate job now depends on lint, test, frontend, audit, and codeql; lint/test/frontend are required, audit and codeql advisory.
+- **Release (`.github/workflows/release.yml`)**: Refactored to two-stage AO model. Stage 1: single `build` job with matrix (windows-latest, ubuntu-22.04, macos-latest). Version determined in build job (tag, manual input, or auto-increment). Tauri config patched (version, disable beforeBuildCommand for CI, platform resources). Build outputs upload as artifacts (`abigail-installer-<platform>`). Stage 2: `publish` job runs when build finishes (success or failure); downloads artifacts, renames to stable asset names, creates GitHub Release (non-draft) with `release-assets/*`, then publishes npm package. Workflow dispatch input renamed to `release_version` (optional). Actions pinned by SHA.
+- **Build (`.github/workflows/build.yml`)**: Retained unchanged. Used for push-to-main verification only; does not create releases. Documented in `documents/RELEASE.md`.
+- **Docs**: `documents/RELEASE.md` updated to describe Release workflow (two-stage), manual dispatch, and build.yml role. `documents/GITHUB_SETTINGS.md` already referenced gate and codeql; no change.
+
 ## 2026-02-07 (Fix release build failure: missing anyhow)
 
 - **CI/Release**: Added `anyhow` dependency to `tauri-app/Cargo.toml` so `identity_manager.rs` can compile during `tauri build`.

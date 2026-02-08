@@ -1,0 +1,15 @@
+# Reduce context sent to Docker daemon; keep repo root when building from docker/
+# (compose context is .. so paths below are relative to repo root)
+.git
+.gitignore
+.claude
+*.md
+!documents/*.md
+target
+tauri-app/src-ui/node_modules
+.cargo-docker
+*.log
+.env
+.env.*
+!.env.example
+example.env

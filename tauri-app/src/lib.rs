@@ -6,11 +6,13 @@ mod templates;
 use abigail_birth::BirthOrchestrator;
 use abigail_core::{
     generate_external_keypair, sign_constitutional_documents, validate_local_llm_url, AppConfig,
-    CoreError, ExternalVault, Keyring, ReadOnlyFileVault, SecretsVault, TrinityConfig, Verifier,
+    CoreError, ExternalVault, Keyring, McpServerDefinition, ReadOnlyFileVault, SecretsVault,
+    TrinityConfig, Verifier,
 };
 use abigail_memory::{Memory, MemoryStore};
 use abigail_router::IdEgoRouter;
 use abigail_skills::channel::EventBus;
+use abigail_skills::protocol::mcp::{HttpMcpClient, McpTool};
 use abigail_skills::{MissingSkillSecret, SkillExecutor, SkillRegistry, ToolParams};
 use base64::Engine as _;
 use chrono::Utc;
@@ -47,6 +49,38 @@ fn permitted_backup_bases(data_dir: &Path) -> Vec<PathBuf> {
         bases.push(PathBuf::from(&home));
     }
     bases
+}
+
+/// Recursively copy a directory (for skill package install).
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
+    for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let ty = entry.file_type().map_err(|e| e.to_string())?;
+        let dst_path = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &dst_path)?;
+        } else {
+            std::fs::copy(entry.path(), &dst_path).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Append a line to the skill audit log (data_dir/skill_audit.log).
+fn skill_audit_log(data_dir: &Path, action: &str, detail: &str) {
+    let log_path = data_dir.join("skill_audit.log");
+    let line = format!(
+        "{} {} {}\n",
+        Utc::now().format("%Y-%m-%dT%H:%M:%SZ"),
+        action,
+        detail
+    );
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
 }
 
 /// Validates that dest_path is under a permitted base (data_dir or user Documents/Home).
@@ -1217,6 +1251,17 @@ async fn execute_tool(
     tool_name: String,
     params: HashMap<String, serde_json::Value>,
 ) -> Result<abigail_skills::ToolOutput, String> {
+    {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        if !config.approved_skill_ids.is_empty()
+            && !config.approved_skill_ids.contains(&skill_id)
+        {
+            return Err(format!(
+                "Skill {} is not approved for execution. Approve it in settings or install it first.",
+                skill_id
+            ));
+        }
+    }
     let id = abigail_skills::SkillId(skill_id);
     let tool_params = ToolParams { values: params };
     state
@@ -1224,6 +1269,162 @@ async fn execute_tool(
         .execute(&id, &tool_name, tool_params)
         .await
         .map_err(|e| e.to_string())
+}
+
+// ── MCP (Model Context Protocol) ────────────────────────────────────
+
+#[tauri::command]
+fn get_mcp_servers(state: tauri::State<AppState>) -> Result<Vec<McpServerDefinition>, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    Ok(config.mcp_servers.clone())
+}
+
+#[tauri::command]
+async fn mcp_list_tools(
+    state: tauri::State<'_, AppState>,
+    server_id: String,
+) -> Result<Vec<McpTool>, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let server = config
+        .mcp_servers
+        .iter()
+        .find(|s| s.id == server_id)
+        .ok_or_else(|| format!("MCP server not found: {}", server_id))?;
+    if server.transport != "http" {
+        return Err("Only HTTP transport is supported for MCP list_tools".to_string());
+    }
+    let client = HttpMcpClient::new(server.command_or_url.clone());
+    client.initialize().await.map_err(|e| e.to_string())?;
+    client.list_tools_impl().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn execute_mcp_tool(
+    state: tauri::State<'_, AppState>,
+    server_id: String,
+    tool_name: String,
+    params: HashMap<String, serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let server = config
+        .mcp_servers
+        .iter()
+        .find(|s| s.id == server_id)
+        .ok_or_else(|| format!("MCP server not found: {}", server_id))?;
+    if server.transport != "http" {
+        return Err("Only HTTP transport is supported for MCP tool execution".to_string());
+    }
+    let client = HttpMcpClient::new(server.command_or_url.clone());
+    let args = serde_json::to_value(&params).map_err(|e| e.to_string())?;
+    client
+        .call_tool_impl(&tool_name, args)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Fetch MCP App UI content (e.g. ui:// resource) for sandboxed iframe rendering.
+#[tauri::command]
+async fn get_mcp_app_content(
+    state: tauri::State<'_, AppState>,
+    server_id: String,
+    resource_uri: String,
+) -> Result<String, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let server = config
+        .mcp_servers
+        .iter()
+        .find(|s| s.id == server_id)
+        .ok_or_else(|| format!("MCP server not found: {}", server_id))?;
+    if server.transport != "http" {
+        return Err("Only HTTP transport is supported for MCP Apps".to_string());
+    }
+    let client = HttpMcpClient::new(server.command_or_url.clone());
+    client
+        .read_resource(&resource_uri)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// ── Skill install / approval ────────────────────────────────────────
+
+#[tauri::command]
+fn list_approved_skills(state: tauri::State<AppState>) -> Result<Vec<String>, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    Ok(config.approved_skill_ids.clone())
+}
+
+#[tauri::command]
+fn install_skill(state: tauri::State<AppState>, package_path: String) -> Result<String, String> {
+    let path = Path::new(&package_path);
+    if !path.is_dir() {
+        return Err("Package path must be a directory".to_string());
+    }
+    let manifest_path = path.join("skill.toml");
+    if !manifest_path.is_file() {
+        return Err("Directory must contain skill.toml".to_string());
+    }
+    let manifest =
+        abigail_skills::SkillManifest::load_from_path(&manifest_path).map_err(|e| e.to_string())?;
+    let skill_id = manifest.id.0.clone();
+
+    let data_dir = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        config.data_dir.clone()
+    };
+    let skills_dir = data_dir.join("skills");
+    std::fs::create_dir_all(&skills_dir).map_err(|e| e.to_string())?;
+    let dest = skills_dir.join(&skill_id);
+    if dest.exists() {
+        return Err(format!("Skill {} is already installed", skill_id));
+    }
+    copy_dir_all(path, &dest).map_err(|e| e.to_string())?;
+
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        if !config.approved_skill_ids.contains(&skill_id) {
+            config.approved_skill_ids.push(skill_id.clone());
+        }
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
+    }
+
+    skill_audit_log(&data_dir, "install", &format!("skill_id={}", skill_id));
+    Ok(skill_id)
+}
+
+#[tauri::command]
+fn uninstall_skill(state: tauri::State<AppState>, skill_id: String) -> Result<(), String> {
+    let data_dir = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        config.data_dir.clone()
+    };
+    let skill_path = data_dir.join("skills").join(&skill_id);
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.approved_skill_ids.retain(|id| id != &skill_id);
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
+    }
+    if skill_path.exists() {
+        std::fs::remove_dir_all(&skill_path).map_err(|e| e.to_string())?;
+    }
+    skill_audit_log(&data_dir, "uninstall", &format!("skill_id={}", skill_id));
+    Ok(())
+}
+
+#[tauri::command]
+fn approve_skill(state: tauri::State<AppState>, skill_id: String) -> Result<(), String> {
+    let mut config = state.config.write().map_err(|e| e.to_string())?;
+    if !config.approved_skill_ids.contains(&skill_id) {
+        config.approved_skill_ids.push(skill_id.clone());
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
+        skill_audit_log(&config.data_dir, "approve", &format!("skill_id={}", skill_id));
+    }
+    Ok(())
 }
 
 // ── Secrets Management ──────────────────────────────────────────────
@@ -2604,6 +2805,14 @@ pub fn run() {
             list_discovered_skills,
             list_tools,
             execute_tool,
+            get_mcp_servers,
+            mcp_list_tools,
+            execute_mcp_tool,
+            get_mcp_app_content,
+            list_approved_skills,
+            install_skill,
+            uninstall_skill,
+            approve_skill,
             check_secret,
             store_secret,
             remove_secret,
