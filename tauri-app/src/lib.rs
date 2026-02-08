@@ -2556,6 +2556,21 @@ fn complete_emergence(state: tauri::State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Sign the active agent's public key with the Hive master key.
+/// Called from BootSequence after `complete_emergence` to link the
+/// birth-generated keypair into the Hive trust chain.
+#[tauri::command]
+fn sign_agent_with_hive(state: tauri::State<AppState>) -> Result<(), String> {
+    let agent_id = state
+        .active_agent_id
+        .read()
+        .map_err(|e| e.to_string())?
+        .clone()
+        .ok_or("No active agent")?;
+
+    state.identity_manager.sign_agent_after_birth(&agent_id)
+}
+
 /// Determine the best Ego provider and API key from config + secrets vault.
 /// Returns (provider_name, api_key). Checks TrinityConfig first, then
 /// falls back to openai_api_key in config, then vault secrets.
@@ -2840,6 +2855,7 @@ pub fn run() {
             extract_genesis_identity,
             crystallize_soul,
             complete_emergence,
+            sign_agent_with_hive,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

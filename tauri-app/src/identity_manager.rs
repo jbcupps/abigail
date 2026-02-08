@@ -1,12 +1,11 @@
 use abigail_core::{
-    generate_external_keypair, generate_master_key, load_master_key, sign_agent_key,
-    sign_constitutional_documents, verify_agent_signature, AgentEntry, AppConfig, GlobalConfig,
-    Keyring, MasterKeyResult, SecretsVault,
+    generate_master_key, load_master_key, sign_agent_key, verify_agent_signature, AgentEntry,
+    AppConfig, GlobalConfig, SecretsVault,
 };
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::RwLock;
 use uuid::Uuid;
 
 /// Information about an agent identity for the frontend.
@@ -172,11 +171,8 @@ impl IdentityManager {
         Ok(())
     }
 
-    /// Load an agent by UUID. Verifies signature first, then returns config.
+    /// Load an agent by UUID. Verifies signature for born agents, skips for unborn.
     pub fn load_agent(&self, agent_id: &str) -> Result<AppConfig, String> {
-        // Verify signature
-        self.verify_agent(agent_id)?;
-
         let gc = self.global_config.read().map_err(|e| e.to_string())?;
         let entry = gc
             .find_agent(agent_id)
@@ -194,10 +190,23 @@ impl IdentityManager {
         }
 
         let config = AppConfig::load(&config_path).map_err(|e| e.to_string())?;
+
+        // Only verify signature for born agents (unborn agents don't have keys yet)
+        if config.birth_complete {
+            drop(gc); // Release read lock before calling verify_agent
+            self.verify_agent(agent_id)?;
+        } else {
+            tracing::info!(
+                "Skipping signature verification for unborn agent {}",
+                agent_id
+            );
+        }
+
         Ok(config)
     }
 
-    /// Create a new agent. Generates UUID, keypair, signs with master key.
+    /// Create a new agent. Generates UUID and directory structure only.
+    /// Keypair generation and signing are deferred to the birth sequence.
     /// Returns (uuid, agent_dir).
     pub fn create_agent(&self, name: &str) -> Result<(String, PathBuf), String> {
         let uuid = Uuid::new_v4().to_string();
@@ -208,32 +217,7 @@ impl IdentityManager {
         let docs_dir = agent_dir.join("docs");
         std::fs::create_dir_all(&docs_dir).map_err(|e| e.to_string())?;
 
-        // Generate agent keypair
-        let keypair_result = generate_external_keypair(&agent_dir).map_err(|e| e.to_string())?;
-
-        // Read the generated public key to sign it
-        let pubkey_bytes =
-            std::fs::read(&keypair_result.public_key_path).map_err(|e| e.to_string())?;
-        let pubkey_array: [u8; 32] = pubkey_bytes
-            .as_slice()
-            .try_into()
-            .map_err(|_| "Invalid public key length")?;
-        let agent_pubkey = VerifyingKey::from_bytes(&pubkey_array)
-            .map_err(|e| format!("Invalid public key: {}", e))?;
-
-        // Sign the agent's public key with the master key
-        let signature = sign_agent_key(&self.master_key, &agent_pubkey);
-        let sig_path = agent_dir.join("signature.sig");
-        std::fs::write(&sig_path, &signature).map_err(|e| e.to_string())?;
-
-        // Generate internal keyring for this agent
-        let keys_file = agent_dir.join("keys.bin");
-        if !keys_file.exists() {
-            let keyring = Keyring::generate(agent_dir.clone()).map_err(|e| e.to_string())?;
-            keyring.save().map_err(|e| e.to_string())?;
-        }
-
-        // Create agent-specific config
+        // Create agent-specific config (no keypair yet — birth will generate it)
         let config = AppConfig {
             schema_version: abigail_core::CONFIG_SCHEMA_VERSION,
             data_dir: agent_dir.clone(),
@@ -244,7 +228,7 @@ impl IdentityManager {
             email: None,
             birth_complete: false,
             birth_stage: None,
-            external_pubkey_path: Some(keypair_result.public_key_path),
+            external_pubkey_path: None,
             local_llm_base_url: None,
             routing_mode: abigail_core::RoutingMode::default(),
             trinity: None,
@@ -272,6 +256,51 @@ impl IdentityManager {
 
         tracing::info!("Created new agent: {} ({})", name, uuid);
         Ok((uuid, agent_dir))
+    }
+
+    /// Sign an agent's public key with the Hive master key after birth completes.
+    /// Called after BootSequence finishes — the agent now has `external_pubkey.bin`
+    /// from the birth-generated keypair.
+    pub fn sign_agent_after_birth(&self, agent_id: &str) -> Result<(), String> {
+        let gc = self.global_config.read().map_err(|e| e.to_string())?;
+        let entry = gc
+            .find_agent(agent_id)
+            .ok_or_else(|| format!("Agent {} not registered", agent_id))?;
+
+        let agent_dir = if entry.directory.is_absolute() {
+            entry.directory.clone()
+        } else {
+            self.data_root.join(&entry.directory)
+        };
+        drop(gc);
+
+        // Read the agent's public key (generated during birth)
+        let pubkey_path = agent_dir.join("external_pubkey.bin");
+        if !pubkey_path.exists() {
+            return Err(format!(
+                "Agent {} has no public key — birth may not have completed keypair generation",
+                agent_id
+            ));
+        }
+
+        let pubkey_bytes = std::fs::read(&pubkey_path).map_err(|e| e.to_string())?;
+        let pubkey_array: [u8; 32] = pubkey_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| "Invalid public key length")?;
+        let agent_pubkey = VerifyingKey::from_bytes(&pubkey_array)
+            .map_err(|e| format!("Invalid public key: {}", e))?;
+
+        // Sign with master key and write signature
+        let signature = sign_agent_key(&self.master_key, &agent_pubkey);
+        let sig_path = agent_dir.join("signature.sig");
+        std::fs::write(&sig_path, &signature).map_err(|e| e.to_string())?;
+
+        tracing::info!(
+            "Signed agent {} with Hive master key (post-birth)",
+            agent_id
+        );
+        Ok(())
     }
 
     /// Get the agent directory path for a given UUID.
