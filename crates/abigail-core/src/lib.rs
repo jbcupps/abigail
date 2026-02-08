@@ -5,6 +5,7 @@ pub mod error;
 pub mod global_config;
 pub mod keyring;
 pub mod local_llm_url;
+pub mod sao_bridge;
 pub mod secrets;
 pub mod superego;
 pub mod system_prompt;
@@ -16,6 +17,7 @@ pub use config::{
     AppConfig, EmailConfig, McpServerDefinition, McpTrustPolicy, RoutingMode, TrinityConfig,
     CONFIG_SCHEMA_VERSION,
 };
+pub use sao_bridge::{AgentState, SaoBridgeClient, SaoBridgeError};
 pub use document::{CoreDocument, DocumentTier};
 pub use error::{CoreError, Result};
 pub use global_config::{AgentEntry, GlobalConfig};
