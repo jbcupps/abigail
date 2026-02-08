@@ -19,6 +19,160 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
+name = "abigail-app"
+version = "0.0.1"
+dependencies = [
+ "abigail-birth",
+ "abigail-capabilities",
+ "abigail-core",
+ "abigail-memory",
+ "abigail-router",
+ "abigail-skills",
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "ed25519-dalek",
+ "regex",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "skill-filesystem",
+ "skill-http",
+ "skill-perplexity-search",
+ "skill-shell",
+ "skill-web-search",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "abigail-birth"
+version = "0.0.1"
+dependencies = [
+ "abigail-capabilities",
+ "abigail-core",
+ "abigail-memory",
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "ed25519-dalek",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "abigail-capabilities"
+version = "0.0.1"
+dependencies = [
+ "abigail-core",
+ "anyhow",
+ "async-openai",
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "indicatif",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "abigail-core"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "directories",
+ "ed25519-dalek",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+ "url",
+ "windows 0.52.0",
+]
+
+[[package]]
+name = "abigail-keygen"
+version = "0.0.1"
+dependencies = [
+ "abigail-core",
+ "directories",
+ "eframe",
+ "rfd 0.15.4",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "abigail-memory"
+version = "0.0.1"
+dependencies = [
+ "abigail-core",
+ "anyhow",
+ "chrono",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "abigail-router"
+version = "0.0.1"
+dependencies = [
+ "abigail-capabilities",
+ "abigail-core",
+ "anyhow",
+ "async-trait",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "abigail-skills"
+version = "0.0.1"
+dependencies = [
+ "abigail-core",
+ "anyhow",
+ "async-imap",
+ "async-native-tls",
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "lettre",
+ "mail-parser",
+ "notify",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "toml 0.8.23",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -108,159 +262,6 @@ name = "anyhow"
 version = "1.0.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
-
-[[package]]
-name = "abigail-app"
-version = "0.0.1"
-dependencies = [
- "abigail-birth",
- "abigail-capabilities",
- "abigail-core",
- "abigail-memory",
- "abigail-router",
- "abigail-skills",
- "base64 0.21.7",
- "chrono",
- "ed25519-dalek",
- "regex",
- "reqwest 0.11.27",
- "serde",
- "serde_json",
- "skill-filesystem",
- "skill-http",
- "skill-perplexity-search",
- "skill-shell",
- "skill-web-search",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "abigail-birth"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "abigail-capabilities",
- "abigail-core",
- "abigail-memory",
- "base64 0.21.7",
- "chrono",
- "ed25519-dalek",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "abigail-capabilities"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "abigail-core",
- "async-openai",
- "async-trait",
- "chrono",
- "futures-util",
- "indicatif",
- "reqwest 0.11.27",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "abigail-core"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "base64 0.21.7",
- "chrono",
- "directories",
- "ed25519-dalek",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tracing",
- "url",
- "windows 0.52.0",
-]
-
-[[package]]
-name = "abigail-keygen"
-version = "0.0.1"
-dependencies = [
- "abigail-core",
- "directories",
- "eframe",
- "rfd 0.15.4",
- "serde",
- "serde_json",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "abigail-memory"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "abigail-core",
- "chrono",
- "rusqlite",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "abigail-router"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "abigail-capabilities",
- "abigail-core",
- "async-trait",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "abigail-skills"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "abigail-core",
- "async-imap",
- "async-native-tls",
- "async-trait",
- "chrono",
- "futures-util",
- "lettre",
- "mail-parser",
- "notify",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tokio-util",
- "toml 0.8.23",
- "tracing",
- "uuid",
-]
 
 [[package]]
 name = "ar_archive_writer"
