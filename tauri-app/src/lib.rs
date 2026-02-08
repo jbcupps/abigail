@@ -1067,11 +1067,15 @@ fn build_superego_llm_provider(
             key.to_string(),
         )),
         "perplexity" | "xai" | "google" => {
-            if let Some(cp) = abigail_capabilities::cognitive::CompatibleProvider::from_name(provider) {
-                Arc::new(abigail_capabilities::cognitive::OpenAiCompatibleProvider::new(
-                    cp,
-                    key.to_string(),
-                ))
+            if let Some(cp) =
+                abigail_capabilities::cognitive::CompatibleProvider::from_name(provider)
+            {
+                Arc::new(
+                    abigail_capabilities::cognitive::OpenAiCompatibleProvider::new(
+                        cp,
+                        key.to_string(),
+                    ),
+                )
             } else {
                 Arc::new(abigail_capabilities::cognitive::OpenAiProvider::new(Some(
                     key.to_string(),
@@ -1181,7 +1185,9 @@ fn complete_birth(state: tauri::State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn list_skills(state: tauri::State<AppState>) -> Result<Vec<abigail_skills::SkillManifest>, String> {
+fn list_skills(
+    state: tauri::State<AppState>,
+) -> Result<Vec<abigail_skills::SkillManifest>, String> {
     state.registry.list().map_err(|e| e.to_string())
 }
 
@@ -1474,7 +1480,9 @@ async fn execute_tool_call(
 /// - [TOOL_CALL]{"name": "...", "arguments": {...}}[/TOOL_CALL]
 /// - Inline JSON with tool structure
 /// Returns a list of parsed tool calls and the remaining text (without tool blocks).
-fn parse_text_tool_calls(content: &str) -> (Vec<abigail_capabilities::cognitive::ToolCall>, String) {
+fn parse_text_tool_calls(
+    content: &str,
+) -> (Vec<abigail_capabilities::cognitive::ToolCall>, String) {
     let mut tool_calls = Vec::new();
     let mut cleaned_content = content.to_string();
 

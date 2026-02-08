@@ -8,7 +8,9 @@ use abigail_capabilities::sensory::web_search;
 use abigail_core::secrets::SecretsVault;
 use abigail_core::superego;
 use abigail_skills::channel::TriggerDescriptor;
-use abigail_skills::manifest::{CapabilityDescriptor, NetworkPermission, Permission, SkillManifest};
+use abigail_skills::manifest::{
+    CapabilityDescriptor, NetworkPermission, Permission, SkillManifest,
+};
 use abigail_skills::skill::{
     CostEstimate, ExecutionContext, HealthStatus, Skill, SkillConfig, SkillError, SkillHealth,
     SkillResult, ToolDescriptor, ToolOutput, ToolParams,
