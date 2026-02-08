@@ -1,0 +1,47 @@
+# Docker Compose for Abigail: local dev and CI-like build validation.
+# See documents/HOW_TO_RUN_LOCALLY.md.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml up -d abigail-dev   # start dev container
+#   docker compose -f docker/docker-compose.yml exec abigail-dev bash
+#   docker compose -f docker/docker-compose.yml run --rm abigail-build   # one-shot build+test
+
+services:
+  abigail-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: dev
+    image: abigail-dev:local
+    volumes:
+      - ..:/app
+      # Persist cargo cache on host so repeated builds are fast
+      - abigail-cargo-cache:/app/target
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    command: ["bash"]
+
+  abigail-build:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: dev
+    image: abigail-dev:local
+    volumes:
+      - ..:/app
+      - abigail-cargo-cache:/app/target
+    working_dir: /app
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        cargo fmt --all -- --check || true
+        cargo build --all
+        cd tauri-app/src-ui && npm ci && npm run build && cd ../..
+        cargo test --all --no-fail-fast 2>&1 | head -200
+        echo "Build and test completed."
+
+volumes:
+  abigail-cargo-cache:

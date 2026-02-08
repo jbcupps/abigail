@@ -6,6 +6,7 @@ pub mod manifest;
 pub mod prelude;
 pub mod protocol;
 pub mod registry;
+pub mod runtime;
 pub mod sandbox;
 pub mod skill;
 pub mod transport;

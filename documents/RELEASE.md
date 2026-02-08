@@ -19,8 +19,8 @@ All workspace crates use `version.workspace = true`, so they follow the root.
 
 ## Build and release from GitHub Actions (no tag push)
 
-- Go to **Actions** → **build-release** → **Run workflow**.
-- Optionally set **Release version** (e.g. `0.0.1`). If set, the workflow will build installers for Windows, Linux, and macOS and **publish** a release with that version (tag `v0.0.1`). If left empty, only the build runs and artifacts are kept in the run (no release).
+- Go to **Actions** → **Release** → **Run workflow**.
+- Optionally set **Release version** (e.g. `0.0.1`). If set, the workflow builds installers and publishes a release with that version (tag `v0.0.1`). If left empty, version is auto-incremented from the latest `v*` tag.
 
 ## How to publish a release (tag-based)
 
@@ -41,9 +41,9 @@ All workspace crates use `version.workspace = true`, so they follow the root.
    git push origin v0.0.2
    ```
 
-4. **CI:** `.github/workflows/build-release.yml` runs on `v*` tags:
-   - Builds installers for Windows (NSIS), Linux (deb), and macOS (dmg).
-   - Creates and **publishes** a GitHub Release for that tag with all installers attached (no manual publish step needed).
+4. **CI:** `.github/workflows/release.yml` runs on `v*` tags (two-stage: build matrix → publish):
+   - Stage 1: Parallel builds for Windows (NSIS), Linux (deb), and macOS (dmg). Each job uploads installer artifacts.
+   - Stage 2: Download artifacts, create GitHub Release with stable asset names, publish npm package. Proceeds if at least one platform built successfully.
 
 ## Where to get installers (end users)
 
@@ -104,7 +104,11 @@ See `documents/HOW_TO_RUN_LOCALLY.md` for full Docker development instructions.
 | 1 | Bump `version` in `Cargo.toml` and `tauri-app/tauri.conf.json` to next patch (e.g. 0.0.2). |
 | 2 | Commit and push the version bump. |
 | 3 | `git tag v0.0.x` and `git push origin v0.0.x`. |
-| 4 | Wait for build-release workflow to finish — release is published automatically. |
+| 4 | Wait for **Release** workflow to finish — release is published automatically. |
+
+## Build workflow (push to main)
+
+`.github/workflows/build.yml` runs on every **push to main** (no tag). It builds the workspace on all three platforms and uploads binaries as artifacts (7-day retention). This is for verification only; it does not create a GitHub Release or publish npm. Releases are only created by the **Release** workflow (tag or manual dispatch).
 
 ---
 
@@ -162,14 +166,13 @@ You can also trigger a Deva build without a tag:
 
 ## npm publishing
 
-The `abigail-desktop` npm package is published automatically when a GitHub Release is created:
+The `abigail-desktop` npm package is published automatically by the **Release** workflow (Stage 2):
 
-1. `.github/workflows/npm-publish.yml` triggers on `release: published` events.
-2. It reads the version from the release tag and updates `npm-package/package.json`.
-3. Publishes to npm (requires `NPM_TOKEN` secret in repo settings).
+1. After the build stage completes, the publish job downloads installer artifacts, creates the GitHub Release, then updates `npm-package/package.json` with the release version and runs `npm publish`.
+2. Requires `NPM_TOKEN` secret in **Settings > Secrets and variables > Actions**.
 
 To set up npm publishing:
 1. Create an npm access token at [npmjs.com](https://www.npmjs.com/settings/~/tokens).
 2. Add it as a repository secret named `NPM_TOKEN` in **Settings > Secrets and variables > Actions**.
 
-Manual republish: **Actions > npm-publish > Run workflow**.
+To republish npm only, run the **Release** workflow manually with the desired version (npm publish runs in the same job as the GitHub Release).

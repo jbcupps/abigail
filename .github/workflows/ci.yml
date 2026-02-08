@@ -1,14 +1,18 @@
-# CI quality gate for pull requests.
+# Unified CI quality gate.
 #
-# Runs lint, cross-platform tests, and frontend build in parallel.
-# The gate job aggregates results: lint, test, frontend must pass;
-# audit and codeql are advisory. Configure branch protection to require "gate".
+# Runs 5 parallel jobs on push to main and PRs. CodeQL also runs weekly.
+# The "gate" job requires lint, test, and frontend to pass; audit and CodeQL
+# are advisory. Configure branch protection to require the "gate" check.
 
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: '17 4 * * 0'  # Weekly on Sunday at 04:17 UTC (CodeQL)
 
 permissions:
   contents: read
@@ -20,19 +24,21 @@ concurrency:
 jobs:
 
   # -- Lint (fast) -----------------------------------------------------------
+  # No Linux GUI deps needed: fmt and clippy only.
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -40,17 +46,17 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --exclude abigail-app -- -D warnings
 
-  # -- Tests (3-platform matrix) ---------------------------------------------
+  # -- Tests (3-platform matrix) ----------------------------------------------
   test:
     name: Test (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
           - platform: macos-latest
             target: x86_64-apple-darwin
 
@@ -58,57 +64,52 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
+      - name: Install Linux dependencies (Tauri 2 / Debian)
+        if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libgtk-3-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
 
       - name: Run tests
         run: cargo test --workspace --exclude abigail-app
 
   # -- Frontend build --------------------------------------------------------
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
-          cache: npm
+          cache: "npm"
           cache-dependency-path: tauri-app/src-ui/package-lock.json
 
-      - name: Install dependencies
-        working-directory: tauri-app/src-ui
-        run: npm ci
-
       - name: Build frontend
-        working-directory: tauri-app/src-ui
-        run: npm run build
+        run: cd tauri-app/src-ui && npm ci && npm run build
 
-  # -- Security audit (advisory) --------------------------------------------
+  # -- Security audit (advisory) ----------------------------------------------
   audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
@@ -116,22 +117,51 @@ jobs:
       - name: Cargo audit
         run: cargo audit
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
-          cache: npm
+          cache: "npm"
           cache-dependency-path: tauri-app/src-ui/package-lock.json
 
       - name: npm audit
         run: cd tauri-app/src-ui && npm ci && npm audit --audit-level=high
 
+  # -- CodeQL static analysis -------------------------------------------------
+  # Does not block gate when code scanning is not enabled for the repo.
+  codeql:
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v4
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        continue-on-error: true
+        with:
+          category: "/language:javascript-typescript"
+
   # -- Gate (aggregator) -----------------------------------------------------
-  # Requires lint, test, and frontend to succeed. Audit is advisory.
+  # Requires lint, test, and frontend to succeed. Audit and CodeQL are
+  # advisory (warn but don't block). This is the single required status
+  # check for branch protection.
   gate:
-    needs: [lint, test, frontend, audit]
+    needs: [lint, test, frontend, audit, codeql]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Evaluate upstream results
         shell: bash
@@ -140,15 +170,17 @@ jobs:
           echo "test:     ${{ needs.test.result }}"
           echo "frontend: ${{ needs.frontend.result }}"
           echo "audit:    ${{ needs.audit.result }}"
+          echo "codeql:   ${{ needs.codeql.result }}"
 
           failed=false
 
           # Critical jobs -- must succeed
           for job in lint test frontend; do
-            result="${{ needs.lint.result }}"
             case "$job" in
+              lint)     result="${{ needs.lint.result }}" ;;
               test)     result="${{ needs.test.result }}" ;;
               frontend) result="${{ needs.frontend.result }}" ;;
+              *)        result="unknown" ;;
             esac
             if [[ "$result" != "success" ]]; then
               echo "::error::Required job '$job' did not succeed (result: $result)"
@@ -157,9 +189,16 @@ jobs:
           done
 
           # Advisory jobs -- warn but don't block
-          if [[ "${{ needs.audit.result }}" != "success" ]]; then
-            echo "::warning::Advisory job 'audit' did not succeed (result: ${{ needs.audit.result }})"
-          fi
+          for job in audit codeql; do
+            case "$job" in
+              audit)  result="${{ needs.audit.result }}" ;;
+              codeql) result="${{ needs.codeql.result }}" ;;
+              *)      result="unknown" ;;
+            esac
+            if [[ "$result" != "success" ]]; then
+              echo "::warning::Advisory job '$job' did not succeed (result: $result)"
+            fi
+          done
 
           if [[ "$failed" == "true" ]]; then
             echo "::error::One or more required jobs failed."

@@ -348,6 +348,10 @@ mod tests {
             trinity: None,
             agent_name: None,
             birth_timestamp: None,
+            mcp_servers: Default::default(),
+            mcp_trust_policy: Default::default(),
+            approved_skill_ids: Default::default(),
+            trusted_skill_signers: Default::default(),
         }
     }
 

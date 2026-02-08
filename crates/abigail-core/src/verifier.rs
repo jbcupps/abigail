@@ -243,7 +243,11 @@ mod tests {
         fs::create_dir_all(&docs_dir).unwrap();
 
         // 1. Create realistic constitutional docs
-        fs::write(docs_dir.join("soul.md"), "I am Abigail. My designation is Abigail.").unwrap();
+        fs::write(
+            docs_dir.join("soul.md"),
+            "I am Abigail. My designation is Abigail.",
+        )
+        .unwrap();
         fs::write(
             docs_dir.join("ethics.md"),
             "Triangle Ethic: Deontological, Areteological, Teleological.",

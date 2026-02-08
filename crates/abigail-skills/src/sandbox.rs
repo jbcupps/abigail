@@ -7,9 +7,10 @@
 //! capability layer). Skills that do raw file or network I/O should go through such a layer so the
 //! sandbox is checked.
 //!
-//! **Resource limits:** `ResourceLimits` (max_memory_bytes, max_cpu_ms, etc.) are not currently
-//! enforced at runtime (no timeout or memory cap on tool execution). They are defined for future
-//! use and for documentation. Consider enforcing timeouts per tool call in the executor.
+//! **Resource limits:** Timeouts and concurrency are enforced in `SkillExecutor` (see
+//! `executor.rs`): each tool call is bounded by `ResourceLimits::max_cpu_ms` and global
+//! concurrency by `max_concurrency`. Memory and storage caps (max_memory_bytes, storage_quota)
+//! are intended to be enforced by capability layers and/or a future WASM runtime for untrusted skills.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;

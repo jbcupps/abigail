@@ -66,7 +66,19 @@
 ## Skill Sandbox
 
 - **Network:** The executor checks the sandbox for network permission before running a tool that declares a network permission (domain allowlist). Other resource access (file, memory) uses the same sandbox logic but must be invoked by the code path that performs the I/O (e.g. a capability layer). Skill code that performs raw file or network I/O should go through a layer that calls the sandbox.
-- **Resource limits:** `ResourceLimits` (memory, CPU, concurrency) are defined in the sandbox but are not yet enforced at runtime (no per-tool timeout or memory cap). Documented as planned; consider adding executor-level timeouts.
+- **Resource limits:** Timeouts and concurrency are enforced at runtime: each tool call is bounded by `ResourceLimits::max_cpu_ms` (default 30s), and global concurrency by `max_concurrency` (default 10). Memory and storage caps are intended for capability layers and/or a future WASM runtime (see `crates/abigail-skills/src/runtime/wasm.rs`).
+
+## Skill Packaging and Approval
+
+- **Approval gating:** If `approved_skill_ids` is non-empty in config, only skills in that list may execute tools. Install and approve flows update this list and persist it to `config.json`.
+- **Audit log:** Install, uninstall, and approve actions are appended to `{data_dir}/skill_audit.log` with timestamp and detail (e.g. `skill_id=...`) for traceability.
+- **Signing (path):** Config supports `trusted_skill_signers` for a future signed-package format. Currently, install copies a directory with a valid `skill.toml` into `{data_dir}/skills/<id>/`; signature verification of packages is not yet implemented.
+
+## MCP Trust
+
+- **Server definitions:** MCP servers are configured in `AppConfig.mcp_servers` (id, name, transport, command or URL, env). Only explicitly configured servers are used.
+- **Trust policy:** `mcp_trust_policy` (e.g. `allow_list_only`, `allowed_http_hosts`) restricts which HTTP hosts are allowed for stdio/HTTP MCP. Use allowlists to avoid data exfiltration to untrusted hosts.
+- **Tool confirmation:** Tools that declare `requires_confirmation` should be gated in the UI before invocation; the backend does not enforce confirmation (UI responsibility).
 
 ## Threat Model Summary
 
@@ -77,3 +89,6 @@
 | Compromised private key | User can detect via failed verification |
 | Man-in-the-middle on download | Installer signatures (future: code signing) |
 | Local privilege escalation | DPAPI uses user scope, not machine scope |
+| Skill supply-chain abuse | Approval list; audit log; (future) signed packages + trusted signers |
+| MCP server exfiltration | Per-server config; HTTP allowlist in trust policy |
+| UI sandbox escape (MCP Apps) | Sandboxed iframe + CSP; no elevated privileges to host |

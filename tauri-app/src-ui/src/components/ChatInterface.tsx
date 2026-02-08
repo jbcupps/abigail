@@ -2,12 +2,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useState, useEffect } from "react";
 import { useTheme } from "../contexts/ThemeContext";
+import McpAppFrame from "./McpAppFrame";
 import VaultModal, { type MissingSkillSecret } from "./VaultModal";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
   isError?: boolean;
+  /** When set, render an MCP App (ui:// resource) in a sandboxed iframe below the message. */
+  mcpApp?: { serverId: string; resourceUri: string; title?: string };
 }
 
 interface RouterStatus {
@@ -379,6 +382,15 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
                 </span>
               ))}
             </span>
+            {msg.mcpApp && (
+              <div className="mt-2">
+                <McpAppFrame
+                  serverId={msg.mcpApp.serverId}
+                  resourceUri={msg.mcpApp.resourceUri}
+                  title={msg.mcpApp.title}
+                />
+              </div>
+            )}
           </div>
         ))}
         {loading && <p className="text-theme-text-dim">{chatStatus || "..."}</p>}

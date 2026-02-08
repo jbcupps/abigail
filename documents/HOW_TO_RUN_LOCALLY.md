@@ -16,7 +16,7 @@ This runbook reflects the current interactive onboarding + chat flow in this rep
 
 ### Required (Docker development)
 
-- Docker 20+ and Docker Compose v2
+- Docker 20+ and Docker Compose v2. The `docker/` directory contains `Dockerfile` and `docker-compose.yml` for containerized build and test (Docker-first option).
 
 ### Optional
 
@@ -44,7 +44,10 @@ cargo install tauri-cli
 Use the development container to avoid installing Rust/Node.js/system deps on your host:
 
 ```bash
-# Build and start the dev container
+# Build the dev image (from repo root; context is parent directory)
+docker compose -f docker/docker-compose.yml build
+
+# Start the dev container
 docker compose -f docker/docker-compose.yml up -d abigail-dev
 
 # Open a shell inside the container

@@ -575,7 +575,7 @@ mod tests {
         assert!(result.success);
         let data = result.data.unwrap();
         assert_eq!(data["formatted"], "Hello, Abigail!");
-        assert_eq!(data["size_bytes"], 10);
+        assert_eq!(data["size_bytes"], 15);
 
         let _ = fs::remove_dir_all(&tmp);
     }
