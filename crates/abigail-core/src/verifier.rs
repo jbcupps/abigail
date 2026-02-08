@@ -18,7 +18,7 @@ pub struct SigMeta {
 /// Verifier for constitutional documents.
 ///
 /// Uses an **external public key** (from vault) as the trust root for signature verification.
-/// The signing private key is never stored in AO.
+/// The signing private key is never stored in Abigail.
 pub struct Verifier {
     pubkey: VerifyingKey,
     documents: HashMap<String, CoreDocument>,
@@ -144,7 +144,7 @@ mod tests {
         let signing_key = SigningKey::generate(&mut OsRng);
         let pubkey = signing_key.verifying_key();
 
-        let content = "I am AO. This is my soul.";
+        let content = "I am Abigail. This is my soul.";
         let mut doc = CoreDocument::new(
             "soul.md".into(),
             DocumentTier::Constitutional,
@@ -158,7 +158,7 @@ mod tests {
         verifier.verify_document(&doc).unwrap();
 
         // Tamper: modify content; signature no longer matches
-        doc.content = "I am AO. This is TAMPERED.".into();
+        doc.content = "I am Abigail. This is TAMPERED.".into();
 
         let verifier2 = Verifier::with_pubkey(pubkey);
         let result = verifier2.verify_document(&doc);
@@ -243,7 +243,7 @@ mod tests {
         fs::create_dir_all(&docs_dir).unwrap();
 
         // 1. Create realistic constitutional docs
-        fs::write(docs_dir.join("soul.md"), "I am AO. My designation is AO.").unwrap();
+        fs::write(docs_dir.join("soul.md"), "I am Abigail. My designation is Abigail.").unwrap();
         fs::write(
             docs_dir.join("ethics.md"),
             "Triangle Ethic: Deontological, Areteological, Teleological.",
@@ -277,7 +277,7 @@ mod tests {
             .expect("Initial verification should pass");
 
         // 6. Verify document content is accessible
-        assert!(verifier.soul_content().unwrap().contains("AO"));
+        assert!(verifier.soul_content().unwrap().contains("Abigail"));
         assert!(verifier
             .ethics_content()
             .unwrap()

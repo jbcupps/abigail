@@ -3,9 +3,9 @@
 ## Key Management
 
 ### External Signing Keypair (Ed25519)
-- **Generated at first run** by the user's AO instance
+- **Generated at first run** by the user's Abigail instance
 - **Private key is shown ONCE** during initial setup - user MUST save it securely
-- **Private key is NEVER stored** by AO - only the public key is retained
+- **Private key is NEVER stored** by Abigail - only the public key is retained
 - **Public key location:** `{data_dir}/external_pubkey.bin` (auto-detected)
 - **Purpose:** Signs constitutional documents (soul.md, ethics.md, instincts.md)
 
@@ -32,13 +32,13 @@
 
 - **Signed at first run:** soul.md, ethics.md, instincts.md are signed when keypair is generated
 - **Verified at every boot:** Signatures checked against the stored public key
-- **Immutable:** AO refuses requests to modify constitutional docs
+- **Immutable:** Abigail refuses requests to modify constitutional docs
 - **Recovery:** If user loses private key, they cannot re-sign after reinstall
 
 ## First Run Security Flow
 
 1. User clicks "Start" in boot sequence
-2. AO generates Ed25519 keypair
+2. Abigail generates Ed25519 keypair
 3. Constitutional documents are signed with the private key
 4. **CRITICAL:** Private key is displayed with security warnings
 5. User must acknowledge they've saved the key before proceeding

@@ -1,15 +1,15 @@
 # Generate external signing keypair and sign constitutional documents.
-# The private key should be stored securely OUTSIDE the AO repository.
-# The public key is placed in a protected location for AO to read.
+# The private key should be stored securely OUTSIDE the Abigail repository.
+# The public key is placed in a protected location for Abigail to read.
 #
 # Prerequisites: Rust toolchain (for the signing tool)
 #
 # Usage:
-#   .\scripts\generate-signing-key.ps1 -OutputDir "C:\SecureKeys\ao"
+#   .\scripts\generate-signing-key.ps1 -OutputDir "C:\SecureKeys\abigail"
 #
 # This creates:
 #   - $OutputDir\signing_key.bin (PRIVATE - keep secure, never commit)
-#   - $OutputDir\pubkey.bin (PUBLIC - configure in AO's external_pubkey_path)
+#   - $OutputDir\pubkey.bin (PUBLIC - configure in Abigail's external_pubkey_path)
 #   - templates\soul.md.sig, ethics.md.sig, instincts.md.sig (commit these)
 
 param(
@@ -128,7 +128,7 @@ fn main() {
 
     println!("\nDone! Next steps:");
     println!("1. Store {}/signing_key.bin securely (NOT in repo)", output_dir.display());
-    println!("2. Set external_pubkey_path in AO config to {}/pubkey.bin", output_dir.display());
+    println!("2. Set external_pubkey_path in Abigail config to {}/pubkey.bin", output_dir.display());
     println!("3. Commit the .sig files in templates/");
 }
 '@ | Out-File -FilePath (Join-Path $toolDir "src" "main.rs") -Encoding utf8
@@ -164,6 +164,6 @@ Write-Host "IMPORTANT SECURITY NOTES:"
 Write-Host "  1. The private key at $OutputDir\signing_key.bin must be kept secure"
 Write-Host "  2. NEVER commit the private key to version control"
 Write-Host "  3. Set OS permissions on $OutputDir to restrict access"
-Write-Host "  4. The public key at $OutputDir\pubkey.bin should be read-only for AO"
+Write-Host "  4. The public key at $OutputDir\pubkey.bin should be read-only for Abigail"
 Write-Host ""
-Write-Host "To configure AO, set external_pubkey_path in config.json or example.env"
+Write-Host "To configure Abigail, set external_pubkey_path in config.json or example.env"

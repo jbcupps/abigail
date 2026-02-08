@@ -18,7 +18,7 @@ fn main() -> eframe::Result<()> {
     }
 
     // Resolve data directory
-    let data_dir = directories::ProjectDirs::from("com", "ao", "AO")
+    let data_dir = directories::ProjectDirs::from("com", "abigail", "Abigail")
         .map(|d| d.data_local_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));
 
@@ -44,14 +44,14 @@ fn main() -> eframe::Result<()> {
             let app = KeygenApp::new(result);
             let options = eframe::NativeOptions {
                 viewport: egui::ViewportBuilder::default()
-                    .with_title("AO Identity Setup")
+                    .with_title("Abigail Identity Setup")
                     .with_inner_size([600.0, 520.0])
                     .with_resizable(false)
                     .with_always_on_top(),
                 ..Default::default()
             };
             eframe::run_native(
-                "AO Identity Setup",
+                "Abigail Identity Setup",
                 options,
                 Box::new(|_cc| Ok(Box::new(app))),
             )
@@ -62,13 +62,13 @@ fn main() -> eframe::Result<()> {
             let app = KeygenApp::error(e);
             let options = eframe::NativeOptions {
                 viewport: egui::ViewportBuilder::default()
-                    .with_title("AO Identity Setup - Error")
+                    .with_title("Abigail Identity Setup - Error")
                     .with_inner_size([500.0, 200.0])
                     .with_resizable(false),
                 ..Default::default()
             };
             eframe::run_native(
-                "AO Identity Setup - Error",
+                "Abigail Identity Setup - Error",
                 options,
                 Box::new(|_cc| Ok(Box::new(app))),
             )
@@ -78,7 +78,7 @@ fn main() -> eframe::Result<()> {
 
 /// Headless master key generation for the Hive architecture.
 ///
-/// Usage: ao-keygen --gen-master [--path <data_dir>]
+/// Usage: abigail-keygen --gen-master [--path <data_dir>]
 ///
 /// Generates:
 ///   - master.key (DPAPI-encrypted Ed25519 signing key)
@@ -90,12 +90,12 @@ fn run_gen_master(args: &[String]) -> eframe::Result<()> {
     // Parse optional --path argument
     let data_dir = if let Some(pos) = args.iter().position(|a| a == "--path") {
         args.get(pos + 1).map(PathBuf::from).unwrap_or_else(|| {
-            directories::ProjectDirs::from("com", "ao", "AO")
+            directories::ProjectDirs::from("com", "abigail", "Abigail")
                 .map(|d| d.data_local_dir().to_path_buf())
                 .unwrap_or_else(|| PathBuf::from("."))
         })
     } else {
-        directories::ProjectDirs::from("com", "ao", "AO")
+        directories::ProjectDirs::from("com", "abigail", "Abigail")
             .map(|d| d.data_local_dir().to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."))
     };
@@ -298,7 +298,7 @@ impl eframe::App for KeygenApp {
                     );
                     ui.colored_label(
                         egui::Color32::from_rgb(255, 220, 100),
-                        "This is the ONLY time you will see this key. AO does NOT store it.",
+                        "This is the ONLY time you will see this key. Abigail does NOT store it.",
                     );
                 });
 
@@ -367,7 +367,7 @@ impl eframe::App for KeygenApp {
                     );
                     ui.colored_label(
                         egui::Color32::from_rgb(255, 180, 180),
-                        "- This key proves you are AO's legitimate mentor.",
+                        "- This key proves you are Abigail's legitimate mentor.",
                     );
                     ui.colored_label(
                         egui::Color32::from_rgb(255, 180, 180),

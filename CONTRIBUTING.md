@@ -1,6 +1,6 @@
-# Contributing to AO
+# Contributing to Abigail
 
-Thank you for your interest in contributing to AO. This guide explains how to set up a development environment, submit changes, and follow our project conventions.
+Thank you for your interest in contributing to Abigail. This guide explains how to set up a development environment, submit changes, and follow our project conventions.
 
 ## Getting Started
 
@@ -29,8 +29,8 @@ sudo apt-get install -y \
 
 ```bash
 # Clone the repository
-git clone https://github.com/jbcupps/ao.git
-cd ao
+git clone https://github.com/jbcupps/abigail.git
+cd abigail
 
 # Build Rust workspace
 cargo build
@@ -125,8 +125,8 @@ See [CLAUDE.md](CLAUDE.md) for a detailed architecture reference, including crat
 
 ## Reporting Issues
 
-- **Bugs**: Use the [bug report template](https://github.com/jbcupps/ao/issues/new?template=bug_report.yml)
-- **Features**: Use the [feature request template](https://github.com/jbcupps/ao/issues/new?template=feature_request.yml)
+- **Bugs**: Use the [bug report template](https://github.com/jbcupps/abigail/issues/new?template=bug_report.yml)
+- **Features**: Use the [feature request template](https://github.com/jbcupps/abigail/issues/new?template=feature_request.yml)
 - **Security**: See [SECURITY.md](.github/SECURITY.md) -- do NOT open public issues for vulnerabilities
 
 ## License

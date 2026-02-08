@@ -348,7 +348,7 @@ mod tests {
     fn test_manifest_parses() {
         let manifest = test_manifest();
         assert_eq!(manifest.name, "Perplexity Search");
-        assert_eq!(manifest.id.0, "com.ao.skills.perplexity-search");
+        assert_eq!(manifest.id.0, "com.abigail.skills.perplexity-search");
     }
 
     #[test]

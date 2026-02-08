@@ -65,7 +65,7 @@ pub struct SkillManifest {
     pub category: String,
     pub keywords: Vec<String>,
     pub runtime: String,
-    pub min_ao_version: String,
+    pub min_abigail_version: String,
     pub platforms: Vec<String>,
     pub capabilities: Vec<CapabilityDescriptor>,
     pub permissions: Vec<Permission>,
@@ -123,7 +123,7 @@ pub struct RuntimeSection {
     #[serde(default = "default_runtime")]
     pub runtime: String,
     #[serde(default)]
-    pub min_ao_version: Option<String>,
+    pub min_abigail_version: Option<String>,
     #[serde(default)]
     pub platforms: Vec<String>,
 }
@@ -223,8 +223,8 @@ impl SkillManifest {
                 .as_ref()
                 .map(|r| r.runtime.clone())
                 .unwrap_or_else(|| "Native".to_string()),
-            min_ao_version: runtime
-                .and_then(|r| r.min_ao_version.clone())
+            min_abigail_version: runtime
+                .and_then(|r| r.min_abigail_version.clone())
                 .unwrap_or_else(|| "0.1.0".to_string()),
             platforms: runtime
                 .as_ref()

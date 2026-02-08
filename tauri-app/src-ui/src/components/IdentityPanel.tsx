@@ -336,7 +336,7 @@ export default function IdentityPanel() {
             <div className="border-t border-gray-800 pt-6">
               <h3 className="text-red-400 font-bold mb-2">Hard Reset</h3>
               <p className="text-sm text-gray-400 mb-4">
-                If you lost your key, you must reset AO.{" "}
+                If you lost your key, you must reset Abigail.{" "}
                 <strong>This destroys the current trust relationship.</strong>{" "}
                 You will be treated as a new mentor.
               </p>

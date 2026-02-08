@@ -18,9 +18,9 @@ tauri-app/gen/
 
 # Application data files (created at runtime, not in repo)
 config.json
-ao_seed.db
-ao_seed.db-wal
-ao_seed.db-shm
+abigail_seed.db
+abigail_seed.db-wal
+abigail_seed.db-shm
 external_pubkey.bin
 
 # IDE

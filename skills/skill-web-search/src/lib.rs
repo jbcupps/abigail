@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn test_default_manifest_parses() {
         let manifest = WebSearchSkill::default_manifest();
-        assert_eq!(manifest.id.0, "com.ao.skills.web-search");
+        assert_eq!(manifest.id.0, "com.abigail.skills.web-search");
         assert_eq!(manifest.name, "Web Search");
         assert_eq!(manifest.secrets.len(), 1);
         assert_eq!(manifest.secrets[0].name, "tavily");

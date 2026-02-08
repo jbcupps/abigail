@@ -67,7 +67,7 @@ Evening check-in  ←── you             You say "merge it"
 
 ## Release & Package Paths (Cross-Cutting Requirement)
 
-AO ships through **6 release/package paths** today. This is a strategic advantage — OpenClaw only has `npm install`. Every feature we build must work across all paths, and new binaries get their own path added.
+Abigail ships through **6 release/package paths** today. This is a strategic advantage — OpenClaw only has `npm install`. Every feature we build must work across all paths, and new binaries get their own path added.
 
 ### Current Paths (Must Not Break)
 
@@ -76,15 +76,15 @@ AO ships through **6 release/package paths** today. This is a strategic advantag
 | 1 | **Windows installer** | NSIS `.exe` | `v*` tag on main | `release.yml` → `tauri-action` |
 | 2 | **macOS installer** | Universal `.dmg` (Intel + Apple Silicon) | `v*` tag on main | `release.yml` → `tauri-action` |
 | 3 | **Linux installer** | `.deb` (Ubuntu 22.04+) | `v*` tag on main | `release.yml` → `tauri-action` |
-| 4 | **npm package** | `npx ao-desktop install` | `release.yml` → `npm publish` | Downloads correct platform binary |
+| 4 | **npm package** | `npx abigail-desktop install` | `release.yml` → `npm publish` | Downloads correct platform binary |
 | 5 | **GitHub Release** | All 3 platform artifacts + notes | `release.yml` Stage 2 | `softprops/action-gh-release` |
-| 6 | **ao-keygen** | Bundled egui binary (per-platform) | Built as resource in release | `cargo build -p ao-keygen` |
+| 6 | **abigail-keygen** | Bundled egui binary (per-platform) | Built as resource in release | `cargo build -p abigail-keygen` |
 
 ### New Path Added in Phase 1
 
 | # | Path | Format | Trigger | Pipeline |
 |---|------|--------|---------|----------|
-| 7 | **ao-cli** | Standalone binary (Win/Mac/Linux) | `v*` tag on main | New job in `release.yml` |
+| 7 | **abigail-cli** | Standalone binary (Win/Mac/Linux) | `v*` tag on main | New job in `release.yml` |
 
 ### CI Quality Gate (Must Pass Every PR)
 
@@ -109,7 +109,7 @@ For every cycle/PR:
 1. `cargo test --all` passes (covers new crate code)
 2. `cargo clippy` clean (no warnings)
 3. Frontend builds (`npm run build`)
-4. New binaries (ao-cli) added to release workflow when they exist
+4. New binaries (abigail-cli) added to release workflow when they exist
 5. Demo runs on at least one platform before merge
 
 This means the **Definition of Done** includes: "doesn't break any existing release path, and new artifacts have their release path defined."
@@ -121,8 +121,8 @@ This means the **Definition of Done** includes: "doesn't break any existing rele
 Six deliverables, ordered by dependency and value. Each is sized to fit a 2-day cycle (or split across cycles if larger).
 
 ### Feature 1: Anthropic Claude Provider
-**Why:** Opens AO to the best available LLM. OpenClaw recommends Claude as primary.
-**What you'll see in demo:** Type a message in AO, get a response from Claude instead of (or alongside) GPT.
+**Why:** Opens Abigail to the best available LLM. OpenClaw recommends Claude as primary.
+**What you'll see in demo:** Type a message in Abigail, get a response from Claude instead of (or alongside) GPT.
 **Cycles:** 1 (2 days)
 
 **Current state:**
@@ -134,7 +134,7 @@ Six deliverables, ordered by dependency and value. Each is sized to fit a 2-day 
 **Work items:**
 - [ ] Create `AnthropicProvider` struct implementing `LlmProvider` trait
 - [ ] Handle Anthropic's message format (system prompt is separate, not a message)
-- [ ] Map AO's `ToolDefinition` to Anthropic's tool format
+- [ ] Map Abigail's `ToolDefinition` to Anthropic's tool format
 - [ ] Wire into `IdEgoRouter` so `set_api_key("anthropic", key)` builds an Anthropic-backed Ego
 - [ ] Add Tauri command to switch Ego provider between OpenAI/Anthropic
 - [ ] Test with real API key
@@ -163,7 +163,7 @@ Six deliverables, ordered by dependency and value. Each is sized to fit a 2-day 
 ---
 
 ### Feature 3: Wire Superego (3-Way Routing)
-**Why:** AO's unique architectural differentiator. Adds an ethical oversight layer to every interaction.
+**Why:** Abigail's unique architectural differentiator. Adds an ethical oversight layer to every interaction.
 **What you'll see in demo:** A settings panel where you configure Id/Ego/Superego providers. Chat messages show which path they took.
 **Cycles:** 1 (2 days)
 
@@ -185,7 +185,7 @@ Six deliverables, ordered by dependency and value. Each is sized to fit a 2-day 
 
 ### Feature 4: Core Skills (Filesystem + Shell + HTTP)
 **Why:** The skill system works but only has 1 active skill. These 3 unlock the agent's ability to actually DO things.
-**What you'll see in demo:** Ask AO to "list files in my home directory", "run `cargo --version`", or "fetch the weather from an API" — and it does it.
+**What you'll see in demo:** Ask Abigail to "list files in my home directory", "run `cargo --version`", or "fetch the weather from an API" — and it does it.
 **Cycles:** 2 (4 days — one cycle per 1-2 skills)
 
 **Current state:**
@@ -218,7 +218,7 @@ Six deliverables, ordered by dependency and value. Each is sized to fit a 2-day 
 
 ### Feature 5: Skills Watcher (Hot-Reload)
 **Why:** During development (and for users adding skills), the app shouldn't need a restart to pick up new skills.
-**What you'll see in demo:** Drop a new skill folder into the skills directory → AO detects it and shows it in the skill list without restart.
+**What you'll see in demo:** Drop a new skill folder into the skills directory → Abigail detects it and shows it in the skill list without restart.
 **Cycles:** 0.5 (1 day — pair with another small item)
 
 **Current state:**
@@ -235,29 +235,29 @@ Six deliverables, ordered by dependency and value. Each is sized to fit a 2-day 
 ---
 
 ### Feature 6: CLI Interface (Headless Operation)
-**Why:** Enables AO to run without the desktop GUI — foundation for server/gateway deployment later. Also adds a **new release artifact** to AO's multi-path distribution.
-**What you'll see in demo:** Run `ao-cli chat "What is 2+2?"` in a terminal and get a response. No window opens.
+**Why:** Enables Abigail to run without the desktop GUI — foundation for server/gateway deployment later. Also adds a **new release artifact** to Abigail's multi-path distribution.
+**What you'll see in demo:** Run `abigail-cli chat "What is 2+2?"` in a terminal and get a response. No window opens.
 **Cycles:** 1.5 (3 days)
 
 **Current state:**
-- All logic is in library crates (`ao-router`, `ao-skills`, `ao-memory`, `ao-core`)
+- All logic is in library crates (`abigail-router`, `abigail-skills`, `abigail-memory`, `abigail-core`)
 - But wired together only in `tauri-app/src/lib.rs`
 - No standalone CLI binary
-- `npm-package/` already has a CLI pattern (`ao-desktop`) we can extend
+- `npm-package/` already has a CLI pattern (`abigail-desktop`) we can extend
 
 **Work items:**
-- [ ] New crate: `ao-cli` (or binary in existing crate)
-- [ ] `clap` argument parser: `ao-cli chat "message"`, `ao-cli config set-key`, `ao-cli skills list`
-- [ ] Reuse `ao-router`, `ao-skills`, `ao-memory` directly (no Tauri dependency)
-- [ ] Interactive REPL mode: `ao-cli` with no args drops into a chat loop
+- [ ] New crate: `abigail-cli` (or binary in existing crate)
+- [ ] `clap` argument parser: `abigail-cli chat "message"`, `abigail-cli config set-key`, `abigail-cli skills list`
+- [ ] Reuse `abigail-router`, `abigail-skills`, `abigail-memory` directly (no Tauri dependency)
+- [ ] Interactive REPL mode: `abigail-cli` with no args drops into a chat loop
 - [ ] Add to workspace `Cargo.toml`
 - [ ] Output formatting (colored terminal output with streaming)
 
 **Release path work items (new!):**
-- [ ] Add `ao-cli` build step to `release.yml` (3-platform matrix, like ao-keygen)
-- [ ] Upload `ao-cli` binaries as GitHub Release assets (ao-cli-windows-x64.exe, ao-cli-macos-universal, ao-cli-linux-x64)
-- [ ] Update `npm-package/` to also offer `npx ao-desktop cli` as a subcommand
-- [ ] Add `ao-cli` to CI test matrix (ensure `cargo build -p ao-cli` passes on all 3 platforms)
+- [ ] Add `abigail-cli` build step to `release.yml` (3-platform matrix, like abigail-keygen)
+- [ ] Upload `abigail-cli` binaries as GitHub Release assets (abigail-cli-windows-x64.exe, abigail-cli-macos-universal, abigail-cli-linux-x64)
+- [ ] Update `npm-package/` to also offer `npx abigail-desktop cli` as a subcommand
+- [ ] Add `abigail-cli` to CI test matrix (ensure `cargo build -p abigail-cli` passes on all 3 platforms)
 
 ---
 
@@ -268,7 +268,7 @@ Six deliverables, ordered by dependency and value. Each is sized to fit a 2-day 
 | Day | Type | Cycle | Work | Demo Deliverable |
 |-----|------|-------|------|-----------------|
 | 1 | Build | C1 | Anthropic provider implementation | — |
-| 2 | Demo | C1 | — | **Demo 1:** Chat with Claude in AO |
+| 2 | Demo | C1 | — | **Demo 1:** Chat with Claude in Abigail |
 | 3 | Build | C2 | Streaming responses (trait + OpenAI + Anthropic) | — |
 | 4 | Demo | C2 | — | **Demo 2:** Watch responses stream in real-time |
 | 5 | Build | C3 | Streaming for LocalHttp + UI polish | — |
@@ -281,7 +281,7 @@ Six deliverables, ordered by dependency and value. Each is sized to fit a 2-day 
 | 7 | Build | C4 | Superego wiring + trinity routing | — |
 | 8 | Demo | C4 | — | **Demo 4:** 3-way routing visible in UI |
 | 9 | Build | C5 | Filesystem skill + shell skill | — |
-| 10 | Demo | C5 | — | **Demo 5:** Ask AO to list files, run commands |
+| 10 | Demo | C5 | — | **Demo 5:** Ask Abigail to list files, run commands |
 
 ### Week 3: Skills Expansion
 
@@ -290,7 +290,7 @@ Six deliverables, ordered by dependency and value. Each is sized to fit a 2-day 
 | 11 | Build | C6 | HTTP skill + skills watcher | — |
 | 12 | Demo | C6 | — | **Demo 6:** HTTP requests + hot-reload skills |
 | 13 | Build | C7 | CLI interface (core + chat subcommand) | — |
-| 14 | Demo | C7 | — | **Demo 7:** `ao-cli chat` works in terminal |
+| 14 | Demo | C7 | — | **Demo 7:** `abigail-cli chat` works in terminal |
 | 15 | Demo | — | — | **Buffer / catch-up / polish** |
 
 ### Weeks 4-6: Buffer & Hardening
@@ -373,7 +373,7 @@ git checkout <branch-name>
 cargo tauri dev
 
 # 3. If testing CLI (Feature 6)
-cargo run -p ao-cli -- chat "Hello, AO"
+cargo run -p abigail-cli -- chat "Hello, Abigail"
 ```
 
 I'll provide exact commands at each demo point. If anything fails, share the error output in our check-in and I'll fix it.
@@ -393,7 +393,7 @@ This plan is designed to flex:
 1. Anthropic provider ← **must have**
 2. Streaming responses ← **must have**
 3. Core skills (filesystem + shell) ← **must have**
-4. Superego wiring ← **high value, AO differentiator**
+4. Superego wiring ← **high value, Abigail differentiator**
 5. HTTP skill ← **nice to have**
 6. Skills watcher ← **nice to have**
 7. CLI interface ← **can defer to Phase 2**
@@ -406,7 +406,7 @@ This plan is designed to flex:
 - [ ] Existing tests still pass (`cargo test --all`)
 - [ ] New tests cover the happy path
 - [ ] Feature works in the running Tauri app (or CLI)
-- [ ] **All existing release paths unbroken** (NSIS, DMG, deb, npm, GitHub Release, ao-keygen)
+- [ ] **All existing release paths unbroken** (NSIS, DMG, deb, npm, GitHub Release, abigail-keygen)
 - [ ] **New release artifacts have pipeline coverage** (if applicable)
 - [ ] You've walked through the demo and approved
 - [ ] PR merged to main

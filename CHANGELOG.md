@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to AO are documented in this file.
+All notable changes to Abigail are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
@@ -24,7 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
-- Initial release of AO desktop agent
+- Initial release of Abigail desktop agent
 - Interactive birth flow with staged onboarding
 - First-run Ed25519 signing key generation with one-time private key presentation
 - Constitutional document signing and verification (soul.md, ethics.md, instincts.md)
@@ -35,10 +35,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Skill-based tool execution with web-search capability
 - DPAPI-encrypted secrets storage on Windows
 - Cross-platform builds: Windows (NSIS), Ubuntu (deb), macOS (dmg universal binary)
-- npm CLI installer (`npx ao-desktop`)
+- npm CLI installer (`npx abigail-desktop`)
 - Docker development and build containers
 - Security audit CI (cargo audit, npm audit)
 - Dependabot configuration for Cargo, npm, and GitHub Actions
 
-[Unreleased]: https://github.com/jbcupps/ao/compare/v0.0.1...HEAD
-[0.0.1]: https://github.com/jbcupps/ao/releases/tag/v0.0.1
+[Unreleased]: https://github.com/jbcupps/abigail/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/jbcupps/abigail/releases/tag/v0.0.1

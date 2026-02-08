@@ -1,4 +1,4 @@
-//! AO Skills — plugin and tool execution layer.
+//! Abigail Skills — plugin and tool execution layer.
 
 pub mod channel;
 pub mod executor;
@@ -112,7 +112,7 @@ mod tests {
             category: "Test".to_string(),
             keywords: vec![],
             runtime: "Native".to_string(),
-            min_ao_version: "0.1.0".to_string(),
+            min_abigail_version: "0.1.0".to_string(),
             platforms: vec!["All".to_string()],
             capabilities: vec![],
             permissions: vec![],

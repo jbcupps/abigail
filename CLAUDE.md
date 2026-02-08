@@ -21,7 +21,7 @@ cargo test --all                         # Run all tests
 cargo test -p abigail-core                    # Signature verification, config
 cargo test -p abigail-memory                  # SQLite schema, memory CRUD
 cargo test -p abigail-router                  # Routing decisions
-cargo test -p abigail-skills                  # Requires AO_IMAP_TEST=1 + credentials
+cargo test -p abigail-skills                  # Requires ABIGAIL_IMAP_TEST=1 + credentials
 
 # Single test
 cargo test -p abigail-core verify             # Run tests matching "verify" in abigail-core
@@ -117,7 +117,7 @@ All workspace crates inherit via `version.workspace = true`.
 
 ## Data Directory
 
-- Windows: `%LOCALAPPDATA%\ao\AO\`
+- Windows: `%LOCALAPPDATA%\abigail\Abigail\`
 - macOS: `~/Library/Application Support/abigail/Abigail/`
 - Linux: `~/.local/share/abigail/Abigail/`
 

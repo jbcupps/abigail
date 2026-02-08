@@ -2,7 +2,7 @@
 
 ## Our Commitment
 
-AO is committed to providing a welcoming and inclusive environment for everyone. We expect all participants in our community to treat each other with respect and professionalism.
+Abigail is committed to providing a welcoming and inclusive environment for everyone. We expect all participants in our community to treat each other with respect and professionalism.
 
 ## Standards
 

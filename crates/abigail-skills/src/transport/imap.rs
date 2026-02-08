@@ -1,4 +1,4 @@
-//! IMAP client for AO's email account. Proton-style defaults: mail.proton.me:993.
+//! IMAP client for Abigail's email account. Proton-style defaults: mail.proton.me:993.
 
 use async_imap::Session;
 use async_native_tls::TlsConnector;
@@ -97,16 +97,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_imap_connection() {
-        if std::env::var("AO_IMAP_TEST").is_err() {
+        if std::env::var("ABIGAIL_IMAP_TEST").is_err() {
             return;
         }
-        let host = std::env::var("AO_IMAP_HOST").unwrap_or_else(|_| "mail.proton.me".into());
-        let port: u16 = std::env::var("AO_IMAP_PORT")
+        let host = std::env::var("ABIGAIL_IMAP_HOST").unwrap_or_else(|_| "mail.proton.me".into());
+        let port: u16 = std::env::var("ABIGAIL_IMAP_PORT")
             .ok()
             .and_then(|p| p.parse().ok())
             .unwrap_or(993);
-        let user = std::env::var("AO_IMAP_USER").unwrap_or_default();
-        let pass = std::env::var("AO_IMAP_PASS").unwrap_or_default();
+        let user = std::env::var("ABIGAIL_IMAP_USER").unwrap_or_default();
+        let pass = std::env::var("ABIGAIL_IMAP_PASS").unwrap_or_default();
         if user.is_empty() || pass.is_empty() {
             return;
         }

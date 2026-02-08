@@ -1,8 +1,8 @@
 //! Vault abstraction for external public key storage.
 //!
 //! The external vault stores the **public key** used to verify constitutional documents.
-//! AO can **read** from this vault but cannot write to it. The private signing key
-//! is created and managed out-of-band (e.g., GPG, OpenSSL) and never stored in AO.
+//! Abigail can **read** from this vault but cannot write to it. The private signing key
+//! is created and managed out-of-band (e.g., GPG, OpenSSL) and never stored in Abigail.
 
 use crate::error::{CoreError, Result};
 use base64::Engine as _;
@@ -25,7 +25,7 @@ pub struct ReadOnlyFileVault {
 
 impl ReadOnlyFileVault {
     /// Create a new file vault pointing to the given path.
-    /// The path should be outside AO's data directory and protected by OS ACLs.
+    /// The path should be outside Abigail's data directory and protected by OS ACLs.
     pub fn new(path: impl AsRef<Path>) -> Self {
         Self {
             path: path.as_ref().to_path_buf(),

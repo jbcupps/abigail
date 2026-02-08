@@ -1,5 +1,5 @@
 [skill]
-id = "com.ao.skills.web-search"
+id = "com.abigail.skills.web-search"
 name = "Web Search"
 version = "0.1.0"
 description = "Search the web using Tavily API"

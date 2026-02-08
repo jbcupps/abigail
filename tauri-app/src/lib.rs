@@ -274,7 +274,7 @@ fn init_soul(state: tauri::State<AppState>) -> Result<(), String> {
 /// 3. Stores the PUBLIC key in data_dir/external_pubkey.bin
 /// 4. Returns the PRIVATE key as base64 for the user to save
 ///
-/// CRITICAL: The private key is returned ONCE and never stored by AO.
+/// CRITICAL: The private key is returned ONCE and never stored by Abigail.
 /// The user MUST save it securely. Without it, they cannot verify integrity
 /// after a reinstall or re-sign documents if needed.
 #[tauri::command]
@@ -297,7 +297,7 @@ fn generate_and_sign_constitutional(
     if sig_exists {
         // Already generated - can't return the private key again (it was never stored)
         return Err("Constitutional documents are already signed. \
-             The private key was presented during initial setup and is not stored by AO. \
+             The private key was presented during initial setup and is not stored by Abigail. \
              If you need to re-sign, you must use your saved private key."
             .to_string());
     }
@@ -1942,7 +1942,7 @@ async fn birth_chat(
         let stage = b.current_stage();
         let prompt =
             abigail_birth::prompts::system_prompt_for_stage_with_context(stage, &stored_providers)
-                .unwrap_or_else(|| "You are AO, a newborn AI agent.".to_string());
+                .unwrap_or_else(|| "You are Abigail, a newborn AI agent.".to_string());
         (stage, prompt)
     };
 
@@ -2155,7 +2155,7 @@ async fn extract_genesis_identity(
     for (role, content) in &conversation {
         let label = match role.as_str() {
             "user" => "Mentor",
-            "assistant" => "AO",
+            "assistant" => "Abigail",
             _ => role.as_str(),
         };
         conv_text.push_str(&format!("{}: {}\n", label, content));
@@ -2461,7 +2461,7 @@ pub fn run() {
     }
     {
         let fs_manifest = FilesystemSkill::default_manifest();
-        // Sandbox to the user's home directory and AO data directory
+        // Sandbox to the user's home directory and Abigail data directory
         let mut allowed_roots = vec![config.data_dir.clone()];
         if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
             allowed_roots.push(PathBuf::from(home));

@@ -1,16 +1,16 @@
-# Proton Mail-style email skill (ao-skills IMAP/SMTP).
+# Proton Mail-style email skill (abigail-skills IMAP/SMTP).
 
 [skill]
-id = "com.ao.skills.proton-mail"
+id = "com.abigail.skills.proton-mail"
 name = "Proton Mail"
 version = "0.1.0"
-description = "Proton Mail-style email: fetch, send, and manage mail via IMAP/SMTP (ao-skills)."
+description = "Proton Mail-style email: fetch, send, and manage mail via IMAP/SMTP (abigail-skills)."
 category = "Communication"
 keywords = ["email", "proton", "imap", "smtp"]
 
 [runtime]
 runtime = "Native"
-min_ao_version = "0.1.0"
+min_abigail_version = "0.1.0"
 platforms = ["Windows", "macOS", "Linux"]
 
 [[capabilities]]

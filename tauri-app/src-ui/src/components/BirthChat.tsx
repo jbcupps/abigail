@@ -156,7 +156,7 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
             )}
             {msg.role === "assistant" && (
               <div>
-                <span className="text-theme-text">AO: </span>
+                <span className="text-theme-text">Abigail: </span>
                 <span className="text-theme-text-bright">
                   {msg.content.split("\n").map((line, j) => (
                     <span key={j}>
@@ -194,7 +194,7 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
           ref={inputRef}
           type="text"
           className="flex-1 bg-black border border-theme-primary text-theme-text px-3 py-2 rounded text-sm"
-          placeholder="Speak to AO..."
+          placeholder="Speak to Abigail..."
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSend()}

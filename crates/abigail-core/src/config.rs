@@ -53,7 +53,7 @@ pub struct AppConfig {
     /// OpenAI API key (optional - enables Ego)
     pub openai_api_key: Option<String>,
 
-    /// Email configuration for AO's account
+    /// Email configuration for Abigail's account
     pub email: Option<EmailConfig>,
 
     /// Whether birth sequence has completed
@@ -65,7 +65,7 @@ pub struct AppConfig {
     pub birth_stage: Option<String>,
 
     /// Path to external public key file for signature verification.
-    /// This file should be outside AO's data directory and read-only.
+    /// This file should be outside Abigail's data directory and read-only.
     /// If None, falls back to internal keyring (legacy/dev mode).
     #[serde(default)]
     pub external_pubkey_path: Option<PathBuf>,
@@ -105,7 +105,7 @@ pub struct EmailConfig {
 
 impl AppConfig {
     pub fn default_paths() -> Self {
-        let base = directories::ProjectDirs::from("com", "ao", "AO")
+        let base = directories::ProjectDirs::from("com", "abigail", "Abigail")
             .map(|d| d.data_local_dir().to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."));
 

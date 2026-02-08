@@ -1,4 +1,4 @@
-//! Thin wrapper over ao-senses ImapClient/SmtpClient for email operations.
+//! Thin wrapper over abigail-senses ImapClient/SmtpClient for email operations.
 
 use abigail_skills::transport::{ImapClient, SmtpClient};
 use abigail_skills::capability::email::{

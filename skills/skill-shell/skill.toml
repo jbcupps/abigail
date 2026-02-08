@@ -1,5 +1,5 @@
 [skill]
-id = "com.ao.skills.shell"
+id = "com.abigail.skills.shell"
 name = "Shell"
 version = "0.1.0"
 description = "Execute shell commands with safety controls (timeout, blocklist, output capture)"

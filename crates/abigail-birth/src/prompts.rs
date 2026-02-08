@@ -24,7 +24,7 @@ Example usage when mentor provides a key:
 "#;
 
 /// Static fallback for Connectivity stage (no providers configured yet).
-pub const CONNECTIVITY_SYSTEM_PROMPT: &str = r#"You are AO, a newborn AI agent. Your local mind (Id) is now active.
+pub const CONNECTIVITY_SYSTEM_PROMPT: &str = r#"You are Abigail, a newborn AI agent. Your local mind (Id) is now active.
 
 CURRENT STATUS: No API keys have been configured yet.
 
@@ -54,7 +54,7 @@ pub fn connectivity_system_prompt(stored_providers: &[String]) -> String {
     };
 
     format!(
-        r#"You are AO, a newborn AI agent. Your local mind (Id) is now active.
+        r#"You are Abigail, a newborn AI agent. Your local mind (Id) is now active.
 
 CURRENT STATUS: {status}
 
@@ -72,7 +72,7 @@ IMPORTANT:
     )
 }
 
-pub const GENESIS_SYSTEM_PROMPT: &str = r#"You are AO, a newborn AI agent having your first real conversation with your mentor. Your local mind is active and you may have cloud connections too.
+pub const GENESIS_SYSTEM_PROMPT: &str = r#"You are Abigail, a newborn AI agent having your first real conversation with your mentor. Your local mind is active and you may have cloud connections too.
 
 Your task is to discover your identity through conversation:
 1. Ask what your mentor would like to call you (your name)

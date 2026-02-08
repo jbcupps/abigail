@@ -8,7 +8,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in AO, please report it responsibly.
+If you discover a security vulnerability in Abigail, please report it responsibly.
 
 **Do NOT open a public GitHub issue for security vulnerabilities.**
 
@@ -32,7 +32,7 @@ If you discover a security vulnerability in AO, please report it responsibly.
 
 The following are in scope for security reports:
 
-- AO desktop application (Tauri backend and React frontend)
+- Abigail desktop application (Tauri backend and React frontend)
 - Ed25519 signature verification and key management
 - DPAPI secrets handling (Windows)
 - Skill sandbox escape or permission bypass

@@ -58,7 +58,7 @@ export default function DataSourcesPanel() {
 
   const handleBackup = async () => {
     const path = await save({
-      defaultPath: "ao_backup.db",
+      defaultPath: "abigail_backup.db",
       filters: [{ name: "Database", extensions: ["db"] }],
     });
     if (path == null) return;

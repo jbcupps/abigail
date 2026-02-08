@@ -1,16 +1,16 @@
-# AO vs OpenClaw: Gap Analysis & Feature Parity Plan
+# Abigail vs OpenClaw: Gap Analysis & Feature Parity Plan
 
 **Date:** 2026-02-06
-**AO Version:** 0.0.1 (MVP)
+**Abigail Version:** 0.0.1 (MVP)
 **OpenClaw Version:** Latest (145K+ GitHub stars, 900+ contributors)
 
 ---
 
 ## Executive Summary
 
-AO and OpenClaw are both AI agent/assistant platforms, but they target different form factors and maturity levels. **AO** is a desktop-native Tauri 2.0 application (Rust + React) focused on constitutional identity, Ed25519 document signing, and an Id/Ego dual-LLM routing architecture. **OpenClaw** is a Node.js/TypeScript CLI-first agent that connects messaging platforms (WhatsApp, Telegram, Discord, Slack, Signal, iMessage, Teams, Matrix, and more) to AI models via a WebSocket gateway, with Docker-sandboxed execution, 100+ skills, voice integration, and browser automation.
+Abigail and OpenClaw are both AI agent/assistant platforms, but they target different form factors and maturity levels. **Abigail** is a desktop-native Tauri 2.0 application (Rust + React) focused on constitutional identity, Ed25519 document signing, and an Id/Ego dual-LLM routing architecture. **OpenClaw** is a Node.js/TypeScript CLI-first agent that connects messaging platforms (WhatsApp, Telegram, Discord, Slack, Signal, iMessage, Teams, Matrix, and more) to AI models via a WebSocket gateway, with Docker-sandboxed execution, 100+ skills, voice integration, and browser automation.
 
-This report identifies **37 feature gaps** across 12 categories, estimates effort for each, and provides a phased implementation plan to bring AO to feature parity.
+This report identifies **37 feature gaps** across 12 categories, estimates effort for each, and provides a phased implementation plan to bring Abigail to feature parity.
 
 ---
 
@@ -19,7 +19,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 1. [Project Comparison Overview](#1-project-comparison-overview)
 2. [Feature Gap Inventory](#2-feature-gap-inventory)
 3. [Detailed Gap Analysis by Category](#3-detailed-gap-analysis-by-category)
-4. [AO's Unique Strengths (Not in OpenClaw)](#4-aos-unique-strengths-not-in-openclaw)
+4. [Abigail's Unique Strengths (Not in OpenClaw)](#4-aos-unique-strengths-not-in-openclaw)
 5. [Architecture Comparison](#5-architecture-comparison)
 6. [Phased Implementation Plan](#6-phased-implementation-plan)
 7. [Effort Estimates](#7-effort-estimates)
@@ -30,7 +30,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 
 ## 1. Project Comparison Overview
 
-| Dimension | AO | OpenClaw |
+| Dimension | Abigail | OpenClaw |
 |-----------|----|---------|
 | **Runtime** | Tauri 2.0 (Rust) + React/TypeScript | Node.js 22+ (TypeScript CLI) |
 | **Form factor** | Desktop app (Windows/macOS/Linux) | CLI + messaging platform integrations |
@@ -47,7 +47,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 | **Scheduling** | None | Cron-based task scheduling |
 | **Mobile** | None | iOS/Android companion apps |
 | **Community** | Solo/small team | 900+ contributors, ClawCon meetups |
-| **Release paths** | 6 paths: NSIS, DMG, deb, npm, GitHub Release, ao-keygen | 1 path: `npm install -g openclaw` |
+| **Release paths** | 6 paths: NSIS, DMG, deb, npm, GitHub Release, abigail-keygen | 1 path: `npm install -g openclaw` |
 | **CI/CD** | 5-job gate: lint, 3-platform tests, frontend, audit, CodeQL | GitHub Actions (details vary) |
 
 ---
@@ -106,7 +106,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 
 **OpenClaw's capability:** Connects to 12+ messaging platforms as a unified inbox. Users interact with the agent through WhatsApp, Telegram, Discord, Slack, Signal, iMessage (via BlueBubbles), Microsoft Teams, Matrix, Google Chat, Zalo, and a built-in WebChat. Each channel can be routed to a different agent workspace with isolated memory.
 
-**AO's current state:** Desktop-only chat interface embedded in the Tauri app. No external messaging platform integrations. Communication is limited to the local UI.
+**Abigail's current state:** Desktop-only chat interface embedded in the Tauri app. No external messaging platform integrations. Communication is limited to the local UI.
 
 **What's needed:**
 - A messaging adapter layer (trait-based, one adapter per platform)
@@ -116,7 +116,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 - DM pairing/allowlists for security
 - Per-channel routing configuration
 
-**AO advantage to leverage:** AO's existing `LlmProvider` trait pattern and skill system can be extended. The Tauri event bus already supports multi-channel event routing internally.
+**Abigail advantage to leverage:** Abigail's existing `LlmProvider` trait pattern and skill system can be extended. The Tauri event bus already supports multi-channel event routing internally.
 
 ---
 
@@ -124,7 +124,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 
 **OpenClaw's capability:** A WebSocket server (`ws://127.0.0.1:18789`) serves as the sole control plane. It manages sessions, channels, tools, and events. A "Lane Queue System" enforces serial execution by default to prevent race conditions, with explicit opt-in parallelism for safe operations.
 
-**AO's current state:** Tauri command-based architecture. Each frontend action maps to a `#[tauri::command]` handler. No WebSocket gateway, no queue system. Execution is synchronous per-request within the Tauri event loop.
+**Abigail's current state:** Tauri command-based architecture. Each frontend action maps to a `#[tauri::command]` handler. No WebSocket gateway, no queue system. Execution is synchronous per-request within the Tauri event loop.
 
 **What's needed:**
 - WebSocket server (tokio-tungstenite or axum with WebSocket support)
@@ -140,7 +140,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 
 **OpenClaw's capability:** Docker-based sandbox for all tool execution. Three execution contexts: sandbox (Docker container with isolated filesystem), host (gateway process), and device nodes (paired mobile/desktop devices). The Docker sandbox prevents skill code from accessing the host system directly.
 
-**AO's current state:** Skills run in-process within the Tauri app. The `Sandbox` struct in `ao-skills` defines permission types and resource limits, but enforcement is permission-check-based (allowlists), not process-level isolation. There is no container or process sandboxing.
+**Abigail's current state:** Skills run in-process within the Tauri app. The `Sandbox` struct in `abigail-skills` defines permission types and resource limits, but enforcement is permission-check-based (allowlists), not process-level isolation. There is no container or process sandboxing.
 
 **What's needed:**
 - Docker integration (bollard crate for Rust Docker API)
@@ -156,7 +156,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 
 **OpenClaw's capability:** Supports Anthropic Claude (recommended), OpenAI, local models via Ollama, and Chinese models (Moonshot AI Kimi, MiniMax). Users bring their own API keys. Streaming responses are standard.
 
-**AO's current state:** Two providers: `OpenAiProvider` (cloud) and `LocalHttpProvider` (Ollama/LM Studio). Infrastructure for a third `Superego` provider exists in `TrinityConfig` but is not wired. No streaming (responses returned as complete strings). API key validation exists for OpenAI, Anthropic, XAI, Google, and Tavily but only OpenAI is implemented as an actual provider.
+**Abigail's current state:** Two providers: `OpenAiProvider` (cloud) and `LocalHttpProvider` (Ollama/LM Studio). Infrastructure for a third `Superego` provider exists in `TrinityConfig` but is not wired. No streaming (responses returned as complete strings). API key validation exists for OpenAI, Anthropic, XAI, Google, and Tavily but only OpenAI is implemented as an actual provider.
 
 **What's needed:**
 - `AnthropicProvider` implementation (using anthropic-sdk or direct HTTP)
@@ -172,7 +172,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 
 **OpenClaw's capability:** 100+ preconfigured AgentSkills across categories: shell commands, filesystem operations, web automation, 50+ third-party service integrations (smart home, productivity, music). Three skill types: bundled, managed, and workspace skills. A skills watcher hot-reloads changes to `SKILL.md`. Community-driven ecosystem with install gating.
 
-**AO's current state:** 2 skills total — `skill-web-search` (Tavily, fully working) and `skill-proton-mail` (manifest only, transport layer exists but not integrated). The `SkillRegistry`, `SkillExecutor`, and `EventBus` infrastructure is solid but underutilized.
+**Abigail's current state:** 2 skills total — `skill-web-search` (Tavily, fully working) and `skill-proton-mail` (manifest only, transport layer exists but not integrated). The `SkillRegistry`, `SkillExecutor`, and `EventBus` infrastructure is solid but underutilized.
 
 **What's needed (prioritized skill categories):**
 
@@ -208,7 +208,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 
 **OpenClaw's capability:** Full browser control via a dedicated Chrome/Chromium instance. Uses "semantic snapshots" — accessibility tree parsing instead of screenshots. A screenshot can be 5MB; a semantic snapshot is under 50KB, dramatically reducing token costs while providing higher precision for the LLM to understand page content.
 
-**AO's current state:** No browser automation. The `sensory/vision.rs` module has stubs returning errors.
+**Abigail's current state:** No browser automation. The `sensory/vision.rs` module has stubs returning errors.
 
 **What's needed:**
 - Chrome DevTools Protocol (CDP) client (chromiumoxide or fantoccini crate)
@@ -225,7 +225,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 
 **OpenClaw's capability:** Always-on speech with Voice Wake (wake-word detection) and Talk Mode on macOS/iOS/Android. ElevenLabs integration for high-quality TTS. Speech-to-text for voice input.
 
-**AO's current state:** `sensory/hearing.rs` has stubs returning errors. No voice capability.
+**Abigail's current state:** `sensory/hearing.rs` has stubs returning errors. No voice capability.
 
 **What's needed:**
 - Speech-to-text integration (Whisper API or local whisper.cpp)
@@ -241,7 +241,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 
 **OpenClaw's capability:** Route different channels to isolated agent instances via workspaces. Each workspace has its own memory directory, skills configuration, and system prompt. Enables running multiple specialized agents from a single installation.
 
-**AO's current state:** Single agent with Id/Ego routing. The `agent.rs` module in `ao-capabilities` has cooperation stubs. No workspace isolation.
+**Abigail's current state:** Single agent with Id/Ego routing. The `agent.rs` module in `abigail-capabilities` has cooperation stubs. No workspace isolation.
 
 **What's needed:**
 - Workspace abstraction (isolated config, memory, skills per workspace)
@@ -256,7 +256,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 
 **OpenClaw's capability:** Memory stored as local Markdown documents that users can manually read and edit. Search uses BM25 (keyword), vector embeddings, and graph search for semantic retrieval. Per-channel memory isolation ensures conversations don't leak across contexts.
 
-**AO's current state:** SQLite with 3-tier `MemoryWeight` system (Ephemeral/Distilled/Crystallized). Memories stored as content strings with weight and timestamp. No semantic search, no vector embeddings, no user-editable format.
+**Abigail's current state:** SQLite with 3-tier `MemoryWeight` system (Ephemeral/Distilled/Crystallized). Memories stored as content strings with weight and timestamp. No semantic search, no vector embeddings, no user-editable format.
 
 **What's needed:**
 - Markdown-based memory export/import (alongside SQLite)
@@ -273,7 +273,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 
 **OpenClaw's capability:** Cron-based scheduled task execution. Agents can be configured to run tasks on schedules (e.g., daily briefings, periodic checks).
 
-**AO's current state:** No scheduling capability.
+**Abigail's current state:** No scheduling capability.
 
 **What's needed:**
 - Cron expression parser (cron crate)
@@ -288,7 +288,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 
 **OpenClaw's capability:** macOS menu bar companion app, iOS and Android companion apps that act as "device nodes." Nodes execute local actions on the paired device with permission handling, enabling cross-device agent interactions.
 
-**AO's current state:** Desktop-only Tauri app. No mobile presence.
+**Abigail's current state:** Desktop-only Tauri app. No mobile presence.
 
 **What's needed:**
 - Device node protocol (WebSocket or gRPC for device pairing)
@@ -304,7 +304,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 
 **OpenClaw's capability:** CLI interface for headless operation, WebChat browser-based UI, Live Canvas for agent-driven visual workspaces, Agent-to-UI (A2UI) protocol for dynamic rendering.
 
-**AO's current state:** Tauri desktop UI only. React frontend with chat and identity panels. No CLI mode, no web interface, no dynamic canvas.
+**Abigail's current state:** Tauri desktop UI only. React frontend with chat and identity panels. No CLI mode, no web interface, no dynamic canvas.
 
 **What's needed:**
 - CLI binary (clap-based, no Tauri dependency)
@@ -315,11 +315,11 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 
 ---
 
-## 4. AO's Unique Strengths (Not in OpenClaw)
+## 4. Abigail's Unique Strengths (Not in OpenClaw)
 
-AO has several features that OpenClaw lacks. These are differentiators worth preserving:
+Abigail has several features that OpenClaw lacks. These are differentiators worth preserving:
 
-| AO Feature | Description | OpenClaw Equivalent |
+| Abigail Feature | Description | OpenClaw Equivalent |
 |------------|-------------|---------------------|
 | **Constitutional identity** | Ed25519-signed soul.md/ethics.md/instincts.md verified at every boot | None — OpenClaw has no cryptographic identity verification |
 | **Birth sequence** | 5-stage interactive identity creation (Darkness→Ignition→Connectivity→Genesis→Emergence) | Simple onboarding wizard |
@@ -329,16 +329,16 @@ AO has several features that OpenClaw lacks. These are differentiators worth pre
 | **Memory weight tiers** | Ephemeral/Distilled/Crystallized importance levels | Flat Markdown files |
 | **Identity repair flow** | Recovery from broken state with private key or hard reset | No equivalent |
 | **Rust-native security** | Memory safety, SSRF protection, path traversal prevention at the type level | Node.js with Docker isolation |
-| **Multi-path distribution** | 6 release paths: NSIS installer, macOS DMG (universal), Linux deb, npm CLI, GitHub Release, ao-keygen — all automated in CI | Single npm install path |
+| **Multi-path distribution** | 6 release paths: NSIS installer, macOS DMG (universal), Linux deb, npm CLI, GitHub Release, abigail-keygen — all automated in CI | Single npm install path |
 | **5-job CI quality gate** | Lint, 3-platform tests, frontend build, cargo+npm audit, CodeQL SAST — gated branch protection | Standard CI (varies) |
 
-**Recommendation:** These features should be preserved and enhanced, not replaced, during the parity effort. They represent AO's philosophical and architectural differentiation.
+**Recommendation:** These features should be preserved and enhanced, not replaced, during the parity effort. They represent Abigail's philosophical and architectural differentiation.
 
 ---
 
 ## 5. Architecture Comparison
 
-### AO (Current)
+### Abigail (Current)
 ```
 ┌─────────────────────────────────┐
 │         Tauri Desktop App       │
@@ -348,14 +348,14 @@ AO has several features that OpenClaw lacks. These are differentiators worth pre
 │  └──────────┘  └──────┬──────┘  │
 │                       │         │
 │  ┌────────────────────┼───────┐ │
-│  │    ao-router        │       │ │
+│  │    abigail-router        │       │ │
 │  │  ┌─────┐ ┌───────┐ │       │ │
 │  │  │ Id  │ │  Ego  │ │       │ │
 │  │  │Local│ │ Cloud │ │       │ │
 │  │  └─────┘ └───────┘ │       │ │
 │  └─────────────────────┘       │ │
 │  ┌──────────┐ ┌──────────────┐ │ │
-│  │ao-skills │ │  ao-memory   │ │ │
+│  │abigail-skills │ │  abigail-memory   │ │ │
 │  │ Registry │ │   SQLite     │ │ │
 │  └──────────┘ └──────────────┘ │ │
 └─────────────────────────────────┘
@@ -400,10 +400,10 @@ AO has several features that OpenClaw lacks. These are differentiators worth pre
 └──────────────────────────────────────────┘
 ```
 
-### Proposed AO Architecture (Post-Parity)
+### Proposed Abigail Architecture (Post-Parity)
 ```
 ┌──────────────────────────────────────────────┐
-│                  AO Platform                  │
+│                  Abigail Platform                  │
 │                                               │
 │  ┌──────────────────────────────────────┐     │
 │  │        Gateway (WebSocket/gRPC)      │     │
@@ -411,19 +411,19 @@ AO has several features that OpenClaw lacks. These are differentiators worth pre
 │  └──────────────────┬───────────────────┘     │
 │                     │                          │
 │  ┌──────────────────┼───────────────────┐     │
-│  │      ao-router (Superego/Ego/Id)     │     │
+│  │      abigail-router (Superego/Ego/Id)     │     │
 │  │  Anthropic │ OpenAI │ Ollama │ etc   │     │
 │  │  + Streaming + MCP                   │     │
 │  └──────────────────┬───────────────────┘     │
 │                     │                          │
 │  ┌──────────────────┼───────────────────┐     │
-│  │         ao-capabilities              │     │
+│  │         abigail-capabilities              │     │
 │  │  Cognitive │ Sensory │ Agent │ Memory│     │
 │  │  + Voice   │ Browser │ Multi │ Vector│     │
 │  └──────────────────┬───────────────────┘     │
 │                     │                          │
 │  ┌─────────┐ ┌──────┴──────┐ ┌────────────┐  │
-│  │ao-skills│ │ ao-sandbox  │ │ ao-memory   │  │
+│  │abigail-skills│ │ abigail-sandbox  │ │ abigail-memory   │  │
 │  │ 50+     │ │ Docker/Wasm │ │ SQLite+FTS5 │  │
 │  │ skills  │ │ isolation   │ │ +Vector     │  │
 │  └─────────┘ └─────────────┘ └────────────┘  │
@@ -455,14 +455,14 @@ AO has several features that OpenClaw lacks. These are differentiators worth pre
 | 1.3 | **Wire 3-way Superego routing** — Connect existing `TrinityConfig` infrastructure | M | 1.1 |
 | 1.4 | **Add core skills: filesystem, shell, HTTP** — Essential tool capabilities | M | None |
 | 1.5 | **Implement skills watcher** — Hot-reload skills on file change (notify crate) | S | None |
-| 1.6 | **Add CLI interface** — clap-based binary sharing ao-router/ao-skills/ao-memory | M | None |
+| 1.6 | **Add CLI interface** — clap-based binary sharing abigail-router/abigail-skills/abigail-memory | M | None |
 
 ### Phase 2: Gateway & Messaging (Weeks 7-14)
 **Goal:** Multi-channel communication and gateway architecture
 
 | # | Task | Effort | Dependencies |
 |---|------|--------|-------------|
-| 2.1 | **Build WebSocket gateway** — New `ao-gateway` crate (tokio-tungstenite/axum) | L | Phase 1 |
+| 2.1 | **Build WebSocket gateway** — New `abigail-gateway` crate (tokio-tungstenite/axum) | L | Phase 1 |
 | 2.2 | **Implement lane queue system** — Serial-by-default execution with opt-in parallelism | L | 2.1 |
 | 2.3 | **Channel adapter trait** — Abstract messaging platform interface | M | 2.1 |
 | 2.4 | **Telegram adapter** — First messaging platform (Bot API, well-documented) | M | 2.3 |
@@ -475,7 +475,7 @@ AO has several features that OpenClaw lacks. These are differentiators worth pre
 
 | # | Task | Effort | Dependencies |
 |---|------|--------|-------------|
-| 3.1 | **Docker sandbox integration** — `ao-sandbox` crate using bollard | L | Phase 2 |
+| 3.1 | **Docker sandbox integration** — `abigail-sandbox` crate using bollard | L | Phase 2 |
 | 3.2 | **Enhanced memory: FTS5 full-text search** — SQLite FTS5 extension | M | None |
 | 3.3 | **Enhanced memory: vector search** — Embedding generation + similarity | L | 1.1 |
 | 3.4 | **Markdown memory export/import** — User-editable memory files | M | None |
@@ -518,10 +518,10 @@ AO has several features that OpenClaw lacks. These are differentiators worth pre
 | Phase | Duration | New Crates | Key Deliverables |
 |-------|----------|-----------|-----------------|
 | **Phase 1: Foundation** | 6 weeks | — | Anthropic provider, streaming, CLI, core skills |
-| **Phase 2: Gateway** | 8 weeks | `ao-gateway`, `ao-channels` | WebSocket gateway, Telegram, Discord, Slack |
-| **Phase 3: Execution** | 8 weeks | `ao-sandbox` | Docker sandbox, vector memory, scheduler, workspaces |
-| **Phase 4: Sensory** | 8 weeks | `ao-browser` | Browser automation, voice, more messaging adapters |
-| **Phase 5: Ecosystem** | 10 weeks | `ao-registry` | Skill SDK, marketplace, mobile apps, canvas |
+| **Phase 2: Gateway** | 8 weeks | `abigail-gateway`, `abigail-channels` | WebSocket gateway, Telegram, Discord, Slack |
+| **Phase 3: Execution** | 8 weeks | `abigail-sandbox` | Docker sandbox, vector memory, scheduler, workspaces |
+| **Phase 4: Sensory** | 8 weeks | `abigail-browser` | Browser automation, voice, more messaging adapters |
+| **Phase 5: Ecosystem** | 10 weeks | `abigail-registry` | Skill SDK, marketplace, mobile apps, canvas |
 | **Total** | **~40 weeks** | **4 new crates** | **Feature parity with OpenClaw** |
 
 ### Effort by Category
@@ -550,7 +550,7 @@ AO has several features that OpenClaw lacks. These are differentiators worth pre
 | **Skills quality vs quantity** — 100+ skills need maintenance | High | Medium | Community-driven with quality gates; curated "official" subset |
 | **Voice latency** — Real-time audio requires low-latency pipeline | Medium | Medium | Start with push-to-talk; always-on as enhancement |
 | **Rust async complexity** — Gateway + channels + sandbox = complex async | Medium | Medium | Leverage tokio ecosystem; comprehensive integration tests |
-| **Losing AO's identity** — Chasing parity may dilute AO's strengths | Medium | High | Preserve constitutional identity as core differentiator; don't remove existing features |
+| **Losing Abigail's identity** — Chasing parity may dilute Abigail's strengths | Medium | High | Preserve constitutional identity as core differentiator; don't remove existing features |
 
 ---
 
@@ -558,11 +558,11 @@ AO has several features that OpenClaw lacks. These are differentiators worth pre
 
 ### Strategic Recommendations
 
-1. **Don't try to be OpenClaw.** AO has a unique philosophy — constitutional identity, psychoanalytic routing, cryptographic sovereignty. Use feature parity as a *capability* target, not an identity target.
+1. **Don't try to be OpenClaw.** Abigail has a unique philosophy — constitutional identity, psychoanalytic routing, cryptographic sovereignty. Use feature parity as a *capability* target, not an identity target.
 
 2. **Prioritize the gateway.** The WebSocket gateway (Phase 2) unlocks everything: messaging, CLI, web interface, multi-agent, and mobile. It's the single highest-leverage architectural investment.
 
-3. **Anthropic provider first.** OpenClaw recommends Claude as the primary model. Adding an `AnthropicProvider` immediately expands AO's LLM reach and aligns with the best available models.
+3. **Anthropic provider first.** OpenClaw recommends Claude as the primary model. Adding an `AnthropicProvider` immediately expands Abigail's LLM reach and aligns with the best available models.
 
 4. **Skills are a community problem.** Building 100+ skills in-house is not feasible. Invest in the skill SDK and registry infrastructure (Phase 5.1-5.2), then grow through community contributions.
 
@@ -574,7 +574,7 @@ AO has several features that OpenClaw lacks. These are differentiators worth pre
 
 7. **Start Phase 1 immediately.** Adding Anthropic, streaming, and core skills has zero architectural risk and immediate user value.
 
-8. **Use the existing skill infrastructure.** AO's `SkillRegistry`, `SkillExecutor`, `EventBus`, and TOML manifest system is solid. Build on it rather than replacing it.
+8. **Use the existing skill infrastructure.** Abigail's `SkillRegistry`, `SkillExecutor`, `EventBus`, and TOML manifest system is solid. Build on it rather than replacing it.
 
 9. **SQLite FTS5 before vector search.** Full-text search is simpler, faster to implement, and covers 80% of memory search needs. Add vector embeddings in Phase 3.
 
@@ -584,20 +584,20 @@ AO has several features that OpenClaw lacks. These are differentiators worth pre
 
 ## Appendix A: New Crate Proposals
 
-### `ao-gateway`
-WebSocket server, session management, lane queue system, channel routing. Depends on: `ao-router`, `ao-skills`, `ao-memory`.
+### `abigail-gateway`
+WebSocket server, session management, lane queue system, channel routing. Depends on: `abigail-router`, `abigail-skills`, `abigail-memory`.
 
-### `ao-channels`
-Channel adapter trait + platform-specific implementations (Telegram, Discord, Slack, etc.). Depends on: `ao-gateway`.
+### `abigail-channels`
+Channel adapter trait + platform-specific implementations (Telegram, Discord, Slack, etc.). Depends on: `abigail-gateway`.
 
-### `ao-sandbox`
-Docker container management via bollard crate. Execution context isolation for skill/tool execution. Depends on: `ao-skills`.
+### `abigail-sandbox`
+Docker container management via bollard crate. Execution context isolation for skill/tool execution. Depends on: `abigail-skills`.
 
-### `ao-browser`
-Chrome DevTools Protocol client, page navigation, semantic snapshots, accessibility tree parsing. Depends on: `ao-capabilities`.
+### `abigail-browser`
+Chrome DevTools Protocol client, page navigation, semantic snapshots, accessibility tree parsing. Depends on: `abigail-capabilities`.
 
-### `ao-registry` (Phase 5)
-Remote skill catalog, version management, install/uninstall, dependency resolution. Depends on: `ao-skills`.
+### `abigail-registry` (Phase 5)
+Remote skill catalog, version management, install/uninstall, dependency resolution. Depends on: `abigail-skills`.
 
 ---
 

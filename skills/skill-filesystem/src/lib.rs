@@ -565,7 +565,7 @@ mod tests {
         let tmp = std::env::temp_dir().join("abigail_fs_test_read");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
-        fs::write(tmp.join("test.txt"), "Hello, AO!").unwrap();
+        fs::write(tmp.join("test.txt"), "Hello, Abigail!").unwrap();
 
         let skill = test_skill(vec![tmp.clone()]);
         let result = skill
@@ -574,7 +574,7 @@ mod tests {
 
         assert!(result.success);
         let data = result.data.unwrap();
-        assert_eq!(data["formatted"], "Hello, AO!");
+        assert_eq!(data["formatted"], "Hello, Abigail!");
         assert_eq!(data["size_bytes"], 10);
 
         let _ = fs::remove_dir_all(&tmp);
@@ -589,12 +589,12 @@ mod tests {
         let skill = test_skill(vec![tmp.clone()]);
         let out_path = tmp.join("output.txt");
         let result = skill
-            .write_file(&out_path.display().to_string(), "Written by AO")
+            .write_file(&out_path.display().to_string(), "Written by Abigail")
             .unwrap();
 
         assert!(result.success);
         let content = fs::read_to_string(&out_path).unwrap();
-        assert_eq!(content, "Written by AO");
+        assert_eq!(content, "Written by Abigail");
 
         let _ = fs::remove_dir_all(&tmp);
     }

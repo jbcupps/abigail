@@ -1,5 +1,5 @@
 [skill]
-id = "com.ao.skills.http"
+id = "com.abigail.skills.http"
 name = "HTTP"
 version = "0.1.0"
 description = "Make HTTP requests (GET, POST) with SSRF protection"

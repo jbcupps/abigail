@@ -1,5 +1,5 @@
 name: Feature Request
-description: Suggest a new feature or enhancement for AO
+description: Suggest a new feature or enhancement for Abigail
 title: "[Feature]: "
 labels: ["enhancement"]
 body:
@@ -34,7 +34,7 @@ body:
     id: area
     attributes:
       label: Area
-      description: Which part of AO does this relate to?
+      description: Which part of Abigail does this relate to?
       options:
         - Desktop App (UI/UX)
         - Rust Backend (crates)

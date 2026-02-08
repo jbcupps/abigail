@@ -1,5 +1,5 @@
 [skill]
-id = "com.ao.skills.filesystem"
+id = "com.abigail.skills.filesystem"
 name = "Filesystem"
 version = "0.1.0"
 description = "Read, write, list, and search files within sandboxed directories"

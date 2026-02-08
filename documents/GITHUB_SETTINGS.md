@@ -29,7 +29,7 @@ Manual configuration steps for the GitHub repository. These settings cannot be m
 
 ## Repository Settings (Settings > General)
 
-- [ ] **Description**: "AO - Local-first desktop AI agent with constitutional integrity, Ed25519 verification, and multi-provider LLM routing"
+- [ ] **Description**: "Abigail - Local-first desktop AI agent with constitutional integrity, Ed25519 verification, and multi-provider LLM routing"
 - [ ] **Topics**: `tauri`, `rust`, `react`, `desktop-app`, `ai-agent`, `llm`, `ed25519`, `local-first`
 - [ ] **Website**: Set to GitHub Pages URL or releases page
 - [ ] **Social preview**: Upload a social preview image (1280x640 recommended)
@@ -54,7 +54,7 @@ Manual configuration steps for the GitHub repository. These settings cannot be m
 
 Required repository secrets:
 
-- [ ] `NPM_TOKEN` -- npm access token for publishing `ao-desktop` package
+- [ ] `NPM_TOKEN` -- npm access token for publishing `abigail-desktop` package
 
 ## Collaborators and Teams (Settings > Collaborators)
 

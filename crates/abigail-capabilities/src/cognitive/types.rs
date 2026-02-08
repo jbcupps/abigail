@@ -1,5 +1,5 @@
 //! Rich cognitive types — supplementary structs for LLM provider metadata.
-//! Migrated from ao-skills capability/llm.rs.
+//! Migrated from abigail-skills capability/llm.rs.
 
 /// Information about an LLM provider.
 #[derive(Debug, Clone)]

@@ -1,4 +1,4 @@
-# How to Run AO Locally
+# How to Run Abigail Locally
 
 This runbook reflects the current interactive onboarding + chat flow in this repository.
 
@@ -45,10 +45,10 @@ Use the development container to avoid installing Rust/Node.js/system deps on yo
 
 ```bash
 # Build and start the dev container
-docker compose -f docker/docker-compose.yml up -d ao-dev
+docker compose -f docker/docker-compose.yml up -d abigail-dev
 
 # Open a shell inside the container
-docker compose -f docker/docker-compose.yml exec ao-dev bash
+docker compose -f docker/docker-compose.yml exec abigail-dev bash
 
 # Inside the container:
 cd tauri-app/src-ui && npm install && cd ../..
@@ -65,12 +65,12 @@ The container bind-mounts the repo so edits on your host appear immediately. Car
 To run a full build + test in an isolated container (mimics CI):
 
 ```bash
-docker compose -f docker/docker-compose.yml run --rm ao-build
+docker compose -f docker/docker-compose.yml run --rm abigail-build
 ```
 
 ## Runtime data locations
 
-AO uses the OS app-data location (via `directories` crate). Typical runtime artifacts include:
+Abigail uses the OS app-data location (via `directories` crate). Typical runtime artifacts include:
 
 - `config.json`
 - constitutional docs copied from `templates/`
@@ -82,7 +82,7 @@ AO uses the OS app-data location (via `directories` crate). Typical runtime arti
 
 ### First run (interactive birth)
 
-On a clean identity state, AO runs a staged boot sequence:
+On a clean identity state, Abigail runs a staged boot sequence:
 
 1. **Darkness**
    - Initializes soul docs and internal keyring state
@@ -100,23 +100,23 @@ On a clean identity state, AO runs a staged boot sequence:
 6. **Emergence**
    - Completes constitutional signing/transition
 7. **Life**
-   - AO enters normal chat mode
+   - Abigail enters normal chat mode
 
 ### Subsequent runs
 
-For existing identities, AO performs startup checks and then loads chat:
+For existing identities, Abigail performs startup checks and then loads chat:
 
 1. LLM heartbeat
 2. Constitutional signature verification
 3. Chat interface
 
-If signatures are invalid/missing, AO enters a repair path.
+If signatures are invalid/missing, Abigail enters a repair path.
 
 ## Key management model (current)
 
-- AO generates an external Ed25519 keypair during first-run onboarding.
-- AO stores **only** the public key (`external_pubkey.bin`).
-- AO never stores the private key; it is shown once and then cleared from UI state.
+- Abigail generates an external Ed25519 keypair during first-run onboarding.
+- Abigail stores **only** the public key (`external_pubkey.bin`).
+- Abigail never stores the private key; it is shown once and then cleared from UI state.
 - The private key is required to re-sign/recover identity integrity after data loss or reset.
 
 Recommended handling:
@@ -141,16 +141,16 @@ Use the workflows documented in [`documents/RELEASE.md`](RELEASE.md) for tagged 
 
 | Platform | Artifact | Runner |
 |----------|----------|--------|
-| Windows (x64) | `AO-windows-x64-setup.exe` | `windows-latest` |
-| macOS (Universal) | `AO-macos-universal.dmg` | `macos-latest` |
-| Ubuntu (x64) | `AO-linux-x64.deb` | `ubuntu-22.04` |
+| Windows (x64) | `Abigail-windows-x64-setup.exe` | `windows-latest` |
+| macOS (Universal) | `Abigail-macos-universal.dmg` | `macos-latest` |
+| Ubuntu (x64) | `Abigail-linux-x64.deb` | `ubuntu-22.04` |
 
 ### npm install (end users)
 
 Users with Node.js 18+ can install with:
 
 ```bash
-npx ao-desktop
+npx abigail-desktop
 ```
 
 This downloads and runs the correct platform installer automatically.
@@ -177,11 +177,11 @@ cargo test
 
 Focused crate tests:
 
-- `cargo test -p ao-core`
-- `cargo test -p ao-birth`
-- `cargo test -p ao-router`
-- `cargo test -p ao-capabilities`
-- `cargo test -p ao-memory`
-- `cargo test -p ao-skills`
+- `cargo test -p abigail-core`
+- `cargo test -p abigail-birth`
+- `cargo test -p abigail-router`
+- `cargo test -p abigail-capabilities`
+- `cargo test -p abigail-memory`
+- `cargo test -p abigail-skills`
 
 Note: some provider/skill tests may require credentials, feature flags, or running external services.

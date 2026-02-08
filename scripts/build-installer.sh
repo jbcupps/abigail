@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build AO installer and open the bundle folder.
+# Build Abigail installer and open the bundle folder.
 # Run from repo root. Requires: Rust, Node.js 20+, npm.
 set -e
 
@@ -18,7 +18,7 @@ cargo tauri build
 # Generate the Hive master key (idempotent - won't overwrite existing)
 echo "Generating Hive master key..."
 cd "$REPO_ROOT"
-cargo run -p ao-keygen -- --gen-master || echo "Master key already exists or generation skipped."
+cargo run -p abigail-keygen -- --gen-master || echo "Master key already exists or generation skipped."
 
 # Bundle output: workspace target or tauri-app/target
 BUNDLE_NSIS="$REPO_ROOT/target/release/bundle/nsis"

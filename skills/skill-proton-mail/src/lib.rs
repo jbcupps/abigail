@@ -1,4 +1,4 @@
-//! Proton Mail–style skill: implements Skill and EmailTransportCapability, wrapping ao-senses IMAP/SMTP.
+//! Proton Mail–style skill: implements Skill and EmailTransportCapability, wrapping abigail-senses IMAP/SMTP.
 
 mod transport;
 
@@ -22,7 +22,7 @@ use abigail_skills::transport::{ImapClient, SmtpClient};
 use crate::transport::ProtonMailTransport;
 
 /// Default skill ID for Proton Mail.
-pub const PROTON_MAIL_SKILL_ID: &str = "com.ao.skills.proton-mail";
+pub const PROTON_MAIL_SKILL_ID: &str = "com.abigail.skills.proton-mail";
 
 /// Proton Mail skill: Skill + EmailTransportCapability.
 pub struct ProtonMailSkill {
@@ -47,7 +47,7 @@ impl ProtonMailSkill {
             category: "Communication".to_string(),
             keywords: vec!["email".into(), "proton".into(), "imap".into(), "smtp".into()],
             runtime: "Native".to_string(),
-            min_ao_version: "0.1.0".to_string(),
+            min_abigail_version: "0.1.0".to_string(),
             platforms: vec!["Windows".into(), "macOS".into(), "Linux".into()],
             capabilities: vec![CapabilityDescriptor {
                 capability_type: "email_transport".to_string(),

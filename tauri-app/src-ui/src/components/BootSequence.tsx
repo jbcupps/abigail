@@ -382,7 +382,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               <h3 className="text-red-400 font-bold mb-2">SECURITY WARNINGS</h3>
               <ul className="text-red-300 text-sm space-y-2">
                 <li>
-                  - <strong>This key proves you are AO's legitimate mentor.</strong>
+                  - <strong>This key proves you are Abigail's legitimate mentor.</strong>
                 </li>
                 <li>
                   - <strong>Store it securely</strong> (password manager, encrypted
@@ -394,7 +394,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 </li>
                 <li>
                   - <strong>If you lose this key:</strong> You cannot re-verify
-                  AO's integrity after reinstall.
+                  Abigail's integrity after reinstall.
                 </li>
                 <li>
                   - <strong>If this key is compromised:</strong> Someone could
@@ -504,7 +504,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
             </h2>
             <p className="text-theme-text-dim text-sm mb-6">
               Review the details extracted from your conversation below. Edit
-              anything that needs adjustment — these will become part of AO's
+              anything that needs adjustment — these will become part of Abigail's
               soul document.
             </p>
 
@@ -602,7 +602,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               </h2>
               <p className="text-red-400 text-sm mb-4">{error}</p>
               <p className="text-gray-400 text-sm">
-                AO's constitutional documents cannot be verified. This usually
+                Abigail's constitutional documents cannot be verified. This usually
                 happens if files were corrupted or tampered with.
               </p>
             </div>
@@ -640,7 +640,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 Option 2: Hard Reset
               </h3>
               <p className="text-sm text-gray-400 mb-4">
-                If you lost your key, you must reset AO.{" "}
+                If you lost your key, you must reset Abigail.{" "}
                 <strong>
                   This destroys the current trust relationship.
                 </strong>{" "}

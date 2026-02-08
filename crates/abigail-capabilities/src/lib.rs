@@ -1,4 +1,4 @@
-//! AO Capabilities — innate, high-trust body/brain functions.
+//! Abigail Capabilities — innate, high-trust body/brain functions.
 //!
 //! Capabilities are the biological analogy: cognitive (thinking), sensory (perceiving),
 //! and memory (remembering). They have vault access and form the trusted core.

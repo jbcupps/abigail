@@ -1,5 +1,5 @@
 //! Transport layer — IMAP/SMTP email clients.
-//! Absorbed from the former ao-senses crate.
+//! Absorbed from the former abigail-senses crate.
 
 pub mod imap;
 pub mod smtp;

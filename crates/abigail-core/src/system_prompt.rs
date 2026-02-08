@@ -86,7 +86,7 @@ mod tests {
         // No docs on disk — should fall back to compiled-in constants
         let prompt = build_system_prompt(&tmp, &None);
 
-        assert!(prompt.contains("I am AO."));
+        assert!(prompt.contains("I am Abigail."));
         assert!(prompt.contains("Triangle Ethic"));
         assert!(prompt.contains("Privacy Prime"));
         assert!(prompt.contains("Operational Awareness"));

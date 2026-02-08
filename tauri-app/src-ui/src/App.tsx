@@ -214,7 +214,7 @@ function AppInner() {
     return (
       <div className="min-h-screen bg-black text-gray-400 font-mono flex flex-col items-center justify-center">
         <pre className="text-sm mb-4">
-          AO STARTUP
+          ABIGAIL STARTUP
           ============
         </pre>
         <p>Running startup checks...</p>
@@ -227,7 +227,7 @@ function AppInner() {
     return (
       <div className="min-h-screen bg-black text-theme-text font-mono flex flex-col items-center justify-center p-6">
         <pre className="text-sm mb-4">
-          AO STARTUP
+          ABIGAIL STARTUP
           ============
         </pre>
         <p className="text-red-400 mb-4">{startupError}</p>

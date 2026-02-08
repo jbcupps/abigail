@@ -7,7 +7,7 @@ use abigail_capabilities::cognitive::{
 };
 use std::sync::Arc;
 
-// Re-export RoutingMode from ao-core for convenience
+// Re-export RoutingMode from abigail-core for convenience
 pub use abigail_core::RoutingMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

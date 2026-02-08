@@ -1,8 +1,8 @@
-# Demo 1: Chat with Claude in AO
+# Demo 1: Chat with Claude in Abigail
 
 **Cycle:** C1 — Anthropic Claude Provider
 **Branch:** `claude/assess-openclaw-gaps-tNhHT`
-**What's new:** AO can now use Anthropic Claude as its Ego (cloud) provider, not just OpenAI.
+**What's new:** Abigail can now use Anthropic Claude as its Ego (cloud) provider, not just OpenAI.
 
 ---
 
@@ -26,10 +26,10 @@ cargo tauri dev
 ## Test Steps
 
 ### Test 1: Store an Anthropic API Key
-1. Open AO (it should launch after `cargo tauri dev`)
+1. Open Abigail (it should launch after `cargo tauri dev`)
 2. If birth is already complete, go to the chat interface
 3. In the chat, type: **"My Anthropic API key is sk-ant-YOUR_KEY_HERE"**
-4. AO should:
+4. Abigail should:
    - Recognize this as an API key
    - Validate it against the Anthropic API
    - Store it in the secure vault
@@ -66,10 +66,10 @@ cargo tauri dev
 
 | File | Change |
 |------|--------|
-| `crates/ao-capabilities/src/cognitive/anthropic.rs` | **NEW** — Full Anthropic Messages API provider |
-| `crates/ao-capabilities/src/cognitive/mod.rs` | Added `AnthropicProvider` export |
-| `crates/ao-router/src/router.rs` | Ego now `Arc<dyn LlmProvider>`, new `with_provider()` constructor |
-| `crates/ao-router/src/lib.rs` | Re-exports `EgoProvider` enum |
+| `crates/abigail-capabilities/src/cognitive/anthropic.rs` | **NEW** — Full Anthropic Messages API provider |
+| `crates/abigail-capabilities/src/cognitive/mod.rs` | Added `AnthropicProvider` export |
+| `crates/abigail-router/src/router.rs` | Ego now `Arc<dyn LlmProvider>`, new `with_provider()` constructor |
+| `crates/abigail-router/src/lib.rs` | Re-exports `EgoProvider` enum |
 | `tauri-app/src/lib.rs` | Router rebuilds for Anthropic keys, startup auto-detects best provider |
 
 ## Known Limitations (Will Be Addressed in Later Cycles)

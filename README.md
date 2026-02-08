@@ -1,7 +1,7 @@
 # Abigail — Autonomous Operations
 
-[![CI](https://github.com/jbcupps/ao/actions/workflows/ci.yml/badge.svg)](https://github.com/jbcupps/ao/actions/workflows/ci.yml)
-[![Security Audit](https://github.com/jbcupps/ao/actions/workflows/security-audit.yml/badge.svg)](https://github.com/jbcupps/ao/actions/workflows/security-audit.yml)
+[![CI](https://github.com/jbcupps/abigail/actions/workflows/ci.yml/badge.svg)](https://github.com/jbcupps/abigail/actions/workflows/ci.yml)
+[![Security Audit](https://github.com/jbcupps/abigail/actions/workflows/security-audit.yml/badge.svg)](https://github.com/jbcupps/abigail/actions/workflows/security-audit.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 > "A system is a promise you keep at scale."
@@ -113,7 +113,7 @@ Two "loosely coupled, tightly linked" blockchain systems:
 
 ### For End Users
 
-Download the latest installer from [GitHub Releases](https://github.com/jbcupps/ao/releases/latest) or install via npm:
+Download the latest installer from [GitHub Releases](https://github.com/jbcupps/abigail/releases/latest) or install via npm:
 
 ```bash
 npx abigail-desktop install
@@ -124,8 +124,8 @@ npx abigail-desktop install
 **Prerequisites**: Rust stable, Node.js 20+, and platform-specific Tauri dependencies.
 
 ```bash
-git clone https://github.com/jbcupps/ao.git
-cd ao
+git clone https://github.com/jbcupps/abigail.git
+cd abigail
 cargo build
 cd tauri-app/src-ui && npm install && cd ../..
 cargo tauri dev
