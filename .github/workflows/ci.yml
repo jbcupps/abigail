@@ -176,10 +176,11 @@ jobs:
 
           # Critical jobs -- must succeed
           for job in lint test frontend; do
-            result="${{ needs.lint.result }}"
             case "$job" in
+              lint)     result="${{ needs.lint.result }}" ;;
               test)     result="${{ needs.test.result }}" ;;
               frontend) result="${{ needs.frontend.result }}" ;;
+              *)        result="unknown" ;;
             esac
             if [[ "$result" != "success" ]]; then
               echo "::error::Required job '$job' did not succeed (result: $result)"
@@ -189,9 +190,10 @@ jobs:
 
           # Advisory jobs -- warn but don't block
           for job in audit codeql; do
-            result="${{ needs.audit.result }}"
             case "$job" in
+              audit)  result="${{ needs.audit.result }}" ;;
               codeql) result="${{ needs.codeql.result }}" ;;
+              *)      result="unknown" ;;
             esac
             if [[ "$result" != "success" ]]; then
               echo "::warning::Advisory job '$job' did not succeed (result: $result)"

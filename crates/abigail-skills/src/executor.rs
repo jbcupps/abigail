@@ -253,11 +253,11 @@ mod tests {
         };
         let skill = SleepSkill {
             manifest,
-            sleep_ms: 500,
+            sleep_ms: 2000, // well above timeout so CI reliably hits timeout
         };
         registry.register(skill_id.clone(), Arc::new(skill)).unwrap();
         let limits = ResourceLimits {
-            max_cpu_ms: 50,
+            max_cpu_ms: 100, // short so test completes quickly; 2s sleep >> 100ms
             max_concurrency: 2,
             ..ResourceLimits::default()
         };
@@ -300,8 +300,9 @@ mod tests {
             .execute(&skill_id, "fetch", ToolParams::new())
             .await;
         let err = result.unwrap_err();
+        let msg = err.to_string();
         assert!(
-            err.to_string().contains("PermissionDenied") || err.to_string().contains("permission"),
+            msg.to_lowercase().contains("permission") && msg.to_lowercase().contains("denied"),
             "expected permission denied, got: {}",
             err
         );
