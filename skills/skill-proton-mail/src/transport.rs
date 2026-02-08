@@ -1,10 +1,10 @@
 //! Thin wrapper over ao-senses ImapClient/SmtpClient for email operations.
 
-use ao_skills::transport::{ImapClient, SmtpClient};
-use ao_skills::capability::email::{
+use abigail_skills::transport::{ImapClient, SmtpClient};
+use abigail_skills::capability::email::{
     Email, EmailAddress, FetchOptions, OutgoingEmail, SendResult,
 };
-use ao_skills::{SkillError, SkillResult};
+use abigail_skills::{SkillError, SkillResult};
 
 /// Transport state: IMAP and optional SMTP. Sessions are not persisted; each fetch connects fresh.
 pub struct ProtonMailTransport {

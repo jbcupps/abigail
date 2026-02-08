@@ -111,7 +111,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
     <div className="p-6">
       <h2 className="text-theme-primary-dim text-lg mb-4">Ignition: Connect Your Local Mind</h2>
       <p className="text-theme-text-dim text-sm mb-6">
-        AO needs a local LLM to think independently. This is your Id — it runs on your machine,
+        Abigail needs a local LLM to think independently. This is your Id — it runs on your machine,
         keeps your data private, and never leaves your network.
       </p>
 

@@ -6,18 +6,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use ao_skills::capability::email::{
+use abigail_skills::capability::email::{
     EmailTransportCapability, EmailTransportInfo, FetchOptions, OutgoingEmail,
 };
-use ao_skills::manifest::{
+use abigail_skills::manifest::{
     CapabilityDescriptor, NetworkPermission, Permission, SkillId, SkillManifest,
 };
-use ao_skills::channel::{SkillEvent, TriggerDescriptor, TriggerFrequency, TriggerPriority};
-use ao_skills::skill::{
+use abigail_skills::channel::{SkillEvent, TriggerDescriptor, TriggerFrequency, TriggerPriority};
+use abigail_skills::skill::{
     CostEstimate, ExecutionContext, HealthStatus, Skill, SkillConfig, SkillHealth, SkillError,
     SkillResult, ToolDescriptor, ToolOutput, ToolParams,
 };
-use ao_skills::transport::{ImapClient, SmtpClient};
+use abigail_skills::transport::{ImapClient, SmtpClient};
 
 use crate::transport::ProtonMailTransport;
 
@@ -57,7 +57,7 @@ impl ProtonMailSkill {
                 "mail.proton.me".into(),
                 "smtp.proton.me".into(),
             ]))],
-            secrets: vec![ao_skills::SecretDescriptor {
+            secrets: vec![abigail_skills::SecretDescriptor {
                 name: "imap_password".to_string(),
                 description: "App password for IMAP".to_string(),
                 required: true,
@@ -337,7 +337,7 @@ impl EmailTransportCapability for ProtonMailSkill {
         Ok(())
     }
 
-    async fn fetch_emails(&self, options: FetchOptions) -> SkillResult<Vec<ao_skills::capability::email::Email>> {
+    async fn fetch_emails(&self, options: FetchOptions) -> SkillResult<Vec<abigail_skills::capability::email::Email>> {
         let transport = self
             .transport
             .as_ref()
@@ -346,7 +346,7 @@ impl EmailTransportCapability for ProtonMailSkill {
         guard.fetch_emails(options).await
     }
 
-    async fn send_email(&self, email: OutgoingEmail) -> SkillResult<ao_skills::capability::email::SendResult> {
+    async fn send_email(&self, email: OutgoingEmail) -> SkillResult<abigail_skills::capability::email::SendResult> {
         let transport = self
             .transport
             .as_ref()

@@ -44,7 +44,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --workspace --exclude ao-app -- -D warnings
+        run: cargo clippy --workspace --exclude abigail-app -- -D warnings
 
   # ── Tests (3-platform matrix) ────────────────────────────────────────────
   test:
@@ -84,7 +84,7 @@ jobs:
         uses: swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
 
       - name: Run tests
-        run: cargo test --workspace --exclude ao-app
+        run: cargo test --workspace --exclude abigail-app
 
   # ── Frontend build ───────────────────────────────────────────────────────
   frontend:

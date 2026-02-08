@@ -4,12 +4,12 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use ao_capabilities::sensory::web_search;
-use ao_core::secrets::SecretsVault;
-use ao_core::superego;
-use ao_skills::channel::TriggerDescriptor;
-use ao_skills::manifest::{CapabilityDescriptor, NetworkPermission, Permission, SkillManifest};
-use ao_skills::skill::{
+use abigail_capabilities::sensory::web_search;
+use abigail_core::secrets::SecretsVault;
+use abigail_core::superego;
+use abigail_skills::channel::TriggerDescriptor;
+use abigail_skills::manifest::{CapabilityDescriptor, NetworkPermission, Permission, SkillManifest};
+use abigail_skills::skill::{
     CostEstimate, ExecutionContext, HealthStatus, Skill, SkillConfig, SkillError, SkillHealth,
     SkillResult, ToolDescriptor, ToolOutput, ToolParams,
 };
@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn test_tools_returns_web_search() {
-        let tmp = std::env::temp_dir().join("ao_ws_skill_test");
+        let tmp = std::env::temp_dir().join("abigail_ws_skill_test");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
 
@@ -214,7 +214,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_tool_blocked_query() {
-        let tmp = std::env::temp_dir().join("ao_ws_skill_blocked");
+        let tmp = std::env::temp_dir().join("abigail_ws_skill_blocked");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
 
@@ -243,7 +243,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_tool_missing_key() {
-        let tmp = std::env::temp_dir().join("ao_ws_skill_nokey");
+        let tmp = std::env::temp_dir().join("abigail_ws_skill_nokey");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
 

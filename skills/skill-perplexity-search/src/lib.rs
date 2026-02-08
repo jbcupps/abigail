@@ -3,8 +3,8 @@
 //! Uses the Perplexity Sonar API to perform research queries that return
 //! answers grounded in real-time web data, with source citations.
 
-use ao_core::SecretsVault;
-use ao_skills::{
+use abigail_core::SecretsVault;
+use abigail_skills::{
     CapabilityDescriptor, CostEstimate, ExecutionContext, HealthStatus, NetworkPermission,
     Permission, Skill, SkillConfig, SkillError, SkillHealth, SkillManifest, SkillResult,
     ToolDescriptor, ToolOutput, ToolParams, TriggerDescriptor,
@@ -109,7 +109,7 @@ impl PerplexitySearchSkill {
         return_related: bool,
     ) -> SkillResult<ToolOutput> {
         // Superego check on the search query
-        let verdict = ao_core::check_search_query(query);
+        let verdict = abigail_core::check_search_query(query);
         if !verdict.allowed {
             return Ok(ToolOutput::error(format!(
                 "Search blocked: {}",
@@ -339,7 +339,7 @@ mod tests {
 
     fn test_skill() -> PerplexitySearchSkill {
         let vault = Arc::new(Mutex::new(SecretsVault::new(
-            std::env::temp_dir().join("ao_pplx_test"),
+            std::env::temp_dir().join("abigail_pplx_test"),
         )));
         PerplexitySearchSkill::with_secrets(test_manifest(), vault)
     }
@@ -380,7 +380,7 @@ mod tests {
         // Even without a key, the superego check should run first
         // and block PII queries before we hit the missing key error
         let vault = Arc::new(Mutex::new(SecretsVault::new(
-            std::env::temp_dir().join("ao_pplx_test_block"),
+            std::env::temp_dir().join("abigail_pplx_test_block"),
         )));
         {
             let mut v = vault.lock().unwrap();

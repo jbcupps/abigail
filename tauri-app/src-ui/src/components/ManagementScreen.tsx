@@ -104,7 +104,7 @@ export default function ManagementScreen({
   ▓█   ▓██▒░ ████▓▒░
   ▒▒   ▓▒█░░ ▒░▒░▒░ `}
         </pre>
-        <h1 className="text-xl text-cyan-300 font-bold">AO HIVE</h1>
+        <h1 className="text-xl text-cyan-300 font-bold">ABIGAIL HIVE</h1>
         <p className="text-gray-500 text-sm mt-1">Identity Management</p>
       </div>
 

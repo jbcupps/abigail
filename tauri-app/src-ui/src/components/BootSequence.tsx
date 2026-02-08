@@ -185,7 +185,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const handleReset = async () => {
     if (
       !confirm(
-        "WARNING: This will delete your identity and reset AO to a fresh state. You will lose your current trust relationship. Are you sure?"
+        "WARNING: This will delete your identity and reset Abigail to a fresh state. You will lose your current trust relationship. Are you sure?"
       )
     ) {
       return;
@@ -324,7 +324,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   return (
     <div className="min-h-screen bg-black text-theme-text font-mono flex flex-col">
       <pre className="text-sm p-4 border-b border-theme-border-dim">
-        AO BOOT SEQUENCE
+        ABIGAIL BOOT SEQUENCE
         ==================
       </pre>
 
@@ -345,7 +345,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 CRITICAL: SAVE YOUR PRIVATE KEY
               </h2>
               <p className="text-yellow-400 text-sm mb-2">
-                This is the ONLY time you will see this key. AO does NOT store
+                This is the ONLY time you will see this key. Abigail does NOT store
                 it.
               </p>
             </div>
@@ -514,7 +514,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 <input
                   type="text"
                   className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
-                  placeholder="AO"
+                  placeholder="Abigail"
                   value={genesisName}
                   onChange={(e) => setGenesisName(e.target.value)}
                   autoFocus

@@ -1,13 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/ao-core",
-    "crates/ao-memory",
-    "crates/ao-capabilities",
-    "crates/ao-router",
-    "crates/ao-birth",
-    "crates/ao-skills",
-    "crates/ao-keygen",
+    "crates/abigail-core",
+    "crates/abigail-memory",
+    "crates/abigail-capabilities",
+    "crates/abigail-router",
+    "crates/abigail-birth",
+    "crates/abigail-skills",
+    "crates/abigail-keygen",
     "skills/skill-web-search",
     "skills/skill-filesystem",
     "skills/skill-shell",
@@ -19,7 +19,7 @@ members = [
 [workspace.package]
 version = "0.0.1"
 edition = "2021"
-authors = ["AO's Mentor"]
+authors = ["Abigail's Mentor"]
 license = "MIT"
 
 [workspace.dependencies]

@@ -4,8 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-ao-skills = { path = "../../crates/ao-skills" }
-ao-core = { path = "../../crates/ao-core" }
+abigail-skills = { path = "../../crates/abigail-skills" }
+abigail-core = { path = "../../crates/abigail-core" }
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true

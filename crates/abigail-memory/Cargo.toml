@@ -1,0 +1,15 @@
+[package]
+name = "abigail-memory"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+abigail-core = { path = "../abigail-core" }
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true

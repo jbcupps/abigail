@@ -38,7 +38,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
   const [activeSecret, setActiveSecret] = useState<MissingSkillSecret | null>(null);
   const [chatStatus, setChatStatus] = useState<string | null>(null);
 
-  const assistantLabel = agentName || "AO";
+  const assistantLabel = agentName || "Abigail";
 
   const refreshRouterStatus = () => {
     invoke<RouterStatus>("get_router_status")

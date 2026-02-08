@@ -6,7 +6,7 @@
 //! - Output size limits (stdout/stderr capped at 64KB each)
 //! - Working directory validation
 
-use ao_skills::{
+use abigail_skills::{
     CapabilityDescriptor, CostEstimate, ExecutionContext, HealthStatus, Permission, Skill,
     SkillConfig, SkillError, SkillHealth, SkillManifest, SkillResult, ToolDescriptor, ToolOutput,
     ToolParams, TriggerDescriptor,

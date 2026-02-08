@@ -1,4 +1,4 @@
-use ao_core::{
+use abigail_core::{
     generate_external_keypair, generate_master_key, load_master_key, sign_agent_key,
     sign_constitutional_documents, verify_agent_signature, AgentEntry, AppConfig, GlobalConfig,
     Keyring, MasterKeyResult, SecretsVault,
@@ -235,18 +235,18 @@ impl IdentityManager {
 
         // Create agent-specific config
         let config = AppConfig {
-            schema_version: ao_core::CONFIG_SCHEMA_VERSION,
+            schema_version: abigail_core::CONFIG_SCHEMA_VERSION,
             data_dir: agent_dir.clone(),
             models_dir: agent_dir.join("models"),
             docs_dir: docs_dir.clone(),
-            db_path: agent_dir.join("ao_memory.db"),
+            db_path: agent_dir.join("abigail_memory.db"),
             openai_api_key: None,
             email: None,
             birth_complete: false,
             birth_stage: None,
             external_pubkey_path: Some(keypair_result.public_key_path),
             local_llm_base_url: None,
-            routing_mode: ao_core::RoutingMode::default(),
+            routing_mode: abigail_core::RoutingMode::default(),
             trinity: None,
             agent_name: Some(name.to_string()),
             birth_timestamp: None,
@@ -340,9 +340,9 @@ impl IdentityManager {
             "keys.bin",
             "external_pubkey.bin",
             "secrets.bin",
-            "ao_seed.db",
-            "ao_seed.db-wal",
-            "ao_seed.db-shm",
+            "abigail_seed.db",
+            "abigail_seed.db-wal",
+            "abigail_seed.db-shm",
         ];
 
         for file in &files_to_move {
@@ -369,7 +369,7 @@ impl IdentityManager {
             config.data_dir = agent_dir.clone();
             config.models_dir = agent_dir.join("models");
             config.docs_dir = agent_dir.join("docs");
-            config.db_path = agent_dir.join("ao_seed.db");
+            config.db_path = agent_dir.join("abigail_seed.db");
             if legacy_pubkey.exists() {
                 config.external_pubkey_path = Some(agent_dir.join("external_pubkey.bin"));
             }

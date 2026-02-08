@@ -1,7 +1,7 @@
 {
-  "productName": "AO",
+  "productName": "Abigail",
   "version": "0.0.1",
-  "identifier": "com.ao",
+  "identifier": "com.abigail",
   "build": {
     "beforeDevCommand": { "cwd": "src-ui", "script": "npm run dev" },
     "devUrl": "http://localhost:1420",
@@ -16,7 +16,7 @@
       {
         "fullscreen": false,
         "resizable": true,
-        "title": "AO",
+        "title": "Abigail",
         "width": 800,
         "height": 600
       }
@@ -53,9 +53,9 @@
     "macOS": {
       "minimumSystemVersion": "10.15"
     },
-    "longDescription": "AO - Desktop AI Agent",
-    "shortDescription": "AO agent",
-    "resources": ["ao-keygen.exe"],
+    "longDescription": "Abigail - Desktop AI Agent",
+    "shortDescription": "Abigail agent",
+    "resources": ["abigail-keygen.exe"],
     "externalBin": [],
     "copyright": "Copyright (c) 2025-2026 Jim Cupps",
     "category": "Developer"

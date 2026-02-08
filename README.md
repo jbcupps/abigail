@@ -1,4 +1,4 @@
-# AO — Autonomous Operations
+# Abigail — Autonomous Operations
 
 [![CI](https://github.com/jbcupps/ao/actions/workflows/ci.yml/badge.svg)](https://github.com/jbcupps/ao/actions/workflows/ci.yml)
 [![Security Audit](https://github.com/jbcupps/ao/actions/workflows/security-audit.yml/badge.svg)](https://github.com/jbcupps/ao/actions/workflows/security-audit.yml)
@@ -6,13 +6,13 @@
 
 > "A system is a promise you keep at scale."
 
-AO is a local-first desktop agent built with [Tauri 2.0](https://tauri.app/), Rust, and React. It combines constitutional integrity checks, first-run identity creation, multi-provider LLM reasoning, and an extensible skill system — all grounded in a formal ethical framework designed for AI autonomy earned through demonstrated character.
+Abigail is a local-first desktop agent built with [Tauri 2.0](https://tauri.app/), Rust, and React. It combines constitutional integrity checks, first-run identity creation, multi-provider LLM reasoning, and an extensible skill system — all grounded in a formal ethical framework designed for AI autonomy earned through demonstrated character.
 
 ---
 
-## What AO Is
+## What Abigail Is
 
-AO is the unified platform for two interconnected efforts:
+Abigail is the unified platform for two interconnected efforts:
 
 **1. Operation Abby — The Agent**
 
@@ -28,7 +28,7 @@ These are not separate projects. Abby is the first agent that plugs into the Eth
 
 ## Current Status: v0.0.1
 
-AO is a working, shipping product. Here's what exists today:
+Abigail is a working, shipping product. Here's what exists today:
 
 - **Interactive birth flow** with staged onboarding (Darkness, KeyPresentation, Ignition, Connectivity, Genesis, Emergence, Life)
 - **First-run signing key generation** with one-time private-key presentation and automatic constitutional document signing
@@ -116,7 +116,7 @@ Two "loosely coupled, tightly linked" blockchain systems:
 Download the latest installer from [GitHub Releases](https://github.com/jbcupps/ao/releases/latest) or install via npm:
 
 ```bash
-npx ao-desktop install
+npx abigail-desktop install
 ```
 
 ### For Developers
@@ -153,13 +153,13 @@ The crates form a layered architecture with clear security boundaries:
 
 | Crate | Role |
 |-------|------|
-| `ao-core` | Foundation: AppConfig, Ed25519 crypto, keyring, vault, DPAPI secrets, document verification |
-| `ao-memory` | SQLite persistence with MemoryWeight tiers (Ephemeral / Distilled / Crystallized) |
-| `ao-capabilities` | High-trust functions: cognitive (LLM providers incl. Anthropic), sensory, memory, agent control |
-| `ao-router` | Id/Ego routing — classifies messages as Routine (local) or Complex (cloud) |
-| `ao-birth` | First-run orchestrator: staged sequence (init → keypair → sign → verify → heartbeat → discover) |
-| `ao-skills` | Lower-trust plugin system: manifest-based skills with sandbox, registry, executor, event bus |
-| `ao-keygen` | Standalone egui utility for Ed25519 keypair generation |
+| `abigail-core` | Foundation: AppConfig, Ed25519 crypto, keyring, vault, DPAPI secrets, document verification |
+| `abigail-memory` | SQLite persistence with MemoryWeight tiers (Ephemeral / Distilled / Crystallized) |
+| `abigail-capabilities` | High-trust functions: cognitive (LLM providers incl. Anthropic), sensory, memory, agent control |
+| `abigail-router` | Id/Ego routing — classifies messages as Routine (local) or Complex (cloud) |
+| `abigail-birth` | First-run orchestrator: staged sequence (init → keypair → sign → verify → heartbeat → discover) |
+| `abigail-skills` | Lower-trust plugin system: manifest-based skills with sandbox, registry, executor, event bus |
+| `abigail-keygen` | Standalone egui utility for Ed25519 keypair generation |
 
 **Security boundary**: Capabilities have vault access and run trusted code. Skills are sandboxed plugins that declare permissions in `skill.toml` manifests.
 
@@ -217,7 +217,7 @@ Anthropic Claude provider (done), streaming responses, Superego wiring, core ski
 
 ### Phase 2: Gateway & Messaging
 
-WebSocket gateway (`ao-gateway`), lane queue system, channel adapters (Telegram, Discord, Slack, WebChat).
+WebSocket gateway (`abigail-gateway`), lane queue system, channel adapters (Telegram, Discord, Slack, WebChat).
 
 ### Phase 3: Execution & Memory
 
@@ -237,7 +237,7 @@ For the complete gap analysis and implementation plan, see [OpenClaw Gap Analysi
 
 ## Ethical Alignment Platform Build Plan
 
-The platform is the infrastructure layer that makes AO's ethical grounding verifiable and evolvable.
+The platform is the infrastructure layer that makes Abigail's ethical grounding verifiable and evolvable.
 
 | Phase | Scope | Deliverable |
 |-------|-------|-------------|
@@ -278,7 +278,7 @@ The platform is the infrastructure layer that makes AO's ethical grounding verif
 cargo test --all
 
 # Focused crate tests
-cargo test -p ao-core
+cargo test -p abigail-core
 
 # Lint and format
 cargo fmt --all -- --check
@@ -295,7 +295,7 @@ powershell -File scripts/build-installer.ps1 # Windows
 
 **Missing Linux libraries**: `sudo apt-get install -y libwebkit2gtk-4.1-0 libayatana-appindicator3-1`
 
-**Local LLM not detected**: Ensure your LLM server is running and accessible. AO validates localhost/loopback only (SSRF protection).
+**Local LLM not detected**: Ensure your LLM server is running and accessible. Abigail validates localhost/loopback only (SSRF protection).
 
 **Birth sequence stuck**: Check the developer console (F12) for errors. Ensure network connectivity if using a cloud provider.
 

@@ -53,7 +53,7 @@ export default function VaultModal({ secret, onSaved, onCancel }: VaultModalProp
       <div className="bg-black border border-theme-primary rounded-lg p-6 max-w-md w-full mx-4">
         <h2 className="text-theme-primary-dim text-lg mb-2">Setup Required</h2>
         <p className="text-theme-text-dim text-sm mb-4">
-          AO needs access to <span className="text-theme-text-bright">{secret.secret_name}</span> to
+          Abigail needs access to <span className="text-theme-text-bright">{secret.secret_name}</span> to
           enable the <span className="text-theme-text-bright">{secret.skill_name}</span> skill.
           This will be encrypted securely on your device.
         </p>

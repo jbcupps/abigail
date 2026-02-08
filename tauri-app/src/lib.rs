@@ -3,15 +3,15 @@
 pub mod identity_manager;
 mod templates;
 
-use ao_birth::BirthOrchestrator;
-use ao_core::{
+use abigail_birth::BirthOrchestrator;
+use abigail_core::{
     generate_external_keypair, sign_constitutional_documents, validate_local_llm_url, AppConfig,
     CoreError, ExternalVault, Keyring, ReadOnlyFileVault, SecretsVault, TrinityConfig, Verifier,
 };
-use ao_memory::{Memory, MemoryStore};
-use ao_router::IdEgoRouter;
-use ao_skills::channel::EventBus;
-use ao_skills::{MissingSkillSecret, SkillExecutor, SkillRegistry, ToolParams};
+use abigail_memory::{Memory, MemoryStore};
+use abigail_router::IdEgoRouter;
+use abigail_skills::channel::EventBus;
+use abigail_skills::{MissingSkillSecret, SkillExecutor, SkillRegistry, ToolParams};
 use base64::Engine as _;
 use chrono::Utc;
 use ed25519_dalek::SigningKey;
@@ -488,9 +488,9 @@ fn archive_identity(state: tauri::State<AppState>) -> Result<String, String> {
     // Files to archive
     let files_to_move = [
         "config.json",
-        "ao_seed.db",
-        "ao_seed.db-wal",
-        "ao_seed.db-shm",
+        "abigail_seed.db",
+        "abigail_seed.db-wal",
+        "abigail_seed.db-shm",
         "secrets.bin",
         "keys.bin",
         "external_pubkey.bin",
@@ -520,7 +520,7 @@ fn archive_identity(state: tauri::State<AppState>) -> Result<String, String> {
     // Reset secrets vault
     {
         let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
-        *vault = ao_core::SecretsVault::new(data_dir.clone());
+        *vault = abigail_core::SecretsVault::new(data_dir.clone());
     }
 
     tracing::info!("Identity archived");
@@ -538,9 +538,9 @@ fn wipe_identity(state: tauri::State<AppState>) -> Result<(), String> {
     // Files to delete
     let files_to_delete = [
         "config.json",
-        "ao_seed.db",
-        "ao_seed.db-wal",
-        "ao_seed.db-shm",
+        "abigail_seed.db",
+        "abigail_seed.db-wal",
+        "abigail_seed.db-shm",
         "secrets.bin",
         "keys.bin",
         "external_pubkey.bin",
@@ -568,7 +568,7 @@ fn wipe_identity(state: tauri::State<AppState>) -> Result<(), String> {
     // Reset secrets vault
     {
         let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
-        *vault = ao_core::SecretsVault::new(data_dir);
+        *vault = abigail_core::SecretsVault::new(data_dir);
     }
 
     tracing::warn!("Identity wiped - all data deleted");
@@ -921,7 +921,7 @@ fn configure_email(
     let mut config = state.config.write().map_err(|e| e.to_string())?;
     let password_encrypted =
         Keyring::encrypt_bytes(password.as_bytes()).map_err(|e| e.to_string())?;
-    config.email = Some(ao_core::EmailConfig {
+    config.email = Some(abigail_core::EmailConfig {
         address,
         imap_host,
         imap_port,
@@ -946,7 +946,7 @@ async fn download_model(
         config.models_dir.clone()
     };
     std::fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
-    let downloader = ao_capabilities::cognitive::ModelDownloader::new();
+    let downloader = abigail_capabilities::cognitive::ModelDownloader::new();
     let dest = downloader
         .download_to(&models_dir, |written, total_bytes| {
             let payload = serde_json::json!({ "written": written, "total": total_bytes });
@@ -1061,24 +1061,24 @@ fn extract_superego_config(config: &AppConfig) -> Option<(String, String)> {
 fn build_superego_llm_provider(
     provider: &str,
     key: &str,
-) -> Arc<dyn ao_capabilities::cognitive::LlmProvider> {
+) -> Arc<dyn abigail_capabilities::cognitive::LlmProvider> {
     match provider {
-        "anthropic" => Arc::new(ao_capabilities::cognitive::AnthropicProvider::new(
+        "anthropic" => Arc::new(abigail_capabilities::cognitive::AnthropicProvider::new(
             key.to_string(),
         )),
         "perplexity" | "xai" | "google" => {
-            if let Some(cp) = ao_capabilities::cognitive::CompatibleProvider::from_name(provider) {
-                Arc::new(ao_capabilities::cognitive::OpenAiCompatibleProvider::new(
+            if let Some(cp) = abigail_capabilities::cognitive::CompatibleProvider::from_name(provider) {
+                Arc::new(abigail_capabilities::cognitive::OpenAiCompatibleProvider::new(
                     cp,
                     key.to_string(),
                 ))
             } else {
-                Arc::new(ao_capabilities::cognitive::OpenAiProvider::new(Some(
+                Arc::new(abigail_capabilities::cognitive::OpenAiProvider::new(Some(
                     key.to_string(),
                 )))
             }
         }
-        _ => Arc::new(ao_capabilities::cognitive::OpenAiProvider::new(Some(
+        _ => Arc::new(abigail_capabilities::cognitive::OpenAiProvider::new(Some(
             key.to_string(),
         ))),
     }
@@ -1181,25 +1181,25 @@ fn complete_birth(state: tauri::State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn list_skills(state: tauri::State<AppState>) -> Result<Vec<ao_skills::SkillManifest>, String> {
+fn list_skills(state: tauri::State<AppState>) -> Result<Vec<abigail_skills::SkillManifest>, String> {
     state.registry.list().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn list_discovered_skills(
     state: tauri::State<AppState>,
-) -> Result<Vec<ao_skills::SkillManifest>, String> {
+) -> Result<Vec<abigail_skills::SkillManifest>, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let paths = vec![config.data_dir.join("skills")];
-    Ok(ao_skills::SkillRegistry::discover(&paths))
+    Ok(abigail_skills::SkillRegistry::discover(&paths))
 }
 
 #[tauri::command]
 fn list_tools(
     state: tauri::State<AppState>,
     skill_id: String,
-) -> Result<Vec<ao_skills::ToolDescriptor>, String> {
-    let id = ao_skills::SkillId(skill_id);
+) -> Result<Vec<abigail_skills::ToolDescriptor>, String> {
+    let id = abigail_skills::SkillId(skill_id);
     let (skill, _) = state.registry.get_skill(&id).map_err(|e| e.to_string())?;
     Ok(skill.tools())
 }
@@ -1210,8 +1210,8 @@ async fn execute_tool(
     skill_id: String,
     tool_name: String,
     params: HashMap<String, serde_json::Value>,
-) -> Result<ao_skills::ToolOutput, String> {
-    let id = ao_skills::SkillId(skill_id);
+) -> Result<abigail_skills::ToolOutput, String> {
+    let id = abigail_skills::SkillId(skill_id);
     let tool_params = ToolParams { values: params };
     state
         .executor
@@ -1234,7 +1234,7 @@ fn allowed_secret_keys(
         .iter()
         .map(|s| (*s).to_string())
         .collect();
-    let manifests = ao_skills::SkillRegistry::discover(skill_paths);
+    let manifests = abigail_skills::SkillRegistry::discover(skill_paths);
     for m in manifests {
         for s in &m.secrets {
             allowed.insert(s.name.clone());
@@ -1305,12 +1305,12 @@ fn list_missing_skill_secrets(
 /// Build tool definitions for the chat command, including registered skills.
 fn chat_tool_definitions(
     registry: &SkillRegistry,
-) -> Vec<ao_capabilities::cognitive::ToolDefinition> {
+) -> Vec<abigail_capabilities::cognitive::ToolDefinition> {
     let mut tools = Vec::new();
 
     // Built-in: store_provider_key
-    let schema = ao_capabilities::cognitive::update_provider_key_schema();
-    tools.push(ao_capabilities::cognitive::ToolDefinition {
+    let schema = abigail_capabilities::cognitive::update_provider_key_schema();
+    tools.push(abigail_capabilities::cognitive::ToolDefinition {
         name: schema["name"]
             .as_str()
             .unwrap_or("store_provider_key")
@@ -1324,7 +1324,7 @@ fn chat_tool_definitions(
         for manifest in &manifests {
             if let Ok((skill, _)) = registry.get_skill(&manifest.id) {
                 for td in skill.tools() {
-                    tools.push(ao_capabilities::cognitive::ToolDefinition {
+                    tools.push(abigail_capabilities::cognitive::ToolDefinition {
                         name: td.name.clone(),
                         description: td.description.clone(),
                         parameters: td.parameters.clone(),
@@ -1341,7 +1341,7 @@ fn chat_tool_definitions(
 async fn execute_tool_call(
     state: &tauri::State<'_, AppState>,
     app: &tauri::AppHandle,
-    tool_call: &ao_capabilities::cognitive::ToolCall,
+    tool_call: &abigail_capabilities::cognitive::ToolCall,
 ) -> String {
     match tool_call.name.as_str() {
         "update_provider_key" | "store_provider_key" => {
@@ -1358,7 +1358,7 @@ async fn execute_tool_call(
 
             // Validate the key first
             if let Err(e) =
-                ao_capabilities::cognitive::validation::validate_api_key(provider, key).await
+                abigail_capabilities::cognitive::validation::validate_api_key(provider, key).await
             {
                 return format!(
                     "API key validation failed: {}. Please check the key and try again.",
@@ -1474,12 +1474,12 @@ async fn execute_tool_call(
 /// - [TOOL_CALL]{"name": "...", "arguments": {...}}[/TOOL_CALL]
 /// - Inline JSON with tool structure
 /// Returns a list of parsed tool calls and the remaining text (without tool blocks).
-fn parse_text_tool_calls(content: &str) -> (Vec<ao_capabilities::cognitive::ToolCall>, String) {
+fn parse_text_tool_calls(content: &str) -> (Vec<abigail_capabilities::cognitive::ToolCall>, String) {
     let mut tool_calls = Vec::new();
     let mut cleaned_content = content.to_string();
 
     // Helper to try parsing a JSON string as a tool call
-    let try_parse_tool = |json_str: &str| -> Option<ao_capabilities::cognitive::ToolCall> {
+    let try_parse_tool = |json_str: &str| -> Option<abigail_capabilities::cognitive::ToolCall> {
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) {
             if let Some(name) = parsed.get("name").and_then(|n| n.as_str()) {
                 let arguments = if let Some(args) = parsed.get("arguments") {
@@ -1487,7 +1487,7 @@ fn parse_text_tool_calls(content: &str) -> (Vec<ao_capabilities::cognitive::Tool
                 } else {
                     "{}".to_string()
                 };
-                return Some(ao_capabilities::cognitive::ToolCall {
+                return Some(abigail_capabilities::cognitive::ToolCall {
                     id: String::new(), // Will be assigned later
                     name: name.to_string(),
                     arguments,
@@ -1562,7 +1562,7 @@ async fn chat(
         let config = state.config.read().map_err(|e| e.to_string())?;
         let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
         let prompt =
-            ao_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
+            abigail_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
         drop(config);
         let router = state.router.read().map_err(|e| e.to_string())?.clone();
         (store, router, prompt)
@@ -1570,8 +1570,8 @@ async fn chat(
 
     // Build messages with system prompt
     let mut messages = vec![
-        ao_capabilities::cognitive::Message::new("system", &system_prompt),
-        ao_capabilities::cognitive::Message::new("user", &message),
+        abigail_capabilities::cognitive::Message::new("system", &system_prompt),
+        abigail_capabilities::cognitive::Message::new("user", &message),
     ];
 
     let target_mode = target.as_deref().unwrap_or("EGO");
@@ -1600,7 +1600,7 @@ async fn chat(
             }
 
             // Build follow-up: original messages + assistant with tool_calls + tool results
-            messages.push(ao_capabilities::cognitive::Message {
+            messages.push(abigail_capabilities::cognitive::Message {
                 role: "assistant".to_string(),
                 content: response.content.clone(),
                 tool_call_id: None,
@@ -1608,7 +1608,7 @@ async fn chat(
             });
 
             for (tc, result) in &tool_results {
-                messages.push(ao_capabilities::cognitive::Message::tool_result(
+                messages.push(abigail_capabilities::cognitive::Message::tool_result(
                     &tc.id, result,
                 ));
             }
@@ -1635,7 +1635,7 @@ async fn chat(
             }
 
             // Build follow-up with tool results for final response
-            messages.push(ao_capabilities::cognitive::Message::new(
+            messages.push(abigail_capabilities::cognitive::Message::new(
                 "assistant",
                 &cleaned_content,
             ));
@@ -1646,7 +1646,7 @@ async fn chat(
                 .map(|(name, result)| format!("[Tool '{}' result]: {}", name, result))
                 .collect::<Vec<_>>()
                 .join("\n");
-            messages.push(ao_capabilities::cognitive::Message::new(
+            messages.push(abigail_capabilities::cognitive::Message::new(
                 "system",
                 &results_summary,
             ));
@@ -1674,21 +1674,21 @@ async fn chat_stream(
     message: String,
     target: Option<String>,
 ) -> Result<String, String> {
-    use ao_capabilities::cognitive::StreamEvent;
+    use abigail_capabilities::cognitive::StreamEvent;
 
     let (store, router, system_prompt) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
         let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
         let prompt =
-            ao_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
+            abigail_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
         drop(config);
         let router = state.router.read().map_err(|e| e.to_string())?.clone();
         (store, router, prompt)
     };
 
     let mut messages = vec![
-        ao_capabilities::cognitive::Message::new("system", &system_prompt),
-        ao_capabilities::cognitive::Message::new("user", &message),
+        abigail_capabilities::cognitive::Message::new("system", &system_prompt),
+        abigail_capabilities::cognitive::Message::new("user", &message),
     ];
 
     let target_mode = target.as_deref().unwrap_or("EGO");
@@ -1715,7 +1715,7 @@ async fn chat_stream(
             }
         });
 
-        let request = ao_capabilities::cognitive::CompletionRequest::simple(messages.clone());
+        let request = abigail_capabilities::cognitive::CompletionRequest::simple(messages.clone());
         let response = router
             .route_stream(messages, tx)
             .await
@@ -1737,7 +1737,7 @@ async fn chat_stream(
                 tool_results.push((tc.clone(), result));
             }
 
-            messages.push(ao_capabilities::cognitive::Message {
+            messages.push(abigail_capabilities::cognitive::Message {
                 role: "assistant".to_string(),
                 content: response.content.clone(),
                 tool_call_id: None,
@@ -1745,7 +1745,7 @@ async fn chat_stream(
             });
 
             for (tc, result) in &tool_results {
-                messages.push(ao_capabilities::cognitive::Message::tool_result(
+                messages.push(abigail_capabilities::cognitive::Message::tool_result(
                     &tc.id, result,
                 ));
             }
@@ -1933,7 +1933,7 @@ async fn birth_chat(
         let b = birth.as_ref().ok_or("Birth not started")?;
         let stage = b.current_stage();
         let prompt =
-            ao_birth::prompts::system_prompt_for_stage_with_context(stage, &stored_providers)
+            abigail_birth::prompts::system_prompt_for_stage_with_context(stage, &stored_providers)
                 .unwrap_or_else(|| "You are AO, a newborn AI agent.".to_string());
         (stage, prompt)
     };
@@ -1949,12 +1949,12 @@ async fn birth_chat(
     let mut messages = {
         let birth = state.birth.read().map_err(|e| e.to_string())?;
         let b = birth.as_ref().ok_or("Birth not started")?;
-        let mut msgs = vec![ao_capabilities::cognitive::Message::new(
+        let mut msgs = vec![abigail_capabilities::cognitive::Message::new(
             "system",
             &system_prompt,
         )];
         for (role, content) in b.get_conversation() {
-            msgs.push(ao_capabilities::cognitive::Message::new(role, content));
+            msgs.push(abigail_capabilities::cognitive::Message::new(role, content));
         }
         msgs
     };
@@ -1978,7 +1978,7 @@ async fn birth_chat(
         }
 
         // Build follow-up with tool results
-        messages.push(ao_capabilities::cognitive::Message::new(
+        messages.push(abigail_capabilities::cognitive::Message::new(
             "assistant",
             &cleaned_content,
         ));
@@ -1989,7 +1989,7 @@ async fn birth_chat(
             .map(|(name, result)| format!("[Tool '{}' executed]: {}", name, result))
             .collect::<Vec<_>>()
             .join("\n");
-        messages.push(ao_capabilities::cognitive::Message::new(
+        messages.push(abigail_capabilities::cognitive::Message::new(
             "system",
             &results_summary,
         ));
@@ -2047,7 +2047,7 @@ async fn store_provider_key(
     // Validate if requested
     if should_validate {
         if let Err(e) =
-            ao_capabilities::cognitive::validation::validate_api_key(&provider, &key).await
+            abigail_capabilities::cognitive::validation::validate_api_key(&provider, &key).await
         {
             return Ok(StoreKeyResult {
                 success: false,
@@ -2166,7 +2166,7 @@ async fn extract_genesis_identity(
         conv_text
     );
 
-    let messages = vec![ao_capabilities::cognitive::Message::new(
+    let messages = vec![abigail_capabilities::cognitive::Message::new(
         "user",
         &extraction_prompt,
     )];
@@ -2225,8 +2225,8 @@ fn crystallize_soul(
     purpose: String,
     personality: String,
 ) -> Result<String, String> {
-    let soul_content = ao_core::templates::fill_soul_template(&name, &purpose, &personality);
-    let growth_content = ao_core::templates::GROWTH_MD.to_string();
+    let soul_content = abigail_core::templates::fill_soul_template(&name, &purpose, &personality);
+    let growth_content = abigail_core::templates::GROWTH_MD.to_string();
 
     // Update agent name in config
     {
@@ -2501,7 +2501,7 @@ pub fn run() {
 
     // Start the skills directory watcher for hot-reload
     let skills_dir = data_dir.join("skills");
-    let _skills_watcher = match ao_skills::SkillsWatcher::start(vec![skills_dir]) {
+    let _skills_watcher = match abigail_skills::SkillsWatcher::start(vec![skills_dir]) {
         Ok((watcher, mut rx)) => {
             // Spawn a thread to forward skill file events to the Tauri event system
             // The watcher must be kept alive for the duration of the app
@@ -2510,8 +2510,8 @@ pub fn run() {
                 rt.block_on(async move {
                     while let Ok(event) = rx.recv().await {
                         let (event_type, path) = match event {
-                            ao_skills::SkillFileEvent::Changed(p) => ("changed", p),
-                            ao_skills::SkillFileEvent::Removed(p) => ("removed", p),
+                            abigail_skills::SkillFileEvent::Changed(p) => ("changed", p),
+                            abigail_skills::SkillFileEvent::Removed(p) => ("removed", p),
                         };
                         tracing::info!("Skill file {}: {}", event_type, path.display());
                         // Note: actual re-registration of skills would go here.

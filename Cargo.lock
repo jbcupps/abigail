@@ -110,15 +110,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
-name = "ao-app"
+name = "abigail-app"
 version = "0.0.1"
 dependencies = [
- "ao-birth",
- "ao-capabilities",
- "ao-core",
- "ao-memory",
- "ao-router",
- "ao-skills",
+ "abigail-birth",
+ "abigail-capabilities",
+ "abigail-core",
+ "abigail-memory",
+ "abigail-router",
+ "abigail-skills",
  "base64 0.21.7",
  "chrono",
  "ed25519-dalek",
@@ -141,13 +141,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "ao-birth"
+name = "abigail-birth"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "ao-capabilities",
- "ao-core",
- "ao-memory",
+ "abigail-capabilities",
+ "abigail-core",
+ "abigail-memory",
  "base64 0.21.7",
  "chrono",
  "ed25519-dalek",
@@ -160,11 +160,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "ao-capabilities"
+name = "abigail-capabilities"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "ao-core",
+ "abigail-core",
  "async-openai",
  "async-trait",
  "chrono",
@@ -179,7 +179,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ao-core"
+name = "abigail-core"
 version = "0.0.1"
 dependencies = [
  "anyhow",
@@ -197,10 +197,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "ao-keygen"
+name = "abigail-keygen"
 version = "0.0.1"
 dependencies = [
- "ao-core",
+ "abigail-core",
  "directories",
  "eframe",
  "rfd 0.15.4",
@@ -211,11 +211,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "ao-memory"
+name = "abigail-memory"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "ao-core",
+ "abigail-core",
  "chrono",
  "rusqlite",
  "serde",
@@ -226,12 +226,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "ao-router"
+name = "abigail-router"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "ao-capabilities",
- "ao-core",
+ "abigail-capabilities",
+ "abigail-core",
  "async-trait",
  "thiserror 1.0.69",
  "tokio",
@@ -239,11 +239,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "ao-skills"
+name = "abigail-skills"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "ao-core",
+ "abigail-core",
  "async-imap",
  "async-native-tls",
  "async-trait",
@@ -5732,8 +5732,8 @@ checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
 name = "skill-filesystem"
 version = "0.0.1"
 dependencies = [
- "ao-core",
- "ao-skills",
+ "abigail-core",
+ "abigail-skills",
  "async-trait",
  "chrono",
  "glob",
@@ -5747,8 +5747,8 @@ dependencies = [
 name = "skill-http"
 version = "0.0.1"
 dependencies = [
- "ao-core",
- "ao-skills",
+ "abigail-core",
+ "abigail-skills",
  "async-trait",
  "chrono",
  "reqwest 0.11.27",
@@ -5763,8 +5763,8 @@ dependencies = [
 name = "skill-perplexity-search"
 version = "0.0.1"
 dependencies = [
- "ao-core",
- "ao-skills",
+ "abigail-core",
+ "abigail-skills",
  "async-trait",
  "chrono",
  "reqwest 0.11.27",
@@ -5778,8 +5778,8 @@ dependencies = [
 name = "skill-shell"
 version = "0.0.1"
 dependencies = [
- "ao-core",
- "ao-skills",
+ "abigail-core",
+ "abigail-skills",
  "async-trait",
  "chrono",
  "serde",
@@ -5792,9 +5792,9 @@ dependencies = [
 name = "skill-web-search"
 version = "0.0.1"
 dependencies = [
- "ao-capabilities",
- "ao-core",
- "ao-skills",
+ "abigail-capabilities",
+ "abigail-core",
+ "abigail-skills",
  "async-trait",
  "chrono",
  "serde",

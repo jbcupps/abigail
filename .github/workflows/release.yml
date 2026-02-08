@@ -1,4 +1,4 @@
-# Build AO installers, publish GitHub Release, and publish npm package.
+# Build Abigail installers, publish GitHub Release, and publish npm package.
 #
 # Triggers:
 # - Tags matching 'v*' (e.g., v0.0.3)
@@ -40,28 +40,28 @@ jobs:
             args: ""
             target: x86_64-pc-windows-msvc
             installer_path: target/release/bundle/nsis/*.exe
-            asset_name: AO-windows-x64-setup.exe
+            asset_name: Abigail-windows-x64-setup.exe
             asset_glob: "*.exe"
-            keygen_bin: ao-keygen.exe
-            resource_name: ao-keygen.exe
+            keygen_bin: abigail-keygen.exe
+            resource_name: abigail-keygen.exe
 
           - platform: ubuntu-22.04
             args: ""
             target: x86_64-unknown-linux-gnu
             installer_path: target/release/bundle/deb/*.deb
-            asset_name: AO-linux-x64.deb
+            asset_name: Abigail-linux-x64.deb
             asset_glob: "*.deb"
-            keygen_bin: ao-keygen
-            resource_name: ao-keygen
+            keygen_bin: abigail-keygen
+            resource_name: abigail-keygen
 
           - platform: macos-latest
             args: "--target universal-apple-darwin"
             target: aarch64-apple-darwin,x86_64-apple-darwin
             installer_path: target/universal-apple-darwin/release/bundle/dmg/*.dmg
-            asset_name: AO-macos-universal.dmg
+            asset_name: Abigail-macos-universal.dmg
             asset_glob: "*.dmg"
-            keygen_bin: ao-keygen
-            resource_name: ao-keygen
+            keygen_bin: abigail-keygen
+            resource_name: abigail-keygen
 
     runs-on: ${{ matrix.platform }}
 
@@ -205,18 +205,18 @@ jobs:
           cp tauri-app/icons/icon.icns icons/ 2>/dev/null || true
           cp tauri-app/icons/*.png icons/ 2>/dev/null || true
 
-      - name: Build ao-keygen binary
+      - name: Build abigail-keygen binary
         shell: bash
         run: |
           if [[ "${{ matrix.platform }}" == "macos-latest" ]]; then
-            cargo build --release -p ao-keygen --target aarch64-apple-darwin
-            cargo build --release -p ao-keygen --target x86_64-apple-darwin
+            cargo build --release -p abigail-keygen --target aarch64-apple-darwin
+            cargo build --release -p abigail-keygen --target x86_64-apple-darwin
             lipo -create \
-              target/aarch64-apple-darwin/release/ao-keygen \
-              target/x86_64-apple-darwin/release/ao-keygen \
-              -output tauri-app/ao-keygen
+              target/aarch64-apple-darwin/release/abigail-keygen \
+              target/x86_64-apple-darwin/release/abigail-keygen \
+              -output tauri-app/abigail-keygen
           else
-            cargo build --release -p ao-keygen
+            cargo build --release -p abigail-keygen
             cp target/release/${{ matrix.keygen_bin }} tauri-app/${{ matrix.resource_name }}
           fi
 
@@ -231,7 +231,7 @@ jobs:
       - name: Upload installers (Artifacts)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ao-installer-${{ matrix.platform }}
+          name: abigail-installer-${{ matrix.platform }}
           path: ${{ matrix.installer_path }}
           if-no-files-found: error
 
@@ -257,7 +257,7 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
-          pattern: ao-installer-*
+          pattern: abigail-installer-*
           merge-multiple: false
 
       - name: Create git tag if needed
@@ -278,30 +278,30 @@ jobs:
           mkdir -p release-assets
 
           # Windows
-          INSTALLER=$(find artifacts/ao-installer-windows-latest -name "*.exe" -type f 2>/dev/null | head -1 || true)
+          INSTALLER=$(find artifacts/abigail-installer-windows-latest -name "*.exe" -type f 2>/dev/null | head -1 || true)
           if [ -z "$INSTALLER" ]; then
             echo "WARNING: No Windows installer found in artifacts"
           else
             echo "Found Windows installer: $INSTALLER"
-            cp "$INSTALLER" release-assets/AO-windows-x64-setup.exe
+            cp "$INSTALLER" release-assets/Abigail-windows-x64-setup.exe
           fi
 
           # Linux
-          DEB=$(find artifacts/ao-installer-ubuntu-22.04 -name "*.deb" -type f 2>/dev/null | head -1 || true)
+          DEB=$(find artifacts/abigail-installer-ubuntu-22.04 -name "*.deb" -type f 2>/dev/null | head -1 || true)
           if [ -z "$DEB" ]; then
             echo "WARNING: No Linux deb found in artifacts"
           else
             echo "Found Linux deb: $DEB"
-            cp "$DEB" release-assets/AO-linux-x64.deb
+            cp "$DEB" release-assets/Abigail-linux-x64.deb
           fi
 
           # macOS
-          DMG=$(find artifacts/ao-installer-macos-latest -name "*.dmg" -type f 2>/dev/null | head -1 || true)
+          DMG=$(find artifacts/abigail-installer-macos-latest -name "*.dmg" -type f 2>/dev/null | head -1 || true)
           if [ -z "$DMG" ]; then
             echo "WARNING: No macOS dmg found in artifacts"
           else
             echo "Found macOS dmg: $DMG"
-            cp "$DMG" release-assets/AO-macos-universal.dmg
+            cp "$DMG" release-assets/Abigail-macos-universal.dmg
           fi
 
           echo "Release assets:"
@@ -311,35 +311,35 @@ jobs:
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
         with:
           tag_name: ${{ needs.build.outputs.tag }}
-          name: AO ${{ needs.build.outputs.tag }}
+          name: Abigail ${{ needs.build.outputs.tag }}
           draft: false
           prerelease: false
           body: |
-            ## AO ${{ needs.build.outputs.tag }}
+            ## Abigail ${{ needs.build.outputs.tag }}
 
             ### Installation
 
             Download the installer for your platform:
-            - **Windows**: `AO-windows-x64-setup.exe`
-            - **macOS**: `AO-macos-universal.dmg` (Intel + Apple Silicon)
-            - **Linux**: `AO-linux-x64.deb` (Ubuntu 22.04+)
+            - **Windows**: `Abigail-windows-x64-setup.exe`
+            - **macOS**: `Abigail-macos-universal.dmg` (Intel + Apple Silicon)
+            - **Linux**: `Abigail-linux-x64.deb` (Ubuntu 22.04+)
 
             Or install via npm:
             ```bash
-            npx ao-desktop install
+            npx abigail-desktop install
             ```
 
             ### First Run Setup
 
-            On first launch, AO will:
+            On first launch, Abigail will:
             1. Generate a signing keypair for verifying document integrity
             2. **Present your private key** - you MUST save this securely
             3. Run integrity checks and complete the birth sequence
 
             ### Security Note
 
-            The private key shown during first run is NEVER stored by AO.
-            Keep it safe - you'll need it if you ever need to verify your AO instance
+            The private key shown during first run is NEVER stored by Abigail.
+            Keep it safe - you'll need it if you ever need to verify your Abigail instance
             or recover from data loss.
 
             ### Platform Notes
@@ -385,4 +385,4 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           npm publish --access public || echo "WARNING: npm publish failed (token may not be configured)"
-          echo "Published ao-desktop@${{ steps.npm_version.outputs.version }} to npm"
+          echo "Published abigail-desktop@${{ steps.npm_version.outputs.version }} to npm"

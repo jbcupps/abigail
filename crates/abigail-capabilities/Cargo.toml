@@ -1,0 +1,19 @@
+[package]
+name = "abigail-capabilities"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+abigail-core = { path = "../abigail-core" }
+async-trait.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+async-openai = "0.18"
+indicatif = "0.17"
+reqwest = { version = "0.11", features = ["stream", "json"] }
+futures-util = "0.3"

@@ -4,7 +4,7 @@ export default function PersonaToggle() {
   const { mode, setMode, agentName } = useTheme();
 
   const isEgo = mode === "ego";
-  const label = isEgo ? (agentName || "AO") : "THE FORGE";
+  const label = isEgo ? (agentName || "Abigail") : "THE FORGE";
   const tooltip = isEgo ? "Access Core Identity (Id)" : "Return to Surface (Ego)";
 
   return (

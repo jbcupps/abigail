@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AO is a desktop agent application built with Tauri 2.0 (Rust backend) and React (TypeScript frontend). It implements a first-run "birth" sequence, Ed25519 signature verification of constitutional documents, Id/Ego LLM routing, and an extensible skill system.
+Abigail is a desktop agent application built with Tauri 2.0 (Rust backend) and React (TypeScript frontend). It implements a first-run "birth" sequence, Ed25519 signature verification of constitutional documents, Id/Ego LLM routing, and an extensible skill system.
 
 ## Build & Run Commands
 
@@ -18,13 +18,13 @@ cargo tauri dev                          # Launches app with hot-reload at local
 
 # Tests
 cargo test --all                         # Run all tests
-cargo test -p ao-core                    # Signature verification, config
-cargo test -p ao-memory                  # SQLite schema, memory CRUD
-cargo test -p ao-router                  # Routing decisions
-cargo test -p ao-skills                  # Requires AO_IMAP_TEST=1 + credentials
+cargo test -p abigail-core                    # Signature verification, config
+cargo test -p abigail-memory                  # SQLite schema, memory CRUD
+cargo test -p abigail-router                  # Routing decisions
+cargo test -p abigail-skills                  # Requires AO_IMAP_TEST=1 + credentials
 
 # Single test
-cargo test -p ao-core verify             # Run tests matching "verify" in ao-core
+cargo test -p abigail-core verify             # Run tests matching "verify" in abigail-core
 
 # Linting
 cargo clippy
@@ -41,7 +41,7 @@ cd tauri-app && cargo tauri build        # Output: target/release/bundle/nsis/
 
 - `OPENAI_API_KEY` — enables Ego (cloud) routing for complex queries
 - `LOCAL_LLM_BASE_URL` — local LLM server (LM Studio: `http://localhost:1234`, Ollama: `http://localhost:11434`)
-- `RUST_LOG=ao_router=debug,ao_core=info` — per-crate log levels
+- `RUST_LOG=abigail_router=debug,abigail_core=info` — per-crate log levels
 - See `example.env` for full list
 
 ## Architecture
@@ -52,13 +52,13 @@ The crates form a layered architecture with clear security boundaries:
 
 | Crate | Role |
 |-------|------|
-| `ao-core` | Foundation: AppConfig, Ed25519 crypto, keyring, vault, DPAPI secrets, document verification |
-| `ao-memory` | SQLite persistence with MemoryWeight tiers (Ephemeral/Distilled/Crystallized) |
-| `ao-capabilities` | **High-trust** functions: cognitive (LLM providers), sensory, memory, agent control |
-| `ao-router` | Id/Ego routing — classifies messages as Routine (local LLM) or Complex (cloud), delegates accordingly |
-| `ao-birth` | First-run orchestrator: staged sequence (init → keypair → sign → verify → heartbeat → discover) |
-| `ao-skills` | **Lower-trust** plugin system: manifest-based skills with sandbox, registry, executor, event bus |
-| `ao-keygen` | Standalone egui utility for Ed25519 keypair generation |
+| `abigail-core` | Foundation: AppConfig, Ed25519 crypto, keyring, vault, DPAPI secrets, document verification |
+| `abigail-memory` | SQLite persistence with MemoryWeight tiers (Ephemeral/Distilled/Crystallized) |
+| `abigail-capabilities` | **High-trust** functions: cognitive (LLM providers), sensory, memory, agent control |
+| `abigail-router` | Id/Ego routing — classifies messages as Routine (local LLM) or Complex (cloud), delegates accordingly |
+| `abigail-birth` | First-run orchestrator: staged sequence (init → keypair → sign → verify → heartbeat → discover) |
+| `abigail-skills` | **Lower-trust** plugin system: manifest-based skills with sandbox, registry, executor, event bus |
+| `abigail-keygen` | Standalone egui utility for Ed25519 keypair generation |
 
 **Security boundary**: Capabilities have vault access and run trusted code. Skills are sandboxed plugins that declare permissions in `skill.toml` manifests.
 
@@ -79,7 +79,7 @@ loading → boot → startup_check → chat
 
 ### Id/Ego Router
 
-The router (`ao-router`) implements a dual-LLM pattern:
+The router (`abigail-router`) implements a dual-LLM pattern:
 - **Id** = local LLM (LocalHttpProvider for OpenAI-compatible servers, or CandleProvider stub)
 - **Ego** = cloud LLM (OpenAiProvider wrapping Azure/OpenAI API)
 - `RoutingMode::IdPrimary` — local first, cloud for complex queries
@@ -118,7 +118,7 @@ All workspace crates inherit via `version.workspace = true`.
 ## Data Directory
 
 - Windows: `%LOCALAPPDATA%\ao\AO\`
-- macOS: `~/Library/Application Support/ao/AO/`
-- Linux: `~/.local/share/ao/AO/`
+- macOS: `~/Library/Application Support/abigail/Abigail/`
+- Linux: `~/.local/share/abigail/Abigail/`
 
-Contains: `config.json`, `keys.bin` (DPAPI), `secrets.bin` (DPAPI), `external_pubkey.bin`, `ao_seed.db` (SQLite), `docs/` (signed constitutional docs)
+Contains: `config.json`, `keys.bin` (DPAPI), `secrets.bin` (DPAPI), `external_pubkey.bin`, `abigail_seed.db` (SQLite), `docs/` (signed constitutional docs)

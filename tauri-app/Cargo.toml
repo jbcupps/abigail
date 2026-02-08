@@ -1,5 +1,5 @@
 [package]
-name = "ao-app"
+name = "abigail-app"
 version.workspace = true
 edition.workspace = true
 
@@ -7,15 +7,15 @@ edition.workspace = true
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-ao-core = { path = "../crates/ao-core" }
+abigail-core = { path = "../crates/abigail-core" }
 anyhow = "1"
 base64 = "0.21"
 ed25519-dalek.workspace = true
-ao-memory = { path = "../crates/ao-memory" }
-ao-capabilities = { path = "../crates/ao-capabilities" }
-ao-router = { path = "../crates/ao-router" }
-ao-birth = { path = "../crates/ao-birth" }
-ao-skills = { path = "../crates/ao-skills" }
+abigail-memory = { path = "../crates/abigail-memory" }
+abigail-capabilities = { path = "../crates/abigail-capabilities" }
+abigail-router = { path = "../crates/abigail-router" }
+abigail-birth = { path = "../crates/abigail-birth" }
+abigail-skills = { path = "../crates/abigail-skills" }
 skill-web-search = { path = "../skills/skill-web-search" }
 skill-filesystem = { path = "../skills/skill-filesystem" }
 skill-shell = { path = "../skills/skill-shell" }

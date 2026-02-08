@@ -3,7 +3,7 @@
 //! All file operations are restricted to allowed root directories to prevent
 //! path traversal and unauthorized file access.
 
-use ao_skills::{
+use abigail_skills::{
     CapabilityDescriptor, CostEstimate, ExecutionContext, FileSystemPermission, HealthStatus,
     Permission, Skill, SkillConfig, SkillError, SkillHealth, SkillManifest, SkillResult,
     ToolDescriptor, ToolOutput, ToolParams, TriggerDescriptor,
@@ -530,7 +530,7 @@ mod tests {
 
     #[test]
     fn test_path_traversal_blocked() {
-        let tmp = std::env::temp_dir().join("ao_fs_test_traversal");
+        let tmp = std::env::temp_dir().join("abigail_fs_test_traversal");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 
@@ -546,7 +546,7 @@ mod tests {
 
     #[test]
     fn test_path_outside_roots_blocked() {
-        let tmp = std::env::temp_dir().join("ao_fs_test_outside");
+        let tmp = std::env::temp_dir().join("abigail_fs_test_outside");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 
@@ -562,7 +562,7 @@ mod tests {
 
     #[test]
     fn test_read_file() {
-        let tmp = std::env::temp_dir().join("ao_fs_test_read");
+        let tmp = std::env::temp_dir().join("abigail_fs_test_read");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
         fs::write(tmp.join("test.txt"), "Hello, AO!").unwrap();
@@ -582,7 +582,7 @@ mod tests {
 
     #[test]
     fn test_write_file() {
-        let tmp = std::env::temp_dir().join("ao_fs_test_write");
+        let tmp = std::env::temp_dir().join("abigail_fs_test_write");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 
@@ -601,7 +601,7 @@ mod tests {
 
     #[test]
     fn test_list_directory() {
-        let tmp = std::env::temp_dir().join("ao_fs_test_list");
+        let tmp = std::env::temp_dir().join("abigail_fs_test_list");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(tmp.join("subdir")).unwrap();
         fs::write(tmp.join("a.txt"), "a").unwrap();
@@ -619,7 +619,7 @@ mod tests {
 
     #[test]
     fn test_search_files() {
-        let tmp = std::env::temp_dir().join("ao_fs_test_search");
+        let tmp = std::env::temp_dir().join("abigail_fs_test_search");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(tmp.join("sub")).unwrap();
         fs::write(tmp.join("one.txt"), "1").unwrap();
@@ -641,7 +641,7 @@ mod tests {
 
     #[test]
     fn test_read_nonexistent_file() {
-        let tmp = std::env::temp_dir().join("ao_fs_test_nofile");
+        let tmp = std::env::temp_dir().join("abigail_fs_test_nofile");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 
@@ -655,7 +655,7 @@ mod tests {
 
     #[test]
     fn test_health_check() {
-        let tmp = std::env::temp_dir().join("ao_fs_test_health");
+        let tmp = std::env::temp_dir().join("abigail_fs_test_health");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 

@@ -172,7 +172,7 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
             )}
           </div>
         ))}
-        {loading && <p className="text-theme-text-dim animate-pulse">AO is thinking...</p>}
+        {loading && <p className="text-theme-text-dim animate-pulse">Abigail is thinking...</p>}
       </div>
 
       {error && (

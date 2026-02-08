@@ -106,12 +106,12 @@ export default function IdentityPanel() {
   };
 
   const handleReset = async () => {
-    if (!confirm("WARNING: This will delete your identity and reset AO to a fresh state. Are you sure?")) return;
+    if (!confirm("WARNING: This will delete your identity and reset Abigail to a fresh state. Are you sure?")) return;
     setRepairError("");
     setRepairMessage("Resetting...");
     try {
       await invoke("repair_identity", { params: { private_key: null, reset: true } });
-      setRepairMessage("Identity reset. Restart AO to begin fresh.");
+      setRepairMessage("Identity reset. Restart Abigail to begin fresh.");
     } catch (e) {
       setRepairError(String(e));
       setRepairMessage("");
@@ -170,7 +170,7 @@ export default function IdentityPanel() {
           <div className="p-6 space-y-4">
             <div>
               <span className="text-theme-text-dim text-sm">Agent Name: </span>
-              <span className="text-theme-text-bright">{agentName || "AO (default)"}</span>
+              <span className="text-theme-text-bright">{agentName || "Abigail (default)"}</span>
             </div>
             <div>
               <span className="text-theme-text-dim text-sm">Router: </span>
@@ -261,7 +261,7 @@ export default function IdentityPanel() {
                 <input
                   type="text"
                   className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
-                  placeholder="AO"
+                  placeholder="Abigail"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                 />
