@@ -250,6 +250,10 @@ impl IdentityManager {
             trinity: None,
             agent_name: Some(name.to_string()),
             birth_timestamp: None,
+            mcp_servers: Default::default(),
+            mcp_trust_policy: Default::default(),
+            approved_skill_ids: Default::default(),
+            trusted_skill_signers: Default::default(),
         };
         let config_path = agent_dir.join("config.json");
         config.save(&config_path).map_err(|e| e.to_string())?;
