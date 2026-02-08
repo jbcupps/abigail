@@ -94,45 +94,8 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         return;
       }
 
-      // Identity is Complete — run legacy flow
-      await runLegacyBoot();
-    } catch (e) {
-      setError(String(e));
-      setStage("Darkness");
-    }
-  };
-
-  const runLegacyBoot = async () => {
-    try {
-      setMessage("Running startup checks...");
-
-      const result = await invoke<{
-        heartbeat_ok: boolean;
-        verification_ok: boolean;
-        error: string | null;
-      }>("run_startup_checks");
-
-      if (!result.heartbeat_ok) {
-        setError(result.error || "LLM heartbeat failed. Is the local LLM server running?");
-        setStage("Darkness");
-        return;
-      }
-
-      if (!result.verification_ok && result.error) {
-        setError(result.error);
-        setStage("Repair");
-        return;
-      }
-
-      // Start birth, skip to life, complete
-      await invoke("start_birth");
-      await invoke("verify_crypto");
-      await invoke("skip_to_life_for_mvp");
-      await invoke("complete_birth");
-
-      setStage("Life");
-      setMessage("I am awake.");
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Identity is Complete — born agent should never be in BootSequence.
+      // If we somehow got here, just complete immediately.
       onComplete();
     } catch (e) {
       setError(String(e));
@@ -312,6 +275,11 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     setMessage("Signing constitutional documents...");
     try {
       await invoke("complete_emergence");
+
+      // Link the birth-generated keypair into the Hive trust chain
+      setMessage("Registering with Hive...");
+      await invoke("sign_agent_with_hive");
+
       setStage("Life");
       setMessage("I am awake.");
       await new Promise((resolve) => setTimeout(resolve, 1500));

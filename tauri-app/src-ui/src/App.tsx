@@ -7,8 +7,10 @@ import PersonaToggle from "./components/PersonaToggle";
 import IdentityPanel from "./components/IdentityPanel";
 import IdentityConflictPanel, { IdentitySummary } from "./components/IdentityConflictPanel";
 import ManagementScreen from "./components/ManagementScreen";
+import SplashScreen from "./components/SplashScreen";
 
 type AppState =
+  | "splash"
   | "loading"
   | "management"
   | "identity_conflict"
@@ -24,51 +26,61 @@ interface StartupCheckResult {
 }
 
 function AppInner() {
-  const [appState, setAppState] = useState<AppState>("loading");
+  const [appState, setAppState] = useState<AppState>("splash");
   const [startupError, setStartupError] = useState<string | null>(null);
   const [existingIdentity, setExistingIdentity] = useState<IdentitySummary | null>(null);
   const { mode, setMode, refreshAgentName } = useTheme();
 
-  useEffect(() => {
-    (async () => {
-      try {
-        // Check if an agent is already active (e.g. resumed session)
-        const activeAgent = await invoke<string | null>("get_active_agent");
-        if (activeAgent) {
-          // Agent already loaded, go to startup checks
-          const complete = await invoke<boolean>("get_birth_complete");
-          if (complete) {
-            setMode("ego");
-            setAppState("startup_check");
-            await refreshAgentName();
-            await runStartupChecks();
-          } else {
-            setAppState("boot");
-          }
+  const initializeApp = async () => {
+    try {
+      // Check if an agent is already active (e.g. resumed session)
+      const activeAgent = await invoke<string | null>("get_active_agent");
+      if (activeAgent) {
+        // Agent already loaded, go to startup checks
+        const complete = await invoke<boolean>("get_birth_complete");
+        if (complete) {
+          setMode("ego");
+          setAppState("startup_check");
+          await refreshAgentName();
+          await runStartupChecks();
+        } else {
+          setAppState("boot");
+        }
+        return;
+      }
+
+      // Check if Hive has any agents
+      const identities = await invoke<unknown[]>("get_identities");
+
+      if (identities.length === 0) {
+        // Check for legacy single-identity installation
+        const identity = await invoke<IdentitySummary | null>("check_existing_identity");
+        if (identity) {
+          // Show identity conflict/migration screen
+          setExistingIdentity(identity);
+          setAppState("identity_conflict");
           return;
         }
-
-        // Check if Hive has any agents
-        const identities = await invoke<unknown[]>("get_identities");
-
-        if (identities.length === 0) {
-          // Check for legacy single-identity installation
-          const identity = await invoke<IdentitySummary | null>("check_existing_identity");
-          if (identity) {
-            // Show identity conflict/migration screen
-            setExistingIdentity(identity);
-            setAppState("identity_conflict");
-            return;
-          }
-        }
-
-        // Default: show the management screen (identity selector)
-        setAppState("management");
-      } catch {
-        // Fallback to management screen on error
-        setAppState("management");
       }
-    })();
+
+      // Default: show the management screen (identity selector)
+      setAppState("management");
+    } catch {
+      // Fallback to management screen on error
+      setAppState("management");
+    }
+  };
+
+  const handleSplashComplete = () => {
+    setAppState("loading");
+    initializeApp();
+  };
+
+  useEffect(() => {
+    // If we somehow start in loading (e.g. no splash needed), initialize immediately
+    if (appState === "loading") {
+      initializeApp();
+    }
   }, []);
 
   const runStartupChecks = async () => {
@@ -177,6 +189,10 @@ function AppInner() {
     }
     setAppState("management");
   };
+
+  if (appState === "splash") {
+    return <SplashScreen onComplete={handleSplashComplete} />;
+  }
 
   if (appState === "loading") {
     return (
