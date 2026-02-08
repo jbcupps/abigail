@@ -1282,16 +1282,19 @@ async fn mcp_list_tools(
     state: tauri::State<'_, AppState>,
     server_id: String,
 ) -> Result<Vec<McpTool>, String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    let server = config
-        .mcp_servers
-        .iter()
-        .find(|s| s.id == server_id)
-        .ok_or_else(|| format!("MCP server not found: {}", server_id))?;
-    if server.transport != "http" {
-        return Err("Only HTTP transport is supported for MCP list_tools".to_string());
-    }
-    let client = HttpMcpClient::new(server.command_or_url.clone());
+    let url = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let server = config
+            .mcp_servers
+            .iter()
+            .find(|s| s.id == server_id)
+            .ok_or_else(|| format!("MCP server not found: {}", server_id))?;
+        if server.transport != "http" {
+            return Err("Only HTTP transport is supported for MCP list_tools".to_string());
+        }
+        server.command_or_url.clone()
+    }; // guard dropped here
+    let client = HttpMcpClient::new(url);
     client.initialize().await.map_err(|e| e.to_string())?;
     client.list_tools_impl().await.map_err(|e| e.to_string())
 }
@@ -1303,16 +1306,19 @@ async fn execute_mcp_tool(
     tool_name: String,
     params: HashMap<String, serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    let server = config
-        .mcp_servers
-        .iter()
-        .find(|s| s.id == server_id)
-        .ok_or_else(|| format!("MCP server not found: {}", server_id))?;
-    if server.transport != "http" {
-        return Err("Only HTTP transport is supported for MCP tool execution".to_string());
-    }
-    let client = HttpMcpClient::new(server.command_or_url.clone());
+    let url = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let server = config
+            .mcp_servers
+            .iter()
+            .find(|s| s.id == server_id)
+            .ok_or_else(|| format!("MCP server not found: {}", server_id))?;
+        if server.transport != "http" {
+            return Err("Only HTTP transport is supported for MCP tool execution".to_string());
+        }
+        server.command_or_url.clone()
+    }; // guard dropped here
+    let client = HttpMcpClient::new(url);
     let args = serde_json::to_value(&params).map_err(|e| e.to_string())?;
     client
         .call_tool_impl(&tool_name, args)
@@ -1327,16 +1333,19 @@ async fn get_mcp_app_content(
     server_id: String,
     resource_uri: String,
 ) -> Result<String, String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    let server = config
-        .mcp_servers
-        .iter()
-        .find(|s| s.id == server_id)
-        .ok_or_else(|| format!("MCP server not found: {}", server_id))?;
-    if server.transport != "http" {
-        return Err("Only HTTP transport is supported for MCP Apps".to_string());
-    }
-    let client = HttpMcpClient::new(server.command_or_url.clone());
+    let url = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let server = config
+            .mcp_servers
+            .iter()
+            .find(|s| s.id == server_id)
+            .ok_or_else(|| format!("MCP server not found: {}", server_id))?;
+        if server.transport != "http" {
+            return Err("Only HTTP transport is supported for MCP Apps".to_string());
+        }
+        server.command_or_url.clone()
+    }; // guard dropped here
+    let client = HttpMcpClient::new(url);
     client
         .read_resource(&resource_uri)
         .await
