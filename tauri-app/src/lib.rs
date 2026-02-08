@@ -1253,9 +1253,7 @@ async fn execute_tool(
 ) -> Result<abigail_skills::ToolOutput, String> {
     {
         let config = state.config.read().map_err(|e| e.to_string())?;
-        if !config.approved_skill_ids.is_empty()
-            && !config.approved_skill_ids.contains(&skill_id)
-        {
+        if !config.approved_skill_ids.is_empty() && !config.approved_skill_ids.contains(&skill_id) {
             return Err(format!(
                 "Skill {} is not approved for execution. Approve it in settings or install it first.",
                 skill_id
@@ -1422,7 +1420,11 @@ fn approve_skill(state: tauri::State<AppState>, skill_id: String) -> Result<(), 
         config
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;
-        skill_audit_log(&config.data_dir, "approve", &format!("skill_id={}", skill_id));
+        skill_audit_log(
+            &config.data_dir,
+            "approve",
+            &format!("skill_id={}", skill_id),
+        );
     }
     Ok(())
 }

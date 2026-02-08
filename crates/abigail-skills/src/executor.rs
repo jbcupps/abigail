@@ -73,11 +73,8 @@ impl SkillExecutor {
             .ok_or_else(|| SkillError::ToolFailed(format!("Unknown tool: {}", tool_name)))?;
 
         let limits = ResourceLimits::default();
-        let mut sandbox = SkillSandbox::new(
-            manifest.id.clone(),
-            manifest.permissions.clone(),
-            limits,
-        );
+        let mut sandbox =
+            SkillSandbox::new(manifest.id.clone(), manifest.permissions.clone(), limits);
         if let Some(action) = Self::audit_action_for_tool(tool_name, &tool.required_permissions) {
             if !sandbox.check_permission(&action) {
                 return Err(SkillError::PermissionDenied(format!(
@@ -255,7 +252,9 @@ mod tests {
             manifest,
             sleep_ms: 2000, // well above timeout so CI reliably hits timeout
         };
-        registry.register(skill_id.clone(), Arc::new(skill)).unwrap();
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .unwrap();
         let limits = ResourceLimits {
             max_cpu_ms: 100, // short so test completes quickly; 2s sleep >> 100ms
             max_concurrency: 2,
@@ -294,7 +293,9 @@ mod tests {
             config_defaults: HashMap::new(),
         };
         let skill = NetworkToolNoPermissionSkill { manifest };
-        registry.register(skill_id.clone(), Arc::new(skill)).unwrap();
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .unwrap();
         let executor = SkillExecutor::new(registry);
         let result = executor
             .execute(&skill_id, "fetch", ToolParams::new())

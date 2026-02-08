@@ -10,7 +10,7 @@ use std::sync::RwLock;
 use crate::manifest::{CapabilityDescriptor, SkillId, SkillManifest};
 use crate::manifest::{NetworkPermission, Permission};
 use crate::skill::{
-    CostEstimate, ExecutionContext, Skill, SkillConfig, SkillHealth, SkillError, SkillResult,
+    CostEstimate, ExecutionContext, Skill, SkillConfig, SkillError, SkillHealth, SkillResult,
     ToolDescriptor, ToolOutput, ToolParams,
 };
 
@@ -103,7 +103,11 @@ impl HttpMcpClient {
     }
 
     /// Send a JSON-RPC request and return the result value (or error).
-    async fn send(&self, method: &str, params: Option<serde_json::Value>) -> SkillResult<serde_json::Value> {
+    async fn send(
+        &self,
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> SkillResult<serde_json::Value> {
         let id = self.next_id();
         let req = JsonRpcRequest {
             jsonrpc: "2.0",
@@ -120,10 +124,9 @@ impl HttpMcpClient {
             .await
             .map_err(|e| crate::SkillError::ToolFailed(format!("MCP request failed: {}", e)))?;
         let status = res.status();
-        let body: JsonRpcResult = res
-            .json()
-            .await
-            .map_err(|e| crate::SkillError::ToolFailed(format!("MCP response parse failed: {}", e)))?;
+        let body: JsonRpcResult = res.json().await.map_err(|e| {
+            crate::SkillError::ToolFailed(format!("MCP response parse failed: {}", e))
+        })?;
         if let Some(err) = body.error {
             return Err(crate::SkillError::ToolFailed(format!(
                 "MCP error {}: {}",
@@ -136,9 +139,8 @@ impl HttpMcpClient {
                 status
             )));
         }
-        body.result.ok_or_else(|| {
-            crate::SkillError::ToolFailed("MCP response missing result".to_string())
-        })
+        body.result
+            .ok_or_else(|| crate::SkillError::ToolFailed("MCP response missing result".to_string()))
     }
 
     /// Initialize the session (MCP lifecycle). Optional for some servers.
@@ -185,11 +187,17 @@ impl HttpMcpClient {
             .into_iter()
             .next()
             .and_then(|c| c.text)
-            .ok_or_else(|| crate::SkillError::ToolFailed("resources/read: no text content".to_string()))
+            .ok_or_else(|| {
+                crate::SkillError::ToolFailed("resources/read: no text content".to_string())
+            })
     }
 
     /// Call a tool by name with the given arguments.
-    pub async fn call_tool_impl(&self, name: &str, arguments: serde_json::Value) -> SkillResult<serde_json::Value> {
+    pub async fn call_tool_impl(
+        &self,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> SkillResult<serde_json::Value> {
         let result = self
             .send(
                 "tools/call",
@@ -283,7 +291,11 @@ pub struct McpSkillRuntime {
 }
 
 impl McpSkillRuntime {
-    pub fn new(server_id: impl Into<String>, server_name: impl Into<String>, base_url: impl Into<String>) -> Self {
+    pub fn new(
+        server_id: impl Into<String>,
+        server_name: impl Into<String>,
+        base_url: impl Into<String>,
+    ) -> Self {
         let id = server_id.into();
         let name = server_name.into();
         let manifest = SkillManifest {
@@ -359,9 +371,8 @@ impl Skill for McpSkillRuntime {
         params: ToolParams,
         _context: &ExecutionContext,
     ) -> SkillResult<ToolOutput> {
-        let args = serde_json::to_value(&params.values).map_err(|e| {
-            SkillError::ToolFailed(format!("MCP tool params serialize: {}", e))
-        })?;
+        let args = serde_json::to_value(&params.values)
+            .map_err(|e| SkillError::ToolFailed(format!("MCP tool params serialize: {}", e)))?;
         let result = self.client.call_tool_impl(tool_name, args).await?;
         Ok(ToolOutput::success(result))
     }
