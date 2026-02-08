@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 abigail-core = { path = "../abigail-core" }
-eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
