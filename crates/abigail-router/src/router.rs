@@ -708,8 +708,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_provider_none_key() {
-        let router =
-            IdEgoRouter::new(None, Some("anthropic"), None, RoutingMode::EgoPrimary);
+        let router = IdEgoRouter::new(None, Some("anthropic"), None, RoutingMode::EgoPrimary);
         assert!(!router.has_ego());
         assert_eq!(router.ego_provider_name(), None);
     }

@@ -100,38 +100,24 @@ impl SubagentManager {
             SubagentProvider::SameAsEgo => {
                 let request = CompletionRequest {
                     messages,
-                    tools: if tools.is_empty() {
-                        None
-                    } else {
-                        Some(tools)
-                    },
+                    tools: if tools.is_empty() { None } else { Some(tools) },
                 };
-                self.router.route_with_tools(
-                    request.messages,
-                    request.tools.unwrap_or_default(),
-                ).await
+                self.router
+                    .route_with_tools(request.messages, request.tools.unwrap_or_default())
+                    .await
             }
-            SubagentProvider::SameAsId => {
-                self.router.id_only(messages).await
-            }
+            SubagentProvider::SameAsId => self.router.id_only(messages).await,
             SubagentProvider::Custom(_provider_name, _api_key) => {
                 // Custom provider delegation — future phase.
                 // For now, fall back to the main router's Ego.
-                tracing::warn!(
-                    "Custom subagent provider not yet implemented, falling back to Ego"
-                );
+                tracing::warn!("Custom subagent provider not yet implemented, falling back to Ego");
                 let request = CompletionRequest {
                     messages,
-                    tools: if tools.is_empty() {
-                        None
-                    } else {
-                        Some(tools)
-                    },
+                    tools: if tools.is_empty() { None } else { Some(tools) },
                 };
-                self.router.route_with_tools(
-                    request.messages,
-                    request.tools.unwrap_or_default(),
-                ).await
+                self.router
+                    .route_with_tools(request.messages, request.tools.unwrap_or_default())
+                    .await
             }
         }
     }
@@ -200,11 +186,7 @@ mod tests {
         let mgr = SubagentManager::new(router);
 
         let result = mgr
-            .delegate(
-                "nonexistent",
-                vec![Message::new("user", "hello")],
-                vec![],
-            )
+            .delegate("nonexistent", vec![Message::new("user", "hello")], vec![])
             .await;
 
         assert!(result.is_err());

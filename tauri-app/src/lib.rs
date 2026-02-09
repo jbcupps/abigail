@@ -2064,12 +2064,10 @@ async fn chat_stream(
             while let Some(event) = rx.recv().await {
                 match event {
                     StreamEvent::Token(token) => {
-                        let _ =
-                            app_clone.emit("chat-token", serde_json::json!({ "token": token }));
+                        let _ = app_clone.emit("chat-token", serde_json::json!({ "token": token }));
                     }
                     StreamEvent::Done(_) => {
-                        let _ =
-                            app_clone.emit("chat-token", serde_json::json!({ "done": true }));
+                        let _ = app_clone.emit("chat-token", serde_json::json!({ "done": true }));
                     }
                 }
             }
@@ -2121,8 +2119,8 @@ async fn chat_stream(
                                 .emit("chat-token", serde_json::json!({ "token": token }));
                         }
                         StreamEvent::Done(_) => {
-                            let _ = app_clone2
-                                .emit("chat-token", serde_json::json!({ "done": true }));
+                            let _ =
+                                app_clone2.emit("chat-token", serde_json::json!({ "done": true }));
                         }
                     }
                 }
@@ -2741,7 +2739,10 @@ fn complete_emergence(state: tauri::State<AppState>) -> Result<(), String> {
             docs_dir.join("triangle_ethics_operational.md"),
             abigail_core::templates::TRIANGLE_ETHICS_OPERATIONAL_MD,
         );
-        tracing::info!("Wrote operational documents (capabilities.md, triangle_ethics_operational.md) to {:?}", docs_dir);
+        tracing::info!(
+            "Wrote operational documents (capabilities.md, triangle_ethics_operational.md) to {:?}",
+            docs_dir
+        );
     }
 
     // Write trinity config and mark birth complete with timestamp
@@ -2916,16 +2917,16 @@ async fn delegate_to_subagent(
         (router, def)
     };
 
-    let messages = vec![abigail_capabilities::cognitive::Message::new("user", &message)];
+    let messages = vec![abigail_capabilities::cognitive::Message::new(
+        "user", &message,
+    )];
 
     // Delegate using the extracted router based on the subagent's provider
     let response = match &def.provider {
-        abigail_router::SubagentProvider::SameAsEgo => {
-            router
-                .route_with_tools(messages, vec![])
-                .await
-                .map_err(|e| e.to_string())?
-        }
+        abigail_router::SubagentProvider::SameAsEgo => router
+            .route_with_tools(messages, vec![])
+            .await
+            .map_err(|e| e.to_string())?,
         abigail_router::SubagentProvider::SameAsId => {
             router.id_only(messages).await.map_err(|e| e.to_string())?
         }
