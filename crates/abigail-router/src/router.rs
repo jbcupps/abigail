@@ -457,6 +457,10 @@ impl IdEgoRouter {
 
     /// Streaming version of route_with_tools().
     /// Runs Superego pre-check before routing.
+    ///
+    /// Uses a buffered Ego attempt: tokens are collected in a side channel first.
+    /// If Ego succeeds, the buffered tokens are forwarded to the caller. If Ego fails,
+    /// the partial tokens are discarded and Id gets a clean channel — preventing garbled output.
     pub async fn route_stream_with_tools(
         &self,
         messages: Vec<Message>,
@@ -476,14 +480,29 @@ impl IdEgoRouter {
         // For tool-calling, prefer Ego if available
         if let Some(ref ego) = self.ego {
             tracing::info!("route_stream_with_tools: attempting Ego stream");
-            match ego.stream(&request, tx.clone()).await {
-                Ok(response) => return Ok(response),
+
+            // Buffer Ego's stream output to prevent partial token leakage on failure.
+            // We use a side channel so that if Ego errors mid-stream, we can discard
+            // the partial tokens and give Id a clean channel instead.
+            let (ego_tx, mut ego_rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+
+            match ego.stream(&request, ego_tx).await {
+                Ok(response) => {
+                    // Ego succeeded — forward all buffered events to the real channel.
+                    while let Some(event) = ego_rx.recv().await {
+                        let _ = tx.send(event).await;
+                    }
+                    return Ok(response);
+                }
                 Err(e) => {
                     tracing::warn!(
                         "Ego stream failed for tool call, falling back to Id stream: {}",
                         e
                     );
-                    // Fall back to Id streaming (not non-streaming) so tokens reach frontend
+                    // Discard any partial tokens from the Ego attempt by dropping ego_rx.
+                    drop(ego_rx);
+
+                    // Fall back to Id streaming with a clean channel
                     match self.id.stream(&request, tx.clone()).await {
                         Ok(response) => return Ok(response),
                         Err(e2) => {

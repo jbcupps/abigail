@@ -56,7 +56,7 @@ export default function IdentityPanel() {
 
       // Check stored providers
       const providers: string[] = [];
-      for (const p of ["openai", "anthropic", "xai", "google", "tavily"]) {
+      for (const p of ["openai", "anthropic", "perplexity", "xai", "google", "tavily"]) {
         try {
           const exists = await invoke<boolean>("check_secret", { key: p });
           if (exists) providers.push(p);
@@ -218,7 +218,7 @@ export default function IdentityPanel() {
               Manage provider API keys. Keys are encrypted with DPAPI on your device.
             </p>
             <div className="space-y-2">
-              {["openai", "anthropic", "xai", "google", "tavily"].map((p) => (
+              {["openai", "anthropic", "perplexity", "xai", "google", "tavily"].map((p) => (
                 <div key={p} className="flex items-center justify-between px-4 py-3 border border-theme-border rounded">
                   <div>
                     <span className="text-theme-text-bright font-bold capitalize">{p}</span>

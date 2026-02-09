@@ -1230,29 +1230,22 @@ pub struct RouterStatus {
 #[tauri::command]
 fn get_router_status(state: tauri::State<AppState>) -> Result<RouterStatus, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
-    let vault = state.secrets.lock().map_err(|e| e.to_string())?;
+    let router = state.router.read().map_err(|e| e.to_string())?;
 
-    let id_provider = {
-        let router = state.router.read().map_err(|e| e.to_string())?;
-        if router.is_using_http_provider() {
+    // Use the actual router state instead of re-deriving from config/vault,
+    // so the status always reflects what the router will actually do.
+    let status = router.status();
+
+    Ok(RouterStatus {
+        id_provider: if status.has_local_http {
             "local_http".to_string()
         } else {
             "candle_stub".to_string()
-        }
-    };
-
-    let (ego_provider, ego_key) = determine_ego_provider(&config, &vault);
-
-    Ok(RouterStatus {
-        id_provider,
+        },
         id_url: config.local_llm_base_url.clone(),
-        ego_configured: ego_key.is_some(),
-        ego_provider: ego_provider,
-        superego_configured: state
-            .router
-            .read()
-            .map(|r| r.has_superego())
-            .unwrap_or(false),
+        ego_configured: status.has_ego,
+        ego_provider: status.ego_provider,
+        superego_configured: status.has_superego,
         routing_mode: format!("{:?}", config.routing_mode).to_lowercase(),
     })
 }
@@ -1493,7 +1486,14 @@ fn approve_skill(state: tauri::State<AppState>, skill_id: String) -> Result<(), 
 // ── Secrets Management ──────────────────────────────────────────────
 
 /// Reserved provider names for API keys (must match validation.rs known providers).
-const ALLOWED_PROVIDER_SECRET_KEYS: &[&str] = &["openai", "anthropic", "xai", "google", "tavily"];
+const ALLOWED_PROVIDER_SECRET_KEYS: &[&str] = &[
+    "openai",
+    "anthropic",
+    "perplexity",
+    "xai",
+    "google",
+    "tavily",
+];
 
 /// Returns the set of allowed secret keys: reserved provider names + skill-declared secret names.
 fn allowed_secret_keys(
@@ -1613,6 +1613,8 @@ fn detect_provider_from_prefix(key: &str) -> Option<&'static str> {
         Some("anthropic")
     } else if key.starts_with("sk-") {
         Some("openai")
+    } else if key.starts_with("pplx-") {
+        Some("perplexity")
     } else if key.starts_with("xai-") {
         Some("xai")
     } else if key.starts_with("AIza") {
@@ -2502,7 +2504,7 @@ async fn store_provider_key(
         let _ = hive.save();
     }
 
-    // For known Ego providers, update config and rebuild router (preserving Superego)
+    // For known Ego providers, update config + TrinityConfig and rebuild router
     if matches!(
         provider.as_str(),
         "openai" | "anthropic" | "perplexity" | "xai" | "google"
@@ -2512,6 +2514,11 @@ async fn store_provider_key(
             if provider == "openai" {
                 config.openai_api_key = Some(key.clone());
             }
+            // Update TrinityConfig so determine_ego_provider picks up the new provider.
+            // Without this, TrinityConfig may still point to a different provider.
+            let trinity = config.trinity.get_or_insert_with(TrinityConfig::default);
+            trinity.ego_provider = Some(provider.clone());
+            trinity.ego_api_key = Some(key.clone());
             config
                 .save(&config.config_path())
                 .map_err(|e| e.to_string())?;
@@ -2693,21 +2700,25 @@ fn complete_emergence(state: tauri::State<AppState>) -> Result<(), String> {
         let config = state.config.read().map_err(|e| e.to_string())?;
         let vault = state.secrets.lock().map_err(|e| e.to_string())?;
 
+        // Determine ego provider by checking all supported providers in the vault
+        let (ego_prov, ego_key) = if config.openai_api_key.is_some() {
+            (Some("openai".to_string()), config.openai_api_key.clone())
+        } else {
+            // Check all supported Ego providers in the vault
+            let mut found = (None, None);
+            for provider in &["anthropic", "openai", "xai", "perplexity", "google"] {
+                if let Some(key) = vault.get_secret(provider) {
+                    found = (Some(provider.to_string()), Some(key.to_string()));
+                    break;
+                }
+            }
+            found
+        };
+
         TrinityConfig {
             id_url: config.local_llm_base_url.clone(),
-            ego_provider: if config.openai_api_key.is_some() {
-                Some("openai".to_string())
-            } else {
-                vault
-                    .get_secret("anthropic")
-                    .map(|_| "anthropic".to_string())
-                    .or_else(|| vault.get_secret("xai").map(|_| "xai".to_string()))
-            },
-            ego_api_key: config
-                .openai_api_key
-                .clone()
-                .or_else(|| vault.get_secret("anthropic").map(|s| s.to_string()))
-                .or_else(|| vault.get_secret("xai").map(|s| s.to_string())),
+            ego_provider: ego_prov,
+            ego_api_key: ego_key,
             superego_provider: vault
                 .get_secret("anthropic")
                 .map(|_| "anthropic".to_string())

@@ -8,6 +8,7 @@ pub async fn validate_api_key(provider: &str, key: &str) -> anyhow::Result<()> {
     match provider {
         "openai" => validate_openai(key).await,
         "anthropic" => validate_anthropic(key).await,
+        "perplexity" => validate_perplexity(key).await,
         "xai" => validate_xai(key).await,
         "google" => validate_google(key).await,
         "tavily" => validate_tavily(key).await,
@@ -66,6 +67,25 @@ async fn validate_anthropic(key: &str) -> anyhow::Result<()> {
             }
         }
         status => Err(anyhow::anyhow!("API error: {}", status)),
+    }
+}
+
+async fn validate_perplexity(key: &str) -> anyhow::Result<()> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()?;
+
+    let response = client
+        .get("https://api.perplexity.ai/models")
+        .header("Authorization", format!("Bearer {}", key))
+        .send()
+        .await?;
+
+    match response.status().as_u16() {
+        200 => Ok(()),
+        401 => Err(anyhow::anyhow!("Invalid API key")),
+        429 => Ok(()), // Rate limited but key is valid
+        _ => Err(anyhow::anyhow!("API error: {}", response.status())),
     }
 }
 

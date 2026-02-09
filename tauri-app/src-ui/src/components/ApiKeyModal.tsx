@@ -17,6 +17,7 @@ interface ApiKeyModalProps {
 const PROVIDER_INFO: Record<string, { label: string; placeholder: string; prefix: string }> = {
   openai: { label: "OpenAI", placeholder: "sk-...", prefix: "sk-" },
   anthropic: { label: "Anthropic", placeholder: "sk-ant-...", prefix: "sk-ant-" },
+  perplexity: { label: "Perplexity", placeholder: "pplx-...", prefix: "pplx-" },
   xai: { label: "X.AI (Grok)", placeholder: "xai-...", prefix: "xai-" },
   google: { label: "Google (Gemini)", placeholder: "AIza...", prefix: "AIza" },
   tavily: { label: "Tavily (Web Search)", placeholder: "tvly-...", prefix: "tvly-" },

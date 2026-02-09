@@ -432,7 +432,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
             <div className="px-4 py-2 border-b border-theme-border bg-theme-surface">
               <div className="flex gap-2 flex-wrap items-center">
                 <span className="text-theme-text-dim text-xs mr-2">Add key:</span>
-                {["openai", "anthropic", "xai", "google", "tavily"].map((p) => (
+                {["openai", "anthropic", "perplexity", "xai", "google", "tavily"].map((p) => (
                   <button
                     key={p}
                     className={`text-xs px-2 py-1 rounded border ${
