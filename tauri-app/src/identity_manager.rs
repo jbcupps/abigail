@@ -202,6 +202,9 @@ impl IdentityManager {
             );
         }
 
+        // Ensure per-agent Documents folder exists
+        let _ = self.create_documents_folder(agent_id);
+
         Ok(config)
     }
 
@@ -254,6 +257,9 @@ impl IdentityManager {
             .map_err(|e| e.to_string())?;
             gc.save(&self.data_root).map_err(|e| e.to_string())?;
         }
+
+        // Create per-agent Documents folder
+        let _ = self.create_documents_folder(&uuid);
 
         tracing::info!("Created new agent: {} ({})", name, uuid);
         Ok((uuid, agent_dir))
@@ -329,6 +335,46 @@ impl IdentityManager {
         } else {
             Err(format!("Agent {} not registered", agent_id))
         }
+    }
+
+    /// Create (or ensure existence of) the per-agent Documents folder.
+    /// On Windows: `%USERPROFILE%\Documents\Abigail\{agent_name}\`
+    /// On other platforms: `~/Documents/Abigail/{agent_name}/`
+    pub fn create_documents_folder(&self, agent_id: &str) -> Result<PathBuf, String> {
+        let gc = self.global_config.read().map_err(|e| e.to_string())?;
+        let entry = gc
+            .find_agent(agent_id)
+            .ok_or_else(|| format!("Agent {} not registered", agent_id))?;
+        let agent_name = &entry.name;
+        drop(gc);
+
+        // Sanitize the name for use as a directory (replace problematic chars)
+        let safe_name: String = agent_name
+            .chars()
+            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' { c } else { '_' })
+            .collect();
+        let safe_name = safe_name.trim().to_string();
+        let safe_name = if safe_name.is_empty() { agent_id.to_string() } else { safe_name };
+
+        #[cfg(windows)]
+        let docs_base = {
+            let profile = std::env::var("USERPROFILE")
+                .map_err(|_| "USERPROFILE environment variable not set")?;
+            PathBuf::from(profile).join("Documents")
+        };
+        #[cfg(not(windows))]
+        let docs_base = {
+            let home = std::env::var("HOME")
+                .map_err(|_| "HOME environment variable not set")?;
+            PathBuf::from(home).join("Documents")
+        };
+
+        let agent_docs = docs_base.join("Abigail").join(&safe_name);
+        std::fs::create_dir_all(&agent_docs)
+            .map_err(|e| format!("Failed to create Documents folder: {}", e))?;
+
+        tracing::info!("Documents folder ready: {}", agent_docs.display());
+        Ok(agent_docs)
     }
 
     /// Check if any agents exist.

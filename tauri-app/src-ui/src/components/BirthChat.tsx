@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useState, useRef, useEffect, useImperativeHandle, forwardRef } from "react";
+import ThinkingIndicator from "./ThinkingIndicator";
 
 interface BirthChatResponse {
   message: string;
@@ -29,6 +30,18 @@ interface BirthChatProps {
 
 export interface BirthChatHandle {
   injectKeyConfirmation: (provider: string, validatedText?: string) => void;
+}
+
+/** Defense-in-depth: redact common API key patterns before rendering. */
+function redactApiKeys(text: string): string {
+  return text.replace(
+    /(?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{10,})|(?:xai-[A-Za-z0-9_-]{10,})|(?:pplx-[A-Za-z0-9_-]{10,})|(?:AIza[A-Za-z0-9_-]{10,})/g,
+    (match) => {
+      const dashIdx = match.indexOf("-");
+      const visible = dashIdx >= 0 ? match.slice(0, dashIdx + 4) : match.slice(0, 4);
+      return `${visible}***`;
+    }
+  );
 }
 
 const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction, onStageAdvance, initialMessage }, ref) => {
@@ -171,10 +184,10 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
               <div>
                 <span className="text-theme-text">Abigail: </span>
                 <span className="text-theme-text-bright">
-                  {msg.content.split("\n").map((line, j) => (
+                  {redactApiKeys(msg.content).split("\n").map((line, j, arr) => (
                     <span key={j}>
                       {line}
-                      {j < msg.content.split("\n").length - 1 && <br />}
+                      {j < arr.length - 1 && <br />}
                     </span>
                   ))}
                 </span>
@@ -187,7 +200,7 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
             )}
           </div>
         ))}
-        {loading && <p className="text-theme-text-dim animate-pulse">Abigail is thinking...</p>}
+        {loading && <ThinkingIndicator label="Abigail" />}
       </div>
 
       {error && (

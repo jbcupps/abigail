@@ -107,6 +107,37 @@ fn validate_backup_dest_path(dest_path: &str, data_dir: &Path) -> Result<PathBuf
     Err("Backup path must be under the app data directory or your Documents/Home folder".into())
 }
 
+/// Redact API keys from text to prevent leaking them in transcripts.
+/// Matches common key prefixes: sk-..., sk-ant-..., sk-proj-..., xai-..., pplx-..., AIza...
+fn redact_api_keys(text: &str) -> String {
+    // Lazy-init regex for common API key patterns
+    use std::sync::OnceLock;
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(
+            r"(?x)
+            (?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{10,}) |   # OpenAI / Anthropic
+            (?:xai-[A-Za-z0-9_-]{10,})               |   # xAI
+            (?:pplx-[A-Za-z0-9_-]{10,})              |   # Perplexity
+            (?:AIza[A-Za-z0-9_-]{10,})                    # Google
+            "
+        )
+        .expect("redact regex")
+    });
+    re.replace_all(text, |caps: &regex::Captures| {
+        let m = caps.get(0).unwrap().as_str();
+        // Keep the prefix visible (up to first dash + 3 chars), mask the rest
+        let visible = if let Some(pos) = m.find('-') {
+            let end = (pos + 4).min(m.len());
+            &m[..end]
+        } else {
+            &m[..4.min(m.len())]
+        };
+        format!("{}***", visible)
+    })
+    .into_owned()
+}
+
 struct AppState {
     config: RwLock<AppConfig>,
     birth: RwLock<Option<BirthOrchestrator>>,
@@ -116,6 +147,8 @@ struct AppState {
     #[allow(dead_code)] // used for skill-event subscription; keep for future UI wiring
     event_bus: Arc<EventBus>,
     secrets: Arc<Mutex<SecretsVault>>,
+    /// Hive-level secrets vault (shared API keys across all agents)
+    hive_secrets: Arc<Mutex<SecretsVault>>,
     /// Identity manager for the Hive multi-agent system
     identity_manager: Arc<IdentityManager>,
     /// Currently active agent UUID (None if no agent loaded)
@@ -1127,8 +1160,17 @@ fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let vault = state.secrets.lock().map_err(|e| e.to_string())?;
 
-    // Use centralized ego provider determination (TrinityConfig > config key > vault)
-    let (ego_name, ego_key) = determine_ego_provider(&config, &vault);
+    // Use centralized ego provider determination (TrinityConfig > config key > per-agent vault > hive vault)
+    let (ego_name, ego_key) = {
+        let (name, key) = determine_ego_provider(&config, &vault);
+        if name.is_some() {
+            (name, key)
+        } else {
+            // Fall back to hive-level vault
+            let hive = state.hive_secrets.lock().map_err(|e| e.to_string())?;
+            determine_ego_provider(&config, &hive)
+        }
+    };
 
     tracing::info!(
         "rebuild_router_with_superego: ego_provider={:?}, local_url={:?}, mode={:?}",
@@ -1611,7 +1653,7 @@ async fn execute_tool_call(
                 );
             }
 
-            // Store in secrets vault
+            // Store in per-agent secrets vault
             {
                 let mut vault = match state.secrets.lock() {
                     Ok(v) => v,
@@ -1623,7 +1665,13 @@ async fn execute_tool_call(
                 }
             }
 
-            // For known Ego providers, rebuild router so Ego is active immediately
+            // Also store in hive-level vault so all agents can access it
+            if let Ok(mut hive) = state.hive_secrets.lock() {
+                hive.set_secret(provider, key);
+                let _ = hive.save();
+            }
+
+            // For known Ego providers, persist in TrinityConfig and rebuild router
             if matches!(
                 provider,
                 "openai" | "anthropic" | "perplexity" | "xai" | "google"
@@ -1632,19 +1680,15 @@ async fn execute_tool_call(
                     if provider == "openai" {
                         config.openai_api_key = Some(key.to_string());
                     }
+                    // Persist ego provider in TrinityConfig for restart resilience
+                    let trinity = config.trinity.get_or_insert_with(Default::default);
+                    trinity.ego_provider = Some(provider.to_string());
+                    trinity.ego_api_key = Some(key.to_string());
                     let _ = config.save(&config.config_path());
-
-                    let new_router = IdEgoRouter::new(
-                        config.local_llm_base_url.clone(),
-                        Some(provider),
-                        Some(key.to_string()),
-                        config.routing_mode,
-                    );
                     drop(config);
-                    if let Ok(mut router) = state.router.write() {
-                        *router = new_router;
-                    }
                 }
+                // Use centralized rebuild (preserves Superego)
+                let _ = rebuild_router_with_superego(state);
             }
 
             format!(
@@ -1959,9 +2003,12 @@ async fn chat_stream(
     let target_mode = target.as_deref().unwrap_or("EGO");
     let tools = chat_tool_definitions(&state.registry);
 
+    tracing::debug!("chat_stream: target_mode={}, has_tools={}", target_mode, !tools.is_empty());
+
     // For simple (no-tool) streaming, use the streaming path.
     // For tool-calling, we do a non-streaming initial request then stream the follow-up.
     let final_content = if target_mode == "ID" {
+        tracing::debug!("chat_stream: using Id-only streaming path");
         // Id-only: stream directly (no tool calling)
         let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
         let app_clone = app.clone();
@@ -1988,11 +2035,15 @@ async fn chat_stream(
         let _ = forward_handle.await;
         response.content
     } else {
+        tracing::debug!("chat_stream: using Ego mode with {} tools", tools.len());
         // Ego mode: first request with tools (non-streaming to capture tool calls)
         let response = router
             .route_with_tools(messages.clone(), tools.clone())
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                tracing::debug!("chat_stream: Ego route_with_tools error: {}", e);
+                e.to_string()
+            })?;
 
         if let Some(ref tool_calls) = response.tool_calls {
             // Execute tools (non-streaming)
@@ -2321,13 +2372,13 @@ async fn birth_chat(
             router.id_only(messages).await.map_err(|e| e.to_string())?
         };
 
-        // Record the full exchange in birth conversation
+        // Record the full exchange in birth conversation (redact API keys)
         {
             let mut birth = state.birth.write().map_err(|e| e.to_string())?;
             let b = birth.as_mut().ok_or("Birth not started")?;
-            b.add_message("assistant", &cleaned_content);
-            b.add_message("system", &results_summary);
-            b.add_message("assistant", &follow_up.content);
+            b.add_message("assistant", &redact_api_keys(&cleaned_content));
+            b.add_message("system", &redact_api_keys(&results_summary));
+            b.add_message("assistant", &redact_api_keys(&follow_up.content));
         }
 
         follow_up.content
@@ -2336,13 +2387,13 @@ async fn birth_chat(
         {
             let mut birth = state.birth.write().map_err(|e| e.to_string())?;
             let b = birth.as_mut().ok_or("Birth not started")?;
-            b.add_message("assistant", &response.content);
+            b.add_message("assistant", &redact_api_keys(&response.content));
         }
         response.content
     };
 
     Ok(BirthChatResponse {
-        message: final_content,
+        message: redact_api_keys(&final_content),
         stage: stage.name().to_string(),
         action,
     })
@@ -2401,11 +2452,18 @@ async fn store_provider_key(
         }
     }
 
-    // Store in secrets vault
+    // Store in per-agent secrets vault
     {
         let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
         vault.set_secret(&provider, &key);
         vault.save().map_err(|e| e.to_string())?;
+    }
+
+    // Also store in hive-level vault so all agents can access it
+    {
+        let mut hive = state.hive_secrets.lock().map_err(|e| e.to_string())?;
+        hive.set_secret(&provider, &key);
+        let _ = hive.save();
     }
 
     // For known Ego providers, update config and rebuild router (preserving Superego)
@@ -2659,21 +2717,71 @@ fn complete_emergence(state: tauri::State<AppState>) -> Result<(), String> {
         }
     }
 
-    // Rebuild router so Ego is active immediately after birth
+    // Rebuild router so Ego + Superego are active immediately after birth
+    rebuild_router_with_superego(&state)?;
+
+    // Store encrypted birth transcript in per-agent Documents folder
     {
-        let config = state.config.read().map_err(|e| e.to_string())?;
-        let vault = state.secrets.lock().map_err(|e| e.to_string())?;
-        let (ego_provider, ego_api_key) = determine_ego_provider(&config, &vault);
-        let new_router = IdEgoRouter::new(
-            config.local_llm_base_url.clone(),
-            ego_provider.as_deref(),
-            ego_api_key,
-            config.routing_mode,
-        );
-        drop(vault);
-        drop(config);
-        let mut router = state.router.write().map_err(|e| e.to_string())?;
-        *router = new_router;
+        let active_agent = state
+            .active_agent_id
+            .read()
+            .map_err(|e| e.to_string())?
+            .clone();
+        if let Some(agent_id) = active_agent {
+            let birth = state.birth.read().map_err(|e| e.to_string())?;
+            if let Some(b) = birth.as_ref() {
+                let conversation = b.get_conversation();
+                if !conversation.is_empty() {
+                    // Serialize and redact
+                    let redacted: Vec<(String, String)> = conversation
+                        .iter()
+                        .map(|(role, content)| (role.clone(), redact_api_keys(content)))
+                        .collect();
+                    if let Ok(json) = serde_json::to_string_pretty(&redacted) {
+                        if let Ok(docs_folder) =
+                            state.identity_manager.create_documents_folder(&agent_id)
+                        {
+                            let transcript_path = docs_folder.join("birth_transcript.enc");
+                            if let Err(e) = abigail_core::encrypted_storage::write_encrypted(
+                                &transcript_path,
+                                json.as_bytes(),
+                            ) {
+                                tracing::warn!("Failed to write birth transcript: {}", e);
+                            } else {
+                                tracing::info!(
+                                    "Birth transcript saved: {}",
+                                    transcript_path.display()
+                                );
+                            }
+
+                            // Also store encrypted copies of constitutional documents
+                            let config = state.config.read().map_err(|e| e.to_string())?;
+                            for doc_name in &["soul.md", "ethics.md", "instincts.md"] {
+                                let src = config.docs_dir.join(doc_name);
+                                if src.exists() {
+                                    if let Ok(content) = std::fs::read(&src) {
+                                        let enc_name =
+                                            format!("{}.enc", doc_name.trim_end_matches(".md"));
+                                        let enc_path = docs_folder.join(enc_name);
+                                        if let Err(e) =
+                                            abigail_core::encrypted_storage::write_encrypted(
+                                                &enc_path, &content,
+                                            )
+                                        {
+                                            tracing::warn!(
+                                                "Failed to encrypt {}: {}",
+                                                doc_name,
+                                                e
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Ok(())
@@ -2692,6 +2800,25 @@ fn sign_agent_with_hive(state: tauri::State<AppState>) -> Result<(), String> {
         .ok_or("No active agent")?;
 
     state.identity_manager.sign_agent_after_birth(&agent_id)
+}
+
+/// Read and decrypt the birth transcript for a given agent.
+#[tauri::command]
+fn get_birth_transcript(
+    state: tauri::State<AppState>,
+    agent_id: String,
+) -> Result<String, String> {
+    let docs_folder = state.identity_manager.create_documents_folder(&agent_id)?;
+    let transcript_path = docs_folder.join("birth_transcript.enc");
+
+    if !transcript_path.exists() {
+        return Err("No birth transcript found for this agent".into());
+    }
+
+    let data = abigail_core::encrypted_storage::read_encrypted(&transcript_path)
+        .map_err(|e| format!("Failed to decrypt transcript: {}", e))?;
+
+    String::from_utf8(data).map_err(|e| format!("Invalid transcript encoding: {}", e))
 }
 
 /// Determine the best Ego provider and API key from config + secrets vault.
@@ -2752,16 +2879,30 @@ pub fn run() {
         }),
     );
 
-    // Initialize the secrets vault (DPAPI-encrypted on Windows)
+    // Initialize the per-agent secrets vault (DPAPI-encrypted on Windows)
     let secrets = Arc::new(Mutex::new(
         SecretsVault::load(config.data_dir.clone())
             .unwrap_or_else(|_| SecretsVault::new(config.data_dir.clone())),
     ));
 
-    // Determine Ego provider from config + vault before building router
+    // Initialize the hive-level secrets vault (shared API keys)
+    let hive_secrets_dir = identity_manager.data_root().to_path_buf();
+    let hive_secrets = Arc::new(Mutex::new(
+        SecretsVault::load(hive_secrets_dir.clone())
+            .unwrap_or_else(|_| SecretsVault::new(hive_secrets_dir)),
+    ));
+
+    // Determine Ego provider from config + vault + hive vault before building router
     let (ego_provider, ego_api_key) = {
         let vault = secrets.lock().unwrap();
-        determine_ego_provider(&config, &vault)
+        let (provider, key) = determine_ego_provider(&config, &vault);
+        if provider.is_some() {
+            (provider, key)
+        } else {
+            // Fall back to hive-level vault
+            let hive = hive_secrets.lock().unwrap();
+            determine_ego_provider(&config, &hive)
+        }
     };
 
     tracing::info!(
@@ -2850,6 +2991,7 @@ pub fn run() {
         executor,
         event_bus: event_bus.clone(),
         secrets,
+        hive_secrets,
         identity_manager,
         active_agent_id: RwLock::new(None),
     };
@@ -2979,6 +3121,7 @@ pub fn run() {
             crystallize_soul,
             complete_emergence,
             sign_agent_with_hive,
+            get_birth_transcript,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

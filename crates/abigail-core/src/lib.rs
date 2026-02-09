@@ -1,6 +1,7 @@
 pub mod config;
 pub mod document;
 pub mod dpapi;
+pub mod encrypted_storage;
 pub mod error;
 pub mod global_config;
 pub mod keyring;
