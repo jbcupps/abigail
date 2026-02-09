@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-export type PersonaMode = "id" | "ego";
+export type PersonaMode = "id" | "ego" | "neutral";
 
 interface ThemeContextValue {
   mode: PersonaMode;
@@ -17,14 +17,14 @@ interface ThemeProviderProps {
   children: ReactNode;
 }
 
-export function ThemeProvider({ initialMode = "id", children }: ThemeProviderProps) {
+export function ThemeProvider({ initialMode = "neutral", children }: ThemeProviderProps) {
   const [mode, setMode] = useState<PersonaMode>(initialMode);
   const [agentName, setAgentName] = useState<string | null>(null);
 
   // Apply theme class to document root
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.remove("theme-id", "theme-ego");
+    root.classList.remove("theme-id", "theme-ego", "theme-neutral");
     root.classList.add(`theme-${mode}`);
   }, [mode]);
 

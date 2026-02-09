@@ -71,7 +71,10 @@ The crates form a layered architecture with clear security boundaries:
 ### Frontend State Machine (src-ui/src/App.tsx)
 
 ```
-loading → boot → startup_check → chat
+splash → loading → management → boot → chat
+                 → identity_conflict → management
+                 → startup_check → chat
+                 → startup_failed
 ```
 
 - `BootSequence.tsx` — First-run UI: intro → init soul → generate keypair → key presentation → verify → complete
@@ -108,6 +111,19 @@ Version must be updated in two places:
 2. `tauri-app/tauri.conf.json` → `"version"`
 
 All workspace crates inherit via `version.workspace = true`.
+
+## Deploy / PR Process
+
+- **Branch protection**: Direct pushes to `main` are blocked. All changes must go through a pull request.
+- **Workflow**: Create a feature branch, push it, then open a PR via `gh pr create`.
+- **Typical flow**:
+  1. Make changes on `main` (or a feature branch)
+  2. Commit with descriptive message
+  3. `git stash --include-untracked && git pull --rebase && git stash pop` (sync with remote)
+  4. `git checkout -b <branch-name>` (create feature branch)
+  5. `git push -u origin <branch-name>` (push branch)
+  6. `gh pr create --title "..." --body "..."` (open PR)
+- **Branch naming**: `refactor/`, `fix/`, `feat/`, `ci/` prefixes matching commit type.
 
 ## Release Process
 

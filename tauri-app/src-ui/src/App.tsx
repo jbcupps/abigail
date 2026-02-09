@@ -187,6 +187,7 @@ function AppInner() {
     } catch {
       // Ignore errors during disconnect
     }
+    setMode("neutral");
     setAppState("management");
   };
 
@@ -196,8 +197,8 @@ function AppInner() {
 
   if (appState === "loading") {
     return (
-      <div className="min-h-screen bg-black text-gray-500 font-mono flex items-center justify-center">
-        Loading...
+      <div className="min-h-screen bg-theme-bg text-theme-text-dim font-mono flex items-center justify-center">
+        <div className="animate-pulse">Loading...</div>
       </div>
     );
   }
@@ -228,21 +229,21 @@ function AppInner() {
 
   if (appState === "startup_check") {
     return (
-      <div className="min-h-screen bg-black text-gray-400 font-mono flex flex-col items-center justify-center">
-        <pre className="text-sm mb-4">
+      <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col items-center justify-center">
+        <pre className="text-theme-primary text-sm mb-4">
           ABIGAIL STARTUP
           ============
         </pre>
-        <p>Running startup checks...</p>
-        <div className="animate-pulse mt-2">...</div>
+        <p className="text-theme-text-dim">Running startup checks...</p>
+        <div className="animate-pulse mt-2 text-theme-text-dim">...</div>
       </div>
     );
   }
 
   if (appState === "startup_failed") {
     return (
-      <div className="min-h-screen bg-black text-theme-text font-mono flex flex-col items-center justify-center p-6">
-        <pre className="text-sm mb-4">
+      <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col items-center justify-center p-6">
+        <pre className="text-theme-primary text-sm mb-4">
           ABIGAIL STARTUP
           ============
         </pre>
@@ -275,7 +276,7 @@ function AppInner() {
       {mode === "id" && <IdentityPanel />}
       {/* Disconnect button */}
       <button
-        className="fixed top-2 right-2 text-gray-600 hover:text-gray-400 text-xs font-mono z-50"
+        className="fixed top-2 right-2 text-theme-text-dim hover:text-theme-text text-xs font-mono z-50"
         onClick={handleDisconnect}
         title="Return to identity selector"
       >
@@ -287,7 +288,7 @@ function AppInner() {
 
 function App() {
   return (
-    <ThemeProvider initialMode="id">
+    <ThemeProvider initialMode="neutral">
       <AppInner />
     </ThemeProvider>
   );
