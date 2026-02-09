@@ -21,6 +21,9 @@ pub struct GlobalConfig {
     /// List of registered agents.
     #[serde(default)]
     pub agents: Vec<AgentEntry>,
+    /// Path to hive-level secrets vault (shared API keys across all agents).
+    #[serde(default)]
+    pub hive_secrets_path: Option<PathBuf>,
 }
 
 impl GlobalConfig {
@@ -29,6 +32,7 @@ impl GlobalConfig {
         Self {
             master_key_path: data_root.join("master.key"),
             agents: Vec::new(),
+            hive_secrets_path: Some(data_root.join("hive_secrets.bin")),
         }
     }
 

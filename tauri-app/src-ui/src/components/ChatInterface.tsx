@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useState, useEffect } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import McpAppFrame from "./McpAppFrame";
+import ThinkingIndicator from "./ThinkingIndicator";
 import VaultModal, { type MissingSkillSecret } from "./VaultModal";
 
 interface Message {
@@ -393,7 +394,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
             )}
           </div>
         ))}
-        {loading && <p className="text-theme-text-dim">{chatStatus || "..."}</p>}
+        {loading && <ThinkingIndicator status={chatStatus} label={assistantLabel} />}
       </div>
       <div className="p-4 border-t border-theme-border flex gap-2">
         <input

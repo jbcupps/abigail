@@ -338,29 +338,17 @@ FunctionEnd
 ; ============================================================================
 
 !macro NSIS_HOOK_POSTINSTALL
-  ; Step 1: Run identity keygen (only for fresh installs or no existing identity)
-  ${If} $UpgradeDetected != "1"
-  ${OrIf} $PreserveData != "1"
-    DetailPrint "Running Abigail identity setup..."
-    ExecWait '"$INSTDIR\abigail-keygen.exe"' $0
-    DetailPrint "Identity setup completed (exit code: $0)"
-    ${If} $0 != 0
-      MessageBox MB_OK|MB_ICONEXCLAMATION "Identity setup did not complete.$\n$\nYou can set up your identity on first app launch."
-    ${EndIf}
-  ${Else}
-    DetailPrint "Skipping identity setup (upgrade with preserved data)"
-  ${EndIf}
-
-  ; Step 2: Restore user data if upgrading
+  ; Step 1: Restore user data if upgrading
+  ; Note: Identity keygen removed — the in-app birth sequence handles key generation.
   ${If} $UpgradeDetected == "1"
   ${AndIf} $PreserveData == "1"
     Call RestoreUserData
   ${EndIf}
 
-  ; Step 3: Write version to registry
+  ; Step 2: Write version to registry
   Call WriteVersionToRegistry
 
-  ; Step 4: LLM setup dialog
+  ; Step 3: LLM setup dialog
   Call ShowLlmSetupDialog
 !macroend
 

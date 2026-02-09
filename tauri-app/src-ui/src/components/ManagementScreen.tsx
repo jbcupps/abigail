@@ -175,40 +175,47 @@ export default function ManagementScreen({
 
       {errorBanner}
 
-      {/* Agent list */}
-      <div className="w-full max-w-lg space-y-3 mb-8">
-        <p className="text-theme-text-dim text-xs uppercase tracking-wider mb-2">
+      {/* Agent table */}
+      <div className="w-full max-w-2xl mb-8">
+        <p className="text-theme-text-dim text-xs uppercase tracking-wider mb-3">
           Select an Identity
         </p>
-        {agents.map((agent) => (
-          <button
-            key={agent.id}
-            className="w-full text-left p-4 border border-theme-border rounded hover:border-theme-primary hover:bg-theme-primary-glow transition-colors group"
-            onClick={() => handleSelectAgent(agent.id)}
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-theme-primary-dim font-bold group-hover:text-theme-text-bright">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="border-b border-theme-border text-left text-xs text-theme-text-dim uppercase tracking-wider">
+              <th className="py-2 px-3">Name</th>
+              <th className="py-2 px-3">UUID</th>
+              <th className="py-2 px-3">Status</th>
+              <th className="py-2 px-3">Birth Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {agents.map((agent) => (
+              <tr
+                key={agent.id}
+                className="border-b border-theme-border-dim hover:bg-theme-primary-glow cursor-pointer transition-colors group"
+                onClick={() => handleSelectAgent(agent.id)}
+              >
+                <td className="py-3 px-3 text-theme-primary-dim font-bold group-hover:text-theme-text-bright">
                   {agent.name}
-                </div>
-                <div className="text-theme-text-dim text-xs mt-1">
+                </td>
+                <td className="py-3 px-3 text-theme-text-dim text-xs font-mono">
                   {agent.id.substring(0, 8)}...
+                </td>
+                <td className="py-3 px-3">
                   {agent.birth_complete ? (
-                    <span className="ml-2 text-green-600">born</span>
+                    <span className="text-green-600 text-xs">born</span>
                   ) : (
-                    <span className="ml-2 text-yellow-600">unborn</span>
+                    <span className="text-yellow-600 text-xs">unborn</span>
                   )}
-                  {agent.birth_date && (
-                    <span className="ml-2">{agent.birth_date}</span>
-                  )}
-                </div>
-              </div>
-              <div className="text-theme-text-dim group-hover:text-theme-primary">
-                &rarr;
-              </div>
-            </div>
-          </button>
-        ))}
+                </td>
+                <td className="py-3 px-3 text-theme-text-dim text-xs">
+                  {agent.birth_date || "\u2014"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       {/* Create new agent */}
