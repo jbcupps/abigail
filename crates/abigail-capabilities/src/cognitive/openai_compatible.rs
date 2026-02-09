@@ -272,6 +272,14 @@ struct StreamFunctionDelta {
 #[async_trait]
 impl LlmProvider for OpenAiCompatibleProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
+        tracing::info!(
+            "OpenAiCompatible[{}]::complete model={}, messages={}, tools={}, url={}",
+            self.provider_type,
+            self.model,
+            request.messages.len(),
+            request.tools.as_ref().map_or(0, |t| t.len()),
+            self.completions_url(),
+        );
         let messages = Self::build_messages(&request.messages);
         let tools = request.tools.as_ref().map(|t| Self::build_tools(t));
 
@@ -329,6 +337,13 @@ impl LlmProvider for OpenAiCompatibleProvider {
         request: &CompletionRequest,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
+        tracing::info!(
+            "OpenAiCompatible[{}]::stream model={}, messages={}, tools={}",
+            self.provider_type,
+            self.model,
+            request.messages.len(),
+            request.tools.as_ref().map_or(0, |t| t.len()),
+        );
         let messages = Self::build_messages(&request.messages);
         let tools = request.tools.as_ref().map(|t| Self::build_tools(t));
 

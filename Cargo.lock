@@ -147,6 +147,7 @@ dependencies = [
  "abigail-core",
  "anyhow",
  "async-trait",
+ "serde",
  "thiserror 1.0.69",
  "tokio",
  "tracing",

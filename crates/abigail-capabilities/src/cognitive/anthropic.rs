@@ -311,6 +311,12 @@ fn convert_tools(tools: &[ToolDefinition]) -> Vec<AnthropicTool> {
 #[async_trait]
 impl LlmProvider for AnthropicProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
+        tracing::info!(
+            "Anthropic::complete model={}, messages={}, tools={}",
+            self.model,
+            request.messages.len(),
+            request.tools.as_ref().map_or(0, |t| t.len()),
+        );
         let (system, messages) = convert_messages(&request.messages);
         let tools = request.tools.as_ref().map(|t| convert_tools(t));
 
@@ -393,6 +399,12 @@ impl LlmProvider for AnthropicProvider {
         request: &CompletionRequest,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
+        tracing::info!(
+            "Anthropic::stream model={}, messages={}, tools={}",
+            self.model,
+            request.messages.len(),
+            request.tools.as_ref().map_or(0, |t| t.len()),
+        );
         let (system, messages) = convert_messages(&request.messages);
         let tools = request.tools.as_ref().map(|t| convert_tools(t));
 

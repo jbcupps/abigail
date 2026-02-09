@@ -22,6 +22,10 @@ impl Default for CandleProvider {
 #[async_trait]
 impl LlmProvider for CandleProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
+        tracing::warn!(
+            "CandleProvider::complete (STUB) called with {} messages — no real LLM backing this provider",
+            request.messages.len(),
+        );
         // Stub: for classification prompts, return COMPLEX when input suggests complex task (for router test).
         let full = request
             .messages

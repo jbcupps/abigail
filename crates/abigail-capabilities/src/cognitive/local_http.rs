@@ -304,6 +304,13 @@ impl LocalHttpProvider {
 #[async_trait]
 impl LlmProvider for LocalHttpProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
+        tracing::info!(
+            "LocalHttp::complete base_url={}, model={}, messages={}, tools={}",
+            self.base_url,
+            self.model,
+            request.messages.len(),
+            request.tools.as_ref().map_or(0, |t| t.len()),
+        );
         validate_local_llm_url(&self.base_url).map_err(|e| anyhow::anyhow!("{}", e))?;
 
         let chat_request = ChatRequest {
@@ -372,6 +379,13 @@ impl LlmProvider for LocalHttpProvider {
         request: &CompletionRequest,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
+        tracing::info!(
+            "LocalHttp::stream base_url={}, model={}, messages={}, tools={}",
+            self.base_url,
+            self.model,
+            request.messages.len(),
+            request.tools.as_ref().map_or(0, |t| t.len()),
+        );
         validate_local_llm_url(&self.base_url).map_err(|e| anyhow::anyhow!("{}", e))?;
 
         let chat_request = ChatRequest {
