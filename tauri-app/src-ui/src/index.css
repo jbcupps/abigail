@@ -3,6 +3,21 @@
 @tailwind utilities;
 
 :root,
+.theme-neutral {
+  --color-primary: #22d3ee;       /* cyan-400 */
+  --color-primary-dim: #67e8f9;   /* cyan-300 */
+  --color-primary-muted: #06b6d4; /* cyan-500 */
+  --color-primary-faint: #0891b2; /* cyan-600 */
+  --color-primary-glow: rgba(34, 211, 238, 0.15);
+  --color-bg: #000000;
+  --color-surface: rgba(8, 51, 68, 0.3);   /* cyan-950/30 */
+  --color-border: #155e75;        /* cyan-800 */
+  --color-border-dim: #164e63;    /* cyan-900 */
+  --color-text: #22d3ee;          /* cyan-400 */
+  --color-text-bright: #a5f3fc;   /* cyan-200 */
+  --color-text-dim: #06b6d4;      /* cyan-500 */
+}
+
 .theme-ego {
   --color-primary: #22c55e;       /* green-500 */
   --color-primary-dim: #4ade80;   /* green-400 */

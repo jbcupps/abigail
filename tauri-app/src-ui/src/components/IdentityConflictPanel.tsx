@@ -63,7 +63,7 @@ export default function IdentityConflictPanel({
   };
 
   return (
-    <div className="min-h-screen bg-black text-theme-text font-mono flex items-center justify-center p-6">
+    <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex items-center justify-center p-6">
       <div className="max-w-lg w-full">
         {/* Header */}
         <div className="text-center mb-8">

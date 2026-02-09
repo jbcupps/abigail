@@ -290,7 +290,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   };
 
   return (
-    <div className="min-h-screen bg-black text-theme-text font-mono flex flex-col">
+    <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col">
       <pre className="text-sm p-4 border-b border-theme-border-dim">
         ABIGAIL BOOT SEQUENCE
         ==================

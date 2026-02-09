@@ -86,92 +86,134 @@ export default function ManagementScreen({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-black text-gray-500 font-mono flex items-center justify-center">
-        Loading identities...
+      <div className="min-h-screen bg-theme-bg text-theme-text-dim font-mono flex items-center justify-center">
+        <div className="animate-pulse">Loading identities...</div>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-black text-gray-300 font-mono flex flex-col items-center justify-center p-8">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <pre className="text-cyan-400 text-xs mb-2">
-{`  ▄▄▄       ▒█████
- ▒████▄    ▒██▒  ██▒
- ▒██  ▀█▄  ▒██░  ██▒
- ░██▄▄▄▄██ ▒██   ██░
-  ▓█   ▓██▒░ ████▓▒░
-  ▒▒   ▓▒█░░ ▒░▒░▒░ `}
-        </pre>
-        <h1 className="text-xl text-cyan-300 font-bold">ABIGAIL HIVE</h1>
-        <p className="text-gray-500 text-sm mt-1">Identity Management</p>
-      </div>
+  // Error banner (shared between both states)
+  const errorBanner = error && (
+    <div className="w-full max-w-lg mb-4 p-3 border border-red-800 rounded bg-red-900/20 text-red-400 text-sm">
+      {error}
+      <button
+        className="ml-2 text-red-300 underline"
+        onClick={() => setError(null)}
+      >
+        dismiss
+      </button>
+    </div>
+  );
 
-      {error && (
-        <div className="w-full max-w-lg mb-4 p-3 border border-red-800 rounded bg-red-900/20 text-red-400 text-sm">
-          {error}
-          <button
-            className="ml-2 text-red-300 underline"
-            onClick={() => setError(null)}
-          >
-            dismiss
-          </button>
-        </div>
-      )}
-
-      {/* Agent list */}
-      {agents.length > 0 ? (
-        <div className="w-full max-w-lg space-y-3 mb-8">
-          <p className="text-gray-500 text-xs uppercase tracking-wider mb-2">
-            Select an Identity
+  // Empty state: Welcome landing page
+  if (agents.length === 0) {
+    return (
+      <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col items-center justify-center p-8">
+        {/* Welcome header */}
+        <div className="text-center mb-10">
+          <h1 className="text-theme-primary text-4xl font-bold tracking-widest mb-2">
+            ABIGAIL
+          </h1>
+          <p className="text-theme-text-dim text-sm">
+            Your personal desktop AI agent
           </p>
-          {agents.map((agent) => (
-            <button
-              key={agent.id}
-              className="w-full text-left p-4 border border-gray-700 rounded hover:border-cyan-500 hover:bg-cyan-900/10 transition-colors group"
-              onClick={() => handleSelectAgent(agent.id)}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-cyan-300 font-bold group-hover:text-cyan-200">
-                    {agent.name}
-                  </div>
-                  <div className="text-gray-600 text-xs mt-1">
-                    {agent.id.substring(0, 8)}...
-                    {agent.birth_complete ? (
-                      <span className="ml-2 text-green-600">born</span>
-                    ) : (
-                      <span className="ml-2 text-yellow-600">unborn</span>
-                    )}
-                    {agent.birth_date && (
-                      <span className="ml-2">{agent.birth_date}</span>
-                    )}
-                  </div>
-                </div>
-                <div className="text-gray-600 group-hover:text-cyan-400">
-                  &rarr;
-                </div>
-              </div>
-            </button>
-          ))}
         </div>
-      ) : (
-        <div className="w-full max-w-lg text-center mb-8 p-6 border border-gray-800 rounded">
-          <p className="text-gray-500 mb-4">No agents found in this Hive.</p>
+
+        {errorBanner}
+
+        {/* Create agent card */}
+        <div className="w-full max-w-md border-2 border-theme-primary rounded-lg p-6 mb-6">
+          <p className="text-theme-text-bright text-sm mb-4">
+            Create your first agent to begin
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={newAgentName}
+              onChange={(e) => setNewAgentName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleCreateAgent();
+              }}
+              placeholder="Agent name..."
+              className="flex-1 bg-theme-bg border border-theme-border rounded px-3 py-2 text-theme-primary-dim placeholder:text-theme-text-dim focus:border-theme-primary focus:outline-none text-sm"
+              disabled={creating}
+              autoFocus
+            />
+            <button
+              className="border border-theme-primary text-theme-primary px-5 py-2 rounded hover:bg-theme-primary-glow disabled:opacity-50 disabled:cursor-not-allowed text-sm font-bold"
+              onClick={handleCreateAgent}
+              disabled={creating || !newAgentName.trim()}
+            >
+              {creating ? "Creating..." : "Create"}
+            </button>
+          </div>
+        </div>
+
+        {/* Migration link */}
+        <div className="text-center">
+          <div className="text-theme-border text-xs mb-3">or</div>
           <button
-            className="text-cyan-400 underline text-sm"
+            className="text-theme-text-dim hover:text-theme-text text-xs underline"
             onClick={handleMigrateLegacy}
             disabled={migrating}
           >
             {migrating ? "Checking..." : "Detect & migrate legacy identity"}
           </button>
         </div>
-      )}
+      </div>
+    );
+  }
+
+  // Populated state: Agent selector
+  return (
+    <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col items-center justify-center p-8">
+      {/* Header */}
+      <div className="text-center mb-8">
+        <h1 className="text-xl text-theme-primary-dim font-bold">ABIGAIL HIVE</h1>
+        <p className="text-theme-text-dim text-sm mt-1">Identity Management</p>
+      </div>
+
+      {errorBanner}
+
+      {/* Agent list */}
+      <div className="w-full max-w-lg space-y-3 mb-8">
+        <p className="text-theme-text-dim text-xs uppercase tracking-wider mb-2">
+          Select an Identity
+        </p>
+        {agents.map((agent) => (
+          <button
+            key={agent.id}
+            className="w-full text-left p-4 border border-theme-border rounded hover:border-theme-primary hover:bg-theme-primary-glow transition-colors group"
+            onClick={() => handleSelectAgent(agent.id)}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-theme-primary-dim font-bold group-hover:text-theme-text-bright">
+                  {agent.name}
+                </div>
+                <div className="text-theme-text-dim text-xs mt-1">
+                  {agent.id.substring(0, 8)}...
+                  {agent.birth_complete ? (
+                    <span className="ml-2 text-green-600">born</span>
+                  ) : (
+                    <span className="ml-2 text-yellow-600">unborn</span>
+                  )}
+                  {agent.birth_date && (
+                    <span className="ml-2">{agent.birth_date}</span>
+                  )}
+                </div>
+              </div>
+              <div className="text-theme-text-dim group-hover:text-theme-primary">
+                &rarr;
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
 
       {/* Create new agent */}
-      <div className="w-full max-w-lg border border-gray-800 rounded p-4">
-        <p className="text-gray-500 text-xs uppercase tracking-wider mb-3">
+      <div className="w-full max-w-lg border border-theme-border-dim rounded p-4">
+        <p className="text-theme-text-dim text-xs uppercase tracking-wider mb-3">
           Initialize New Agent
         </p>
         <div className="flex gap-2">
@@ -183,11 +225,11 @@ export default function ManagementScreen({
               if (e.key === "Enter") handleCreateAgent();
             }}
             placeholder="Agent name..."
-            className="flex-1 bg-black border border-gray-700 rounded px-3 py-2 text-cyan-300 placeholder-gray-600 focus:border-cyan-500 focus:outline-none text-sm"
+            className="flex-1 bg-theme-bg border border-theme-border rounded px-3 py-2 text-theme-primary-dim placeholder:text-theme-text-dim focus:border-theme-primary focus:outline-none text-sm"
             disabled={creating}
           />
           <button
-            className="border border-cyan-700 text-cyan-400 px-4 py-2 rounded hover:bg-cyan-900/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+            className="border border-theme-primary-faint text-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow disabled:opacity-50 disabled:cursor-not-allowed text-sm"
             onClick={handleCreateAgent}
             disabled={creating || !newAgentName.trim()}
           >
