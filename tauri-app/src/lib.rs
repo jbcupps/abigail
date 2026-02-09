@@ -1487,7 +1487,7 @@ const ALLOWED_PROVIDER_SECRET_KEYS: &[&str] = &["openai", "anthropic", "xai", "g
 
 /// Returns the set of allowed secret keys: reserved provider names + skill-declared secret names.
 fn allowed_secret_keys(
-    registry: &SkillRegistry,
+    _registry: &SkillRegistry,
     skill_paths: &[PathBuf],
 ) -> std::collections::HashSet<String> {
     let mut allowed: std::collections::HashSet<String> = ALLOWED_PROVIDER_SECRET_KEYS
@@ -2031,7 +2031,7 @@ async fn chat_stream(
             }
         });
 
-        let request = abigail_capabilities::cognitive::CompletionRequest::simple(messages.clone());
+        let _request = abigail_capabilities::cognitive::CompletionRequest::simple(messages.clone());
         let response = router
             .route_stream(messages, tx)
             .await

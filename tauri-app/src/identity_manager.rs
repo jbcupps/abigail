@@ -341,12 +341,13 @@ impl IdentityManager {
     /// On Windows: `%USERPROFILE%\Documents\Abigail\{agent_name}\`
     /// On other platforms: `~/Documents/Abigail/{agent_name}/`
     pub fn create_documents_folder(&self, agent_id: &str) -> Result<PathBuf, String> {
-        let gc = self.global_config.read().map_err(|e| e.to_string())?;
-        let entry = gc
-            .find_agent(agent_id)
-            .ok_or_else(|| format!("Agent {} not registered", agent_id))?;
-        let agent_name = &entry.name;
-        drop(gc);
+        let agent_name = {
+            let gc = self.global_config.read().map_err(|e| e.to_string())?;
+            let entry = gc
+                .find_agent(agent_id)
+                .ok_or_else(|| format!("Agent {} not registered", agent_id))?;
+            entry.name.clone()
+        };
 
         // Sanitize the name for use as a directory (replace problematic chars)
         let safe_name: String = agent_name
