@@ -238,6 +238,7 @@ impl IdentityManager {
             mcp_trust_policy: Default::default(),
             approved_skill_ids: Default::default(),
             trusted_skill_signers: Default::default(),
+            sao_endpoint: None,
         };
         let config_path = agent_dir.join("config.json");
         config.save(&config_path).map_err(|e| e.to_string())?;
