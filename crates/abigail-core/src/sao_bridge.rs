@@ -111,10 +111,7 @@ impl SaoBridgeClient {
             Ok(())
         } else {
             let status = resp.status();
-            let text = resp
-                .text()
-                .await
-                .unwrap_or_else(|_| "no body".to_string());
+            let text = resp.text().await.unwrap_or_else(|_| "no body".to_string());
             Err(SaoBridgeError::RegistrationRejected(format!(
                 "{}: {}",
                 status, text
@@ -191,8 +188,7 @@ mod tests {
 
     #[test]
     fn stores_endpoint_and_agent_id() {
-        let client =
-            SaoBridgeClient::new(Some("http://localhost:3030".into()), "abc-123");
+        let client = SaoBridgeClient::new(Some("http://localhost:3030".into()), "abc-123");
         assert!(!client.is_connected());
         assert_eq!(client.endpoint(), Some("http://localhost:3030"));
     }
@@ -214,10 +210,7 @@ mod tests {
 
     #[tokio::test]
     async fn disconnect_noop_when_not_connected() {
-        let mut client = SaoBridgeClient::new(
-            Some("http://localhost:9999".into()),
-            "test",
-        );
+        let mut client = SaoBridgeClient::new(Some("http://localhost:9999".into()), "test");
         let result = client.disconnect().await;
         assert!(result.is_ok());
         assert!(!client.is_connected());
