@@ -5,6 +5,7 @@ pub mod error;
 pub mod global_config;
 pub mod keyring;
 pub mod local_llm_url;
+pub mod sao_bridge;
 pub mod secrets;
 pub mod superego;
 pub mod system_prompt;
@@ -25,6 +26,7 @@ pub use keyring::{
     ExternalKeypairResult, Keyring, MasterKeyResult, SignatureMetadata,
 };
 pub use local_llm_url::validate_local_llm_url;
+pub use sao_bridge::{AgentState, SaoBridgeClient, SaoBridgeError};
 pub use secrets::SecretsVault;
 pub use superego::{check_message, check_search_query, SuperegoVerdict};
 pub use vault::{ExternalVault, ReadOnlyFileVault};

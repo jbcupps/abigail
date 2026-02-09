@@ -138,6 +138,12 @@ pub struct AppConfig {
     /// Trusted signer public keys (base64 Ed25519) for signed skill packages. Optional.
     #[serde(default)]
     pub trusted_skill_signers: Vec<String>,
+
+    /// SAO orchestrator endpoint (e.g. "http://localhost:3030").
+    /// When set, Abigail will register with SAO on startup and send
+    /// periodic status heartbeats. When None, Abigail runs standalone.
+    #[serde(default)]
+    pub sao_endpoint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +183,7 @@ impl AppConfig {
             mcp_trust_policy: McpTrustPolicy::default(),
             approved_skill_ids: Vec::new(),
             trusted_skill_signers: Vec::new(),
+            sao_endpoint: None,
         }
     }
 
@@ -264,7 +271,7 @@ impl AppConfig {
 
         // Migration from v3 to v4
         if self.schema_version < 4 {
-            // v4 adds: approved_skill_ids, trusted_skill_signers
+            // v4 adds: approved_skill_ids, trusted_skill_signers, sao_endpoint
             self.schema_version = 4;
             migrated = true;
             tracing::debug!("Migrated config from v3 to v4");
@@ -327,6 +334,7 @@ mod tests {
             mcp_trust_policy: McpTrustPolicy::default(),
             approved_skill_ids: Vec::new(),
             trusted_skill_signers: Vec::new(),
+            sao_endpoint: None,
         }
     }
 
