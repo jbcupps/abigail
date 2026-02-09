@@ -37,6 +37,26 @@ cd tauri-app/src-ui && npm run build     # tsc + vite build
 cd tauri-app && cargo tauri build        # Output: target/release/bundle/nsis/
 ```
 
+## Pre-Push Checklist
+
+**IMPORTANT: Always run these locally before pushing to avoid wasting CI minutes.** The CI gate job requires lint, test, and frontend to all pass. Run these exact commands to match what CI runs:
+
+```bash
+# 1. Format check (auto-fix with cargo fmt --all)
+cargo fmt --all -- --check
+
+# 2. Clippy (must pass with -D warnings; excludes abigail-app which needs Tauri)
+cargo clippy --workspace --exclude abigail-app -- -D warnings
+
+# 3. Tests (excludes abigail-app; runs on all 3 platforms in CI)
+cargo test --workspace --exclude abigail-app
+
+# 4. Frontend build (tsc type-check + vite build)
+cd tauri-app/src-ui && npm run build
+```
+
+If any of these fail locally, fix them before pushing. The `gate` CI job will block the PR until all four pass.
+
 ## Environment Variables
 
 - `OPENAI_API_KEY` — enables Ego (cloud) routing for complex queries
