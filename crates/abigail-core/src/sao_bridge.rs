@@ -5,6 +5,7 @@
 //! entirely optional: if no endpoint is set every method is a silent no-op,
 //! allowing Abigail to work fully standalone.
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -88,7 +89,7 @@ impl SaoBridgeClient {
 
         let body = RegisterRequest {
             agent_id: &self.agent_id,
-            pubkey: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, pubkey),
+            pubkey: STANDARD.encode(pubkey),
             name: name.map(|n| n.to_string()),
         };
 
