@@ -45,8 +45,10 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
   const assistantLabel = agentName || "Abigail";
 
   const refreshRouterStatus = () => {
+    console.log("[ChatInterface] refreshRouterStatus() called");
     invoke<RouterStatus>("get_router_status")
       .then((status) => {
+        console.log("[ChatInterface] routerStatus:", JSON.stringify(status));
         setRouterStatus(status);
         // Show config menu if no LLM configured
         if (!status.ego_configured && status.id_provider === "candle_stub") {
@@ -141,19 +143,24 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
 
     // Listen for streaming tokens
     let streamContent = "";
-    const unlisten = await listen<{ token?: string; done?: boolean }>("chat-token", (event) => {
-      if (event.payload.token) {
-        streamContent += event.payload.token;
-        setMessages((m) => {
-          const updated = [...m];
-          const lastAssistant = updated[updated.length - 1];
-          if (lastAssistant && lastAssistant.role === "assistant") {
-            updated[updated.length - 1] = { ...lastAssistant, content: streamContent };
-          }
-          return updated;
-        });
-      }
-    });
+    let unlisten: (() => void) | null = null;
+    try {
+      unlisten = await listen<{ token?: string; done?: boolean }>("chat-token", (event) => {
+        if (event.payload.token) {
+          streamContent += event.payload.token;
+          setMessages((m) => {
+            const updated = [...m];
+            const lastAssistant = updated[updated.length - 1];
+            if (lastAssistant && lastAssistant.role === "assistant") {
+              updated[updated.length - 1] = { ...lastAssistant, content: streamContent };
+            }
+            return updated;
+          });
+        }
+      });
+    } catch (listenErr) {
+      console.warn("[ChatInterface] listen() failed:", listenErr);
+    }
 
     try {
       const reply = await invoke<string>("chat_stream", { message: userMessage.content, target });
@@ -185,7 +192,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
         return updated;
       });
     } finally {
-      unlisten();
+      try { if (unlisten) unlisten(); } catch { /* ignore */ }
       setLoading(false);
       setChatStatus(null);
     }

@@ -10,7 +10,7 @@ use abigail_core::{
     TrinityConfig, Verifier,
 };
 use abigail_memory::{Memory, MemoryStore};
-use abigail_router::{IdEgoRouter, SubagentManager};
+use abigail_router::{IdEgoRouter, SubagentDefinition, SubagentManager, SubagentProvider};
 use abigail_skills::channel::EventBus;
 use abigail_skills::protocol::mcp::{HttpMcpClient, McpTool};
 use abigail_skills::{MissingSkillSecret, SkillExecutor, SkillRegistry, ToolParams};
@@ -1589,6 +1589,31 @@ fn chat_tool_definitions(
         parameters: schema["parameters"].clone(),
     });
 
+    // Built-in: delegate_to_subagent
+    tools.push(abigail_capabilities::cognitive::ToolDefinition {
+        name: "delegate_to_subagent".to_string(),
+        description: "Delegate a task to a specialized subagent. Available subagents: \
+                      'research' (web search/research), 'privacy' (local PII-safe processing), \
+                      'file_ops' (file system and shell commands), 'external_comm' (email, HTTP, voice). \
+                      The subagent will use its own tools and return a result."
+            .to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "subagent_id": {
+                    "type": "string",
+                    "description": "ID of the subagent to delegate to",
+                    "enum": ["research", "privacy", "file_ops", "external_comm"]
+                },
+                "task": {
+                    "type": "string",
+                    "description": "The task description to delegate to the subagent"
+                }
+            },
+            "required": ["subagent_id", "task"]
+        }),
+    });
+
     // Skill-provided tools
     if let Ok(manifests) = registry.list() {
         for manifest in &manifests {
@@ -1605,6 +1630,33 @@ fn chat_tool_definitions(
     }
 
     tools
+}
+
+/// Build a focused system prompt for a subagent based on its definition.
+fn build_subagent_system_prompt(def: &SubagentDefinition, base_prompt: &str) -> String {
+    format!(
+        "You are {}, a specialized subagent of Abigail.\n\n\
+         Your role: {}\n\n\
+         You have been delegated a specific task. Complete it using the tools \
+         available to you, then return a clear, concise result.\n\n\
+         Base context:\n{}",
+        def.name, def.description, base_prompt
+    )
+}
+
+/// Filter the full tool list to only those matching a subagent's capability tags.
+fn filter_tools_for_subagent(
+    all_tools: &[abigail_capabilities::cognitive::ToolDefinition],
+    capabilities: &[String],
+) -> Vec<abigail_capabilities::cognitive::ToolDefinition> {
+    if capabilities.is_empty() {
+        return Vec::new();
+    }
+    all_tools
+        .iter()
+        .filter(|t| capabilities.contains(&t.name))
+        .cloned()
+        .collect()
 }
 
 /// Auto-detect provider from API key prefix.
@@ -1627,163 +1679,276 @@ fn detect_provider_from_prefix(key: &str) -> Option<&'static str> {
 }
 
 /// Execute a tool call from the LLM and return the result string.
-async fn execute_tool_call(
-    state: &tauri::State<'_, AppState>,
-    app: &tauri::AppHandle,
-    tool_call: &abigail_capabilities::cognitive::ToolCall,
-) -> String {
-    match tool_call.name.as_str() {
-        "update_provider_key" | "store_provider_key" => {
-            let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
-                Ok(v) => v,
-                Err(e) => return format!("Error parsing arguments: {}", e),
-            };
-            let raw_provider = args["provider"].as_str().unwrap_or("");
-            let key = args["key"].as_str().unwrap_or("");
+fn execute_tool_call<'a>(
+    state: &'a tauri::State<'_, AppState>,
+    app: &'a tauri::AppHandle,
+    tool_call: &'a abigail_capabilities::cognitive::ToolCall,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = String> + Send + 'a>> {
+    Box::pin(async move {
+        match tool_call.name.as_str() {
+            "update_provider_key" | "store_provider_key" => {
+                let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
+                    Ok(v) => v,
+                    Err(e) => return format!("Error parsing arguments: {}", e),
+                };
+                let raw_provider = args["provider"].as_str().unwrap_or("");
+                let key = args["key"].as_str().unwrap_or("");
 
-            if key.is_empty() {
-                return "Error: key is required".to_string();
-            }
+                if key.is_empty() {
+                    return "Error: key is required".to_string();
+                }
 
-            // Auto-detect provider from key prefix if provider is "auto" or empty
-            let provider = if raw_provider.is_empty() || raw_provider == "auto" {
-                match detect_provider_from_prefix(key) {
+                // Auto-detect provider from key prefix if provider is "auto" or empty
+                let provider = if raw_provider.is_empty() || raw_provider == "auto" {
+                    match detect_provider_from_prefix(key) {
                     Some(detected) => detected,
                     None => return "Error: could not auto-detect provider from key prefix. Please specify the provider explicitly.".to_string(),
                 }
-            } else {
-                raw_provider
-            };
-
-            // Validate the key first
-            if let Err(e) =
-                abigail_capabilities::cognitive::validation::validate_api_key(provider, key).await
-            {
-                return format!(
-                    "API key validation failed: {}. Please check the key and try again.",
-                    e
-                );
-            }
-
-            // Store in per-agent secrets vault
-            {
-                let mut vault = match state.secrets.lock() {
-                    Ok(v) => v,
-                    Err(e) => return format!("Error accessing vault: {}", e),
+                } else {
+                    raw_provider
                 };
-                vault.set_secret(provider, key);
-                if let Err(e) = vault.save() {
-                    return format!("Error saving key: {}", e);
+
+                // Validate the key first
+                if let Err(e) =
+                    abigail_capabilities::cognitive::validation::validate_api_key(provider, key)
+                        .await
+                {
+                    return format!(
+                        "API key validation failed: {}. Please check the key and try again.",
+                        e
+                    );
                 }
-            }
 
-            // Also store in hive-level vault so all agents can access it
-            if let Ok(mut hive) = state.hive_secrets.lock() {
-                hive.set_secret(provider, key);
-                let _ = hive.save();
-            }
-
-            // For known Ego providers, persist in TrinityConfig and rebuild router
-            if matches!(
-                provider,
-                "openai" | "anthropic" | "perplexity" | "xai" | "google"
-            ) {
-                if let Ok(mut config) = state.config.write() {
-                    if provider == "openai" {
-                        config.openai_api_key = Some(key.to_string());
+                // Store in per-agent secrets vault
+                {
+                    let mut vault = match state.secrets.lock() {
+                        Ok(v) => v,
+                        Err(e) => return format!("Error accessing vault: {}", e),
+                    };
+                    vault.set_secret(provider, key);
+                    if let Err(e) = vault.save() {
+                        return format!("Error saving key: {}", e);
                     }
-                    // Persist ego provider in TrinityConfig for restart resilience
-                    let trinity = config.trinity.get_or_insert_with(Default::default);
-                    trinity.ego_provider = Some(provider.to_string());
-                    trinity.ego_api_key = Some(key.to_string());
-                    let _ = config.save(&config.config_path());
-                    drop(config);
                 }
-                // Use centralized rebuild (preserves Superego)
-                let _ = rebuild_router_with_superego(state);
+
+                // Also store in hive-level vault so all agents can access it
+                if let Ok(mut hive) = state.hive_secrets.lock() {
+                    hive.set_secret(provider, key);
+                    let _ = hive.save();
+                }
+
+                // For known Ego providers, persist in TrinityConfig and rebuild router
+                if matches!(
+                    provider,
+                    "openai" | "anthropic" | "perplexity" | "xai" | "google"
+                ) {
+                    if let Ok(mut config) = state.config.write() {
+                        if provider == "openai" {
+                            config.openai_api_key = Some(key.to_string());
+                        }
+                        // Persist ego provider in TrinityConfig for restart resilience
+                        let trinity = config.trinity.get_or_insert_with(Default::default);
+                        trinity.ego_provider = Some(provider.to_string());
+                        trinity.ego_api_key = Some(key.to_string());
+                        let _ = config.save(&config.config_path());
+                        drop(config);
+                    }
+                    // Use centralized rebuild (preserves Superego)
+                    let _ = rebuild_router_with_superego(state);
+                }
+
+                format!(
+                    "Successfully validated and stored {} API key in secure vault.",
+                    provider
+                )
             }
+            "recommend_crystallize" => {
+                let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
+                    Ok(v) => v,
+                    Err(e) => return format!("Error parsing arguments: {}", e),
+                };
+                let name = args["name"].as_str().unwrap_or("");
+                let purpose = args["purpose"].as_str().unwrap_or("");
+                let personality = args["personality"].as_str().unwrap_or("");
 
-            format!(
-                "Successfully validated and stored {} API key in secure vault.",
-                provider
-            )
-        }
-        "recommend_crystallize" => {
-            let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
-                Ok(v) => v,
-                Err(e) => return format!("Error parsing arguments: {}", e),
-            };
-            let name = args["name"].as_str().unwrap_or("");
-            let purpose = args["purpose"].as_str().unwrap_or("");
-            let personality = args["personality"].as_str().unwrap_or("");
+                if name.is_empty() || purpose.is_empty() || personality.is_empty() {
+                    return "Error: name, purpose, and personality are all required".to_string();
+                }
 
-            if name.is_empty() || purpose.is_empty() || personality.is_empty() {
-                return "Error: name, purpose, and personality are all required".to_string();
+                format!(
+                    "Crystallization recommended with name='{}', purpose='{}', personality='{}'.",
+                    name, purpose, personality
+                )
             }
+            "delegate_to_subagent" => {
+                let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
+                    Ok(v) => v,
+                    Err(e) => return format!("Error parsing arguments: {}", e),
+                };
+                let subagent_id = args["subagent_id"].as_str().unwrap_or("");
+                let task = args["task"].as_str().unwrap_or("");
 
-            format!(
-                "Crystallization recommended with name='{}', purpose='{}', personality='{}'.",
-                name, purpose, personality
-            )
-        }
-        other => {
-            // Check registered skills for matching tool name
-            let _ = app.emit(
-                "chat-status",
-                serde_json::json!({
-                    "status": "tool_executing",
-                    "tool": other,
-                }),
-            );
+                if subagent_id.is_empty() || task.is_empty() {
+                    return "Error: subagent_id and task are required".to_string();
+                }
 
-            // Search skills for a tool with this name
-            if let Ok(manifests) = state.registry.list() {
-                for manifest in &manifests {
-                    if let Ok((skill, _)) = state.registry.get_skill(&manifest.id) {
-                        if skill.tools().iter().any(|t| t.name == other) {
-                            // Parse arguments into ToolParams
-                            let args: serde_json::Value =
-                                match serde_json::from_str(&tool_call.arguments) {
-                                    Ok(v) => v,
-                                    Err(e) => return format!("Error parsing arguments: {}", e),
-                                };
+                // Emit status event
+                let _ = app.emit(
+                    "chat-status",
+                    serde_json::json!({
+                        "status": "delegating",
+                        "subagent": subagent_id,
+                        "task": task,
+                    }),
+                );
 
-                            let mut params = ToolParams::new();
-                            if let Some(obj) = args.as_object() {
-                                for (k, v) in obj {
-                                    params.values.insert(k.clone(), v.clone());
-                                }
+                // Build system prompt and filtered tools (no locks held across await)
+                let (system_prompt, all_tools) = {
+                    let config = match state.config.read() {
+                        Ok(c) => c,
+                        Err(e) => return format!("Error reading config: {}", e),
+                    };
+                    let prompt = abigail_core::system_prompt::build_system_prompt(
+                        &config.docs_dir,
+                        &config.agent_name,
+                    );
+                    drop(config);
+                    let tools = chat_tool_definitions(&state.registry);
+                    (prompt, tools)
+                };
+
+                // Look up subagent definition, clone router — drop all locks before await
+                let (def, router) = {
+                    let mgr = match state.subagent_manager.read() {
+                        Ok(m) => m,
+                        Err(e) => return format!("Error accessing subagent manager: {}", e),
+                    };
+                    let def = match mgr.list().iter().find(|d| d.id == subagent_id) {
+                        Some(d) => d.clone(),
+                        None => return format!("Unknown subagent: {}", subagent_id),
+                    };
+                    drop(mgr);
+                    let router = match state.router.read() {
+                        Ok(r) => r.clone(),
+                        Err(e) => return format!("Error accessing router: {}", e),
+                    };
+                    (def, router)
+                };
+
+                let filtered_tools = filter_tools_for_subagent(&all_tools, &def.capabilities);
+                let sub_system_prompt = build_subagent_system_prompt(&def, &system_prompt);
+
+                let messages = vec![
+                    abigail_capabilities::cognitive::Message::new("system", &sub_system_prompt),
+                    abigail_capabilities::cognitive::Message::new("user", task),
+                ];
+
+                // Route via the cloned router (no locks held)
+                let result = match &def.provider {
+                    SubagentProvider::SameAsEgo => {
+                        router.route_with_tools(messages, filtered_tools).await
+                    }
+                    SubagentProvider::SameAsId => router.id_only(messages).await,
+                    SubagentProvider::Custom(_, _) => {
+                        router.route_with_tools(messages, filtered_tools).await
+                    }
+                };
+
+                match result {
+                    Ok(response) => {
+                        tracing::info!(
+                            "Subagent '{}' completed delegation, response length: {}",
+                            subagent_id,
+                            response.content.len()
+                        );
+
+                        // If the subagent returned tool calls, execute them and summarize
+                        if let Some(ref tool_calls) = response.tool_calls {
+                            tracing::info!(
+                                "Subagent '{}' returned {} tool call(s), executing",
+                                subagent_id,
+                                tool_calls.len()
+                            );
+                            let mut results = Vec::new();
+                            for tc in tool_calls {
+                                let result = execute_tool_call(state, app, tc).await;
+                                results.push(format!("[{}]: {}", tc.name, result));
                             }
+                            format!(
+                                "Subagent '{}' result:\n{}\n\nTool results:\n{}",
+                                def.name,
+                                response.content,
+                                results.join("\n")
+                            )
+                        } else {
+                            format!("Subagent '{}' result:\n{}", def.name, response.content)
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Subagent '{}' delegation failed: {}", subagent_id, e);
+                        format!("Delegation to '{}' failed: {}", def.name, e)
+                    }
+                }
+            }
+            other => {
+                // Check registered skills for matching tool name
+                let _ = app.emit(
+                    "chat-status",
+                    serde_json::json!({
+                        "status": "tool_executing",
+                        "tool": other,
+                    }),
+                );
 
-                            match state.executor.execute(&manifest.id, other, params).await {
-                                Ok(output) => {
-                                    if output.success {
-                                        // Extract formatted text for LLM consumption
-                                        if let Some(ref data) = output.data {
-                                            if let Some(formatted) =
-                                                data.get("formatted").and_then(|f| f.as_str())
-                                            {
-                                                return formatted.to_string();
-                                            }
-                                            return data.to_string();
-                                        }
-                                        return "Tool executed successfully".to_string();
-                                    } else {
-                                        return output
-                                            .error
-                                            .unwrap_or_else(|| "Tool failed".to_string());
+                // Search skills for a tool with this name
+                if let Ok(manifests) = state.registry.list() {
+                    for manifest in &manifests {
+                        if let Ok((skill, _)) = state.registry.get_skill(&manifest.id) {
+                            if skill.tools().iter().any(|t| t.name == other) {
+                                // Parse arguments into ToolParams
+                                let args: serde_json::Value =
+                                    match serde_json::from_str(&tool_call.arguments) {
+                                        Ok(v) => v,
+                                        Err(e) => return format!("Error parsing arguments: {}", e),
+                                    };
+
+                                let mut params = ToolParams::new();
+                                if let Some(obj) = args.as_object() {
+                                    for (k, v) in obj {
+                                        params.values.insert(k.clone(), v.clone());
                                     }
                                 }
-                                Err(e) => return format!("Tool error: {}", e),
+
+                                match state.executor.execute(&manifest.id, other, params).await {
+                                    Ok(output) => {
+                                        if output.success {
+                                            // Extract formatted text for LLM consumption
+                                            if let Some(ref data) = output.data {
+                                                if let Some(formatted) =
+                                                    data.get("formatted").and_then(|f| f.as_str())
+                                                {
+                                                    return formatted.to_string();
+                                                }
+                                                return data.to_string();
+                                            }
+                                            return "Tool executed successfully".to_string();
+                                        } else {
+                                            return output
+                                                .error
+                                                .unwrap_or_else(|| "Tool failed".to_string());
+                                        }
+                                    }
+                                    Err(e) => return format!("Tool error: {}", e),
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            format!("Unknown tool: {}", other)
+                format!("Unknown tool: {}", other)
+            }
         }
-    }
+    })
 }
 
 /// Parse text-based tool calls from LLM output.
@@ -1897,6 +2062,18 @@ async fn chat(
 
     let target_mode = target.as_deref().unwrap_or("EGO");
     let tools = chat_tool_definitions(&state.registry);
+
+    // Diagnostic: log router status for non-streaming chat
+    let router_status = router.status();
+    tracing::info!(
+        "chat: target_mode={}, tool_count={}, router_status=[ego={}, ego_provider={:?}, superego={}, local_http={}]",
+        target_mode,
+        tools.len(),
+        router_status.has_ego,
+        router_status.ego_provider,
+        router_status.has_superego,
+        router_status.has_local_http,
+    );
 
     // First request — route based on target
     let response = if target_mode == "ID" {
@@ -2015,10 +2192,17 @@ async fn chat_stream(
     let target_mode = target.as_deref().unwrap_or("EGO");
     let tools = chat_tool_definitions(&state.registry);
 
-    tracing::debug!(
-        "chat_stream: target_mode={}, has_tools={}",
+    // Diagnostic: log router status at the point of each chat request
+    let router_status = router.status();
+    tracing::info!(
+        "chat_stream: target_mode={}, tool_count={}, router_status=[ego={}, ego_provider={:?}, superego={}, local_http={}], message_preview={:?}",
         target_mode,
-        !tools.is_empty()
+        tools.len(),
+        router_status.has_ego,
+        router_status.ego_provider,
+        router_status.has_superego,
+        router_status.has_local_http,
+        &message.chars().take(80).collect::<String>(),
     );
 
     // For simple (no-tool) streaming, use the streaming path.
@@ -2996,6 +3180,24 @@ fn determine_ego_provider(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize tracing subscriber so all tracing::info!/debug!/warn! calls produce output.
+    // Controlled by RUST_LOG env var; defaults to info level for abigail crates.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new(
+                    "abigail_router=debug,abigail_core=info,abigail_app=debug,abigail_capabilities=debug",
+                )
+            }),
+        )
+        .with_target(true)
+        .with_thread_ids(false)
+        .with_file(true)
+        .with_line_number(true)
+        .init();
+
+    tracing::info!("Abigail starting up — tracing initialized");
+
     let config = get_config();
 
     // Initialize the Hive Identity Manager
@@ -3115,7 +3317,63 @@ pub fn run() {
     // Capture data_dir before config is moved into AppState
     let data_dir = config.data_dir.clone();
 
-    let subagent_manager = SubagentManager::new(Arc::new(router.clone()));
+    let mut subagent_manager = SubagentManager::new(Arc::new(router.clone()));
+
+    // Register built-in subagents
+    subagent_manager.register(SubagentDefinition {
+        id: "research".into(),
+        name: "Research Agent".into(),
+        description: "Searches the web for current information using Tavily and Perplexity. \
+                      Use for fact-checking, current events, and research questions."
+            .into(),
+        capabilities: vec!["web_search".into(), "perplexity_search".into()],
+        provider: SubagentProvider::SameAsEgo,
+    });
+
+    subagent_manager.register(SubagentDefinition {
+        id: "privacy".into(),
+        name: "Privacy Agent".into(),
+        description: "Handles PII-sensitive queries locally without sending data to the cloud. \
+                      Use when the user's message contains personal information, credentials, \
+                      or sensitive data that should not leave the device."
+            .into(),
+        capabilities: vec![],
+        provider: SubagentProvider::SameAsId,
+    });
+
+    subagent_manager.register(SubagentDefinition {
+        id: "file_ops".into(),
+        name: "File Operations Agent".into(),
+        description: "Reads, writes, searches, and lists files and directories. Also executes \
+                      shell commands. Use for filesystem tasks and local command execution."
+            .into(),
+        capabilities: vec![
+            "read_file".into(),
+            "write_file".into(),
+            "list_directory".into(),
+            "search_files".into(),
+            "run_command".into(),
+        ],
+        provider: SubagentProvider::SameAsId,
+    });
+
+    subagent_manager.register(SubagentDefinition {
+        id: "external_comm".into(),
+        name: "External Communication Agent".into(),
+        description: "Handles all external communication: email (fetch/send), HTTP requests, \
+                      and voice I/O (when available). Use when the user wants to send/receive \
+                      email, make web requests, or interact via voice."
+            .into(),
+        capabilities: vec![
+            "fetch_emails".into(),
+            "send_email".into(),
+            "classify_importance".into(),
+            "create_filter".into(),
+            "http_get".into(),
+            "http_post".into(),
+        ],
+        provider: SubagentProvider::SameAsEgo,
+    });
 
     let state = AppState {
         config: RwLock::new(config),

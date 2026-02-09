@@ -6,12 +6,13 @@
 use abigail_capabilities::cognitive::{
     CompletionRequest, CompletionResponse, Message, ToolDefinition,
 };
+use serde::Serialize;
 use std::sync::Arc;
 
 use crate::router::IdEgoRouter;
 
 /// Which LLM provider backs a subagent.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum SubagentProvider {
     /// Use the main Ego provider.
     SameAsEgo,
@@ -22,7 +23,7 @@ pub enum SubagentProvider {
 }
 
 /// Declares a subagent's identity, capabilities, and constraints.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SubagentDefinition {
     /// Unique identifier for this subagent.
     pub id: String,

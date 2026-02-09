@@ -482,15 +482,26 @@ impl IdEgoRouter {
             tracing::info!("route_stream_with_tools: attempting Ego stream");
 
             // Buffer Ego's stream output to prevent partial token leakage on failure.
-            // We use a side channel so that if Ego errors mid-stream, we can discard
-            // the partial tokens and give Id a clean channel instead.
+            // A collector task drains the side channel concurrently to avoid deadlock
+            // when the response exceeds the channel capacity. If Ego fails, we abort
+            // the collector so partial tokens are discarded.
             let (ego_tx, mut ego_rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+
+            let collector = tokio::spawn(async move {
+                let mut events = Vec::new();
+                while let Some(event) = ego_rx.recv().await {
+                    events.push(event);
+                }
+                events
+            });
 
             match ego.stream(&request, ego_tx).await {
                 Ok(response) => {
-                    // Ego succeeded — forward all buffered events to the real channel.
-                    while let Some(event) = ego_rx.recv().await {
-                        let _ = tx.send(event).await;
+                    // Ego succeeded — forward all collected events to the real channel.
+                    if let Ok(events) = collector.await {
+                        for event in events {
+                            let _ = tx.send(event).await;
+                        }
                     }
                     return Ok(response);
                 }
@@ -499,8 +510,8 @@ impl IdEgoRouter {
                         "Ego stream failed for tool call, falling back to Id stream: {}",
                         e
                     );
-                    // Discard any partial tokens from the Ego attempt by dropping ego_rx.
-                    drop(ego_rx);
+                    // Discard any partial tokens by aborting the collector task.
+                    collector.abort();
 
                     // Fall back to Id streaming with a clean channel
                     match self.id.stream(&request, tx.clone()).await {
