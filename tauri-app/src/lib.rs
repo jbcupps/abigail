@@ -10,7 +10,7 @@ use abigail_core::{
     TrinityConfig, Verifier,
 };
 use abigail_memory::{Memory, MemoryStore};
-use abigail_router::IdEgoRouter;
+use abigail_router::{IdEgoRouter, SubagentManager};
 use abigail_skills::channel::EventBus;
 use abigail_skills::protocol::mcp::{HttpMcpClient, McpTool};
 use abigail_skills::{MissingSkillSecret, SkillExecutor, SkillRegistry, ToolParams};
@@ -153,6 +153,8 @@ struct AppState {
     identity_manager: Arc<IdentityManager>,
     /// Currently active agent UUID (None if no agent loaded)
     active_agent_id: RwLock<Option<String>>,
+    /// Subagent manager for delegating tasks to specialized subagents
+    subagent_manager: RwLock<SubagentManager>,
 }
 
 fn get_config() -> AppConfig {
@@ -1179,7 +1181,7 @@ fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
         config.routing_mode
     );
 
-    let mut new_router = IdEgoRouter::with_provider(
+    let mut new_router = IdEgoRouter::new(
         config.local_llm_base_url.clone(),
         ego_name.as_deref(),
         ego_key,
@@ -1195,8 +1197,16 @@ fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
 
     drop(vault);
     drop(config);
+    let router_arc = Arc::new(new_router.clone());
     let mut router = state.router.write().map_err(|e| e.to_string())?;
     *router = new_router;
+    drop(router);
+
+    // Keep subagent manager's router reference in sync
+    if let Ok(mut mgr) = state.subagent_manager.write() {
+        mgr.update_router(router_arc);
+    }
+
     Ok(())
 }
 
@@ -2039,18 +2049,47 @@ async fn chat_stream(
         let _ = forward_handle.await;
         response.content
     } else {
-        tracing::debug!("chat_stream: using Ego mode with {} tools", tools.len());
-        // Ego mode: first request with tools (non-streaming to capture tool calls)
+        tracing::info!(
+            "chat_stream: using Ego streaming-first path with {} tools",
+            tools.len()
+        );
+
+        // Ego mode: stream directly with tools. The router's route_stream_with_tools()
+        // handles streaming with inline tool call accumulation and fallback chain
+        // (Ego stream → Id stream → non-streaming).
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+        let app_clone = app.clone();
+
+        let forward_handle = tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                match event {
+                    StreamEvent::Token(token) => {
+                        let _ =
+                            app_clone.emit("chat-token", serde_json::json!({ "token": token }));
+                    }
+                    StreamEvent::Done(_) => {
+                        let _ =
+                            app_clone.emit("chat-token", serde_json::json!({ "done": true }));
+                    }
+                }
+            }
+        });
+
         let response = router
-            .route_with_tools(messages.clone(), tools.clone())
+            .route_stream_with_tools(messages.clone(), tools.clone(), tx)
             .await
             .map_err(|e| {
-                tracing::debug!("chat_stream: Ego route_with_tools error: {}", e);
+                tracing::warn!("chat_stream: Ego streaming failed: {}", e);
                 e.to_string()
             })?;
+        let _ = forward_handle.await;
 
+        // If the streaming response included tool calls, execute them and stream a follow-up
         if let Some(ref tool_calls) = response.tool_calls {
-            // Execute tools (non-streaming)
+            tracing::info!(
+                "chat_stream: Ego returned {} tool call(s), executing",
+                tool_calls.len()
+            );
             let mut tool_results = Vec::new();
             for tc in tool_calls {
                 let result = execute_tool_call(&state, &app, tc).await;
@@ -2070,39 +2109,34 @@ async fn chat_stream(
                 ));
             }
 
-            // Stream the follow-up response
-            let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
-            let app_clone = app.clone();
+            // Stream the follow-up response after tool execution
+            let (tx2, mut rx2) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+            let app_clone2 = app.clone();
 
-            let forward_handle = tokio::spawn(async move {
-                while let Some(event) = rx.recv().await {
+            let forward_handle2 = tokio::spawn(async move {
+                while let Some(event) = rx2.recv().await {
                     match event {
                         StreamEvent::Token(token) => {
-                            let _ =
-                                app_clone.emit("chat-token", serde_json::json!({ "token": token }));
+                            let _ = app_clone2
+                                .emit("chat-token", serde_json::json!({ "token": token }));
                         }
                         StreamEvent::Done(_) => {
-                            let _ =
-                                app_clone.emit("chat-token", serde_json::json!({ "done": true }));
+                            let _ = app_clone2
+                                .emit("chat-token", serde_json::json!({ "done": true }));
                         }
                     }
                 }
             });
 
+            tracing::info!("chat_stream: streaming follow-up after tool execution");
             let follow_up = router
-                .route_stream_with_tools(messages, tools, tx)
+                .route_stream(messages, tx2)
                 .await
                 .map_err(|e| e.to_string())?;
-            let _ = forward_handle.await;
+            let _ = forward_handle2.await;
             follow_up.content
         } else {
-            // No tool calls — the initial response was already the final answer.
-            // We didn't stream it, so emit it now as a single token.
-            let _ = app.emit(
-                "chat-token",
-                serde_json::json!({ "token": response.content }),
-            );
-            let _ = app.emit("chat-token", serde_json::json!({ "done": true }));
+            tracing::info!("chat_stream: Ego response complete (no tool calls)");
             response.content
         }
     };
@@ -2694,6 +2728,22 @@ fn complete_emergence(state: tauri::State<AppState>) -> Result<(), String> {
         b.complete_emergence().map_err(|e| e.to_string())?;
     }
 
+    // Write operational (non-constitutional) documents to docs_dir
+    {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let docs_dir = &config.docs_dir;
+        let _ = std::fs::create_dir_all(docs_dir);
+        let _ = std::fs::write(
+            docs_dir.join("capabilities.md"),
+            abigail_core::templates::CAPABILITIES_MD,
+        );
+        let _ = std::fs::write(
+            docs_dir.join("triangle_ethics_operational.md"),
+            abigail_core::templates::TRIANGLE_ETHICS_OPERATIONAL_MD,
+        );
+        tracing::info!("Wrote operational documents (capabilities.md, triangle_ethics_operational.md) to {:?}", docs_dir);
+    }
+
     // Write trinity config and mark birth complete with timestamp
     {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
@@ -2816,6 +2866,79 @@ fn get_birth_transcript(state: tauri::State<AppState>, agent_id: String) -> Resu
         .map_err(|e| format!("Failed to decrypt transcript: {}", e))?;
 
     String::from_utf8(data).map_err(|e| format!("Invalid transcript encoding: {}", e))
+}
+
+// ── Subagent Management ──────────────────────────────────────────────
+
+/// Serializable subagent info for the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubagentInfo {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub capabilities: Vec<String>,
+}
+
+/// List all registered subagent definitions.
+#[tauri::command]
+fn list_subagents(state: tauri::State<AppState>) -> Result<Vec<SubagentInfo>, String> {
+    let mgr = state.subagent_manager.read().map_err(|e| e.to_string())?;
+    Ok(mgr
+        .list()
+        .iter()
+        .map(|d| SubagentInfo {
+            id: d.id.clone(),
+            name: d.name.clone(),
+            description: d.description.clone(),
+            capabilities: d.capabilities.clone(),
+        })
+        .collect())
+}
+
+/// Delegate a task to a specific subagent by id.
+#[tauri::command]
+async fn delegate_to_subagent(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    message: String,
+) -> Result<String, String> {
+    // Extract the router and subagent definition before the async boundary
+    // to avoid holding the RwLock across await (RwLockReadGuard is !Send).
+    let (router, def) = {
+        let mgr = state.subagent_manager.read().map_err(|e| e.to_string())?;
+        let def = mgr
+            .list()
+            .iter()
+            .find(|d| d.id == id)
+            .cloned()
+            .ok_or_else(|| format!("Subagent '{}' not found", id))?;
+        let router = state.router.read().map_err(|e| e.to_string())?.clone();
+        (router, def)
+    };
+
+    let messages = vec![abigail_capabilities::cognitive::Message::new("user", &message)];
+
+    // Delegate using the extracted router based on the subagent's provider
+    let response = match &def.provider {
+        abigail_router::SubagentProvider::SameAsEgo => {
+            router
+                .route_with_tools(messages, vec![])
+                .await
+                .map_err(|e| e.to_string())?
+        }
+        abigail_router::SubagentProvider::SameAsId => {
+            router.id_only(messages).await.map_err(|e| e.to_string())?
+        }
+        abigail_router::SubagentProvider::Custom(_, _) => {
+            // Custom providers not yet implemented — fall back to Ego route
+            router
+                .route_with_tools(messages, vec![])
+                .await
+                .map_err(|e| e.to_string())?
+        }
+    };
+
+    Ok(response.content)
 }
 
 /// Determine the best Ego provider and API key from config + secrets vault.
@@ -2980,6 +3103,8 @@ pub fn run() {
     // Capture data_dir before config is moved into AppState
     let data_dir = config.data_dir.clone();
 
+    let subagent_manager = SubagentManager::new(Arc::new(router.clone()));
+
     let state = AppState {
         config: RwLock::new(config),
         birth: RwLock::new(None),
@@ -2991,6 +3116,7 @@ pub fn run() {
         hive_secrets,
         identity_manager,
         active_agent_id: RwLock::new(None),
+        subagent_manager: RwLock::new(subagent_manager),
     };
 
     // Clone event_bus before setup since state isn't available inside setup callback
@@ -3119,6 +3245,9 @@ pub fn run() {
             complete_emergence,
             sign_agent_with_hive,
             get_birth_transcript,
+            // Subagent management
+            list_subagents,
+            delegate_to_subagent,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

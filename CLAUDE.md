@@ -138,3 +138,13 @@ All workspace crates inherit via `version.workspace = true`.
 - Linux: `~/.local/share/abigail/Abigail/`
 
 Contains: `config.json`, `keys.bin` (DPAPI), `secrets.bin` (DPAPI), `external_pubkey.bin`, `abigail_seed.db` (SQLite), `docs/` (signed constitutional docs)
+
+## Known Issues
+
+### Ego Router
+The Ego (cloud LLM) router has been refactored to streaming-first but may still have edge cases.
+Debug with `RUST_LOG=abigail_router=debug`. Key diagnostics:
+- `get_router_status` Tauri command returns current Id/Ego/Superego state
+- If Ego shows as unconfigured after birth, check TrinityConfig in config.json
+- CandleProvider stub returns a helpful message instead of erroring when no local LLM exists
+- The `chat_stream` Ego path now streams from the start instead of doing a non-streaming initial request

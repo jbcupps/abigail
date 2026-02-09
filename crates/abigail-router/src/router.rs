@@ -47,6 +47,16 @@ impl std::fmt::Display for EgoProvider {
     }
 }
 
+/// Structured snapshot of the router's configuration for diagnostics and UI display.
+#[derive(Debug, Clone)]
+pub struct RouterStatusInfo {
+    pub has_ego: bool,
+    pub ego_provider: Option<String>,
+    pub has_superego: bool,
+    pub has_local_http: bool,
+    pub mode: RoutingMode,
+}
+
 /// Routes user messages: Id (local) classifies; ROUTINE stays local, COMPLEX goes to Ego if configured.
 ///
 /// Id can be either:
@@ -91,55 +101,9 @@ impl IdEgoRouter {
         }
     }
 
-    /// Create a new router with a specific cloud provider for Ego.
-    ///
-    /// # Arguments
-    /// * `local_llm_base_url` - Base URL for local LLM server
-    /// * `ego_provider_name` - Provider name: "openai", "anthropic", "perplexity", "xai", "google"
-    /// * `ego_api_key` - API key for the chosen provider
-    /// * `mode` - Routing mode (EgoPrimary or IdPrimary)
-    pub fn with_provider(
-        local_llm_base_url: Option<String>,
-        ego_provider_name: Option<&str>,
-        ego_api_key: Option<String>,
-        mode: RoutingMode,
-    ) -> Self {
-        let (ego, ego_provider) = build_ego_provider(ego_provider_name, ego_api_key);
-        let (id, local_http) = build_id_provider(local_llm_base_url);
-
-        Self {
-            id,
-            ego,
-            ego_provider,
-            superego: None,
-            local_http,
-            mode,
-        }
-    }
-
     /// Create a new router with auto-detected model name for local LLM.
     /// This is the preferred constructor when a local LLM URL is provided.
     pub async fn new_auto_detect(
-        local_llm_base_url: Option<String>,
-        ego_provider_name: Option<&str>,
-        ego_api_key: Option<String>,
-        mode: RoutingMode,
-    ) -> Self {
-        let (ego, ego_provider) = build_ego_provider(ego_provider_name, ego_api_key);
-        let (id, local_http) = build_id_provider_auto_detect(local_llm_base_url).await;
-
-        Self {
-            id,
-            ego,
-            ego_provider,
-            superego: None,
-            local_http,
-            mode,
-        }
-    }
-
-    /// Create a new router with auto-detected local LLM and a specific cloud provider.
-    pub async fn with_provider_auto_detect(
         local_llm_base_url: Option<String>,
         ego_provider_name: Option<&str>,
         ego_api_key: Option<String>,
@@ -185,6 +149,17 @@ impl IdEgoRouter {
     /// Check if Superego (safety layer) is configured.
     pub fn has_superego(&self) -> bool {
         self.superego.is_some()
+    }
+
+    /// Return a structured status snapshot of the router's configuration.
+    pub fn status(&self) -> RouterStatusInfo {
+        RouterStatusInfo {
+            has_ego: self.ego.is_some(),
+            ego_provider: self.ego_provider.as_ref().map(|p| p.to_string()),
+            has_superego: self.superego.is_some(),
+            has_local_http: self.local_http.is_some(),
+            mode: self.mode,
+        }
     }
 
     /// Builder method: attach a Superego provider to this router.
@@ -673,7 +648,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_provider_anthropic() {
-        let router = IdEgoRouter::with_provider(
+        let router = IdEgoRouter::new(
             None,
             Some("anthropic"),
             Some("test-key".to_string()),
@@ -685,7 +660,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_provider_perplexity() {
-        let router = IdEgoRouter::with_provider(
+        let router = IdEgoRouter::new(
             None,
             Some("perplexity"),
             Some("pplx-key".to_string()),
@@ -697,7 +672,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_provider_xai() {
-        let router = IdEgoRouter::with_provider(
+        let router = IdEgoRouter::new(
             None,
             Some("xai"),
             Some("xai-key".to_string()),
@@ -709,7 +684,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_provider_google() {
-        let router = IdEgoRouter::with_provider(
+        let router = IdEgoRouter::new(
             None,
             Some("google"),
             Some("google-key".to_string()),
@@ -721,7 +696,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_provider_openai() {
-        let router = IdEgoRouter::with_provider(
+        let router = IdEgoRouter::new(
             None,
             Some("openai"),
             Some("test-key".to_string()),
@@ -734,7 +709,7 @@ mod tests {
     #[tokio::test]
     async fn test_with_provider_none_key() {
         let router =
-            IdEgoRouter::with_provider(None, Some("anthropic"), None, RoutingMode::EgoPrimary);
+            IdEgoRouter::new(None, Some("anthropic"), None, RoutingMode::EgoPrimary);
         assert!(!router.has_ego());
         assert_eq!(router.ego_provider_name(), None);
     }

@@ -1,6 +1,6 @@
 //! Local Phi-3 via Candle — STUBBED for MVP.
-//! Handles classification for router, but returns error for actual chat (no local LLM configured).
-//! Replace with real Candle inference later.
+//! Handles classification for router. Returns a helpful configuration message for
+//! actual chat requests (no local LLM configured). Replace with real Candle inference later.
 
 use crate::cognitive::provider::{CompletionRequest, CompletionResponse, LlmProvider};
 use async_trait::async_trait;
@@ -53,9 +53,14 @@ impl LlmProvider for CandleProvider {
             });
         }
 
-        // For actual chat requests - return error instead of echo
-        Err(anyhow::anyhow!(
-            "No local LLM configured. Please install Ollama or set LOCAL_LLM_BASE_URL environment variable."
-        ))
+        // For actual chat requests, return a helpful message instead of an error.
+        // This ensures the fallback chain always produces a user-visible response
+        // when Ego fails and Id (CandleProvider stub) is the only option.
+        Ok(CompletionResponse {
+            content: "I need a cloud API key or local LLM to answer that. \
+                      You can configure one in Settings or during the birth sequence."
+                .into(),
+            tool_calls: None,
+        })
     }
 }
