@@ -31,6 +31,12 @@ pub fn build_system_prompt(docs_dir: &Path, agent_name: &Option<String>) -> Stri
     let soul = read_or_fallback(docs_dir, "soul.md", templates::SOUL_MD);
     let ethics = read_or_fallback(docs_dir, "ethics.md", templates::ETHICS_MD);
     let instincts = read_or_fallback(docs_dir, "instincts.md", templates::INSTINCTS_MD);
+    let capabilities = read_or_fallback(docs_dir, "capabilities.md", templates::CAPABILITIES_MD);
+    let triangle_ops = read_or_fallback(
+        docs_dir,
+        "triangle_ethics_operational.md",
+        templates::TRIANGLE_ETHICS_OPERATIONAL_MD,
+    );
 
     let greeting = match agent_name {
         Some(name) => format!("You are {}.\n\n", name),
@@ -38,11 +44,13 @@ pub fn build_system_prompt(docs_dir: &Path, agent_name: &Option<String>) -> Stri
     };
 
     format!(
-        "{greeting}{soul}\n\n{ethics}\n\n{instincts}\n{operational}",
+        "{greeting}{soul}\n\n{ethics}\n\n{instincts}\n\n{capabilities}\n\n{triangle_ops}\n{operational}",
         greeting = greeting,
         soul = soul.trim(),
         ethics = ethics.trim(),
         instincts = instincts.trim(),
+        capabilities = capabilities.trim(),
+        triangle_ops = triangle_ops.trim(),
         operational = OPERATIONAL_PROMPT.trim(),
     )
 }
