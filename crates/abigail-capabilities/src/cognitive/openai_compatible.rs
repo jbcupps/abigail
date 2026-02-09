@@ -247,6 +247,26 @@ struct StreamChoice {
 struct StreamDelta {
     #[serde(default)]
     content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<StreamToolCallDelta>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamToolCallDelta {
+    #[serde(default)]
+    index: usize,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<StreamFunctionDelta>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamFunctionDelta {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
 }
 
 #[async_trait]
@@ -336,35 +356,75 @@ impl LlmProvider for OpenAiCompatibleProvider {
         }
 
         let mut full_content = String::new();
-        let mut stream = response.bytes_stream();
+        let mut tool_call_map: std::collections::HashMap<usize, (String, String, String)> =
+            std::collections::HashMap::new();
+        let mut byte_stream = response.bytes_stream();
+        let mut buffer = String::new();
 
-        while let Some(chunk) = stream.next().await {
+        while let Some(chunk) = byte_stream.next().await {
             let bytes = chunk?;
-            let text = String::from_utf8_lossy(&bytes);
+            buffer.push_str(&String::from_utf8_lossy(&bytes));
 
-            for line in text.lines() {
-                let line = line.trim();
-                if line.is_empty() || !line.starts_with("data: ") {
+            // Process complete SSE lines
+            while let Some(pos) = buffer.find('\n') {
+                let line = buffer[..pos].trim().to_string();
+                buffer = buffer[pos + 1..].to_string();
+
+                if line.is_empty() {
                     continue;
                 }
-                let json_str = &line[6..];
-                if json_str == "[DONE]" {
-                    break;
-                }
-                if let Ok(chunk) = serde_json::from_str::<ChatStreamChunk>(json_str) {
-                    if let Some(choice) = chunk.choices.first() {
-                        if let Some(ref content) = choice.delta.content {
-                            full_content.push_str(content);
-                            let _ = tx.send(StreamEvent::Token(content.clone())).await;
+                if let Some(data) = line.strip_prefix("data: ") {
+                    if data == "[DONE]" {
+                        break;
+                    }
+                    if let Ok(chunk) = serde_json::from_str::<ChatStreamChunk>(data) {
+                        if let Some(choice) = chunk.choices.first() {
+                            if let Some(ref content) = choice.delta.content {
+                                full_content.push_str(content);
+                                let _ = tx.send(StreamEvent::Token(content.clone())).await;
+                            }
+                            if let Some(ref tc_deltas) = choice.delta.tool_calls {
+                                for tc_delta in tc_deltas {
+                                    let entry =
+                                        tool_call_map.entry(tc_delta.index).or_insert_with(|| {
+                                            (String::new(), String::new(), String::new())
+                                        });
+                                    if let Some(ref id) = tc_delta.id {
+                                        entry.0 = id.clone();
+                                    }
+                                    if let Some(ref func) = tc_delta.function {
+                                        if let Some(ref name) = func.name {
+                                            entry.1 = name.clone();
+                                        }
+                                        if let Some(ref args) = func.arguments {
+                                            entry.2.push_str(args);
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
+        let tool_calls: Vec<ToolCall> = tool_call_map
+            .into_values()
+            .map(|(id, name, arguments)| ToolCall {
+                id,
+                name,
+                arguments,
+            })
+            .collect();
+        let tool_calls = if tool_calls.is_empty() {
+            None
+        } else {
+            Some(tool_calls)
+        };
+
         let response = CompletionResponse {
             content: full_content,
-            tool_calls: None,
+            tool_calls,
         };
         let _ = tx.send(StreamEvent::Done(response.clone())).await;
         Ok(response)
