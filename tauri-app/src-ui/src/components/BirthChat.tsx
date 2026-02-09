@@ -8,14 +8,16 @@ interface BirthChatResponse {
 }
 
 interface BirthAction {
-  type: "RequestApiKey" | "SoulReady" | "StageComplete";
+  type: "RequestApiKey" | "KeyStored" | "SoulReady" | "StageComplete";
   provider?: string;
+  validated?: boolean;
   preview?: string;
 }
 
 interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
+  variant?: "success" | "error";
 }
 
 interface BirthChatProps {
@@ -83,8 +85,19 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
       setRetryCount(0); // Reset retry count on success
       setLastMessage(null);
 
-      if (response.action && onAction) {
-        onAction(response.action);
+      if (response.action) {
+        // Insert success message for KeyStored actions
+        if (response.action.type === "KeyStored" && response.action.provider) {
+          const validatedText = response.action.validated ? " and validated" : "";
+          setMessages(m => [...m, {
+            role: "system",
+            content: `${response.action!.provider!.toUpperCase()} API key stored${validatedText} successfully.`,
+            variant: "success",
+          }]);
+        }
+        if (onAction) {
+          onAction(response.action);
+        }
       }
     } catch (e) {
       const errorMsg = String(e);
@@ -168,7 +181,9 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
               </div>
             )}
             {msg.role === "system" && (
-              <div className="text-red-400 text-sm">{msg.content}</div>
+              <div className={`text-sm ${msg.variant === "success" ? "text-green-400" : "text-red-400"}`}>
+                {msg.content}
+              </div>
             )}
           </div>
         ))}
