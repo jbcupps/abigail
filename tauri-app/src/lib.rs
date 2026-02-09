@@ -2252,8 +2252,10 @@ async fn birth_chat(
             let result = execute_tool_call(&state, &app, tc).await;
 
             // Detect successful store_provider_key calls
-            if matches!(tc.name.as_str(), "store_provider_key" | "update_provider_key")
-                && result.starts_with("Successfully")
+            if matches!(
+                tc.name.as_str(),
+                "store_provider_key" | "update_provider_key"
+            ) && result.starts_with("Successfully")
             {
                 let args: serde_json::Value =
                     serde_json::from_str(&tc.arguments).unwrap_or_default();
@@ -2314,15 +2316,9 @@ async fn birth_chat(
         // Re-read router (tool execution may have rebuilt it with Ego)
         let router = state.router.read().map_err(|e| e.to_string())?.clone();
         let follow_up = if router.has_ego() {
-            router
-                .route(messages)
-                .await
-                .map_err(|e| e.to_string())?
+            router.route(messages).await.map_err(|e| e.to_string())?
         } else {
-            router
-                .id_only(messages)
-                .await
-                .map_err(|e| e.to_string())?
+            router.id_only(messages).await.map_err(|e| e.to_string())?
         };
 
         // Record the full exchange in birth conversation
