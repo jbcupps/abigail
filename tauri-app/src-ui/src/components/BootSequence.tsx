@@ -54,7 +54,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const handleStart = async () => {
     setError("");
     setStage("Darkness");
-    setMessage("Initializing...");
+    setMessage("Preparing secure environment...");
 
     try {
       // 1. Initialize soul (copy templates, create internal keyring)
@@ -231,6 +231,12 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   };
 
   const handleGenesisDone = async () => {
+    // Skip extraction if data was already populated by recommend_crystallize tool
+    if (genesisName && genesisPurpose && genesisPersonality) {
+      setStage("SoulPreview");
+      return;
+    }
+
     // Extract identity from Genesis conversation via LLM
     setMessage("Extracting identity from conversation...");
     try {
@@ -279,6 +285,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
       // Link the birth-generated keypair into the Hive trust chain
       setMessage("Registering with Hive...");
       await invoke("sign_agent_with_hive");
+      setMessage("Hive trust chain established.");
 
       setStage("Life");
       setMessage("I am awake.");
@@ -310,11 +317,20 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
           <div className="p-6 max-w-2xl">
             <div className="border border-yellow-500 bg-yellow-500/10 p-4 rounded mb-6">
               <h2 className="text-yellow-500 text-lg font-bold mb-2">
-                CRITICAL: SAVE YOUR PRIVATE KEY
+                YOUR CONSTITUTIONAL SIGNING KEY
               </h2>
               <p className="text-yellow-400 text-sm mb-2">
                 This is the ONLY time you will see this key. Abigail does NOT store
                 it.
+              </p>
+              <p className="text-yellow-400/80 text-sm mt-3">
+                This key signs Abigail's constitutional documents — her soul, ethics,
+                and instincts. These documents define who she is and what she will
+                never do. Abigail maintains a separate internal keyring for day-to-day
+                operations, stored securely on your device — you don't need to manage
+                that. This signing key is yours alone. It proves you authored
+                Abigail's constitution and lets you re-sign documents if files are
+                ever corrupted.
               </p>
             </div>
 
@@ -350,7 +366,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               <h3 className="text-red-400 font-bold mb-2">SECURITY WARNINGS</h3>
               <ul className="text-red-300 text-sm space-y-2">
                 <li>
-                  - <strong>This key proves you are Abigail's legitimate mentor.</strong>
+                  - <strong>This key proves you authored Abigail's constitutional documents and are her legitimate mentor.</strong>
                 </li>
                 <li>
                   - <strong>Store it securely</strong> (password manager, encrypted
@@ -442,6 +458,13 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               ref={birthChatRef}
               stage="Connectivity"
               onStageAdvance={handleConnectivityAdvance}
+              onAction={(action) => {
+                if (action.type === "KeyStored" && action.provider) {
+                  setStoredProviders((prev) =>
+                    prev.includes(action.provider!) ? prev : [...prev, action.provider!]
+                  );
+                }
+              }}
             />
 
             {activeApiKeyProvider && (
@@ -460,6 +483,19 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
             <BirthChat
               stage="Genesis"
               onStageAdvance={handleGenesisDone}
+              onAction={(action) => {
+                if (action.type === "SoulReady" && action.preview) {
+                  try {
+                    const data = JSON.parse(action.preview);
+                    if (data.name) setGenesisName(data.name);
+                    if (data.purpose) setGenesisPurpose(data.purpose);
+                    if (data.personality) setGenesisPersonality(data.personality);
+                    setStage("SoulPreview");
+                  } catch {
+                    // If preview isn't valid JSON, ignore and let manual flow continue
+                  }
+                }
+              }}
             />
           </div>
         )}

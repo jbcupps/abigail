@@ -1555,6 +1555,23 @@ fn chat_tool_definitions(
     tools
 }
 
+/// Auto-detect provider from API key prefix.
+fn detect_provider_from_prefix(key: &str) -> Option<&'static str> {
+    if key.starts_with("sk-ant-") {
+        Some("anthropic")
+    } else if key.starts_with("sk-") {
+        Some("openai")
+    } else if key.starts_with("xai-") {
+        Some("xai")
+    } else if key.starts_with("AIza") {
+        Some("google")
+    } else if key.starts_with("tvly-") {
+        Some("tavily")
+    } else {
+        None
+    }
+}
+
 /// Execute a tool call from the LLM and return the result string.
 async fn execute_tool_call(
     state: &tauri::State<'_, AppState>,
@@ -1567,12 +1584,22 @@ async fn execute_tool_call(
                 Ok(v) => v,
                 Err(e) => return format!("Error parsing arguments: {}", e),
             };
-            let provider = args["provider"].as_str().unwrap_or("");
+            let raw_provider = args["provider"].as_str().unwrap_or("");
             let key = args["key"].as_str().unwrap_or("");
 
-            if provider.is_empty() || key.is_empty() {
-                return "Error: provider and key are required".to_string();
+            if key.is_empty() {
+                return "Error: key is required".to_string();
             }
+
+            // Auto-detect provider from key prefix if provider is "auto" or empty
+            let provider = if raw_provider.is_empty() || raw_provider == "auto" {
+                match detect_provider_from_prefix(key) {
+                    Some(detected) => detected,
+                    None => return "Error: could not auto-detect provider from key prefix. Please specify the provider explicitly.".to_string(),
+                }
+            } else {
+                raw_provider
+            };
 
             // Validate the key first
             if let Err(e) =
@@ -1623,6 +1650,24 @@ async fn execute_tool_call(
             format!(
                 "Successfully validated and stored {} API key in secure vault.",
                 provider
+            )
+        }
+        "recommend_crystallize" => {
+            let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
+                Ok(v) => v,
+                Err(e) => return format!("Error parsing arguments: {}", e),
+            };
+            let name = args["name"].as_str().unwrap_or("");
+            let purpose = args["purpose"].as_str().unwrap_or("");
+            let personality = args["personality"].as_str().unwrap_or("");
+
+            if name.is_empty() || purpose.is_empty() || personality.is_empty() {
+                return "Error: name, purpose, and personality are all required".to_string();
+            }
+
+            format!(
+                "Crystallization recommended with name='{}', purpose='{}', personality='{}'.",
+                name, purpose, personality
             )
         }
         other => {
@@ -2125,6 +2170,7 @@ pub struct BirthChatResponse {
 #[serde(tag = "type")]
 pub enum BirthAction {
     RequestApiKey { provider: String },
+    KeyStored { provider: String, validated: bool },
     SoulReady { preview: String },
     StageComplete,
 }
@@ -2179,21 +2225,72 @@ async fn birth_chat(
         msgs
     };
 
-    // Route through local LLM only (Id)
+    // Route through Ego if available, otherwise Id only
     let router = state.router.read().map_err(|e| e.to_string())?.clone();
-    let response = router
-        .id_only(messages.clone())
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = if router.has_ego() {
+        router
+            .route(messages.clone())
+            .await
+            .map_err(|e| e.to_string())?
+    } else {
+        router
+            .id_only(messages.clone())
+            .await
+            .map_err(|e| e.to_string())?
+    };
 
     // Check for text-based tool calls (for local LLMs without native function calling)
     let (text_tool_calls, cleaned_content) = parse_text_tool_calls(&response.content);
+
+    // Track actions to return to frontend
+    let mut action: Option<BirthAction> = None;
 
     let final_content = if !text_tool_calls.is_empty() {
         // Execute text-based tool calls
         let mut tool_results = Vec::new();
         for tc in &text_tool_calls {
             let result = execute_tool_call(&state, &app, tc).await;
+
+            // Detect successful store_provider_key calls
+            if matches!(tc.name.as_str(), "store_provider_key" | "update_provider_key")
+                && result.starts_with("Successfully")
+            {
+                let args: serde_json::Value =
+                    serde_json::from_str(&tc.arguments).unwrap_or_default();
+                let raw_provider = args["provider"].as_str().unwrap_or("unknown");
+                let key = args["key"].as_str().unwrap_or("");
+                // Resolve auto-detected provider for the action
+                let resolved = if raw_provider == "auto" || raw_provider.is_empty() {
+                    detect_provider_from_prefix(key)
+                        .unwrap_or(raw_provider)
+                        .to_string()
+                } else {
+                    raw_provider.to_string()
+                };
+                action = Some(BirthAction::KeyStored {
+                    provider: resolved,
+                    validated: true,
+                });
+            }
+
+            // Detect recommend_crystallize calls (Issue 3)
+            if tc.name == "recommend_crystallize" {
+                let args: serde_json::Value =
+                    serde_json::from_str(&tc.arguments).unwrap_or_default();
+                let name = args["name"].as_str().unwrap_or("").to_string();
+                let purpose = args["purpose"].as_str().unwrap_or("").to_string();
+                let personality = args["personality"].as_str().unwrap_or("").to_string();
+                if !name.is_empty() && !purpose.is_empty() && !personality.is_empty() {
+                    let preview = serde_json::json!({
+                        "name": name,
+                        "purpose": purpose,
+                        "personality": personality,
+                    })
+                    .to_string();
+                    action = Some(BirthAction::SoulReady { preview });
+                }
+            }
+
             tool_results.push((tc.name.clone(), result));
         }
 
@@ -2214,8 +2311,19 @@ async fn birth_chat(
             &results_summary,
         ));
 
-        // Get follow-up response from Id to acknowledge the tool execution
-        let follow_up = router.id_only(messages).await.map_err(|e| e.to_string())?;
+        // Re-read router (tool execution may have rebuilt it with Ego)
+        let router = state.router.read().map_err(|e| e.to_string())?.clone();
+        let follow_up = if router.has_ego() {
+            router
+                .route(messages)
+                .await
+                .map_err(|e| e.to_string())?
+        } else {
+            router
+                .id_only(messages)
+                .await
+                .map_err(|e| e.to_string())?
+        };
 
         // Record the full exchange in birth conversation
         {
@@ -2240,7 +2348,7 @@ async fn birth_chat(
     Ok(BirthChatResponse {
         message: final_content,
         stage: stage.name().to_string(),
-        action: None,
+        action,
     })
 }
 
@@ -2263,6 +2371,25 @@ async fn store_provider_key(
     validate: Option<bool>,
 ) -> Result<StoreKeyResult, String> {
     let should_validate = validate.unwrap_or(true);
+
+    // Auto-detect provider from key prefix if provider is "auto" or empty
+    let provider = if provider.is_empty() || provider == "auto" {
+        match detect_provider_from_prefix(&key) {
+            Some(detected) => detected.to_string(),
+            None => {
+                return Ok(StoreKeyResult {
+                    success: false,
+                    provider,
+                    validated: false,
+                    error: Some(
+                        "Could not auto-detect provider from key prefix. Please specify the provider explicitly.".to_string(),
+                    ),
+                });
+            }
+        }
+    } else {
+        provider
+    };
 
     // Validate if requested
     if should_validate {
