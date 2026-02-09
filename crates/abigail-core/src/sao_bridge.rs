@@ -88,10 +88,7 @@ impl SaoBridgeClient {
 
         let body = RegisterRequest {
             agent_id: &self.agent_id,
-            pubkey: base64::Engine::encode(
-                &base64::engine::general_purpose::STANDARD,
-                pubkey,
-            ),
+            pubkey: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, pubkey),
             name: name.map(|n| n.to_string()),
         };
 

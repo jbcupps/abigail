@@ -352,6 +352,7 @@ mod tests {
             mcp_trust_policy: Default::default(),
             approved_skill_ids: Default::default(),
             trusted_skill_signers: Default::default(),
+            sao_endpoint: None,
         }
     }
 

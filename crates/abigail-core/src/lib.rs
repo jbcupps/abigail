@@ -17,7 +17,6 @@ pub use config::{
     AppConfig, EmailConfig, McpServerDefinition, McpTrustPolicy, RoutingMode, TrinityConfig,
     CONFIG_SCHEMA_VERSION,
 };
-pub use sao_bridge::{AgentState, SaoBridgeClient, SaoBridgeError};
 pub use document::{CoreDocument, DocumentTier};
 pub use error::{CoreError, Result};
 pub use global_config::{AgentEntry, GlobalConfig};
@@ -27,6 +26,7 @@ pub use keyring::{
     ExternalKeypairResult, Keyring, MasterKeyResult, SignatureMetadata,
 };
 pub use local_llm_url::validate_local_llm_url;
+pub use sao_bridge::{AgentState, SaoBridgeClient, SaoBridgeError};
 pub use secrets::SecretsVault;
 pub use superego::{check_message, check_search_query, SuperegoVerdict};
 pub use vault::{ExternalVault, ReadOnlyFileVault};

@@ -277,7 +277,6 @@ impl AppConfig {
             tracing::debug!("Migrated config from v3 to v4");
         }
 
-
         migrated
     }
 
