@@ -351,10 +351,20 @@ impl IdentityManager {
         // Sanitize the name for use as a directory (replace problematic chars)
         let safe_name: String = agent_name
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         let safe_name = safe_name.trim().to_string();
-        let safe_name = if safe_name.is_empty() { agent_id.to_string() } else { safe_name };
+        let safe_name = if safe_name.is_empty() {
+            agent_id.to_string()
+        } else {
+            safe_name
+        };
 
         #[cfg(windows)]
         let docs_base = {
@@ -364,8 +374,7 @@ impl IdentityManager {
         };
         #[cfg(not(windows))]
         let docs_base = {
-            let home = std::env::var("HOME")
-                .map_err(|_| "HOME environment variable not set")?;
+            let home = std::env::var("HOME").map_err(|_| "HOME environment variable not set")?;
             PathBuf::from(home).join("Documents")
         };
 

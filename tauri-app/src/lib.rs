@@ -120,7 +120,7 @@ fn redact_api_keys(text: &str) -> String {
             (?:xai-[A-Za-z0-9_-]{10,})               |   # xAI
             (?:pplx-[A-Za-z0-9_-]{10,})              |   # Perplexity
             (?:AIza[A-Za-z0-9_-]{10,})                    # Google
-            "
+            ",
         )
         .expect("redact regex")
     });
@@ -2003,7 +2003,11 @@ async fn chat_stream(
     let target_mode = target.as_deref().unwrap_or("EGO");
     let tools = chat_tool_definitions(&state.registry);
 
-    tracing::debug!("chat_stream: target_mode={}, has_tools={}", target_mode, !tools.is_empty());
+    tracing::debug!(
+        "chat_stream: target_mode={}, has_tools={}",
+        target_mode,
+        !tools.is_empty()
+    );
 
     // For simple (no-tool) streaming, use the streaming path.
     // For tool-calling, we do a non-streaming initial request then stream the follow-up.
@@ -2768,11 +2772,7 @@ fn complete_emergence(state: tauri::State<AppState>) -> Result<(), String> {
                                                 &enc_path, &content,
                                             )
                                         {
-                                            tracing::warn!(
-                                                "Failed to encrypt {}: {}",
-                                                doc_name,
-                                                e
-                                            );
+                                            tracing::warn!("Failed to encrypt {}: {}", doc_name, e);
                                         }
                                     }
                                 }
@@ -2804,10 +2804,7 @@ fn sign_agent_with_hive(state: tauri::State<AppState>) -> Result<(), String> {
 
 /// Read and decrypt the birth transcript for a given agent.
 #[tauri::command]
-fn get_birth_transcript(
-    state: tauri::State<AppState>,
-    agent_id: String,
-) -> Result<String, String> {
+fn get_birth_transcript(state: tauri::State<AppState>, agent_id: String) -> Result<String, String> {
     let docs_folder = state.identity_manager.create_documents_folder(&agent_id)?;
     let transcript_path = docs_folder.join("birth_transcript.enc");
 

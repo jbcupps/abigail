@@ -304,9 +304,8 @@ impl LlmProvider for OpenAiProvider {
                             }
                             if let Some(ref tc_deltas) = choice.delta.tool_calls {
                                 for tc_delta in tc_deltas {
-                                    let entry = tool_call_map
-                                        .entry(tc_delta.index)
-                                        .or_insert_with(|| {
+                                    let entry =
+                                        tool_call_map.entry(tc_delta.index).or_insert_with(|| {
                                             (String::new(), String::new(), String::new())
                                         });
                                     if let Some(ref id) = tc_delta.id {
