@@ -155,6 +155,10 @@ struct AppState {
     active_agent_id: RwLock<Option<String>>,
     /// Subagent manager for delegating tasks to specialized subagents
     subagent_manager: RwLock<SubagentManager>,
+    /// Browser automation capability (lazy-init, async-safe)
+    browser: Arc<tokio::sync::RwLock<abigail_capabilities::sensory::browser::BrowserCapability>>,
+    /// Enhanced HTTP client capability with sessions and cookies
+    http_client: Arc<tokio::sync::RwLock<abigail_capabilities::sensory::http_client::HttpClientCapability>>,
 }
 
 fn get_config() -> AppConfig {
@@ -1575,6 +1579,8 @@ fn list_missing_skill_secrets(
 /// Build tool definitions for the chat command, including registered skills.
 fn chat_tool_definitions(
     registry: &SkillRegistry,
+    browser: &abigail_capabilities::sensory::browser::BrowserCapability,
+    http_client: &abigail_capabilities::sensory::http_client::HttpClientCapability,
 ) -> Vec<abigail_capabilities::cognitive::ToolDefinition> {
     let mut tools = Vec::new();
 
@@ -1613,6 +1619,12 @@ fn chat_tool_definitions(
             "required": ["subagent_id", "task"]
         }),
     });
+
+    // Browser capability tools
+    tools.extend(browser.tool_definitions());
+
+    // HTTP client capability tools
+    tools.extend(http_client.tool_definitions());
 
     // Skill-provided tools
     if let Ok(manifests) = registry.list() {
@@ -1803,7 +1815,7 @@ fn execute_tool_call<'a>(
                 );
 
                 // Build system prompt and filtered tools (no locks held across await)
-                let (system_prompt, all_tools) = {
+                let system_prompt = {
                     let config = match state.config.read() {
                         Ok(c) => c,
                         Err(e) => return format!("Error reading config: {}", e),
@@ -1813,8 +1825,12 @@ fn execute_tool_call<'a>(
                         &config.agent_name,
                     );
                     drop(config);
-                    let tools = chat_tool_definitions(&state.registry);
-                    (prompt, tools)
+                    prompt
+                };
+                let all_tools = {
+                    let browser_guard = state.browser.read().await;
+                    let http_client_guard = state.http_client.read().await;
+                    chat_tool_definitions(&state.registry, &browser_guard, &http_client_guard)
                 };
 
                 // Look up subagent definition, clone router — drop all locks before await
@@ -1889,6 +1905,36 @@ fn execute_tool_call<'a>(
                         format!("Delegation to '{}' failed: {}", def.name, e)
                     }
                 }
+            }
+            name if name.starts_with("browser_") => {
+                let _ = app.emit(
+                    "chat-status",
+                    serde_json::json!({
+                        "status": "tool_executing",
+                        "tool": name,
+                    }),
+                );
+                let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
+                    Ok(v) => v,
+                    Err(e) => return format!("Error parsing arguments: {}", e),
+                };
+                let browser = state.browser.read().await;
+                browser.execute_tool(name, &args).await
+            }
+            name if name.starts_with("http_") && name != "http_get" && name != "http_post" => {
+                let _ = app.emit(
+                    "chat-status",
+                    serde_json::json!({
+                        "status": "tool_executing",
+                        "tool": name,
+                    }),
+                );
+                let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
+                    Ok(v) => v,
+                    Err(e) => return format!("Error parsing arguments: {}", e),
+                };
+                let http_client = state.http_client.read().await;
+                http_client.execute_tool(name, &args).await
             }
             other => {
                 // Check registered skills for matching tool name
@@ -2061,7 +2107,11 @@ async fn chat(
     ];
 
     let target_mode = target.as_deref().unwrap_or("EGO");
-    let tools = chat_tool_definitions(&state.registry);
+    let tools = {
+        let browser_guard = state.browser.read().await;
+        let http_client_guard = state.http_client.read().await;
+        chat_tool_definitions(&state.registry, &browser_guard, &http_client_guard)
+    };
 
     // Diagnostic: log router status for non-streaming chat
     let router_status = router.status();
@@ -2190,7 +2240,11 @@ async fn chat_stream(
     ];
 
     let target_mode = target.as_deref().unwrap_or("EGO");
-    let tools = chat_tool_definitions(&state.registry);
+    let tools = {
+        let browser_guard = state.browser.read().await;
+        let http_client_guard = state.http_client.read().await;
+        chat_tool_definitions(&state.registry, &browser_guard, &http_client_guard)
+    };
 
     // Diagnostic: log router status at the point of each chat request
     let router_status = router.status();
@@ -3361,8 +3415,8 @@ pub fn run() {
         id: "external_comm".into(),
         name: "External Communication Agent".into(),
         description: "Handles all external communication: email (fetch/send), HTTP requests, \
-                      and voice I/O (when available). Use when the user wants to send/receive \
-                      email, make web requests, or interact via voice."
+                      browser automation, and voice I/O (when available). Use when the user wants \
+                      to send/receive email, make web requests, browse websites, or interact via voice."
             .into(),
         capabilities: vec![
             "fetch_emails".into(),
@@ -3371,9 +3425,34 @@ pub fn run() {
             "create_filter".into(),
             "http_get".into(),
             "http_post".into(),
+            "http_request".into(),
+            "http_session_create".into(),
+            "http_session_close".into(),
+            "http_download".into(),
+            "browser_navigate".into(),
+            "browser_get_content".into(),
+            "browser_screenshot".into(),
+            "browser_click".into(),
+            "browser_type_text".into(),
+            "browser_fill_form".into(),
+            "browser_wait_for".into(),
+            "browser_evaluate_js".into(),
+            "browser_get_url".into(),
+            "browser_get_title".into(),
+            "browser_back".into(),
+            "browser_forward".into(),
+            "browser_close".into(),
         ],
         provider: SubagentProvider::SameAsEgo,
     });
+
+    // Initialize browser and HTTP client capabilities
+    let browser_cap = abigail_capabilities::sensory::browser::BrowserCapability::new(
+        abigail_capabilities::sensory::browser::BrowserCapabilityConfig::default(),
+    );
+    let http_client_cap = abigail_capabilities::sensory::http_client::HttpClientCapability::new(
+        data_dir.join("downloads"),
+    );
 
     let state = AppState {
         config: RwLock::new(config),
@@ -3387,6 +3466,8 @@ pub fn run() {
         identity_manager,
         active_agent_id: RwLock::new(None),
         subagent_manager: RwLock::new(subagent_manager),
+        browser: Arc::new(tokio::sync::RwLock::new(browser_cap)),
+        http_client: Arc::new(tokio::sync::RwLock::new(http_client_cap)),
     };
 
     // Clone event_bus before setup since state isn't available inside setup callback
