@@ -1,5 +1,5 @@
 [package]
-name = "abigail-birth"
+name = "abigail-soul-crystallization"
 version.workspace = true
 edition.workspace = true
 
@@ -7,14 +7,10 @@ edition.workspace = true
 abigail-core = { path = "../abigail-core" }
 abigail-memory = { path = "../abigail-memory" }
 abigail-capabilities = { path = "../abigail-capabilities" }
-abigail-soul-crystallization = { path = "../abigail-soul-crystallization" }
-tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 chrono.workspace = true
-ed25519-dalek.workspace = true
-rand.workspace = true
-base64.workspace = true
+async-trait.workspace = true

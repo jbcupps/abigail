@@ -15,6 +15,7 @@ abigail-memory = { path = "../crates/abigail-memory" }
 abigail-capabilities = { path = "../crates/abigail-capabilities" }
 abigail-router = { path = "../crates/abigail-router" }
 abigail-birth = { path = "../crates/abigail-birth" }
+abigail-soul-crystallization = { path = "../crates/abigail-soul-crystallization" }
 abigail-skills = { path = "../crates/abigail-skills" }
 skill-web-search = { path = "../skills/skill-web-search" }
 skill-filesystem = { path = "../skills/skill-filesystem" }

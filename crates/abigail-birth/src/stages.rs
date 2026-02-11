@@ -1,7 +1,8 @@
-//! First-run state machine: Darkness -> Ignition -> Connectivity -> Genesis -> Emergence.
+//! First-run state machine: Darkness -> Ignition -> Connectivity -> Crystallization -> Emergence.
 
 use abigail_core::{generate_external_keypair, sign_constitutional_documents, AppConfig};
 use abigail_memory::{Memory, MemoryStore};
+use abigail_soul_crystallization::CrystallizationEngine;
 use base64::Engine as _;
 use ed25519_dalek::SigningKey;
 use std::path::Path;
@@ -15,8 +16,8 @@ pub enum BirthStage {
     Ignition,
     /// Id (local LLM) converses with user to acquire API keys
     Connectivity,
-    /// Id converses with user to discover name, purpose, personality
-    Genesis,
+    /// Soul crystallization: LLM-driven conversation to build MentorProfile
+    Crystallization,
     /// Sign all docs, finalize birth
     Emergence,
 }
@@ -27,7 +28,7 @@ impl BirthStage {
             BirthStage::Darkness => "Generating identity...",
             BirthStage::Ignition => "Configure your local LLM.",
             BirthStage::Connectivity => "Establishing connections...",
-            BirthStage::Genesis => "Discovering who I am...",
+            BirthStage::Crystallization => "Crystallizing your soul...",
             BirthStage::Emergence => "I am awake.",
         }
     }
@@ -37,7 +38,7 @@ impl BirthStage {
             BirthStage::Darkness => "Darkness",
             BirthStage::Ignition => "Ignition",
             BirthStage::Connectivity => "Connectivity",
-            BirthStage::Genesis => "Genesis",
+            BirthStage::Crystallization => "Crystallization",
             BirthStage::Emergence => "Emergence",
         }
     }
@@ -46,8 +47,8 @@ impl BirthStage {
         match self {
             BirthStage::Darkness => Some(BirthStage::Ignition),
             BirthStage::Ignition => Some(BirthStage::Connectivity),
-            BirthStage::Connectivity => Some(BirthStage::Genesis),
-            BirthStage::Genesis => Some(BirthStage::Emergence),
+            BirthStage::Connectivity => Some(BirthStage::Crystallization),
+            BirthStage::Crystallization => Some(BirthStage::Emergence),
             BirthStage::Emergence => None,
         }
     }
@@ -82,6 +83,8 @@ pub struct BirthOrchestrator {
     private_key_base64: Option<String>,
     /// Conversation history for birth chat (role, content)
     conversation_history: Vec<(String, String)>,
+    /// Crystallization engine for the soul crystallization phase
+    crystallization_engine: Option<CrystallizationEngine>,
 }
 
 impl BirthOrchestrator {
@@ -97,6 +100,7 @@ impl BirthOrchestrator {
             signing_key: None,
             private_key_base64: None,
             conversation_history: Vec::new(),
+            crystallization_engine: None,
         })
     }
 
@@ -171,10 +175,10 @@ impl BirthOrchestrator {
         Ok(())
     }
 
-    /// Advance from Connectivity to Genesis (after API keys are stored).
-    pub fn advance_to_genesis(&mut self) -> anyhow::Result<()> {
+    /// Advance from Connectivity to Crystallization (after API keys are stored).
+    pub fn advance_to_crystallization(&mut self) -> anyhow::Result<()> {
         if self.stage == BirthStage::Connectivity {
-            self.stage = BirthStage::Genesis;
+            self.stage = BirthStage::Crystallization;
             self.persist_stage()?;
         }
         Ok(())
@@ -203,13 +207,13 @@ impl BirthOrchestrator {
         self.conversation_history.clear();
     }
 
-    /// Genesis: write personalized soul.md and growth.md, advance to Emergence.
+    /// Crystallization: write personalized soul.md and growth.md, advance to Emergence.
     pub fn crystallize_soul(
         &mut self,
         soul_content: &str,
         growth_content: &str,
     ) -> anyhow::Result<()> {
-        if self.stage != BirthStage::Genesis {
+        if self.stage != BirthStage::Crystallization {
             return Err(BirthError::StageGuard(self.stage.name().to_string()).into());
         }
 
@@ -321,6 +325,28 @@ impl BirthOrchestrator {
     pub fn config_mut(&mut self) -> &mut AppConfig {
         &mut self.config
     }
+
+    /// Get a reference to the crystallization engine, if initialized.
+    pub fn crystallization_engine(&self) -> Option<&CrystallizationEngine> {
+        self.crystallization_engine.as_ref()
+    }
+
+    /// Get a mutable reference to the crystallization engine, if initialized.
+    pub fn crystallization_engine_mut(&mut self) -> Option<&mut CrystallizationEngine> {
+        self.crystallization_engine.as_mut()
+    }
+
+    /// Initialize the crystallization engine with the given depth level.
+    pub fn start_crystallization(
+        &mut self,
+        depth: abigail_soul_crystallization::DepthLevel,
+    ) -> anyhow::Result<()> {
+        if self.stage != BirthStage::Crystallization {
+            return Err(BirthError::StageGuard(self.stage.name().to_string()).into());
+        }
+        self.crystallization_engine = Some(CrystallizationEngine::new(depth));
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -421,8 +447,8 @@ mod tests {
     }
 
     #[test]
-    fn test_advance_to_genesis() {
-        let tmp = std::env::temp_dir().join("abigail_birth_advance_gen");
+    fn test_advance_to_crystallization() {
+        let tmp = std::env::temp_dir().join("abigail_birth_advance_crystal");
         let _ = fs::remove_dir_all(&tmp);
         let config = test_config(&tmp);
         let docs_dir = config.docs_dir.clone();
@@ -431,8 +457,8 @@ mod tests {
         orch.generate_identity(&docs_dir).unwrap();
         orch.advance_past_darkness().unwrap();
         orch.advance_to_connectivity().unwrap();
-        orch.advance_to_genesis().unwrap();
-        assert_eq!(orch.current_stage(), BirthStage::Genesis);
+        orch.advance_to_crystallization().unwrap();
+        assert_eq!(orch.current_stage(), BirthStage::Crystallization);
 
         let _ = fs::remove_dir_all(&tmp);
     }
@@ -449,7 +475,7 @@ mod tests {
         orch.generate_identity(&docs_dir).unwrap();
         orch.advance_past_darkness().unwrap();
         orch.advance_to_connectivity().unwrap();
-        orch.advance_to_genesis().unwrap();
+        orch.advance_to_crystallization().unwrap();
 
         orch.crystallize_soul("# Soul\nI am Test.", "# Growth\nGrowing.")
             .unwrap();
@@ -481,7 +507,7 @@ mod tests {
         orch.generate_identity(&docs_dir).unwrap();
         orch.advance_past_darkness().unwrap();
         orch.advance_to_connectivity().unwrap();
-        orch.advance_to_genesis().unwrap();
+        orch.advance_to_crystallization().unwrap();
         orch.crystallize_soul("# Soul\nI am Test.", "# Growth\nGrowing.")
             .unwrap();
 
@@ -561,8 +587,14 @@ mod tests {
     fn test_stage_transitions() {
         assert_eq!(BirthStage::Darkness.next(), Some(BirthStage::Ignition));
         assert_eq!(BirthStage::Ignition.next(), Some(BirthStage::Connectivity));
-        assert_eq!(BirthStage::Connectivity.next(), Some(BirthStage::Genesis));
-        assert_eq!(BirthStage::Genesis.next(), Some(BirthStage::Emergence));
+        assert_eq!(
+            BirthStage::Connectivity.next(),
+            Some(BirthStage::Crystallization)
+        );
+        assert_eq!(
+            BirthStage::Crystallization.next(),
+            Some(BirthStage::Emergence)
+        );
         assert_eq!(BirthStage::Emergence.next(), None);
     }
 
@@ -571,7 +603,7 @@ mod tests {
         assert_eq!(BirthStage::Darkness.name(), "Darkness");
         assert_eq!(BirthStage::Ignition.name(), "Ignition");
         assert_eq!(BirthStage::Connectivity.name(), "Connectivity");
-        assert_eq!(BirthStage::Genesis.name(), "Genesis");
+        assert_eq!(BirthStage::Crystallization.name(), "Crystallization");
         assert_eq!(BirthStage::Emergence.name(), "Emergence");
     }
 

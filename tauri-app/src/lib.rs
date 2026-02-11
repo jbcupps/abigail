@@ -155,6 +155,11 @@ struct AppState {
     active_agent_id: RwLock<Option<String>>,
     /// Subagent manager for delegating tasks to specialized subagents
     subagent_manager: RwLock<SubagentManager>,
+    /// Browser automation capability (lazy-init, async-safe)
+    browser: Arc<tokio::sync::RwLock<abigail_capabilities::sensory::browser::BrowserCapability>>,
+    /// Enhanced HTTP client capability with sessions and cookies
+    http_client:
+        Arc<tokio::sync::RwLock<abigail_capabilities::sensory::http_client::HttpClientCapability>>,
 }
 
 fn get_config() -> AppConfig {
@@ -1575,6 +1580,8 @@ fn list_missing_skill_secrets(
 /// Build tool definitions for the chat command, including registered skills.
 fn chat_tool_definitions(
     registry: &SkillRegistry,
+    browser: &abigail_capabilities::sensory::browser::BrowserCapability,
+    http_client: &abigail_capabilities::sensory::http_client::HttpClientCapability,
 ) -> Vec<abigail_capabilities::cognitive::ToolDefinition> {
     let mut tools = Vec::new();
 
@@ -1613,6 +1620,12 @@ fn chat_tool_definitions(
             "required": ["subagent_id", "task"]
         }),
     });
+
+    // Browser capability tools
+    tools.extend(browser.tool_definitions());
+
+    // HTTP client capability tools
+    tools.extend(http_client.tool_definitions());
 
     // Skill-provided tools
     if let Ok(manifests) = registry.list() {
@@ -1803,7 +1816,7 @@ fn execute_tool_call<'a>(
                 );
 
                 // Build system prompt and filtered tools (no locks held across await)
-                let (system_prompt, all_tools) = {
+                let system_prompt = {
                     let config = match state.config.read() {
                         Ok(c) => c,
                         Err(e) => return format!("Error reading config: {}", e),
@@ -1813,8 +1826,12 @@ fn execute_tool_call<'a>(
                         &config.agent_name,
                     );
                     drop(config);
-                    let tools = chat_tool_definitions(&state.registry);
-                    (prompt, tools)
+                    prompt
+                };
+                let all_tools = {
+                    let browser_guard = state.browser.read().await;
+                    let http_client_guard = state.http_client.read().await;
+                    chat_tool_definitions(&state.registry, &browser_guard, &http_client_guard)
                 };
 
                 // Look up subagent definition, clone router — drop all locks before await
@@ -1889,6 +1906,36 @@ fn execute_tool_call<'a>(
                         format!("Delegation to '{}' failed: {}", def.name, e)
                     }
                 }
+            }
+            name if name.starts_with("browser_") => {
+                let _ = app.emit(
+                    "chat-status",
+                    serde_json::json!({
+                        "status": "tool_executing",
+                        "tool": name,
+                    }),
+                );
+                let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
+                    Ok(v) => v,
+                    Err(e) => return format!("Error parsing arguments: {}", e),
+                };
+                let browser = state.browser.read().await;
+                browser.execute_tool(name, &args).await
+            }
+            name if name.starts_with("http_") && name != "http_get" && name != "http_post" => {
+                let _ = app.emit(
+                    "chat-status",
+                    serde_json::json!({
+                        "status": "tool_executing",
+                        "tool": name,
+                    }),
+                );
+                let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
+                    Ok(v) => v,
+                    Err(e) => return format!("Error parsing arguments: {}", e),
+                };
+                let http_client = state.http_client.read().await;
+                http_client.execute_tool(name, &args).await
             }
             other => {
                 // Check registered skills for matching tool name
@@ -2061,7 +2108,11 @@ async fn chat(
     ];
 
     let target_mode = target.as_deref().unwrap_or("EGO");
-    let tools = chat_tool_definitions(&state.registry);
+    let tools = {
+        let browser_guard = state.browser.read().await;
+        let http_client_guard = state.http_client.read().await;
+        chat_tool_definitions(&state.registry, &browser_guard, &http_client_guard)
+    };
 
     // Diagnostic: log router status for non-streaming chat
     let router_status = router.status();
@@ -2190,7 +2241,11 @@ async fn chat_stream(
     ];
 
     let target_mode = target.as_deref().unwrap_or("EGO");
-    let tools = chat_tool_definitions(&state.registry);
+    let tools = {
+        let browser_guard = state.browser.read().await;
+        let http_client_guard = state.http_client.read().await;
+        chat_tool_definitions(&state.registry, &browser_guard, &http_client_guard)
+    };
 
     // Diagnostic: log router status at the point of each chat request
     let router_status = router.status();
@@ -2731,30 +2786,88 @@ fn get_stored_providers(state: tauri::State<AppState>) -> Result<Vec<String>, St
         .collect())
 }
 
-/// Advance from Connectivity to Genesis.
+/// Advance from Connectivity to Crystallization.
 #[tauri::command]
-fn advance_to_genesis(state: tauri::State<AppState>) -> Result<(), String> {
+fn advance_to_crystallization(state: tauri::State<AppState>) -> Result<(), String> {
     let mut birth = state.birth.write().map_err(|e| e.to_string())?;
     let b = birth.as_mut().ok_or("Birth not started")?;
     b.clear_conversation(); // Clear connectivity conversation
-    b.advance_to_genesis().map_err(|e| e.to_string())?;
+    b.advance_to_crystallization().map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// Extract name, purpose, and personality from the Genesis conversation.
+/// Start the crystallization process with a chosen depth level.
+/// Returns intro text for the Spark phase.
+#[tauri::command]
+fn start_crystallization(state: tauri::State<AppState>, depth: String) -> Result<String, String> {
+    let depth_level = match depth.as_str() {
+        "quick_start" => abigail_soul_crystallization::DepthLevel::QuickStart,
+        "conversation" => abigail_soul_crystallization::DepthLevel::Conversation,
+        "deep_dive" => abigail_soul_crystallization::DepthLevel::DeepDive,
+        _ => return Err(format!("Unknown depth level: {}", depth)),
+    };
+
+    let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+    let b = birth.as_mut().ok_or("Birth not started")?;
+    b.start_crystallization(depth_level)
+        .map_err(|e| e.to_string())?;
+
+    let intro = match depth_level {
+        abigail_soul_crystallization::DepthLevel::QuickStart => {
+            "Quick Start selected. Using default soul template.".to_string()
+        }
+        abigail_soul_crystallization::DepthLevel::Conversation => {
+            "Conversation depth selected. Let's discover who you are through dialogue.".to_string()
+        }
+        abigail_soul_crystallization::DepthLevel::DeepDive => {
+            "Deep Dive selected. We'll explore your values, ethics, and communication style in depth.".to_string()
+        }
+    };
+
+    Ok(intro)
+}
+
+/// Get the current status of the crystallization engine.
+#[tauri::command]
+fn get_crystallization_status(state: tauri::State<AppState>) -> Result<serde_json::Value, String> {
+    let birth = state.birth.read().map_err(|e| e.to_string())?;
+    let b = birth.as_ref().ok_or("Birth not started")?;
+
+    match b.crystallization_engine() {
+        Some(engine) => {
+            let status = engine.status();
+            serde_json::to_value(&status).map_err(|e| e.to_string())
+        }
+        None => Ok(serde_json::json!({ "phase": "not_started" })),
+    }
+}
+
+/// Get the current mentor profile from the crystallization engine.
+#[tauri::command]
+fn get_mentor_profile(state: tauri::State<AppState>) -> Result<serde_json::Value, String> {
+    let birth = state.birth.read().map_err(|e| e.to_string())?;
+    let b = birth.as_ref().ok_or("Birth not started")?;
+
+    match b.crystallization_engine() {
+        Some(engine) => serde_json::to_value(engine.profile()).map_err(|e| e.to_string()),
+        None => Err("Crystallization engine not started".to_string()),
+    }
+}
+
+/// Extract name, purpose, and personality from the Crystallization conversation.
 /// Sends the conversation to the local LLM with an extraction prompt,
 /// parses the JSON response, and returns the values for the SoulPreview form.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GenesisIdentity {
+pub struct CrystallizationIdentity {
     pub name: Option<String>,
     pub purpose: Option<String>,
     pub personality: Option<String>,
 }
 
 #[tauri::command]
-async fn extract_genesis_identity(
+async fn extract_crystallization_identity(
     state: tauri::State<'_, AppState>,
-) -> Result<GenesisIdentity, String> {
+) -> Result<CrystallizationIdentity, String> {
     // Get conversation history from birth orchestrator
     let conversation = {
         let birth = state.birth.read().map_err(|e| e.to_string())?;
@@ -2763,7 +2876,7 @@ async fn extract_genesis_identity(
     };
 
     if conversation.is_empty() {
-        return Ok(GenesisIdentity {
+        return Ok(CrystallizationIdentity {
             name: None,
             purpose: None,
             personality: None,
@@ -2806,8 +2919,8 @@ async fn extract_genesis_identity(
     Ok(parse_identity_json(&response.content))
 }
 
-fn parse_identity_json(text: &str) -> GenesisIdentity {
-    let empty = GenesisIdentity {
+fn parse_identity_json(text: &str) -> CrystallizationIdentity {
+    let empty = CrystallizationIdentity {
         name: None,
         purpose: None,
         personality: None,
@@ -2833,8 +2946,8 @@ fn parse_identity_json(text: &str) -> GenesisIdentity {
     empty
 }
 
-fn value_to_identity(v: &serde_json::Value) -> GenesisIdentity {
-    GenesisIdentity {
+fn value_to_identity(v: &serde_json::Value) -> CrystallizationIdentity {
+    CrystallizationIdentity {
         name: v.get("name").and_then(|v| v.as_str()).map(String::from),
         purpose: v.get("purpose").and_then(|v| v.as_str()).map(String::from),
         personality: v
@@ -3361,8 +3474,8 @@ pub fn run() {
         id: "external_comm".into(),
         name: "External Communication Agent".into(),
         description: "Handles all external communication: email (fetch/send), HTTP requests, \
-                      and voice I/O (when available). Use when the user wants to send/receive \
-                      email, make web requests, or interact via voice."
+                      browser automation, and voice I/O (when available). Use when the user wants \
+                      to send/receive email, make web requests, browse websites, or interact via voice."
             .into(),
         capabilities: vec![
             "fetch_emails".into(),
@@ -3371,9 +3484,34 @@ pub fn run() {
             "create_filter".into(),
             "http_get".into(),
             "http_post".into(),
+            "http_request".into(),
+            "http_session_create".into(),
+            "http_session_close".into(),
+            "http_download".into(),
+            "browser_navigate".into(),
+            "browser_get_content".into(),
+            "browser_screenshot".into(),
+            "browser_click".into(),
+            "browser_type_text".into(),
+            "browser_fill_form".into(),
+            "browser_wait_for".into(),
+            "browser_evaluate_js".into(),
+            "browser_get_url".into(),
+            "browser_get_title".into(),
+            "browser_back".into(),
+            "browser_forward".into(),
+            "browser_close".into(),
         ],
         provider: SubagentProvider::SameAsEgo,
     });
+
+    // Initialize browser and HTTP client capabilities
+    let browser_cap = abigail_capabilities::sensory::browser::BrowserCapability::new(
+        abigail_capabilities::sensory::browser::BrowserCapabilityConfig::default(),
+    );
+    let http_client_cap = abigail_capabilities::sensory::http_client::HttpClientCapability::new(
+        data_dir.join("downloads"),
+    );
 
     let state = AppState {
         config: RwLock::new(config),
@@ -3387,6 +3525,8 @@ pub fn run() {
         identity_manager,
         active_agent_id: RwLock::new(None),
         subagent_manager: RwLock::new(subagent_manager),
+        browser: Arc::new(tokio::sync::RwLock::new(browser_cap)),
+        http_client: Arc::new(tokio::sync::RwLock::new(http_client_cap)),
     };
 
     // Clone event_bus before setup since state isn't available inside setup callback
@@ -3509,8 +3649,11 @@ pub fn run() {
             birth_chat,
             store_provider_key,
             get_stored_providers,
-            advance_to_genesis,
-            extract_genesis_identity,
+            advance_to_crystallization,
+            start_crystallization,
+            get_crystallization_status,
+            get_mentor_profile,
+            extract_crystallization_identity,
             crystallize_soul,
             complete_emergence,
             sign_agent_with_hive,

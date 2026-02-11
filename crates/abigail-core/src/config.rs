@@ -92,7 +92,7 @@ pub struct AppConfig {
     pub birth_complete: bool,
 
     /// Current birth stage if birth is in progress (for diagnostics and recovery)
-    /// Values: "Darkness", "Ignition", "Connectivity", "Genesis", "Emergence"
+    /// Values: "Darkness", "Ignition", "Connectivity", "Crystallization", "Emergence"
     #[serde(default)]
     pub birth_stage: Option<String>,
 
@@ -115,7 +115,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub trinity: Option<TrinityConfig>,
 
-    /// Agent's chosen name (set during Genesis)
+    /// Agent's chosen name (set during Crystallization)
     #[serde(default)]
     pub agent_name: Option<String>,
 
@@ -434,8 +434,8 @@ mod tests {
 
         assert!(config.birth_stage.is_none());
 
-        config.set_birth_stage("Genesis");
-        assert_eq!(config.birth_stage, Some("Genesis".to_string()));
+        config.set_birth_stage("Crystallization");
+        assert_eq!(config.birth_stage, Some("Crystallization".to_string()));
 
         config.clear_birth_stage();
         assert!(config.birth_stage.is_none());

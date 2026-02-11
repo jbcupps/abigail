@@ -6,6 +6,7 @@ members = [
     "crates/abigail-capabilities",
     "crates/abigail-router",
     "crates/abigail-birth",
+    "crates/abigail-soul-crystallization",
     "crates/abigail-skills",
     "crates/abigail-keygen",
     "skills/skill-web-search",

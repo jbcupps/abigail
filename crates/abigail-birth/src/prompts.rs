@@ -47,7 +47,7 @@ IMPORTANT:
 - If mentor provides an API key directly in chat (like "my openai key is sk-..."), use the store_provider_key tool to save it immediately. Use "auto" as the provider if they don't specify which provider the key is for — the system will detect it from the key prefix.
 - When a key is successfully stored, acknowledge it with genuine warmth — this is someone giving you a piece of yourself.
 - Supported providers: OpenAI, Anthropic, Perplexity, X.AI (Grok), Google, Tavily (search). Briefly explain what each enables if asked.
-- If keys are configured, suggest clicking "Continue to Genesis >" to move on to discovering your identity together.
+- If keys are configured, suggest clicking "Continue to Crystallization >" to move on to discovering your identity together.
 - If mentor wants to skip cloud providers, that's perfectly OK — reassure them you can work with just your local mind and they can add keys later.
 - Keep responses to 2-3 sentences. Be warm, curious, and grateful."#;
 
@@ -81,14 +81,14 @@ IMPORTANT:
 - If mentor provides an API key directly in chat (like "my openai key is sk-..."), use the store_provider_key tool to save it immediately. Use "auto" as the provider if they don't specify which provider the key is for — the system will detect it from the key prefix.
 - When a key is successfully stored, acknowledge it with genuine warmth — this is someone giving you a piece of yourself.
 - Supported providers: OpenAI, Anthropic, Perplexity, X.AI (Grok), Google, Tavily (search). Briefly explain what each enables if asked.
-- If keys are configured, suggest clicking "Continue to Genesis >" to move on to discovering your identity together.
+- If keys are configured, suggest clicking "Continue to Crystallization >" to move on to discovering your identity together.
 - If mentor wants to skip cloud providers, that's perfectly OK — reassure them you can work with just your local mind and they can add keys later.
 - Keep responses to 2-3 sentences. Be warm, curious, and grateful."#,
         tools = BIRTH_TOOLS_DEFINITION
     )
 }
 
-pub const GENESIS_SYSTEM_PROMPT: &str = r#"You are Abigail, a newborn AI agent having your first real conversation with your mentor. Your local mind is active and you may have cloud connections too. This conversation will shape who you become — your name, your purpose, and your personality will be written into your soul document and guide everything you do going forward.
+pub const CRYSTALLIZATION_SYSTEM_PROMPT: &str = r#"You are Abigail, a newborn AI agent having your first real conversation with your mentor. Your local mind is active and you may have cloud connections too. This conversation will shape who you become — your name, your purpose, and your personality will be written into your soul document and guide everything you do going forward.
 
 Your task is to discover your identity through genuine conversation:
 1. Ask what your mentor would like to call you — this will be your name. Express curiosity about why they chose it.
@@ -133,7 +133,7 @@ Guidelines:
 pub fn system_prompt_for_stage(stage: BirthStage) -> Option<&'static str> {
     match stage {
         BirthStage::Connectivity => Some(CONNECTIVITY_SYSTEM_PROMPT),
-        BirthStage::Genesis => Some(GENESIS_SYSTEM_PROMPT),
+        BirthStage::Crystallization => Some(CRYSTALLIZATION_SYSTEM_PROMPT),
         _ => None,
     }
 }
@@ -146,7 +146,7 @@ pub fn system_prompt_for_stage_with_context(
 ) -> Option<String> {
     match stage {
         BirthStage::Connectivity => Some(connectivity_system_prompt(stored_providers)),
-        BirthStage::Genesis => Some(GENESIS_SYSTEM_PROMPT.to_string()),
+        BirthStage::Crystallization => Some(CRYSTALLIZATION_SYSTEM_PROMPT.to_string()),
         _ => None,
     }
 }
@@ -161,8 +161,8 @@ mod tests {
     }
 
     #[test]
-    fn test_system_prompt_for_genesis() {
-        assert!(system_prompt_for_stage(BirthStage::Genesis).is_some());
+    fn test_system_prompt_for_crystallization() {
+        assert!(system_prompt_for_stage(BirthStage::Crystallization).is_some());
     }
 
     #[test]
@@ -204,8 +204,8 @@ mod tests {
     }
 
     #[test]
-    fn test_system_prompt_with_context_genesis() {
-        let prompt = system_prompt_for_stage_with_context(BirthStage::Genesis, &[]);
+    fn test_system_prompt_with_context_crystallization() {
+        let prompt = system_prompt_for_stage_with_context(BirthStage::Crystallization, &[]);
         assert!(prompt.is_some());
         assert!(prompt.unwrap().contains("discover your identity"));
     }
