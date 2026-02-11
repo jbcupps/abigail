@@ -444,11 +444,9 @@ impl BrowserCapability {
                     .await
                     .map_err(|e| format!("Screenshot failed: {}", e))?
                 } else {
-                    page.screenshot(
-                        chromiumoxide::page::ScreenshotParams::builder().build(),
-                    )
-                    .await
-                    .map_err(|e| format!("Screenshot failed: {}", e))?
+                    page.screenshot(chromiumoxide::page::ScreenshotParams::builder().build())
+                        .await
+                        .map_err(|e| format!("Screenshot failed: {}", e))?
                 };
 
                 use base64::Engine as _;
@@ -603,14 +601,14 @@ impl BrowserCapability {
         match self
             .with_active_page(|page| async move {
                 let result: serde_json::Value = page
-                    .evaluate(&script)
+                    .evaluate(script.as_str())
                     .await
                     .map_err(|e| format!("JS evaluation failed: {}", e))?
                     .into_value()
                     .map_err(|e| format!("Failed to parse JS result: {}", e))?;
 
-                let result_str = serde_json::to_string_pretty(&result)
-                    .unwrap_or_else(|_| result.to_string());
+                let result_str =
+                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string());
 
                 // Truncate large results
                 if result_str.len() > MAX_JS_RESULT_BYTES {

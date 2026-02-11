@@ -22,7 +22,7 @@ interface ChatMessage {
 }
 
 interface BirthChatProps {
-  stage: "Connectivity" | "Genesis";
+  stage: "Connectivity" | "Crystallization";
   onAction?: (action: BirthAction) => void;
   onStageAdvance: () => void;
   initialMessage?: string;
@@ -64,7 +64,7 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
     const greeting = initialMessage || (
       stage === "Connectivity"
         ? "Hello. I just woke up."
-        : "I'm ready to discover who I am."
+        : "I'm ready to discover who I am."  // Used for Crystallization stage
     );
     sendMessage(greeting, true);
   }, []);
@@ -163,7 +163,7 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
 
   const stageLabel = stage === "Connectivity"
     ? "CONNECTIVITY: Establishing Cloud Connections"
-    : "GENESIS: Discovering Identity";
+    : "CRYSTALLIZATION: Forging Identity";
 
   return (
     <div className="flex flex-col h-full">
@@ -242,7 +242,7 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
           className="text-theme-text-dim text-xs hover:text-theme-primary-dim"
           onClick={onStageAdvance}
         >
-          {stage === "Connectivity" ? "Continue to Genesis >" : "Finalize >"}
+          {stage === "Connectivity" ? "Continue to Crystallization >" : "Finalize >"}
         </button>
       </div>
     </div>

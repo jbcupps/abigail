@@ -28,6 +28,7 @@ dependencies = [
  "abigail-memory",
  "abigail-router",
  "abigail-skills",
+ "abigail-soul-crystallization",
  "anyhow",
  "base64 0.21.7",
  "chrono",
@@ -57,6 +58,7 @@ dependencies = [
  "abigail-capabilities",
  "abigail-core",
  "abigail-memory",
+ "abigail-soul-crystallization",
  "anyhow",
  "base64 0.21.7",
  "chrono",
@@ -85,7 +87,6 @@ dependencies = [
  "reqwest 0.11.27",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -180,6 +181,22 @@ dependencies = [
  "toml 0.8.23",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "abigail-soul-crystallization"
+version = "0.0.1"
+dependencies = [
+ "abigail-capabilities",
+ "abigail-core",
+ "abigail-memory",
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]

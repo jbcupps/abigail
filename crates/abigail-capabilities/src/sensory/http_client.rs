@@ -191,7 +191,10 @@ impl HttpClientCapability {
                     url_str.to_string()
                 }
             } else {
-                return format!("Session '{}' not found. Create it first with http_session_create.", name);
+                return format!(
+                    "Session '{}' not found. Create it first with http_session_create.",
+                    name
+                );
             }
         } else {
             url_str.to_string()
@@ -253,7 +256,10 @@ impl HttpClientCapability {
             Some(n) => n.to_string(),
             None => return "Missing required parameter: name".into(),
         };
-        let base_url = args.get("base_url").and_then(|v| v.as_str()).map(String::from);
+        let base_url = args
+            .get("base_url")
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         // Validate base_url if provided
         if let Some(ref url) = base_url {
@@ -264,7 +270,10 @@ impl HttpClientCapability {
 
         let mut sessions = self.sessions.write().await;
         if sessions.len() >= MAX_SESSIONS && !sessions.contains_key(&name) {
-            return format!("Maximum sessions ({}) reached. Close a session first.", MAX_SESSIONS);
+            return format!(
+                "Maximum sessions ({}) reached. Close a session first.",
+                MAX_SESSIONS
+            );
         }
 
         let client = reqwest::Client::builder()
@@ -279,7 +288,13 @@ impl HttpClientCapability {
             Err(e) => return format!("Failed to create session client: {}", e),
         };
 
-        sessions.insert(name.clone(), HttpSession { client, base_url: base_url.clone() });
+        sessions.insert(
+            name.clone(),
+            HttpSession {
+                client,
+                base_url: base_url.clone(),
+            },
+        );
 
         let base_msg = base_url
             .map(|u| format!(" with base URL '{}'", u))
@@ -317,7 +332,13 @@ impl HttpClientCapability {
             // Sanitize user-provided filename
             let sanitized: String = name
                 .chars()
-                .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+                .map(|c| {
+                    if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
                 .collect();
             if sanitized.is_empty() {
                 "download".to_string()
@@ -327,7 +348,7 @@ impl HttpClientCapability {
         } else {
             // Extract from URL path
             url.path_segments()
-                .and_then(|seg| seg.last())
+                .and_then(|mut seg| seg.next_back())
                 .filter(|s| !s.is_empty())
                 .unwrap_or("download")
                 .to_string()
@@ -491,14 +512,18 @@ mod tests {
         let result = cap.handle_session_create(&args).await;
         assert!(result.contains("created"), "got: {}", result);
 
-        let result = cap.handle_session_close(&serde_json::json!({ "name": "test_session" })).await;
+        let result = cap
+            .handle_session_close(&serde_json::json!({ "name": "test_session" }))
+            .await;
         assert!(result.contains("closed"), "got: {}", result);
     }
 
     #[tokio::test]
     async fn test_session_close_nonexistent() {
         let cap = make_capability();
-        let result = cap.handle_session_close(&serde_json::json!({ "name": "nope" })).await;
+        let result = cap
+            .handle_session_close(&serde_json::json!({ "name": "nope" }))
+            .await;
         assert!(result.contains("not found"), "got: {}", result);
     }
 
@@ -523,7 +548,11 @@ mod tests {
             "url": "http://169.254.169.254/latest/meta-data/"
         });
         let result = cap.handle_http_request(&args).await;
-        assert!(result.contains("rejected") || result.contains("blocked"), "got: {}", result);
+        assert!(
+            result.contains("rejected") || result.contains("blocked"),
+            "got: {}",
+            result
+        );
     }
 
     #[tokio::test]
@@ -547,7 +576,11 @@ mod tests {
         let cap = make_capability();
         let args = serde_json::json!({ "url": "http://10.0.0.1/secret" });
         let result = cap.handle_download(&args).await;
-        assert!(result.contains("rejected") || result.contains("blocked"), "got: {}", result);
+        assert!(
+            result.contains("rejected") || result.contains("blocked"),
+            "got: {}",
+            result
+        );
     }
 
     #[tokio::test]
@@ -558,6 +591,10 @@ mod tests {
             "base_url": "http://192.168.1.1"
         });
         let result = cap.handle_session_create(&args).await;
-        assert!(result.contains("rejected") || result.contains("blocked"), "got: {}", result);
+        assert!(
+            result.contains("rejected") || result.contains("blocked"),
+            "got: {}",
+            result
+        );
     }
 }

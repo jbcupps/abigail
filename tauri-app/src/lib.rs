@@ -158,7 +158,8 @@ struct AppState {
     /// Browser automation capability (lazy-init, async-safe)
     browser: Arc<tokio::sync::RwLock<abigail_capabilities::sensory::browser::BrowserCapability>>,
     /// Enhanced HTTP client capability with sessions and cookies
-    http_client: Arc<tokio::sync::RwLock<abigail_capabilities::sensory::http_client::HttpClientCapability>>,
+    http_client:
+        Arc<tokio::sync::RwLock<abigail_capabilities::sensory::http_client::HttpClientCapability>>,
 }
 
 fn get_config() -> AppConfig {
@@ -2785,30 +2786,88 @@ fn get_stored_providers(state: tauri::State<AppState>) -> Result<Vec<String>, St
         .collect())
 }
 
-/// Advance from Connectivity to Genesis.
+/// Advance from Connectivity to Crystallization.
 #[tauri::command]
-fn advance_to_genesis(state: tauri::State<AppState>) -> Result<(), String> {
+fn advance_to_crystallization(state: tauri::State<AppState>) -> Result<(), String> {
     let mut birth = state.birth.write().map_err(|e| e.to_string())?;
     let b = birth.as_mut().ok_or("Birth not started")?;
     b.clear_conversation(); // Clear connectivity conversation
-    b.advance_to_genesis().map_err(|e| e.to_string())?;
+    b.advance_to_crystallization().map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// Extract name, purpose, and personality from the Genesis conversation.
+/// Start the crystallization process with a chosen depth level.
+/// Returns intro text for the Spark phase.
+#[tauri::command]
+fn start_crystallization(state: tauri::State<AppState>, depth: String) -> Result<String, String> {
+    let depth_level = match depth.as_str() {
+        "quick_start" => abigail_soul_crystallization::DepthLevel::QuickStart,
+        "conversation" => abigail_soul_crystallization::DepthLevel::Conversation,
+        "deep_dive" => abigail_soul_crystallization::DepthLevel::DeepDive,
+        _ => return Err(format!("Unknown depth level: {}", depth)),
+    };
+
+    let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+    let b = birth.as_mut().ok_or("Birth not started")?;
+    b.start_crystallization(depth_level)
+        .map_err(|e| e.to_string())?;
+
+    let intro = match depth_level {
+        abigail_soul_crystallization::DepthLevel::QuickStart => {
+            "Quick Start selected. Using default soul template.".to_string()
+        }
+        abigail_soul_crystallization::DepthLevel::Conversation => {
+            "Conversation depth selected. Let's discover who you are through dialogue.".to_string()
+        }
+        abigail_soul_crystallization::DepthLevel::DeepDive => {
+            "Deep Dive selected. We'll explore your values, ethics, and communication style in depth.".to_string()
+        }
+    };
+
+    Ok(intro)
+}
+
+/// Get the current status of the crystallization engine.
+#[tauri::command]
+fn get_crystallization_status(state: tauri::State<AppState>) -> Result<serde_json::Value, String> {
+    let birth = state.birth.read().map_err(|e| e.to_string())?;
+    let b = birth.as_ref().ok_or("Birth not started")?;
+
+    match b.crystallization_engine() {
+        Some(engine) => {
+            let status = engine.status();
+            serde_json::to_value(&status).map_err(|e| e.to_string())
+        }
+        None => Ok(serde_json::json!({ "phase": "not_started" })),
+    }
+}
+
+/// Get the current mentor profile from the crystallization engine.
+#[tauri::command]
+fn get_mentor_profile(state: tauri::State<AppState>) -> Result<serde_json::Value, String> {
+    let birth = state.birth.read().map_err(|e| e.to_string())?;
+    let b = birth.as_ref().ok_or("Birth not started")?;
+
+    match b.crystallization_engine() {
+        Some(engine) => serde_json::to_value(engine.profile()).map_err(|e| e.to_string()),
+        None => Err("Crystallization engine not started".to_string()),
+    }
+}
+
+/// Extract name, purpose, and personality from the Crystallization conversation.
 /// Sends the conversation to the local LLM with an extraction prompt,
 /// parses the JSON response, and returns the values for the SoulPreview form.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GenesisIdentity {
+pub struct CrystallizationIdentity {
     pub name: Option<String>,
     pub purpose: Option<String>,
     pub personality: Option<String>,
 }
 
 #[tauri::command]
-async fn extract_genesis_identity(
+async fn extract_crystallization_identity(
     state: tauri::State<'_, AppState>,
-) -> Result<GenesisIdentity, String> {
+) -> Result<CrystallizationIdentity, String> {
     // Get conversation history from birth orchestrator
     let conversation = {
         let birth = state.birth.read().map_err(|e| e.to_string())?;
@@ -2817,7 +2876,7 @@ async fn extract_genesis_identity(
     };
 
     if conversation.is_empty() {
-        return Ok(GenesisIdentity {
+        return Ok(CrystallizationIdentity {
             name: None,
             purpose: None,
             personality: None,
@@ -2860,8 +2919,8 @@ async fn extract_genesis_identity(
     Ok(parse_identity_json(&response.content))
 }
 
-fn parse_identity_json(text: &str) -> GenesisIdentity {
-    let empty = GenesisIdentity {
+fn parse_identity_json(text: &str) -> CrystallizationIdentity {
+    let empty = CrystallizationIdentity {
         name: None,
         purpose: None,
         personality: None,
@@ -2887,8 +2946,8 @@ fn parse_identity_json(text: &str) -> GenesisIdentity {
     empty
 }
 
-fn value_to_identity(v: &serde_json::Value) -> GenesisIdentity {
-    GenesisIdentity {
+fn value_to_identity(v: &serde_json::Value) -> CrystallizationIdentity {
+    CrystallizationIdentity {
         name: v.get("name").and_then(|v| v.as_str()).map(String::from),
         purpose: v.get("purpose").and_then(|v| v.as_str()).map(String::from),
         personality: v
@@ -3590,8 +3649,11 @@ pub fn run() {
             birth_chat,
             store_provider_key,
             get_stored_providers,
-            advance_to_genesis,
-            extract_genesis_identity,
+            advance_to_crystallization,
+            start_crystallization,
+            get_crystallization_status,
+            get_mentor_profile,
+            extract_crystallization_identity,
             crystallize_soul,
             complete_emergence,
             sign_agent_with_hive,

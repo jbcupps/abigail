@@ -72,10 +72,7 @@ pub fn validate_url(url_str: &str, policy: &UrlSecurityPolicy) -> Result<Url, St
             host_lower == d_lower || host_lower.ends_with(&format!(".{}", d_lower))
         });
         if !is_allowed {
-            return Err(format!(
-                "Host '{}' is not in allowed domains list",
-                host
-            ));
+            return Err(format!("Host '{}' is not in allowed domains list", host));
         }
     }
 
@@ -249,7 +246,9 @@ mod tests {
         assert!(is_private_ip(&IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1))));
         assert!(is_private_ip(&IpAddr::V4(Ipv4Addr::new(172, 31, 255, 255))));
         assert!(is_private_ip(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
-        assert!(is_private_ip(&IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254))));
+        assert!(is_private_ip(&IpAddr::V4(Ipv4Addr::new(
+            169, 254, 169, 254
+        ))));
         assert!(is_private_ip(&IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))));
 
         // Public IPs should not be private

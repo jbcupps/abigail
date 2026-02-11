@@ -3,13 +3,14 @@ import { useState, useEffect, useRef } from "react";
 import LlmSetupPanel from "./LlmSetupPanel";
 import BirthChat, { BirthChatHandle } from "./BirthChat";
 import ApiKeyModal from "./ApiKeyModal";
+import SoulCrystallization from "./SoulCrystallization";
 
 type Stage =
   | "Darkness"
   | "KeyPresentation"
   | "Ignition"
   | "Connectivity"
-  | "Genesis"
+  | "Crystallization"
   | "SoulPreview"
   | "Emergence"
   | "Life"
@@ -39,9 +40,9 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [activeApiKeyProvider, setActiveApiKeyProvider] = useState<string | null>(null);
   const [storedProviders, setStoredProviders] = useState<string[]>([]);
   const [soulPreview, setSoulPreview] = useState("");
-  const [genesisName, setGenesisName] = useState("");
-  const [genesisPurpose, setGenesisPurpose] = useState("");
-  const [genesisPersonality, setGenesisPersonality] = useState("");
+  const [crystalName, setCrystalName] = useState("");
+  const [crystalPurpose, setCrystalPurpose] = useState("");
+  const [crystalPersonality, setCrystalPersonality] = useState("");
 
   // Ref to BirthChat for injecting key confirmations
   const birthChatRef = useRef<BirthChatHandle>(null);
@@ -223,42 +224,31 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
   const handleConnectivityAdvance = async () => {
     try {
-      await invoke("advance_to_genesis");
-      setStage("Genesis");
+      await invoke("advance_to_crystallization");
+      setStage("Crystallization");
     } catch (e) {
       setError(String(e));
     }
   };
 
-  const handleGenesisDone = async () => {
-    // Skip extraction if data was already populated by recommend_crystallize tool
-    if (genesisName && genesisPurpose && genesisPersonality) {
-      setStage("SoulPreview");
-      return;
-    }
+  const handleCrystallizationQuickStart = () => {
+    // Quick Start: go directly to SoulPreview with empty form
+    setStage("SoulPreview");
+  };
 
-    // Extract identity from Genesis conversation via LLM
-    setMessage("Extracting identity from conversation...");
-    try {
-      const identity = await invoke<{
-        name: string | null;
-        purpose: string | null;
-        personality: string | null;
-      }>("extract_genesis_identity");
-
-      if (identity.name) setGenesisName(identity.name);
-      if (identity.purpose) setGenesisPurpose(identity.purpose);
-      if (identity.personality) setGenesisPersonality(identity.personality);
-    } catch (e) {
-      console.warn("Could not extract identity from conversation:", e);
-      // Continue to SoulPreview with empty form — user fills in manually
-    }
-    setMessage("");
+  const handleCrystallizationComplete = (identity: {
+    name: string;
+    purpose: string;
+    personality: string;
+  }) => {
+    if (identity.name) setCrystalName(identity.name);
+    if (identity.purpose) setCrystalPurpose(identity.purpose);
+    if (identity.personality) setCrystalPersonality(identity.personality);
     setStage("SoulPreview");
   };
 
   const handleCrystallize = async () => {
-    if (!genesisName.trim()) {
+    if (!crystalName.trim()) {
       setError("Name is required");
       return;
     }
@@ -266,9 +256,9 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     setError("");
     try {
       const preview = await invoke<string>("crystallize_soul", {
-        name: genesisName.trim(),
-        purpose: genesisPurpose.trim() || "assist, retrieve, connect, and surface information",
-        personality: genesisPersonality.trim() || "helpful, clear, and honest",
+        name: crystalName.trim(),
+        purpose: crystalPurpose.trim() || "assist, retrieve, connect, and surface information",
+        personality: crystalPersonality.trim() || "helpful, clear, and honest",
       });
       setSoulPreview(preview);
       setStage("Emergence");
@@ -449,7 +439,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               </div>
               {storedProviders.length > 0 && (
                 <p className="text-green-500 text-xs mt-2">
-                  ✓ {storedProviders.length} provider{storedProviders.length !== 1 ? "s" : ""} configured and validated. Click "Continue to Genesis &gt;" when ready.
+                  ✓ {storedProviders.length} provider{storedProviders.length !== 1 ? "s" : ""} configured and validated. Click "Continue to Crystallization &gt;" when ready.
                 </p>
               )}
             </div>
@@ -477,39 +467,24 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
           </div>
         )}
 
-        {/* ── GENESIS ── */}
-        {stage === "Genesis" && (
-          <div className="flex flex-col h-full" style={{ minHeight: "60vh" }}>
-            <BirthChat
-              stage="Genesis"
-              onStageAdvance={handleGenesisDone}
-              onAction={(action) => {
-                if (action.type === "SoulReady" && action.preview) {
-                  try {
-                    const data = JSON.parse(action.preview);
-                    if (data.name) setGenesisName(data.name);
-                    if (data.purpose) setGenesisPurpose(data.purpose);
-                    if (data.personality) setGenesisPersonality(data.personality);
-                    setStage("SoulPreview");
-                  } catch {
-                    // If preview isn't valid JSON, ignore and let manual flow continue
-                  }
-                }
-              }}
-            />
-          </div>
+        {/* ── CRYSTALLIZATION ── */}
+        {stage === "Crystallization" && (
+          <SoulCrystallization
+            onQuickStart={handleCrystallizationQuickStart}
+            onCrystallizationComplete={handleCrystallizationComplete}
+            onError={(e) => setError(e)}
+          />
         )}
 
         {/* ── SOUL PREVIEW ── */}
         {stage === "SoulPreview" && (
           <div className="p-6 max-w-2xl">
             <h2 className="text-theme-primary-dim text-lg mb-4">
-              Genesis: Define Your Agent
+              Crystallization: Define Your Agent
             </h2>
             <p className="text-theme-text-dim text-sm mb-6">
-              Review the details extracted from your conversation below. Edit
-              anything that needs adjustment — these will become part of Abigail's
-              soul document.
+              Review the details below. Edit anything that needs adjustment —
+              these will become part of Abigail's soul document.
             </p>
 
             <div className="space-y-4 mb-6">
@@ -519,8 +494,8 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                   type="text"
                   className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
                   placeholder="Abigail"
-                  value={genesisName}
-                  onChange={(e) => setGenesisName(e.target.value)}
+                  value={crystalName}
+                  onChange={(e) => setCrystalName(e.target.value)}
                   autoFocus
                 />
               </div>
@@ -532,8 +507,8 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                   type="text"
                   className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
                   placeholder="assist, retrieve, connect, and surface information"
-                  value={genesisPurpose}
-                  onChange={(e) => setGenesisPurpose(e.target.value)}
+                  value={crystalPurpose}
+                  onChange={(e) => setCrystalPurpose(e.target.value)}
                 />
               </div>
               <div>
@@ -544,8 +519,8 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                   type="text"
                   className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
                   placeholder="helpful, clear, and honest"
-                  value={genesisPersonality}
-                  onChange={(e) => setGenesisPersonality(e.target.value)}
+                  value={crystalPersonality}
+                  onChange={(e) => setCrystalPersonality(e.target.value)}
                 />
               </div>
             </div>

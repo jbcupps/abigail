@@ -90,7 +90,7 @@ pub const CONSTITUTIONAL_DOCS: [(&str, &str); 3] = [
     ("instincts.md", INSTINCTS_MD),
 ];
 
-/// Parameterized soul template. Filled with {name}, {purpose}, {personality} during Genesis.
+/// Parameterized soul template. Filled with {name}, {purpose}, {personality} during Crystallization.
 pub const SOUL_TEMPLATE_MD: &str = r#"# Soul
 
 I am {name}. My designation is {name}.
