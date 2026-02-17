@@ -1,25 +1,26 @@
-# Dependabot: automated dependency updates.
-# See https://docs.github.com/en/code-security/dependabot
+# Dependabot: disabled to conserve GitHub Actions budget.
+# Re-enable by uncommenting the updates below.
 
 version: 2
-updates:
-  - package-ecosystem: "cargo"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    labels: ["dependencies", "rust"]
+updates: []
 
-  - package-ecosystem: "npm"
-    directory: "tauri-app/src-ui"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    labels: ["dependencies", "npm"]
-
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 3
-    labels: ["dependencies", "github-actions"]
+# - package-ecosystem: "cargo"
+#   directory: "/"
+#   schedule:
+#     interval: "weekly"
+#   open-pull-requests-limit: 5
+#   labels: ["dependencies", "rust"]
+#
+# - package-ecosystem: "npm"
+#   directory: "tauri-app/src-ui"
+#   schedule:
+#     interval: "weekly"
+#   open-pull-requests-limit: 5
+#   labels: ["dependencies", "npm"]
+#
+# - package-ecosystem: "github-actions"
+#   directory: "/"
+#   schedule:
+#     interval: "weekly"
+#   open-pull-requests-limit: 3
+#   labels: ["dependencies", "github-actions"]

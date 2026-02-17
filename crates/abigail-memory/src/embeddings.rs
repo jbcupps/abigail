@@ -3,6 +3,7 @@
 //! Provides a trait for embedding text and semantic similarity search.
 //! Implementations can use local models (Candle) or cloud APIs (OpenAI).
 
+#[cfg(feature = "postgres")]
 use async_trait::async_trait;
 
 /// A text embedding provider.

@@ -670,7 +670,7 @@ mod tests {
 
     #[test]
     fn test_tier_models_get_model_fallback() {
-        let tiers = TierModels::defaults();
+        let _tiers = TierModels::defaults();
         // Pro falls back to standard if no pro entry
         let mut custom = TierModels::default();
         custom

@@ -230,7 +230,7 @@ fn generate_sigil(weights: &TriangleWeights) -> String {
     let a = (weights.areteology * 10.0) as usize;
     let w = (weights.welfare * 10.0) as usize;
 
-    let bar = |n: usize, ch: char| -> String { std::iter::repeat(ch).take(n).collect::<String>() };
+    let bar = |n: usize, ch: char| -> String { std::iter::repeat_n(ch, n).collect::<String>() };
 
     format!(
         r#"
