@@ -16,7 +16,7 @@ use abigail_router::{
 };
 use abigail_skills::channel::EventBus;
 use abigail_skills::protocol::mcp::{HttpMcpClient, McpTool};
-use abigail_skills::{MissingSkillSecret, SkillExecutor, SkillRegistry, ToolParams};
+use abigail_skills::{MissingSkillSecret, Skill, SkillExecutor, SkillRegistry, ToolParams};
 use base64::Engine as _;
 use chrono::Utc;
 use ed25519_dalek::SigningKey;
