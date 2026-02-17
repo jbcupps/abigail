@@ -24,6 +24,13 @@ interface RouterStatus {
   council_providers?: number;
 }
 
+interface OllamaStatus {
+  managed: boolean;
+  running: boolean;
+  port: number;
+  model_ready: boolean;
+}
+
 type ConfigStep = "menu" | "ollama" | "lmstudio" | "openai" | null;
 
 interface ChatInterfaceProps {
@@ -42,6 +49,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
   const [missingSecrets, setMissingSecrets] = useState<MissingSkillSecret[]>([]);
   const [activeSecret, setActiveSecret] = useState<MissingSkillSecret | null>(null);
   const [chatStatus, setChatStatus] = useState<string | null>(null);
+  const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
 
   const assistantLabel = agentName || "Abigail";
 
@@ -59,6 +67,10 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
         }
       })
       .catch(console.error);
+    // Also fetch Ollama status
+    invoke<OllamaStatus>("get_ollama_status")
+      .then(setOllamaStatus)
+      .catch(() => setOllamaStatus(null));
   };
 
   const refreshMissingSecrets = () => {
@@ -180,7 +192,8 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
       const errorMsg = String(e);
       let content = errorMsg;
       if (errorMsg.includes("No local LLM configured")) {
-        content = "No LLM available. Please either:\n" +
+        content = "No LLM available. The bundled Ollama may still be starting.\n" +
+          "Please wait a moment, or configure a provider:\n" +
           "1. Set OPENAI_API_KEY environment variable, or\n" +
           "2. Install Ollama and set LOCAL_LLM_BASE_URL=http://localhost:11434";
       }
@@ -224,8 +237,16 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
       statusText = `[cloud] ${egoLabel}`;
       statusColor = "text-blue-400";
     } else if (hasLocal) {
-      statusText = `[local] ${routerStatus.id_url}`;
+      // Show "bundled" label when the local LLM is from managed Ollama
+      if (ollamaStatus?.managed && ollamaStatus?.running) {
+        statusText = "[local: bundled]";
+      } else {
+        statusText = `[local] ${routerStatus.id_url}`;
+      }
       statusColor = "text-theme-primary-dim";
+    } else if (ollamaStatus?.managed && !ollamaStatus?.model_ready) {
+      statusText = "Starting local AI...";
+      statusColor = "text-yellow-500";
     } else {
       statusText = "[no LLM] Press 1-3 to configure";
       statusColor = "text-red-400";

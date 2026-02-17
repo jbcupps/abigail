@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 9;
+pub const CONFIG_SCHEMA_VERSION: u32 = 10;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -188,6 +188,14 @@ fn default_email_auth_method() -> String {
     "password".to_string()
 }
 
+fn default_bundled_ollama() -> bool {
+    cfg!(windows)
+}
+
+fn default_bundled_model() -> Option<String> {
+    Some("qwen2.5:0.5b".to_string())
+}
+
 /// Trinity configuration: maps providers to Superego/Ego/Id roles.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TrinityConfig {
@@ -303,6 +311,15 @@ pub struct AppConfig {
     /// Multiple email account configurations (replaces single `email` field).
     #[serde(default)]
     pub email_accounts: Vec<EmailAccountConfig>,
+
+    // ── v10 fields ─────────────────────────────────────────────────
+    /// Whether to manage a bundled Ollama instance (default: true on Windows).
+    #[serde(default = "default_bundled_ollama")]
+    pub bundled_ollama: bool,
+
+    /// Model to ensure is available when using bundled Ollama.
+    #[serde(default = "default_bundled_model")]
+    pub bundled_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -348,6 +365,8 @@ impl AppConfig {
             active_provider_preference: None,
             superego_l2_mode: SuperegoL2Mode::default(),
             email_accounts: Vec::new(),
+            bundled_ollama: default_bundled_ollama(),
+            bundled_model: default_bundled_model(),
         }
     }
 
@@ -499,6 +518,15 @@ impl AppConfig {
             tracing::debug!("Migrated config from v8 to v9");
         }
 
+        // Migration from v9 to v10
+        if self.schema_version < 10 {
+            // v10 adds: bundled_ollama, bundled_model for zero-config local LLM.
+            // Defaults are applied via serde defaults.
+            self.schema_version = 10;
+            migrated = true;
+            tracing::debug!("Migrated config from v9 to v10");
+        }
+
         migrated
     }
 
@@ -562,6 +590,8 @@ mod tests {
             active_provider_preference: None,
             superego_l2_mode: SuperegoL2Mode::default(),
             email_accounts: Vec::new(),
+            bundled_ollama: false,
+            bundled_model: None,
         }
     }
 

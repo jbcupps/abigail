@@ -348,8 +348,18 @@ FunctionEnd
   ; Step 2: Write version to registry
   Call WriteVersionToRegistry
 
-  ; Step 3: LLM setup dialog
+  ; Step 3: LLM setup dialog — skip if bundled Ollama is present
+  ; (Abigail will manage Ollama automatically at runtime)
+  IfFileExists "$INSTDIR\ollama\ollama.exe" BundledOllamaFound ShowLlmDialog
+
+ShowLlmDialog:
   Call ShowLlmSetupDialog
+  Goto PostInstallDone
+
+BundledOllamaFound:
+  DetailPrint "Bundled Ollama detected — skipping LLM setup dialog"
+
+PostInstallDone:
 !macroend
 
 ; ============================================================================
