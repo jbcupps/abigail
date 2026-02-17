@@ -48,14 +48,17 @@ cargo fmt --all -- --check
 # 2. Clippy (must pass with -D warnings; excludes abigail-app which needs Tauri)
 cargo clippy --workspace --exclude abigail-app -- -D warnings
 
-# 3. Tests (excludes abigail-app; runs on all 3 platforms in CI)
+# 3. Check abigail-app compiles (excluded from clippy/test but checked separately in CI)
+cargo check -p abigail-app
+
+# 4. Tests (excludes abigail-app; runs on all 3 platforms in CI)
 cargo test --workspace --exclude abigail-app
 
-# 4. Frontend build (tsc type-check + vite build)
+# 5. Frontend build (tsc type-check + vite build)
 cd tauri-app/src-ui && npm run build
 ```
 
-If any of these fail locally, fix them before pushing. The `gate` CI job will block the PR until all four pass.
+If any of these fail locally, fix them before pushing. The `gate` CI job will block the PR until all five pass.
 
 ## Environment Variables
 
