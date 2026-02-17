@@ -32,11 +32,21 @@ pub struct ConstraintStore {
 }
 
 impl ConstraintStore {
+    /// Create a new in-memory store (no persistence).
+    ///
+    /// Use `with_data_dir` to create a store that persists to disk.
+    pub fn new() -> Self {
+        Self {
+            constraints: Vec::new(),
+            file_path: PathBuf::new(),
+        }
+    }
+
     /// Create a new store rooted in `data_dir`.
     ///
     /// If a constraints file already exists on disk, it is loaded automatically.
     /// If the file does not exist or is corrupt, the store starts empty.
-    pub fn new(data_dir: PathBuf) -> Self {
+    pub fn with_data_dir(data_dir: PathBuf) -> Self {
         match Self::load(data_dir.clone()) {
             Ok(store) => store,
             Err(_) => Self {
@@ -76,6 +86,30 @@ impl ConstraintStore {
             learned_from
         );
         id
+    }
+
+    /// Add a hard constraint (alias for `add` with optional learned_from).
+    ///
+    /// Hard constraints represent immutable facts discovered during execution.
+    pub fn add_hard(&mut self, description: &str, learned_from: Option<&str>) -> String {
+        self.add(description, learned_from.unwrap_or("discovery"))
+    }
+
+    /// Check if any constraint contains the given text.
+    pub fn has(&self, text: &str) -> bool {
+        self.constraints
+            .iter()
+            .any(|c| c.description.contains(text))
+    }
+
+    /// Check if the store is empty.
+    pub fn is_empty(&self) -> bool {
+        self.constraints.is_empty()
+    }
+
+    /// Return the number of constraints.
+    pub fn len(&self) -> usize {
+        self.constraints.len()
     }
 
     /// Remove a constraint by its ID.
@@ -148,7 +182,7 @@ mod tests {
     #[test]
     fn test_new_empty_store() {
         let dir = test_dir("new_empty");
-        let store = ConstraintStore::new(dir.clone());
+        let store = ConstraintStore::with_data_dir(dir.clone());
         assert!(store.all().is_empty());
         assert!(store.as_strings().is_empty());
         cleanup(&dir);
@@ -157,7 +191,7 @@ mod tests {
     #[test]
     fn test_add_constraint() {
         let dir = test_dir("add");
-        let mut store = ConstraintStore::new(dir.clone());
+        let mut store = ConstraintStore::with_data_dir(dir.clone());
 
         let id = store.add("API requires auth token", "HTTP 401 on attempt #1");
         assert!(!id.is_empty());
@@ -175,7 +209,7 @@ mod tests {
     #[test]
     fn test_add_multiple_constraints() {
         let dir = test_dir("add_multiple");
-        let mut store = ConstraintStore::new(dir.clone());
+        let mut store = ConstraintStore::with_data_dir(dir.clone());
 
         let id1 = store.add("Rate limit is 100/min", "HTTP 429");
         let id2 = store.add("Response must be JSON", "Parse error on attempt #2");
@@ -189,7 +223,7 @@ mod tests {
     #[test]
     fn test_remove_constraint() {
         let dir = test_dir("remove");
-        let mut store = ConstraintStore::new(dir.clone());
+        let mut store = ConstraintStore::with_data_dir(dir.clone());
 
         let id = store.add("Temporary constraint", "test");
         assert_eq!(store.all().len(), 1);
@@ -204,7 +238,7 @@ mod tests {
     #[test]
     fn test_remove_nonexistent_constraint() {
         let dir = test_dir("remove_nonexistent");
-        let mut store = ConstraintStore::new(dir.clone());
+        let mut store = ConstraintStore::with_data_dir(dir.clone());
 
         store.add("Keep me", "test");
         let removed = store.remove("nonexistent-id");
@@ -217,7 +251,7 @@ mod tests {
     #[test]
     fn test_clear() {
         let dir = test_dir("clear");
-        let mut store = ConstraintStore::new(dir.clone());
+        let mut store = ConstraintStore::with_data_dir(dir.clone());
 
         store.add("Constraint A", "failure A");
         store.add("Constraint B", "failure B");
@@ -232,7 +266,7 @@ mod tests {
     #[test]
     fn test_save_and_load() {
         let dir = test_dir("save_load");
-        let mut store = ConstraintStore::new(dir.clone());
+        let mut store = ConstraintStore::with_data_dir(dir.clone());
 
         store.add("Persisted constraint", "saved from test");
         store.add("Another constraint", "also saved");
@@ -251,13 +285,13 @@ mod tests {
     fn test_new_loads_existing_file() {
         let dir = test_dir("new_loads");
         {
-            let mut store = ConstraintStore::new(dir.clone());
+            let mut store = ConstraintStore::with_data_dir(dir.clone());
             store.add("Pre-existing constraint", "from previous session");
             store.save().unwrap();
         }
 
         // ConstraintStore::new should auto-load the file.
-        let store = ConstraintStore::new(dir.clone());
+        let store = ConstraintStore::with_data_dir(dir.clone());
         assert_eq!(store.all().len(), 1);
         assert_eq!(store.all()[0].description, "Pre-existing constraint");
 
@@ -282,7 +316,7 @@ mod tests {
         assert!(result.is_err());
 
         // new() should fall back to empty store.
-        let store = ConstraintStore::new(dir.clone());
+        let store = ConstraintStore::with_data_dir(dir.clone());
         assert!(store.all().is_empty());
 
         cleanup(&dir);
@@ -291,7 +325,7 @@ mod tests {
     #[test]
     fn test_as_strings() {
         let dir = test_dir("as_strings");
-        let mut store = ConstraintStore::new(dir.clone());
+        let mut store = ConstraintStore::with_data_dir(dir.clone());
 
         store.add("First constraint", "failure 1");
         store.add("Second constraint", "failure 2");
@@ -309,7 +343,7 @@ mod tests {
     #[test]
     fn test_as_strings_empty() {
         let dir = test_dir("as_strings_empty");
-        let store = ConstraintStore::new(dir.clone());
+        let store = ConstraintStore::with_data_dir(dir.clone());
         assert!(store.as_strings().is_empty());
         cleanup(&dir);
     }
@@ -317,7 +351,7 @@ mod tests {
     #[test]
     fn test_constraint_id_is_uuid() {
         let dir = test_dir("uuid");
-        let mut store = ConstraintStore::new(dir.clone());
+        let mut store = ConstraintStore::with_data_dir(dir.clone());
 
         let id = store.add("Test", "test");
         // UUIDs are 36 chars with dashes (8-4-4-4-12).
@@ -330,7 +364,7 @@ mod tests {
     #[test]
     fn test_constraint_created_at_is_iso8601() {
         let dir = test_dir("iso8601");
-        let mut store = ConstraintStore::new(dir.clone());
+        let mut store = ConstraintStore::with_data_dir(dir.clone());
 
         store.add("Test", "test");
         let created_at = &store.all()[0].created_at;
@@ -349,7 +383,7 @@ mod tests {
     fn test_save_creates_parent_directories() {
         let dir = test_dir("nested_parent");
         let nested = dir.join("deep").join("nested").join("dir");
-        let mut store = ConstraintStore::new(nested.clone());
+        let mut store = ConstraintStore::with_data_dir(nested.clone());
 
         store.add("Nested test", "testing save");
         store.save().unwrap();
@@ -363,7 +397,7 @@ mod tests {
     #[test]
     fn test_round_trip_preserves_data() {
         let dir = test_dir("round_trip");
-        let mut store = ConstraintStore::new(dir.clone());
+        let mut store = ConstraintStore::with_data_dir(dir.clone());
 
         let id = store.add("Exact description", "Exact failure source");
         store.save().unwrap();
@@ -380,7 +414,7 @@ mod tests {
     #[test]
     fn test_save_after_remove() {
         let dir = test_dir("save_after_remove");
-        let mut store = ConstraintStore::new(dir.clone());
+        let mut store = ConstraintStore::with_data_dir(dir.clone());
 
         let id1 = store.add("Keep this", "test");
         let id2 = store.add("Remove this", "test");
@@ -397,7 +431,7 @@ mod tests {
     #[test]
     fn test_save_after_clear() {
         let dir = test_dir("save_after_clear");
-        let mut store = ConstraintStore::new(dir.clone());
+        let mut store = ConstraintStore::with_data_dir(dir.clone());
 
         store.add("Will be cleared", "test");
         store.clear();

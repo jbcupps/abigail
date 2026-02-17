@@ -3,11 +3,8 @@
 //! Replaces Orion Dock's SSE-based agentic system with Tauri event emission.
 //! The engine runs a plan → execute → check loop with mentor interaction points.
 
-use crate::constraint_store::ConstraintStore;
-use crate::governor::{ExecutionGovernor, GovernedResult};
-use crate::planner::{GoalFrame, Planner};
 use abigail_capabilities::cognitive::provider::{
-    CompletionRequest, CompletionResponse, LlmProvider, Message, ToolCall, ToolDefinition,
+    CompletionRequest, LlmProvider, Message, ToolCall, ToolDefinition,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

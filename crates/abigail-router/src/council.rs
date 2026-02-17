@@ -5,9 +5,7 @@
 //! 2. **Critique**: providers cross-review each other's drafts with JSON 0-10 scoring.
 //! 3. **Synthesis**: the first provider merges the ranked drafts into a final answer.
 
-use abigail_capabilities::cognitive::provider::{
-    CompletionRequest, CompletionResponse, LlmProvider, Message,
-};
+use abigail_capabilities::cognitive::provider::{CompletionRequest, LlmProvider, Message};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -375,6 +373,7 @@ fn parse_score(text: &str) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use abigail_capabilities::cognitive::provider::CompletionResponse;
     use async_trait::async_trait;
 
     // ── Mock providers ─────────────────────────────────────────────────

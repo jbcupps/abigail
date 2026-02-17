@@ -5,7 +5,6 @@ use abigail_capabilities::cognitive::{
     CompletionResponse, LlmProvider, LocalHttpProvider, Message, OpenAiCompatibleProvider,
     OpenAiProvider, StreamEvent, ToolDefinition,
 };
-use abigail_core::config::ModelTier;
 use std::sync::Arc;
 
 // Re-export RoutingMode from abigail-core for convenience

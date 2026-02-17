@@ -25,7 +25,7 @@ impl EdgeType {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "derived_from" => Some(EdgeType::DerivedFrom),
             "critiqued_by" => Some(EdgeType::CritiquedBy),
@@ -155,11 +155,8 @@ mod tests {
     #[test]
     fn test_edge_types() {
         assert_eq!(EdgeType::DerivedFrom.as_str(), "derived_from");
-        assert_eq!(
-            EdgeType::from_str("critiqued_by"),
-            Some(EdgeType::CritiquedBy)
-        );
-        assert_eq!(EdgeType::from_str("unknown"), None);
+        assert_eq!(EdgeType::parse("critiqued_by"), Some(EdgeType::CritiquedBy));
+        assert_eq!(EdgeType::parse("unknown"), None);
     }
 
     #[test]
