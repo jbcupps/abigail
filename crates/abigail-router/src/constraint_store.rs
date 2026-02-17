@@ -31,6 +31,12 @@ pub struct ConstraintStore {
     file_path: PathBuf,
 }
 
+impl Default for ConstraintStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConstraintStore {
     /// Create a new in-memory store (no persistence).
     ///

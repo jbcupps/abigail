@@ -166,7 +166,7 @@ impl ExecutionGovernor {
     /// - Escalate -> Abort
     pub fn advance_strategy(&mut self) {
         let last_failure = self.state.last_failure();
-        let is_retryable = last_failure.map_or(true, |f| f.is_retryable());
+        let is_retryable = last_failure.is_none_or(|f| f.is_retryable());
 
         let next = match &self.strategy {
             GovernorStrategy::Initial => {
@@ -398,7 +398,7 @@ impl ExecutionGovernor {
             .unwrap_or_default()
             .as_millis() as u64;
 
-        now_ms.saturating_sub(self.start_time_ms) > self.goal.time_budget_ms
+        now_ms.saturating_sub(self.start_time_ms) >= self.goal.time_budget_ms
     }
 
     /// Build a short summary of failures for inclusion in result messages.

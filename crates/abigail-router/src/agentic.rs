@@ -226,7 +226,7 @@ impl AgenticEngine {
         }
         messages.push(Message::new(
             "user",
-            &format!(
+            format!(
                 "Your goal: {}\n\nWork autonomously to accomplish this goal. \
                  Use the available tools as needed. When you believe the goal is \
                  accomplished, summarize what you did.",
@@ -340,7 +340,7 @@ impl AgenticEngine {
                                         // Denied — tell LLM the tool was rejected
                                         messages.push(Message::new(
                                             "user",
-                                            &format!("Tool '{}' was denied by the mentor.", tc.name),
+                                            format!("Tool '{}' was denied by the mentor.", tc.name),
                                         ));
                                         {
                                             let mut r = run.write().await;
@@ -390,7 +390,7 @@ impl AgenticEngine {
                     // Add tool result to conversation
                     messages.push(Message::new(
                         "user",
-                        &format!("Tool '{}' result: {}", tc.name, result),
+                        format!("Tool '{}' result: {}", tc.name, result),
                     ));
                 }
             } else {
