@@ -46,6 +46,11 @@ impl CouncilEngine {
         }
     }
 
+    /// Return the number of providers enrolled in this council.
+    pub fn provider_count(&self) -> usize {
+        self.providers.len()
+    }
+
     /// Set the overall time budget for the deliberation.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;

@@ -21,6 +21,7 @@ interface RouterStatus {
   ego_provider: string | null;
   superego_configured: boolean;
   routing_mode: string;
+  council_providers?: number;
 }
 
 type ConfigStep = "menu" | "ollama" | "lmstudio" | "openai" | null;
@@ -211,7 +212,12 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
     const egoName = routerStatus.ego_provider || "Cloud";
     const egoLabel = egoName.charAt(0).toUpperCase() + egoName.slice(1);
 
-    if (hasEgo && hasLocal) {
+    const councilCount = routerStatus.council_providers || 0;
+
+    if (mode === "council" && councilCount > 1) {
+      statusText = `[council: ${councilCount} providers]`;
+      statusColor = "text-purple-400";
+    } else if (hasEgo && hasLocal) {
       statusText = `[${mode}] ${egoLabel} + Local`;
       statusColor = "text-theme-text";
     } else if (hasEgo) {

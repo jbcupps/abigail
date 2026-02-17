@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 8;
+pub const CONFIG_SCHEMA_VERSION: u32 = 9;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -11,9 +11,12 @@ pub const CONFIG_SCHEMA_VERSION: u32 = 8;
 pub enum RoutingMode {
     /// Id (local) classifies, routes complex to Ego (legacy behavior)
     IdPrimary,
-    /// Ego (cloud) is primary when available, Id is fallback (new default)
-    #[default]
+    /// Ego (cloud) is primary when available, Id is fallback
     EgoPrimary,
+    /// Council (mixture-of-agents): all available providers deliberate together.
+    /// With 1 provider this is passthrough (same as EgoPrimary).
+    #[default]
+    Council,
 }
 
 fn default_schema_version() -> u32 {
@@ -241,7 +244,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub local_llm_base_url: Option<String>,
 
-    /// Routing mode: ego_primary (default) or id_primary
+    /// Routing mode: council (default), ego_primary, or id_primary
     #[serde(default)]
     pub routing_mode: RoutingMode,
 
@@ -487,6 +490,15 @@ impl AppConfig {
             tracing::debug!("Migrated config from v7 to v8");
         }
 
+        // Migration from v8 to v9
+        if self.schema_version < 9 {
+            // v9 adds: Council routing mode (new default).
+            // Existing configs keep their current routing_mode value (serde preserves it).
+            self.schema_version = 9;
+            migrated = true;
+            tracing::debug!("Migrated config from v8 to v9");
+        }
+
         migrated
     }
 
@@ -712,10 +724,36 @@ mod tests {
         });
 
         assert!(config.migrate());
-        assert_eq!(config.schema_version, 8);
+        assert_eq!(config.schema_version, CONFIG_SCHEMA_VERSION);
         assert_eq!(config.email_accounts.len(), 1);
         assert_eq!(config.email_accounts[0].address, "test@example.com");
         assert_eq!(config.email_accounts[0].id, "legacy");
+    }
+
+    #[test]
+    fn test_migrate_v8_to_v9() {
+        let mut config = AppConfig::default_paths();
+        config.schema_version = 8;
+        config.routing_mode = RoutingMode::EgoPrimary; // existing user keeps their mode
+
+        assert!(config.migrate());
+        assert_eq!(config.schema_version, CONFIG_SCHEMA_VERSION);
+        // Existing routing_mode is preserved (not forced to Council)
+        assert_eq!(config.routing_mode, RoutingMode::EgoPrimary);
+    }
+
+    #[test]
+    fn test_default_routing_mode_is_council() {
+        assert_eq!(RoutingMode::default(), RoutingMode::Council);
+    }
+
+    #[test]
+    fn test_council_routing_mode_serde() {
+        let mode = RoutingMode::Council;
+        let json = serde_json::to_string(&mode).unwrap();
+        assert_eq!(json, "\"council\"");
+        let parsed: RoutingMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, RoutingMode::Council);
     }
 
     #[test]

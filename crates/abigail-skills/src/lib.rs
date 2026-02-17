@@ -1,6 +1,7 @@
 //! Abigail Skills — plugin and tool execution layer.
 
 pub mod channel;
+pub mod dynamic;
 pub mod executor;
 pub mod manifest;
 pub mod prelude;
@@ -16,6 +17,7 @@ pub mod watcher;
 pub use protocol as capability;
 
 pub use channel::*;
+pub use dynamic::{DynamicApiSkill, DynamicSkillConfig, DynamicToolConfig};
 pub use executor::SkillExecutor;
 pub use manifest::*;
 pub use prelude::*;
