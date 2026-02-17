@@ -4,12 +4,18 @@ import LlmSetupPanel from "./LlmSetupPanel";
 import BirthChat, { BirthChatHandle } from "./BirthChat";
 import ApiKeyModal from "./ApiKeyModal";
 import SoulCrystallization from "./SoulCrystallization";
+import GenesisPathSelector from "./GenesisPathSelector";
+import GenesisChat from "./GenesisChat";
+import ForgeScenario from "./ForgeScenario";
 
 type Stage =
   | "Darkness"
   | "KeyPresentation"
   | "Ignition"
   | "Connectivity"
+  | "Genesis"
+  | "GenesisChat"
+  | "GenesisForge"
   | "Crystallization"
   | "SoulPreview"
   | "Emergence"
@@ -43,6 +49,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [crystalName, setCrystalName] = useState("");
   const [crystalPurpose, setCrystalPurpose] = useState("");
   const [crystalPersonality, setCrystalPersonality] = useState("");
+  const [genesisPath, setGenesisPath] = useState<string | null>(null);
 
   // Ref to BirthChat for injecting key confirmations
   const birthChatRef = useRef<BirthChatHandle>(null);
@@ -225,10 +232,41 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const handleConnectivityAdvance = async () => {
     try {
       await invoke("advance_to_crystallization");
-      setStage("Crystallization");
+      setStage("Genesis");
     } catch (e) {
       setError(String(e));
     }
+  };
+
+  const handleGenesisPathSelected = (pathId: string) => {
+    setGenesisPath(pathId);
+    switch (pathId) {
+      case "quick_start":
+        // Skip genesis entirely, use default soul
+        handleCrystallizationQuickStart();
+        break;
+      case "direct":
+        setStage("GenesisChat");
+        break;
+      case "soul_crystallization":
+        setStage("Crystallization");
+        break;
+      case "soul_forge":
+        setStage("GenesisForge");
+        break;
+      default:
+        setStage("Crystallization");
+    }
+  };
+
+  const handleGenesisChatComplete = () => {
+    // After direct discovery chat, move to SoulPreview
+    setStage("SoulPreview");
+  };
+
+  const handleForgeComplete = (_output: { archetype: string; weights: Record<string, number>; soul_hash: string; sigil: string }) => {
+    // After Soul Forge, move to Emergence
+    setStage("Emergence");
   };
 
   const handleCrystallizationQuickStart = () => {
@@ -465,6 +503,24 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               />
             )}
           </div>
+        )}
+
+        {/* ── GENESIS PATH SELECTION ── */}
+        {stage === "Genesis" && (
+          <GenesisPathSelector onSelect={handleGenesisPathSelected} />
+        )}
+
+        {/* ── GENESIS CHAT (Direct Discovery) ── */}
+        {stage === "GenesisChat" && (
+          <GenesisChat
+            mode={genesisPath === "direct" ? "direct" : "crystallization"}
+            onComplete={handleGenesisChatComplete}
+          />
+        )}
+
+        {/* ── GENESIS FORGE (Soul Forge) ── */}
+        {stage === "GenesisForge" && (
+          <ForgeScenario onComplete={handleForgeComplete} />
         )}
 
         {/* ── CRYSTALLIZATION ── */}

@@ -17,6 +17,7 @@ abigail-router = { path = "../crates/abigail-router" }
 abigail-birth = { path = "../crates/abigail-birth" }
 abigail-soul-crystallization = { path = "../crates/abigail-soul-crystallization" }
 abigail-skills = { path = "../crates/abigail-skills" }
+soul-forge = { path = "../crates/soul-forge" }
 skill-web-search = { path = "../skills/skill-web-search" }
 skill-filesystem = { path = "../skills/skill-filesystem" }
 skill-shell = { path = "../skills/skill-shell" }

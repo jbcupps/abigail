@@ -9,6 +9,7 @@ members = [
     "crates/abigail-soul-crystallization",
     "crates/abigail-skills",
     "crates/abigail-keygen",
+    "crates/soul-forge",
     "skills/skill-web-search",
     "skills/skill-filesystem",
     "skills/skill-shell",

@@ -3250,6 +3250,366 @@ async fn delegate_to_subagent(
     Ok(response.content)
 }
 
+// ---------------------------------------------------------------------------
+// Phase 1: Config & Tier commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn get_tier_models(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let tier_models = config
+        .tier_models
+        .clone()
+        .unwrap_or_else(|| abigail_core::TierModels::defaults());
+    serde_json::to_value(&tier_models).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_tier_models(
+    state: tauri::State<'_, AppState>,
+    tier_models: serde_json::Value,
+) -> Result<(), String> {
+    let parsed: abigail_core::TierModels =
+        serde_json::from_value(tier_models).map_err(|e| e.to_string())?;
+    let mut config = state.config.write().map_err(|e| e.to_string())?;
+    config.tier_models = Some(parsed);
+    config
+        .save(&config.config_path())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn reset_tier_models(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let mut config = state.config.write().map_err(|e| e.to_string())?;
+    config.tier_models = Some(abigail_core::TierModels::defaults());
+    config
+        .save(&config.config_path())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn validate_tier_models(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let tier_models = config
+        .tier_models
+        .clone()
+        .unwrap_or_else(|| abigail_core::TierModels::defaults());
+    let catalog = if config.provider_catalog.is_empty() {
+        abigail_capabilities::cognitive::catalog::ProviderCatalog::curated_defaults()
+    } else {
+        config.provider_catalog.clone()
+    };
+    let issues = abigail_capabilities::cognitive::catalog::ProviderCatalog::validate_tier_models(
+        &tier_models,
+        &catalog,
+    );
+    serde_json::to_value(&issues).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn refresh_provider_catalog(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    // Get config and secrets before async boundary
+    let (providers_with_keys, _data_dir) = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let secrets = state.secrets.lock().map_err(|e| e.to_string())?;
+        let mut providers = Vec::new();
+        for provider in &["openai", "anthropic", "google", "xai", "perplexity"] {
+            if let Some(key) = secrets.get_secret(provider) {
+                providers.push((provider.to_string(), key.to_string()));
+            }
+        }
+        (providers, config.data_dir.clone())
+    };
+
+    let mut all_entries =
+        abigail_capabilities::cognitive::catalog::ProviderCatalog::curated_defaults();
+
+    for (provider, key) in &providers_with_keys {
+        match abigail_capabilities::cognitive::catalog::ProviderCatalog::fetch_catalog(
+            provider, key,
+        )
+        .await
+        {
+            Ok(entries) => {
+                // Replace curated entries for this provider with fetched ones
+                all_entries.retain(|e| e.provider != *provider);
+                all_entries.extend(entries);
+            }
+            Err(e) => {
+                tracing::warn!("Failed to fetch catalog for {}: {}", provider, e);
+            }
+        }
+    }
+
+    // Save to config
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.provider_catalog = all_entries.clone();
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
+    }
+
+    serde_json::to_value(&all_entries).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_active_provider(state: tauri::State<'_, AppState>, provider: String) -> Result<(), String> {
+    let mut config = state.config.write().map_err(|e| e.to_string())?;
+    config.active_provider_preference = Some(provider);
+    config
+        .save(&config.config_path())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_superego_l2_mode(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    serde_json::to_string(&config.superego_l2_mode).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_superego_l2_mode(state: tauri::State<'_, AppState>, mode: String) -> Result<(), String> {
+    let parsed: abigail_core::SuperegoL2Mode =
+        serde_json::from_str(&format!("\"{}\"", mode)).map_err(|e| e.to_string())?;
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.superego_l2_mode = parsed;
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
+    }
+    // Also update the router
+    let mut router = state.router.write().map_err(|e| e.to_string())?;
+    router.set_superego_l2_mode(parsed);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: Genesis paths
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn get_genesis_paths() -> Result<serde_json::Value, String> {
+    let paths: Vec<abigail_birth::GenesisPathInfo> = abigail_birth::GenesisPath::all()
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    serde_json::to_value(&paths).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: File ingestion
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn upload_chat_attachment(file_path: String) -> Result<serde_json::Value, String> {
+    let path = std::path::Path::new(&file_path);
+    let result = abigail_capabilities::sensory::file_ingestion::ingest_file(path)
+        .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "content": result.content,
+        "content_type": result.content_type,
+        "filename": result.filename,
+        "size_bytes": result.size_bytes,
+        "truncated": result.truncated,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: Governor / Constraint Store
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn get_governor_status() -> Result<serde_json::Value, String> {
+    // TODO: wire to Governor engine when implemented
+    Ok(serde_json::json!({}))
+}
+
+#[tauri::command]
+fn get_constraint_store() -> Result<serde_json::Value, String> {
+    // TODO: wire to ConstraintStore when implemented
+    Ok(serde_json::json!([]))
+}
+
+#[tauri::command]
+fn clear_constraints() -> Result<(), String> {
+    // TODO: wire to ConstraintStore when implemented
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: Agentic Runs + Orchestration
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn start_agentic_run(
+    _state: tauri::State<'_, AppState>,
+    _goal: String,
+    _max_turns: u32,
+    _require_confirmation: bool,
+) -> Result<String, String> {
+    // TODO: wire to AgenticEngine when AppState is updated
+    let task_id = uuid::Uuid::new_v4().to_string();
+    Ok(task_id)
+}
+
+#[tauri::command]
+fn get_agentic_run_status(
+    _state: tauri::State<'_, AppState>,
+    task_id: String,
+) -> Result<serde_json::Value, String> {
+    // TODO: wire to AgenticEngine when AppState is updated
+    Ok(serde_json::json!({
+        "task_id": task_id,
+        "status": "not_started",
+        "turns_completed": 0,
+        "goal": "",
+        "events": []
+    }))
+}
+
+#[tauri::command]
+fn respond_to_mentor_ask(
+    _state: tauri::State<'_, AppState>,
+    _task_id: String,
+    _response: String,
+) -> Result<(), String> {
+    // TODO: wire to AgenticEngine when AppState is updated
+    Ok(())
+}
+
+#[tauri::command]
+fn confirm_tool_execution(
+    _state: tauri::State<'_, AppState>,
+    _task_id: String,
+    _approved: bool,
+) -> Result<(), String> {
+    // TODO: wire to AgenticEngine when AppState is updated
+    Ok(())
+}
+
+#[tauri::command]
+fn cancel_agentic_run(_state: tauri::State<'_, AppState>, _task_id: String) -> Result<(), String> {
+    // TODO: wire to AgenticEngine when AppState is updated
+    Ok(())
+}
+
+#[tauri::command]
+fn list_agentic_runs(_state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    // TODO: wire to AgenticEngine when AppState is updated
+    Ok(serde_json::json!([]))
+}
+
+#[tauri::command]
+fn list_orchestration_jobs(
+    _state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    // TODO: wire to OrchestrationScheduler when AppState is updated
+    Ok(serde_json::json!([]))
+}
+
+#[tauri::command]
+fn create_orchestration_job(
+    _state: tauri::State<'_, AppState>,
+    _name: String,
+    _cron_expression: String,
+    _mode: String,
+    _goal_template: Option<String>,
+) -> Result<(), String> {
+    // TODO: wire to OrchestrationScheduler when AppState is updated
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_orchestration_job(
+    _state: tauri::State<'_, AppState>,
+    _job_id: String,
+) -> Result<(), String> {
+    // TODO: wire to OrchestrationScheduler when AppState is updated
+    Ok(())
+}
+
+#[tauri::command]
+fn enable_orchestration_job(
+    _state: tauri::State<'_, AppState>,
+    _job_id: String,
+    _enabled: bool,
+) -> Result<(), String> {
+    // TODO: wire to OrchestrationScheduler when AppState is updated
+    Ok(())
+}
+
+#[tauri::command]
+fn run_orchestration_job_now(
+    _state: tauri::State<'_, AppState>,
+    _job_id: String,
+) -> Result<(), String> {
+    // TODO: wire to OrchestrationScheduler when AppState is updated
+    Ok(())
+}
+
+#[tauri::command]
+fn get_orchestration_logs(_state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    // TODO: wire to OrchestrationScheduler when AppState is updated
+    Ok(serde_json::json!([]))
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 (additional): Soul Forge, Genesis Chat, Active Provider
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn get_forge_scenarios() -> Result<serde_json::Value, String> {
+    let engine = soul_forge::SoulForgeEngine::new();
+    let scenarios = engine.scenarios();
+    serde_json::to_value(scenarios).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn crystallize_forge(choices: Vec<String>) -> Result<serde_json::Value, String> {
+    let engine = soul_forge::SoulForgeEngine::new();
+    let scenarios = engine.scenarios();
+
+    // choices is a flat Vec<String> of choice IDs, one per scenario (in order)
+    if choices.len() != scenarios.len() {
+        return Err(format!(
+            "Expected {} choices, got {}",
+            scenarios.len(),
+            choices.len()
+        ));
+    }
+
+    let paired: Vec<(String, String)> = scenarios
+        .iter()
+        .zip(choices.iter())
+        .map(|(s, c)| (s.id.clone(), c.clone()))
+        .collect();
+
+    let output = engine.crystallize(&paired)?;
+    serde_json::to_value(&output).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn genesis_chat(
+    _state: tauri::State<'_, AppState>,
+    _message: String,
+) -> Result<serde_json::Value, String> {
+    // TODO: wire to Genesis conversation engine when implemented
+    Ok(serde_json::json!({
+        "message": "Genesis chat is not yet implemented. This is a stub response.",
+        "complete": false
+    }))
+}
+
+#[tauri::command]
+fn get_active_provider(state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    Ok(config.active_provider_preference.clone())
+}
+
 /// Determine the best Ego provider and API key from config + secrets vault.
 /// Returns (provider_name, api_key). Checks TrinityConfig first, then
 /// falls back to openai_api_key in config, then vault secrets.
@@ -3661,6 +4021,42 @@ pub fn run() {
             // Subagent management
             list_subagents,
             delegate_to_subagent,
+            // Phase 1: Tier models & provider catalog
+            get_tier_models,
+            set_tier_models,
+            reset_tier_models,
+            validate_tier_models,
+            refresh_provider_catalog,
+            set_active_provider,
+            get_superego_l2_mode,
+            set_superego_l2_mode,
+            // Phase 4: Genesis paths
+            get_genesis_paths,
+            // Phase 5: File ingestion
+            upload_chat_attachment,
+            // Phase 2: Governor / Constraint Store
+            get_governor_status,
+            get_constraint_store,
+            clear_constraints,
+            // Phase 3: Agentic Runs
+            start_agentic_run,
+            get_agentic_run_status,
+            respond_to_mentor_ask,
+            confirm_tool_execution,
+            cancel_agentic_run,
+            list_agentic_runs,
+            // Phase 3: Orchestration
+            list_orchestration_jobs,
+            create_orchestration_job,
+            delete_orchestration_job,
+            enable_orchestration_job,
+            run_orchestration_job_now,
+            get_orchestration_logs,
+            // Phase 4 (additional): Soul Forge, Genesis, Provider
+            get_forge_scenarios,
+            crystallize_forge,
+            genesis_chat,
+            get_active_provider,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2,6 +2,7 @@
 
 pub mod anthropic;
 pub mod candle;
+pub mod catalog;
 pub mod download;
 pub mod local_http;
 pub mod openai;

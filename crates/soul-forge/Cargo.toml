@@ -1,0 +1,9 @@
+[package]
+name = "soul-forge"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
