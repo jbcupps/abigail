@@ -1500,9 +1500,10 @@ const ALLOWED_PROVIDER_SECRET_KEYS: &[&str] = &[
     "tavily",
 ];
 
-/// Returns the set of allowed secret keys: reserved provider names + skill-declared secret names.
+/// Returns the set of allowed secret keys: reserved provider names + skill-declared secret names
+/// + secret keys referenced by dynamic skills.
 fn allowed_secret_keys(
-    _registry: &SkillRegistry,
+    registry: &SkillRegistry,
     skill_paths: &[PathBuf],
 ) -> std::collections::HashSet<String> {
     let mut allowed: std::collections::HashSet<String> = ALLOWED_PROVIDER_SECRET_KEYS
@@ -1513,6 +1514,14 @@ fn allowed_secret_keys(
     for m in manifests {
         for s in &m.secrets {
             allowed.insert(s.name.clone());
+        }
+    }
+    // Also include secrets declared by registered dynamic skills
+    if let Ok(registered) = registry.list() {
+        for m in &registered {
+            for s in &m.secrets {
+                allowed.insert(s.name.clone());
+            }
         }
     }
     allowed
@@ -1627,6 +1636,112 @@ fn chat_tool_definitions(
     // HTTP client capability tools
     tools.extend(http_client.tool_definitions());
 
+    // Dynamic skill management tools
+    tools.push(abigail_capabilities::cognitive::ToolDefinition {
+        name: "create_dynamic_skill".to_string(),
+        description: "Create a new dynamic API skill at runtime. Defines HTTP-based tools that \
+                      make templated requests to external APIs. Use this when the user asks you \
+                      to integrate with an API you don't already have a tool for. URL templates \
+                      use {{param_name}} for parameters and {{secret:key_name}} for API keys \
+                      stored in the secrets vault. Only HTTPS URLs are allowed."
+            .to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Unique skill ID, must start with 'dynamic.' (e.g. 'dynamic.openweathermap')"
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Human-readable skill name"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "What this skill does"
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Skill category (e.g. 'Weather', 'Finance', 'Social')"
+                },
+                "tools": {
+                    "type": "array",
+                    "description": "List of tool definitions",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Tool name (alphanumeric + underscores, 3-64 chars)"
+                            },
+                            "description": {
+                                "type": "string",
+                                "description": "What this tool does"
+                            },
+                            "parameters": {
+                                "type": "object",
+                                "description": "JSON Schema for tool parameters"
+                            },
+                            "method": {
+                                "type": "string",
+                                "enum": ["GET", "POST", "PUT", "DELETE"],
+                                "description": "HTTP method"
+                            },
+                            "url_template": {
+                                "type": "string",
+                                "description": "URL template with {{param}} and {{secret:key}} placeholders. Must start with https://"
+                            },
+                            "headers": {
+                                "type": "object",
+                                "description": "HTTP headers (supports {{secret:key}} placeholders)"
+                            },
+                            "body_template": {
+                                "type": "string",
+                                "description": "Request body template (for POST/PUT)"
+                            },
+                            "response_extract": {
+                                "type": "object",
+                                "description": "Map of field_name -> dot.path to extract from JSON response (e.g. {\"temp\": \"main.temp\"})"
+                            },
+                            "response_format": {
+                                "type": "string",
+                                "description": "Format string using extracted fields (e.g. \"Temperature: {{temp}}°F\")"
+                            }
+                        },
+                        "required": ["name", "description", "parameters", "method", "url_template"]
+                    }
+                }
+            },
+            "required": ["id", "name", "description", "tools"]
+        }),
+    });
+
+    tools.push(abigail_capabilities::cognitive::ToolDefinition {
+        name: "list_dynamic_skills".to_string(),
+        description: "List all dynamic API skills that have been created at runtime.".to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {}
+        }),
+    });
+
+    tools.push(abigail_capabilities::cognitive::ToolDefinition {
+        name: "delete_dynamic_skill".to_string(),
+        description: "Delete a dynamic API skill by ID. The skill will be unregistered and its \
+                      config file removed."
+            .to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "The skill ID to delete (must start with 'dynamic.')"
+                }
+            },
+            "required": ["id"]
+        }),
+    });
+
     // Skill-provided tools
     if let Ok(manifests) = registry.list() {
         for manifest in &manifests {
@@ -1643,6 +1758,75 @@ fn chat_tool_definitions(
     }
 
     tools
+}
+
+/// Build a markdown section listing all available tools, grouped by source.
+/// Appended to the system prompt so the LLM knows what tools it has and when to use them.
+fn build_tool_awareness_section(
+    registry: &SkillRegistry,
+    browser: &abigail_capabilities::sensory::browser::BrowserCapability,
+    http_client: &abigail_capabilities::sensory::http_client::HttpClientCapability,
+) -> String {
+    let mut sections = Vec::new();
+
+    // Browser tools
+    let browser_tools = browser.tool_definitions();
+    if !browser_tools.is_empty() {
+        let mut s = String::from("### Browser Automation\n");
+        for t in &browser_tools {
+            s.push_str(&format!("- **{}**: {}\n", t.name, t.description));
+        }
+        sections.push(s);
+    }
+
+    // HTTP client tools
+    let http_tools = http_client.tool_definitions();
+    if !http_tools.is_empty() {
+        let mut s = String::from("### HTTP Client\n");
+        for t in &http_tools {
+            s.push_str(&format!("- **{}**: {}\n", t.name, t.description));
+        }
+        sections.push(s);
+    }
+
+    // Skill-provided tools, grouped by skill
+    if let Ok(manifests) = registry.list() {
+        for manifest in &manifests {
+            if let Ok((skill, _)) = registry.get_skill(&manifest.id) {
+                let tools = skill.tools();
+                if tools.is_empty() {
+                    continue;
+                }
+                let mut s = format!("### {} ({})\n", manifest.name, manifest.id.0);
+                for t in &tools {
+                    s.push_str(&format!("- **{}**: {}\n", t.name, t.description));
+                }
+                sections.push(s);
+            }
+        }
+    }
+
+    // Meta-tools guidance
+    let mut guidance = String::from("### Skill Management\n");
+    guidance.push_str("- **create_dynamic_skill**: Create a new API integration at runtime. Use when you need a tool that doesn't exist yet.\n");
+    guidance.push_str("- **list_dynamic_skills**: List all dynamic skills you've created.\n");
+    guidance.push_str("- **delete_dynamic_skill**: Remove a dynamic skill.\n\n");
+    guidance.push_str("**When to create a dynamic skill**: If the user asks you to interact with an external API \
+                       and no existing tool covers it, research the API (using web_search), then use \
+                       create_dynamic_skill to define a tool for it. URL templates must use HTTPS. \
+                       For API keys, use `{{secret:key_name}}` in templates and tell the user to store \
+                       the key with the store_secret command.\n");
+    sections.push(guidance);
+
+    if sections.is_empty() {
+        return String::new();
+    }
+
+    format!(
+        "\n\n## Available Tools\n\nBelow is an inventory of all tools currently available to you. \
+         Use the most appropriate tool for each task.\n\n{}",
+        sections.join("\n")
+    )
 }
 
 /// Build a focused system prompt for a subagent based on its definition.
@@ -1937,6 +2121,226 @@ fn execute_tool_call<'a>(
                 let http_client = state.http_client.read().await;
                 http_client.execute_tool(name, &args).await
             }
+            "create_dynamic_skill" => {
+                let _ = app.emit(
+                    "chat-status",
+                    serde_json::json!({ "status": "tool_executing", "tool": "create_dynamic_skill" }),
+                );
+                let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
+                    Ok(v) => v,
+                    Err(e) => return format!("Error parsing arguments: {}", e),
+                };
+
+                let id = args["id"].as_str().unwrap_or("").to_string();
+                let name = args["name"].as_str().unwrap_or("").to_string();
+                let description = args["description"].as_str().unwrap_or("").to_string();
+                let category = args["category"].as_str().unwrap_or("API").to_string();
+
+                if id.is_empty() || name.is_empty() {
+                    return "Error: id and name are required".to_string();
+                }
+
+                // Parse tools array
+                let tools_val = match args.get("tools").and_then(|t| t.as_array()) {
+                    Some(t) => t,
+                    None => return "Error: tools array is required".to_string(),
+                };
+
+                let mut tool_configs = Vec::new();
+                for tv in tools_val {
+                    let tc = abigail_skills::DynamicToolConfig {
+                        name: tv["name"].as_str().unwrap_or("").to_string(),
+                        description: tv["description"].as_str().unwrap_or("").to_string(),
+                        parameters: tv
+                            .get("parameters")
+                            .cloned()
+                            .unwrap_or(serde_json::json!({"type": "object", "properties": {}})),
+                        method: tv["method"].as_str().unwrap_or("GET").to_string(),
+                        url_template: tv["url_template"].as_str().unwrap_or("").to_string(),
+                        headers: tv
+                            .get("headers")
+                            .and_then(|h| h.as_object())
+                            .map(|obj| {
+                                obj.iter()
+                                    .filter_map(|(k, v)| {
+                                        v.as_str().map(|s| (k.clone(), s.to_string()))
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                        body_template: tv
+                            .get("body_template")
+                            .and_then(|b| b.as_str())
+                            .map(String::from),
+                        response_extract: tv
+                            .get("response_extract")
+                            .and_then(|h| h.as_object())
+                            .map(|obj| {
+                                obj.iter()
+                                    .filter_map(|(k, v)| {
+                                        v.as_str().map(|s| (k.clone(), s.to_string()))
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                        response_format: tv
+                            .get("response_format")
+                            .and_then(|f| f.as_str())
+                            .map(String::from),
+                    };
+                    tool_configs.push(tc);
+                }
+
+                let config = abigail_skills::DynamicSkillConfig {
+                    id: id.clone(),
+                    name: name.clone(),
+                    description,
+                    version: "1.0.0".to_string(),
+                    category,
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                    tools: tool_configs,
+                };
+
+                // Check for tool name collisions with existing tools
+                {
+                    let browser_guard = state.browser.read().await;
+                    let http_client_guard = state.http_client.read().await;
+                    let existing_tools =
+                        chat_tool_definitions(&state.registry, &browser_guard, &http_client_guard);
+                    for new_tool in &config.tools {
+                        if existing_tools.iter().any(|t| t.name == new_tool.name) {
+                            return format!(
+                                "Error: tool name '{}' conflicts with an existing tool",
+                                new_tool.name
+                            );
+                        }
+                    }
+                }
+
+                // Create the dynamic skill
+                let skill = match abigail_skills::DynamicApiSkill::from_config(
+                    config,
+                    Some(state.secrets.clone()),
+                ) {
+                    Ok(s) => s,
+                    Err(e) => return format!("Error creating dynamic skill: {}", e),
+                };
+
+                // Save to disk
+                let data_dir = match state.config.read() {
+                    Ok(c) => c.data_dir.clone(),
+                    Err(e) => return format!("Error reading config: {}", e),
+                };
+                let dynamic_dir = data_dir.join("dynamic_skills");
+                let file_path = dynamic_dir.join(format!("{}.json", id));
+                if let Err(e) = skill.save_to_path(&file_path) {
+                    return format!("Error saving dynamic skill: {}", e);
+                }
+
+                // Register with skill registry
+                let tool_names: Vec<String> =
+                    skill.tools().iter().map(|t| t.name.clone()).collect();
+                let missing_secrets: Vec<String> = {
+                    let vault = state.secrets.lock().ok();
+                    skill
+                        .manifest()
+                        .secrets
+                        .iter()
+                        .filter(|s| vault.as_ref().map_or(true, |v| !v.exists(&s.name)))
+                        .map(|s| s.name.clone())
+                        .collect()
+                };
+                let skill_id = abigail_skills::SkillId(id.clone());
+                if let Err(e) = state
+                    .registry
+                    .register(skill_id, std::sync::Arc::new(skill))
+                {
+                    return format!("Error registering dynamic skill: {}", e);
+                }
+
+                let mut result = format!(
+                    "Dynamic skill '{}' created successfully with tools: {}",
+                    name,
+                    tool_names.join(", ")
+                );
+                if !missing_secrets.is_empty() {
+                    result.push_str(&format!(
+                        "\n\nNote: The following API keys need to be stored before the skill can be used: {}. \
+                         Use the store_secret command to add them.",
+                        missing_secrets.join(", ")
+                    ));
+                }
+                result
+            }
+            "list_dynamic_skills" => {
+                let _ = app.emit(
+                    "chat-status",
+                    serde_json::json!({ "status": "tool_executing", "tool": "list_dynamic_skills" }),
+                );
+                let manifests = match state.registry.list() {
+                    Ok(m) => m,
+                    Err(e) => return format!("Error listing skills: {}", e),
+                };
+
+                let dynamic_skills: Vec<_> = manifests
+                    .iter()
+                    .filter(|m| m.id.0.starts_with("dynamic."))
+                    .collect();
+
+                if dynamic_skills.is_empty() {
+                    return "No dynamic skills are currently registered. You can create one with create_dynamic_skill.".to_string();
+                }
+
+                let mut result = format!("Found {} dynamic skill(s):\n", dynamic_skills.len());
+                for m in &dynamic_skills {
+                    result.push_str(&format!(
+                        "\n- **{}** ({}): {}",
+                        m.name, m.id.0, m.description
+                    ));
+                    if let Ok((skill, _)) = state.registry.get_skill(&m.id) {
+                        let tool_names: Vec<String> =
+                            skill.tools().iter().map(|t| t.name.clone()).collect();
+                        result.push_str(&format!("\n  Tools: {}", tool_names.join(", ")));
+                    }
+                }
+                result
+            }
+            "delete_dynamic_skill" => {
+                let _ = app.emit(
+                    "chat-status",
+                    serde_json::json!({ "status": "tool_executing", "tool": "delete_dynamic_skill" }),
+                );
+                let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
+                    Ok(v) => v,
+                    Err(e) => return format!("Error parsing arguments: {}", e),
+                };
+                let id = args["id"].as_str().unwrap_or("").to_string();
+
+                if id.is_empty() || !id.starts_with("dynamic.") {
+                    return "Error: id must start with 'dynamic.'".to_string();
+                }
+
+                // Unregister from skill registry
+                let skill_id = abigail_skills::SkillId(id.clone());
+                let _ = state.registry.unregister(&skill_id);
+
+                // Delete config file from disk
+                let data_dir = match state.config.read() {
+                    Ok(c) => c.data_dir.clone(),
+                    Err(e) => return format!("Error reading config: {}", e),
+                };
+                let file_path = data_dir.join("dynamic_skills").join(format!("{}.json", id));
+                if file_path.exists() {
+                    if let Err(e) = std::fs::remove_file(&file_path) {
+                        return format!(
+                            "Skill unregistered but failed to delete config file: {}",
+                            e
+                        );
+                    }
+                }
+
+                format!("Dynamic skill '{}' has been deleted.", id)
+            }
             other => {
                 // Check registered skills for matching tool name
                 let _ = app.emit(
@@ -2091,7 +2495,7 @@ async fn chat(
     target: Option<String>,
 ) -> Result<String, String> {
     // Build system prompt and gather config before async boundary
-    let (store, router, system_prompt) = {
+    let (store, router, base_system_prompt) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
         let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
         let prompt =
@@ -2101,18 +2505,22 @@ async fn chat(
         (store, router, prompt)
     };
 
+    let target_mode = target.as_deref().unwrap_or("EGO");
+    let (tools, system_prompt) = {
+        let browser_guard = state.browser.read().await;
+        let http_client_guard = state.http_client.read().await;
+        let tools = chat_tool_definitions(&state.registry, &browser_guard, &http_client_guard);
+        let tool_awareness =
+            build_tool_awareness_section(&state.registry, &browser_guard, &http_client_guard);
+        let system_prompt = format!("{}{}", base_system_prompt, tool_awareness);
+        (tools, system_prompt)
+    };
+
     // Build messages with system prompt
     let mut messages = vec![
         abigail_capabilities::cognitive::Message::new("system", &system_prompt),
         abigail_capabilities::cognitive::Message::new("user", &message),
     ];
-
-    let target_mode = target.as_deref().unwrap_or("EGO");
-    let tools = {
-        let browser_guard = state.browser.read().await;
-        let http_client_guard = state.http_client.read().await;
-        chat_tool_definitions(&state.registry, &browser_guard, &http_client_guard)
-    };
 
     // Diagnostic: log router status for non-streaming chat
     let router_status = router.status();
@@ -2225,7 +2633,7 @@ async fn chat_stream(
 ) -> Result<String, String> {
     use abigail_capabilities::cognitive::StreamEvent;
 
-    let (store, router, system_prompt) = {
+    let (store, router, base_system_prompt) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
         let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
         let prompt =
@@ -2235,17 +2643,21 @@ async fn chat_stream(
         (store, router, prompt)
     };
 
+    let target_mode = target.as_deref().unwrap_or("EGO");
+    let (tools, system_prompt) = {
+        let browser_guard = state.browser.read().await;
+        let http_client_guard = state.http_client.read().await;
+        let tools = chat_tool_definitions(&state.registry, &browser_guard, &http_client_guard);
+        let tool_awareness =
+            build_tool_awareness_section(&state.registry, &browser_guard, &http_client_guard);
+        let system_prompt = format!("{}{}", base_system_prompt, tool_awareness);
+        (tools, system_prompt)
+    };
+
     let mut messages = vec![
         abigail_capabilities::cognitive::Message::new("system", &system_prompt),
         abigail_capabilities::cognitive::Message::new("user", &message),
     ];
-
-    let target_mode = target.as_deref().unwrap_or("EGO");
-    let tools = {
-        let browser_guard = state.browser.read().await;
-        let http_client_guard = state.http_client.read().await;
-        chat_tool_definitions(&state.registry, &browser_guard, &http_client_guard)
-    };
 
     // Diagnostic: log router status at the point of each chat request
     let router_status = router.status();
@@ -3782,6 +4194,20 @@ pub fn run() {
         let pplx_skill =
             PerplexitySearchSkill::with_secrets(pplx_manifest.clone(), secrets.clone());
         let _ = registry.register(pplx_manifest.id.clone(), Arc::new(pplx_skill));
+    }
+
+    // Load dynamic skills from data_dir/dynamic_skills/
+    {
+        let dynamic_dir = config.data_dir.join("dynamic_skills");
+        if dynamic_dir.exists() {
+            for skill in
+                abigail_skills::DynamicApiSkill::discover(&dynamic_dir, Some(secrets.clone()))
+            {
+                let id = skill.manifest().id.clone();
+                tracing::info!("Loaded dynamic skill: {}", id.0);
+                let _ = registry.register(id, Arc::new(skill));
+            }
+        }
     }
 
     let event_bus = Arc::new(EventBus::new(256));
