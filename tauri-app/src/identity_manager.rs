@@ -242,6 +242,11 @@ impl IdentityManager {
             approved_skill_ids: Default::default(),
             trusted_skill_signers: Default::default(),
             sao_endpoint: None,
+            tier_models: None,
+            provider_catalog: Vec::new(),
+            active_provider_preference: None,
+            superego_l2_mode: Default::default(),
+            email_accounts: Vec::new(),
         };
         let config_path = agent_dir.join("config.json");
         config.save(&config_path).map_err(|e| e.to_string())?;
