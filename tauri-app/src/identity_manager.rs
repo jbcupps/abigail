@@ -247,6 +247,8 @@ impl IdentityManager {
             active_provider_preference: None,
             superego_l2_mode: Default::default(),
             email_accounts: Vec::new(),
+            bundled_ollama: cfg!(windows),
+            bundled_model: Some("qwen2.5:0.5b".to_string()),
         };
         let config_path = agent_dir.join("config.json");
         config.save(&config_path).map_err(|e| e.to_string())?;

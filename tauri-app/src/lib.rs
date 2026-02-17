@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 pub mod identity_manager;
+pub mod ollama_manager;
 mod templates;
 
 use abigail_birth::BirthOrchestrator;
@@ -20,6 +21,7 @@ use base64::Engine as _;
 use chrono::Utc;
 use ed25519_dalek::SigningKey;
 use identity_manager::{AgentIdentityInfo, IdentityManager};
+use ollama_manager::OllamaManager;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use skill_filesystem::FilesystemSkill;
@@ -30,7 +32,7 @@ use skill_web_search::WebSearchSkill;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 /// Returns permitted base directories for backup destinations (canonicalized where possible).
 /// Backup is allowed only under: data_dir, or user's Documents/Home.
@@ -162,6 +164,8 @@ struct AppState {
     /// Enhanced HTTP client capability with sessions and cookies
     http_client:
         Arc<tokio::sync::RwLock<abigail_capabilities::sensory::http_client::HttpClientCapability>>,
+    /// Managed Ollama instance (bundled or system)
+    ollama: Arc<tokio::sync::Mutex<Option<OllamaManager>>>,
 }
 
 fn get_config() -> AppConfig {
@@ -1215,6 +1219,12 @@ fn gather_council_providers(
 }
 
 /// Rebuild the router from current config + vault state, attaching Superego and Council if configured.
+/// Rebuild router using an AppHandle (for use in async closures without tauri::State).
+fn rebuild_router_with_superego_from_handle(handle: &tauri::AppHandle) -> Result<(), String> {
+    let state = handle.state::<AppState>();
+    rebuild_router_with_superego(&state)
+}
+
 fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let vault = state.secrets.lock().map_err(|e| e.to_string())?;
@@ -1328,6 +1338,22 @@ fn get_router_status(state: tauri::State<AppState>) -> Result<RouterStatus, Stri
         routing_mode: format!("{:?}", config.routing_mode).to_lowercase(),
         council_providers: status.council_provider_count,
     })
+}
+
+#[tauri::command]
+async fn get_ollama_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<ollama_manager::OllamaStatus, String> {
+    let guard = state.ollama.lock().await;
+    match guard.as_ref() {
+        Some(manager) => Ok(manager.status()),
+        None => Ok(ollama_manager::OllamaStatus {
+            managed: false,
+            running: false,
+            port: 0,
+            model_ready: false,
+        }),
+    }
 }
 
 #[tauri::command]
@@ -4403,10 +4429,13 @@ pub fn run() {
         subagent_manager: RwLock::new(subagent_manager),
         browser: Arc::new(tokio::sync::RwLock::new(browser_cap)),
         http_client: Arc::new(tokio::sync::RwLock::new(http_client_cap)),
+        ollama: Arc::new(tokio::sync::Mutex::new(None)),
     };
 
     // Clone event_bus before setup since state isn't available inside setup callback
     let event_bus_for_setup = event_bus.clone();
+    // Clone data_dir for setup closure (Ollama startup)
+    let data_dir_for_setup = data_dir.clone();
 
     // Start the skills directory watcher for hot-reload
     let skills_dir = data_dir.join("skills");
@@ -4457,6 +4486,86 @@ pub fn run() {
                     }
                 });
             });
+
+            // Spawn async Ollama startup (non-blocking — runs in background)
+            let ollama_handle = app.handle().clone();
+            let resource_dir = app.path().resource_dir().ok();
+            let ollama_data_dir = data_dir_for_setup;
+            tauri::async_runtime::spawn(async move {
+                let state = ollama_handle.state::<AppState>();
+
+                // Check if bundled_ollama is enabled in config
+                let bundled_enabled = {
+                    state
+                        .config
+                        .read()
+                        .map(|c| c.bundled_ollama)
+                        .unwrap_or(false)
+                };
+                if !bundled_enabled {
+                    tracing::debug!("Bundled Ollama disabled in config");
+                    return;
+                }
+
+                let res_dir = match resource_dir {
+                    Some(d) => d,
+                    None => {
+                        tracing::debug!("No resource_dir available, skipping bundled Ollama");
+                        return;
+                    }
+                };
+
+                match OllamaManager::discover_and_start(&res_dir, &ollama_data_dir).await {
+                    Ok(mut manager) => {
+                        let url = manager.base_url();
+                        tracing::info!("Bundled Ollama started at {}", url);
+
+                        // Ensure default model
+                        let model = {
+                            state
+                                .config
+                                .read()
+                                .ok()
+                                .and_then(|c| c.bundled_model.clone())
+                                .unwrap_or_else(|| "qwen2.5:0.5b".to_string())
+                        };
+                        if let Err(e) = manager.ensure_model(&model).await {
+                            tracing::warn!("Failed to ensure model '{}': {}", model, e);
+                        }
+
+                        // Update config with the Ollama URL if no local LLM is configured
+                        {
+                            if let Ok(mut config) = state.config.write() {
+                                if config.local_llm_base_url.is_none() {
+                                    config.local_llm_base_url = Some(url.clone());
+                                    tracing::info!(
+                                        "Set local_llm_base_url to bundled Ollama: {}",
+                                        url
+                                    );
+                                    // Save config
+                                    let path = config.config_path();
+                                    if let Err(e) = config.save(&path) {
+                                        tracing::warn!("Failed to save config: {}", e);
+                                    }
+                                }
+                            }
+                        }
+
+                        // Rebuild router with the new local URL
+                        if let Err(e) = rebuild_router_with_superego_from_handle(&ollama_handle) {
+                            tracing::warn!("Failed to rebuild router after Ollama start: {}", e);
+                        }
+
+                        // Store manager in state
+                        let mut guard = state.ollama.lock().await;
+                        *guard = Some(manager);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Bundled Ollama not available: {}", e);
+                    }
+                }
+            });
+
             Ok(())
         })
         .manage(state)
@@ -4498,6 +4607,7 @@ pub fn run() {
             set_api_key,
             set_local_llm_url,
             get_router_status,
+            get_ollama_status,
             set_superego_provider,
             complete_birth,
             skip_to_life_for_mvp,
@@ -4574,6 +4684,17 @@ pub fn run() {
             genesis_chat,
             get_active_provider,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error building tauri app")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Shut down managed Ollama process on app exit
+                let state = app_handle.state::<AppState>();
+                if let Ok(mut guard) = state.ollama.try_lock() {
+                    if let Some(ref mut manager) = *guard {
+                        manager.shutdown();
+                    }
+                }
+            }
+        });
 }

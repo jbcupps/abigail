@@ -195,9 +195,30 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     }
   };
 
-  const handleContinueFromKeyPresentation = () => {
+  const handleContinueFromKeyPresentation = async () => {
     setPrivateKey(""); // Clear from memory
     invoke("advance_past_darkness").catch(console.error);
+
+    // Check if bundled Ollama is running — if so, skip the manual LLM setup
+    try {
+      const status = await invoke<{ managed: boolean; running: boolean; port: number; model_ready: boolean }>(
+        "get_ollama_status"
+      );
+      if (status.running && status.model_ready) {
+        // Bundled Ollama is ready — skip Ignition, go straight to Connectivity
+        try {
+          const providers = await invoke<string[]>("get_stored_providers");
+          setStoredProviders(providers);
+        } catch (e) {
+          console.error("Failed to fetch stored providers:", e);
+        }
+        setStage("Connectivity");
+        return;
+      }
+    } catch {
+      // get_ollama_status not available or failed — fall through to Ignition
+    }
+
     setStage("Ignition");
   };
 

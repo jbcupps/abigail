@@ -159,7 +159,11 @@ jobs:
             const path = 'tauri-app/tauri.conf.json';
             const data = JSON.parse(fs.readFileSync(path, 'utf8'));
             data.bundle = data.bundle || {};
-            data.bundle.resources = ['${{ matrix.resource_name }}'];
+            const resources = ['${{ matrix.resource_name }}'];
+            if ('${{ matrix.platform }}' === 'windows-latest') {
+              resources.push('ollama/ollama.exe');
+            }
+            data.bundle.resources = resources;
             fs.writeFileSync(path, JSON.stringify(data, null, 2) + '\n');
           "
 
@@ -188,6 +192,15 @@ jobs:
           cp tauri-app/icons/icon.ico icons/ 2>/dev/null || true
           cp tauri-app/icons/icon.icns icons/ 2>/dev/null || true
           cp tauri-app/icons/*.png icons/ 2>/dev/null || true
+
+      - name: Download Ollama binary (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          mkdir -p tauri-app/ollama
+          curl -L -o tauri-app/ollama/ollama.exe \
+            https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.exe
+          ls -la tauri-app/ollama/
 
       - name: Build abigail-keygen binary
         shell: bash
