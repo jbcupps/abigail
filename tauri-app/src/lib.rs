@@ -4694,7 +4694,7 @@ pub fn run() {
                     if let Some(ref mut manager) = *guard {
                         manager.shutdown();
                     }
-                }
+                };
             }
         });
 }
