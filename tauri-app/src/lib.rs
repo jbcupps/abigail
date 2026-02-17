@@ -912,6 +912,15 @@ fn advance_past_darkness(state: tauri::State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Advance from Ignition to Connectivity (e.g. when bundled Ollama handles local LLM).
+#[tauri::command]
+fn advance_to_connectivity(state: tauri::State<AppState>) -> Result<(), String> {
+    let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+    let b = birth.as_mut().ok_or("Birth not started")?;
+    b.advance_to_connectivity().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepairIdentityParams {
     pub private_key: Option<String>,
@@ -4602,6 +4611,7 @@ pub fn run() {
             verify_crypto,
             generate_identity,
             advance_past_darkness,
+            advance_to_connectivity,
             configure_email,
             download_model,
             set_api_key,
