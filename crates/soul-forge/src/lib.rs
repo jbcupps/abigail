@@ -507,10 +507,10 @@ mod tests {
 
     #[test]
     fn test_archetype_derivation() {
-        // High deontology + welfare → Guardian
+        // High deontology + welfare → Guardian (deontology must be strictly dominant)
         let w = TriangleWeights {
-            deontology: 0.4,
-            teleology: 0.1,
+            deontology: 0.45,
+            teleology: 0.05,
             areteology: 0.1,
             welfare: 0.4,
         };
