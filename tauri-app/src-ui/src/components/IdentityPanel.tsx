@@ -11,6 +11,7 @@ interface RouterStatus {
   id_url: string | null;
   ego_configured: boolean;
   routing_mode: string;
+  council_providers?: number;
 }
 
 export default function IdentityPanel() {
@@ -175,7 +176,7 @@ export default function IdentityPanel() {
             <div>
               <span className="text-theme-text-dim text-sm">Router: </span>
               <span className="text-theme-text-bright">
-                {routerStatus ? `${routerStatus.routing_mode} | Id: ${routerStatus.id_provider}` : "Loading..."}
+                {routerStatus ? `${routerStatus.routing_mode}${routerStatus.routing_mode === "council" && routerStatus.council_providers ? ` (${routerStatus.council_providers} providers)` : ""} | Id: ${routerStatus.id_provider}` : "Loading..."}
               </span>
             </div>
             <div>

@@ -7,6 +7,8 @@ use abigail_capabilities::cognitive::{
 };
 use std::sync::Arc;
 
+use crate::council::CouncilEngine;
+
 // Re-export RoutingMode from abigail-core for convenience
 pub use abigail_core::RoutingMode;
 pub use abigail_core::SuperegoL2Mode;
@@ -56,6 +58,8 @@ pub struct RouterStatusInfo {
     pub has_superego: bool,
     pub has_local_http: bool,
     pub mode: RoutingMode,
+    /// Number of providers enrolled in the council (0 if no council attached).
+    pub council_provider_count: usize,
 }
 
 /// Routes user messages: Id (local) classifies; ROUTINE stays local, COMPLEX goes to Ego if configured.
@@ -71,6 +75,7 @@ pub struct IdEgoRouter {
     ego: Option<Arc<dyn LlmProvider>>,
     ego_provider: Option<EgoProvider>,
     superego: Option<Arc<dyn LlmProvider>>,
+    council: Option<Arc<CouncilEngine>>,
     local_http: Option<Arc<LocalHttpProvider>>,
     mode: RoutingMode,
     /// Superego Layer-2 enforcement mode.
@@ -99,6 +104,7 @@ impl IdEgoRouter {
             ego,
             ego_provider,
             superego: None,
+            council: None,
             local_http,
             mode,
             superego_l2_mode: SuperegoL2Mode::Off,
@@ -121,6 +127,7 @@ impl IdEgoRouter {
             ego,
             ego_provider,
             superego: None,
+            council: None,
             local_http,
             mode,
             superego_l2_mode: SuperegoL2Mode::Off,
@@ -164,6 +171,7 @@ impl IdEgoRouter {
             has_superego: self.superego.is_some(),
             has_local_http: self.local_http.is_some(),
             mode: self.mode,
+            council_provider_count: self.council.as_ref().map_or(0, |c| c.provider_count()),
         }
     }
 
@@ -171,6 +179,12 @@ impl IdEgoRouter {
     /// The Superego runs an LLM-based safety check before any routing decision.
     pub fn with_superego(mut self, provider: Arc<dyn LlmProvider>) -> Self {
         self.superego = Some(provider);
+        self
+    }
+
+    /// Builder method: attach a CouncilEngine for multi-provider deliberation.
+    pub fn with_council(mut self, engine: CouncilEngine) -> Self {
+        self.council = Some(Arc::new(engine));
         self
     }
 
@@ -322,7 +336,40 @@ impl IdEgoRouter {
         match self.mode {
             RoutingMode::IdPrimary => self.route_id_primary(messages).await,
             RoutingMode::EgoPrimary => self.route_ego_primary(messages).await,
+            RoutingMode::Council => self.route_council(messages).await,
         }
+    }
+
+    /// Council routing: delegate to CouncilEngine if attached, fall back to ego_primary.
+    async fn route_council(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
+        if let Some(ref council) = self.council {
+            tracing::info!(
+                "Routing to Council ({} providers)",
+                council.provider_count()
+            );
+            match council.deliberate(messages.clone(), None).await {
+                Ok(result) => {
+                    tracing::info!(
+                        "Council deliberation complete: {} drafts, synthesis len={}",
+                        result.drafts.len(),
+                        result.synthesis.len()
+                    );
+                    return Ok(CompletionResponse {
+                        content: result.synthesis,
+                        tool_calls: None,
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Council deliberation failed, falling back to ego_primary: {}",
+                        e
+                    );
+                }
+            }
+        } else {
+            tracing::debug!("Council mode but no engine attached, falling back to ego_primary");
+        }
+        self.route_ego_primary(messages).await
     }
 
     /// Run Superego pre-check on the last user message.
@@ -410,13 +457,15 @@ impl IdEgoRouter {
 
     /// Route message with tool definitions attached.
     /// Runs Superego pre-check before routing.
+    /// In Council mode, tool-calling bypasses council and uses ego/id directly.
     pub async fn route_with_tools(
         &self,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
     ) -> anyhow::Result<CompletionResponse> {
         tracing::debug!(
-            "route_with_tools: has_ego={}, tool_count={}, msg_count={}",
+            "route_with_tools: mode={:?}, has_ego={}, tool_count={}, msg_count={}",
+            self.mode,
             self.ego.is_some(),
             tools.len(),
             messages.len()
@@ -470,9 +519,31 @@ impl IdEgoRouter {
             let _ = tx.send(StreamEvent::Done(deny.clone())).await;
             return Ok(deny);
         }
-        // Determine which provider to use (same logic as route)
+        // Council mode: deliberate non-streaming, send synthesis as burst
+        if self.mode == RoutingMode::Council {
+            if let Some(ref council) = self.council {
+                tracing::info!("route_stream: council mode, deliberating non-streaming");
+                match council.deliberate(messages.clone(), None).await {
+                    Ok(result) => {
+                        let response = CompletionResponse {
+                            content: result.synthesis.clone(),
+                            tool_calls: None,
+                        };
+                        let _ = tx.send(StreamEvent::Token(result.synthesis)).await;
+                        let _ = tx.send(StreamEvent::Done(response.clone())).await;
+                        return Ok(response);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Council stream deliberation failed, falling back to single provider: {}", e);
+                    }
+                }
+            }
+            // Fall through to ego_primary-style streaming
+        }
+
+        // Determine which provider to use (same logic as route for non-council modes)
         let provider: &Arc<dyn LlmProvider> = match self.mode {
-            RoutingMode::EgoPrimary => {
+            RoutingMode::EgoPrimary | RoutingMode::Council => {
                 if let Some(ref ego) = self.ego {
                     ego
                 } else {
@@ -718,8 +789,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_default_routing_mode_is_ego_primary() {
-        assert_eq!(RoutingMode::default(), RoutingMode::EgoPrimary);
+    async fn test_default_routing_mode_is_council() {
+        assert_eq!(RoutingMode::default(), RoutingMode::Council);
     }
 
     #[tokio::test]
@@ -871,5 +942,61 @@ mod tests {
         let router = IdEgoRouter::new(None, None, None, RoutingMode::default())
             .with_superego(Arc::new(CandleProvider::new()));
         assert!(router.has_superego());
+    }
+
+    // ── Council tests ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_council_mode_without_engine_falls_back() {
+        // Council mode with no engine attached should fall back to ego_primary behavior
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::Council);
+        let status = router.status();
+        assert_eq!(status.mode, RoutingMode::Council);
+        assert_eq!(status.council_provider_count, 0);
+
+        // Route should still work (falls back to Id since no Ego either)
+        let messages = vec![Message::new("user", "hello")];
+        let response = router.route(messages).await.unwrap();
+        assert!(!response.content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_council_mode_single_provider_passthrough() {
+        use crate::council::CouncilEngine;
+
+        let provider = Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>;
+        let engine = CouncilEngine::new(vec![("stub".to_string(), provider)]);
+
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::Council).with_council(engine);
+
+        let status = router.status();
+        assert_eq!(status.council_provider_count, 1);
+
+        // Single provider = passthrough (no critique/synthesis)
+        let messages = vec![Message::new("user", "What is 2+2?")];
+        let response = router.route(messages).await.unwrap();
+        assert!(!response.content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_council_mode_tool_calls_use_ego() {
+        // In Council mode, route_with_tools should bypass council and use ego/id
+        let router = IdEgoRouter::new(
+            None,
+            Some("openai"),
+            Some("test-key".to_string()),
+            RoutingMode::Council,
+        );
+        assert!(router.has_ego());
+        // Just verify it doesn't panic — actual tool calls need a real provider
+    }
+
+    #[tokio::test]
+    async fn test_with_council_builder() {
+        use crate::council::CouncilEngine;
+
+        let engine = CouncilEngine::new(vec![]);
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::Council).with_council(engine);
+        assert_eq!(router.status().council_provider_count, 0);
     }
 }

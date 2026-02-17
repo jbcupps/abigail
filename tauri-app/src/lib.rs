@@ -10,7 +10,9 @@ use abigail_core::{
     TrinityConfig, Verifier,
 };
 use abigail_memory::{Memory, MemoryStore};
-use abigail_router::{IdEgoRouter, SubagentDefinition, SubagentManager, SubagentProvider};
+use abigail_router::{
+    CouncilEngine, IdEgoRouter, RoutingMode, SubagentDefinition, SubagentManager, SubagentProvider,
+};
 use abigail_skills::channel::EventBus;
 use abigail_skills::protocol::mcp::{HttpMcpClient, McpTool};
 use abigail_skills::{MissingSkillSecret, SkillExecutor, SkillRegistry, ToolParams};
@@ -1162,7 +1164,57 @@ fn build_superego_llm_provider(
     }
 }
 
-/// Rebuild the router from current config + vault state, attaching Superego if configured.
+/// Gather all cloud providers with stored API keys for council enrollment.
+/// Iterates per-agent vault first, then hive vault (dedup by name).
+/// Excludes local LLM — only cloud providers participate; Id stays separate.
+fn gather_council_providers(
+    secrets: &abigail_core::SecretsVault,
+    hive_secrets: &abigail_core::SecretsVault,
+) -> Vec<(
+    String,
+    Arc<dyn abigail_capabilities::cognitive::LlmProvider>,
+)> {
+    let provider_names = ["anthropic", "openai", "xai", "perplexity", "google"];
+    let mut seen = std::collections::HashSet::new();
+    let mut providers: Vec<(
+        String,
+        Arc<dyn abigail_capabilities::cognitive::LlmProvider>,
+    )> = Vec::new();
+
+    // Check per-agent vault first
+    for name in &provider_names {
+        if let Some(key) = secrets.get_secret(name) {
+            let key_str = key.to_string();
+            if !key_str.is_empty() {
+                providers.push((
+                    name.to_string(),
+                    build_superego_llm_provider(name, &key_str),
+                ));
+                seen.insert(*name);
+            }
+        }
+    }
+
+    // Then hive vault (dedup)
+    for name in &provider_names {
+        if seen.contains(name) {
+            continue;
+        }
+        if let Some(key) = hive_secrets.get_secret(name) {
+            let key_str = key.to_string();
+            if !key_str.is_empty() {
+                providers.push((
+                    name.to_string(),
+                    build_superego_llm_provider(name, &key_str),
+                ));
+            }
+        }
+    }
+
+    providers
+}
+
+/// Rebuild the router from current config + vault state, attaching Superego and Council if configured.
 fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let vault = state.secrets.lock().map_err(|e| e.to_string())?;
@@ -1200,6 +1252,26 @@ fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
         tracing::info!("Superego attached: provider={}", se_provider);
     }
 
+    // Attach Council if routing_mode is Council
+    if config.routing_mode == RoutingMode::Council {
+        let hive = state.hive_secrets.lock().map_err(|e| e.to_string())?;
+        let council_providers = gather_council_providers(&vault, &hive);
+        if !council_providers.is_empty() {
+            tracing::info!(
+                "Council: enrolling {} providers: {:?}",
+                council_providers.len(),
+                council_providers
+                    .iter()
+                    .map(|(n, _)| n.as_str())
+                    .collect::<Vec<_>>()
+            );
+            let engine = CouncilEngine::new(council_providers);
+            new_router = new_router.with_council(engine);
+        } else {
+            tracing::info!("Council mode but no providers with stored keys; will fall back to ego_primary behavior");
+        }
+    }
+
     drop(vault);
     drop(config);
     let router_arc = Arc::new(new_router.clone());
@@ -1228,8 +1300,10 @@ pub struct RouterStatus {
     pub ego_provider: Option<String>,
     /// Whether Superego (safety layer) is configured
     pub superego_configured: bool,
-    /// Current routing mode: "ego_primary" or "id_primary"
+    /// Current routing mode: "ego_primary", "id_primary", or "council"
     pub routing_mode: String,
+    /// Number of providers enrolled in the council (0 if not council mode)
+    pub council_providers: usize,
 }
 
 #[tauri::command]
@@ -1252,6 +1326,7 @@ fn get_router_status(state: tauri::State<AppState>) -> Result<RouterStatus, Stri
         ego_provider: status.ego_provider,
         superego_configured: status.has_superego,
         routing_mode: format!("{:?}", config.routing_mode).to_lowercase(),
+        council_providers: status.council_provider_count,
     })
 }
 
@@ -4150,6 +4225,21 @@ pub fn run() {
             let superego = build_superego_llm_provider(&se_provider, &se_key);
             r = r.with_superego(superego);
             tracing::info!("Superego configured at startup: provider={}", se_provider);
+        }
+
+        // Attach Council if routing_mode is Council
+        if config.routing_mode == RoutingMode::Council {
+            let vault = secrets.lock().unwrap();
+            let hive = hive_secrets.lock().unwrap();
+            let council_providers = gather_council_providers(&vault, &hive);
+            if !council_providers.is_empty() {
+                tracing::info!(
+                    "Council at startup: enrolling {} providers",
+                    council_providers.len()
+                );
+                let engine = CouncilEngine::new(council_providers);
+                r = r.with_council(engine);
+            }
         }
 
         r
