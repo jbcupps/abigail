@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 4;
+pub const CONFIG_SCHEMA_VERSION: u32 = 8;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -49,6 +50,139 @@ pub struct McpTrustPolicy {
     /// For HTTP transport: allowed hostnames (e.g. "localhost", "127.0.0.1"). Empty means no HTTP allowed or use default localhost.
     #[serde(default)]
     pub allowed_http_hosts: Vec<String>,
+}
+
+/// Model tier for routing — selects which model quality to use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelTier {
+    /// Fastest, cheapest model (e.g. gpt-4o-mini)
+    Fast,
+    /// Balanced quality/speed (e.g. gpt-4o)
+    #[default]
+    Standard,
+    /// Highest quality, may be slower (e.g. o1, claude-opus)
+    Pro,
+}
+
+/// Per-provider model assignments for each tier.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TierModels {
+    /// Provider → model-id for Fast tier
+    #[serde(default)]
+    pub fast: HashMap<String, String>,
+    /// Provider → model-id for Standard tier
+    #[serde(default)]
+    pub standard: HashMap<String, String>,
+    /// Provider → model-id for Pro tier
+    #[serde(default)]
+    pub pro: HashMap<String, String>,
+}
+
+impl TierModels {
+    /// Get the model ID for a given provider and tier, falling back to standard then fast.
+    pub fn get_model(&self, provider: &str, tier: ModelTier) -> Option<&String> {
+        match tier {
+            ModelTier::Pro => self
+                .pro
+                .get(provider)
+                .or_else(|| self.standard.get(provider)),
+            ModelTier::Standard => self.standard.get(provider),
+            ModelTier::Fast => self.fast.get(provider),
+        }
+    }
+
+    /// Build default tier model mappings with curated defaults.
+    pub fn defaults() -> Self {
+        let mut fast = HashMap::new();
+        let mut standard = HashMap::new();
+        let mut pro = HashMap::new();
+
+        fast.insert("openai".into(), "gpt-4o-mini".into());
+        fast.insert("anthropic".into(), "claude-haiku-4-5-20251001".into());
+        fast.insert("google".into(), "gemini-2.0-flash".into());
+        fast.insert("xai".into(), "grok-2-mini".into());
+        fast.insert("perplexity".into(), "sonar".into());
+
+        standard.insert("openai".into(), "gpt-4o".into());
+        standard.insert("anthropic".into(), "claude-sonnet-4-5-20250929".into());
+        standard.insert("google".into(), "gemini-2.5-pro".into());
+        standard.insert("xai".into(), "grok-3".into());
+        standard.insert("perplexity".into(), "sonar-pro".into());
+
+        pro.insert("openai".into(), "o3".into());
+        pro.insert("anthropic".into(), "claude-opus-4-6".into());
+        pro.insert("google".into(), "gemini-2.5-pro".into());
+        pro.insert("xai".into(), "grok-3".into());
+        pro.insert("perplexity".into(), "sonar-reasoning-pro".into());
+
+        Self {
+            fast,
+            standard,
+            pro,
+        }
+    }
+}
+
+/// A cached entry from a provider's model catalog.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderCatalogEntry {
+    /// Provider name (e.g. "openai", "anthropic")
+    pub provider: String,
+    /// Model ID as the provider knows it (e.g. "gpt-4o")
+    pub model_id: String,
+    /// Human-readable display name
+    pub display_name: String,
+    /// Lifecycle status: "active", "deprecated", "preview"
+    #[serde(default)]
+    pub lifecycle: Option<String>,
+    /// ISO 8601 timestamp of when this entry was fetched
+    #[serde(default)]
+    pub last_fetched: Option<String>,
+}
+
+/// Superego Layer-2 enforcement mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SuperegoL2Mode {
+    /// No LLM-based safety check (pattern-based L1 always runs)
+    #[default]
+    Off,
+    /// Run LLM safety check, log warnings but don't block
+    Advisory,
+    /// Run LLM safety check, block on DENY
+    Enforce,
+}
+
+/// Email account configuration supporting multiple accounts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailAccountConfig {
+    /// Unique ID for this email account
+    pub id: String,
+    /// Email address
+    pub address: String,
+    /// IMAP host
+    pub imap_host: String,
+    /// IMAP port
+    pub imap_port: u16,
+    /// SMTP host
+    pub smtp_host: String,
+    /// SMTP port
+    pub smtp_port: u16,
+    /// Auth method: "password" or "oauth2"
+    #[serde(default = "default_email_auth_method")]
+    pub auth_method: String,
+    /// Encrypted password via DPAPI (or plaintext stub on non-Windows).
+    /// Used when auth_method is "password".
+    #[serde(default)]
+    pub password_encrypted: Vec<u8>,
+    /// OAuth2 provider hint (e.g. "gmail", "outlook") when auth_method is "oauth2"
+    #[serde(default)]
+    pub oauth2_provider: Option<String>,
+}
+
+fn default_email_auth_method() -> String {
+    "password".to_string()
 }
 
 /// Trinity configuration: maps providers to Superego/Ego/Id roles.
@@ -144,6 +278,28 @@ pub struct AppConfig {
     /// periodic status heartbeats. When None, Abigail runs standalone.
     #[serde(default)]
     pub sao_endpoint: Option<String>,
+
+    // ── v5+ fields ──────────────────────────────────────────────────
+    /// Per-provider model assignments for Fast/Standard/Pro tiers.
+    #[serde(default)]
+    pub tier_models: Option<TierModels>,
+
+    /// Cached model catalog entries from provider APIs.
+    #[serde(default)]
+    pub provider_catalog: Vec<ProviderCatalogEntry>,
+
+    /// Preferred Ego provider name (e.g. "anthropic", "openai").
+    /// When set, this overrides the trinity ego_provider for routing.
+    #[serde(default)]
+    pub active_provider_preference: Option<String>,
+
+    /// Superego Layer-2 enforcement mode.
+    #[serde(default)]
+    pub superego_l2_mode: SuperegoL2Mode,
+
+    /// Multiple email account configurations (replaces single `email` field).
+    #[serde(default)]
+    pub email_accounts: Vec<EmailAccountConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,6 +340,11 @@ impl AppConfig {
             approved_skill_ids: Vec::new(),
             trusted_skill_signers: Vec::new(),
             sao_endpoint: None,
+            tier_models: None,
+            provider_catalog: Vec::new(),
+            active_provider_preference: None,
+            superego_l2_mode: SuperegoL2Mode::default(),
+            email_accounts: Vec::new(),
         }
     }
 
@@ -277,6 +438,55 @@ impl AppConfig {
             tracing::debug!("Migrated config from v3 to v4");
         }
 
+        // Migration from v4 to v5
+        if self.schema_version < 5 {
+            // v5 adds: tier_models (initialized to None → will use defaults on read)
+            self.schema_version = 5;
+            migrated = true;
+            tracing::debug!("Migrated config from v4 to v5");
+        }
+
+        // Migration from v5 to v6
+        if self.schema_version < 6 {
+            // v6 adds: provider_catalog, active_provider_preference
+            self.schema_version = 6;
+            migrated = true;
+            tracing::debug!("Migrated config from v5 to v6");
+        }
+
+        // Migration from v6 to v7
+        if self.schema_version < 7 {
+            // v7 adds: superego_l2_mode (defaults to Off)
+            self.schema_version = 7;
+            migrated = true;
+            tracing::debug!("Migrated config from v6 to v7");
+        }
+
+        // Migration from v7 to v8
+        if self.schema_version < 8 {
+            // v8 adds: email_accounts (multi-account email).
+            // Migrate legacy single `email` to email_accounts if present.
+            if let Some(ref legacy_email) = self.email {
+                if self.email_accounts.is_empty() {
+                    self.email_accounts.push(EmailAccountConfig {
+                        id: "legacy".to_string(),
+                        address: legacy_email.address.clone(),
+                        imap_host: legacy_email.imap_host.clone(),
+                        imap_port: legacy_email.imap_port,
+                        smtp_host: legacy_email.smtp_host.clone(),
+                        smtp_port: legacy_email.smtp_port,
+                        auth_method: "password".to_string(),
+                        password_encrypted: legacy_email.password_encrypted.clone(),
+                        oauth2_provider: None,
+                    });
+                    tracing::info!("Migrated legacy email config to email_accounts");
+                }
+            }
+            self.schema_version = 8;
+            migrated = true;
+            tracing::debug!("Migrated config from v7 to v8");
+        }
+
         migrated
     }
 
@@ -335,6 +545,11 @@ mod tests {
             approved_skill_ids: Vec::new(),
             trusted_skill_signers: Vec::new(),
             sao_endpoint: None,
+            tier_models: None,
+            provider_catalog: Vec::new(),
+            active_provider_preference: None,
+            superego_l2_mode: SuperegoL2Mode::default(),
+            email_accounts: Vec::new(),
         }
     }
 
@@ -439,5 +654,85 @@ mod tests {
 
         config.clear_birth_stage();
         assert!(config.birth_stage.is_none());
+    }
+
+    #[test]
+    fn test_tier_models_defaults() {
+        let tiers = TierModels::defaults();
+        assert_eq!(tiers.fast.get("openai"), Some(&"gpt-4o-mini".to_string()));
+        assert_eq!(tiers.standard.get("openai"), Some(&"gpt-4o".to_string()));
+        assert_eq!(tiers.pro.get("openai"), Some(&"o3".to_string()));
+        assert_eq!(
+            tiers.standard.get("anthropic"),
+            Some(&"claude-sonnet-4-5-20250929".to_string())
+        );
+    }
+
+    #[test]
+    fn test_tier_models_get_model_fallback() {
+        let tiers = TierModels::defaults();
+        // Pro falls back to standard if no pro entry
+        let mut custom = TierModels::default();
+        custom
+            .standard
+            .insert("test".into(), "standard-model".into());
+        assert_eq!(
+            custom.get_model("test", ModelTier::Pro),
+            Some(&"standard-model".to_string())
+        );
+        assert_eq!(custom.get_model("test", ModelTier::Fast), None);
+    }
+
+    #[test]
+    fn test_superego_l2_mode_default() {
+        assert_eq!(SuperegoL2Mode::default(), SuperegoL2Mode::Off);
+    }
+
+    #[test]
+    fn test_migrate_v4_to_v8() {
+        let mut config = AppConfig::default_paths();
+        config.schema_version = 4;
+
+        assert!(config.migrate());
+        assert_eq!(config.schema_version, CONFIG_SCHEMA_VERSION);
+        assert!(config.email_accounts.is_empty()); // no legacy email
+    }
+
+    #[test]
+    fn test_migrate_v7_to_v8_with_legacy_email() {
+        let mut config = AppConfig::default_paths();
+        config.schema_version = 7;
+        config.email = Some(EmailConfig {
+            address: "test@example.com".into(),
+            imap_host: "imap.example.com".into(),
+            imap_port: 993,
+            smtp_host: "smtp.example.com".into(),
+            smtp_port: 587,
+            password_encrypted: vec![1, 2, 3],
+        });
+
+        assert!(config.migrate());
+        assert_eq!(config.schema_version, 8);
+        assert_eq!(config.email_accounts.len(), 1);
+        assert_eq!(config.email_accounts[0].address, "test@example.com");
+        assert_eq!(config.email_accounts[0].id, "legacy");
+    }
+
+    #[test]
+    fn test_superego_l2_mode_serde() {
+        let mode = SuperegoL2Mode::Enforce;
+        let json = serde_json::to_string(&mode).unwrap();
+        assert_eq!(json, "\"enforce\"");
+        let parsed: SuperegoL2Mode = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, SuperegoL2Mode::Enforce);
+    }
+
+    #[test]
+    fn test_model_tier_serde() {
+        let tier = ModelTier::Pro;
+        let json = serde_json::to_string(&tier).unwrap();
+        assert_eq!(json, "\"pro\"");
+        let parsed: ModelTier = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, ModelTier::Pro);
     }
 }

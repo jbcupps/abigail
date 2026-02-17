@@ -1,3 +1,4 @@
+pub mod capability_envelope;
 pub mod config;
 pub mod document;
 pub mod dpapi;
@@ -8,14 +9,19 @@ pub mod keyring;
 pub mod local_llm_url;
 pub mod sao_bridge;
 pub mod secrets;
+pub mod structured_failure;
 pub mod superego;
 pub mod system_prompt;
 pub mod templates;
 pub mod vault;
 pub mod verifier;
 
+pub use capability_envelope::{
+    evaluate_gate, CapabilityEnvelope, CapabilityGateResult, RequestedCapability,
+};
 pub use config::{
-    AppConfig, EmailConfig, McpServerDefinition, McpTrustPolicy, RoutingMode, TrinityConfig,
+    AppConfig, EmailAccountConfig, EmailConfig, McpServerDefinition, McpTrustPolicy, ModelTier,
+    ProviderCatalogEntry, RoutingMode, SuperegoL2Mode, TierModels, TrinityConfig,
     CONFIG_SCHEMA_VERSION,
 };
 pub use document::{CoreDocument, DocumentTier};
@@ -29,6 +35,7 @@ pub use keyring::{
 pub use local_llm_url::validate_local_llm_url;
 pub use sao_bridge::{AgentState, SaoBridgeClient, SaoBridgeError};
 pub use secrets::SecretsVault;
+pub use structured_failure::StructuredFailure;
 pub use superego::{check_message, check_search_query, SuperegoVerdict};
 pub use vault::{ExternalVault, ReadOnlyFileVault};
 pub use verifier::{write_sig_file, Verifier};

@@ -5,10 +5,12 @@ use abigail_capabilities::cognitive::{
     CompletionResponse, LlmProvider, LocalHttpProvider, Message, OpenAiCompatibleProvider,
     OpenAiProvider, StreamEvent, ToolDefinition,
 };
+use abigail_core::config::ModelTier;
 use std::sync::Arc;
 
 // Re-export RoutingMode from abigail-core for convenience
 pub use abigail_core::RoutingMode;
+pub use abigail_core::SuperegoL2Mode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteDecision {
@@ -72,6 +74,8 @@ pub struct IdEgoRouter {
     superego: Option<Arc<dyn LlmProvider>>,
     local_http: Option<Arc<LocalHttpProvider>>,
     mode: RoutingMode,
+    /// Superego Layer-2 enforcement mode.
+    superego_l2_mode: SuperegoL2Mode,
 }
 
 impl IdEgoRouter {
@@ -98,6 +102,7 @@ impl IdEgoRouter {
             superego: None,
             local_http,
             mode,
+            superego_l2_mode: SuperegoL2Mode::Off,
         }
     }
 
@@ -119,6 +124,7 @@ impl IdEgoRouter {
             superego: None,
             local_http,
             mode,
+            superego_l2_mode: SuperegoL2Mode::Off,
         }
     }
 
@@ -169,11 +175,30 @@ impl IdEgoRouter {
         self
     }
 
+    /// Builder method: set the Superego L2 enforcement mode.
+    pub fn with_superego_l2_mode(mut self, mode: SuperegoL2Mode) -> Self {
+        self.superego_l2_mode = mode;
+        self
+    }
+
+    /// Get the current Superego L2 mode.
+    pub fn superego_l2_mode(&self) -> SuperegoL2Mode {
+        self.superego_l2_mode
+    }
+
+    /// Set the Superego L2 mode at runtime.
+    pub fn set_superego_l2_mode(&mut self, mode: SuperegoL2Mode) {
+        self.superego_l2_mode = mode;
+    }
+
     /// Run Superego safety pre-check on a user message.
     ///
     /// This is a two-layer check:
     /// 1. **Pattern-based** (fast, offline): catches known harmful patterns (PII, malware, jailbreaks).
-    /// 2. **LLM-based** (optional): if a Superego provider is configured, runs an LLM safety classifier.
+    /// 2. **LLM-based** (optional): controlled by `superego_l2_mode`:
+    ///    - Off: skip LLM check entirely
+    ///    - Advisory: run LLM check, log warnings but don't block
+    ///    - Enforce: run LLM check, block on DENY
     ///
     /// Returns `SuperegoResult::Allow` if the message passes all checks,
     /// or `SuperegoResult::Deny(reason)` if blocked.
@@ -187,6 +212,12 @@ impl IdEgoRouter {
                     .reason
                     .unwrap_or_else(|| "Blocked by safety check".to_string()),
             );
+        }
+
+        // Layer 2: LLM-based check — skip if L2 is Off
+        if self.superego_l2_mode == SuperegoL2Mode::Off {
+            tracing::debug!("Superego L2 mode is Off, skipping LLM check");
+            return SuperegoResult::Allow;
         }
 
         // Layer 2: LLM-based check (only if superego provider configured)
@@ -219,10 +250,26 @@ impl IdEgoRouter {
                             .or_else(|| response.content.trim().strip_prefix("DENY"))
                             .map(|s| s.trim().to_string())
                             .unwrap_or_else(|| "Blocked by Superego safety check".to_string());
-                        tracing::info!("Superego LLM check DENIED: {}", reason);
-                        return SuperegoResult::Deny(reason);
+
+                        match self.superego_l2_mode {
+                            SuperegoL2Mode::Enforce => {
+                                tracing::info!("Superego L2 ENFORCE denied: {}", reason);
+                                return SuperegoResult::Deny(reason);
+                            }
+                            SuperegoL2Mode::Advisory => {
+                                tracing::warn!(
+                                    "Superego L2 ADVISORY warning (allowing): {}",
+                                    reason
+                                );
+                                // Advisory: log but don't block
+                            }
+                            SuperegoL2Mode::Off => {
+                                // Should not reach here, but be safe
+                            }
+                        }
+                    } else {
+                        tracing::debug!("Superego LLM check: SAFE");
                     }
-                    tracing::debug!("Superego LLM check: SAFE");
                 }
                 Err(e) => {
                     // Superego failure is non-fatal: log and allow through

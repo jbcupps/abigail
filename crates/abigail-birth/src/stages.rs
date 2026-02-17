@@ -379,6 +379,11 @@ mod tests {
             approved_skill_ids: Default::default(),
             trusted_skill_signers: Default::default(),
             sao_endpoint: None,
+            tier_models: None,
+            provider_catalog: Default::default(),
+            active_provider_preference: None,
+            superego_l2_mode: Default::default(),
+            email_accounts: Default::default(),
         }
     }
 

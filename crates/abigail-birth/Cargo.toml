@@ -8,6 +8,7 @@ abigail-core = { path = "../abigail-core" }
 abigail-memory = { path = "../abigail-memory" }
 abigail-capabilities = { path = "../abigail-capabilities" }
 abigail-soul-crystallization = { path = "../abigail-soul-crystallization" }
+soul-forge = { path = "../soul-forge" }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

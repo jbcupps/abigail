@@ -8,6 +8,9 @@ import IdentityPanel from "./components/IdentityPanel";
 import IdentityConflictPanel, { IdentitySummary } from "./components/IdentityConflictPanel";
 import ManagementScreen from "./components/ManagementScreen";
 import SplashScreen from "./components/SplashScreen";
+import AgenticPanel from "./components/AgenticPanel";
+import OrchestrationPanel from "./components/OrchestrationPanel";
+import TierModelPanel from "./components/TierModelPanel";
 
 type AppState =
   | "splash"
@@ -25,10 +28,13 @@ interface StartupCheckResult {
   error: string | null;
 }
 
+type ChatTab = "chat" | "agent" | "jobs" | "models";
+
 function AppInner() {
   const [appState, setAppState] = useState<AppState>("splash");
   const [startupError, setStartupError] = useState<string | null>(null);
   const [existingIdentity, setExistingIdentity] = useState<IdentitySummary | null>(null);
+  const [chatTab, setChatTab] = useState<ChatTab>("chat");
   const { mode, setMode, refreshAgentName } = useTheme();
 
   const initializeApp = async () => {
@@ -270,18 +276,43 @@ function AppInner() {
   return (
     <>
       <PersonaToggle />
-      <div className={mode === "ego" ? "" : "hidden"}>
-        <ChatInterface target="EGO" />
+      {/* Tab bar */}
+      <div className="flex items-center border-b border-theme-border bg-theme-bg px-2">
+        {(["chat", "agent", "jobs", "models"] as ChatTab[]).map((tab) => (
+          <button
+            key={tab}
+            className={`px-4 py-2 text-xs font-mono uppercase tracking-wide border-b-2 transition-colors ${
+              chatTab === tab
+                ? "border-theme-primary text-theme-primary"
+                : "border-transparent text-theme-text-dim hover:text-theme-text"
+            }`}
+            onClick={() => setChatTab(tab)}
+          >
+            {tab}
+          </button>
+        ))}
+        <div className="flex-1" />
+        <button
+          className="text-theme-text-dim hover:text-theme-text text-xs font-mono px-2 py-1"
+          onClick={handleDisconnect}
+          title="Return to identity selector"
+        >
+          [disconnect]
+        </button>
       </div>
-      {mode === "id" && <IdentityPanel />}
-      {/* Disconnect button */}
-      <button
-        className="fixed top-2 right-2 text-theme-text-dim hover:text-theme-text text-xs font-mono z-50"
-        onClick={handleDisconnect}
-        title="Return to identity selector"
-      >
-        [disconnect]
-      </button>
+
+      {/* Tab content */}
+      {chatTab === "chat" && (
+        <>
+          <div className={mode === "ego" ? "" : "hidden"}>
+            <ChatInterface target="EGO" />
+          </div>
+          {mode === "id" && <IdentityPanel />}
+        </>
+      )}
+      {chatTab === "agent" && <AgenticPanel />}
+      {chatTab === "jobs" && <OrchestrationPanel />}
+      {chatTab === "models" && <TierModelPanel />}
     </>
   );
 }
