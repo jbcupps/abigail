@@ -21,5 +21,5 @@ async-openai = "0.18"
 reqwest = { version = "0.11", features = ["stream", "json", "multipart", "cookies"] }
 url = "2.5"
 base64.workspace = true
-chromiumoxide = { version = "0.7", features = ["tokio-runtime"], default-features = false, optional = true }
+chromiumoxide = { version = "0.8", features = ["tokio-runtime"], default-features = false, optional = true }
 futures-util = "0.3"
