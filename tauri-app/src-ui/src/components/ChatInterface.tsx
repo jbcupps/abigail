@@ -58,6 +58,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
     console.log("[ChatInterface] refreshRouterStatus() called");
     invoke<RouterStatus>("get_router_status")
       .then((status) => {
+        if (!mountedRef.current) return;
         console.log("[ChatInterface] routerStatus:", JSON.stringify(status));
         setRouterStatus(status);
         // Show config menu if no LLM configured
@@ -67,17 +68,31 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
           setConfigStep(null);
         }
       })
-      .catch(console.error);
+      .catch((err) => {
+        console.error("[ChatInterface] get_router_status failed:", err);
+      });
     // Also fetch Ollama status
     invoke<OllamaStatus>("get_ollama_status")
-      .then(setOllamaStatus)
-      .catch(() => setOllamaStatus(null));
+      .then((status) => {
+        if (!mountedRef.current) return;
+        setOllamaStatus(status);
+      })
+      .catch(() => {
+        if (!mountedRef.current) return;
+        setOllamaStatus(null);
+      });
   };
 
   const refreshMissingSecrets = () => {
     invoke<MissingSkillSecret[]>("list_missing_skill_secrets")
-      .then(setMissingSecrets)
-      .catch(() => setMissingSecrets([]));
+      .then((secrets) => {
+        if (!mountedRef.current) return;
+        setMissingSecrets(secrets);
+      })
+      .catch(() => {
+        if (!mountedRef.current) return;
+        setMissingSecrets([]);
+      });
   };
 
   useEffect(() => {
@@ -95,7 +110,9 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
     });
     return () => {
       mountedRef.current = false;
-      unlisten.then((f) => f());
+      unlisten.then((f) => f()).catch((e) => {
+        console.warn("[ChatInterface] failed to unregister chat-status listener:", e);
+      });
     };
   }, []);
 
@@ -213,6 +230,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
       });
     } finally {
       try { if (unlisten) unlisten(); } catch { /* ignore */ }
+      if (!mountedRef.current) return;
       setLoading(false);
       setChatStatus(null);
     }

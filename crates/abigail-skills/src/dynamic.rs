@@ -150,7 +150,7 @@ fn render_template(
         let value = secrets
             .and_then(|v| v.get_secret(key).map(|s| s.to_string()))
             .ok_or_else(|| {
-                tracing::warn!("Secret reference not found in vault: {}", key);
+                tracing::warn!("Secret reference not found in vault");
                 "A required secret is not configured. Check skill configuration and store the needed secret with store_secret.".to_string()
             })?;
         result = format!(

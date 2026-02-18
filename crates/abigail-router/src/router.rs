@@ -595,8 +595,21 @@ impl IdEgoRouter {
     ) -> anyhow::Result<CompletionResponse> {
         // Superego pre-check
         if let Some(deny) = self.run_superego_precheck(&messages).await {
-            let _ = tx.send(StreamEvent::Token(deny.content.clone())).await;
-            let _ = tx.send(StreamEvent::Done(deny.clone())).await;
+            if !try_send_stream_event(
+                &tx,
+                StreamEvent::Token(deny.content.clone()),
+                "route_stream superego deny token",
+            )
+            .await
+            {
+                return Ok(deny);
+            }
+            let _ = try_send_stream_event(
+                &tx,
+                StreamEvent::Done(deny.clone()),
+                "route_stream superego deny done",
+            )
+            .await;
             return Ok(deny);
         }
         // Council mode: deliberate non-streaming, send synthesis as burst
@@ -609,8 +622,21 @@ impl IdEgoRouter {
                             content: result.synthesis.clone(),
                             tool_calls: None,
                         };
-                        let _ = tx.send(StreamEvent::Token(result.synthesis)).await;
-                        let _ = tx.send(StreamEvent::Done(response.clone())).await;
+                        if !try_send_stream_event(
+                            &tx,
+                            StreamEvent::Token(result.synthesis),
+                            "route_stream council token",
+                        )
+                        .await
+                        {
+                            return Ok(response);
+                        }
+                        let _ = try_send_stream_event(
+                            &tx,
+                            StreamEvent::Done(response.clone()),
+                            "route_stream council done",
+                        )
+                        .await;
                         return Ok(response);
                     }
                     Err(e) => {
@@ -685,8 +711,21 @@ impl IdEgoRouter {
     ) -> anyhow::Result<CompletionResponse> {
         // Superego pre-check
         if let Some(deny) = self.run_superego_precheck(&messages).await {
-            let _ = tx.send(StreamEvent::Token(deny.content.clone())).await;
-            let _ = tx.send(StreamEvent::Done(deny.clone())).await;
+            if !try_send_stream_event(
+                &tx,
+                StreamEvent::Token(deny.content.clone()),
+                "route_stream_with_tools superego deny token",
+            )
+            .await
+            {
+                return Ok(deny);
+            }
+            let _ = try_send_stream_event(
+                &tx,
+                StreamEvent::Done(deny.clone()),
+                "route_stream_with_tools superego deny done",
+            )
+            .await;
             return Ok(deny);
         }
         let request = CompletionRequest {
@@ -716,7 +755,15 @@ impl IdEgoRouter {
                     // Ego succeeded — forward all collected events to the real channel.
                     if let Ok(events) = collector.await {
                         for event in events {
-                            let _ = tx.send(event).await;
+                            if !try_send_stream_event(
+                                &tx,
+                                event,
+                                "route_stream_with_tools ego forward",
+                            )
+                            .await
+                            {
+                                break;
+                            }
                         }
                     }
                     return Ok(response);
@@ -739,8 +786,21 @@ impl IdEgoRouter {
                             );
                             // Last resort: non-streaming complete, send result through channel
                             let response = self.id.complete(&request).await?;
-                            let _ = tx.send(StreamEvent::Token(response.content.clone())).await;
-                            let _ = tx.send(StreamEvent::Done(response.clone())).await;
+                            if !try_send_stream_event(
+                                &tx,
+                                StreamEvent::Token(response.content.clone()),
+                                "route_stream_with_tools fallback token",
+                            )
+                            .await
+                            {
+                                return Ok(response);
+                            }
+                            let _ = try_send_stream_event(
+                                &tx,
+                                StreamEvent::Done(response.clone()),
+                                "route_stream_with_tools fallback done",
+                            )
+                            .await;
                             return Ok(response);
                         }
                     }
@@ -752,6 +812,18 @@ impl IdEgoRouter {
     }
 }
 
+async fn try_send_stream_event(
+    tx: &tokio::sync::mpsc::Sender<StreamEvent>,
+    event: StreamEvent,
+    context: &str,
+) -> bool {
+    if let Err(e) = tx.send(event).await {
+        tracing::warn!("{}: stream receiver closed: {}", context, e);
+        return false;
+    }
+    true
+}
+
 // ── Helper functions for building providers ──────────────────────────
 
 /// Build the Ego (cloud) provider from a provider name and API key.
@@ -759,7 +831,10 @@ fn build_ego_provider(
     provider_name: Option<&str>,
     api_key: Option<String>,
 ) -> (Option<Arc<dyn LlmProvider>>, Option<EgoProvider>) {
-    let key = match api_key.filter(|k| !k.is_empty()) {
+    let key = match api_key
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+    {
         Some(k) => k,
         None => {
             tracing::info!(
@@ -823,16 +898,28 @@ fn build_ego_provider(
                 }
             }
         }
-        Some("openai") | None => (
-            Some(Arc::new(OpenAiProvider::new(Some(key))) as Arc<dyn LlmProvider>),
-            Some(EgoProvider::OpenAi),
-        ),
+        Some("openai") | None => match OpenAiProvider::new(Some(key)) {
+            Ok(p) => (
+                Some(Arc::new(p) as Arc<dyn LlmProvider>),
+                Some(EgoProvider::OpenAi),
+            ),
+            Err(e) => {
+                tracing::error!("Failed to create OpenAI provider: {}", e);
+                (None, None)
+            }
+        },
         Some(unknown) => {
             tracing::warn!("Unknown ego provider '{}', falling back to OpenAI", unknown);
-            (
-                Some(Arc::new(OpenAiProvider::new(Some(key))) as Arc<dyn LlmProvider>),
-                Some(EgoProvider::OpenAi),
-            )
+            match OpenAiProvider::new(Some(key)) {
+                Ok(p) => (
+                    Some(Arc::new(p) as Arc<dyn LlmProvider>),
+                    Some(EgoProvider::OpenAi),
+                ),
+                Err(e) => {
+                    tracing::error!("Failed to create OpenAI fallback provider: {}", e);
+                    (None, None)
+                }
+            }
         }
     }
 }
@@ -928,12 +1015,23 @@ mod tests {
             _: &CompletionRequest,
             tx: tokio::sync::mpsc::Sender<StreamEvent>,
         ) -> anyhow::Result<CompletionResponse> {
-            let _ = tx.send(StreamEvent::Token(self.response.clone())).await;
+            if tx
+                .send(StreamEvent::Token(self.response.clone()))
+                .await
+                .is_err()
+            {
+                return Ok(CompletionResponse {
+                    content: self.response.clone(),
+                    tool_calls: None,
+                });
+            }
             let resp = CompletionResponse {
                 content: self.response.clone(),
                 tool_calls: None,
             };
-            let _ = tx.send(StreamEvent::Done(resp.clone())).await;
+            if tx.send(StreamEvent::Done(resp.clone())).await.is_err() {
+                tracing::warn!("MockStreamProvider: receiver closed before done event");
+            }
             Ok(resp)
         }
     }

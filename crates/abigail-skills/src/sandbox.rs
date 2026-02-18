@@ -14,35 +14,82 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::path::{Component, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::manifest::{Permission, SkillId};
 
-/// Normalize a path by resolving `.` and `..` components lexically (no disk access).
-/// This prevents path traversal attacks like "/allowed/../etc/passwd".
-fn normalize_path(path: &str) -> PathBuf {
-    let p = std::path::Path::new(path);
-    let mut components = Vec::new();
-    for component in p.components() {
+/// Normalize a path by resolving `.` and `..` components lexically.
+/// This does not resolve symlinks (that is done by canonicalization helpers).
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
         match component {
+            Component::CurDir => {}
             Component::ParentDir => {
-                // Pop last normal component; never pop past root/prefix
-                if matches!(components.last(), Some(Component::Normal(_))) {
-                    components.pop();
+                // Never pop past root/prefix.
+                if matches!(out.components().next_back(), Some(Component::Normal(_))) {
+                    out.pop();
                 }
             }
-            Component::CurDir => {} // skip "."
-            other => components.push(other),
+            other => out.push(other.as_os_str()),
         }
     }
-    components.iter().collect()
+    out
 }
 
-/// Check if `path` is under `allowed_prefix` using normalized path comparison.
+/// Canonicalize a path for policy checks.
+///
+/// - Existing paths are fully canonicalized (resolves symlinks).
+/// - Non-existing paths resolve the nearest existing ancestor and append
+///   the remaining lexical suffix, so write targets can be validated safely.
+fn canonicalize_for_policy(path: &Path) -> Option<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    let normalized = normalize_path(&absolute);
+
+    if normalized.exists() {
+        return normalized.canonicalize().ok();
+    }
+
+    let mut cursor = normalized.as_path();
+    let mut suffix = Vec::new();
+    while !cursor.exists() {
+        let name = cursor.file_name()?.to_os_string();
+        suffix.push(name);
+        cursor = cursor.parent()?;
+    }
+
+    let mut canonical = cursor.canonicalize().ok()?;
+    for part in suffix.into_iter().rev() {
+        canonical.push(part);
+    }
+    Some(canonical)
+}
+
+/// Check if `path` is under `allowed_prefix` using canonical path comparison.
 fn path_is_under(path: &str, allowed_prefix: &str) -> bool {
-    let norm_path = normalize_path(path);
-    let norm_prefix = normalize_path(allowed_prefix);
-    norm_path == norm_prefix || norm_path.starts_with(&norm_prefix)
+    let policy_path = match canonicalize_for_policy(Path::new(path)) {
+        Some(p) => p,
+        None => return false,
+    };
+    let policy_prefix = match canonicalize_for_policy(Path::new(allowed_prefix)) {
+        Some(p) => p,
+        None => return false,
+    };
+    policy_path == policy_prefix || policy_path.starts_with(&policy_prefix)
+}
+
+/// Domain allow-list match: exact or true subdomain only.
+fn domain_matches_allowed(domain: &str, allowed: &str) -> bool {
+    let domain = domain.trim_end_matches('.').to_lowercase();
+    let allowed = allowed.trim_end_matches('.').to_lowercase();
+    if domain.is_empty() || allowed.is_empty() {
+        return false;
+    }
+    domain == allowed || domain.ends_with(&format!(".{}", allowed))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,10 +180,7 @@ impl SkillSandbox {
                                 }
                             }
                             crate::manifest::NetworkPermission::Domains(domains) => {
-                                if domains
-                                    .iter()
-                                    .any(|d| domain == d || domain.ends_with(&format!(".{}", d)))
-                                {
+                                if domains.iter().any(|d| domain_matches_allowed(domain, d)) {
                                     return true;
                                 }
                             }
@@ -200,5 +244,102 @@ impl SkillSandbox {
             }
             AuditActionKind::Other(_) => true,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn as_str_path(path: &Path) -> String {
+        path.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn domain_match_allows_exact_and_subdomain() {
+        assert!(domain_matches_allowed("api.example.com", "api.example.com"));
+        assert!(domain_matches_allowed(
+            "v1.api.example.com",
+            "api.example.com"
+        ));
+        assert!(domain_matches_allowed(
+            "api.example.com.",
+            "api.example.com"
+        ));
+    }
+
+    #[test]
+    fn domain_match_rejects_suffix_impersonation() {
+        assert!(!domain_matches_allowed(
+            "evil-api.example.com",
+            "api.example.com"
+        ));
+        assert!(!domain_matches_allowed(
+            "api.example.com.evil",
+            "api.example.com"
+        ));
+    }
+
+    #[test]
+    fn path_is_under_allows_nested_nonexistent_write_target() {
+        let tmp = std::env::temp_dir().join("abigail_sandbox_nested_write");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let allowed = tmp.join("allowed");
+        std::fs::create_dir_all(&allowed).unwrap();
+
+        let nested = allowed.join("new").join("deep").join("file.txt");
+        assert!(path_is_under(&as_str_path(&nested), &as_str_path(&allowed),));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn path_is_under_blocks_parent_traversal_outside_root() {
+        let tmp = std::env::temp_dir().join("abigail_sandbox_parent_traversal");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let allowed = tmp.join("allowed");
+        let outside = tmp.join("outside");
+        std::fs::create_dir_all(&allowed).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let traversed = allowed.join("..").join("outside").join("secret.txt");
+        assert!(!path_is_under(
+            &as_str_path(&traversed),
+            &as_str_path(&allowed),
+        ));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn path_is_under_blocks_symlink_escape() {
+        let tmp = std::env::temp_dir().join("abigail_sandbox_symlink_escape");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let allowed = tmp.join("allowed");
+        let outside = tmp.join("outside");
+        std::fs::create_dir_all(&allowed).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let link = allowed.join("link_out");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, &link).unwrap();
+        }
+        #[cfg(windows)]
+        {
+            if std::os::windows::fs::symlink_dir(&outside, &link).is_err() {
+                // Symlink creation may require elevated privileges on some systems.
+                let _ = std::fs::remove_dir_all(&tmp);
+                return;
+            }
+        }
+
+        let escaped = link.join("secret.txt");
+        assert!(!path_is_under(
+            &as_str_path(&escaped),
+            &as_str_path(&allowed),
+        ));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

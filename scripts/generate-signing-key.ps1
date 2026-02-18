@@ -42,7 +42,7 @@ edition = "2021"
 [dependencies]
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 rand = "0.8"
-base64 = "0.21"
+base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }

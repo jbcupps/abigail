@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import LlmSetupPanel from "./LlmSetupPanel";
 import ApiKeyModal from "./ApiKeyModal";
 import DataSourcesPanel from "./DataSourcesPanel";
@@ -34,9 +34,14 @@ export default function IdentityPanel() {
   const [repairKey, setRepairKey] = useState("");
   const [repairMessage, setRepairMessage] = useState("");
   const [repairError, setRepairError] = useState("");
+  const mountedRef = useRef(true);
 
   useEffect(() => {
+    mountedRef.current = true;
     refreshStatus();
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   const refreshStatus = async () => {
@@ -45,12 +50,14 @@ export default function IdentityPanel() {
         invoke<RouterStatus>("get_router_status"),
         invoke<string | null>("get_agent_name"),
       ]);
+      if (!mountedRef.current) return;
       setRouterStatus(status);
       setAgentName(name);
       if (name) setEditName(name);
 
       // Get data dir from docs path (parent)
       const docs = await invoke<string>("get_docs_path");
+      if (!mountedRef.current) return;
       const parts = docs.replace(/\\/g, "/").split("/");
       parts.pop();
       setDataDir(parts.join("/"));
@@ -61,10 +68,16 @@ export default function IdentityPanel() {
         try {
           const exists = await invoke<boolean>("check_secret", { key: p });
           if (exists) providers.push(p);
-        } catch { /* ignore */ }
+        } catch (e) {
+          console.warn(`[IdentityPanel] check_secret failed for ${p}:`, e);
+        }
+        if (!mountedRef.current) return;
       }
+      if (!mountedRef.current) return;
       setStoredProviders(providers);
-    } catch { /* ignore */ }
+    } catch (e) {
+      console.warn("[IdentityPanel] refreshStatus failed:", e);
+    }
   };
 
   const handleApiKeySaved = () => {
