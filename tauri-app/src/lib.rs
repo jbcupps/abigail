@@ -2012,14 +2012,16 @@ fn build_tool_awareness_section(
 
     // Meta-tools guidance
     let mut guidance = String::from("### Skill Management\n");
-    guidance.push_str("- **create_dynamic_skill**: Create a new API integration at runtime. Use when you need a tool that doesn't exist yet.\n");
+    guidance.push_str("- **create_dynamic_skill**: Create a new API integration at runtime.\n");
     guidance.push_str("- **list_dynamic_skills**: List all dynamic skills you've created.\n");
     guidance.push_str("- **delete_dynamic_skill**: Remove a dynamic skill.\n\n");
-    guidance.push_str("**When to create a dynamic skill**: If the user asks you to interact with an external API \
-                       and no existing tool covers it, research the API (using web_search), then use \
-                       create_dynamic_skill to define a tool for it. URL templates must use HTTPS. \
-                       For API keys, use `{{secret:key_name}}` in templates and tell the user to store \
-                       the key with the store_secret command.\n");
+    guidance.push_str(
+        "**You are expected to create skills.** When a task needs a capability you don't have:\n\
+         1. Search the web for an API or service that can help\n\
+         2. Use create_dynamic_skill to define the integration (HTTPS only, `{{secret:key_name}}` for API keys)\n\
+         3. Use the new tool immediately to complete the task\n\n\
+         Don't say \"I can't do that.\" Say \"Let me build a tool for that.\"\n",
+    );
     sections.push(guidance);
 
     if sections.is_empty() {
