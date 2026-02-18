@@ -79,7 +79,7 @@ pub struct OpenAiCompatibleProvider {
 
 impl OpenAiCompatibleProvider {
     /// Create a provider for a known compatible API.
-    pub fn new(provider: CompatibleProvider, api_key: String) -> Self {
+    pub fn new(provider: CompatibleProvider, api_key: String) -> anyhow::Result<Self> {
         Self::with_config(
             provider,
             provider.base_url().to_string(),
@@ -94,19 +94,19 @@ impl OpenAiCompatibleProvider {
         base_url: String,
         api_key: String,
         model: String,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(120))
             .build()
-            .expect("Failed to create HTTP client");
+            .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {}", e))?;
 
-        Self {
+        Ok(Self {
             base_url,
             api_key,
             model,
             provider_type: provider,
             client,
-        }
+        })
     }
 
     /// Get the provider type.
@@ -509,7 +509,8 @@ mod tests {
     #[test]
     fn test_completions_url() {
         let provider =
-            OpenAiCompatibleProvider::new(CompatibleProvider::Perplexity, "test-key".to_string());
+            OpenAiCompatibleProvider::new(CompatibleProvider::Perplexity, "test-key".to_string())
+                .unwrap();
         assert_eq!(
             provider.completions_url(),
             "https://api.perplexity.ai/chat/completions"

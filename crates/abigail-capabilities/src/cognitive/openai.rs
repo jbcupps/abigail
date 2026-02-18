@@ -16,18 +16,28 @@ use std::time::Duration;
 pub struct OpenAiProvider {
     client: async_openai::Client<OpenAIConfig>,
     api_key: String,
+    model: String,
 }
 
 impl OpenAiProvider {
     pub fn new(api_key: Option<String>) -> Self {
+        Self::with_model(api_key, "gpt-4o-mini".to_string())
+    }
+
+    pub fn with_model(api_key: Option<String>, model: String) -> Self {
         let key = api_key
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-            .unwrap_or_default();
+            .filter(|k| !k.trim().is_empty())
+            .unwrap_or_else(|| {
+                tracing::warn!("OpenAI API key is empty or missing; requests will fail");
+                String::new()
+            });
         let config = OpenAIConfig::new().with_api_key(&key);
         let client = async_openai::Client::with_config(config);
         Self {
             client,
             api_key: key,
+            model,
         }
     }
 }
@@ -177,7 +187,7 @@ impl LlmProvider for OpenAiProvider {
         });
 
         let req = CreateChatCompletionRequest {
-            model: "gpt-4o-mini".to_string(),
+            model: self.model.clone(),
             messages,
             tools,
             ..Default::default()
@@ -255,7 +265,7 @@ impl LlmProvider for OpenAiProvider {
         });
 
         let body = StreamChatRequest {
-            model: "gpt-4o-mini".to_string(),
+            model: self.model.clone(),
             messages,
             tools,
             stream: true,

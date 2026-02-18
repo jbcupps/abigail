@@ -150,10 +150,8 @@ fn render_template(
         let value = secrets
             .and_then(|v| v.get_secret(key).map(|s| s.to_string()))
             .ok_or_else(|| {
-                format!(
-                    "Secret '{}' not found in vault. Store it first with store_secret.",
-                    key
-                )
+                tracing::warn!("Secret reference not found in vault: {}", key);
+                "A required secret is not configured. Check skill configuration and store the needed secret with store_secret.".to_string()
             })?;
         result = format!(
             "{}{}{}",
@@ -464,7 +462,11 @@ impl DynamicApiSkill {
         };
 
         // Build request — no lock held
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(|e| SkillError::ToolFailed(format!("Failed to create HTTP client: {}", e)))?;
         let method = tool_config.method.to_uppercase();
         let mut request = match method.as_str() {
             "GET" => client.get(&rendered_url),
@@ -755,7 +757,10 @@ mod tests {
             &params,
             None,
         );
-        assert!(result.unwrap_err().contains("mykey"));
+        let err = result.unwrap_err();
+        assert!(err.contains("secret is not configured"));
+        // Secret name must NOT appear in the error message (information leak)
+        assert!(!err.contains("mykey"));
     }
 
     #[test]

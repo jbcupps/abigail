@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import McpAppFrame from "./McpAppFrame";
 import ThinkingIndicator from "./ThinkingIndicator";
@@ -52,6 +52,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
 
   const assistantLabel = agentName || "Abigail";
+  const mountedRef = useRef(true);
 
   const refreshRouterStatus = () => {
     console.log("[ChatInterface] refreshRouterStatus() called");
@@ -92,7 +93,10 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
         setChatStatus(`Running ${tool}...`);
       }
     });
-    return () => { unlisten.then((f) => f()); };
+    return () => {
+      mountedRef.current = false;
+      unlisten.then((f) => f());
+    };
   }, []);
 
   const handleConfigSelect = (option: number) => {
@@ -177,6 +181,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
 
     try {
       const reply = await invoke<string>("chat_stream", { message: userMessage.content, target });
+      if (!mountedRef.current) return;
       // If streaming didn't produce content (fallback), use the return value
       if (!streamContent) {
         setMessages((m) => {
@@ -189,6 +194,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
         });
       }
     } catch (e) {
+      if (!mountedRef.current) return;
       const errorMsg = String(e);
       let content = errorMsg;
       if (errorMsg.includes("No local LLM configured")) {
@@ -227,7 +233,16 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
 
     const councilCount = routerStatus.council_providers || 0;
 
-    if (mode === "council" && councilCount > 1) {
+    if (mode === "tier_based" && hasEgo && hasLocal) {
+      statusText = `[tier] ${egoLabel} + Local`;
+      statusColor = "text-theme-text";
+    } else if (mode === "tier_based" && hasEgo) {
+      statusText = `[tier] ${egoLabel}`;
+      statusColor = "text-blue-400";
+    } else if (mode === "tier_based" && hasLocal) {
+      statusText = "[tier] Local";
+      statusColor = "text-theme-primary-dim";
+    } else if (mode === "council" && councilCount > 1) {
       statusText = `[council: ${councilCount} providers]`;
       statusColor = "text-purple-400";
     } else if (hasEgo && hasLocal) {

@@ -53,10 +53,12 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
   // Ref to BirthChat for injecting key confirmations
   const birthChatRef = useRef<BirthChatHandle>(null);
+  const mountedRef = useRef(true);
 
   // Auto-start boot sequence on mount
   useEffect(() => {
     handleStart();
+    return () => { mountedRef.current = false; };
   }, []);
 
   const handleStart = async () => {
@@ -67,6 +69,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     try {
       // 1. Initialize soul (copy templates, create internal keyring)
       await invoke("init_soul");
+      if (!mountedRef.current) return;
       setMessage("Checking identity status...");
 
       // 2. Check for interrupted birth (closed app mid-way through first run)
@@ -75,6 +78,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         stage: string | null;
       }
       const interrupted = await invoke<InterruptedBirthInfo>("check_interrupted_birth");
+      if (!mountedRef.current) return;
       if (interrupted.was_interrupted) {
         setError(
           `Birth was interrupted at stage "${interrupted.stage}". ` +
@@ -85,12 +89,15 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
       // 3. Check identity status
       const status = await invoke<IdentityStatus>("check_identity_status");
+      if (!mountedRef.current) return;
 
       if (status === "Clean") {
         // First run: start birth and generate identity
         await invoke("start_birth");
+        if (!mountedRef.current) return;
         setMessage("Generating signing keypair...");
         const keypairResult = await invoke<KeypairGenerationResult>("generate_identity");
+        if (!mountedRef.current) return;
 
         setPrivateKey(keypairResult.private_key_base64);
         setPublicKeyPath(keypairResult.public_key_path);
@@ -106,6 +113,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
       // If we somehow got here, just complete immediately.
       onComplete();
     } catch (e) {
+      if (!mountedRef.current) return;
       setError(String(e));
       setStage("Darkness");
     }
@@ -331,17 +339,21 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     setMessage("Signing constitutional documents...");
     try {
       await invoke("complete_emergence");
+      if (!mountedRef.current) return;
 
       // Link the birth-generated keypair into the Hive trust chain
       setMessage("Registering with Hive...");
       await invoke("sign_agent_with_hive");
+      if (!mountedRef.current) return;
       setMessage("Hive trust chain established.");
 
       setStage("Life");
       setMessage("I am awake.");
       await new Promise((resolve) => setTimeout(resolve, 1500));
+      if (!mountedRef.current) return;
       onComplete();
     } catch (e) {
+      if (!mountedRef.current) return;
       setError(String(e));
     }
   };

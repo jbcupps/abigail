@@ -141,29 +141,29 @@ impl LocalHttpProvider {
     /// # Arguments
     /// * `base_url` - Base URL of the server, e.g. "http://localhost:1234"
     /// * `model` - Model name to use, e.g. "local-model" or "gpt-3.5-turbo" (depends on server)
-    pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> anyhow::Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(120))
             .connect_timeout(Duration::from_secs(10))
             .build()
-            .expect("Failed to create HTTP client");
+            .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {}", e))?;
 
-        Self {
+        Ok(Self {
             base_url: base_url.into(),
             client,
             model: model.into(),
-        }
+        })
     }
 
     /// Create a provider with default model name "local-model".
     /// Note: Use `with_url_auto_model()` for LM Studio which requires actual model names.
-    pub fn with_url(base_url: impl Into<String>) -> Self {
+    pub fn with_url(base_url: impl Into<String>) -> anyhow::Result<Self> {
         Self::new(base_url, "local-model")
     }
 
     /// Create a provider that auto-detects the model name from /v1/models.
     /// Falls back to "local-model" if detection fails.
-    pub async fn with_url_auto_model(base_url: impl Into<String>) -> Self {
+    pub async fn with_url_auto_model(base_url: impl Into<String>) -> anyhow::Result<Self> {
         let base = base_url.into();
         let model = Self::detect_model(&base).await.unwrap_or_else(|e| {
             tracing::warn!("Model auto-detection failed: {}. Using 'local-model'", e);
@@ -521,7 +521,7 @@ mod tests {
     #[tokio::test]
     async fn test_local_http_provider_unreachable() {
         // Test that heartbeat fails gracefully when server is not running
-        let provider = LocalHttpProvider::with_url("http://localhost:59999");
+        let provider = LocalHttpProvider::with_url("http://localhost:59999").unwrap();
         let result = provider.heartbeat().await;
         assert!(result.is_err());
     }

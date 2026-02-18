@@ -24,20 +24,20 @@ pub struct AnthropicProvider {
 }
 
 impl AnthropicProvider {
-    pub fn new(api_key: String) -> Self {
+    pub fn new(api_key: String) -> anyhow::Result<Self> {
         Self::with_model(api_key, DEFAULT_MODEL.to_string())
     }
 
-    pub fn with_model(api_key: String, model: String) -> Self {
+    pub fn with_model(api_key: String, model: String) -> anyhow::Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(120))
             .build()
-            .expect("failed to build HTTP client");
-        Self {
+            .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {}", e))?;
+        Ok(Self {
             api_key,
             model,
             client,
-        }
+        })
     }
 }
 
@@ -613,7 +613,7 @@ mod tests {
             Ok(k) if !k.is_empty() => k,
             _ => return,
         };
-        let provider = AnthropicProvider::new(key);
+        let provider = AnthropicProvider::new(key).unwrap();
         let request =
             CompletionRequest::simple(vec![Message::new("user", "Say hello in one word.")]);
         let response = provider.complete(&request).await.unwrap();

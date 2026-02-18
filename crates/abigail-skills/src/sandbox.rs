@@ -14,8 +14,36 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::path::{Component, PathBuf};
 
 use crate::manifest::{Permission, SkillId};
+
+/// Normalize a path by resolving `.` and `..` components lexically (no disk access).
+/// This prevents path traversal attacks like "/allowed/../etc/passwd".
+fn normalize_path(path: &str) -> PathBuf {
+    let p = std::path::Path::new(path);
+    let mut components = Vec::new();
+    for component in p.components() {
+        match component {
+            Component::ParentDir => {
+                // Pop last normal component; never pop past root/prefix
+                if matches!(components.last(), Some(Component::Normal(_))) {
+                    components.pop();
+                }
+            }
+            Component::CurDir => {} // skip "."
+            other => components.push(other),
+        }
+    }
+    components.iter().collect()
+}
+
+/// Check if `path` is under `allowed_prefix` using normalized path comparison.
+fn path_is_under(path: &str, allowed_prefix: &str) -> bool {
+    let norm_path = normalize_path(path);
+    let norm_prefix = normalize_path(allowed_prefix);
+    norm_path == norm_prefix || norm_path.starts_with(&norm_prefix)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceLimits {
@@ -105,7 +133,10 @@ impl SkillSandbox {
                                 }
                             }
                             crate::manifest::NetworkPermission::Domains(domains) => {
-                                if domains.iter().any(|d| domain == d || domain.ends_with(d)) {
+                                if domains
+                                    .iter()
+                                    .any(|d| domain == d || domain.ends_with(&format!(".{}", d)))
+                                {
                                     return true;
                                 }
                             }
@@ -123,10 +154,7 @@ impl SkillSandbox {
                         Permission::FileSystem(crate::manifest::FileSystemPermission::Read(
                             allowed,
                         )) => {
-                            if allowed
-                                .iter()
-                                .any(|a| path == a || path.starts_with(&format!("{}/", a)))
-                            {
+                            if allowed.iter().any(|a| path_is_under(path, a)) {
                                 return true;
                             }
                         }
@@ -144,10 +172,7 @@ impl SkillSandbox {
                         Permission::FileSystem(crate::manifest::FileSystemPermission::Write(
                             allowed,
                         )) => {
-                            if allowed
-                                .iter()
-                                .any(|a| path == a || path.starts_with(&format!("{}/", a)))
-                            {
+                            if allowed.iter().any(|a| path_is_under(path, a)) {
                                 return true;
                             }
                         }
