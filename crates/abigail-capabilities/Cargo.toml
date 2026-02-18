@@ -17,7 +17,7 @@ thiserror.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 chrono.workspace = true
-async-openai = "0.18"
+async-openai = "0.33"
 reqwest = { version = "0.11", features = ["stream", "json", "multipart", "cookies"] }
 url = "2.5"
 base64.workspace = true
