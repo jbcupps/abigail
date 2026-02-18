@@ -30,7 +30,7 @@ dependencies = [
  "abigail-skills",
  "abigail-soul-crystallization",
  "anyhow",
- "base64 0.21.7",
+ "base64 0.22.1",
  "chrono",
  "ed25519-dalek",
  "regex",
@@ -62,7 +62,7 @@ dependencies = [
  "abigail-memory",
  "abigail-soul-crystallization",
  "anyhow",
- "base64 0.21.7",
+ "base64 0.22.1",
  "chrono",
  "ed25519-dalek",
  "rand 0.8.5",
@@ -101,7 +101,7 @@ name = "abigail-core"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "base64 0.21.7",
+ "base64 0.22.1",
  "chrono",
  "directories",
  "ed25519-dalek",

@@ -2,6 +2,7 @@
 
 pub mod identity_manager;
 pub mod ollama_manager;
+pub mod rate_limit;
 mod templates;
 
 use abigail_birth::BirthOrchestrator;
@@ -12,7 +13,8 @@ use abigail_core::{
 };
 use abigail_memory::{Memory, MemoryStore};
 use abigail_router::{
-    CouncilEngine, IdEgoRouter, RoutingMode, SubagentDefinition, SubagentManager, SubagentProvider,
+    CouncilEngine, IdEgoRouter, PromptClassifier, RoutingMode, SubagentDefinition, SubagentManager,
+    SubagentProvider, TierResolver,
 };
 use abigail_skills::channel::EventBus;
 use abigail_skills::protocol::mcp::{HttpMcpClient, McpTool};
@@ -22,6 +24,7 @@ use chrono::Utc;
 use ed25519_dalek::SigningKey;
 use identity_manager::{AgentIdentityInfo, IdentityManager};
 use ollama_manager::OllamaManager;
+use rate_limit::CooldownGuard;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use skill_filesystem::FilesystemSkill;
@@ -142,6 +145,29 @@ fn redact_api_keys(text: &str) -> String {
     .into_owned()
 }
 
+/// Shared application state holding all subsystem handles.
+///
+/// ## Lock ordering convention
+///
+/// When acquiring multiple locks, always follow this order to prevent deadlocks:
+///
+///   1. `config`            (RwLock — most frequently accessed, acquire first)
+///   2. `birth`             (RwLock)
+///   3. `secrets`           (Mutex)
+///   4. `hive_secrets`      (Mutex)
+///   5. `router`            (RwLock)
+///   6. `active_agent_id`   (RwLock)
+///   7. `subagent_manager`  (RwLock)
+///   8. `browser`           (tokio RwLock — async, acquire after all sync locks)
+///   9. `http_client`       (tokio RwLock — async, acquire after all sync locks)
+///  10. `ollama`            (tokio Mutex — async, acquire last)
+///
+/// Rules:
+/// - Never hold a sync lock (1-7) across an `.await` boundary.
+/// - Drop earlier locks before acquiring later ones when possible.
+/// - Scoped blocks `{ let guard = lock.write(); ... }` are preferred to limit hold duration.
+/// - `rebuild_router_with_superego()` acquires config → secrets → hive_secrets → router;
+///   callers must not hold any of these when calling it.
 struct AppState {
     config: RwLock<AppConfig>,
     birth: RwLock<Option<BirthOrchestrator>>,
@@ -166,6 +192,10 @@ struct AppState {
         Arc<tokio::sync::RwLock<abigail_capabilities::sensory::http_client::HttpClientCapability>>,
     /// Managed Ollama instance (bundled or system)
     ollama: Arc<tokio::sync::Mutex<Option<OllamaManager>>>,
+    /// Rate limiter for chat_stream command
+    chat_cooldown: CooldownGuard,
+    /// Rate limiter for birth_chat command
+    birth_cooldown: CooldownGuard,
 }
 
 fn get_config() -> AppConfig {
@@ -1151,29 +1181,40 @@ fn build_superego_llm_provider(
     provider: &str,
     key: &str,
 ) -> Arc<dyn abigail_capabilities::cognitive::LlmProvider> {
-    match provider {
-        "anthropic" => Arc::new(abigail_capabilities::cognitive::AnthropicProvider::new(
+    let fallback = || {
+        Arc::new(abigail_capabilities::cognitive::OpenAiProvider::new(Some(
             key.to_string(),
-        )),
+        )))
+    };
+    match provider {
+        "anthropic" => {
+            match abigail_capabilities::cognitive::AnthropicProvider::new(key.to_string()) {
+                Ok(p) => Arc::new(p),
+                Err(e) => {
+                    tracing::error!("Failed to create Anthropic provider: {}", e);
+                    fallback()
+                }
+            }
+        }
         "perplexity" | "xai" | "google" => {
             if let Some(cp) =
                 abigail_capabilities::cognitive::CompatibleProvider::from_name(provider)
             {
-                Arc::new(
-                    abigail_capabilities::cognitive::OpenAiCompatibleProvider::new(
-                        cp,
-                        key.to_string(),
-                    ),
-                )
-            } else {
-                Arc::new(abigail_capabilities::cognitive::OpenAiProvider::new(Some(
+                match abigail_capabilities::cognitive::OpenAiCompatibleProvider::new(
+                    cp,
                     key.to_string(),
-                )))
+                ) {
+                    Ok(p) => Arc::new(p),
+                    Err(e) => {
+                        tracing::error!("Failed to create {} provider: {}", provider, e);
+                        fallback()
+                    }
+                }
+            } else {
+                fallback()
             }
         }
-        _ => Arc::new(abigail_capabilities::cognitive::OpenAiProvider::new(Some(
-            key.to_string(),
-        ))),
+        _ => fallback(),
     }
 }
 
@@ -1260,7 +1301,7 @@ fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
     let mut new_router = IdEgoRouter::new(
         config.local_llm_base_url.clone(),
         ego_name.as_deref(),
-        ego_key,
+        ego_key.clone(),
         config.routing_mode,
     );
 
@@ -1291,6 +1332,41 @@ fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
         }
     }
 
+    // Attach TierBased classifier + resolver if routing_mode is TierBased
+    if config.routing_mode == RoutingMode::TierBased {
+        let tier_models = config
+            .tier_models
+            .clone()
+            .unwrap_or_else(abigail_core::TierModels::defaults);
+
+        // Build local provider reference for tier resolver
+        let local_provider: Option<Arc<dyn abigail_capabilities::cognitive::LlmProvider>> =
+            config.local_llm_base_url.as_ref().and_then(|url| {
+                match abigail_capabilities::cognitive::LocalHttpProvider::with_url(url.clone()) {
+                    Ok(p) => {
+                        Some(Arc::new(p) as Arc<dyn abigail_capabilities::cognitive::LlmProvider>)
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to create local HTTP provider for tier routing: {}",
+                            e
+                        );
+                        None
+                    }
+                }
+            });
+
+        let classifier = Arc::new(PromptClassifier::new(local_provider.clone()));
+        let resolver = Arc::new(TierResolver::new(
+            ego_name.clone(),
+            ego_key,
+            tier_models,
+            local_provider,
+        ));
+        new_router = new_router.with_tier_config(classifier, resolver);
+        tracing::info!("TierBased routing configured: ego={:?}", ego_name);
+    }
+
     drop(vault);
     drop(config);
     let router_arc = Arc::new(new_router.clone());
@@ -1319,7 +1395,7 @@ pub struct RouterStatus {
     pub ego_provider: Option<String>,
     /// Whether Superego (safety layer) is configured
     pub superego_configured: bool,
-    /// Current routing mode: "ego_primary", "id_primary", or "council"
+    /// Current routing mode: "ego_primary", "id_primary", "council", or "tierbased"
     pub routing_mode: String,
     /// Number of providers enrolled in the council (0 if not council mode)
     pub council_providers: usize,
@@ -1344,7 +1420,10 @@ fn get_router_status(state: tauri::State<AppState>) -> Result<RouterStatus, Stri
         ego_configured: status.has_ego,
         ego_provider: status.ego_provider,
         superego_configured: status.has_superego,
-        routing_mode: format!("{:?}", config.routing_mode).to_lowercase(),
+        routing_mode: serde_json::to_value(&config.routing_mode)
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| format!("{:?}", config.routing_mode).to_lowercase()),
         council_providers: status.council_provider_count,
     })
 }
@@ -2743,6 +2822,13 @@ async fn chat_stream(
 ) -> Result<String, String> {
     use abigail_capabilities::cognitive::StreamEvent;
 
+    if let Err(remaining) = state.chat_cooldown.check().await {
+        return Err(format!(
+            "Rate limited — please wait {}ms",
+            remaining.as_millis()
+        ));
+    }
+
     let (store, router, base_system_prompt) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
         let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
@@ -3033,6 +3119,13 @@ async fn birth_chat(
     state: tauri::State<'_, AppState>,
     message: String,
 ) -> Result<BirthChatResponse, String> {
+    if let Err(remaining) = state.birth_cooldown.check().await {
+        return Err(format!(
+            "Rate limited — please wait {}ms",
+            remaining.as_millis()
+        ));
+    }
+
     // Get stored providers for context-aware prompt
     let stored_providers: Vec<String> = {
         let vault = state.secrets.lock().map_err(|e| e.to_string())?;
@@ -4251,7 +4344,7 @@ pub fn run() {
         let mut r = IdEgoRouter::new(
             config.local_llm_base_url.clone(),
             ego_provider.as_deref(),
-            ego_api_key,
+            ego_api_key.clone(),
             config.routing_mode,
         );
 
@@ -4275,6 +4368,45 @@ pub fn run() {
                 let engine = CouncilEngine::new(council_providers);
                 r = r.with_council(engine);
             }
+        }
+
+        // Attach TierBased classifier + resolver if routing_mode is TierBased
+        if config.routing_mode == RoutingMode::TierBased {
+            let tier_models = config
+                .tier_models
+                .clone()
+                .unwrap_or_else(abigail_core::TierModels::defaults);
+
+            let local_provider: Option<Arc<dyn abigail_capabilities::cognitive::LlmProvider>> =
+                config.local_llm_base_url.as_ref().and_then(|url| {
+                    match abigail_capabilities::cognitive::LocalHttpProvider::with_url(url.clone())
+                    {
+                        Ok(p) => {
+                            Some(Arc::new(p)
+                                as Arc<dyn abigail_capabilities::cognitive::LlmProvider>)
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                "Failed to create local HTTP provider for tier routing: {}",
+                                e
+                            );
+                            None
+                        }
+                    }
+                });
+
+            let classifier = Arc::new(PromptClassifier::new(local_provider.clone()));
+            let resolver = Arc::new(TierResolver::new(
+                ego_provider.clone(),
+                ego_api_key,
+                tier_models,
+                local_provider,
+            ));
+            r = r.with_tier_config(classifier, resolver);
+            tracing::info!(
+                "TierBased routing configured at startup: ego={:?}",
+                ego_provider
+            );
         }
 
         r
@@ -4439,6 +4571,8 @@ pub fn run() {
         browser: Arc::new(tokio::sync::RwLock::new(browser_cap)),
         http_client: Arc::new(tokio::sync::RwLock::new(http_client_cap)),
         ollama: Arc::new(tokio::sync::Mutex::new(None)),
+        chat_cooldown: CooldownGuard::new(std::time::Duration::from_millis(500)),
+        birth_cooldown: CooldownGuard::new(std::time::Duration::from_millis(1000)),
     };
 
     // Clone event_bus before setup since state isn't available inside setup callback
