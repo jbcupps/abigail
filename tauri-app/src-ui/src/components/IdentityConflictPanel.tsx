@@ -32,8 +32,7 @@ export default function IdentityConflictPanel({
     setAction("archiving");
     setError(null);
     try {
-      const backupPath = await invoke<string>("archive_identity");
-      console.log("Identity archived to:", backupPath);
+      await invoke<string>("archive_identity");
       onArchive();
     } catch (e) {
       setError(`Archive failed: ${e}`);

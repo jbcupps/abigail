@@ -55,10 +55,8 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
   const mountedRef = useRef(true);
 
   const refreshRouterStatus = () => {
-    console.log("[ChatInterface] refreshRouterStatus() called");
     invoke<RouterStatus>("get_router_status")
       .then((status) => {
-        console.log("[ChatInterface] routerStatus:", JSON.stringify(status));
         setRouterStatus(status);
         // Show config menu if no LLM configured
         if (!status.ego_configured && status.id_provider === "candle_stub") {
