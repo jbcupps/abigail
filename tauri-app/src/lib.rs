@@ -1445,6 +1445,112 @@ async fn get_ollama_status(
 }
 
 #[tauri::command]
+async fn detect_ollama() -> Result<ollama_manager::OllamaDetection, String> {
+    Ok(OllamaManager::detect_ollama().await)
+}
+
+#[tauri::command]
+fn list_recommended_models() -> Result<Vec<ollama_manager::RecommendedModel>, String> {
+    Ok(OllamaManager::list_recommended_models())
+}
+
+#[tauri::command]
+async fn install_ollama(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    OllamaManager::download_and_install(|progress| {
+        let _ = app.emit("ollama-install-progress", &progress);
+    })
+    .await?;
+
+    // Attach a manager to the freshly installed system Ollama.
+    let data_dir = {
+        let cfg = state.config.read().map_err(|e| e.to_string())?;
+        cfg.data_dir.clone()
+    };
+
+    let mut manager = OllamaManager::discover_and_start(&data_dir).await?;
+    let base_url = manager.base_url();
+
+    // Keep using the configured default model target for status checks.
+    let model = {
+        state
+            .config
+            .read()
+            .ok()
+            .and_then(|c| c.bundled_model.clone())
+            .unwrap_or_else(|| "qwen2.5:0.5b".to_string())
+    };
+    let _ = manager.ensure_model(&model).await;
+
+    {
+        let mut guard = state.ollama.lock().await;
+        *guard = Some(manager);
+    }
+
+    // Persist local URL if missing.
+    {
+        let mut cfg = state.config.write().map_err(|e| e.to_string())?;
+        if cfg.local_llm_base_url.is_none() {
+            cfg.local_llm_base_url = Some(base_url);
+            cfg.save(&cfg.config_path()).map_err(|e| e.to_string())?;
+        }
+    }
+
+    rebuild_router_with_superego(&state)?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn pull_ollama_model(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    model: String,
+) -> Result<(), String> {
+    let base_url = {
+        let guard = state.ollama.lock().await;
+        if let Some(manager) = guard.as_ref() {
+            manager.base_url()
+        } else {
+            drop(guard);
+            state
+                .config
+                .read()
+                .map_err(|e| e.to_string())?
+                .local_llm_base_url
+                .clone()
+                .unwrap_or_else(|| "http://127.0.0.1:11434".to_string())
+        }
+    };
+
+    OllamaManager::pull_model_streaming(&base_url, &model, |progress| {
+        let _ = app.emit("ollama-model-progress", &progress);
+    })
+    .await?;
+
+    // If Abigail manages Ollama, mark model as ready for status checks.
+    {
+        let mut guard = state.ollama.lock().await;
+        if let Some(manager) = guard.as_mut() {
+            manager.mark_model_ready();
+        }
+    }
+
+    // Persist local URL once pull succeeds (if not already set).
+    {
+        let mut cfg = state.config.write().map_err(|e| e.to_string())?;
+        if cfg.local_llm_base_url.is_none() {
+            cfg.local_llm_base_url = Some(base_url);
+            cfg.save(&cfg.config_path()).map_err(|e| e.to_string())?;
+        }
+    }
+
+    rebuild_router_with_superego(&state)?;
+    Ok(())
+}
+
+#[tauri::command]
 fn complete_birth(state: tauri::State<AppState>) -> Result<(), String> {
     let mut birth = state.birth.write().map_err(|e| e.to_string())?;
     let b = birth.as_mut().ok_or("Birth not started")?;
@@ -4634,7 +4740,6 @@ pub fn run() {
 
             // Spawn async Ollama startup (non-blocking — runs in background)
             let ollama_handle = app.handle().clone();
-            let resource_dir = app.path().resource_dir().ok();
             let ollama_data_dir = data_dir_for_setup;
             tauri::async_runtime::spawn(async move {
                 let state = ollama_handle.state::<AppState>();
@@ -4652,18 +4757,10 @@ pub fn run() {
                     return;
                 }
 
-                let res_dir = match resource_dir {
-                    Some(d) => d,
-                    None => {
-                        tracing::debug!("No resource_dir available, skipping bundled Ollama");
-                        return;
-                    }
-                };
-
-                match OllamaManager::discover_and_start(&res_dir, &ollama_data_dir).await {
+                match OllamaManager::discover_and_start(&ollama_data_dir).await {
                     Ok(mut manager) => {
                         let url = manager.base_url();
-                        tracing::info!("Bundled Ollama started at {}", url);
+                        tracing::info!("Managed Ollama started at {}", url);
 
                         // Ensure default model
                         let model = {
@@ -4683,10 +4780,7 @@ pub fn run() {
                             if let Ok(mut config) = state.config.write() {
                                 if config.local_llm_base_url.is_none() {
                                     config.local_llm_base_url = Some(url.clone());
-                                    tracing::info!(
-                                        "Set local_llm_base_url to bundled Ollama: {}",
-                                        url
-                                    );
+                                    tracing::info!("Set local_llm_base_url to Ollama: {}", url);
                                     // Save config
                                     let path = config.config_path();
                                     if let Err(e) = config.save(&path) {
@@ -4706,7 +4800,7 @@ pub fn run() {
                         *guard = Some(manager);
                     }
                     Err(e) => {
-                        tracing::warn!("Bundled Ollama not available: {}", e);
+                        tracing::warn!("Ollama not available for managed startup: {}", e);
                     }
                 }
             });
@@ -4754,6 +4848,10 @@ pub fn run() {
             set_local_llm_url,
             get_router_status,
             get_ollama_status,
+            detect_ollama,
+            install_ollama,
+            list_recommended_models,
+            pull_ollama_model,
             set_superego_provider,
             complete_birth,
             skip_to_life_for_mvp,

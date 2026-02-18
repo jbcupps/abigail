@@ -142,83 +142,6 @@ Function WriteVersionToRegistry
 FunctionEnd
 
 ; ============================================================================
-; OLLAMA INSTALLATION
-; ============================================================================
-
-Function InstallOllama
-  DetailPrint "Downloading Ollama installer..."
-
-  ; Download using PowerShell
-  nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri https://ollama.com/download/OllamaSetup.exe -OutFile $env:TEMP\OllamaSetup.exe -ErrorAction Stop; Write-Output OK } catch { Write-Output FAIL }"'
-  Pop $0  ; exit code
-  Pop $1  ; output
-
-  ${If} $1 == "OK"
-    DetailPrint "Running Ollama installer (silent)..."
-    ExecWait '"$TEMP\OllamaSetup.exe" /S' $0
-    DetailPrint "Ollama installer completed (exit code: $0)"
-
-    ; Wait for Ollama service to start
-    DetailPrint "Waiting for Ollama service to start..."
-    Sleep 5000
-
-    ; Verify Ollama is now running
-    nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "try { $$r = Invoke-WebRequest -Uri http://localhost:11434/api/tags -TimeoutSec 5 -ErrorAction Stop; if ($$r.StatusCode -eq 200) { Write-Output RUNNING } } catch { Write-Output NOT_RUNNING }"'
-    Pop $0
-    Pop $1
-
-    ${If} $1 == "RUNNING"
-      StrCpy $OllamaStatus "running"
-      DetailPrint "Ollama installed and running successfully"
-
-      ; Offer to pull model
-      MessageBox MB_YESNO|MB_ICONQUESTION "Ollama is installed and running!$\n$\nWould you like to download the phi3:mini model (~2.3GB)?$\n$\nThis enables offline AI responses." IDYES PullModel IDNO SkipModel
-
-PullModel:
-      DetailPrint "Downloading phi3:mini model..."
-      nsExec::ExecToStack 'ollama pull phi3:mini'
-      Pop $0
-      ${If} $0 == 0
-        DetailPrint "Model phi3:mini downloaded successfully"
-      ${Else}
-        DetailPrint "Model download failed - you can run 'ollama pull phi3:mini' later"
-      ${EndIf}
-      Goto ModelDone
-
-SkipModel:
-      DetailPrint "Skipping model download"
-
-ModelDone:
-      ; Write config with Ollama URL
-      Call WriteOllamaConfig
-    ${Else}
-      DetailPrint "Ollama installed but not yet running"
-      MessageBox MB_OK|MB_ICONINFORMATION "Ollama was installed but is not yet running.$\n$\nIt should start automatically on next login, or you can start it manually from the Start menu."
-    ${EndIf}
-  ${Else}
-    MessageBox MB_OK|MB_ICONEXCLAMATION "Failed to download Ollama.$\n$\nYou can install it later from https://ollama.com"
-  ${EndIf}
-FunctionEnd
-
-; ============================================================================
-; CONFIG WRITING
-; ============================================================================
-
-Function WriteOllamaConfig
-  ; Get AppData\Local path
-  ReadEnvStr $0 LOCALAPPDATA
-  StrCpy $1 "$0\abigail\Abigail\config.json"
-
-  ; Check if config exists and update/create appropriately
-  ; Note: schema_version=2 matches CONFIG_SCHEMA_VERSION in abigail-core/src/config.rs
-  nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "$$path = \"$1\"; $$dir = Split-Path $$path; if (-not (Test-Path $$dir)) { New-Item -ItemType Directory -Path $$dir -Force | Out-Null }; if (Test-Path $$path) { $$c = Get-Content -Raw $$path | ConvertFrom-Json; if (-not $$c.local_llm_base_url) { $$c | Add-Member -NotePropertyName local_llm_base_url -NotePropertyValue \"http://localhost:11434\" -Force }; if (-not $$c.PSObject.Properties[\"schema_version\"]) { $$c | Add-Member -NotePropertyName schema_version -NotePropertyValue 2 -Force }; $$c | ConvertTo-Json -Depth 10 | Set-Content $$path } else { @{local_llm_base_url=\"http://localhost:11434\"; routing_mode=\"ego_primary\"; schema_version=2} | ConvertTo-Json | Set-Content $$path }; Write-Output OK"'
-  Pop $0
-  Pop $1
-
-  DetailPrint "Config updated with Ollama URL"
-FunctionEnd
-
-; ============================================================================
 ; LLM SETUP DIALOG (uses MessageBox since nsDialogs pages not supported in hooks)
 ; ============================================================================
 
@@ -241,47 +164,12 @@ Function ShowLlmSetupDialog
 
   ; LM Studio status
   ${If} $LmStudioStatus == "installed"
-    StrCpy $TempResult "$TempResultLM Studio: Installed$\n"
+    StrCpy $TempResult "$TempResult$LM Studio: Installed$\n"
   ${Else}
-    StrCpy $TempResult "$TempResultLM Studio: Not detected$\n"
+    StrCpy $TempResult "$TempResult$LM Studio: Not detected$\n"
   ${EndIf}
 
-  ; If both missing, offer to install Ollama
-  ${If} $OllamaStatus == "not_found"
-  ${AndIf} $LmStudioStatus == "not_found"
-    MessageBox MB_YESNO|MB_ICONQUESTION "Local LLM Status:$\n$\n$TempResult$\nNo local LLM detected. Abigail works best with a local LLM for privacy and offline use.$\n$\nWould you like to download and install Ollama now (recommended)?" IDYES DoInstallOllama IDNO CheckLmStudio
-
-DoInstallOllama:
-    Call InstallOllama
-    Goto LlmSetupDone
-
-CheckLmStudio:
-    MessageBox MB_YESNO|MB_ICONQUESTION "Would you like to open the LM Studio download page instead?$\n$\nLM Studio is a GUI-based LLM manager with a model browser." IDYES DoLmStudio IDNO LlmSetupDone
-
-DoLmStudio:
-    ExecShell "open" "https://lmstudio.ai/download"
-    MessageBox MB_OK|MB_ICONINFORMATION "LM Studio download page opened in your browser.$\n$\nAfter installing LM Studio:$\n1. Launch LM Studio$\n2. Download a model (e.g., Phi-3 Mini)$\n3. Start the local server (Developer tab > Start Server)$\n4. Abigail will auto-detect it at http://localhost:1234"
-    Goto LlmSetupDone
-  ${EndIf}
-
-  ; If only Ollama missing but LM Studio installed
-  ${If} $OllamaStatus == "not_found"
-  ${AndIf} $LmStudioStatus == "installed"
-    MessageBox MB_OK|MB_ICONINFORMATION "Local LLM Status:$\n$\n$TempResult$\nLM Studio is installed. Make sure to:$\n1. Load a model$\n2. Start the local server (Developer tab > Start Server)$\n$\nYou can also install Ollama later from https://ollama.com"
-    Goto LlmSetupDone
-  ${EndIf}
-
-  ; If Ollama installed but not running
-  ${If} $OllamaStatus == "installed"
-    MessageBox MB_OK|MB_ICONINFORMATION "Local LLM Status:$\n$\n$TempResult$\nOllama is installed but not running. It should auto-start on login, or you can start it manually from the Start menu.$\n$\nMake sure you have at least one model. Run: ollama pull phi3:mini"
-    Goto LlmSetupDone
-  ${EndIf}
-
-  ; If Ollama is running, just inform
-  ${If} $OllamaStatus == "running"
-    ; Silently write config, don't bother user
-    Call WriteOllamaConfig
-  ${EndIf}
+  MessageBox MB_OK|MB_ICONINFORMATION "Local LLM Status:$\n$\n$TempResult$\nAbigail will guide you through Ollama or LM Studio setup on first launch."
 
 LlmSetupDone:
 FunctionEnd
@@ -348,16 +236,8 @@ FunctionEnd
   ; Step 2: Write version to registry
   Call WriteVersionToRegistry
 
-  ; Step 3: LLM setup dialog — skip if bundled Ollama is present
-  ; (Abigail will manage Ollama automatically at runtime)
-  IfFileExists "$INSTDIR\ollama\ollama.exe" BundledOllamaFound ShowLlmDialog
-
-ShowLlmDialog:
+  ; Step 3: LLM setup information (in-app wizard handles install/config)
   Call ShowLlmSetupDialog
-  Goto PostInstallDone
-
-BundledOllamaFound:
-  DetailPrint "Bundled Ollama detected — skipping LLM setup dialog"
 
 PostInstallDone:
 !macroend
