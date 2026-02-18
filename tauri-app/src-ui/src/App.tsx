@@ -30,6 +30,10 @@ interface StartupCheckResult {
 
 type ChatTab = "chat" | "agent" | "jobs" | "models";
 
+function assertNeverState(state: never): never {
+  throw new Error(`Unhandled AppState: ${state}`);
+}
+
 function AppInner() {
   const [appState, setAppState] = useState<AppState>("splash");
   const [startupError, setStartupError] = useState<string | null>(null);
@@ -71,7 +75,8 @@ function AppInner() {
 
       // Default: show the management screen (identity selector)
       setAppState("management");
-    } catch {
+    } catch (e) {
+      console.error("[App] initializeApp failed; falling back to management screen:", e);
       // Fallback to management screen on error
       setAppState("management");
     }
@@ -148,7 +153,8 @@ function AppInner() {
         setExistingIdentity(null);
         setAppState("management");
       }
-    } catch {
+    } catch (e) {
+      console.error("[App] handleIdentityResume failed; returning to management:", e);
       setExistingIdentity(null);
       setAppState("management");
     }
@@ -190,131 +196,130 @@ function AppInner() {
   const handleDisconnect = async () => {
     try {
       await invoke("disconnect_agent");
-    } catch {
-      // Ignore errors during disconnect
+    } catch (e) {
+      console.warn("[App] disconnect_agent failed; continuing to management:", e);
     }
     setMode("neutral");
     setAppState("management");
   };
 
-  if (appState === "splash") {
-    return <SplashScreen onComplete={handleSplashComplete} />;
-  }
-
-  if (appState === "loading") {
-    return (
-      <div className="min-h-screen bg-theme-bg text-theme-text-dim font-mono flex items-center justify-center">
-        <div className="animate-pulse">Loading...</div>
-      </div>
-    );
-  }
-
-  if (appState === "management") {
-    return (
-      <ManagementScreen
-        onAgentSelected={handleAgentSelected}
-        onCreateAgent={handleCreateAgent}
-      />
-    );
-  }
-
-  if (appState === "identity_conflict" && existingIdentity) {
-    return (
-      <IdentityConflictPanel
-        identity={existingIdentity}
-        onResume={handleIdentityResume}
-        onArchive={handleIdentityArchive}
-        onWipe={handleIdentityWipe}
-      />
-    );
-  }
-
-  if (appState === "boot") {
-    return <BootSequence onComplete={onBirthComplete} />;
-  }
-
-  if (appState === "startup_check") {
-    return (
-      <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col items-center justify-center">
-        <pre className="text-theme-primary text-sm mb-4">
-          ABIGAIL STARTUP
-          ============
-        </pre>
-        <p className="text-theme-text-dim">Running startup checks...</p>
-        <div className="animate-pulse mt-2 text-theme-text-dim">...</div>
-      </div>
-    );
-  }
-
-  if (appState === "startup_failed") {
-    return (
-      <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col items-center justify-center p-6">
-        <pre className="text-theme-primary text-sm mb-4">
-          ABIGAIL STARTUP
-          ============
-        </pre>
-        <p className="text-red-400 mb-4">{startupError}</p>
-        <div className="flex gap-4">
-          <button
-            className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
-            onClick={handleRetry}
-          >
-            Retry
-          </button>
-          <button
-            className="border border-yellow-500 text-yellow-500 px-4 py-2 rounded hover:bg-yellow-500/20"
-            onClick={handleContinueAnyway}
-          >
-            Continue anyway
-          </button>
+  switch (appState) {
+    case "splash":
+      return <SplashScreen onComplete={handleSplashComplete} />;
+    case "loading":
+      return (
+        <div className="min-h-screen bg-theme-bg text-theme-text-dim font-mono flex items-center justify-center">
+          <div className="animate-pulse">Loading...</div>
         </div>
-      </div>
-    );
-  }
-
-  // ── CHAT STATE ──
-  return (
-    <>
-      <PersonaToggle />
-      {/* Tab bar */}
-      <div className="flex items-center border-b border-theme-border bg-theme-bg px-2">
-        {(["chat", "agent", "jobs", "models"] as ChatTab[]).map((tab) => (
-          <button
-            key={tab}
-            className={`px-4 py-2 text-xs font-mono uppercase tracking-wide border-b-2 transition-colors ${
-              chatTab === tab
-                ? "border-theme-primary text-theme-primary"
-                : "border-transparent text-theme-text-dim hover:text-theme-text"
-            }`}
-            onClick={() => setChatTab(tab)}
-          >
-            {tab}
-          </button>
-        ))}
-        <div className="flex-1" />
-        <button
-          className="text-theme-text-dim hover:text-theme-text text-xs font-mono px-2 py-1"
-          onClick={handleDisconnect}
-          title="Return to identity selector"
-        >
-          [disconnect]
-        </button>
-      </div>
-
-      {/* Tab content */}
-      {chatTab === "chat" && (
-        <>
-          <div className={mode === "ego" ? "" : "hidden"}>
-            <ChatInterface target="EGO" />
+      );
+    case "management":
+      return (
+        <ManagementScreen
+          onAgentSelected={handleAgentSelected}
+          onCreateAgent={handleCreateAgent}
+        />
+      );
+    case "identity_conflict":
+      if (!existingIdentity) {
+        console.warn("[App] identity_conflict without identity; returning to management");
+        return (
+          <ManagementScreen
+            onAgentSelected={handleAgentSelected}
+            onCreateAgent={handleCreateAgent}
+          />
+        );
+      }
+      return (
+        <IdentityConflictPanel
+          identity={existingIdentity}
+          onResume={handleIdentityResume}
+          onArchive={handleIdentityArchive}
+          onWipe={handleIdentityWipe}
+        />
+      );
+    case "boot":
+      return <BootSequence onComplete={onBirthComplete} />;
+    case "startup_check":
+      return (
+        <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col items-center justify-center">
+          <pre className="text-theme-primary text-sm mb-4">
+            ABIGAIL STARTUP
+            ============
+          </pre>
+          <p className="text-theme-text-dim">Running startup checks...</p>
+          <div className="animate-pulse mt-2 text-theme-text-dim">...</div>
+        </div>
+      );
+    case "startup_failed":
+      return (
+        <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col items-center justify-center p-6">
+          <pre className="text-theme-primary text-sm mb-4">
+            ABIGAIL STARTUP
+            ============
+          </pre>
+          <p className="text-red-400 mb-4">{startupError}</p>
+          <div className="flex gap-4">
+            <button
+              className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
+              onClick={handleRetry}
+            >
+              Retry
+            </button>
+            <button
+              className="border border-yellow-500 text-yellow-500 px-4 py-2 rounded hover:bg-yellow-500/20"
+              onClick={handleContinueAnyway}
+            >
+              Continue anyway
+            </button>
           </div>
-          {mode === "id" && <IdentityPanel />}
+        </div>
+      );
+    case "chat":
+      return (
+        <>
+          <PersonaToggle />
+          {/* Tab bar */}
+          <div className="flex items-center border-b border-theme-border bg-theme-bg px-2">
+            {(["chat", "agent", "jobs", "models"] as ChatTab[]).map((tab) => (
+              <button
+                key={tab}
+                className={`px-4 py-2 text-xs font-mono uppercase tracking-wide border-b-2 transition-colors ${
+                  chatTab === tab
+                    ? "border-theme-primary text-theme-primary"
+                    : "border-transparent text-theme-text-dim hover:text-theme-text"
+                }`}
+                onClick={() => setChatTab(tab)}
+              >
+                {tab}
+              </button>
+            ))}
+            <div className="flex-1" />
+            <button
+              className="text-theme-text-dim hover:text-theme-text text-xs font-mono px-2 py-1"
+              onClick={handleDisconnect}
+              title="Return to identity selector"
+            >
+              [disconnect]
+            </button>
+          </div>
+
+          {/* Tab content */}
+          {chatTab === "chat" && (
+            <>
+              <div className={mode === "ego" ? "" : "hidden"}>
+                <ChatInterface target="EGO" />
+              </div>
+              {mode === "id" && <IdentityPanel />}
+            </>
+          )}
+          {chatTab === "agent" && <AgenticPanel />}
+          {chatTab === "jobs" && <OrchestrationPanel />}
+          {chatTab === "models" && <TierModelPanel />}
         </>
-      )}
-      {chatTab === "agent" && <AgenticPanel />}
-      {chatTab === "jobs" && <OrchestrationPanel />}
-      {chatTab === "models" && <TierModelPanel />}
-    </>
-  );
+      );
+    default:
+      return assertNeverState(appState);
+  }
 }
 
 function App() {

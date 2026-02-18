@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface AgentIdentityInfo {
   id: string;
@@ -24,22 +24,29 @@ export default function ManagementScreen({
   const [creating, setCreating] = useState(false);
   const [newAgentName, setNewAgentName] = useState("");
   const [migrating, setMigrating] = useState(false);
+  const mountedRef = useRef(true);
 
   const fetchAgents = async () => {
     try {
-      setLoading(true);
+      if (mountedRef.current) setLoading(true);
       const identities = await invoke<AgentIdentityInfo[]>("get_identities");
+      if (!mountedRef.current) return;
       setAgents(identities);
       setError(null);
     } catch (e) {
+      if (!mountedRef.current) return;
       setError(String(e));
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
   useEffect(() => {
+    mountedRef.current = true;
     fetchAgents();
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   const handleCreateAgent = async () => {
@@ -50,12 +57,15 @@ export default function ManagementScreen({
       const uuid = await invoke<string>("create_agent", {
         name: newAgentName.trim(),
       });
+      if (!mountedRef.current) return;
       setNewAgentName("");
       setCreating(false);
       // Load the new agent and go to birth
       await invoke("load_agent", { agentId: uuid });
+      if (!mountedRef.current) return;
       onCreateAgent();
     } catch (e) {
+      if (!mountedRef.current) return;
       setError(String(e));
       setCreating(false);
     }
@@ -64,8 +74,10 @@ export default function ManagementScreen({
   const handleSelectAgent = async (agentId: string) => {
     try {
       await invoke("load_agent", { agentId });
+      if (!mountedRef.current) return;
       onAgentSelected(agentId);
     } catch (e) {
+      if (!mountedRef.current) return;
       setError(String(e));
     }
   };
@@ -78,9 +90,10 @@ export default function ManagementScreen({
         await fetchAgents();
       }
     } catch (e) {
+      if (!mountedRef.current) return;
       setError(String(e));
     } finally {
-      setMigrating(false);
+      if (mountedRef.current) setMigrating(false);
     }
   };
 

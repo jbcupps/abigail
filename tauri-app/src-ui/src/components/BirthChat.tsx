@@ -51,6 +51,8 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
   const [error, setError] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(true);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -69,6 +71,17 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
     sendMessage(greeting, true);
   }, []);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+    };
+  }, []);
+
   // Focus input
   useEffect(() => {
     inputRef.current?.focus();
@@ -80,6 +93,8 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
 
   const sendMessage = async (text: string, isSystemGreeting = false, isRetry = false) => {
     if (!text.trim()) return;
+    if (!mountedRef.current) return;
+    let scheduledRetry = false;
 
     if (!isSystemGreeting && !isRetry) {
       setMessages(m => [...m, { role: "user", content: text }]);
@@ -93,6 +108,7 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
       const response = await invoke<BirthChatResponse>("birth_chat", {
         message: text,
       });
+      if (!mountedRef.current) return;
 
       setMessages(m => [...m, { role: "assistant", content: response.message }]);
       setRetryCount(0); // Reset retry count on success
@@ -102,6 +118,7 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
         // Insert success message for KeyStored actions
         if (response.action.type === "KeyStored" && response.action.provider) {
           const validatedText = response.action.validated ? " and validated" : "";
+          if (!mountedRef.current) return;
           setMessages(m => [...m, {
             role: "system",
             content: `${response.action!.provider!.toUpperCase()} API key stored${validatedText} successfully.`,
@@ -121,18 +138,27 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
         errorMsg.toLowerCase().includes("failed to fetch");
 
       if (isNetworkError && retryCount < MAX_RETRIES) {
+        if (!mountedRef.current) return;
         setError(`Connection error. Retrying... (${retryCount + 1}/${MAX_RETRIES})`);
         setRetryCount(prev => prev + 1);
         // Retry after a short delay
-        setTimeout(() => sendMessage(text, isSystemGreeting, true), 1500);
+        if (retryTimerRef.current) {
+          clearTimeout(retryTimerRef.current);
+        }
+        retryTimerRef.current = setTimeout(() => {
+          if (!mountedRef.current) return;
+          sendMessage(text, isSystemGreeting, true);
+        }, 1500);
+        scheduledRetry = true;
         return;
       }
 
+      if (!mountedRef.current) return;
       setError(errorMsg);
       setMessages(m => [...m, { role: "system", content: `Error: ${errorMsg}` }]);
       setRetryCount(0);
     } finally {
-      if (!error?.includes("Retrying")) {
+      if (mountedRef.current && !scheduledRetry) {
         setLoading(false);
       }
     }

@@ -308,4 +308,395 @@ mod tests {
             err
         );
     }
+
+    // ── New coverage tests ─────────────────────────────────────────
+
+    /// Helper to build a test manifest with given permissions.
+    fn test_manifest(id: &str, permissions: Vec<Permission>) -> crate::manifest::SkillManifest {
+        crate::manifest::SkillManifest {
+            id: SkillId(id.to_string()),
+            name: id.to_string(),
+            version: "1.0".to_string(),
+            description: "Test".to_string(),
+            license: None,
+            category: "Test".to_string(),
+            keywords: vec![],
+            runtime: "Native".to_string(),
+            min_abigail_version: "0.1.0".to_string(),
+            platforms: vec!["All".to_string()],
+            capabilities: vec![],
+            permissions,
+            secrets: vec![],
+            config_defaults: HashMap::new(),
+        }
+    }
+
+    /// Skill that echoes params back as success output.
+    struct EchoSkill {
+        manifest: crate::manifest::SkillManifest,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::skill::Skill for EchoSkill {
+        fn manifest(&self) -> &crate::manifest::SkillManifest {
+            &self.manifest
+        }
+        async fn initialize(&mut self, _: crate::skill::SkillConfig) -> SkillResult<()> {
+            Ok(())
+        }
+        async fn shutdown(&mut self) -> SkillResult<()> {
+            Ok(())
+        }
+        fn health(&self) -> SkillHealth {
+            SkillHealth {
+                status: HealthStatus::Healthy,
+                message: None,
+                last_check: chrono::Utc::now(),
+                metrics: HashMap::new(),
+            }
+        }
+        fn tools(&self) -> Vec<ToolDescriptor> {
+            vec![ToolDescriptor {
+                name: "echo".to_string(),
+                description: "Echo params".to_string(),
+                parameters: serde_json::json!({}),
+                returns: serde_json::json!({}),
+                cost_estimate: crate::skill::CostEstimate::default(),
+                required_permissions: vec![],
+                autonomous: true,
+                requires_confirmation: false,
+            }]
+        }
+        async fn execute_tool(
+            &self,
+            _tool_name: &str,
+            params: ToolParams,
+            _: &ExecutionContext,
+        ) -> SkillResult<crate::skill::ToolOutput> {
+            Ok(crate::skill::ToolOutput::success(
+                serde_json::to_value(&params.values).unwrap_or_default(),
+            ))
+        }
+        fn capabilities(&self) -> Vec<crate::manifest::CapabilityDescriptor> {
+            vec![]
+        }
+        fn get_capability(&self, _: &str) -> Option<&dyn std::any::Any> {
+            None
+        }
+        fn triggers(&self) -> Vec<crate::channel::TriggerDescriptor> {
+            vec![]
+        }
+    }
+
+    /// Skill that always returns a ToolFailed error.
+    struct FailingSkill {
+        manifest: crate::manifest::SkillManifest,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::skill::Skill for FailingSkill {
+        fn manifest(&self) -> &crate::manifest::SkillManifest {
+            &self.manifest
+        }
+        async fn initialize(&mut self, _: crate::skill::SkillConfig) -> SkillResult<()> {
+            Ok(())
+        }
+        async fn shutdown(&mut self) -> SkillResult<()> {
+            Ok(())
+        }
+        fn health(&self) -> SkillHealth {
+            SkillHealth {
+                status: HealthStatus::Healthy,
+                message: None,
+                last_check: chrono::Utc::now(),
+                metrics: HashMap::new(),
+            }
+        }
+        fn tools(&self) -> Vec<ToolDescriptor> {
+            vec![ToolDescriptor {
+                name: "fail".to_string(),
+                description: "Always fails".to_string(),
+                parameters: serde_json::json!({}),
+                returns: serde_json::json!({}),
+                cost_estimate: crate::skill::CostEstimate::default(),
+                required_permissions: vec![],
+                autonomous: true,
+                requires_confirmation: false,
+            }]
+        }
+        async fn execute_tool(
+            &self,
+            _: &str,
+            _: ToolParams,
+            _: &ExecutionContext,
+        ) -> SkillResult<crate::skill::ToolOutput> {
+            Err(SkillError::ToolFailed("intentional failure".to_string()))
+        }
+        fn capabilities(&self) -> Vec<crate::manifest::CapabilityDescriptor> {
+            vec![]
+        }
+        fn get_capability(&self, _: &str) -> Option<&dyn std::any::Any> {
+            None
+        }
+        fn triggers(&self) -> Vec<crate::channel::TriggerDescriptor> {
+            vec![]
+        }
+    }
+
+    /// Skill with a Network(Full) tool and Network(Full) permission granted.
+    struct NetworkSkillGranted {
+        manifest: crate::manifest::SkillManifest,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::skill::Skill for NetworkSkillGranted {
+        fn manifest(&self) -> &crate::manifest::SkillManifest {
+            &self.manifest
+        }
+        async fn initialize(&mut self, _: crate::skill::SkillConfig) -> SkillResult<()> {
+            Ok(())
+        }
+        async fn shutdown(&mut self) -> SkillResult<()> {
+            Ok(())
+        }
+        fn health(&self) -> SkillHealth {
+            SkillHealth {
+                status: HealthStatus::Healthy,
+                message: None,
+                last_check: chrono::Utc::now(),
+                metrics: HashMap::new(),
+            }
+        }
+        fn tools(&self) -> Vec<ToolDescriptor> {
+            vec![ToolDescriptor {
+                name: "fetch".to_string(),
+                description: "Fetch URL".to_string(),
+                parameters: serde_json::json!({}),
+                returns: serde_json::json!({}),
+                cost_estimate: crate::skill::CostEstimate::default(),
+                required_permissions: vec![Permission::Network(NetworkPermission::Full)],
+                autonomous: false,
+                requires_confirmation: false,
+            }]
+        }
+        async fn execute_tool(
+            &self,
+            _: &str,
+            _: ToolParams,
+            _: &ExecutionContext,
+        ) -> SkillResult<crate::skill::ToolOutput> {
+            Ok(crate::skill::ToolOutput::success(
+                serde_json::json!({"fetched": true}),
+            ))
+        }
+        fn capabilities(&self) -> Vec<crate::manifest::CapabilityDescriptor> {
+            vec![]
+        }
+        fn get_capability(&self, _: &str) -> Option<&dyn std::any::Any> {
+            None
+        }
+        fn triggers(&self) -> Vec<crate::channel::TriggerDescriptor> {
+            vec![]
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_success() {
+        let registry = Arc::new(SkillRegistry::new());
+        let skill_id = SkillId("test.echo".to_string());
+        let manifest = test_manifest("test.echo", vec![]);
+        let skill = EchoSkill { manifest };
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .unwrap();
+        let executor = SkillExecutor::new(registry);
+        let result = executor.execute(&skill_id, "echo", ToolParams::new()).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().success);
+    }
+
+    #[tokio::test]
+    async fn skill_not_found() {
+        let registry = Arc::new(SkillRegistry::new());
+        let executor = SkillExecutor::new(registry);
+        let result = executor
+            .execute(
+                &SkillId("nonexistent".to_string()),
+                "tool",
+                ToolParams::new(),
+            )
+            .await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string().to_lowercase();
+        assert!(
+            msg.contains("not found") || msg.contains("unknown"),
+            "expected not found error, got: {}",
+            msg
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_not_found() {
+        let registry = Arc::new(SkillRegistry::new());
+        let skill_id = SkillId("test.echo".to_string());
+        let manifest = test_manifest("test.echo", vec![]);
+        let skill = EchoSkill { manifest };
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .unwrap();
+        let executor = SkillExecutor::new(registry);
+        let result = executor
+            .execute(&skill_id, "nonexistent_tool", ToolParams::new())
+            .await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("Unknown tool"),
+            "expected unknown tool error, got: {}",
+            msg
+        );
+    }
+
+    #[tokio::test]
+    async fn network_permission_granted() {
+        let registry = Arc::new(SkillRegistry::new());
+        let skill_id = SkillId("test.net".to_string());
+        let manifest = test_manifest(
+            "test.net",
+            vec![Permission::Network(NetworkPermission::Full)],
+        );
+        let skill = NetworkSkillGranted { manifest };
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .unwrap();
+        let executor = SkillExecutor::new(registry);
+        let result = executor
+            .execute(&skill_id, "fetch", ToolParams::new())
+            .await;
+        assert!(result.is_ok(), "network permission should be granted");
+    }
+
+    #[tokio::test]
+    async fn domain_permission_mismatch() {
+        // Skill has LocalOnly permission, but tool requires Full network
+        let registry = Arc::new(SkillRegistry::new());
+        let skill_id = SkillId("test.local".to_string());
+        let manifest = test_manifest(
+            "test.local",
+            vec![Permission::Network(NetworkPermission::LocalOnly)],
+        );
+        // Reuse NetworkToolNoPermissionSkill but with LocalOnly permission in manifest
+        // Tool requires Full → sandbox should deny because "any" != "localhost"
+        let skill = NetworkSkillGranted { manifest };
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .unwrap();
+        let executor = SkillExecutor::new(registry);
+        let result = executor
+            .execute(&skill_id, "fetch", ToolParams::new())
+            .await;
+        assert!(
+            result.is_err(),
+            "LocalOnly should not satisfy Full network permission"
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrency_limit_respected() {
+        let registry = Arc::new(SkillRegistry::new());
+        let skill_id = SkillId("test.sleep".to_string());
+        let manifest = test_manifest("test.sleep", vec![]);
+        let skill = SleepSkill {
+            manifest,
+            sleep_ms: 100,
+        };
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .unwrap();
+        let limits = ResourceLimits {
+            max_concurrency: 1,
+            max_cpu_ms: 5000,
+            ..ResourceLimits::default()
+        };
+        let executor = Arc::new(SkillExecutor::with_limits(registry, limits));
+
+        // Launch 3 concurrent tasks — with concurrency=1, they should serialize
+        let start = std::time::Instant::now();
+        let mut handles = vec![];
+        for _ in 0..3 {
+            let exec = executor.clone();
+            let sid = skill_id.clone();
+            handles.push(tokio::spawn(async move {
+                exec.execute(&sid, "sleep", ToolParams::new()).await
+            }));
+        }
+        for h in handles {
+            h.await.unwrap().unwrap();
+        }
+        let elapsed = start.elapsed();
+        // With concurrency=1 and 100ms sleep, 3 tasks should take >= 300ms
+        assert!(
+            elapsed.as_millis() >= 250,
+            "expected serialized execution (>=250ms), got {}ms",
+            elapsed.as_millis()
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_returns_error() {
+        let registry = Arc::new(SkillRegistry::new());
+        let skill_id = SkillId("test.fail".to_string());
+        let manifest = test_manifest("test.fail", vec![]);
+        let skill = FailingSkill { manifest };
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .unwrap();
+        let executor = SkillExecutor::new(registry);
+        let result = executor.execute(&skill_id, "fail", ToolParams::new()).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("intentional failure"));
+    }
+
+    #[tokio::test]
+    async fn default_limits_work() {
+        let registry = Arc::new(SkillRegistry::new());
+        // new(registry) should not panic
+        let _executor = SkillExecutor::new(registry);
+    }
+
+    #[tokio::test]
+    async fn execute_with_params() {
+        let registry = Arc::new(SkillRegistry::new());
+        let skill_id = SkillId("test.echo".to_string());
+        let manifest = test_manifest("test.echo", vec![]);
+        let skill = EchoSkill { manifest };
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .unwrap();
+        let executor = SkillExecutor::new(registry);
+        let params = ToolParams::new().with("key", "value");
+        let result = executor.execute(&skill_id, "echo", params).await.unwrap();
+        assert!(result.success);
+        // The echo skill returns the values as output data
+        assert_eq!(result.data.as_ref().unwrap()["key"], "value");
+    }
+
+    #[tokio::test]
+    async fn filesystem_permission_passthrough() {
+        // When no FS audit action is generated (tool has no FS required_permissions),
+        // execution should pass through without sandbox check
+        let registry = Arc::new(SkillRegistry::new());
+        let skill_id = SkillId("test.echo2".to_string());
+        let manifest = test_manifest("test.echo2", vec![]);
+        let skill = EchoSkill { manifest };
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .unwrap();
+        let executor = SkillExecutor::new(registry);
+        let result = executor.execute(&skill_id, "echo", ToolParams::new()).await;
+        assert!(result.is_ok(), "no FS audit action → should pass through");
+    }
 }

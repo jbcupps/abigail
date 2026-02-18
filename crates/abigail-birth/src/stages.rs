@@ -116,7 +116,7 @@ impl BirthOrchestrator {
     /// Does NOT sign documents yet (signing is deferred to Emergence).
     pub fn generate_identity(&mut self, docs_path: &Path) -> anyhow::Result<()> {
         if self.stage != BirthStage::Darkness {
-            return Ok(());
+            return Err(BirthError::StageGuard(self.stage.name().to_string()).into());
         }
 
         let data_dir = self.config.data_dir.clone();
@@ -159,28 +159,31 @@ impl BirthOrchestrator {
 
     /// Advance from Darkness to Ignition (after user has saved key).
     pub fn advance_past_darkness(&mut self) -> anyhow::Result<()> {
-        if self.stage == BirthStage::Darkness {
-            self.stage = BirthStage::Ignition;
-            self.persist_stage()?;
+        if self.stage != BirthStage::Darkness {
+            return Err(BirthError::StageGuard(self.stage.name().to_string()).into());
         }
+        self.stage = BirthStage::Ignition;
+        self.persist_stage()?;
         Ok(())
     }
 
     /// Advance from Ignition to Connectivity (after local LLM is confirmed working).
     pub fn advance_to_connectivity(&mut self) -> anyhow::Result<()> {
-        if self.stage == BirthStage::Ignition {
-            self.stage = BirthStage::Connectivity;
-            self.persist_stage()?;
+        if self.stage != BirthStage::Ignition {
+            return Err(BirthError::StageGuard(self.stage.name().to_string()).into());
         }
+        self.stage = BirthStage::Connectivity;
+        self.persist_stage()?;
         Ok(())
     }
 
     /// Advance from Connectivity to Crystallization (after API keys are stored).
     pub fn advance_to_crystallization(&mut self) -> anyhow::Result<()> {
-        if self.stage == BirthStage::Connectivity {
-            self.stage = BirthStage::Crystallization;
-            self.persist_stage()?;
+        if self.stage != BirthStage::Connectivity {
+            return Err(BirthError::StageGuard(self.stage.name().to_string()).into());
         }
+        self.stage = BirthStage::Crystallization;
+        self.persist_stage()?;
         Ok(())
     }
 
@@ -654,6 +657,72 @@ mod tests {
         // In Darkness stage, complete_emergence should fail
         let result = orch.complete_emergence();
         assert!(result.is_err());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_advance_past_darkness_wrong_stage_fails() {
+        let tmp = std::env::temp_dir().join("abigail_birth_advance_dark_guard");
+        let _ = fs::remove_dir_all(&tmp);
+        let config = test_config(&tmp);
+        let docs_dir = config.docs_dir.clone();
+
+        let mut orch = BirthOrchestrator::new(config).unwrap();
+        orch.generate_identity(&docs_dir).unwrap();
+        orch.advance_past_darkness().unwrap();
+        // Now in Ignition — calling again should fail
+        let result = orch.advance_past_darkness();
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("Stage guard"));
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_advance_to_connectivity_wrong_stage_fails() {
+        let tmp = std::env::temp_dir().join("abigail_birth_advance_conn_guard");
+        let _ = fs::remove_dir_all(&tmp);
+        let config = test_config(&tmp);
+
+        let mut orch = BirthOrchestrator::new(config).unwrap();
+        // In Darkness stage, advance_to_connectivity should fail
+        let result = orch.advance_to_connectivity();
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("Stage guard"));
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_advance_to_crystallization_wrong_stage_fails() {
+        let tmp = std::env::temp_dir().join("abigail_birth_advance_crystal_guard");
+        let _ = fs::remove_dir_all(&tmp);
+        let config = test_config(&tmp);
+
+        let mut orch = BirthOrchestrator::new(config).unwrap();
+        // In Darkness stage, advance_to_crystallization should fail
+        let result = orch.advance_to_crystallization();
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("Stage guard"));
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_generate_identity_wrong_stage_fails() {
+        let tmp = std::env::temp_dir().join("abigail_birth_gen_id_guard");
+        let _ = fs::remove_dir_all(&tmp);
+        let config = test_config(&tmp);
+        let docs_dir = config.docs_dir.clone();
+
+        let mut orch = BirthOrchestrator::new(config).unwrap();
+        orch.generate_identity(&docs_dir).unwrap();
+        orch.advance_past_darkness().unwrap();
+        // Now in Ignition — generate_identity should fail
+        let result = orch.generate_identity(&docs_dir);
+        assert!(result.is_err());
+        assert!(format!("{}", result.unwrap_err()).contains("Stage guard"));
 
         let _ = fs::remove_dir_all(&tmp);
     }

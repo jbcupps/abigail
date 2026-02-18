@@ -75,15 +75,19 @@ async fn validate_perplexity(key: &str) -> anyhow::Result<()> {
         .timeout(Duration::from_secs(10))
         .build()?;
 
+    // Perplexity has no /models endpoint; use a minimal chat completion request
     let response = client
-        .get("https://api.perplexity.ai/models")
+        .post("https://api.perplexity.ai/chat/completions")
         .header("Authorization", format!("Bearer {}", key))
+        .header("content-type", "application/json")
+        .body(r#"{"model":"sonar","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}"#)
         .send()
         .await?;
 
     match response.status().as_u16() {
         200 => Ok(()),
         401 => Err(anyhow::anyhow!("Invalid API key")),
+        403 => Err(anyhow::anyhow!("API key lacks permission")),
         429 => Ok(()), // Rate limited but key is valid
         _ => Err(anyhow::anyhow!("API error: {}", response.status())),
     }

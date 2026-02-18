@@ -9,7 +9,7 @@ tauri-build = { version = "2.0", features = [] }
 [dependencies]
 abigail-core = { path = "../crates/abigail-core" }
 anyhow = "1"
-base64 = "0.21"
+base64.workspace = true
 ed25519-dalek.workspace = true
 abigail-memory = { path = "../crates/abigail-memory" }
 abigail-capabilities = { path = "../crates/abigail-capabilities" }

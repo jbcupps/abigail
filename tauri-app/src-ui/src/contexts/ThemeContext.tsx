@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 export type PersonaMode = "id" | "ego" | "neutral";
@@ -20,6 +20,7 @@ interface ThemeProviderProps {
 export function ThemeProvider({ initialMode = "neutral", children }: ThemeProviderProps) {
   const [mode, setMode] = useState<PersonaMode>(initialMode);
   const [agentName, setAgentName] = useState<string | null>(null);
+  const mountedRef = useRef(true);
 
   // Apply theme class to document root
   useEffect(() => {
@@ -28,12 +29,21 @@ export function ThemeProvider({ initialMode = "neutral", children }: ThemeProvid
     root.classList.add(`theme-${mode}`);
   }, [mode]);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const refreshAgentName = useCallback(async () => {
     try {
       const name = await invoke<string | null>("get_agent_name");
+      if (!mountedRef.current) return;
       setAgentName(name);
-    } catch {
+    } catch (e) {
       // Ignore - agent name not yet set
+      console.warn("[ThemeContext] refreshAgentName failed:", e);
     }
   }, []);
 

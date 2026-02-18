@@ -25,14 +25,14 @@ authors = ["Abigail's Mentor"]
 license = "MIT"
 
 [workspace.dependencies]
-tokio = { version = "1.35", features = ["full"] }
+tokio = { version = "1.35", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net", "process", "signal"] }
 async-trait = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 rand = "0.8"
-base64 = "0.21"
-rusqlite = { version = "0.31", features = ["bundled", "blob"] }
+base64 = "0.22"
+rusqlite = { version = "0.32", features = ["bundled", "blob"] }
 thiserror = "1.0"
 anyhow = "1.0"
 tracing = "0.1"
@@ -40,4 +40,3 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
 tokio-util = { version = "0.7", features = ["io", "compat"] }
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid"] }

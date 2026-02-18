@@ -79,7 +79,7 @@ pub struct OpenAiCompatibleProvider {
 
 impl OpenAiCompatibleProvider {
     /// Create a provider for a known compatible API.
-    pub fn new(provider: CompatibleProvider, api_key: String) -> Self {
+    pub fn new(provider: CompatibleProvider, api_key: String) -> anyhow::Result<Self> {
         Self::with_config(
             provider,
             provider.base_url().to_string(),
@@ -94,19 +94,24 @@ impl OpenAiCompatibleProvider {
         base_url: String,
         api_key: String,
         model: String,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
+        let api_key = api_key.trim().to_string();
+        if api_key.is_empty() {
+            anyhow::bail!("API key is empty");
+        }
+
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(120))
             .build()
-            .expect("Failed to create HTTP client");
+            .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {}", e))?;
 
-        Self {
+        Ok(Self {
             base_url,
             api_key,
             model,
             provider_type: provider,
             client,
-        }
+        })
     }
 
     /// Get the provider type.
@@ -375,8 +380,9 @@ impl LlmProvider for OpenAiCompatibleProvider {
             std::collections::HashMap::new();
         let mut byte_stream = response.bytes_stream();
         let mut buffer = String::new();
+        let mut receiver_closed = false;
 
-        while let Some(chunk) = byte_stream.next().await {
+        'stream_loop: while let Some(chunk) = byte_stream.next().await {
             let bytes = chunk?;
             buffer.push_str(&String::from_utf8_lossy(&bytes));
 
@@ -396,7 +402,13 @@ impl LlmProvider for OpenAiCompatibleProvider {
                         if let Some(choice) = chunk.choices.first() {
                             if let Some(ref content) = choice.delta.content {
                                 full_content.push_str(content);
-                                let _ = tx.send(StreamEvent::Token(content.clone())).await;
+                                if tx.send(StreamEvent::Token(content.clone())).await.is_err() {
+                                    tracing::warn!(
+                                        "OpenAI-compatible stream receiver closed while sending token; terminating stream early"
+                                    );
+                                    receiver_closed = true;
+                                    break 'stream_loop;
+                                }
                             }
                             if let Some(ref tc_deltas) = choice.delta.tool_calls {
                                 for tc_delta in tc_deltas {
@@ -441,7 +453,13 @@ impl LlmProvider for OpenAiCompatibleProvider {
             content: full_content,
             tool_calls,
         };
-        let _ = tx.send(StreamEvent::Done(response.clone())).await;
+        if tx.send(StreamEvent::Done(response.clone())).await.is_err() {
+            tracing::warn!(
+                "OpenAI-compatible stream receiver closed while sending completion event"
+            );
+        } else if receiver_closed {
+            tracing::debug!("OpenAI-compatible stream ended after receiver disconnect");
+        }
         Ok(response)
     }
 }
@@ -509,7 +527,8 @@ mod tests {
     #[test]
     fn test_completions_url() {
         let provider =
-            OpenAiCompatibleProvider::new(CompatibleProvider::Perplexity, "test-key".to_string());
+            OpenAiCompatibleProvider::new(CompatibleProvider::Perplexity, "test-key".to_string())
+                .unwrap();
         assert_eq!(
             provider.completions_url(),
             "https://api.perplexity.ai/chat/completions"
@@ -521,5 +540,12 @@ mod tests {
         assert_eq!(CompatibleProvider::Perplexity.to_string(), "perplexity");
         assert_eq!(CompatibleProvider::Xai.to_string(), "xai");
         assert_eq!(CompatibleProvider::Google.to_string(), "google");
+    }
+
+    #[test]
+    fn test_rejects_empty_api_key() {
+        let provider =
+            OpenAiCompatibleProvider::new(CompatibleProvider::Perplexity, "   ".to_string());
+        assert!(provider.is_err());
     }
 }

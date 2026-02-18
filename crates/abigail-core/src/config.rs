@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 10;
+pub const CONFIG_SCHEMA_VERSION: u32 = 11;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -15,8 +15,11 @@ pub enum RoutingMode {
     EgoPrimary,
     /// Council (mixture-of-agents): all available providers deliberate together.
     /// With 1 provider this is passthrough (same as EgoPrimary).
-    #[default]
     Council,
+    /// Tier-based: classifies prompt complexity → routes to optimal provider+model.
+    /// T1Fast → local/fast, T2Standard → standard, T3Pro → pro, T4Specialist → pro.
+    #[default]
+    TierBased,
 }
 
 fn default_schema_version() -> u32 {
@@ -527,6 +530,15 @@ impl AppConfig {
             tracing::debug!("Migrated config from v9 to v10");
         }
 
+        // Migration from v10 to v11
+        if self.schema_version < 11 {
+            // v11 adds: TierBased routing mode (new default).
+            // Existing configs keep their current routing_mode (serde preserves it).
+            self.schema_version = 11;
+            migrated = true;
+            tracing::debug!("Migrated config from v10 to v11");
+        }
+
         migrated
     }
 
@@ -761,20 +773,20 @@ mod tests {
     }
 
     #[test]
-    fn test_migrate_v8_to_v9() {
+    fn test_migrate_v8_preserves_routing_mode() {
         let mut config = AppConfig::default_paths();
         config.schema_version = 8;
         config.routing_mode = RoutingMode::EgoPrimary; // existing user keeps their mode
 
         assert!(config.migrate());
         assert_eq!(config.schema_version, CONFIG_SCHEMA_VERSION);
-        // Existing routing_mode is preserved (not forced to Council)
+        // Existing routing_mode is preserved (not forced to TierBased)
         assert_eq!(config.routing_mode, RoutingMode::EgoPrimary);
     }
 
     #[test]
-    fn test_default_routing_mode_is_council() {
-        assert_eq!(RoutingMode::default(), RoutingMode::Council);
+    fn test_default_routing_mode_is_tier_based() {
+        assert_eq!(RoutingMode::default(), RoutingMode::TierBased);
     }
 
     #[test]
@@ -784,6 +796,15 @@ mod tests {
         assert_eq!(json, "\"council\"");
         let parsed: RoutingMode = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, RoutingMode::Council);
+    }
+
+    #[test]
+    fn test_tier_based_routing_mode_serde() {
+        let mode = RoutingMode::TierBased;
+        let json = serde_json::to_string(&mode).unwrap();
+        assert_eq!(json, "\"tier_based\"");
+        let parsed: RoutingMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, RoutingMode::TierBased);
     }
 
     #[test]

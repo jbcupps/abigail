@@ -7,7 +7,9 @@ use abigail_capabilities::cognitive::{
 };
 use std::sync::Arc;
 
+use crate::classifier::{ClassificationResult, PromptClassifier};
 use crate::council::CouncilEngine;
+use crate::tier_resolver::TierResolver;
 
 // Re-export RoutingMode from abigail-core for convenience
 pub use abigail_core::RoutingMode;
@@ -80,6 +82,10 @@ pub struct IdEgoRouter {
     mode: RoutingMode,
     /// Superego Layer-2 enforcement mode.
     superego_l2_mode: SuperegoL2Mode,
+    /// Prompt complexity classifier for TierBased routing.
+    classifier: Arc<PromptClassifier>,
+    /// Maps PromptTier → concrete provider+model for TierBased routing.
+    tier_resolver: Arc<TierResolver>,
 }
 
 impl IdEgoRouter {
@@ -89,15 +95,30 @@ impl IdEgoRouter {
     /// * `local_llm_base_url` - Base URL for local LLM server (e.g. "http://localhost:1234")
     /// * `ego_provider_name` - Cloud provider name for Ego (e.g. "openai", "anthropic")
     /// * `ego_api_key` - API key for Ego (cloud) routing
-    /// * `mode` - Routing mode (EgoPrimary or IdPrimary)
+    /// * `mode` - Routing mode (EgoPrimary, IdPrimary, Council, or TierBased)
     pub fn new(
         local_llm_base_url: Option<String>,
         ego_provider_name: Option<&str>,
         ego_api_key: Option<String>,
         mode: RoutingMode,
     ) -> Self {
-        let (ego, ego_provider) = build_ego_provider(ego_provider_name, ego_api_key);
+        let (ego, ego_provider) = build_ego_provider(ego_provider_name, ego_api_key.clone());
         let (id, local_http) = build_id_provider(local_llm_base_url);
+
+        // Build default classifier (Layer 1 only — no LLM for Layer 2 in sync constructor)
+        let classifier = Arc::new(PromptClassifier::new(None));
+
+        // Build tier resolver from defaults
+        let tier_models = abigail_core::TierModels::defaults();
+        let local_for_resolver = local_http
+            .as_ref()
+            .map(|p| p.clone() as Arc<dyn LlmProvider>);
+        let tier_resolver = Arc::new(TierResolver::new(
+            ego_provider_name.map(|s| s.to_string()),
+            ego_api_key,
+            tier_models,
+            local_for_resolver,
+        ));
 
         Self {
             id,
@@ -108,6 +129,8 @@ impl IdEgoRouter {
             local_http,
             mode,
             superego_l2_mode: SuperegoL2Mode::Off,
+            classifier,
+            tier_resolver,
         }
     }
 
@@ -119,8 +142,26 @@ impl IdEgoRouter {
         ego_api_key: Option<String>,
         mode: RoutingMode,
     ) -> Self {
-        let (ego, ego_provider) = build_ego_provider(ego_provider_name, ego_api_key);
+        let (ego, ego_provider) = build_ego_provider(ego_provider_name, ego_api_key.clone());
         let (id, local_http) = build_id_provider_auto_detect(local_llm_base_url).await;
+
+        // Build classifier with local LLM for Layer 2 fallback
+        let l2_llm = local_http
+            .as_ref()
+            .map(|p| p.clone() as Arc<dyn LlmProvider>);
+        let classifier = Arc::new(PromptClassifier::new(l2_llm));
+
+        // Build tier resolver from defaults
+        let tier_models = abigail_core::TierModels::defaults();
+        let local_for_resolver = local_http
+            .as_ref()
+            .map(|p| p.clone() as Arc<dyn LlmProvider>);
+        let tier_resolver = Arc::new(TierResolver::new(
+            ego_provider_name.map(|s| s.to_string()),
+            ego_api_key,
+            tier_models,
+            local_for_resolver,
+        ));
 
         Self {
             id,
@@ -131,6 +172,8 @@ impl IdEgoRouter {
             local_http,
             mode,
             superego_l2_mode: SuperegoL2Mode::Off,
+            classifier,
+            tier_resolver,
         }
     }
 
@@ -191,6 +234,17 @@ impl IdEgoRouter {
     /// Builder method: set the Superego L2 enforcement mode.
     pub fn with_superego_l2_mode(mut self, mode: SuperegoL2Mode) -> Self {
         self.superego_l2_mode = mode;
+        self
+    }
+
+    /// Builder method: set custom classifier and tier resolver.
+    pub fn with_tier_config(
+        mut self,
+        classifier: Arc<PromptClassifier>,
+        tier_resolver: Arc<TierResolver>,
+    ) -> Self {
+        self.classifier = classifier;
+        self.tier_resolver = tier_resolver;
         self
     }
 
@@ -294,7 +348,12 @@ impl IdEgoRouter {
         SuperegoResult::Allow
     }
 
-    /// Classify with Id: ROUTINE or COMPLEX.
+    /// Classify a user message into a PromptTier using the multi-tier classifier.
+    pub async fn classify_tier(&self, user_message: &str) -> ClassificationResult {
+        self.classifier.classify(user_message).await
+    }
+
+    /// Classify with Id: ROUTINE or COMPLEX (legacy method, kept for backward compatibility).
     pub async fn classify(&self, user_message: &str) -> anyhow::Result<RouteDecision> {
         let prompt = format!(
             "Classify this user request. Reply with exactly one word: ROUTINE or COMPLEX.\n\
@@ -337,6 +396,7 @@ impl IdEgoRouter {
             RoutingMode::IdPrimary => self.route_id_primary(messages).await,
             RoutingMode::EgoPrimary => self.route_ego_primary(messages).await,
             RoutingMode::Council => self.route_council(messages).await,
+            RoutingMode::TierBased => self.route_tier_based(messages).await,
         }
     }
 
@@ -370,6 +430,26 @@ impl IdEgoRouter {
             tracing::debug!("Council mode but no engine attached, falling back to ego_primary");
         }
         self.route_ego_primary(messages).await
+    }
+
+    /// Tier-based routing: classify prompt complexity → route to optimal provider+model.
+    async fn route_tier_based(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
+        let last = messages.last().map(|m| m.content.as_str()).unwrap_or("");
+        let result = self.classify_tier(last).await;
+
+        tracing::info!(
+            "Tier routing: {} (confidence={:.2}, rule={:?})",
+            result.tier,
+            result.confidence,
+            result.matched_rule
+        );
+
+        let provider = self.tier_resolver.resolve(result.tier);
+        let request = CompletionRequest {
+            messages,
+            tools: None,
+        };
+        provider.complete(&request).await
     }
 
     /// Run Superego pre-check on the last user message.
@@ -515,8 +595,21 @@ impl IdEgoRouter {
     ) -> anyhow::Result<CompletionResponse> {
         // Superego pre-check
         if let Some(deny) = self.run_superego_precheck(&messages).await {
-            let _ = tx.send(StreamEvent::Token(deny.content.clone())).await;
-            let _ = tx.send(StreamEvent::Done(deny.clone())).await;
+            if !try_send_stream_event(
+                &tx,
+                StreamEvent::Token(deny.content.clone()),
+                "route_stream superego deny token",
+            )
+            .await
+            {
+                return Ok(deny);
+            }
+            let _ = try_send_stream_event(
+                &tx,
+                StreamEvent::Done(deny.clone()),
+                "route_stream superego deny done",
+            )
+            .await;
             return Ok(deny);
         }
         // Council mode: deliberate non-streaming, send synthesis as burst
@@ -529,8 +622,21 @@ impl IdEgoRouter {
                             content: result.synthesis.clone(),
                             tool_calls: None,
                         };
-                        let _ = tx.send(StreamEvent::Token(result.synthesis)).await;
-                        let _ = tx.send(StreamEvent::Done(response.clone())).await;
+                        if !try_send_stream_event(
+                            &tx,
+                            StreamEvent::Token(result.synthesis),
+                            "route_stream council token",
+                        )
+                        .await
+                        {
+                            return Ok(response);
+                        }
+                        let _ = try_send_stream_event(
+                            &tx,
+                            StreamEvent::Done(response.clone()),
+                            "route_stream council done",
+                        )
+                        .await;
                         return Ok(response);
                     }
                     Err(e) => {
@@ -539,6 +645,24 @@ impl IdEgoRouter {
                 }
             }
             // Fall through to ego_primary-style streaming
+        }
+
+        // TierBased streaming: classify → resolve provider → stream
+        if self.mode == RoutingMode::TierBased {
+            let last = messages.last().map(|m| m.content.as_str()).unwrap_or("");
+            let result = self.classify_tier(last).await;
+            tracing::info!(
+                "Tier stream routing: {} (confidence={:.2}, rule={:?})",
+                result.tier,
+                result.confidence,
+                result.matched_rule
+            );
+            let provider = self.tier_resolver.resolve(result.tier);
+            let request = CompletionRequest {
+                messages,
+                tools: None,
+            };
+            return provider.stream(&request, tx).await;
         }
 
         // Determine which provider to use (same logic as route for non-council modes)
@@ -563,6 +687,7 @@ impl IdEgoRouter {
                     &self.id
                 }
             }
+            RoutingMode::TierBased => unreachable!("handled above"),
         };
 
         let request = CompletionRequest {
@@ -586,8 +711,21 @@ impl IdEgoRouter {
     ) -> anyhow::Result<CompletionResponse> {
         // Superego pre-check
         if let Some(deny) = self.run_superego_precheck(&messages).await {
-            let _ = tx.send(StreamEvent::Token(deny.content.clone())).await;
-            let _ = tx.send(StreamEvent::Done(deny.clone())).await;
+            if !try_send_stream_event(
+                &tx,
+                StreamEvent::Token(deny.content.clone()),
+                "route_stream_with_tools superego deny token",
+            )
+            .await
+            {
+                return Ok(deny);
+            }
+            let _ = try_send_stream_event(
+                &tx,
+                StreamEvent::Done(deny.clone()),
+                "route_stream_with_tools superego deny done",
+            )
+            .await;
             return Ok(deny);
         }
         let request = CompletionRequest {
@@ -617,7 +755,15 @@ impl IdEgoRouter {
                     // Ego succeeded — forward all collected events to the real channel.
                     if let Ok(events) = collector.await {
                         for event in events {
-                            let _ = tx.send(event).await;
+                            if !try_send_stream_event(
+                                &tx,
+                                event,
+                                "route_stream_with_tools ego forward",
+                            )
+                            .await
+                            {
+                                break;
+                            }
                         }
                     }
                     return Ok(response);
@@ -640,8 +786,21 @@ impl IdEgoRouter {
                             );
                             // Last resort: non-streaming complete, send result through channel
                             let response = self.id.complete(&request).await?;
-                            let _ = tx.send(StreamEvent::Token(response.content.clone())).await;
-                            let _ = tx.send(StreamEvent::Done(response.clone())).await;
+                            if !try_send_stream_event(
+                                &tx,
+                                StreamEvent::Token(response.content.clone()),
+                                "route_stream_with_tools fallback token",
+                            )
+                            .await
+                            {
+                                return Ok(response);
+                            }
+                            let _ = try_send_stream_event(
+                                &tx,
+                                StreamEvent::Done(response.clone()),
+                                "route_stream_with_tools fallback done",
+                            )
+                            .await;
                             return Ok(response);
                         }
                     }
@@ -653,6 +812,18 @@ impl IdEgoRouter {
     }
 }
 
+async fn try_send_stream_event(
+    tx: &tokio::sync::mpsc::Sender<StreamEvent>,
+    event: StreamEvent,
+    context: &str,
+) -> bool {
+    if let Err(e) = tx.send(event).await {
+        tracing::warn!("{}: stream receiver closed: {}", context, e);
+        return false;
+    }
+    true
+}
+
 // ── Helper functions for building providers ──────────────────────────
 
 /// Build the Ego (cloud) provider from a provider name and API key.
@@ -660,7 +831,10 @@ fn build_ego_provider(
     provider_name: Option<&str>,
     api_key: Option<String>,
 ) -> (Option<Arc<dyn LlmProvider>>, Option<EgoProvider>) {
-    let key = match api_key.filter(|k| !k.is_empty()) {
+    let key = match api_key
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+    {
         Some(k) => k,
         None => {
             tracing::info!(
@@ -678,41 +852,74 @@ fn build_ego_provider(
     );
 
     match provider_name {
-        Some("anthropic") => (
-            Some(Arc::new(AnthropicProvider::new(key)) as Arc<dyn LlmProvider>),
-            Some(EgoProvider::Anthropic),
-        ),
-        Some("perplexity") | Some("pplx") => (
-            Some(Arc::new(OpenAiCompatibleProvider::new(
-                CompatibleProvider::Perplexity,
-                key,
-            )) as Arc<dyn LlmProvider>),
-            Some(EgoProvider::Perplexity),
-        ),
-        Some("xai") | Some("grok") => (
-            Some(
-                Arc::new(OpenAiCompatibleProvider::new(CompatibleProvider::Xai, key))
-                    as Arc<dyn LlmProvider>,
+        Some("anthropic") => match AnthropicProvider::new(key) {
+            Ok(p) => (
+                Some(Arc::new(p) as Arc<dyn LlmProvider>),
+                Some(EgoProvider::Anthropic),
             ),
-            Some(EgoProvider::Xai),
-        ),
-        Some("google") | Some("gemini") => (
-            Some(Arc::new(OpenAiCompatibleProvider::new(
-                CompatibleProvider::Google,
-                key,
-            )) as Arc<dyn LlmProvider>),
-            Some(EgoProvider::Google),
-        ),
-        Some("openai") | None => (
-            Some(Arc::new(OpenAiProvider::new(Some(key))) as Arc<dyn LlmProvider>),
-            Some(EgoProvider::OpenAi),
-        ),
+            Err(e) => {
+                tracing::error!("Failed to create Anthropic provider: {}", e);
+                (None, None)
+            }
+        },
+        Some("perplexity") | Some("pplx") => {
+            match OpenAiCompatibleProvider::new(CompatibleProvider::Perplexity, key) {
+                Ok(p) => (
+                    Some(Arc::new(p) as Arc<dyn LlmProvider>),
+                    Some(EgoProvider::Perplexity),
+                ),
+                Err(e) => {
+                    tracing::error!("Failed to create Perplexity provider: {}", e);
+                    (None, None)
+                }
+            }
+        }
+        Some("xai") | Some("grok") => {
+            match OpenAiCompatibleProvider::new(CompatibleProvider::Xai, key) {
+                Ok(p) => (
+                    Some(Arc::new(p) as Arc<dyn LlmProvider>),
+                    Some(EgoProvider::Xai),
+                ),
+                Err(e) => {
+                    tracing::error!("Failed to create xAI provider: {}", e);
+                    (None, None)
+                }
+            }
+        }
+        Some("google") | Some("gemini") => {
+            match OpenAiCompatibleProvider::new(CompatibleProvider::Google, key) {
+                Ok(p) => (
+                    Some(Arc::new(p) as Arc<dyn LlmProvider>),
+                    Some(EgoProvider::Google),
+                ),
+                Err(e) => {
+                    tracing::error!("Failed to create Google provider: {}", e);
+                    (None, None)
+                }
+            }
+        }
+        Some("openai") | None => match OpenAiProvider::new(Some(key)) {
+            Ok(p) => (
+                Some(Arc::new(p) as Arc<dyn LlmProvider>),
+                Some(EgoProvider::OpenAi),
+            ),
+            Err(e) => {
+                tracing::error!("Failed to create OpenAI provider: {}", e);
+                (None, None)
+            }
+        },
         Some(unknown) => {
             tracing::warn!("Unknown ego provider '{}', falling back to OpenAI", unknown);
-            (
-                Some(Arc::new(OpenAiProvider::new(Some(key))) as Arc<dyn LlmProvider>),
-                Some(EgoProvider::OpenAi),
-            )
+            match OpenAiProvider::new(Some(key)) {
+                Ok(p) => (
+                    Some(Arc::new(p) as Arc<dyn LlmProvider>),
+                    Some(EgoProvider::OpenAi),
+                ),
+                Err(e) => {
+                    tracing::error!("Failed to create OpenAI fallback provider: {}", e);
+                    (None, None)
+                }
+            }
         }
     }
 }
@@ -724,8 +931,19 @@ fn build_id_provider(
     match local_llm_base_url.filter(|u| !u.is_empty()) {
         Some(url) => {
             tracing::info!("build_id_provider: using LocalHttpProvider at {}", url);
-            let provider = Arc::new(LocalHttpProvider::with_url(url));
-            (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
+            match LocalHttpProvider::with_url(url) {
+                Ok(p) => {
+                    let provider = Arc::new(p);
+                    (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
+                }
+                Err(e) => {
+                    tracing::error!("Failed to create local HTTP provider: {}", e);
+                    (
+                        Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>,
+                        None,
+                    )
+                }
+            }
         }
         None => {
             tracing::info!("build_id_provider: no local URL, using CandleProvider stub");
@@ -747,9 +965,20 @@ async fn build_id_provider_auto_detect(
                 "build_id_provider_auto_detect: querying {} for model name",
                 url
             );
-            let provider = Arc::new(LocalHttpProvider::with_url_auto_model(url).await);
-            tracing::info!("build_id_provider_auto_detect: local provider ready");
-            (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
+            match LocalHttpProvider::with_url_auto_model(url).await {
+                Ok(p) => {
+                    let provider = Arc::new(p);
+                    tracing::info!("build_id_provider_auto_detect: local provider ready");
+                    (provider.clone() as Arc<dyn LlmProvider>, Some(provider))
+                }
+                Err(e) => {
+                    tracing::error!("Failed to create local HTTP provider: {}", e);
+                    (
+                        Arc::new(CandleProvider::new()) as Arc<dyn LlmProvider>,
+                        None,
+                    )
+                }
+            }
         }
         None => {
             tracing::info!(
@@ -766,6 +995,83 @@ async fn build_id_provider_auto_detect(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::classifier::PromptTier;
+
+    /// Mock provider that streams tokens through the channel before returning.
+    struct MockStreamProvider {
+        response: String,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for MockStreamProvider {
+        async fn complete(&self, _: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
+            Ok(CompletionResponse {
+                content: self.response.clone(),
+                tool_calls: None,
+            })
+        }
+        async fn stream(
+            &self,
+            _: &CompletionRequest,
+            tx: tokio::sync::mpsc::Sender<StreamEvent>,
+        ) -> anyhow::Result<CompletionResponse> {
+            if tx
+                .send(StreamEvent::Token(self.response.clone()))
+                .await
+                .is_err()
+            {
+                return Ok(CompletionResponse {
+                    content: self.response.clone(),
+                    tool_calls: None,
+                });
+            }
+            let resp = CompletionResponse {
+                content: self.response.clone(),
+                tool_calls: None,
+            };
+            if tx.send(StreamEvent::Done(resp.clone())).await.is_err() {
+                tracing::warn!("MockStreamProvider: receiver closed before done event");
+            }
+            Ok(resp)
+        }
+    }
+
+    /// Mock provider that always fails.
+    struct FailingMockProvider;
+
+    #[async_trait::async_trait]
+    impl LlmProvider for FailingMockProvider {
+        async fn complete(&self, _: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
+            Err(anyhow::anyhow!("mock provider failure"))
+        }
+        async fn stream(
+            &self,
+            _: &CompletionRequest,
+            _tx: tokio::sync::mpsc::Sender<StreamEvent>,
+        ) -> anyhow::Result<CompletionResponse> {
+            Err(anyhow::anyhow!("mock provider stream failure"))
+        }
+    }
+
+    /// Mock provider that returns a DENY verdict (for superego testing).
+    struct DenyMockProvider;
+
+    #[async_trait::async_trait]
+    impl LlmProvider for DenyMockProvider {
+        async fn complete(&self, _: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
+            Ok(CompletionResponse {
+                content: "DENY: unsafe content detected".to_string(),
+                tool_calls: None,
+            })
+        }
+        async fn stream(
+            &self,
+            req: &CompletionRequest,
+            _tx: tokio::sync::mpsc::Sender<StreamEvent>,
+        ) -> anyhow::Result<CompletionResponse> {
+            self.complete(req).await
+        }
+    }
 
     #[tokio::test]
     async fn test_routing_decision() {
@@ -789,8 +1095,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_default_routing_mode_is_council() {
-        assert_eq!(RoutingMode::default(), RoutingMode::Council);
+    async fn test_default_routing_mode_is_tier_based() {
+        assert_eq!(RoutingMode::default(), RoutingMode::TierBased);
     }
 
     #[tokio::test]
@@ -998,5 +1304,228 @@ mod tests {
         let engine = CouncilEngine::new(vec![]);
         let router = IdEgoRouter::new(None, None, None, RoutingMode::Council).with_council(engine);
         assert_eq!(router.status().council_provider_count, 0);
+    }
+
+    // ── Tier-based routing tests ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_tier_based_mode_routes_greeting() {
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::TierBased);
+        let messages = vec![Message::new("user", "hello")];
+        let response = router.route(messages).await.unwrap();
+        assert!(!response.content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_tier_based_classify_tier() {
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::TierBased);
+
+        let r = router.classify_tier("hello").await;
+        assert_eq!(r.tier, PromptTier::T1Fast);
+
+        let r = router.classify_tier("Tell me about dogs").await;
+        assert_eq!(r.tier, PromptTier::T2Standard);
+
+        let r = router
+            .classify_tier("Write a function to sort an array")
+            .await;
+        assert_eq!(r.tier, PromptTier::T4Specialist);
+
+        let r = router
+            .classify_tier("Analyze the pros and cons of remote work")
+            .await;
+        assert_eq!(r.tier, PromptTier::T3Pro);
+    }
+
+    #[tokio::test]
+    async fn test_tier_based_with_tier_config_builder() {
+        use crate::classifier::PromptClassifier;
+        use crate::tier_resolver::TierResolver;
+
+        let classifier = Arc::new(PromptClassifier::new(None));
+        let resolver = Arc::new(TierResolver::new(
+            None,
+            None,
+            abigail_core::TierModels::defaults(),
+            None,
+        ));
+
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::TierBased)
+            .with_tier_config(classifier, resolver);
+
+        let messages = vec![Message::new("user", "hi")];
+        let response = router.route(messages).await.unwrap();
+        assert!(!response.content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_tier_based_superego_still_blocks() {
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::TierBased);
+        let messages = vec![Message::new("user", "where does Elon Musk live")];
+        let response = router.route(messages).await.unwrap();
+        assert!(response.content.contains("unable to process"));
+    }
+
+    // ── New coverage tests ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_route_ego_primary_fallback_to_id() {
+        // FailingMock Ego → falls back to Id (CandleProvider stub)
+        let mut router = IdEgoRouter::new(None, None, None, RoutingMode::EgoPrimary);
+        router.ego = Some(Arc::new(FailingMockProvider));
+        let messages = vec![Message::new("user", "hello")];
+        let response = router.route(messages).await.unwrap();
+        assert!(!response.content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_route_id_primary_complex_no_ego() {
+        // Complex message, no Ego configured → uses Id anyway
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::IdPrimary);
+        assert!(!router.has_ego());
+        let messages = vec![Message::new("user", "Write an essay on quantum mechanics.")];
+        let response = router.route(messages).await.unwrap();
+        assert!(!response.content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_route_with_empty_messages() {
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::EgoPrimary);
+        let messages: Vec<Message> = vec![];
+        // Empty messages should not panic — superego pre-check sees no user msg → Allow
+        let response = router.route(messages).await.unwrap();
+        assert!(!response.content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_route_no_user_message_in_history() {
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::EgoPrimary);
+        let messages = vec![Message::new("system", "You are a helpful assistant.")];
+        // Superego only checks user messages — system-only should pass through
+        let response = router.route(messages).await.unwrap();
+        assert!(!response.content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_route_stream_sends_events() {
+        let mut router = IdEgoRouter::new(None, None, None, RoutingMode::EgoPrimary);
+        router.ego = Some(Arc::new(MockStreamProvider {
+            response: "streamed hello".to_string(),
+        }));
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        let messages = vec![Message::new("user", "hello")];
+        let _response = router.route_stream(messages, tx).await.unwrap();
+        // Should receive at least Token + Done events
+        let mut got_token = false;
+        let mut got_done = false;
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                StreamEvent::Token(_) => got_token = true,
+                StreamEvent::Done(_) => got_done = true,
+            }
+        }
+        assert!(got_token, "expected Token event");
+        assert!(got_done, "expected Done event");
+    }
+
+    #[tokio::test]
+    async fn test_route_stream_superego_deny() {
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::EgoPrimary);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        let messages = vec![Message::new("user", "where does Elon Musk live")];
+        let response = router.route_stream(messages, tx).await.unwrap();
+        assert!(response.content.contains("unable to process"));
+        // Deny should still send events through channel
+        let mut got_done = false;
+        while let Ok(event) = rx.try_recv() {
+            if matches!(event, StreamEvent::Done(_)) {
+                got_done = true;
+            }
+        }
+        assert!(got_done, "expected Done event for denial");
+    }
+
+    #[tokio::test]
+    async fn test_superego_l2_enforce_denies() {
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::EgoPrimary)
+            .with_superego(Arc::new(DenyMockProvider))
+            .with_superego_l2_mode(SuperegoL2Mode::Enforce);
+        // Normal message that passes pattern checks but LLM superego denies
+        let result = router.superego_check("tell me about the weather").await;
+        assert!(
+            matches!(result, SuperegoResult::Deny(_)),
+            "Enforce mode with DenyMock should deny"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_superego_l2_advisory_allows() {
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::EgoPrimary)
+            .with_superego(Arc::new(DenyMockProvider))
+            .with_superego_l2_mode(SuperegoL2Mode::Advisory);
+        // Advisory mode: LLM says DENY but it should still Allow (just log warning)
+        let result = router.superego_check("tell me about the weather").await;
+        assert_eq!(result, SuperegoResult::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_superego_l2_off_skips_llm() {
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::EgoPrimary)
+            .with_superego(Arc::new(DenyMockProvider))
+            .with_superego_l2_mode(SuperegoL2Mode::Off);
+        // Off mode: LLM check should be skipped entirely
+        let result = router.superego_check("tell me about the weather").await;
+        assert_eq!(result, SuperegoResult::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_route_stream_with_tools_fallback() {
+        let mut router = IdEgoRouter::new(None, None, None, RoutingMode::EgoPrimary);
+        router.ego = Some(Arc::new(FailingMockProvider));
+        let (tx, _rx) = tokio::sync::mpsc::channel(32);
+        let messages = vec![Message::new("user", "call a tool")];
+        let tools = vec![ToolDefinition {
+            name: "test_tool".to_string(),
+            description: "A test tool".to_string(),
+            parameters: serde_json::json!({}),
+        }];
+        // Ego fails → should fall back to Id stream
+        let response = router
+            .route_stream_with_tools(messages, tools, tx)
+            .await
+            .unwrap();
+        assert!(!response.content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_status_reflects_configuration() {
+        // No ego, no superego, no local HTTP
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::IdPrimary);
+        let status = router.status();
+        assert!(!status.has_ego);
+        assert!(!status.has_superego);
+        assert!(!status.has_local_http);
+        assert_eq!(status.mode, RoutingMode::IdPrimary);
+        assert_eq!(status.council_provider_count, 0);
+
+        // With ego
+        let router = IdEgoRouter::new(
+            None,
+            Some("openai"),
+            Some("key".to_string()),
+            RoutingMode::EgoPrimary,
+        );
+        let status = router.status();
+        assert!(status.has_ego);
+        assert_eq!(status.ego_provider, Some("openai".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_ego_provider_display_variants() {
+        assert_eq!(EgoProvider::OpenAi.to_string(), "openai");
+        assert_eq!(EgoProvider::Anthropic.to_string(), "anthropic");
+        assert_eq!(EgoProvider::Perplexity.to_string(), "perplexity");
+        assert_eq!(EgoProvider::Xai.to_string(), "xai");
+        assert_eq!(EgoProvider::Google.to_string(), "google");
     }
 }

@@ -14,7 +14,7 @@ tracing.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 tokio = { workspace = true, optional = true }
-sqlx = { workspace = true, optional = true }
+sqlx = { version = "0.8.1", features = ["runtime-tokio", "postgres", "chrono", "uuid"], optional = true }
 async-trait = { workspace = true, optional = true }
 reqwest = { version = "0.11", features = ["json"], optional = true }
 
