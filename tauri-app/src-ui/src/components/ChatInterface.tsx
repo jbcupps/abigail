@@ -98,13 +98,32 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
     refreshMissingSecrets();
 
     // Listen for chat-status events from backend (e.g. tool execution)
-    const unlisten = listen<{ status: string; tool: string }>("chat-status", (event) => {
-      const { tool } = event.payload;
-      if (tool === "web_search") {
-        setChatStatus("Searching the web...");
-      } else {
-        setChatStatus(`Running ${tool}...`);
+    const unlisten = listen<{ status: string; tool: string; duration_ms?: number; error?: string }>("chat-status", (event) => {
+      const { status, tool, duration_ms } = event.payload;
+      if (status === "done") {
+        const dur = duration_ms ? ` (${(duration_ms / 1000).toFixed(1)}s)` : "";
+        setChatStatus(`${tool} complete${dur}`);
+        // Auto-clear after a brief display
+        setTimeout(() => setChatStatus(null), 2000);
+        return;
       }
+      if (status === "error") {
+        setChatStatus(`${tool} failed`);
+        setTimeout(() => setChatStatus(null), 3000);
+        return;
+      }
+      // tool_executing status — show contextual messages
+      const toolMessages: Record<string, string> = {
+        web_search: "Searching the web...",
+        perplexity_search: "Searching with Perplexity...",
+        read_file: "Reading file...",
+        write_file: "Writing file...",
+        list_directory: "Listing directory...",
+        http_get: "Fetching URL...",
+        http_post: "Sending HTTP request...",
+        execute: "Running command...",
+      };
+      setChatStatus(toolMessages[tool] || `Running ${tool}...`);
     });
     return () => {
       mountedRef.current = false;

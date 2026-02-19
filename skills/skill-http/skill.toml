@@ -6,6 +6,14 @@ description = "Make HTTP requests (GET, POST) with SSRF protection"
 category = "Sensory"
 keywords = ["http", "api", "web", "request", "fetch"]
 
+[author]
+name = "Abigail Team"
+
+[runtime]
+runtime = "Native"
+min_abigail_version = "0.1.0"
+platforms = ["Windows", "macOS", "Linux"]
+
 [[permissions]]
 permission = { Network = "Full" }
 reason = "Make HTTP requests to external services"

@@ -6,6 +6,14 @@ description = "Read, write, list, and search files within sandboxed directories"
 category = "Capability"
 keywords = ["files", "filesystem", "read", "write", "search"]
 
+[author]
+name = "Abigail Team"
+
+[runtime]
+runtime = "Native"
+min_abigail_version = "0.1.0"
+platforms = ["Windows", "macOS", "Linux"]
+
 [[permissions]]
 permission = { FileSystem = { Read = ["~"] } }
 reason = "Read files within allowed directories"

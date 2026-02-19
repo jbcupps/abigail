@@ -1,11 +1,10 @@
 //! Security sandbox and resource limits.
 //!
-//! **Permission checks:** Network access is enforced by the executor before each tool run (see
-//! `SkillExecutor::audit_action_for_tool` and `check_permission`). File and memory permission
-//! logic exists here (`AuditActionKind::FileRead`, `FileWrite`, `MemoryAccess`) but must be
-//! invoked by the code path that actually performs file or memory I/O on behalf of a skill (e.g. a
-//! capability layer). Skills that do raw file or network I/O should go through such a layer so the
-//! sandbox is checked.
+//! **Permission checks:** Network and filesystem access is enforced by the executor before each
+//! tool run (see `SkillExecutor::audit_actions_for_tool` and `check_permission`). Memory permission
+//! logic exists here (`AuditActionKind::MemoryAccess`) but must be invoked by the code path that
+//! actually performs memory I/O on behalf of a skill (e.g. a capability layer). Skills that do raw
+//! file or network I/O should go through such a layer so the sandbox is checked.
 //!
 //! **Resource limits:** Timeouts and concurrency are enforced in `SkillExecutor` (see
 //! `executor.rs`): each tool call is bounded by `ResourceLimits::max_cpu_ms` and global

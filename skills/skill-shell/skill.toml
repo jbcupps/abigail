@@ -6,6 +6,14 @@ description = "Execute shell commands with safety controls (timeout, blocklist, 
 category = "Capability"
 keywords = ["shell", "command", "execute", "terminal"]
 
+[author]
+name = "Abigail Team"
+
+[runtime]
+runtime = "Native"
+min_abigail_version = "0.1.0"
+platforms = ["Windows", "macOS", "Linux"]
+
 [[permissions]]
 permission = "ShellExecute"
 reason = "Execute shell commands on the host system"

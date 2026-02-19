@@ -241,7 +241,16 @@ impl SkillManifest {
 fn parse_permissions(sections: &[PermissionSection]) -> Vec<Permission> {
     let mut out = Vec::new();
     for s in sections {
+        // Handle string permissions (e.g. "ShellExecute")
+        if let Some(perm_str) = s.permission.as_str() {
+            if perm_str == "ShellExecute" {
+                out.push(Permission::ShellExecute);
+            }
+            continue;
+        }
+
         if let Some(t) = s.permission.as_table() {
+            // ── Network ──
             if let Some(domains) = t
                 .get("Network")
                 .and_then(|n| n.get("Domains"))
@@ -255,6 +264,32 @@ fn parse_permissions(sections: &[PermissionSection]) -> Vec<Permission> {
             } else if t.contains_key("Network") {
                 out.push(Permission::Network(NetworkPermission::Full));
             }
+
+            // ── FileSystem ──
+            if let Some(fs) = t.get("FileSystem") {
+                if let Some(fs_str) = fs.as_str() {
+                    if fs_str == "Full" {
+                        out.push(Permission::FileSystem(FileSystemPermission::Full));
+                    }
+                } else if let Some(fs_table) = fs.as_table() {
+                    if let Some(read_paths) = fs_table.get("Read").and_then(|r| r.as_array()) {
+                        let paths: Vec<String> = read_paths
+                            .iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect();
+                        out.push(Permission::FileSystem(FileSystemPermission::Read(paths)));
+                    }
+                    if let Some(write_paths) = fs_table.get("Write").and_then(|w| w.as_array()) {
+                        let paths: Vec<String> = write_paths
+                            .iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect();
+                        out.push(Permission::FileSystem(FileSystemPermission::Write(paths)));
+                    }
+                }
+            }
+
+            // ── Memory ──
             if let Some(mem) = t.get("Memory") {
                 if let Some(s) = mem.as_str() {
                     out.push(Permission::Memory(MemoryPermission::Namespace(
@@ -267,4 +302,127 @@ fn parse_permissions(sections: &[PermissionSection]) -> Vec<Permission> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_filesystem_read_permission() {
+        let toml = r#"
+[skill]
+id = "test.fs"
+name = "FS Test"
+version = "0.1.0"
+description = "Test"
+
+[[permissions]]
+permission = { FileSystem = { Read = ["~"] } }
+reason = "Read files"
+"#;
+        let manifest = SkillManifest::parse(toml).unwrap();
+        assert!(manifest.permissions.contains(&Permission::FileSystem(
+            FileSystemPermission::Read(vec!["~".to_string()])
+        )));
+    }
+
+    #[test]
+    fn parse_filesystem_write_permission() {
+        let toml = r#"
+[skill]
+id = "test.fs"
+name = "FS Test"
+version = "0.1.0"
+description = "Test"
+
+[[permissions]]
+permission = { FileSystem = { Write = ["/tmp"] } }
+reason = "Write files"
+"#;
+        let manifest = SkillManifest::parse(toml).unwrap();
+        assert!(manifest.permissions.contains(&Permission::FileSystem(
+            FileSystemPermission::Write(vec!["/tmp".to_string()])
+        )));
+    }
+
+    #[test]
+    fn parse_filesystem_full_permission() {
+        let toml = r#"
+[skill]
+id = "test.fs"
+name = "FS Test"
+version = "0.1.0"
+description = "Test"
+
+[[permissions]]
+permission = { FileSystem = "Full" }
+reason = "Full filesystem access"
+"#;
+        let manifest = SkillManifest::parse(toml).unwrap();
+        assert!(manifest
+            .permissions
+            .contains(&Permission::FileSystem(FileSystemPermission::Full)));
+    }
+
+    #[test]
+    fn parse_shell_execute_permission() {
+        let toml = r#"
+[skill]
+id = "test.shell"
+name = "Shell Test"
+version = "0.1.0"
+description = "Test"
+
+[[permissions]]
+permission = "ShellExecute"
+reason = "Execute shell commands"
+"#;
+        let manifest = SkillManifest::parse(toml).unwrap();
+        assert!(manifest.permissions.contains(&Permission::ShellExecute));
+    }
+
+    #[test]
+    fn parse_filesystem_read_and_write_combined() {
+        let toml = r#"
+[skill]
+id = "test.fs"
+name = "FS Test"
+version = "0.1.0"
+description = "Test"
+
+[[permissions]]
+permission = { FileSystem = { Read = ["~"], Write = ["~"] } }
+reason = "Read and write files"
+"#;
+        let manifest = SkillManifest::parse(toml).unwrap();
+        assert_eq!(manifest.permissions.len(), 2);
+        assert!(manifest.permissions.contains(&Permission::FileSystem(
+            FileSystemPermission::Read(vec!["~".to_string()])
+        )));
+        assert!(manifest.permissions.contains(&Permission::FileSystem(
+            FileSystemPermission::Write(vec!["~".to_string()])
+        )));
+    }
+
+    #[test]
+    fn parse_network_domains_still_works() {
+        let toml = r#"
+[skill]
+id = "test.net"
+name = "Net Test"
+version = "0.1.0"
+description = "Test"
+
+[[permissions]]
+permission = { Network = { Domains = ["api.example.com"] } }
+reason = "API access"
+"#;
+        let manifest = SkillManifest::parse(toml).unwrap();
+        assert!(manifest
+            .permissions
+            .contains(&Permission::Network(NetworkPermission::Domains(vec![
+                "api.example.com".to_string()
+            ]))));
+    }
 }

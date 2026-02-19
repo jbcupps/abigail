@@ -6,6 +6,14 @@ description = "AI-powered web search with citations via Perplexity Sonar API"
 category = "Sensory"
 keywords = ["search", "web", "perplexity", "research", "citations"]
 
+[author]
+name = "Abigail Team"
+
+[runtime]
+runtime = "Native"
+min_abigail_version = "0.1.0"
+platforms = ["Windows", "macOS", "Linux"]
+
 [[permissions]]
 permission = { Network = { Domains = ["api.perplexity.ai"] } }
 reason = "Perplexity Sonar search API"

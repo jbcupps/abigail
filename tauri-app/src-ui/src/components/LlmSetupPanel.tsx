@@ -58,7 +58,6 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
   const [installing, setInstalling] = useState(false);
   const [pullingModel, setPullingModel] = useState(false);
   const [error, setError] = useState("");
-  const [showManual, setShowManual] = useState(false);
   const [installProgress, setInstallProgress] = useState<OllamaInstallProgress | null>(null);
   const [modelProgress, setModelProgress] = useState<OllamaModelProgress | null>(null);
 
@@ -94,6 +93,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
     if (mode === "ollama") {
       probeOllama();
     } else {
+      if (!manualUrl) setManualUrl("http://localhost:1234");
       probeLmStudio();
     }
   }, [mode]);
@@ -401,33 +401,19 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
         <div className="mb-6">
           <div className="border border-yellow-700 bg-yellow-900/20 p-4 rounded mb-4">
             <p className="text-yellow-500 text-sm">
-              No local LLM detected. Please start one of:
+              No local LLM server detected on default ports.
             </p>
-            <ul className="text-yellow-400 text-sm mt-2 space-y-1">
-              <li>- <strong>Ollama</strong>: Install from ollama.com, then run <code>ollama serve</code></li>
-              <li>- <strong>LM Studio</strong>: Install from lmstudio.ai, load a model, start the server</li>
-            </ul>
+            <p className="text-yellow-400/80 text-xs mt-2">
+              In LM Studio: load a model, then click <strong>Start Server</strong> (default port 1234).
+              Enter the URL below or click Re-scan after starting.
+            </p>
           </div>
-          <button
-            className="text-theme-text-dim text-sm hover:text-theme-primary-dim"
-            onClick={() => probeLmStudio()}
-          >
-            Re-scan
-          </button>
         </div>
       )}
 
-      {mode === "lmstudio" && !showManual && (
-        <button
-          className="text-theme-text-dim text-xs hover:text-theme-primary-dim mb-4"
-          onClick={() => setShowManual(true)}
-        >
-          Enter URL manually
-        </button>
-      )}
-      {mode === "lmstudio" && showManual && (
+      {mode === "lmstudio" && !probing && (
         <div className="mb-4">
-          <p className="text-theme-text text-sm mb-2">Custom LLM URL:</p>
+          <p className="text-theme-text text-sm mb-2">Server URL:</p>
           <div className="flex gap-2">
             <input
               type="text"
@@ -444,6 +430,13 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
               onClick={handleManualConnect}
             >
               {connecting ? "..." : "Connect"}
+            </button>
+            <button
+              disabled={probing || connecting}
+              className="border border-theme-border-dim px-3 py-2 rounded hover:border-theme-primary text-theme-text-dim text-sm disabled:opacity-50"
+              onClick={() => probeLmStudio()}
+            >
+              Re-scan
             </button>
           </div>
         </div>
