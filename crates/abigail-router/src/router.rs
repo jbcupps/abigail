@@ -438,10 +438,12 @@ impl IdEgoRouter {
         let result = self.classify_tier(last).await;
 
         tracing::info!(
-            "Tier routing: {} (confidence={:.2}, rule={:?})",
+            "Routed to {} because {} (tier={}, confidence={:.2}, rule={:?})",
+            result.routing_target,
+            result.matrix,
             result.tier,
             result.confidence,
-            result.matched_rule
+            result.matched_rule,
         );
 
         let provider = self.tier_resolver.resolve(result.tier);
@@ -652,10 +654,12 @@ impl IdEgoRouter {
             let last = messages.last().map(|m| m.content.as_str()).unwrap_or("");
             let result = self.classify_tier(last).await;
             tracing::info!(
-                "Tier stream routing: {} (confidence={:.2}, rule={:?})",
+                "Routed to {} because {} (tier={}, confidence={:.2}, rule={:?}) [stream]",
+                result.routing_target,
+                result.matrix,
                 result.tier,
                 result.confidence,
-                result.matched_rule
+                result.matched_rule,
             );
             let provider = self.tier_resolver.resolve(result.tier);
             let request = CompletionRequest {
