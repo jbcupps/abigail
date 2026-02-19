@@ -206,28 +206,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const handleContinueFromKeyPresentation = async () => {
     setPrivateKey(""); // Clear from memory
     await invoke("advance_past_darkness");
-
-    // Check if bundled Ollama is running — if so, skip the manual LLM setup
-    try {
-      const status = await invoke<{ managed: boolean; running: boolean; port: number; model_ready: boolean }>(
-        "get_ollama_status"
-      );
-      if (status.running && status.model_ready) {
-        // Bundled Ollama is ready — advance backend past Ignition, then skip to Connectivity
-        await invoke("advance_to_connectivity");
-        try {
-          const providers = await invoke<string[]>("get_stored_providers");
-          setStoredProviders(providers);
-        } catch (e) {
-          console.error("Failed to fetch stored providers:", e);
-        }
-        setStage("Connectivity");
-        return;
-      }
-    } catch {
-      // get_ollama_status not available or failed — fall through to Ignition
-    }
-
+    // Always enter Ignition. The setup wizard decides whether to fast-path.
     setStage("Ignition");
   };
 

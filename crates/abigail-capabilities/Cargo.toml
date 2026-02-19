@@ -17,8 +17,7 @@ thiserror.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 chrono.workspace = true
-async-openai = "0.18"
-reqwest = { version = "0.11", features = ["stream", "json", "multipart", "cookies"] }
+reqwest = { workspace = true, features = ["cookies"] }
 url = "2.5"
 base64.workspace = true
 chromiumoxide = { version = "0.8", features = ["tokio-runtime"], default-features = false, optional = true }
