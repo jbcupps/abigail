@@ -1,0 +1,41 @@
+# Skill Instruction Registry — Single Source of Truth
+#
+# Each [[skill]] entry maps a skill to its LLM instruction file and
+# keyword triggers. When a user message matches any keyword (case-insensitive),
+# the corresponding instruction file is injected into the system prompt.
+
+[[skill]]
+id = "com.abigail.skills.proton-mail"
+instruction_file = "skill_email_imap.md"
+keywords = ["email", "mail", "inbox", "imap", "smtp", "send mail", "proton"]
+enabled = true
+
+[[skill]]
+id = "com.abigail.skills.web-search"
+instruction_file = "skill_web_search.md"
+keywords = ["search", "look up", "find online", "google", "tavily", "web search"]
+enabled = true
+
+[[skill]]
+id = "com.abigail.skills.perplexity-search"
+instruction_file = "skill_perplexity_search.md"
+keywords = ["research", "perplexity", "citations", "deep search", "sonar"]
+enabled = true
+
+[[skill]]
+id = "com.abigail.skills.filesystem"
+instruction_file = "skill_filesystem.md"
+keywords = ["file", "read file", "write file", "directory", "folder", "list files", "search files"]
+enabled = true
+
+[[skill]]
+id = "com.abigail.skills.shell"
+instruction_file = "skill_shell.md"
+keywords = ["run command", "shell", "terminal", "execute", "command line", "cli"]
+enabled = true
+
+[[skill]]
+id = "com.abigail.skills.http"
+instruction_file = "skill_http.md"
+keywords = ["http", "api", "request", "fetch url", "download", "rest", "endpoint"]
+enabled = true

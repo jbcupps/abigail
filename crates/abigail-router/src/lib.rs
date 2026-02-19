@@ -24,7 +24,8 @@ pub use orchestration::{
 };
 pub use planner::{GoalFrame, Planner};
 pub use router::{
-    EgoProvider, IdEgoRouter, RouterStatusInfo, RoutingMode, SuperegoL2Mode, SuperegoResult,
+    ConscienceVerdict, EgoProvider, FastPathResult, FastPathTarget, IdEgoRouter, RouterStatusInfo,
+    RoutingMode, SuperegoL2Mode, SuperegoResult,
 };
 pub use subagent::{SubagentDefinition, SubagentManager, SubagentProvider};
 pub use tier_resolver::TierResolver;

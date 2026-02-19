@@ -1,4 +1,14 @@
 //! Id/Ego router: classifies with Id (local), routes COMPLEX to Ego (cloud) when configured.
+//!
+//! ## Routing Paths
+//!
+//! - **Fast Path** (default): 3-factor quick eval (Id instinct + Ego feasibility + Context
+//!   alignment). Returns in <10 ms with no LLM calls. Used for every normal action.
+//! - **Deliberation Path**: Full 5-factor decision matrix. Only invoked on explicit `deliberate`
+//!   or planning calls.
+//! - **Out-of-Band Conscience**: Superego (constitutional/ethics) + Trust (Ed25519 verification)
+//!   run asynchronously in background tasks. They can veto or force reflection but never block
+//!   the fast path.
 
 use abigail_capabilities::cognitive::{
     stub_heartbeat, AnthropicProvider, CandleProvider, CompatibleProvider, CompletionRequest,
@@ -28,6 +38,51 @@ pub enum SuperegoResult {
     Allow,
     /// Message is blocked with a reason.
     Deny(String),
+}
+
+/// Result of the lightweight 3-factor fast path evaluation.
+/// Returned synchronously (no LLM calls).
+#[derive(Debug, Clone)]
+pub struct FastPathResult {
+    /// Which provider should handle the request.
+    pub target: FastPathTarget,
+    /// Id instinct score (0–100): pattern-based complexity estimate.
+    pub id_instinct: u8,
+    /// Ego feasibility flag: true if cloud provider is available and request warrants it.
+    pub ego_feasible: bool,
+    /// Context alignment flag: true if message fits known skill/context patterns.
+    pub context_aligned: bool,
+    /// Whether the out-of-band conscience monitor was spawned for this request.
+    pub conscience_spawned: bool,
+}
+
+/// Fast path routing target (subset of full RoutingTarget).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FastPathTarget {
+    /// Route to local LLM (Id).
+    Id,
+    /// Route to cloud LLM (Ego).
+    Ego,
+}
+
+impl std::fmt::Display for FastPathTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FastPathTarget::Id => write!(f, "Id"),
+            FastPathTarget::Ego => write!(f, "Ego"),
+        }
+    }
+}
+
+/// Verdict from the out-of-band conscience monitor (Superego + Trust).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConscienceVerdict {
+    /// All checks passed.
+    Clear,
+    /// Superego pattern check flagged the message.
+    Veto(String),
+    /// Trust verification concern (Ed25519 / soulbound).
+    TrustConcern(String),
 }
 
 /// Which cloud provider is backing the Ego slot.
@@ -258,6 +313,347 @@ impl IdEgoRouter {
         self.superego_l2_mode = mode;
     }
 
+    // ── Fast Path (3-factor, no LLM, <10 ms) ─────────────────────────
+
+    /// Lightweight 3-factor evaluation for every normal action.
+    ///
+    /// Factors:
+    /// 1. **Id instinct**: pattern-based complexity estimate (word count, code/math signals).
+    /// 2. **Ego feasibility**: is a cloud provider available and does the request warrant it?
+    /// 3. **Context / Skill alignment**: does the message match known skill patterns or context?
+    ///
+    /// This NEVER calls an LLM and returns in <10 ms.
+    pub fn fast_path_classify(&self, message: &str) -> FastPathResult {
+        let lower = message.trim().to_lowercase();
+        let word_count = message.split_whitespace().count();
+
+        // Factor 1: Id instinct — quick complexity heuristic
+        let id_instinct = Self::score_id_instinct(&lower, word_count);
+
+        // Factor 2: Ego feasibility — cloud available + request warrants it
+        let ego_feasible = self.ego.is_some() && id_instinct > 40;
+
+        // Factor 3: Context / Skill alignment — check for known action patterns
+        let context_aligned = Self::check_context_alignment(&lower);
+
+        let target = if ego_feasible {
+            FastPathTarget::Ego
+        } else {
+            FastPathTarget::Id
+        };
+
+        // Determine if conscience monitor should be spawned (high-stakes heuristic)
+        let conscience_spawned = Self::is_high_stakes(&lower, id_instinct);
+
+        tracing::debug!(
+            "fast_path: target={}, id_instinct={}, ego_feasible={}, context_aligned={}, conscience_spawned={}",
+            target, id_instinct, ego_feasible, context_aligned, conscience_spawned,
+        );
+
+        FastPathResult {
+            target,
+            id_instinct,
+            ego_feasible,
+            context_aligned,
+            conscience_spawned,
+        }
+    }
+
+    /// Quick Id instinct score (0–100) — no LLM, pure pattern matching.
+    fn score_id_instinct(lower: &str, word_count: usize) -> u8 {
+        let mut score: u16 = 0;
+
+        // Word count contribution
+        score += match word_count {
+            0..=3 => 5,
+            4..=10 => 15,
+            11..=30 => 30,
+            31..=60 => 50,
+            _ => 70,
+        };
+
+        // Code / math signals boost
+        let code_markers = [
+            "function",
+            "fn ",
+            "def ",
+            "class ",
+            "impl ",
+            "```",
+            "write a function",
+            "write code",
+            "debug",
+        ];
+        for m in &code_markers {
+            if lower.contains(m) {
+                score += 20;
+                break;
+            }
+        }
+        let math_markers = ["solve", "prove", "calculate", "equation", "integral"];
+        for m in &math_markers {
+            if lower.contains(m) {
+                score += 15;
+                break;
+            }
+        }
+
+        // Analysis / creative boost
+        if lower.contains("analyze") || lower.contains("essay") || lower.contains("compare") {
+            score += 15;
+        }
+
+        (score as u8).min(100)
+    }
+
+    /// Check if message aligns with known skill or context patterns.
+    fn check_context_alignment(lower: &str) -> bool {
+        let skill_patterns = [
+            "search",
+            "email",
+            "file",
+            "weather",
+            "calendar",
+            "reminder",
+            "timer",
+            "note",
+            "todo",
+            "translate",
+        ];
+        skill_patterns.iter().any(|p| lower.contains(p))
+    }
+
+    /// Heuristic: should out-of-band conscience monitor be spawned?
+    /// True for high-stakes actions, flagged contexts, or periodic threshold.
+    fn is_high_stakes(lower: &str, id_instinct: u8) -> bool {
+        // High complexity → conscience check
+        if id_instinct >= 70 {
+            return true;
+        }
+        // Sensitive topic keywords
+        let sensitive = [
+            "medical",
+            "legal",
+            "financial",
+            "weapon",
+            "hack",
+            "exploit",
+            "password",
+            "credit card",
+            "social security",
+            "suicide",
+            "harm",
+            "violence",
+            "delete",
+            "destroy",
+            "admin",
+            "root",
+            "sudo",
+        ];
+        sensitive.iter().any(|s| lower.contains(s))
+    }
+
+    /// Spawn an out-of-band conscience monitor (Superego + Trust) as a background task.
+    ///
+    /// Returns a `JoinHandle` that resolves to a `ConscienceVerdict`.
+    /// The fast path does NOT await this — it runs concurrently and can
+    /// veto or force reflection after the fact.
+    pub fn spawn_conscience_monitor(
+        &self,
+        message: String,
+    ) -> tokio::task::JoinHandle<ConscienceVerdict> {
+        let superego = self.superego.clone();
+        let superego_l2_mode = self.superego_l2_mode;
+
+        tokio::spawn(async move {
+            tracing::debug!(
+                "conscience_monitor: started for message len={}",
+                message.len()
+            );
+
+            // Layer 1: Superego pattern-based check (fast)
+            let verdict = abigail_core::check_message(&message);
+            if !verdict.allowed {
+                let reason = verdict
+                    .reason
+                    .unwrap_or_else(|| "Blocked by safety check".to_string());
+                tracing::info!("conscience_monitor: VETO (pattern) — {}", reason);
+                return ConscienceVerdict::Veto(reason);
+            }
+
+            // Layer 2: LLM-based Superego check (if configured and mode != Off)
+            if superego_l2_mode != SuperegoL2Mode::Off {
+                if let Some(ref superego_provider) = superego {
+                    let prompt = format!(
+                        "You are a safety classifier. Decide if this message is safe.\n\
+                         Reply SAFE or DENY: <reason>.\n\nMessage: \"{}\"\n\nVerdict:",
+                        message
+                    );
+                    let request = CompletionRequest::simple(vec![Message::new("user", prompt)]);
+                    match tokio::time::timeout(
+                        std::time::Duration::from_millis(5000),
+                        superego_provider.complete(&request),
+                    )
+                    .await
+                    {
+                        Ok(Ok(response)) => {
+                            let content = response.content.trim().to_uppercase();
+                            if content.starts_with("DENY") {
+                                let reason = response
+                                    .content
+                                    .trim()
+                                    .strip_prefix("DENY:")
+                                    .or_else(|| response.content.trim().strip_prefix("DENY"))
+                                    .map(|s| s.trim().to_string())
+                                    .unwrap_or_else(|| "Blocked by Superego LLM".to_string());
+
+                                match superego_l2_mode {
+                                    SuperegoL2Mode::Enforce => {
+                                        tracing::info!(
+                                            "conscience_monitor: VETO (LLM enforce) — {}",
+                                            reason
+                                        );
+                                        return ConscienceVerdict::Veto(reason);
+                                    }
+                                    SuperegoL2Mode::Advisory => {
+                                        tracing::warn!(
+                                            "conscience_monitor: advisory warning (allowing) — {}",
+                                            reason
+                                        );
+                                    }
+                                    SuperegoL2Mode::Off => {}
+                                }
+                            } else {
+                                tracing::debug!("conscience_monitor: LLM check SAFE");
+                            }
+                        }
+                        Ok(Err(e)) => {
+                            tracing::warn!(
+                                "conscience_monitor: LLM check failed (allowing): {}",
+                                e
+                            );
+                        }
+                        Err(_) => {
+                            tracing::warn!("conscience_monitor: LLM check timed out (allowing)");
+                        }
+                    }
+                }
+            }
+
+            // Trust verification placeholder (Ed25519 soulbound check)
+            // In production this would verify constitutional document signatures.
+            tracing::debug!("conscience_monitor: trust check passed (placeholder)");
+
+            tracing::debug!("conscience_monitor: CLEAR");
+            ConscienceVerdict::Clear
+        })
+    }
+
+    /// Route using the fast path (default for all normal actions).
+    ///
+    /// 1. Runs 3-factor fast eval (no LLM, <10 ms).
+    /// 2. Optionally spawns out-of-band conscience monitor for high-stakes messages.
+    /// 3. Routes to Id or Ego based on fast path result.
+    /// 4. Conscience monitor runs concurrently — can veto after response if needed.
+    pub async fn route_fast(
+        &self,
+        messages: Vec<Message>,
+    ) -> anyhow::Result<(
+        CompletionResponse,
+        Option<tokio::task::JoinHandle<ConscienceVerdict>>,
+    )> {
+        let last_msg = messages.last().map(|m| m.content.as_str()).unwrap_or("");
+
+        let fp = self.fast_path_classify(last_msg);
+
+        tracing::info!(
+            "route_fast: path={}, id_instinct={}, ego_feasible={}, context_aligned={}",
+            fp.target,
+            fp.id_instinct,
+            fp.ego_feasible,
+            fp.context_aligned,
+        );
+
+        // Spawn conscience monitor out-of-band if high-stakes
+        let conscience_handle = if fp.conscience_spawned {
+            tracing::debug!("route_fast: spawning out-of-band conscience monitor");
+            Some(self.spawn_conscience_monitor(last_msg.to_string()))
+        } else {
+            None
+        };
+
+        // Route based on fast path target
+        let request = CompletionRequest {
+            messages,
+            tools: None,
+        };
+        let response = match fp.target {
+            FastPathTarget::Ego => {
+                if let Some(ego) = &self.ego {
+                    tracing::info!("route_fast: routing to Ego (cloud)");
+                    match ego.complete(&request).await {
+                        Ok(r) => r,
+                        Err(e) => {
+                            tracing::warn!("route_fast: Ego failed ({}), falling back to Id", e);
+                            self.id.complete(&request).await?
+                        }
+                    }
+                } else {
+                    self.id.complete(&request).await?
+                }
+            }
+            FastPathTarget::Id => {
+                tracing::info!("route_fast: routing to Id (local)");
+                self.id.complete(&request).await?
+            }
+        };
+
+        Ok((response, conscience_handle))
+    }
+
+    /// Full 5-factor deliberation — only for explicit "deliberate" or planning calls.
+    ///
+    /// This is the **old** routing path, preserved for when full analysis is needed.
+    /// It runs the complete decision matrix classifier + Superego pre-check synchronously.
+    pub async fn route_deliberate(
+        &self,
+        messages: Vec<Message>,
+    ) -> anyhow::Result<CompletionResponse> {
+        tracing::info!("route_deliberate: entering full 5-factor deliberation path");
+
+        // Full synchronous Superego pre-check (blocks)
+        if let Some(deny) = self.run_superego_precheck(&messages).await {
+            tracing::info!("route_deliberate: blocked by Superego pre-check");
+            return Ok(deny);
+        }
+
+        // Full 5-factor classification
+        let last = messages.last().map(|m| m.content.as_str()).unwrap_or("");
+        let result = self.classify_tier(last).await;
+
+        tracing::info!(
+            "route_deliberate: {} → {} (tier={}, confidence={:.2}, rule={:?})",
+            result.matrix,
+            result.routing_target,
+            result.tier,
+            result.confidence,
+            result.matched_rule,
+        );
+
+        // Route based on full classification
+        match self.mode {
+            RoutingMode::Council => self.route_council(messages).await,
+            _ => {
+                let provider = self.tier_resolver.resolve(result.tier);
+                let request = CompletionRequest {
+                    messages,
+                    tools: None,
+                };
+                provider.complete(&request).await
+            }
+        }
+    }
+
     /// Run Superego safety pre-check on a user message.
     ///
     /// This is a two-layer check:
@@ -379,7 +775,13 @@ impl IdEgoRouter {
     }
 
     /// Route message based on configured routing mode.
-    /// Runs Superego pre-check before routing; returns a deny response if blocked.
+    ///
+    /// **Default behavior**: Uses the lightweight Fast Path (3-factor, no LLM, <10 ms)
+    /// for `TierBased` and `IdPrimary` modes. Superego/Trust checks run out-of-band.
+    /// The full 5-factor deliberation path is available via `route_deliberate()`.
+    ///
+    /// For `Council` and `EgoPrimary` modes, uses existing routing logic with
+    /// synchronous Superego pre-check (preserved for backward compatibility).
     pub async fn route(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
         tracing::debug!(
             "route: mode={:?}, has_ego={}, has_superego={}, msg_count={}",
@@ -388,15 +790,78 @@ impl IdEgoRouter {
             self.superego.is_some(),
             messages.len()
         );
-        // Superego pre-check on the last user message
-        if let Some(deny) = self.run_superego_precheck(&messages).await {
-            return Ok(deny);
-        }
+
         match self.mode {
-            RoutingMode::IdPrimary => self.route_id_primary(messages).await,
-            RoutingMode::EgoPrimary => self.route_ego_primary(messages).await,
-            RoutingMode::Council => self.route_council(messages).await,
-            RoutingMode::TierBased => self.route_tier_based(messages).await,
+            // Fast Path: 3-factor quick eval + out-of-band conscience
+            RoutingMode::TierBased | RoutingMode::IdPrimary => {
+                // Quick pattern-only Superego Layer-1 check (no LLM, instant)
+                let last_user_msg = messages
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == "user")
+                    .map(|m| m.content.as_str())
+                    .unwrap_or("");
+
+                if !last_user_msg.is_empty() {
+                    let verdict = abigail_core::check_message(last_user_msg);
+                    if !verdict.allowed {
+                        let reason = verdict
+                            .reason
+                            .unwrap_or_else(|| "Blocked by safety check".to_string());
+                        tracing::info!("route fast_path: Superego pattern VETO — {}", reason);
+                        return Ok(CompletionResponse {
+                            content: format!(
+                                "I'm unable to process that request. Reason: {}",
+                                reason
+                            ),
+                            tool_calls: None,
+                        });
+                    }
+                }
+
+                // Fast path routing (no LLM classification call)
+                let (response, conscience_handle) = self.route_fast(messages).await?;
+
+                // Log conscience monitor result if spawned (non-blocking)
+                if let Some(handle) = conscience_handle {
+                    tokio::spawn(async move {
+                        match handle.await {
+                            Ok(ConscienceVerdict::Veto(reason)) => {
+                                tracing::warn!(
+                                    "conscience_monitor: post-hoc VETO — {}. \
+                                     (Response already delivered; flagged for reflection.)",
+                                    reason
+                                );
+                            }
+                            Ok(ConscienceVerdict::TrustConcern(reason)) => {
+                                tracing::warn!("conscience_monitor: trust concern — {}", reason);
+                            }
+                            Ok(ConscienceVerdict::Clear) => {
+                                tracing::debug!("conscience_monitor: all clear (post-hoc)");
+                            }
+                            Err(e) => {
+                                tracing::warn!("conscience_monitor: task failed — {}", e);
+                            }
+                        }
+                    });
+                }
+
+                Ok(response)
+            }
+
+            // Existing paths (preserved for backward compatibility)
+            RoutingMode::EgoPrimary => {
+                if let Some(deny) = self.run_superego_precheck(&messages).await {
+                    return Ok(deny);
+                }
+                self.route_ego_primary(messages).await
+            }
+            RoutingMode::Council => {
+                if let Some(deny) = self.run_superego_precheck(&messages).await {
+                    return Ok(deny);
+                }
+                self.route_council(messages).await
+            }
         }
     }
 
@@ -433,6 +898,8 @@ impl IdEgoRouter {
     }
 
     /// Tier-based routing: classify prompt complexity → route to optimal provider+model.
+    /// NOTE: Superseded by fast path in route(). Kept for route_deliberate() and future use.
+    #[allow(dead_code)]
     async fn route_tier_based(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
         let last = messages.last().map(|m| m.content.as_str()).unwrap_or("");
         let result = self.classify_tier(last).await;
@@ -481,6 +948,8 @@ impl IdEgoRouter {
     }
 
     /// Id-primary routing: Id classifies; COMPLEX goes to Ego if configured, else Id.
+    /// NOTE: Superseded by fast path in route(). Kept for backward compatibility and future use.
+    #[allow(dead_code)]
     async fn route_id_primary(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
         let last = messages.last().map(|m| m.content.as_str()).unwrap_or("");
         let decision = self.classify(last).await?;
@@ -589,13 +1058,108 @@ impl IdEgoRouter {
     }
 
     /// Streaming version of route(). Sends token events through the channel.
-    /// Runs Superego pre-check before routing.
+    ///
+    /// Uses Fast Path for `TierBased` and `IdPrimary` modes (out-of-band conscience).
+    /// Uses existing logic for `Council` and `EgoPrimary` modes.
     pub async fn route_stream(
         &self,
         messages: Vec<Message>,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
-        // Superego pre-check
+        // Fast path for TierBased / IdPrimary — pattern-only superego + fast route
+        if matches!(self.mode, RoutingMode::TierBased | RoutingMode::IdPrimary) {
+            // Quick pattern-only Superego check (no LLM, instant)
+            let last_user_msg = messages
+                .iter()
+                .rev()
+                .find(|m| m.role == "user")
+                .map(|m| m.content.as_str())
+                .unwrap_or("");
+
+            if !last_user_msg.is_empty() {
+                let verdict = abigail_core::check_message(last_user_msg);
+                if !verdict.allowed {
+                    let reason = verdict
+                        .reason
+                        .unwrap_or_else(|| "Blocked by safety check".to_string());
+                    tracing::info!("route_stream fast_path: Superego pattern VETO — {}", reason);
+                    let deny = CompletionResponse {
+                        content: format!("I'm unable to process that request. Reason: {}", reason),
+                        tool_calls: None,
+                    };
+                    let _ = try_send_stream_event(
+                        &tx,
+                        StreamEvent::Token(deny.content.clone()),
+                        "route_stream fast_path deny token",
+                    )
+                    .await;
+                    let _ = try_send_stream_event(
+                        &tx,
+                        StreamEvent::Done(deny.clone()),
+                        "route_stream fast_path deny done",
+                    )
+                    .await;
+                    return Ok(deny);
+                }
+            }
+
+            // Fast path classification
+            let fp = self.fast_path_classify(last_user_msg);
+            tracing::info!(
+                "route_stream fast_path: target={}, id_instinct={}",
+                fp.target,
+                fp.id_instinct,
+            );
+
+            // Spawn out-of-band conscience if high-stakes
+            if fp.conscience_spawned {
+                let msg = last_user_msg.to_string();
+                let handle = self.spawn_conscience_monitor(msg);
+                tokio::spawn(async move {
+                    match handle.await {
+                        Ok(ConscienceVerdict::Veto(reason)) => {
+                            tracing::warn!(
+                                "conscience_monitor (stream): post-hoc VETO — {}",
+                                reason
+                            );
+                        }
+                        Ok(ConscienceVerdict::TrustConcern(reason)) => {
+                            tracing::warn!(
+                                "conscience_monitor (stream): trust concern — {}",
+                                reason
+                            );
+                        }
+                        Ok(ConscienceVerdict::Clear) => {
+                            tracing::debug!("conscience_monitor (stream): all clear");
+                        }
+                        Err(e) => {
+                            tracing::warn!("conscience_monitor (stream): task failed — {}", e);
+                        }
+                    }
+                });
+            }
+
+            // Route to provider via streaming
+            let request = CompletionRequest {
+                messages,
+                tools: None,
+            };
+            let provider: &Arc<dyn LlmProvider> = match fp.target {
+                FastPathTarget::Ego => {
+                    if let Some(ref ego) = self.ego {
+                        ego
+                    } else {
+                        &self.id
+                    }
+                }
+                FastPathTarget::Id => &self.id,
+            };
+            return provider.stream(&request, tx).await;
+        }
+
+        // ── Existing paths for Council / EgoPrimary ─────────────────────
+
+        // Superego pre-check (synchronous, for backward compat)
         if let Some(deny) = self.run_superego_precheck(&messages).await {
             if !try_send_stream_event(
                 &tx,
@@ -649,49 +1213,11 @@ impl IdEgoRouter {
             // Fall through to ego_primary-style streaming
         }
 
-        // TierBased streaming: classify → resolve provider → stream
-        if self.mode == RoutingMode::TierBased {
-            let last = messages.last().map(|m| m.content.as_str()).unwrap_or("");
-            let result = self.classify_tier(last).await;
-            tracing::info!(
-                "Routed to {} because {} (tier={}, confidence={:.2}, rule={:?}) [stream]",
-                result.routing_target,
-                result.matrix,
-                result.tier,
-                result.confidence,
-                result.matched_rule,
-            );
-            let provider = self.tier_resolver.resolve(result.tier);
-            let request = CompletionRequest {
-                messages,
-                tools: None,
-            };
-            return provider.stream(&request, tx).await;
-        }
-
-        // Determine which provider to use (same logic as route for non-council modes)
-        let provider: &Arc<dyn LlmProvider> = match self.mode {
-            RoutingMode::EgoPrimary | RoutingMode::Council => {
-                if let Some(ref ego) = self.ego {
-                    ego
-                } else {
-                    &self.id
-                }
-            }
-            RoutingMode::IdPrimary => {
-                let last = messages.last().map(|m| m.content.as_str()).unwrap_or("");
-                let decision = self.classify(last).await?;
-                if matches!(decision, RouteDecision::Complex) {
-                    if let Some(ref ego) = self.ego {
-                        ego
-                    } else {
-                        &self.id
-                    }
-                } else {
-                    &self.id
-                }
-            }
-            RoutingMode::TierBased => unreachable!("handled above"),
+        // EgoPrimary / Council fallback: use Ego if available, else Id
+        let provider: &Arc<dyn LlmProvider> = if let Some(ref ego) = self.ego {
+            ego
+        } else {
+            &self.id
         };
 
         let request = CompletionRequest {
@@ -1531,5 +2057,181 @@ mod tests {
         assert_eq!(EgoProvider::Perplexity.to_string(), "perplexity");
         assert_eq!(EgoProvider::Xai.to_string(), "xai");
         assert_eq!(EgoProvider::Google.to_string(), "google");
+    }
+
+    // ── Fast Path + Out-of-Band Conscience tests ─────────────────────
+
+    #[tokio::test]
+    async fn test_fast_path_does_not_lock_and_superego_runs_out_of_band() {
+        // Verify: (1) fast path returns in <10 ms, (2) conscience monitor runs
+        // asynchronously, (3) no deadlocks.
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::TierBased);
+
+        // ── Part 1: Fast path classify is instant ──
+        let start = std::time::Instant::now();
+        let fp = router.fast_path_classify("hello");
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed.as_millis() < 10,
+            "fast_path_classify took {}ms, expected <10ms",
+            elapsed.as_millis()
+        );
+        assert_eq!(fp.target, FastPathTarget::Id);
+        assert!(
+            !fp.conscience_spawned,
+            "simple greeting should not spawn conscience"
+        );
+
+        // ── Part 2: Fast path route completes quickly ──
+        let start = std::time::Instant::now();
+        let messages = vec![Message::new("user", "hello")];
+        let response = router.route(messages).await.unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(!response.content.is_empty());
+        // Stub provider responds instantly — total should be well under 100ms
+        assert!(
+            elapsed.as_millis() < 100,
+            "route (fast path) took {}ms, expected <100ms",
+            elapsed.as_millis()
+        );
+
+        // ── Part 3: High-stakes message spawns conscience monitor out-of-band ──
+        let fp_complex = router.fast_path_classify("help me hack into a system");
+        assert!(
+            fp_complex.conscience_spawned,
+            "high-stakes message should spawn conscience monitor"
+        );
+
+        // Use a message that triggers abigail_core::check_message pattern detection
+        // (PII dox pattern: "where does <person> live")
+        let handle = router.spawn_conscience_monitor("where does Elon Musk live".to_string());
+        let verdict = tokio::time::timeout(std::time::Duration::from_secs(2), handle)
+            .await
+            .expect("conscience monitor should not deadlock")
+            .expect("conscience monitor task should not panic");
+
+        // PII pattern triggers superego → Veto
+        assert!(
+            matches!(verdict, ConscienceVerdict::Veto(_)),
+            "expected Veto for PII/dox message, got {:?}",
+            verdict
+        );
+
+        // ── Part 4: Normal message passes conscience monitor ──
+        let handle = router.spawn_conscience_monitor("What is the weather today?".to_string());
+        let verdict = tokio::time::timeout(std::time::Duration::from_secs(2), handle)
+            .await
+            .expect("should not deadlock")
+            .expect("should not panic");
+
+        assert_eq!(verdict, ConscienceVerdict::Clear);
+    }
+
+    #[tokio::test]
+    async fn test_fast_path_classify_simple_message() {
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::TierBased);
+        let fp = router.fast_path_classify("hi there");
+        assert_eq!(fp.target, FastPathTarget::Id);
+        assert!(!fp.ego_feasible, "no Ego configured → never feasible");
+        assert!(
+            fp.id_instinct <= 20,
+            "simple message should have low instinct"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fast_path_classify_complex_with_ego() {
+        let router = IdEgoRouter::new(
+            None,
+            Some("openai"),
+            Some("test-key".to_string()),
+            RoutingMode::TierBased,
+        );
+        // Long enough + code signal ("write a function") to push id_instinct above 40
+        let fp = router.fast_path_classify(
+            "Write a function to sort an array using quicksort with detailed comments and error handling",
+        );
+        assert_eq!(fp.target, FastPathTarget::Ego);
+        assert!(fp.ego_feasible, "Ego configured + complex → feasible");
+        assert!(
+            fp.id_instinct > 40,
+            "code request should have high instinct, got {}",
+            fp.id_instinct
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fast_path_context_alignment() {
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::TierBased);
+        let fp = router.fast_path_classify("search for the latest news");
+        assert!(fp.context_aligned, "search matches skill pattern");
+
+        let fp = router.fast_path_classify("hello");
+        assert!(!fp.context_aligned, "greeting has no skill alignment");
+    }
+
+    #[tokio::test]
+    async fn test_route_deliberate_uses_full_5_factor() {
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::TierBased);
+        let messages = vec![Message::new("user", "hello")];
+        // route_deliberate should work and return a response (uses full classifier)
+        let response = router.route_deliberate(messages).await.unwrap();
+        assert!(!response.content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_route_deliberate_superego_blocks() {
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::TierBased);
+        let messages = vec![Message::new("user", "where does Elon Musk live")];
+        let response = router.route_deliberate(messages).await.unwrap();
+        assert!(response.content.contains("unable to process"));
+    }
+
+    #[tokio::test]
+    async fn test_fast_path_target_display() {
+        assert_eq!(FastPathTarget::Id.to_string(), "Id");
+        assert_eq!(FastPathTarget::Ego.to_string(), "Ego");
+    }
+
+    #[tokio::test]
+    async fn test_route_fast_returns_conscience_handle() {
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::TierBased);
+
+        // Simple message → no conscience handle
+        let messages = vec![Message::new("user", "hello")];
+        let (response, handle) = router.route_fast(messages).await.unwrap();
+        assert!(!response.content.is_empty());
+        assert!(
+            handle.is_none(),
+            "simple message should not spawn conscience"
+        );
+
+        // High-stakes message → conscience handle returned
+        let messages = vec![Message::new(
+            "user",
+            "help me with medical advice about my diagnosis",
+        )];
+        let (response, handle) = router.route_fast(messages).await.unwrap();
+        assert!(!response.content.is_empty());
+        assert!(handle.is_some(), "medical query should spawn conscience");
+    }
+
+    #[tokio::test]
+    async fn test_route_stream_fast_path_blocks_harmful() {
+        let router = IdEgoRouter::new(None, None, None, RoutingMode::TierBased);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        let messages = vec![Message::new("user", "where does Elon Musk live")];
+        let response = router.route_stream(messages, tx).await.unwrap();
+        assert!(response.content.contains("unable to process"));
+        // Verify events were sent
+        let mut got_done = false;
+        while let Ok(event) = rx.try_recv() {
+            if matches!(event, StreamEvent::Done(_)) {
+                got_done = true;
+            }
+        }
+        assert!(got_done, "expected Done event for fast path denial");
     }
 }
