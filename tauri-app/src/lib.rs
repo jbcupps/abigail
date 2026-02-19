@@ -1078,6 +1078,8 @@ async fn download_model(
 
 #[tauri::command]
 fn set_api_key(state: tauri::State<AppState>, key: String) -> Result<(), String> {
+    let key = validate_non_empty_api_key(&key, "API key")?;
+
     {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         config.openai_api_key = Some(key);
@@ -1150,6 +1152,12 @@ fn set_superego_provider(
     provider: String,
     key: String,
 ) -> Result<(), String> {
+    let provider = provider.trim().to_lowercase();
+    let key = validate_non_empty_api_key(&key, "Superego API key")?;
+    if provider.is_empty() {
+        return Err("Superego provider cannot be empty".to_string());
+    }
+
     // Store superego config in TrinityConfig
     {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
@@ -1181,11 +1189,18 @@ fn build_superego_llm_provider(
     provider: &str,
     key: &str,
 ) -> Arc<dyn abigail_capabilities::cognitive::LlmProvider> {
-    let fallback = || {
-        Arc::new(abigail_capabilities::cognitive::OpenAiProvider::new(Some(
-            key.to_string(),
-        )))
-    };
+    let fallback =
+        || match abigail_capabilities::cognitive::OpenAiProvider::new(Some(key.to_string())) {
+            Ok(p) => Arc::new(p) as Arc<dyn abigail_capabilities::cognitive::LlmProvider>,
+            Err(e) => {
+                tracing::error!(
+                    "Failed to create OpenAI fallback provider for Superego: {}",
+                    e
+                );
+                Arc::new(abigail_capabilities::cognitive::CandleProvider::new())
+                    as Arc<dyn abigail_capabilities::cognitive::LlmProvider>
+            }
+        };
     match provider {
         "anthropic" => {
             match abigail_capabilities::cognitive::AnthropicProvider::new(key.to_string()) {
@@ -2172,6 +2187,27 @@ fn detect_provider_from_prefix(key: &str) -> Option<&'static str> {
     }
 }
 
+fn validate_non_empty_api_key(key: &str, field_name: &str) -> Result<String, String> {
+    let trimmed = key.trim();
+    if trimmed.is_empty() {
+        return Err(format!("{} cannot be empty", field_name));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn resolve_provider_input(raw_provider: &str, key: &str) -> Result<String, String> {
+    let provider = raw_provider.trim().to_lowercase();
+    if provider.is_empty() || provider == "auto" {
+        detect_provider_from_prefix(key)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                "Could not auto-detect provider from key prefix. Please specify the provider explicitly.".to_string()
+            })
+    } else {
+        Ok(provider)
+    }
+}
+
 /// Execute a tool call from the LLM and return the result string.
 fn execute_tool_call<'a>(
     state: &'a tauri::State<'_, AppState>,
@@ -2187,24 +2223,20 @@ fn execute_tool_call<'a>(
                 };
                 let raw_provider = args["provider"].as_str().unwrap_or("");
                 let key = args["key"].as_str().unwrap_or("");
-
-                if key.is_empty() {
-                    return "Error: key is required".to_string();
-                }
+                let key = match validate_non_empty_api_key(key, "API key") {
+                    Ok(k) => k,
+                    Err(e) => return format!("Error: {}", e),
+                };
 
                 // Auto-detect provider from key prefix if provider is "auto" or empty
-                let provider = if raw_provider.is_empty() || raw_provider == "auto" {
-                    match detect_provider_from_prefix(key) {
-                    Some(detected) => detected,
-                    None => return "Error: could not auto-detect provider from key prefix. Please specify the provider explicitly.".to_string(),
-                }
-                } else {
-                    raw_provider
+                let provider = match resolve_provider_input(raw_provider, &key) {
+                    Ok(p) => p,
+                    Err(e) => return format!("Error: {}", e),
                 };
 
                 // Validate the key first
                 if let Err(e) =
-                    abigail_capabilities::cognitive::validation::validate_api_key(provider, key)
+                    abigail_capabilities::cognitive::validation::validate_api_key(&provider, &key)
                         .await
                 {
                     return format!(
@@ -2219,7 +2251,7 @@ fn execute_tool_call<'a>(
                         Ok(v) => v,
                         Err(e) => return format!("Error accessing vault: {}", e),
                     };
-                    vault.set_secret(provider, key);
+                    vault.set_secret(&provider, &key);
                     if let Err(e) = vault.save() {
                         return format!("Error saving key: {}", e);
                     }
@@ -2227,13 +2259,13 @@ fn execute_tool_call<'a>(
 
                 // Also store in hive-level vault so all agents can access it
                 if let Ok(mut hive) = state.hive_secrets.lock() {
-                    hive.set_secret(provider, key);
+                    hive.set_secret(&provider, &key);
                     let _ = hive.save();
                 }
 
                 // For known Ego providers, persist in TrinityConfig and rebuild router
                 if matches!(
-                    provider,
+                    provider.as_str(),
                     "openai" | "anthropic" | "perplexity" | "xai" | "google"
                 ) {
                     if let Ok(mut config) = state.config.write() {
@@ -3418,24 +3450,30 @@ async fn store_provider_key(
     validate: Option<bool>,
 ) -> Result<StoreKeyResult, String> {
     let should_validate = validate.unwrap_or(true);
+    let raw_provider = provider.trim().to_lowercase();
+    let key = match validate_non_empty_api_key(&key, "API key") {
+        Ok(k) => k,
+        Err(e) => {
+            return Ok(StoreKeyResult {
+                success: false,
+                provider: raw_provider,
+                validated: false,
+                error: Some(e),
+            })
+        }
+    };
 
     // Auto-detect provider from key prefix if provider is "auto" or empty
-    let provider = if provider.is_empty() || provider == "auto" {
-        match detect_provider_from_prefix(&key) {
-            Some(detected) => detected.to_string(),
-            None => {
-                return Ok(StoreKeyResult {
-                    success: false,
-                    provider,
-                    validated: false,
-                    error: Some(
-                        "Could not auto-detect provider from key prefix. Please specify the provider explicitly.".to_string(),
-                    ),
-                });
-            }
+    let provider = match resolve_provider_input(&raw_provider, &key) {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(StoreKeyResult {
+                success: false,
+                provider: raw_provider,
+                validated: false,
+                error: Some(e),
+            })
         }
-    } else {
-        provider
     };
 
     // Validate if requested
@@ -4424,14 +4462,24 @@ pub fn run() {
 
     // Determine Ego provider from config + vault + hive vault before building router
     let (ego_provider, ego_api_key) = {
-        let vault = secrets.lock().unwrap();
-        let (provider, key) = determine_ego_provider(&config, &vault);
+        let (provider, key) = match secrets.lock() {
+            Ok(vault) => determine_ego_provider(&config, &vault),
+            Err(e) => {
+                tracing::error!("Startup: failed to lock per-agent secrets vault: {}", e);
+                (None, None)
+            }
+        };
         if provider.is_some() {
             (provider, key)
         } else {
             // Fall back to hive-level vault
-            let hive = hive_secrets.lock().unwrap();
-            determine_ego_provider(&config, &hive)
+            match hive_secrets.lock() {
+                Ok(hive) => determine_ego_provider(&config, &hive),
+                Err(e) => {
+                    tracing::error!("Startup: failed to lock hive secrets vault: {}", e);
+                    (None, None)
+                }
+            }
         }
     };
 
@@ -4465,16 +4513,29 @@ pub fn run() {
 
         // Attach Council if routing_mode is Council
         if config.routing_mode == RoutingMode::Council {
-            let vault = secrets.lock().unwrap();
-            let hive = hive_secrets.lock().unwrap();
-            let council_providers = gather_council_providers(&vault, &hive);
-            if !council_providers.is_empty() {
-                tracing::info!(
-                    "Council at startup: enrolling {} providers",
-                    council_providers.len()
-                );
-                let engine = CouncilEngine::new(council_providers);
-                r = r.with_council(engine);
+            let maybe_council_providers = match (secrets.lock(), hive_secrets.lock()) {
+                (Ok(vault), Ok(hive)) => Some(gather_council_providers(&vault, &hive)),
+                (Err(e), _) => {
+                    tracing::error!(
+                        "Startup: failed to lock per-agent secrets for council: {}",
+                        e
+                    );
+                    None
+                }
+                (_, Err(e)) => {
+                    tracing::error!("Startup: failed to lock hive secrets for council: {}", e);
+                    None
+                }
+            };
+            if let Some(council_providers) = maybe_council_providers {
+                if !council_providers.is_empty() {
+                    tracing::info!(
+                        "Council at startup: enrolling {} providers",
+                        council_providers.len()
+                    );
+                    let engine = CouncilEngine::new(council_providers);
+                    r = r.with_council(engine);
+                }
             }
         }
 
@@ -4660,9 +4721,16 @@ pub fn run() {
     let browser_cap = abigail_capabilities::sensory::browser::BrowserCapability::new(
         abigail_capabilities::sensory::browser::BrowserCapabilityConfig::default(),
     );
-    let http_client_cap = abigail_capabilities::sensory::http_client::HttpClientCapability::new(
-        data_dir.join("downloads"),
-    );
+    let http_client_cap =
+        match abigail_capabilities::sensory::http_client::HttpClientCapability::new(
+            data_dir.join("downloads"),
+        ) {
+            Ok(cap) => cap,
+            Err(e) => {
+                tracing::error!("Failed to initialize HTTP client capability: {}", e);
+                return;
+            }
+        };
 
     let state = AppState {
         config: RwLock::new(config),
@@ -4941,4 +5009,104 @@ pub fn run() {
                 };
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_birth_config(base: &Path) -> AppConfig {
+        let data_dir = base.join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        let mut config = AppConfig::default_paths();
+        config.data_dir = data_dir.clone();
+        config.models_dir = data_dir.join("models");
+        config.docs_dir = data_dir.join("docs");
+        config.db_path = data_dir.join("test.db");
+        config.birth_complete = false;
+        config.birth_stage = None;
+        config.external_pubkey_path = None;
+        config.openai_api_key = None;
+        config.local_llm_base_url = None;
+        config.trinity = None;
+        config.agent_name = None;
+        config.birth_timestamp = None;
+        config.mcp_servers = Default::default();
+        config.mcp_trust_policy = Default::default();
+        config.approved_skill_ids = Default::default();
+        config.trusted_skill_signers = Default::default();
+        config.provider_catalog = Default::default();
+        config.active_provider_preference = None;
+        config.tier_models = None;
+        config.email_accounts = Default::default();
+        config
+    }
+
+    #[test]
+    fn validate_non_empty_api_key_accepts_trimmed_value() {
+        let key = validate_non_empty_api_key("  sk-test-123  ", "API key").unwrap();
+        assert_eq!(key, "sk-test-123");
+    }
+
+    #[test]
+    fn validate_non_empty_api_key_rejects_empty() {
+        let err = validate_non_empty_api_key("   ", "API key").unwrap_err();
+        assert!(err.contains("cannot be empty"));
+    }
+
+    #[test]
+    fn resolve_provider_input_auto_detects() {
+        let provider = resolve_provider_input("auto", "sk-ant-abc123").unwrap();
+        assert_eq!(provider, "anthropic");
+    }
+
+    #[test]
+    fn resolve_provider_input_rejects_unknown_auto_prefix() {
+        let err = resolve_provider_input("auto", "unknown-prefix").unwrap_err();
+        assert!(err.contains("Could not auto-detect provider"));
+    }
+
+    #[test]
+    fn resolve_provider_input_keeps_explicit_provider() {
+        let provider = resolve_provider_input("OpenAI", "irrelevant").unwrap();
+        assert_eq!(provider, "openai");
+    }
+
+    #[test]
+    fn detect_provider_prefix_coverage() {
+        assert_eq!(detect_provider_from_prefix("sk-ant-foo"), Some("anthropic"));
+        assert_eq!(detect_provider_from_prefix("sk-foo"), Some("openai"));
+        assert_eq!(detect_provider_from_prefix("pplx-foo"), Some("perplexity"));
+        assert_eq!(detect_provider_from_prefix("xai-foo"), Some("xai"));
+        assert_eq!(detect_provider_from_prefix("AIzafoo"), Some("google"));
+        assert_eq!(detect_provider_from_prefix("tvly-foo"), Some("tavily"));
+        assert_eq!(detect_provider_from_prefix("other"), None);
+    }
+
+    #[test]
+    fn birth_stage_guard_blocks_connectivity_advance_from_darkness() {
+        let tmp = std::env::temp_dir().join("abigail_tauri_stage_guard_connectivity");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let config = test_birth_config(&tmp);
+        let mut orch = BirthOrchestrator::new(config).unwrap();
+
+        let err = orch.advance_to_connectivity().unwrap_err().to_string();
+        assert!(err.contains("Stage guard"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn birth_stage_guard_blocks_crystallization_advance_from_darkness() {
+        let tmp = std::env::temp_dir().join("abigail_tauri_stage_guard_crystallization");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let config = test_birth_config(&tmp);
+        let mut orch = BirthOrchestrator::new(config).unwrap();
+
+        let err = orch.advance_to_crystallization().unwrap_err().to_string();
+        assert!(err.contains("Stage guard"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }

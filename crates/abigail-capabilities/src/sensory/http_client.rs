@@ -40,20 +40,20 @@ impl HttpClientCapability {
     /// Create a new HTTP client capability.
     ///
     /// `download_dir` is the base directory for file downloads (typically `data_dir/downloads/`).
-    pub fn new(download_dir: PathBuf) -> Self {
+    pub fn new(download_dir: PathBuf) -> anyhow::Result<Self> {
         let default_client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS))
             .connect_timeout(std::time::Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::limited(10))
             .build()
-            .expect("Failed to create default HTTP client");
+            .map_err(|e| anyhow::anyhow!("Failed to create default HTTP client: {}", e))?;
 
-        Self {
+        Ok(Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             default_client,
             security_policy: UrlSecurityPolicy::default(),
             download_dir,
-        }
+        })
     }
 
     /// Return the tool definitions for this capability.
@@ -484,7 +484,7 @@ mod tests {
     use super::*;
 
     fn make_capability() -> HttpClientCapability {
-        HttpClientCapability::new(PathBuf::from("/tmp/abigail_test_downloads"))
+        HttpClientCapability::new(PathBuf::from("/tmp/abigail_test_downloads")).unwrap()
     }
 
     #[test]

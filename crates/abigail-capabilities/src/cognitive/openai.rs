@@ -14,27 +14,24 @@ pub struct OpenAiProvider {
 }
 
 impl OpenAiProvider {
-    pub fn new(api_key: Option<String>) -> Self {
+    pub fn new(api_key: Option<String>) -> anyhow::Result<Self> {
         Self::with_model(api_key, "gpt-4o-mini".to_string())
     }
 
-    pub fn with_model(api_key: Option<String>, model: String) -> Self {
+    pub fn with_model(api_key: Option<String>, model: String) -> anyhow::Result<Self> {
         let key = api_key
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-            .filter(|k| !k.trim().is_empty())
-            .unwrap_or_else(|| {
-                tracing::warn!("OpenAI API key is empty or missing; requests will fail");
-                String::new()
-            });
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("OpenAI API key is empty or missing"))?;
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(120))
-            .build()
-            .expect("Failed to build reqwest client");
-        Self {
+            .build()?;
+        Ok(Self {
             client,
             api_key: key,
             model,
-        }
+        })
     }
 
     fn build_messages(messages: &[Message]) -> Vec<ChatMessage> {
@@ -273,8 +270,9 @@ impl LlmProvider for OpenAiProvider {
             std::collections::HashMap::new();
         let mut byte_stream = response.bytes_stream();
         let mut buffer = String::new();
+        let mut receiver_closed = false;
 
-        while let Some(chunk) = byte_stream.next().await {
+        'stream_loop: while let Some(chunk) = byte_stream.next().await {
             let chunk = chunk?;
             buffer.push_str(&String::from_utf8_lossy(&chunk));
 
@@ -293,7 +291,13 @@ impl LlmProvider for OpenAiProvider {
                         if let Some(choice) = chunk.choices.first() {
                             if let Some(ref text) = choice.delta.content {
                                 full_content.push_str(text);
-                                let _ = tx.send(StreamEvent::Token(text.clone())).await;
+                                if tx.send(StreamEvent::Token(text.clone())).await.is_err() {
+                                    tracing::warn!(
+                                        "OpenAI stream receiver closed while sending token; terminating stream early"
+                                    );
+                                    receiver_closed = true;
+                                    break 'stream_loop;
+                                }
                             }
                             if let Some(ref tc_deltas) = choice.delta.tool_calls {
                                 for tc_delta in tc_deltas {
@@ -338,7 +342,11 @@ impl LlmProvider for OpenAiProvider {
             content: full_content,
             tool_calls,
         };
-        let _ = tx.send(StreamEvent::Done(response.clone())).await;
+        if tx.send(StreamEvent::Done(response.clone())).await.is_err() {
+            tracing::warn!("OpenAI stream receiver closed while sending completion event");
+        } else if receiver_closed {
+            tracing::debug!("OpenAI stream ended after receiver disconnect");
+        }
         Ok(response)
     }
 }
@@ -348,13 +356,19 @@ mod tests {
     use super::*;
     use crate::cognitive::provider::{CompletionRequest, Message};
 
+    #[test]
+    fn test_openai_provider_rejects_empty_key() {
+        let provider = OpenAiProvider::new(Some("   ".to_string()));
+        assert!(provider.is_err());
+    }
+
     #[tokio::test]
     async fn test_openai_provider() {
         if std::env::var("OPENAI_API_KEY").is_err() {
             return;
         }
         let key = std::env::var("OPENAI_API_KEY").unwrap();
-        let provider = OpenAiProvider::new(Some(key));
+        let provider = OpenAiProvider::new(Some(key)).unwrap();
         let request =
             CompletionRequest::simple(vec![Message::new("user", "Say hello in one word.")]);
         let response = provider.complete(&request).await.unwrap();

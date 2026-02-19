@@ -23,8 +23,8 @@ concurrency:
 
 jobs:
 
-  # -- Lint (fast) -----------------------------------------------------------
-  # No Linux GUI deps needed: fmt and clippy only.
+  # -- Lint ----------------------------------------------------------------
+  # Checks formatting, clippy, and abigail-app compilation.
   lint:
     runs-on: ubuntu-22.04
     steps:
@@ -45,6 +45,20 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --workspace --exclude abigail-app -- -D warnings
+
+      # abigail-app is excluded from clippy/test because it needs Tauri and
+      # platform GUI libs to link.  A plain `cargo check` still catches type
+      # errors, lifetime issues, and missing imports without linking.
+      - name: Install Linux dependencies (for abigail-app check)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libgtk-3-dev
+
+      - name: Check abigail-app compiles
+        run: cargo check -p abigail-app
 
   # -- Tests (3-platform matrix) ----------------------------------------------
   test:
@@ -86,7 +100,7 @@ jobs:
 
       - name: Install cargo-llvm-cov (ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
-        uses: taiki-e/install-action@e74760544e19e95d6484e3e8c1b79c498b316b23 # v2
+        uses: taiki-e/install-action@cede0bb282aae847dfa8aacca3a41c86d973d4d7 # v2.68.1
         with:
           tool: cargo-llvm-cov
 

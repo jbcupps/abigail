@@ -108,10 +108,8 @@ pub fn build_provider_with_model(
     model: &str,
 ) -> Option<Arc<dyn LlmProvider>> {
     let result: anyhow::Result<Arc<dyn LlmProvider>> = match provider_name {
-        "openai" => Ok(Arc::new(OpenAiProvider::with_model(
-            Some(api_key.to_string()),
-            model.to_string(),
-        )) as Arc<dyn LlmProvider>),
+        "openai" => OpenAiProvider::with_model(Some(api_key.to_string()), model.to_string())
+            .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
         "anthropic" => AnthropicProvider::with_model(api_key.to_string(), model.to_string())
             .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
         "perplexity" | "pplx" => OpenAiCompatibleProvider::with_config(
