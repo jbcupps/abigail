@@ -3,6 +3,7 @@
 pub mod channel;
 pub mod dynamic;
 pub mod executor;
+pub mod instruction_registry;
 pub mod manifest;
 pub mod prelude;
 pub mod protocol;
@@ -19,6 +20,7 @@ pub use protocol as capability;
 pub use channel::*;
 pub use dynamic::{DynamicApiSkill, DynamicSkillConfig, DynamicToolConfig};
 pub use executor::SkillExecutor;
+pub use instruction_registry::InstructionRegistry;
 pub use manifest::*;
 pub use prelude::*;
 pub use protocol::*;

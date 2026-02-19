@@ -34,10 +34,33 @@ interface KeypairGenerationResult {
   newly_generated: boolean;
 }
 
+/** Wrap an invoke call with a timeout (ms). Rejects if the command doesn't return in time. */
+function invokeWithTimeout<T>(cmd: string, args?: Record<string, unknown>, ms = 15000): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`Command "${cmd}" timed out after ${ms / 1000}s`));
+      }
+    }, ms);
+
+    invoke<T>(cmd, args)
+      .then((v) => {
+        if (!settled) { settled = true; clearTimeout(timer); resolve(v); }
+      })
+      .catch((e) => {
+        if (!settled) { settled = true; clearTimeout(timer); reject(e); }
+      });
+  });
+}
+
 export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [stage, setStage] = useState<Stage>("Darkness");
   const [message, setMessage] = useState("");
+  const [bootStep, setBootStep] = useState("");
   const [error, setError] = useState("");
+  const [timedOut, setTimedOut] = useState(false);
   const [privateKey, setPrivateKey] = useState("");
   const [publicKeyPath, setPublicKeyPath] = useState("");
   const [keySaved, setKeySaved] = useState(false);
@@ -57,28 +80,35 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const mountedRef = useRef(true);
 
   // Auto-start boot sequence on mount
+  // NOTE: mountedRef must be reset to true here because React.StrictMode
+  // (dev only) runs effects twice: mount → cleanup (sets false) → remount.
+  // Without this reset, both handleStart() calls abort early.
   useEffect(() => {
+    mountedRef.current = true;
     handleStart();
     return () => { mountedRef.current = false; };
   }, []);
 
   const handleStart = async () => {
     setError("");
+    setTimedOut(false);
     setStage("Darkness");
     setMessage("Preparing secure environment...");
+    setBootStep("init_soul");
 
     try {
       // 1. Initialize soul (copy templates, create internal keyring)
-      await invoke("init_soul");
+      await invokeWithTimeout("init_soul");
       if (!mountedRef.current) return;
-      setMessage("Checking identity status...");
 
       // 2. Check for interrupted birth (closed app mid-way through first run)
+      setBootStep("check_interrupted_birth");
+      setMessage("Checking for interrupted birth...");
       interface InterruptedBirthInfo {
         was_interrupted: boolean;
         stage: string | null;
       }
-      const interrupted = await invoke<InterruptedBirthInfo>("check_interrupted_birth");
+      const interrupted = await invokeWithTimeout<InterruptedBirthInfo>("check_interrupted_birth");
       if (!mountedRef.current) return;
       if (interrupted.was_interrupted) {
         setError(
@@ -89,15 +119,21 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
       }
 
       // 3. Check identity status
-      const status = await invoke<IdentityStatus>("check_identity_status");
+      setBootStep("check_identity_status");
+      setMessage("Checking identity status...");
+      const status = await invokeWithTimeout<IdentityStatus>("check_identity_status");
       if (!mountedRef.current) return;
 
       if (status === "Clean") {
         // First run: start birth and generate identity
-        await invoke("start_birth");
+        setBootStep("start_birth");
+        setMessage("Starting birth sequence...");
+        await invokeWithTimeout("start_birth");
         if (!mountedRef.current) return;
+
+        setBootStep("generate_identity");
         setMessage("Generating signing keypair...");
-        const keypairResult = await invoke<KeypairGenerationResult>("generate_identity");
+        const keypairResult = await invokeWithTimeout<KeypairGenerationResult>("generate_identity");
         if (!mountedRef.current) return;
 
         setPrivateKey(keypairResult.private_key_base64);
@@ -115,7 +151,10 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
       onComplete();
     } catch (e) {
       if (!mountedRef.current) return;
-      setError(String(e));
+      const errMsg = String(e);
+      const isTimeout = errMsg.includes("timed out");
+      setTimedOut(isTimeout);
+      setError(errMsg);
       setStage("Darkness");
     }
   };
@@ -350,7 +389,10 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         {/* ── DARKNESS ── */}
         {stage === "Darkness" && !error && (
           <div className="p-6">
-            <p className="mb-4">{message || "Preparing to start..."}</p>
+            <p className="mb-2">{message || "Preparing to start..."}</p>
+            {bootStep && (
+              <p className="text-theme-text-dim text-xs mb-2">Step: {bootStep}</p>
+            )}
             <div className="animate-pulse">...</div>
           </div>
         )}
@@ -741,13 +783,30 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
         {error && stage === "Darkness" && (
           <div className="p-6">
-            <p className="text-red-400 mb-4">{error}</p>
-            <button
-              className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
-              onClick={handleStart}
-            >
-              Retry
-            </button>
+            <p className="text-red-400 mb-2">{error}</p>
+            {timedOut && bootStep && (
+              <p className="text-yellow-500 text-xs mb-4">
+                The boot sequence stalled at step &quot;{bootStep}&quot;.
+                Check the Rust console for diagnostics. You can retry or skip to
+                start fresh.
+              </p>
+            )}
+            <div className="flex gap-3">
+              <button
+                className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
+                onClick={handleStart}
+              >
+                Retry
+              </button>
+              {timedOut && (
+                <button
+                  className="border border-yellow-600 text-yellow-500 px-4 py-2 rounded hover:bg-yellow-600/20"
+                  onClick={handleSkipInteractive}
+                >
+                  Skip to defaults
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

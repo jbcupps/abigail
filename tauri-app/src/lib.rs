@@ -192,6 +192,8 @@ struct AppState {
         Arc<tokio::sync::RwLock<abigail_capabilities::sensory::http_client::HttpClientCapability>>,
     /// Managed Ollama instance (bundled or system)
     ollama: Arc<tokio::sync::Mutex<Option<OllamaManager>>>,
+    /// Skill instruction registry for injecting skill-specific LLM instructions
+    instruction_registry: Arc<abigail_skills::InstructionRegistry>,
     /// Rate limiter for chat_stream command
     chat_cooldown: CooldownGuard,
     /// Rate limiter for birth_chat command
@@ -265,8 +267,11 @@ fn get_active_agent(state: tauri::State<AppState>) -> Result<Option<String>, Str
 /// Load an agent by UUID. Verifies signature, loads config into AppState.
 #[tauri::command]
 fn load_agent(state: tauri::State<AppState>, agent_id: String) -> Result<(), String> {
+    tracing::info!("load_agent: loading agent {}", agent_id);
+
     // Verify and load agent config
     let agent_config = state.identity_manager.load_agent(&agent_id)?;
+    tracing::info!("load_agent: config loaded, updating AppState");
 
     // Update AppState with the loaded agent's config
     {
@@ -283,14 +288,16 @@ fn load_agent(state: tauri::State<AppState>, agent_id: String) -> Result<(), Str
     }
 
     // Rebuild router with new agent's config
+    tracing::info!("load_agent: rebuilding router");
     rebuild_router_with_superego(&state)?;
 
     // Set active agent
     {
         let mut active = state.active_agent_id.write().map_err(|e| e.to_string())?;
-        *active = Some(agent_id);
+        *active = Some(agent_id.clone());
     }
 
+    tracing::info!("load_agent: agent {} loaded successfully", agent_id);
     Ok(())
 }
 
@@ -344,11 +351,24 @@ fn get_docs_path(state: tauri::State<AppState>) -> Result<PathBuf, String> {
 /// Idempotent if docs already exist.
 #[tauri::command]
 fn init_soul(state: tauri::State<AppState>) -> Result<(), String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
+    tracing::info!("init_soul: acquiring config read lock");
+    let config = state.config.read().map_err(|e| {
+        tracing::error!("init_soul: failed to acquire config lock: {}", e);
+        e.to_string()
+    })?;
     let data_dir = config.data_dir.clone();
     let docs_dir = config.docs_dir.clone();
+    drop(config); // Release lock early — we only need the paths
+    tracing::info!(
+        "init_soul: data_dir={:?}, docs_dir={:?}",
+        data_dir,
+        docs_dir
+    );
 
-    std::fs::create_dir_all(&docs_dir).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&docs_dir).map_err(|e| {
+        tracing::error!("init_soul: failed to create docs_dir: {}", e);
+        e.to_string()
+    })?;
 
     // Copy constitutional docs (without signatures - those come from generate_and_sign_constitutional)
     let docs = [
@@ -362,17 +382,21 @@ fn init_soul(state: tauri::State<AppState>) -> Result<(), String> {
 
         // Only write if not already present (idempotent)
         if !doc_path.exists() {
-            std::fs::write(&doc_path, content).map_err(|e| e.to_string())?;
+            tracing::info!("init_soul: writing {}", name);
+            std::fs::write(&doc_path, content).map_err(|e| {
+                tracing::error!("init_soul: failed to write {}: {}", name, e);
+                e.to_string()
+            })?;
+        } else {
+            tracing::debug!("init_soul: {} already exists, skipping", name);
         }
     }
 
-    // Generate internal keyring if not present (for mentor key, etc.)
-    let keys_file = data_dir.join("keys.bin");
-    if !keys_file.exists() {
-        let keyring = Keyring::generate(data_dir).map_err(|e| e.to_string())?;
-        keyring.save().map_err(|e| e.to_string())?;
-    }
+    // NOTE: Internal keyring (keys.bin) generation is deferred to
+    // ensure_internal_keyring(), called lazily when first needed
+    // (e.g. email password encryption). It is NOT required during birth.
 
+    tracing::info!("init_soul: complete");
     Ok(())
 }
 
@@ -463,7 +487,14 @@ pub struct InterruptedBirthInfo {
 /// If interrupted, the birth_stage is reset and user must restart from Darkness.
 #[tauri::command]
 fn check_interrupted_birth(state: tauri::State<AppState>) -> Result<InterruptedBirthInfo, String> {
-    let mut config = state.config.write().map_err(|e| e.to_string())?;
+    tracing::info!("check_interrupted_birth: acquiring config write lock");
+    let mut config = state.config.write().map_err(|e| {
+        tracing::error!(
+            "check_interrupted_birth: failed to acquire config lock: {}",
+            e
+        );
+        e.to_string()
+    })?;
 
     let stage_before = config.birth_stage.clone();
     let was_interrupted = config.check_interrupted_birth();
@@ -484,7 +515,14 @@ fn check_interrupted_birth(state: tauri::State<AppState>) -> Result<InterruptedB
 /// Check the identity status of the application.
 #[tauri::command]
 fn check_identity_status(state: tauri::State<AppState>) -> Result<IdentityStatus, String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
+    tracing::info!("check_identity_status: acquiring config read lock");
+    let config = state.config.read().map_err(|e| {
+        tracing::error!(
+            "check_identity_status: failed to acquire config lock: {}",
+            e
+        );
+        e.to_string()
+    })?;
     let data_dir = config.data_dir.clone();
     let docs_dir = config.docs_dir.clone();
 
@@ -873,11 +911,16 @@ fn get_birth_message(state: tauri::State<AppState>) -> Result<String, String> {
 
 #[tauri::command]
 fn start_birth(state: tauri::State<AppState>) -> Result<(), String> {
+    tracing::info!("start_birth: creating birth orchestrator");
     let config = state.config.read().map_err(|e| e.to_string())?;
     let config = config.clone();
-    let orchestrator = BirthOrchestrator::new(config).map_err(|e| e.to_string())?;
+    let orchestrator = BirthOrchestrator::new(config).map_err(|e| {
+        tracing::error!("start_birth: BirthOrchestrator::new failed: {}", e);
+        e.to_string()
+    })?;
     let mut birth = state.birth.write().map_err(|e| e.to_string())?;
     *birth = Some(orchestrator);
+    tracing::info!("start_birth: orchestrator ready");
     Ok(())
 }
 
@@ -903,11 +946,15 @@ fn verify_crypto(state: tauri::State<AppState>) -> Result<(), String> {
 /// Returns the private key base64 and public key path.
 #[tauri::command]
 fn generate_identity(state: tauri::State<AppState>) -> Result<KeypairGenerationResult, String> {
+    tracing::info!("generate_identity: generating signing keypair");
     let mut birth = state.birth.write().map_err(|e| e.to_string())?;
     let b = birth.as_mut().ok_or("Birth not started")?;
 
     let docs_path = b.config().docs_dir.clone();
-    b.generate_identity(&docs_path).map_err(|e| e.to_string())?;
+    b.generate_identity(&docs_path).map_err(|e| {
+        tracing::error!("generate_identity: failed: {}", e);
+        e.to_string()
+    })?;
 
     let private_key = b
         .get_private_key_base64()
@@ -2875,7 +2922,11 @@ async fn chat(
         let tools = chat_tool_definitions(&state.registry, &browser_guard, &http_client_guard);
         let tool_awareness =
             build_tool_awareness_section(&state.registry, &browser_guard, &http_client_guard);
-        let system_prompt = format!("{}{}", base_system_prompt, tool_awareness);
+        let skill_instructions = state.instruction_registry.format_for_prompt(&message);
+        let system_prompt = format!(
+            "{}{}{}",
+            base_system_prompt, skill_instructions, tool_awareness
+        );
         (tools, system_prompt)
     };
 
@@ -3020,7 +3071,11 @@ async fn chat_stream(
         let tools = chat_tool_definitions(&state.registry, &browser_guard, &http_client_guard);
         let tool_awareness =
             build_tool_awareness_section(&state.registry, &browser_guard, &http_client_guard);
-        let system_prompt = format!("{}{}", base_system_prompt, tool_awareness);
+        let skill_instructions = state.instruction_registry.format_for_prompt(&message);
+        let system_prompt = format!(
+            "{}{}{}",
+            base_system_prompt, skill_instructions, tool_awareness
+        );
         (tools, system_prompt)
     };
 
@@ -3794,6 +3849,7 @@ fn crystallize_soul(
 /// Sign all docs, finalize birth, write Trinity config.
 #[tauri::command]
 fn complete_emergence(state: tauri::State<AppState>) -> Result<(), String> {
+    tracing::info!("complete_emergence: starting");
     // Build Trinity config from current state
     let trinity = {
         let config = state.config.read().map_err(|e| e.to_string())?;
@@ -4677,6 +4733,20 @@ pub fn run() {
         }
     }
 
+    // Load skill instruction registry (keyword → LLM instructions mapping)
+    let instruction_registry = {
+        let registry_path = PathBuf::from("skills/registry.toml");
+        let instructions_dir = PathBuf::from("skills/instructions");
+        if registry_path.exists() {
+            Arc::new(abigail_skills::InstructionRegistry::load(
+                &registry_path,
+                &instructions_dir,
+            ))
+        } else {
+            Arc::new(abigail_skills::InstructionRegistry::empty())
+        }
+    };
+
     let event_bus = Arc::new(EventBus::new(256));
     let executor = Arc::new(SkillExecutor::new(registry.clone()));
 
@@ -4787,6 +4857,7 @@ pub fn run() {
         subagent_manager: RwLock::new(subagent_manager),
         browser: Arc::new(tokio::sync::RwLock::new(browser_cap)),
         http_client: Arc::new(tokio::sync::RwLock::new(http_client_cap)),
+        instruction_registry,
         ollama: Arc::new(tokio::sync::Mutex::new(None)),
         chat_cooldown: CooldownGuard::new(std::time::Duration::from_millis(500)),
         birth_cooldown: CooldownGuard::new(std::time::Duration::from_millis(1000)),
