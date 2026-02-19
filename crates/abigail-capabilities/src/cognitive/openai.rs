@@ -1,12 +1,6 @@
 use crate::cognitive::provider::{
-    CompletionRequest, CompletionResponse, LlmProvider, StreamEvent, ToolCall,
-};
-use async_openai::config::OpenAIConfig;
-use async_openai::types::{
-    ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage,
-    ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage,
-    ChatCompletionRequestToolMessage, ChatCompletionRequestUserMessage, ChatCompletionTool,
-    ChatCompletionToolType, CreateChatCompletionRequest, FunctionCall, FunctionObject,
+    CompletionRequest, CompletionResponse, LlmProvider, Message, StreamEvent, ToolCall,
+    ToolDefinition,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -14,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 pub struct OpenAiProvider {
-    client: async_openai::Client<OpenAIConfig>,
+    client: reqwest::Client,
     api_key: String,
     model: String,
 }
@@ -32,84 +26,88 @@ impl OpenAiProvider {
                 tracing::warn!("OpenAI API key is empty or missing; requests will fail");
                 String::new()
             });
-        let config = OpenAIConfig::new().with_api_key(&key);
-        let client = async_openai::Client::with_config(config);
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(120))
+            .build()
+            .expect("Failed to build reqwest client");
         Self {
             client,
             api_key: key,
             model,
         }
     }
-}
 
-/// Map our Message role string to the correct async_openai variant.
-fn map_message(m: &crate::cognitive::provider::Message) -> ChatCompletionRequestMessage {
-    match m.role.as_str() {
-        "system" => ChatCompletionRequestMessage::System(ChatCompletionRequestSystemMessage {
-            content: m.content.clone(),
-            ..Default::default()
-        }),
-        "assistant" => {
-            // If the assistant message carried tool_calls, map them too.
-            let tool_calls = m.tool_calls.as_ref().map(|tcs| {
-                tcs.iter()
-                    .map(|tc| ChatCompletionMessageToolCall {
-                        id: tc.id.clone(),
-                        r#type: ChatCompletionToolType::Function,
-                        function: FunctionCall {
-                            name: tc.name.clone(),
-                            arguments: tc.arguments.clone(),
-                        },
-                    })
-                    .collect()
-            });
-            ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
-                content: Some(m.content.clone()),
-                tool_calls,
-                ..Default::default()
+    fn build_messages(messages: &[Message]) -> Vec<ChatMessage> {
+        messages
+            .iter()
+            .map(|m| {
+                let tool_calls = m.tool_calls.as_ref().map(|tcs| {
+                    tcs.iter()
+                        .map(|tc| ChatToolCallObj {
+                            id: tc.id.clone(),
+                            r#type: "function".to_string(),
+                            function: ChatFunctionCall {
+                                name: tc.name.clone(),
+                                arguments: tc.arguments.clone(),
+                            },
+                        })
+                        .collect()
+                });
+                ChatMessage {
+                    role: m.role.clone(),
+                    content: m.content.clone(),
+                    tool_call_id: m.tool_call_id.clone(),
+                    tool_calls,
+                }
             })
-        }
-        "tool" => ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
-            content: m.content.clone(),
-            tool_call_id: m.tool_call_id.clone().unwrap_or_default(),
-            ..Default::default()
-        }),
-        _ => ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
-            content: m.content.clone().into(),
-            ..Default::default()
-        }),
+            .collect()
+    }
+
+    fn build_tools(tools: &[ToolDefinition]) -> Vec<ChatTool> {
+        tools
+            .iter()
+            .map(|td| ChatTool {
+                r#type: "function".to_string(),
+                function: ChatFunction {
+                    name: td.name.clone(),
+                    description: Some(td.description.clone()),
+                    parameters: Some(td.parameters.clone()),
+                },
+            })
+            .collect()
     }
 }
 
-// ── Streaming types (raw reqwest SSE) ────────────────────────────────
+// ── API request/response types ───────────────────────────────────
 
 #[derive(Debug, Serialize)]
-struct StreamChatRequest {
+struct ChatRequest {
     model: String,
-    messages: Vec<StreamChatMessage>,
+    messages: Vec<ChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<Vec<StreamChatTool>>,
+    tools: Option<Vec<ChatTool>>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     stream: bool,
 }
 
 #[derive(Debug, Serialize)]
-struct StreamChatMessage {
+struct ChatMessage {
     role: String,
     content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tool_calls: Option<Vec<StreamChatToolCallObj>>,
+    tool_calls: Option<Vec<ChatToolCallObj>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct StreamChatTool {
+struct ChatTool {
     r#type: String,
-    function: StreamChatFunction,
+    function: ChatFunction,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct StreamChatFunction {
+struct ChatFunction {
     name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
@@ -118,17 +116,37 @@ struct StreamChatFunction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct StreamChatToolCallObj {
+struct ChatToolCallObj {
     id: String,
     r#type: String,
-    function: StreamChatFunctionCall,
+    function: ChatFunctionCall,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct StreamChatFunctionCall {
+struct ChatFunctionCall {
     name: String,
     arguments: String,
 }
+
+#[derive(Debug, Deserialize)]
+struct ChatResponse {
+    choices: Vec<ChatChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatChoice {
+    message: ChatResponseMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatResponseMessage {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<ChatToolCallObj>>,
+}
+
+// ── SSE streaming types ──────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
 struct StreamChunk {
@@ -169,38 +187,38 @@ struct StreamFunctionDelta {
 #[async_trait]
 impl LlmProvider for OpenAiProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
-        let messages: Vec<ChatCompletionRequestMessage> =
-            request.messages.iter().map(map_message).collect();
+        let messages = Self::build_messages(&request.messages);
+        let tools = request.tools.as_ref().map(|t| Self::build_tools(t));
 
-        // Map tool definitions if provided.
-        let tools: Option<Vec<ChatCompletionTool>> = request.tools.as_ref().map(|defs| {
-            defs.iter()
-                .map(|td| ChatCompletionTool {
-                    r#type: ChatCompletionToolType::Function,
-                    function: FunctionObject {
-                        name: td.name.clone(),
-                        description: Some(td.description.clone()),
-                        parameters: Some(td.parameters.clone()),
-                    },
-                })
-                .collect()
-        });
-
-        let req = CreateChatCompletionRequest {
+        let body = ChatRequest {
             model: self.model.clone(),
             messages,
             tools,
-            ..Default::default()
+            stream: false,
         };
 
-        let response = self.client.chat().create(req).await?;
-        let choice = response.choices.first();
+        let response = self
+            .client
+            .post("https://api.openai.com/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            anyhow::bail!("OpenAI API error ({}): {}", status, text);
+        }
+
+        let chat_response: ChatResponse = response.json().await?;
+        let choice = chat_response.choices.first();
 
         let content = choice
             .and_then(|c| c.message.content.clone())
             .unwrap_or_default();
 
-        // Extract tool calls from the response.
         let tool_calls = choice
             .and_then(|c| c.message.tool_calls.as_ref())
             .map(|tcs| {
@@ -225,53 +243,18 @@ impl LlmProvider for OpenAiProvider {
         request: &CompletionRequest,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
-        let http_client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(120))
-            .build()?;
+        let messages = Self::build_messages(&request.messages);
+        let tools = request.tools.as_ref().map(|t| Self::build_tools(t));
 
-        let messages: Vec<StreamChatMessage> = request
-            .messages
-            .iter()
-            .map(|m| StreamChatMessage {
-                role: m.role.clone(),
-                content: m.content.clone(),
-                tool_call_id: m.tool_call_id.clone(),
-                tool_calls: m.tool_calls.as_ref().map(|tcs| {
-                    tcs.iter()
-                        .map(|tc| StreamChatToolCallObj {
-                            id: tc.id.clone(),
-                            r#type: "function".to_string(),
-                            function: StreamChatFunctionCall {
-                                name: tc.name.clone(),
-                                arguments: tc.arguments.clone(),
-                            },
-                        })
-                        .collect()
-                }),
-            })
-            .collect();
-
-        let tools: Option<Vec<StreamChatTool>> = request.tools.as_ref().map(|defs| {
-            defs.iter()
-                .map(|td| StreamChatTool {
-                    r#type: "function".to_string(),
-                    function: StreamChatFunction {
-                        name: td.name.clone(),
-                        description: Some(td.description.clone()),
-                        parameters: Some(td.parameters.clone()),
-                    },
-                })
-                .collect()
-        });
-
-        let body = StreamChatRequest {
+        let body = ChatRequest {
             model: self.model.clone(),
             messages,
             tools,
             stream: true,
         };
 
-        let response = http_client
+        let response = self
+            .client
             .post("https://api.openai.com/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
