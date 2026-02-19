@@ -21,6 +21,12 @@ interface SoulOutput {
   sigil: string;
 }
 
+interface ToolOutput {
+  success: boolean;
+  data: Record<string, unknown> | null;
+  error: string | null;
+}
+
 interface Props {
   onComplete: (output: SoulOutput) => void;
 }
@@ -31,6 +37,8 @@ export default function ForgeScenario({ onComplete }: Props) {
   const [selections, setSelections] = useState<Record<string, string>>({});
   const [soulOutput, setSoulOutput] = useState<SoulOutput | null>(null);
   const [loading, setLoading] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     invoke<ForgeScenarioInfo[]>("get_forge_scenarios")
@@ -72,6 +80,28 @@ export default function ForgeScenario({ onComplete }: Props) {
 
   const allSelected = scenarios.length > 0 && scenarios.every((s) => selections[s.id]);
 
+  const handleTestAgent = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const output = await invoke<ToolOutput>("execute_tool", {
+        skillId: "com.abigail.skills.shell",
+        toolName: "execute",
+        params: { command: "echo Abigail skill system is operational.", timeout_ms: 5000 },
+      });
+      if (output.success) {
+        const stdout = output.data?.formatted ?? output.data?.stdout ?? "OK";
+        setTestResult(`${stdout}`);
+      } else {
+        setTestResult(`Error: ${output.error ?? "unknown"}`);
+      }
+    } catch (e) {
+      setTestResult(`Skill test failed: ${e}`);
+    } finally {
+      setTesting(false);
+    }
+  };
+
   if (soulOutput) {
     return (
       <div className="flex flex-col items-center gap-6 p-8 max-w-2xl mx-auto">
@@ -106,12 +136,28 @@ export default function ForgeScenario({ onComplete }: Props) {
           </p>
         </div>
 
-        <button
-          className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg transition-opacity"
-          onClick={() => onComplete(soulOutput)}
-        >
-          Accept Soul
-        </button>
+        {testResult && (
+          <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 w-full">
+            <p className="text-xs text-gray-400 mb-1">Skill Test Result</p>
+            <pre className="text-green-400 text-sm font-mono whitespace-pre-wrap">{testResult}</pre>
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <button
+            className="border border-gray-600 hover:border-blue-500 text-gray-300 hover:text-white px-6 py-3 rounded-lg transition-colors disabled:opacity-50"
+            onClick={handleTestAgent}
+            disabled={testing}
+          >
+            {testing ? "Testing..." : "Test Agent"}
+          </button>
+          <button
+            className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg transition-opacity"
+            onClick={() => onComplete(soulOutput)}
+          >
+            Accept Soul
+          </button>
+        </div>
       </div>
     );
   }

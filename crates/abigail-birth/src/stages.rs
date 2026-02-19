@@ -25,11 +25,11 @@ pub enum BirthStage {
 impl BirthStage {
     pub fn display_message(&self) -> &'static str {
         match self {
-            BirthStage::Darkness => "Generating identity...",
-            BirthStage::Ignition => "Configure your local LLM.",
-            BirthStage::Connectivity => "Establishing connections...",
-            BirthStage::Crystallization => "Crystallizing your soul...",
-            BirthStage::Emergence => "I am awake.",
+            BirthStage::Darkness => "Awakening in the dark...",
+            BirthStage::Ignition => "Igniting the local mind...",
+            BirthStage::Connectivity => "Reaching outward...",
+            BirthStage::Crystallization => "Crystallizing identity...",
+            BirthStage::Emergence => "I breathe. I am.",
         }
     }
 
@@ -400,7 +400,7 @@ mod tests {
 
         let orch = BirthOrchestrator::new(config).unwrap();
         assert_eq!(orch.current_stage(), BirthStage::Darkness);
-        assert_eq!(orch.display_message(), "Generating identity...");
+        assert_eq!(orch.display_message(), "Awakening in the dark...");
 
         let _ = fs::remove_dir_all(&tmp);
     }

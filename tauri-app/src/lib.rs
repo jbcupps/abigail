@@ -2680,6 +2680,8 @@ fn execute_tool_call<'a>(
                     }),
                 );
 
+                let start = std::time::Instant::now();
+
                 // Search skills for a tool with this name
                 if let Ok(manifests) = state.registry.list() {
                     for manifest in &manifests {
@@ -2701,6 +2703,21 @@ fn execute_tool_call<'a>(
 
                                 match state.executor.execute(&manifest.id, other, params).await {
                                     Ok(output) => {
+                                        let duration_ms = start.elapsed().as_millis() as u64;
+                                        tracing::info!(
+                                            tool = other,
+                                            duration_ms = duration_ms,
+                                            success = output.success,
+                                            "Tool execution complete"
+                                        );
+                                        let _ = app.emit(
+                                            "chat-status",
+                                            serde_json::json!({
+                                                "status": "done",
+                                                "tool": other,
+                                                "duration_ms": duration_ms,
+                                            }),
+                                        );
                                         if output.success {
                                             // Extract formatted text for LLM consumption
                                             if let Some(ref data) = output.data {
@@ -2718,7 +2735,24 @@ fn execute_tool_call<'a>(
                                                 .unwrap_or_else(|| "Tool failed".to_string());
                                         }
                                     }
-                                    Err(e) => return format!("Tool error: {}", e),
+                                    Err(e) => {
+                                        let duration_ms = start.elapsed().as_millis() as u64;
+                                        tracing::error!(
+                                            tool = other,
+                                            duration_ms = duration_ms,
+                                            error = %e,
+                                            "Tool execution failed"
+                                        );
+                                        let _ = app.emit(
+                                            "chat-status",
+                                            serde_json::json!({
+                                                "status": "error",
+                                                "tool": other,
+                                                "error": e.to_string(),
+                                            }),
+                                        );
+                                        return format!("Tool error: {}", e);
+                                    }
                                 }
                             }
                         }
@@ -3718,7 +3752,7 @@ fn value_to_identity(v: &serde_json::Value) -> CrystallizationIdentity {
     }
 }
 
-/// Generate soul.md from template with name, purpose, personality.
+/// Generate soul.md from template with name, purpose, personality, mentor_name.
 /// Returns the generated content for preview.
 #[tauri::command]
 fn crystallize_soul(
@@ -3726,8 +3760,15 @@ fn crystallize_soul(
     name: String,
     purpose: String,
     personality: String,
+    mentor_name: String,
 ) -> Result<String, String> {
-    let soul_content = abigail_core::templates::fill_soul_template(&name, &purpose, &personality);
+    let mentor = if mentor_name.trim().is_empty() {
+        "my mentor".to_string()
+    } else {
+        mentor_name.trim().to_string()
+    };
+    let soul_content =
+        abigail_core::templates::fill_soul_template(&name, &purpose, &personality, &mentor);
     let growth_content = abigail_core::templates::GROWTH_MD.to_string();
 
     // Update agent name in config

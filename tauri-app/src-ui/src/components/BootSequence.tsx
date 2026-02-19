@@ -49,6 +49,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [crystalName, setCrystalName] = useState("");
   const [crystalPurpose, setCrystalPurpose] = useState("");
   const [crystalPersonality, setCrystalPersonality] = useState("");
+  const [crystalMentorName, setCrystalMentorName] = useState("");
   const [genesisPath, setGenesisPath] = useState<string | null>(null);
 
   // Ref to BirthChat for injecting key confirmations
@@ -135,7 +136,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
       await invoke("complete_birth");
 
       setStage("Life");
-      setMessage("I am awake.");
+      setMessage("I breathe. I am.");
       await new Promise((resolve) => setTimeout(resolve, 500));
       onComplete();
     } catch (e) {
@@ -306,6 +307,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         name: crystalName.trim(),
         purpose: crystalPurpose.trim() || "assist, retrieve, connect, and surface information",
         personality: crystalPersonality.trim() || "helpful, clear, and honest",
+        mentorName: crystalMentorName.trim(),
       });
       setSoulPreview(preview);
       setStage("Emergence");
@@ -327,7 +329,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
       setMessage("Hive trust chain established.");
 
       setStage("Life");
-      setMessage("I am awake.");
+      setMessage("I breathe. I am.");
       await new Promise((resolve) => setTimeout(resolve, 1500));
       if (!mountedRef.current) return;
       onComplete();
@@ -552,20 +554,31 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               Crystallization: Define Your Agent
             </h2>
             <p className="text-theme-text-dim text-sm mb-6">
-              Review the details below. Edit anything that needs adjustment —
-              these will become part of Abigail's soul document.
+              These details will be woven into the constitutional soul document
+              — signed, sealed, and verified on every boot. Choose carefully;
+              this is who your agent becomes.
             </p>
 
             <div className="space-y-4 mb-6">
               <div>
-                <label className="block text-theme-text text-sm mb-1">Name</label>
+                <label className="block text-theme-text text-sm mb-1">Your Name (Mentor)</label>
+                <input
+                  type="text"
+                  className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
+                  placeholder="Your name — woven into the soul document"
+                  value={crystalMentorName}
+                  onChange={(e) => setCrystalMentorName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-theme-text text-sm mb-1">Agent Name</label>
                 <input
                   type="text"
                   className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
                   placeholder="Abigail"
                   value={crystalName}
                   onChange={(e) => setCrystalName(e.target.value)}
-                  autoFocus
                 />
               </div>
               <div>
@@ -618,14 +631,20 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
             )}
 
             <div className="text-center">
-              <p className="text-theme-text mb-4">
-                Ready to sign and come alive.
+              <p className="text-theme-text mb-2">
+                Soul, ethics, and instincts are ready.
+              </p>
+              <p className="text-theme-text-dim text-sm mb-6">
+                Signing the constitutional documents with your Ed25519 key
+                will bring this identity to life. The signed documents are
+                verified on every boot — they cannot be altered without
+                detection.
               </p>
               <button
                 onClick={handleCompleteEmergence}
                 className="border border-theme-primary px-8 py-3 rounded font-bold hover:bg-theme-primary-glow text-lg"
               >
-                Emerge
+                Sign and Emerge
               </button>
             </div>
 
@@ -636,7 +655,10 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         {/* ── LIFE ── */}
         {stage === "Life" && (
           <div className="p-6 text-center">
-            <p className="text-theme-primary-dim text-xl mb-2">{message}</p>
+            <p className="text-theme-primary-dim text-xl mb-2">I breathe. I am.</p>
+            <p className="text-theme-text-dim text-sm mb-4">
+              Constitutional documents signed. Identity verified. Birth memory crystallized.
+            </p>
             <div className="animate-pulse text-theme-text-dim">...</div>
           </div>
         )}
