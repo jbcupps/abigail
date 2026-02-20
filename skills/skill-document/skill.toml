@@ -1,0 +1,19 @@
+[skill]
+id = "com.abigail.skills.document"
+name = "Document"
+version = "0.1.0"
+description = "Analyze documents: word count, headings extraction, markdown conversion, summarization"
+category = "Productivity"
+keywords = ["document", "word count", "headings", "markdown", "summary"]
+
+[author]
+name = "Abigail Team"
+
+[runtime]
+runtime = "Native"
+min_abigail_version = "0.1.0"
+platforms = ["Windows", "macOS", "Linux"]
+
+[[permissions]]
+permission = { FileSystem = { Read = ["~"] } }
+reason = "Read document files for analysis"

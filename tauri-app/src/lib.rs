@@ -5,6 +5,7 @@ pub mod ollama_manager;
 pub mod rate_limit;
 mod templates;
 
+use abigail_auth::AuthManager;
 use abigail_birth::BirthOrchestrator;
 use abigail_core::{
     generate_external_keypair, sign_constitutional_documents, validate_local_llm_url, AppConfig,
@@ -27,10 +28,20 @@ use ollama_manager::OllamaManager;
 use rate_limit::CooldownGuard;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use skill_calendar::CalendarSkill;
+use skill_clipboard::ClipboardSkill;
+use skill_code_analysis::CodeAnalysisSkill;
+use skill_database::DatabaseSkill;
+use skill_document::DocumentSkill;
 use skill_filesystem::FilesystemSkill;
+use skill_git::GitSkill;
 use skill_http::HttpSkill;
+use skill_image::ImageSkill;
+use skill_knowledge_base::KnowledgeBaseSkill;
+use skill_notification::NotificationSkill;
 use skill_perplexity_search::PerplexitySearchSkill;
 use skill_shell::ShellSkill;
+use skill_system_monitor::SystemMonitorSkill;
 use skill_web_search::WebSearchSkill;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -155,6 +166,7 @@ fn redact_api_keys(text: &str) -> String {
 ///   2. `birth`             (RwLock)
 ///   3. `secrets`           (Mutex)
 ///   4. `hive_secrets`      (Mutex)
+///   4b. `auth_manager`     (Arc — internal async locks, acquire after hive_secrets)
 ///   5. `router`            (RwLock)
 ///   6. `active_agent_id`   (RwLock)
 ///   7. `subagent_manager`  (RwLock)
@@ -179,6 +191,8 @@ struct AppState {
     secrets: Arc<Mutex<SecretsVault>>,
     /// Hive-level secrets vault (shared API keys across all agents)
     hive_secrets: Arc<Mutex<SecretsVault>>,
+    /// Auth manager for integration credential lifecycle
+    auth_manager: Arc<abigail_auth::AuthManager>,
     /// Identity manager for the Hive multi-agent system
     identity_manager: Arc<IdentityManager>,
     /// Currently active agent UUID (None if no agent loaded)
@@ -1941,6 +1955,99 @@ fn list_missing_skill_secrets(
     Ok(state.registry.list_all_missing_secrets(&paths))
 }
 
+// ── Integration Status ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct IntegrationStatus {
+    service_id: String,
+    name: String,
+    configured: bool,
+    missing_secrets: Vec<String>,
+    setup_url: String,
+    setup_instructions: String,
+}
+
+#[tauri::command]
+fn get_integration_status(state: tauri::State<AppState>) -> Result<Vec<IntegrationStatus>, String> {
+    let vault = state.secrets.lock().map_err(|e| e.to_string())?;
+    let integrations = abigail_skills::preloaded_integration_skills();
+
+    let mut statuses = Vec::new();
+    for (config, auth) in &integrations {
+        let secret_keys = abigail_skills::dynamic::extract_secret_keys(config);
+        let missing: Vec<String> = secret_keys
+            .iter()
+            .filter(|k| vault.get_secret(k).is_none())
+            .cloned()
+            .collect();
+        statuses.push(IntegrationStatus {
+            service_id: auth.service_id.clone(),
+            name: config.name.clone(),
+            configured: missing.is_empty(),
+            missing_secrets: missing,
+            setup_url: auth.setup_url.clone(),
+            setup_instructions: auth.setup_instructions.clone(),
+        });
+    }
+
+    Ok(statuses)
+}
+
+#[tauri::command]
+fn store_integration_credential(
+    state: tauri::State<AppState>,
+    service_id: String,
+    credentials: HashMap<String, String>,
+) -> Result<(), String> {
+    let integrations = abigail_skills::preloaded_integration_skills();
+    let (_config, auth) = integrations
+        .iter()
+        .find(|(_, a)| a.service_id == service_id)
+        .ok_or_else(|| format!("Unknown integration service: {}", service_id))?;
+
+    // For Jira BasicAuth, compute the base64 value from email + api_token
+    if service_id == "jira" {
+        let email = credentials
+            .get("jira_email")
+            .ok_or("Missing jira_email credential")?;
+        let api_token = credentials
+            .get("jira_api_token")
+            .ok_or("Missing jira_api_token credential")?;
+        let domain = credentials
+            .get("jira_domain")
+            .ok_or("Missing jira_domain credential")?;
+
+        let encoded =
+            base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", email, api_token));
+
+        let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
+        vault.set_secret("jira_basic_auth", &encoded);
+        vault.set_secret("jira_domain", domain);
+        vault.save().map_err(|e| e.to_string())?;
+    } else {
+        // For StaticToken services, store each credential directly
+        let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
+        for (key, value) in &credentials {
+            vault.set_secret(key, value);
+        }
+        vault.save().map_err(|e| e.to_string())?;
+    }
+
+    // Clear auth cache and re-register the provider
+    let auth_method = auth.auth_method.clone();
+    let sid = auth.service_id.clone();
+    let am = state.auth_manager.clone();
+    // Spawn async re-registration (non-blocking from sync command)
+    tokio::spawn(async move {
+        am.clear_cache(&sid).await;
+        if let Err(e) = am.register_method(&sid, &auth_method).await {
+            tracing::warn!("Failed to re-register auth for '{}': {}", sid, e);
+        }
+    });
+
+    Ok(())
+}
+
 // ── Chat ────────────────────────────────────────────────────────────
 
 /// Build tool definitions for the chat command, including registered skills.
@@ -1967,7 +2074,9 @@ fn chat_tool_definitions(
         name: "delegate_to_subagent".to_string(),
         description: "Delegate a task to a specialized subagent. Available subagents: \
                       'research' (web search/research), 'privacy' (local PII-safe processing), \
-                      'file_ops' (file system and shell commands), 'external_comm' (email, HTTP, voice). \
+                      'file_ops' (file system, shell, git, code analysis, database, documents, images), \
+                      'external_comm' (email, HTTP, browser), \
+                      'productivity' (calendar, notifications, scheduling). \
                       The subagent will use its own tools and return a result."
             .to_string(),
         parameters: serde_json::json!({
@@ -1976,7 +2085,7 @@ fn chat_tool_definitions(
                 "subagent_id": {
                     "type": "string",
                     "description": "ID of the subagent to delegate to",
-                    "enum": ["research", "privacy", "file_ops", "external_comm"]
+                    "enum": ["research", "privacy", "file_ops", "external_comm", "productivity"]
                 },
                 "task": {
                     "type": "string",
@@ -1992,6 +2101,22 @@ fn chat_tool_definitions(
 
     // HTTP client capability tools
     tools.extend(http_client.tool_definitions());
+
+    // Integration status tool
+    tools.push(abigail_capabilities::cognitive::ToolDefinition {
+        name: "check_integration_status".to_string(),
+        description:
+            "Check the configuration status of preloaded integrations (GitHub, Slack, Jira). \
+                      Returns which integrations are configured, which have missing credentials, \
+                      and setup instructions. Call this before attempting to use integration tools \
+                      to verify credentials are available."
+                .to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    });
 
     // Dynamic skill management tools
     tools.push(abigail_capabilities::cognitive::ToolDefinition {
@@ -2352,6 +2477,38 @@ fn execute_tool_call<'a>(
                     "Crystallization recommended with name='{}', purpose='{}', personality='{}'.",
                     name, purpose, personality
                 )
+            }
+            "check_integration_status" => {
+                let state = app.state::<AppState>();
+                let vault = match state.secrets.lock() {
+                    Ok(v) => v,
+                    Err(e) => return format!("Error accessing vault: {}", e),
+                };
+                let integrations = abigail_skills::preloaded_integration_skills();
+                let mut lines = Vec::new();
+                for (config, auth) in &integrations {
+                    let secret_keys = abigail_skills::dynamic::extract_secret_keys(config);
+                    let missing: Vec<&str> = secret_keys
+                        .iter()
+                        .filter(|k| vault.get_secret(k).is_none())
+                        .map(|s| s.as_str())
+                        .collect();
+                    if missing.is_empty() {
+                        lines.push(format!(
+                            "- {} ({}): Configured",
+                            config.name, auth.service_id
+                        ));
+                    } else {
+                        lines.push(format!(
+                            "- {} ({}): NOT configured — missing secrets: {}. Setup: {}",
+                            config.name,
+                            auth.service_id,
+                            missing.join(", "),
+                            auth.setup_url
+                        ));
+                    }
+                }
+                format!("Integration status:\n{}", lines.join("\n"))
             }
             "delegate_to_subagent" => {
                 let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
@@ -4529,7 +4686,7 @@ pub fn run() {
 
     tracing::info!("Abigail starting up — tracing initialized");
 
-    let config = get_config();
+    let mut config = get_config();
 
     // Initialize the Hive Identity Manager
     let identity_manager = Arc::new(
@@ -4556,6 +4713,9 @@ pub fn run() {
         SecretsVault::load(hive_secrets_dir.clone())
             .unwrap_or_else(|_| SecretsVault::new(hive_secrets_dir)),
     ));
+
+    // Initialize auth manager for integration credential lifecycle
+    let auth_manager = Arc::new(AuthManager::new(secrets.clone()));
 
     // Determine Ego provider from config + vault + hive vault before building router
     let (ego_provider, ego_api_key) = {
@@ -4718,6 +4878,72 @@ pub fn run() {
             PerplexitySearchSkill::with_secrets(pplx_manifest.clone(), secrets.clone());
         let _ = registry.register(pplx_manifest.id.clone(), Arc::new(pplx_skill));
     }
+    {
+        let kb_manifest = KnowledgeBaseSkill::default_manifest();
+        let kb_skill = KnowledgeBaseSkill::new(kb_manifest.clone(), config.data_dir.clone());
+        let _ = registry.register(kb_manifest.id.clone(), Arc::new(kb_skill));
+    }
+    {
+        let git_manifest = GitSkill::default_manifest();
+        let git_skill = GitSkill::new(git_manifest.clone());
+        let _ = registry.register(git_manifest.id.clone(), Arc::new(git_skill));
+    }
+    {
+        let ca_manifest = CodeAnalysisSkill::default_manifest();
+        let mut ca_roots = vec![config.data_dir.clone()];
+        if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+            ca_roots.push(PathBuf::from(home));
+        }
+        let ca_skill = CodeAnalysisSkill::new(ca_manifest.clone(), ca_roots);
+        let _ = registry.register(ca_manifest.id.clone(), Arc::new(ca_skill));
+    }
+    {
+        let db_manifest = DatabaseSkill::default_manifest();
+        let mut db_roots = vec![config.data_dir.clone()];
+        if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+            db_roots.push(PathBuf::from(home));
+        }
+        let db_skill = DatabaseSkill::new(db_manifest.clone(), db_roots);
+        let _ = registry.register(db_manifest.id.clone(), Arc::new(db_skill));
+    }
+    {
+        let cal_manifest = CalendarSkill::default_manifest();
+        let cal_skill = CalendarSkill::new(cal_manifest.clone(), config.data_dir.clone());
+        let _ = registry.register(cal_manifest.id.clone(), Arc::new(cal_skill));
+    }
+    {
+        let doc_manifest = DocumentSkill::default_manifest();
+        let mut doc_roots = vec![config.data_dir.clone()];
+        if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+            doc_roots.push(PathBuf::from(home));
+        }
+        let doc_skill = DocumentSkill::new(doc_manifest.clone(), doc_roots);
+        let _ = registry.register(doc_manifest.id.clone(), Arc::new(doc_skill));
+    }
+    {
+        let notif_manifest = NotificationSkill::default_manifest();
+        let notif_skill = NotificationSkill::new(notif_manifest.clone());
+        let _ = registry.register(notif_manifest.id.clone(), Arc::new(notif_skill));
+    }
+    {
+        let img_manifest = ImageSkill::default_manifest();
+        let mut img_roots = vec![config.data_dir.clone()];
+        if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+            img_roots.push(PathBuf::from(home));
+        }
+        let img_skill = ImageSkill::new(img_manifest.clone(), img_roots);
+        let _ = registry.register(img_manifest.id.clone(), Arc::new(img_skill));
+    }
+    {
+        let clip_manifest = ClipboardSkill::default_manifest();
+        let clip_skill = ClipboardSkill::new(clip_manifest.clone());
+        let _ = registry.register(clip_manifest.id.clone(), Arc::new(clip_skill));
+    }
+    {
+        let sysmon_manifest = SystemMonitorSkill::default_manifest();
+        let sysmon_skill = SystemMonitorSkill::new(sysmon_manifest.clone());
+        let _ = registry.register(sysmon_manifest.id.clone(), Arc::new(sysmon_skill));
+    }
 
     // Load dynamic skills from data_dir/dynamic_skills/
     {
@@ -4729,6 +4955,61 @@ pub fn run() {
                 let id = skill.manifest().id.clone();
                 tracing::info!("Loaded dynamic skill: {}", id.0);
                 let _ = registry.register(id, Arc::new(skill));
+            }
+        }
+    }
+
+    // Bootstrap preloaded integration skills (GitHub, Slack, Jira) if version is outdated
+    {
+        use abigail_skills::{
+            build_preloaded_skills, preloaded_integration_skills, PRELOADED_SKILLS_VERSION,
+        };
+
+        if config.preloaded_skills_version < PRELOADED_SKILLS_VERSION {
+            tracing::info!(
+                "Bootstrapping preloaded integration skills (stored v{} < embedded v{})",
+                config.preloaded_skills_version,
+                PRELOADED_SKILLS_VERSION
+            );
+
+            for skill in build_preloaded_skills(Some(secrets.clone())) {
+                let id = skill.manifest().id.clone();
+                if registry.get_skill(&id).is_err() {
+                    tracing::info!("Registering preloaded skill: {}", id.0);
+                    let _ = registry.register(id, Arc::new(skill));
+                } else {
+                    tracing::debug!("Preloaded skill already registered: {}", id.0);
+                }
+            }
+
+            // Register auth methods (best-effort — secrets may not exist yet)
+            for (_cfg, auth_info) in preloaded_integration_skills() {
+                if let Err(e) = auth_manager
+                    .register_method_blocking(&auth_info.service_id, &auth_info.auth_method)
+                {
+                    tracing::debug!(
+                        "Auth method registration deferred for '{}': {}",
+                        auth_info.service_id,
+                        e
+                    );
+                }
+            }
+
+            config.preloaded_skills_version = PRELOADED_SKILLS_VERSION;
+            let path = config.config_path();
+            if let Err(e) = config.save(&path) {
+                tracing::warn!(
+                    "Failed to save config after preloaded skills bootstrap: {}",
+                    e
+                );
+            }
+        } else {
+            // Even if version is current, still register the preloaded skills into the registry
+            for skill in build_preloaded_skills(Some(secrets.clone())) {
+                let id = skill.manifest().id.clone();
+                if registry.get_skill(&id).is_err() {
+                    let _ = registry.register(id, Arc::new(skill));
+                }
             }
         }
     }
@@ -4773,15 +5054,28 @@ pub fn run() {
                       Use when the user's message contains personal information, credentials, \
                       or sensitive data that should not leave the device."
             .into(),
-        capabilities: vec![],
+        capabilities: vec![
+            "kb_store".into(),
+            "kb_search".into(),
+            "kb_get".into(),
+            "kb_delete".into(),
+            "kb_list_tags".into(),
+            "clipboard_read".into(),
+            "clipboard_write".into(),
+            "system_info".into(),
+            "system_resources".into(),
+            "process_list".into(),
+        ],
         provider: SubagentProvider::SameAsId,
     });
 
     subagent_manager.register(SubagentDefinition {
         id: "file_ops".into(),
         name: "File Operations Agent".into(),
-        description: "Reads, writes, searches, and lists files and directories. Also executes \
-                      shell commands. Use for filesystem tasks and local command execution."
+        description: "Reads, writes, searches, and lists files and directories. Also handles \
+                      shell commands, git operations, code analysis, database queries, document \
+                      analysis, and image processing. Use for filesystem tasks, development \
+                      workflows, and local command execution."
             .into(),
         capabilities: vec![
             "read_file".into(),
@@ -4789,6 +5083,24 @@ pub fn run() {
             "list_directory".into(),
             "search_files".into(),
             "run_command".into(),
+            "git_status".into(),
+            "git_log".into(),
+            "git_diff".into(),
+            "git_branch_list".into(),
+            "git_commit".into(),
+            "analyze_file".into(),
+            "analyze_directory".into(),
+            "search_patterns".into(),
+            "db_query".into(),
+            "db_execute".into(),
+            "db_schema".into(),
+            "doc_word_count".into(),
+            "doc_extract_headings".into(),
+            "doc_convert_md_to_text".into(),
+            "doc_summarize".into(),
+            "image_info".into(),
+            "image_resize".into(),
+            "image_convert".into(),
         ],
         provider: SubagentProvider::SameAsId,
     });
@@ -4828,6 +5140,26 @@ pub fn run() {
         provider: SubagentProvider::SameAsEgo,
     });
 
+    subagent_manager.register(SubagentDefinition {
+        id: "productivity".into(),
+        name: "Productivity Agent".into(),
+        description:
+            "Manages calendar events, sends desktop notifications, and handles scheduling. \
+                      Use when the user wants to create/view/update events, set reminders, or \
+                      receive alerts."
+                .into(),
+        capabilities: vec![
+            "calendar_add_event".into(),
+            "calendar_list_events".into(),
+            "calendar_delete_event".into(),
+            "calendar_update_event".into(),
+            "send_notification".into(),
+            "schedule_notification".into(),
+            "cancel_scheduled".into(),
+        ],
+        provider: SubagentProvider::SameAsId,
+    });
+
     // Initialize browser and HTTP client capabilities
     let browser_cap = abigail_capabilities::sensory::browser::BrowserCapability::new(
         abigail_capabilities::sensory::browser::BrowserCapabilityConfig::default(),
@@ -4852,6 +5184,7 @@ pub fn run() {
         event_bus: event_bus.clone(),
         secrets,
         hive_secrets,
+        auth_manager,
         identity_manager,
         active_agent_id: RwLock::new(None),
         subagent_manager: RwLock::new(subagent_manager),
@@ -5051,6 +5384,8 @@ pub fn run() {
             store_secret,
             remove_secret,
             list_missing_skill_secrets,
+            get_integration_status,
+            store_integration_credential,
             chat,
             chat_stream,
             // New birth flow commands

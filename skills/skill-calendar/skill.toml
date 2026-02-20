@@ -1,0 +1,23 @@
+[skill]
+id = "com.abigail.skills.calendar"
+name = "Calendar"
+version = "0.1.0"
+description = "Manage events and schedules: add, list, update, and delete calendar events"
+category = "Productivity"
+keywords = ["calendar", "event", "schedule", "appointment", "meeting"]
+
+[author]
+name = "Abigail Team"
+
+[runtime]
+runtime = "Native"
+min_abigail_version = "0.1.0"
+platforms = ["Windows", "macOS", "Linux"]
+
+[[permissions]]
+permission = { FileSystem = { Read = ["~"] } }
+reason = "Read calendar database"
+
+[[permissions]]
+permission = { FileSystem = { Write = ["~"] } }
+reason = "Write calendar database"

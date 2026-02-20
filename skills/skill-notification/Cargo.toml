@@ -1,0 +1,16 @@
+[package]
+name = "skill-notification"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+abigail-skills = { path = "../../crates/abigail-skills" }
+abigail-core = { path = "../../crates/abigail-core" }
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+notify-rust = "4"
+uuid.workspace = true

@@ -389,6 +389,7 @@ mod tests {
             email_accounts: Default::default(),
             bundled_ollama: false,
             bundled_model: None,
+            preloaded_skills_version: 0,
         }
     }
 

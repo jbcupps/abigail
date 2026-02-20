@@ -39,3 +39,87 @@ id = "com.abigail.skills.http"
 instruction_file = "skill_http.md"
 keywords = ["http", "api", "request", "fetch url", "download", "rest", "endpoint"]
 enabled = true
+
+[[skill]]
+id = "com.abigail.skills.browser"
+instruction_file = "skill_browser.md"
+keywords = ["browser", "browse", "webpage", "website", "navigate", "click", "screenshot"]
+enabled = true
+
+[[skill]]
+id = "com.abigail.skills.git"
+instruction_file = "skill_git.md"
+keywords = ["git", "commit", "branch", "diff", "merge", "repo", "repository"]
+enabled = true
+
+[[skill]]
+id = "com.abigail.skills.calendar"
+instruction_file = "skill_calendar.md"
+keywords = ["calendar", "event", "schedule", "appointment", "reminder", "meeting"]
+enabled = true
+
+[[skill]]
+id = "com.abigail.skills.knowledge-base"
+instruction_file = "skill_knowledge_base.md"
+keywords = ["knowledge", "knowledge base", "kb", "notes", "store", "remember", "recall"]
+enabled = true
+
+[[skill]]
+id = "com.abigail.skills.code-analysis"
+instruction_file = "skill_code_analysis.md"
+keywords = ["analyze code", "code analysis", "code review", "code structure", "patterns", "complexity"]
+enabled = true
+
+[[skill]]
+id = "com.abigail.skills.image"
+instruction_file = "skill_image.md"
+keywords = ["image", "picture", "photo", "resize", "convert image", "image info"]
+enabled = true
+
+[[skill]]
+id = "com.abigail.skills.clipboard"
+instruction_file = "skill_clipboard.md"
+keywords = ["clipboard", "copy", "paste", "clipboard read", "clipboard write"]
+enabled = true
+
+[[skill]]
+id = "com.abigail.skills.system-monitor"
+instruction_file = "skill_system_monitor.md"
+keywords = ["system info", "cpu", "memory usage", "disk space", "processes", "system monitor"]
+enabled = true
+
+[[skill]]
+id = "com.abigail.skills.database"
+instruction_file = "skill_database.md"
+keywords = ["database", "sql", "query", "sqlite", "db", "schema", "table"]
+enabled = true
+
+[[skill]]
+id = "com.abigail.skills.document"
+instruction_file = "skill_document.md"
+keywords = ["document", "word count", "headings", "markdown", "summarize", "extract"]
+enabled = true
+
+[[skill]]
+id = "com.abigail.skills.notification"
+instruction_file = "skill_notification.md"
+keywords = ["notify", "notification", "alert", "remind", "desktop notification"]
+enabled = true
+
+[[skill]]
+id = "dynamic.github_api"
+instruction_file = "skill_github_api.md"
+keywords = ["github", "github api", "repos", "issues", "pull request", "github token"]
+enabled = true
+
+[[skill]]
+id = "dynamic.slack"
+instruction_file = "skill_slack.md"
+keywords = ["slack", "slack message", "channel", "slack bot", "workspace"]
+enabled = true
+
+[[skill]]
+id = "dynamic.jira"
+instruction_file = "skill_jira.md"
+keywords = ["jira", "jira issue", "jql", "atlassian", "sprint", "backlog"]
+enabled = true

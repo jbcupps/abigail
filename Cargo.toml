@@ -8,6 +8,7 @@ members = [
     "crates/abigail-birth",
     "crates/abigail-soul-crystallization",
     "crates/abigail-skills",
+    "crates/abigail-auth",
     "crates/abigail-keygen",
     "crates/soul-forge",
     "skills/skill-web-search",
@@ -15,6 +16,16 @@ members = [
     "skills/skill-shell",
     "skills/skill-http",
     "skills/skill-perplexity-search",
+    "skills/skill-knowledge-base",
+    "skills/skill-git",
+    "skills/skill-code-analysis",
+    "skills/skill-database",
+    "skills/skill-calendar",
+    "skills/skill-document",
+    "skills/skill-notification",
+    "skills/skill-image",
+    "skills/skill-clipboard",
+    "skills/skill-system-monitor",
     "tauri-app",
 ]
 
@@ -41,3 +52,4 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
 tokio-util = { version = "0.7", features = ["io", "compat"] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
+abigail-auth = { path = "crates/abigail-auth" }
