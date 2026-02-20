@@ -1,0 +1,19 @@
+[skill]
+id = "com.abigail.skills.notification"
+name = "Notification"
+version = "0.1.0"
+description = "Send desktop notifications and schedule timed alerts"
+category = "Productivity"
+keywords = ["notification", "alert", "notify", "reminder", "desktop"]
+
+[author]
+name = "Abigail Team"
+
+[runtime]
+runtime = "Native"
+min_abigail_version = "0.1.0"
+platforms = ["Windows", "macOS", "Linux"]
+
+[[permissions]]
+permission = "Notifications"
+reason = "Send desktop notifications to the user"

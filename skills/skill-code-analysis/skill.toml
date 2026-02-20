@@ -1,0 +1,19 @@
+[skill]
+id = "com.abigail.skills.code-analysis"
+name = "Code Analysis"
+version = "0.1.0"
+description = "Analyze source code files: structure, patterns, complexity, and search"
+category = "Developer"
+keywords = ["code", "analysis", "patterns", "structure", "complexity"]
+
+[author]
+name = "Abigail Team"
+
+[runtime]
+runtime = "Native"
+min_abigail_version = "0.1.0"
+platforms = ["Windows", "macOS", "Linux"]
+
+[[permissions]]
+permission = { FileSystem = { Read = ["~"] } }
+reason = "Read source code files for analysis"

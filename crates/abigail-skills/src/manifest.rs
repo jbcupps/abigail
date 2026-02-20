@@ -245,6 +245,10 @@ fn parse_permissions(sections: &[PermissionSection]) -> Vec<Permission> {
         if let Some(perm_str) = s.permission.as_str() {
             if perm_str == "ShellExecute" {
                 out.push(Permission::ShellExecute);
+            } else if perm_str == "Notifications" {
+                out.push(Permission::Notifications);
+            } else if perm_str == "Clipboard" {
+                out.push(Permission::Clipboard);
             }
             continue;
         }

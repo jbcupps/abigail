@@ -1,0 +1,23 @@
+[skill]
+id = "com.abigail.skills.image"
+name = "Image"
+version = "0.1.0"
+description = "Image processing: get info, resize, and convert between formats"
+category = "Utility"
+keywords = ["image", "picture", "resize", "convert", "photo"]
+
+[author]
+name = "Abigail Team"
+
+[runtime]
+runtime = "Native"
+min_abigail_version = "0.1.0"
+platforms = ["Windows", "macOS", "Linux"]
+
+[[permissions]]
+permission = { FileSystem = { Read = ["~"] } }
+reason = "Read image files"
+
+[[permissions]]
+permission = { FileSystem = { Write = ["~"] } }
+reason = "Write processed image files"

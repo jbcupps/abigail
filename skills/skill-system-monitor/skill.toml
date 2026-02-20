@@ -1,0 +1,15 @@
+[skill]
+id = "com.abigail.skills.system-monitor"
+name = "System Monitor"
+version = "0.1.0"
+description = "Monitor system resources: CPU, memory, disk usage, and running processes"
+category = "Utility"
+keywords = ["system", "cpu", "memory", "disk", "processes", "monitor"]
+
+[author]
+name = "Abigail Team"
+
+[runtime]
+runtime = "Native"
+min_abigail_version = "0.1.0"
+platforms = ["Windows", "macOS", "Linux"]

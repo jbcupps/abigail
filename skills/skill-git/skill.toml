@@ -1,0 +1,23 @@
+[skill]
+id = "com.abigail.skills.git"
+name = "Git"
+version = "0.1.0"
+description = "Git repository operations: status, log, diff, branches, and commits"
+category = "Developer"
+keywords = ["git", "commit", "branch", "diff", "repository"]
+
+[author]
+name = "Abigail Team"
+
+[runtime]
+runtime = "Native"
+min_abigail_version = "0.1.0"
+platforms = ["Windows", "macOS", "Linux"]
+
+[[permissions]]
+permission = "ShellExecute"
+reason = "Execute git commands"
+
+[[permissions]]
+permission = { FileSystem = { Read = ["~"] } }
+reason = "Read repository files"

@@ -1,0 +1,23 @@
+[skill]
+id = "com.abigail.skills.database"
+name = "Database"
+version = "0.1.0"
+description = "Query and manage SQLite databases: run queries, execute statements, inspect schemas"
+category = "Developer"
+keywords = ["database", "sql", "sqlite", "query", "schema"]
+
+[author]
+name = "Abigail Team"
+
+[runtime]
+runtime = "Native"
+min_abigail_version = "0.1.0"
+platforms = ["Windows", "macOS", "Linux"]
+
+[[permissions]]
+permission = { FileSystem = { Read = ["~"] } }
+reason = "Read database files"
+
+[[permissions]]
+permission = { FileSystem = { Write = ["~"] } }
+reason = "Write to database files"

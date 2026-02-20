@@ -1,0 +1,19 @@
+[skill]
+id = "com.abigail.skills.clipboard"
+name = "Clipboard"
+version = "0.1.0"
+description = "Read from and write to the system clipboard"
+category = "Utility"
+keywords = ["clipboard", "copy", "paste"]
+
+[author]
+name = "Abigail Team"
+
+[runtime]
+runtime = "Native"
+min_abigail_version = "0.1.0"
+platforms = ["Windows", "macOS", "Linux"]
+
+[[permissions]]
+permission = "Clipboard"
+reason = "Access system clipboard for read and write operations"

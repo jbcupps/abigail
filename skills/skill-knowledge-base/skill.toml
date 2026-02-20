@@ -1,0 +1,23 @@
+[skill]
+id = "com.abigail.skills.knowledge-base"
+name = "Knowledge Base"
+version = "0.1.0"
+description = "Store, search, and manage structured knowledge with tags and categories"
+category = "Productivity"
+keywords = ["knowledge", "notes", "store", "search", "tags"]
+
+[author]
+name = "Abigail Team"
+
+[runtime]
+runtime = "Native"
+min_abigail_version = "0.1.0"
+platforms = ["Windows", "macOS", "Linux"]
+
+[[permissions]]
+permission = { FileSystem = { Read = ["~"] } }
+reason = "Read knowledge base database"
+
+[[permissions]]
+permission = { FileSystem = { Write = ["~"] } }
+reason = "Write knowledge base database"
