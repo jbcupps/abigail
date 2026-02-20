@@ -16,6 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - 2026-02-20 00:15 EST: Register ProtonMailSkill in runtime, add get_system_diagnostics LLM tool, troubleshooting instruction keywords, and fix skill-proton-mail compile errors
 - 2026-02-19 14:30 EST: Unified UI theme system across all 20 components — chat bubbles, softer backgrounds, focus rings, scrollbar theming, ARIA accessibility, and zero hardcoded gray/blue colors
 - 2026-02-20 10:30 EST: UI overhaul — replace single-line input with auto-growing textarea, remove top tab bar, add slide-out Forge drawer with 10 sub-tabs, expose get_system_diagnostics as Tauri command, add DiagnosticsPanel
+- 2026-02-20 14:30 EST: Add Tauri auto-update plugin with UpdateNotification banner, fix NSIS backup for Hive multi-agent files, add SQLite migration framework with schema_versions table, and UPGRADE.md documentation
+- 2026-02-20 15:30 EST: Add CLI provider adapter for Claude Code, Gemini CLI, OpenAI Codex CLI, and xAI Grok CLI as Ego routing backends
 - Public release readiness: LICENSE, CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md
 - CI workflow for pull request validation (cargo fmt, clippy, test, frontend build)
 - CodeQL static analysis workflow
