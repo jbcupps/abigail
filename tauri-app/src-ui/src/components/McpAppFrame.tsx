@@ -53,11 +53,11 @@ export default function McpAppFrame({
   if (loading) {
     return (
       <div
-        className={`rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 p-4 ${className}`}
+        className={`rounded border border-theme-border-dim bg-theme-bg-elevated p-4 ${className}`}
         role="region"
         aria-label={title}
       >
-        <p className="text-sm text-gray-500 dark:text-gray-400">Loading MCP App…</p>
+        <p className="text-sm text-theme-text-dim">Loading MCP App…</p>
       </div>
     );
   }
@@ -65,10 +65,10 @@ export default function McpAppFrame({
   if (error) {
     return (
       <div
-        className={`rounded border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4 ${className}`}
+        className={`rounded border border-red-800 bg-theme-danger-dim p-4 ${className}`}
         role="alert"
       >
-        <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
+        <p className="text-sm text-theme-danger">{error}</p>
       </div>
     );
   }
@@ -79,7 +79,7 @@ export default function McpAppFrame({
 
   return (
     <div
-      className={`rounded border border-gray-300 dark:border-gray-600 overflow-hidden bg-white dark:bg-gray-900 ${className}`}
+      className={`rounded border border-theme-border-dim overflow-hidden bg-theme-bg-inset ${className}`}
       role="region"
       aria-label={title}
     >

@@ -105,54 +105,54 @@ export default function ForgeScenario({ onComplete }: Props) {
   if (soulOutput) {
     return (
       <div className="flex flex-col items-center gap-6 p-8 max-w-2xl mx-auto">
-        <h2 className="text-2xl font-bold text-white">Soul Forged</h2>
-        <div className="bg-gray-800 rounded-lg p-6 w-full text-center">
-          <p className="text-gray-400 text-sm mb-2">Archetype</p>
-          <h3 className="text-xl font-bold text-blue-400 mb-4">{soulOutput.archetype}</h3>
+        <h2 className="text-2xl font-bold text-theme-text-bright">Soul Forged</h2>
+        <div className="bg-theme-bg-elevated rounded-lg p-6 w-full text-center">
+          <p className="text-theme-text-dim text-sm mb-2">Archetype</p>
+          <h3 className="text-xl font-bold text-theme-info mb-4">{soulOutput.archetype}</h3>
 
           <div className="grid grid-cols-2 gap-3 mb-4">
-            <div className="bg-gray-700 rounded p-2">
-              <p className="text-xs text-gray-400">Deontology</p>
-              <p className="text-white font-mono">{(soulOutput.weights.deontology * 100).toFixed(0)}%</p>
+            <div className="bg-theme-surface rounded p-2">
+              <p className="text-xs text-theme-text-dim">Deontology</p>
+              <p className="text-theme-text-bright font-mono">{(soulOutput.weights.deontology * 100).toFixed(0)}%</p>
             </div>
-            <div className="bg-gray-700 rounded p-2">
-              <p className="text-xs text-gray-400">Teleology</p>
-              <p className="text-white font-mono">{(soulOutput.weights.teleology * 100).toFixed(0)}%</p>
+            <div className="bg-theme-surface rounded p-2">
+              <p className="text-xs text-theme-text-dim">Teleology</p>
+              <p className="text-theme-text-bright font-mono">{(soulOutput.weights.teleology * 100).toFixed(0)}%</p>
             </div>
-            <div className="bg-gray-700 rounded p-2">
-              <p className="text-xs text-gray-400">Areteology</p>
-              <p className="text-white font-mono">{(soulOutput.weights.areteology * 100).toFixed(0)}%</p>
+            <div className="bg-theme-surface rounded p-2">
+              <p className="text-xs text-theme-text-dim">Areteology</p>
+              <p className="text-theme-text-bright font-mono">{(soulOutput.weights.areteology * 100).toFixed(0)}%</p>
             </div>
-            <div className="bg-gray-700 rounded p-2">
-              <p className="text-xs text-gray-400">Welfare</p>
-              <p className="text-white font-mono">{(soulOutput.weights.welfare * 100).toFixed(0)}%</p>
+            <div className="bg-theme-surface rounded p-2">
+              <p className="text-xs text-theme-text-dim">Welfare</p>
+              <p className="text-theme-text-bright font-mono">{(soulOutput.weights.welfare * 100).toFixed(0)}%</p>
             </div>
           </div>
 
-          <pre className="text-green-400 text-xs font-mono whitespace-pre mb-4">{soulOutput.sigil}</pre>
+          <pre className="text-theme-success text-xs font-mono whitespace-pre mb-4">{soulOutput.sigil}</pre>
 
-          <p className="text-xs text-gray-500 font-mono break-all">
+          <p className="text-xs text-theme-text-dim font-mono break-all">
             Hash: {soulOutput.soul_hash}
           </p>
         </div>
 
         {testResult && (
-          <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 w-full">
-            <p className="text-xs text-gray-400 mb-1">Skill Test Result</p>
-            <pre className="text-green-400 text-sm font-mono whitespace-pre-wrap">{testResult}</pre>
+          <div className="bg-theme-bg-elevated border border-theme-border-dim rounded-lg p-4 w-full">
+            <p className="text-xs text-theme-text-dim mb-1">Skill Test Result</p>
+            <pre className="text-theme-success text-sm font-mono whitespace-pre-wrap">{testResult}</pre>
           </div>
         )}
 
         <div className="flex gap-3">
           <button
-            className="border border-gray-600 hover:border-blue-500 text-gray-300 hover:text-white px-6 py-3 rounded-lg transition-colors disabled:opacity-50"
+            className="border border-theme-border-dim hover:border-theme-primary text-theme-text-dim hover:text-theme-text-bright transition-colors px-6 py-3 rounded-lg disabled:opacity-50"
             onClick={handleTestAgent}
             disabled={testing}
           >
             {testing ? "Testing..." : "Test Agent"}
           </button>
           <button
-            className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg transition-opacity"
+            className="border border-theme-primary text-theme-primary hover:bg-theme-primary-glow transition-colors px-8 py-3 rounded-lg"
             onClick={() => onComplete(soulOutput)}
           >
             Accept Soul
@@ -165,22 +165,22 @@ export default function ForgeScenario({ onComplete }: Props) {
   if (scenarios.length === 0) {
     return (
       <div className="flex items-center justify-center p-8">
-        <p className="text-gray-400 animate-pulse">Loading scenarios...</p>
+        <p className="text-theme-text-dim animate-pulse">Loading scenarios...</p>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col items-center gap-6 p-8 max-w-2xl mx-auto">
-      <h2 className="text-2xl font-bold text-white">Soul Forge</h2>
-      <p className="text-gray-400 text-center text-sm">
+      <h2 className="text-2xl font-bold text-theme-text-bright">Soul Forge</h2>
+      <p className="text-theme-text-dim text-center text-sm">
         Scenario {currentIndex + 1} of {scenarios.length}
       </p>
 
       {current && (
-        <div className="bg-gray-800 rounded-lg p-6 w-full">
-          <h3 className="text-lg font-semibold text-white mb-2">{current.title}</h3>
-          <p className="text-gray-400 text-sm mb-4">{current.description}</p>
+        <div className="bg-theme-bg-elevated rounded-lg p-6 w-full">
+          <h3 className="text-lg font-semibold text-theme-text-bright mb-2">{current.title}</h3>
+          <p className="text-theme-text-dim text-sm mb-4">{current.description}</p>
 
           <div className="space-y-2">
             {current.choices.map((choice) => (
@@ -188,13 +188,13 @@ export default function ForgeScenario({ onComplete }: Props) {
                 key={choice.id}
                 className={`w-full text-left p-3 rounded-lg border-2 transition-all ${
                   selections[current.id] === choice.id
-                    ? "border-blue-500 bg-blue-900/20"
-                    : "border-gray-700 bg-gray-700 hover:border-gray-600"
+                    ? "border-theme-primary bg-theme-primary-glow"
+                    : "border-theme-border-dim bg-theme-surface hover:border-theme-border"
                 }`}
                 onClick={() => handleChoice(current.id, choice.id)}
               >
-                <span className="text-white text-sm font-medium">{choice.label}</span>
-                <p className="text-gray-400 text-xs mt-1">{choice.description}</p>
+                <span className="text-theme-text-bright text-sm font-medium">{choice.label}</span>
+                <p className="text-theme-text-dim text-xs mt-1">{choice.description}</p>
               </button>
             ))}
           </div>
@@ -203,7 +203,7 @@ export default function ForgeScenario({ onComplete }: Props) {
 
       <div className="flex gap-3">
         <button
-          className="px-4 py-2 text-gray-400 hover:text-white disabled:opacity-30"
+          className="px-4 py-2 text-theme-text-dim hover:text-theme-text-bright disabled:opacity-30"
           onClick={handleBack}
           disabled={currentIndex === 0}
         >
@@ -212,7 +212,7 @@ export default function ForgeScenario({ onComplete }: Props) {
 
         {currentIndex < scenarios.length - 1 ? (
           <button
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg disabled:opacity-50"
+            className="border border-theme-primary text-theme-primary hover:bg-theme-primary-glow transition-colors px-6 py-2 rounded-lg disabled:opacity-50"
             onClick={handleNext}
             disabled={!selections[current?.id]}
           >
@@ -220,7 +220,7 @@ export default function ForgeScenario({ onComplete }: Props) {
           </button>
         ) : (
           <button
-            className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg disabled:opacity-50"
+            className="border border-theme-success text-theme-success hover:bg-theme-success-dim transition-colors px-6 py-2 rounded-lg disabled:opacity-50"
             onClick={handleCrystallize}
             disabled={!allSelected || loading}
           >

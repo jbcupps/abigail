@@ -121,7 +121,7 @@ export default function TierModelPanel() {
   if (!tierModels) {
     return (
       <div className="flex items-center justify-center p-8">
-        <p className="text-gray-400 animate-pulse">Loading tier models...</p>
+        <p className="text-theme-text-dim animate-pulse">Loading tier models...</p>
       </div>
     );
   }
@@ -129,17 +129,17 @@ export default function TierModelPanel() {
   return (
     <div className="flex flex-col h-full p-4 gap-4 overflow-y-auto">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-white">Model Tiers</h2>
+        <h2 className="text-lg font-semibold text-theme-text-bright">Model Tiers</h2>
         <div className="flex gap-2">
           <button
-            className="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 border border-blue-800 rounded"
+            className="text-xs text-theme-info hover:text-theme-primary-dim px-2 py-1 border border-theme-border-dim rounded"
             onClick={handleRefreshCatalog}
             disabled={refreshing}
           >
             {refreshing ? "Refreshing..." : "Refresh Catalog"}
           </button>
           <button
-            className="text-xs text-gray-400 hover:text-gray-300 px-2 py-1 border border-gray-700 rounded"
+            className="text-xs text-theme-text-dim hover:text-theme-text px-2 py-1 border border-theme-border-dim rounded"
             onClick={handleReset}
           >
             Reset Defaults
@@ -148,16 +148,16 @@ export default function TierModelPanel() {
       </div>
 
       {/* Active Provider Selector */}
-      <div className="bg-gray-800 rounded-lg p-3">
-        <label className="text-sm text-gray-400 block mb-2">Preferred Ego Provider</label>
+      <div className="bg-theme-bg-elevated rounded-lg p-3">
+        <label className="text-sm text-theme-text-dim block mb-2">Preferred Ego Provider</label>
         <div className="flex gap-2 flex-wrap">
           {PROVIDERS.map((p) => (
             <button
               key={p}
               className={`text-xs px-3 py-1.5 rounded capitalize ${
                 activeProvider === p
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                  ? "border border-theme-primary bg-theme-primary-glow text-theme-primary"
+                  : "bg-theme-surface text-theme-text-dim hover:bg-theme-surface-bright"
               }`}
               onClick={() => handleSetActiveProvider(p)}
             >
@@ -169,10 +169,10 @@ export default function TierModelPanel() {
 
       {/* Tier Model Grid */}
       {TIER_NAMES.map((tier) => (
-        <div key={tier} className="bg-gray-800 rounded-lg p-3">
-          <h3 className="text-sm font-semibold text-white mb-2 capitalize">
+        <div key={tier} className="bg-theme-bg-elevated rounded-lg p-3">
+          <h3 className="text-sm font-semibold text-theme-text-bright mb-2 capitalize">
             {tier} Tier
-            <span className="text-gray-500 font-normal ml-2 text-xs">
+            <span className="text-theme-text-dim font-normal ml-2 text-xs">
               {tier === "fast" && "(Quick responses, lower cost)"}
               {tier === "standard" && "(Balanced quality and speed)"}
               {tier === "pro" && "(Maximum quality, council routing)"}
@@ -186,10 +186,10 @@ export default function TierModelPanel() {
 
               return (
                 <div key={provider} className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400 w-20 capitalize">{provider}</span>
+                  <span className="text-xs text-theme-text-dim w-20 capitalize">{provider}</span>
                   {providerModels.length > 0 ? (
                     <select
-                      className={`flex-1 bg-gray-700 text-white text-xs rounded px-2 py-1.5 ${
+                      className={`flex-1 bg-theme-input-bg text-theme-text text-xs rounded px-2 py-1.5 ${
                         hasIssue ? "border border-yellow-600" : ""
                       }`}
                       value={currentModel}
@@ -205,7 +205,7 @@ export default function TierModelPanel() {
                     </select>
                   ) : (
                     <input
-                      className={`flex-1 bg-gray-700 text-white text-xs rounded px-2 py-1.5 ${
+                      className={`flex-1 bg-theme-input-bg text-theme-text text-xs rounded px-2 py-1.5 ${
                         hasIssue ? "border border-yellow-600" : ""
                       }`}
                       value={currentModel}
@@ -224,7 +224,7 @@ export default function TierModelPanel() {
       ))}
 
       <button
-        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg self-end disabled:opacity-50"
+        className="border border-theme-primary text-theme-primary hover:bg-theme-primary-glow transition-colors px-4 py-2 rounded-lg self-end disabled:opacity-50"
         onClick={handleSave}
         disabled={saving}
       >

@@ -82,9 +82,9 @@ export default function OrchestrationPanel() {
   return (
     <div className="flex flex-col h-full p-4 gap-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-white">Orchestration Jobs</h2>
+        <h2 className="text-lg font-semibold text-theme-text-bright">Orchestration Jobs</h2>
         <button
-          className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm"
+          className="border border-theme-primary text-theme-primary hover:bg-theme-primary-glow transition-colors px-3 py-1 rounded text-sm"
           onClick={() => setShowCreate(!showCreate)}
         >
           {showCreate ? "Cancel" : "New Job"}
@@ -93,22 +93,22 @@ export default function OrchestrationPanel() {
 
       {/* Create job form */}
       {showCreate && (
-        <div className="bg-gray-800 rounded-lg p-4 flex flex-col gap-3">
+        <div className="bg-theme-bg-elevated rounded-lg p-4 flex flex-col gap-3">
           <input
-            className="bg-gray-700 text-white rounded px-3 py-2"
+            className="bg-theme-input-bg text-theme-text rounded px-3 py-2"
             placeholder="Job name"
             value={newJob.name}
             onChange={(e) => setNewJob({ ...newJob, name: e.target.value })}
           />
           <div className="flex gap-3">
             <input
-              className="flex-1 bg-gray-700 text-white rounded px-3 py-2"
+              className="flex-1 bg-theme-input-bg text-theme-text rounded px-3 py-2"
               placeholder="Cron expression (e.g. 0 */6 * * *)"
               value={newJob.cron}
               onChange={(e) => setNewJob({ ...newJob, cron: e.target.value })}
             />
             <select
-              className="bg-gray-700 text-white rounded px-3 py-2"
+              className="bg-theme-input-bg text-theme-text rounded px-3 py-2"
               value={newJob.mode}
               onChange={(e) => setNewJob({ ...newJob, mode: e.target.value })}
             >
@@ -118,7 +118,7 @@ export default function OrchestrationPanel() {
           </div>
           {newJob.mode === "agentic_run" && (
             <textarea
-              className="bg-gray-700 text-white rounded px-3 py-2 resize-none"
+              className="bg-theme-input-bg text-theme-text rounded px-3 py-2 resize-none"
               rows={2}
               placeholder="Goal template for agentic run..."
               value={newJob.goal}
@@ -126,7 +126,7 @@ export default function OrchestrationPanel() {
             />
           )}
           <button
-            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded self-end"
+            className="border border-theme-success text-theme-success hover:bg-theme-success-dim transition-colors px-4 py-2 rounded self-end"
             onClick={createJob}
           >
             Create

@@ -201,26 +201,30 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
         {messages.map((msg, i) => (
           <div key={i}>
             {msg.role === "user" && (
-              <div className="text-right">
-                <span className="text-theme-text-dim">Mentor: </span>
-                <span className="text-theme-primary-dim">{msg.content}</span>
+              <div className="flex justify-end animate-fade-in-up">
+                <div className="max-w-[80%] bg-theme-bubble-user rounded-xl rounded-br-sm px-4 py-2.5">
+                  <p className="text-xs text-theme-text-dim mb-1">Mentor</p>
+                  <span className="text-theme-primary-dim text-sm">{msg.content}</span>
+                </div>
               </div>
             )}
             {msg.role === "assistant" && (
-              <div>
-                <span className="text-theme-text">Abigail: </span>
-                <span className="text-theme-text-bright">
-                  {redactApiKeys(msg.content).split("\n").map((line, j, arr) => (
-                    <span key={j}>
-                      {line}
-                      {j < arr.length - 1 && <br />}
-                    </span>
-                  ))}
-                </span>
+              <div className="flex justify-start animate-fade-in-up">
+                <div className="max-w-[80%] bg-theme-bubble-assistant rounded-xl rounded-bl-sm px-4 py-2.5">
+                  <p className="text-xs text-theme-text-dim mb-1">Abigail</p>
+                  <span className="text-theme-text-bright text-sm">
+                    {redactApiKeys(msg.content).split("\n").map((line, j, arr) => (
+                      <span key={j}>
+                        {line}
+                        {j < arr.length - 1 && <br />}
+                      </span>
+                    ))}
+                  </span>
+                </div>
               </div>
             )}
             {msg.role === "system" && (
-              <div className={`text-sm ${msg.variant === "success" ? "text-green-400" : "text-red-400"}`}>
+              <div className={`text-sm px-4 py-2 rounded animate-fade-in-up ${msg.variant === "success" ? "text-theme-success bg-theme-success-dim" : "text-theme-danger bg-theme-danger-dim"}`}>
                 {msg.content}
               </div>
             )}
@@ -247,7 +251,8 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
         <input
           ref={inputRef}
           type="text"
-          className="flex-1 bg-black border border-theme-primary text-theme-text px-3 py-2 rounded text-sm"
+          aria-label="Message to Abigail"
+          className="flex-1 bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded text-sm focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
           placeholder="Speak to Abigail..."
           value={input}
           onChange={(e) => setInput(e.target.value)}

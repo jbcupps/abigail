@@ -18,7 +18,7 @@ interface Props {
 export default function JobsTable({ jobs, onToggle, onDelete, onRunNow }: Props) {
   if (jobs.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center text-gray-500">
+      <div className="flex-1 flex items-center justify-center text-theme-text-dim">
         No orchestration jobs configured. Create one to get started.
       </div>
     );
@@ -27,7 +27,7 @@ export default function JobsTable({ jobs, onToggle, onDelete, onRunNow }: Props)
   return (
     <div className="flex-1 overflow-y-auto">
       <table className="w-full text-sm text-left">
-        <thead className="text-gray-400 border-b border-gray-700">
+        <thead className="text-theme-text-dim border-b border-theme-border-dim">
           <tr>
             <th className="py-2 px-3">Name</th>
             <th className="py-2 px-3">Schedule</th>
@@ -38,9 +38,9 @@ export default function JobsTable({ jobs, onToggle, onDelete, onRunNow }: Props)
         </thead>
         <tbody>
           {jobs.map((job) => (
-            <tr key={job.job_id} className="border-b border-gray-800 hover:bg-gray-800/50">
-              <td className="py-2 px-3 text-white">{job.name}</td>
-              <td className="py-2 px-3 text-gray-400 font-mono text-xs">
+            <tr key={job.job_id} className="border-b border-theme-border-dim hover:bg-theme-hover">
+              <td className="py-2 px-3 text-theme-text-bright">{job.name}</td>
+              <td className="py-2 px-3 text-theme-text-dim font-mono text-xs">
                 {job.cron_expression}
               </td>
               <td className="py-2 px-3">
@@ -51,25 +51,25 @@ export default function JobsTable({ jobs, onToggle, onDelete, onRunNow }: Props)
                 </span>
               </td>
               <td className="py-2 px-3">
-                <span className={`text-xs ${job.enabled ? "text-green-400" : "text-gray-500"}`}>
+                <span className={`text-xs ${job.enabled ? "text-theme-success" : "text-theme-text-dim"}`}>
                   {job.enabled ? "Enabled" : "Disabled"}
                 </span>
               </td>
               <td className="py-2 px-3 text-right space-x-2">
                 <button
-                  className="text-xs text-blue-400 hover:text-blue-300"
+                  className="text-xs text-theme-info hover:text-theme-primary-dim"
                   onClick={() => onRunNow(job.job_id)}
                 >
                   Run Now
                 </button>
                 <button
-                  className="text-xs text-yellow-400 hover:text-yellow-300"
+                  className="text-xs text-theme-warning hover:text-theme-text-bright"
                   onClick={() => onToggle(job.job_id, !job.enabled)}
                 >
                   {job.enabled ? "Disable" : "Enable"}
                 </button>
                 <button
-                  className="text-xs text-red-400 hover:text-red-300"
+                  className="text-xs text-theme-danger hover:text-theme-text-bright"
                   onClick={() => onDelete(job.job_id)}
                 >
                   Delete

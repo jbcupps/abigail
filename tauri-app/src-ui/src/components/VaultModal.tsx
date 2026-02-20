@@ -49,8 +49,8 @@ export default function VaultModal({ secret, onSaved, onCancel }: VaultModalProp
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-      <div className="bg-black border border-theme-primary rounded-lg p-6 max-w-md w-full mx-4">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-label="Setup Required">
+      <div className="bg-theme-bg-elevated border border-theme-primary rounded-lg p-6 max-w-md w-full mx-4">
         <h2 className="text-theme-primary-dim text-lg mb-2">Setup Required</h2>
         <p className="text-theme-text-dim text-sm mb-4">
           Abigail needs access to <span className="text-theme-text-bright">{secret.secret_name}</span> to
@@ -64,7 +64,8 @@ export default function VaultModal({ secret, onSaved, onCancel }: VaultModalProp
           <label className="block text-theme-text text-xs mb-1">{secret.secret_name}</label>
           <input
             type="password"
-            className="w-full bg-black border border-theme-primary text-theme-text px-3 py-2 rounded focus:border-theme-primary-dim focus:outline-none"
+            aria-label={secret.secret_name}
+            className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring focus:outline-none"
             placeholder="Enter value..."
             value={value}
             onChange={(e) => setValue(e.target.value)}

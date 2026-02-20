@@ -242,23 +242,27 @@ function AppInner() {
     case "startup_check":
       return (
         <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col items-center justify-center">
-          <pre className="text-theme-primary text-sm mb-4">
-            ABIGAIL STARTUP
-            ============
-          </pre>
-          <p className="text-theme-text-dim">Running startup checks...</p>
-          <div className="animate-pulse mt-2 text-theme-text-dim">...</div>
+          <div className="bg-theme-bg-elevated border border-theme-border-dim rounded-lg p-6 text-center">
+            <pre className="text-theme-primary text-sm mb-4">
+              ABIGAIL STARTUP
+              ============
+            </pre>
+            <p className="text-theme-text-dim">Running startup checks...</p>
+            <div className="animate-pulse mt-2 text-theme-text-dim">...</div>
+          </div>
         </div>
       );
     case "startup_failed":
       return (
         <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col items-center justify-center p-6">
-          <pre className="text-theme-primary text-sm mb-4">
-            ABIGAIL STARTUP
-            ============
-          </pre>
-          <p className="text-red-400 mb-4">{startupError}</p>
-          <div className="flex gap-4">
+          <div className="bg-theme-bg-elevated border border-theme-border-dim rounded-lg p-6 text-center">
+            <pre className="text-theme-primary text-sm mb-4">
+              ABIGAIL STARTUP
+              ============
+            </pre>
+            <p className="text-theme-danger mb-4">{startupError}</p>
+          </div>
+          <div className="flex gap-4 mt-4">
             <button
               className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
               onClick={handleRetry}
@@ -279,10 +283,12 @@ function AppInner() {
         <>
           <PersonaToggle />
           {/* Tab bar */}
-          <div className="flex items-center border-b border-theme-border bg-theme-bg px-2">
+          <div className="flex items-center gap-1 border-b border-theme-border bg-theme-bg px-2" role="tablist" aria-label="Main navigation">
             {(["chat", "agent", "jobs", "models"] as ChatTab[]).map((tab) => (
               <button
                 key={tab}
+                role="tab"
+                aria-selected={chatTab === tab}
                 className={`px-4 py-2 text-xs font-mono uppercase tracking-wide border-b-2 transition-colors ${
                   chatTab === tab
                     ? "border-theme-primary text-theme-primary"

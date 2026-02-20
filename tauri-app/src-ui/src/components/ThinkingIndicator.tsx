@@ -5,7 +5,7 @@ interface ThinkingIndicatorProps {
 
 export default function ThinkingIndicator({ status, label }: ThinkingIndicatorProps) {
   return (
-    <p className="text-theme-text-dim flex items-center gap-2">
+    <p className="text-theme-text-dim flex items-center gap-2 animate-fade-in-up">
       {label && <span>{label}</span>}
       {status ? (
         <span>{status}</span>
