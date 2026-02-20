@@ -5,6 +5,7 @@ pub mod dynamic;
 pub mod executor;
 pub mod instruction_registry;
 pub mod manifest;
+pub mod preloaded;
 pub mod prelude;
 pub mod protocol;
 pub mod registry;
@@ -22,6 +23,10 @@ pub use dynamic::{DynamicApiSkill, DynamicSkillConfig, DynamicToolConfig};
 pub use executor::SkillExecutor;
 pub use instruction_registry::InstructionRegistry;
 pub use manifest::*;
+pub use preloaded::{
+    build_preloaded_skills, preloaded_integration_skills, PreloadedSkillAuth,
+    PRELOADED_SKILLS_VERSION,
+};
 pub use prelude::*;
 pub use protocol::*;
 pub use registry::{MissingSkillSecret, RegisteredSkill, SkillRegistry};

@@ -1,0 +1,82 @@
+{
+  "id": "dynamic.jira",
+  "name": "Jira",
+  "description": "Search and create issues in Atlassian Jira via the REST API.",
+  "version": "1.0.0",
+  "category": "Integration",
+  "created_at": "2026-02-19T00:00:00Z",
+  "tools": [
+    {
+      "name": "jira_search_issues",
+      "description": "Search Jira issues using JQL (Jira Query Language). Returns key, summary, status, and assignee.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "jql": {
+            "type": "string",
+            "description": "JQL query (e.g. 'project = PROJ AND status = Open')"
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Max results to return (default 20)",
+            "default": 20
+          }
+        },
+        "required": ["jql"]
+      },
+      "method": "POST",
+      "url_template": "https://{{secret:jira_domain}}/rest/api/3/search",
+      "headers": {
+        "Authorization": "Basic {{secret:jira_basic_auth}}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      "body_template": "{\"jql\": \"{{jql}}\", \"maxResults\": {{max_results}}, \"fields\": [\"summary\", \"status\", \"assignee\", \"priority\"]}",
+      "response_extract": {
+        "total": "total",
+        "issues": "issues"
+      },
+      "response_format": null
+    },
+    {
+      "name": "jira_create_issue",
+      "description": "Create a new Jira issue in a project.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_key": {
+            "type": "string",
+            "description": "Jira project key (e.g. 'PROJ')"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Issue summary/title"
+          },
+          "description": {
+            "type": "string",
+            "description": "Issue description (plain text)"
+          },
+          "issue_type": {
+            "type": "string",
+            "description": "Issue type: Task, Bug, Story, Epic",
+            "default": "Task"
+          }
+        },
+        "required": ["project_key", "summary"]
+      },
+      "method": "POST",
+      "url_template": "https://{{secret:jira_domain}}/rest/api/3/issue",
+      "headers": {
+        "Authorization": "Basic {{secret:jira_basic_auth}}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      "body_template": "{\"fields\": {\"project\": {\"key\": \"{{project_key}}\"}, \"summary\": \"{{summary}}\", \"description\": {\"type\": \"doc\", \"version\": 1, \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"{{description}}\"}]}]}, \"issuetype\": {\"name\": \"{{issue_type}}\"}}}",
+      "response_extract": {
+        "key": "key",
+        "url": "self"
+      },
+      "response_format": "Created issue {{key}}"
+    }
+  ]
+}

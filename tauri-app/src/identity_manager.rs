@@ -249,6 +249,7 @@ impl IdentityManager {
             email_accounts: Vec::new(),
             bundled_ollama: cfg!(windows),
             bundled_model: Some("qwen2.5:0.5b".to_string()),
+            preloaded_skills_version: 0,
         };
         let config_path = agent_dir.join("config.json");
         config.save(&config_path).map_err(|e| e.to_string())?;

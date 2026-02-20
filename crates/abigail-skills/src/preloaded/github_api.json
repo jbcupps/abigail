@@ -1,0 +1,115 @@
+{
+  "id": "dynamic.github_api",
+  "name": "GitHub API",
+  "description": "Interact with GitHub repositories, issues, and pull requests via the GitHub REST API.",
+  "version": "1.0.0",
+  "category": "Integration",
+  "created_at": "2026-02-19T00:00:00Z",
+  "tools": [
+    {
+      "name": "github_list_repos",
+      "description": "List repositories for the authenticated user. Returns repo name, description, visibility, and URL.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "per_page": {
+            "type": "integer",
+            "description": "Results per page (max 100)",
+            "default": 30
+          },
+          "sort": {
+            "type": "string",
+            "description": "Sort by: created, updated, pushed, full_name",
+            "default": "updated"
+          }
+        }
+      },
+      "method": "GET",
+      "url_template": "https://api.github.com/user/repos?per_page={{per_page}}&sort={{sort}}",
+      "headers": {
+        "Authorization": "Bearer {{secret:github_token}}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "Abigail-Agent"
+      },
+      "body_template": null,
+      "response_extract": {},
+      "response_format": null
+    },
+    {
+      "name": "github_list_issues",
+      "description": "List issues for a repository. Returns issue number, title, state, and assignee.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "description": "Repository owner (user or org)"
+          },
+          "repo": {
+            "type": "string",
+            "description": "Repository name"
+          },
+          "state": {
+            "type": "string",
+            "description": "Filter by state: open, closed, all",
+            "default": "open"
+          }
+        },
+        "required": ["owner", "repo"]
+      },
+      "method": "GET",
+      "url_template": "https://api.github.com/repos/{{owner}}/{{repo}}/issues?state={{state}}",
+      "headers": {
+        "Authorization": "Bearer {{secret:github_token}}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "Abigail-Agent"
+      },
+      "body_template": null,
+      "response_extract": {},
+      "response_format": null
+    },
+    {
+      "name": "github_create_issue",
+      "description": "Create a new issue in a repository.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "description": "Repository owner (user or org)"
+          },
+          "repo": {
+            "type": "string",
+            "description": "Repository name"
+          },
+          "title": {
+            "type": "string",
+            "description": "Issue title"
+          },
+          "body": {
+            "type": "string",
+            "description": "Issue body (Markdown supported)"
+          }
+        },
+        "required": ["owner", "repo", "title"]
+      },
+      "method": "POST",
+      "url_template": "https://api.github.com/repos/{{owner}}/{{repo}}/issues",
+      "headers": {
+        "Authorization": "Bearer {{secret:github_token}}",
+        "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "Abigail-Agent"
+      },
+      "body_template": "{\"title\": \"{{title}}\", \"body\": \"{{body}}\"}",
+      "response_extract": {
+        "number": "number",
+        "url": "html_url"
+      },
+      "response_format": "Created issue #{{number}}: {{url}}"
+    }
+  ]
+}

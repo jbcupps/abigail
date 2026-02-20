@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 11;
+pub const CONFIG_SCHEMA_VERSION: u32 = 12;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -191,6 +191,10 @@ fn default_email_auth_method() -> String {
     "password".to_string()
 }
 
+fn default_preloaded_skills_version() -> u32 {
+    0
+}
+
 fn default_bundled_ollama() -> bool {
     cfg!(windows)
 }
@@ -323,6 +327,12 @@ pub struct AppConfig {
     /// Model to ensure is available when using bundled Ollama.
     #[serde(default = "default_bundled_model")]
     pub bundled_model: Option<String>,
+
+    // ── v12 fields ─────────────────────────────────────────────────
+    /// Version of preloaded integration skills that have been bootstrapped.
+    /// Compared against the embedded version at startup to trigger re-bootstrap.
+    #[serde(default = "default_preloaded_skills_version")]
+    pub preloaded_skills_version: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -370,6 +380,7 @@ impl AppConfig {
             email_accounts: Vec::new(),
             bundled_ollama: default_bundled_ollama(),
             bundled_model: default_bundled_model(),
+            preloaded_skills_version: 0,
         }
     }
 
@@ -539,6 +550,14 @@ impl AppConfig {
             tracing::debug!("Migrated config from v10 to v11");
         }
 
+        // Migration from v11 to v12
+        if self.schema_version < 12 {
+            // v12 adds: preloaded_skills_version (defaults to 0 via serde).
+            self.schema_version = 12;
+            migrated = true;
+            tracing::debug!("Migrated config from v11 to v12");
+        }
+
         migrated
     }
 
@@ -604,6 +623,7 @@ mod tests {
             email_accounts: Vec::new(),
             bundled_ollama: false,
             bundled_model: None,
+            preloaded_skills_version: 0,
         }
     }
 
@@ -823,5 +843,21 @@ mod tests {
         assert_eq!(json, "\"pro\"");
         let parsed: ModelTier = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, ModelTier::Pro);
+    }
+
+    #[test]
+    fn test_migrate_v11_to_v12() {
+        let mut config = AppConfig::default_paths();
+        config.schema_version = 11;
+
+        assert!(config.migrate());
+        assert_eq!(config.schema_version, CONFIG_SCHEMA_VERSION);
+        assert_eq!(config.preloaded_skills_version, 0);
+    }
+
+    #[test]
+    fn test_preloaded_skills_version_default() {
+        let config = AppConfig::default_paths();
+        assert_eq!(config.preloaded_skills_version, 0);
     }
 }
