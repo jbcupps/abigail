@@ -282,11 +282,12 @@ impl IdEgoRouter {
         let last_msg = messages.last().map_or("", |m| &m.content);
         let fp = self.fast_path_classify(last_msg);
         let request = CompletionRequest { messages, tools: None };
-        if fp.target == FastPathTarget::Ego && self.ego.is_some() {
-            self.ego.as_ref().unwrap().complete(&request).await
-        } else {
-            self.id.complete(&request).await
+        if fp.target == FastPathTarget::Ego {
+            if let Some(ref ego) = self.ego {
+                return ego.complete(&request).await;
+            }
         }
+        self.id.complete(&request).await
     }
 
     /// Main route method.

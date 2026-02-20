@@ -32,7 +32,7 @@ describe("App state transitions", () => {
     await user.click(await screen.findByRole("button", { name: /\[skip\]/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/create your first agent to begin/i)).toBeInTheDocument();
+      expect(screen.getByText(/birth a new sovereign entity to begin/i)).toBeInTheDocument();
     });
   });
 
