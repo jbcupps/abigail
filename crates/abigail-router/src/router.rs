@@ -9,8 +9,8 @@
 //!   the fast path.
 
 use abigail_capabilities::cognitive::{
-    stub_heartbeat, AnthropicProvider, CandleProvider, CompletionRequest, CompletionResponse, LlmProvider, LocalHttpProvider,
-    Message, OpenAiProvider, StreamEvent, ToolDefinition,
+    stub_heartbeat, AnthropicProvider, CandleProvider, CompletionRequest, CompletionResponse,
+    LlmProvider, LocalHttpProvider, Message, OpenAiProvider, StreamEvent, ToolDefinition,
 };
 use std::sync::Arc;
 
@@ -264,7 +264,13 @@ impl IdEgoRouter {
     }
 
     fn calculate_id_instinct(&self, text: &str) -> u8 {
-        if text.len() > 500 { 80 } else if text.len() > 100 { 40 } else { 10 }
+        if text.len() > 500 {
+            80
+        } else if text.len() > 100 {
+            40
+        } else {
+            10
+        }
     }
 
     /// Spawn the out-of-band conscience monitor.
@@ -272,16 +278,17 @@ impl IdEgoRouter {
         &self,
         _user_message: String,
     ) -> tokio::task::JoinHandle<ConscienceVerdict> {
-        tokio::spawn(async move {
-            ConscienceVerdict::Clear
-        })
+        tokio::spawn(async move { ConscienceVerdict::Clear })
     }
 
     /// Route using the fast path.
     pub async fn route_fast(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
         let last_msg = messages.last().map_or("", |m| &m.content);
         let fp = self.fast_path_classify(last_msg);
-        let request = CompletionRequest { messages, tools: None };
+        let request = CompletionRequest {
+            messages,
+            tools: None,
+        };
         if fp.target == FastPathTarget::Ego {
             if let Some(ref ego) = self.ego {
                 return ego.complete(&request).await;
@@ -300,20 +307,38 @@ impl IdEgoRouter {
 
     /// Run Superego pre-check.
     pub async fn run_superego_precheck(&self, messages: &[Message]) -> Option<CompletionResponse> {
-        let last_user_msg = messages.iter().rev().find(|m| m.role == "user").map_or("", |m| &m.content);
-        if last_user_msg.is_empty() { return None; }
+        let last_user_msg = messages
+            .iter()
+            .rev()
+            .find(|m| m.role == "user")
+            .map_or("", |m| &m.content);
+        if last_user_msg.is_empty() {
+            return None;
+        }
         let verdict = abigail_core::check_message(last_user_msg);
         if !verdict.allowed {
             let reason = verdict.reason.unwrap_or_else(|| "Blocked".to_string());
-            return Some(CompletionResponse { content: format!("Blocked: {}", reason), tool_calls: None });
+            return Some(CompletionResponse {
+                content: format!("Blocked: {}", reason),
+                tool_calls: None,
+            });
         }
         None
     }
 
     /// Route with tools.
-    pub async fn route_with_tools(&self, messages: Vec<Message>, tools: Vec<ToolDefinition>) -> anyhow::Result<CompletionResponse> {
-        if let Some(deny) = self.run_superego_precheck(&messages).await { return Ok(deny); }
-        let request = CompletionRequest { messages, tools: Some(tools) };
+    pub async fn route_with_tools(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+    ) -> anyhow::Result<CompletionResponse> {
+        if let Some(deny) = self.run_superego_precheck(&messages).await {
+            return Ok(deny);
+        }
+        let request = CompletionRequest {
+            messages,
+            tools: Some(tools),
+        };
         if let Some(ref ego) = self.ego {
             ego.complete(&request).await
         } else {
@@ -327,14 +352,29 @@ impl IdEgoRouter {
     }
 
     /// Streaming routing.
-    pub async fn route_stream(&self, messages: Vec<Message>, tx: tokio::sync::mpsc::Sender<StreamEvent>) -> anyhow::Result<CompletionResponse> {
-        let request = CompletionRequest { messages, tools: None };
+    pub async fn route_stream(
+        &self,
+        messages: Vec<Message>,
+        tx: tokio::sync::mpsc::Sender<StreamEvent>,
+    ) -> anyhow::Result<CompletionResponse> {
+        let request = CompletionRequest {
+            messages,
+            tools: None,
+        };
         self.id.stream(&request, tx).await
     }
 
     /// Streaming with tools.
-    pub async fn route_stream_with_tools(&self, messages: Vec<Message>, tools: Vec<ToolDefinition>, tx: tokio::sync::mpsc::Sender<StreamEvent>) -> anyhow::Result<CompletionResponse> {
-        let request = CompletionRequest { messages, tools: Some(tools) };
+    pub async fn route_stream_with_tools(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        tx: tokio::sync::mpsc::Sender<StreamEvent>,
+    ) -> anyhow::Result<CompletionResponse> {
+        let request = CompletionRequest {
+            messages,
+            tools: Some(tools),
+        };
         self.id.stream(&request, tx).await
     }
 }
@@ -350,13 +390,25 @@ fn build_ego_provider(
         None => return (None, None),
     };
     match provider_name {
-        Some("openai") => (OpenAiProvider::new(Some(key)).ok().map(|p| Arc::new(p) as Arc<dyn LlmProvider>), Some(EgoProvider::OpenAi)),
-        Some("anthropic") => (AnthropicProvider::new(key).ok().map(|p| Arc::new(p) as Arc<dyn LlmProvider>), Some(EgoProvider::Anthropic)),
+        Some("openai") => (
+            OpenAiProvider::new(Some(key))
+                .ok()
+                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
+            Some(EgoProvider::OpenAi),
+        ),
+        Some("anthropic") => (
+            AnthropicProvider::new(key)
+                .ok()
+                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
+            Some(EgoProvider::Anthropic),
+        ),
         _ => (None, None),
     }
 }
 
-fn build_id_provider(local_llm_base_url: Option<String>) -> (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) {
+fn build_id_provider(
+    local_llm_base_url: Option<String>,
+) -> (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) {
     if let Some(url) = local_llm_base_url.filter(|u| !u.trim().is_empty()) {
         if let Ok(p) = LocalHttpProvider::with_url(url) {
             let p = Arc::new(p);
@@ -366,7 +418,9 @@ fn build_id_provider(local_llm_base_url: Option<String>) -> (Arc<dyn LlmProvider
     (Arc::new(CandleProvider::new()), None)
 }
 
-async fn build_id_provider_auto_detect(local_llm_base_url: Option<String>) -> (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) {
+async fn build_id_provider_auto_detect(
+    local_llm_base_url: Option<String>,
+) -> (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) {
     if let Some(url) = local_llm_base_url.filter(|u| !u.trim().is_empty()) {
         if let Ok(p) = LocalHttpProvider::with_url_auto_model(url).await {
             let p = Arc::new(p);
@@ -379,9 +433,11 @@ async fn build_id_provider_auto_detect(local_llm_base_url: Option<String>) -> (A
 #[cfg(test)]
 mod tests {
     use super::*;
-    use abigail_capabilities::cognitive::{LlmProvider, CompletionRequest, CompletionResponse, Message};
-    use std::sync::Arc;
+    use abigail_capabilities::cognitive::{
+        CompletionRequest, CompletionResponse, LlmProvider, Message,
+    };
     use abigail_core::RoutingMode;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_heartbeat_stub() {
@@ -391,7 +447,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_provider_openai() {
-        let router = IdEgoRouter::new(None, Some("openai"), Some("test-key".to_string()), RoutingMode::EgoPrimary);
+        let router = IdEgoRouter::new(
+            None,
+            Some("openai"),
+            Some("test-key".to_string()),
+            RoutingMode::EgoPrimary,
+        );
         assert!(router.has_ego());
         assert_eq!(router.ego_provider_name(), Some(&EgoProvider::OpenAi));
     }
