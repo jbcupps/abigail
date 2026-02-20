@@ -107,6 +107,12 @@ keywords = ["notify", "notification", "alert", "remind", "desktop notification"]
 enabled = true
 
 [[skill]]
+id = "com.abigail.skills.troubleshooting"
+instruction_file = "skill_troubleshooting.md"
+keywords = ["troubleshoot", "troubleshooting", "diagnose", "diagnostic", "diagnostics", "debug", "status", "health check", "what is wrong", "not working"]
+enabled = true
+
+[[skill]]
 id = "dynamic.github_api"
 instruction_file = "skill_github_api.md"
 keywords = ["github", "github api", "repos", "issues", "pull request", "github token"]

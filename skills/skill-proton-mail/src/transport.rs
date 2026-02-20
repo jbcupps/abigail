@@ -1,9 +1,9 @@
 //! Thin wrapper over abigail-senses ImapClient/SmtpClient for email operations.
 
-use abigail_skills::transport::{ImapClient, SmtpClient};
 use abigail_skills::capability::email::{
     Email, EmailAddress, FetchOptions, OutgoingEmail, SendResult,
 };
+use abigail_skills::transport::{ImapClient, SmtpClient};
 use abigail_skills::{SkillError, SkillResult};
 
 /// Transport state: IMAP and optional SMTP. Sessions are not persisted; each fetch connects fresh.

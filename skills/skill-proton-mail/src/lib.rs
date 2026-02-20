@@ -9,15 +9,15 @@ use tokio::sync::RwLock;
 use abigail_skills::capability::email::{
     EmailTransportCapability, EmailTransportInfo, FetchOptions, OutgoingEmail,
 };
+use abigail_skills::channel::{SkillEvent, TriggerDescriptor, TriggerFrequency, TriggerPriority};
 use abigail_skills::manifest::{
     CapabilityDescriptor, NetworkPermission, Permission, SkillId, SkillManifest,
 };
-use abigail_skills::channel::{SkillEvent, TriggerDescriptor, TriggerFrequency, TriggerPriority};
 use abigail_skills::skill::{
-    CostEstimate, ExecutionContext, HealthStatus, Skill, SkillConfig, SkillHealth, SkillError,
+    CostEstimate, ExecutionContext, HealthStatus, Skill, SkillConfig, SkillError, SkillHealth,
     SkillResult, ToolDescriptor, ToolOutput, ToolParams,
 };
-use abigail_skills::transport::{ImapClient, SmtpClient};
+use abigail_skills::transport::ImapClient;
 
 use crate::transport::ProtonMailTransport;
 
@@ -34,7 +34,8 @@ pub struct ProtonMailSkill {
 impl ProtonMailSkill {
     /// Build manifest from embedded skill.toml or default in code.
     pub fn default_manifest() -> SkillManifest {
-        SkillManifest::parse(include_str!("../skill.toml")).unwrap_or_else(|_| Self::fallback_manifest())
+        SkillManifest::parse(include_str!("../skill.toml"))
+            .unwrap_or_else(|_| Self::fallback_manifest())
     }
 
     fn fallback_manifest() -> SkillManifest {
@@ -45,7 +46,12 @@ impl ProtonMailSkill {
             description: "Proton Mail–style email via IMAP/SMTP.".to_string(),
             license: None,
             category: "Communication".to_string(),
-            keywords: vec!["email".into(), "proton".into(), "imap".into(), "smtp".into()],
+            keywords: vec![
+                "email".into(),
+                "proton".into(),
+                "imap".into(),
+                "smtp".into(),
+            ],
             runtime: "Native".to_string(),
             min_abigail_version: "0.1.0".to_string(),
             platforms: vec!["Windows".into(), "macOS".into(), "Linux".into()],
@@ -184,7 +190,11 @@ impl Skill for ProtonMailSkill {
             .map(String::from)
             .or_else(|| config.secrets.get("imap_user").cloned())
             .unwrap_or_default();
-        let password = config.secrets.get("imap_password").cloned().unwrap_or_default();
+        let password = config
+            .secrets
+            .get("imap_password")
+            .cloned()
+            .unwrap_or_default();
 
         if user.is_empty() || password.is_empty() {
             return Err(SkillError::InitFailed(
@@ -250,7 +260,7 @@ impl Skill for ProtonMailSkill {
                     limit: Some(limit as u32),
                     unread_only,
                 };
-                let mut guard = transport.write().await;
+                let guard = transport.write().await;
                 let emails = guard.fetch_emails(options).await?;
                 let count = emails.len();
                 let first_id = emails.first().map(|e| e.id.clone());
@@ -273,11 +283,14 @@ impl Skill for ProtonMailSkill {
             }
             "send_email" => Ok(ToolOutput::error("send_email not yet implemented")),
             "classify_importance" => {
-                let _email_id = params.get::<String>("email_id").unwrap_or(None);
+                let _email_id = params.get::<String>("email_id").unwrap_or_default();
                 Ok(ToolOutput::success(serde_json::json!("normal")))
             }
             "create_filter" => Ok(ToolOutput::error("create_filter not yet implemented")),
-            _ => Err(SkillError::ToolFailed(format!("Unknown tool: {}", tool_name))),
+            _ => Err(SkillError::ToolFailed(format!(
+                "Unknown tool: {}",
+                tool_name
+            ))),
         }
     }
 
@@ -329,7 +342,9 @@ impl EmailTransportCapability for ProtonMailSkill {
         if let Some(ref t) = self.transport {
             t.read().await.test_connection().await
         } else {
-            Err(SkillError::InitFailed("Transport not initialized".to_string()))
+            Err(SkillError::InitFailed(
+                "Transport not initialized".to_string(),
+            ))
         }
     }
 
@@ -337,7 +352,10 @@ impl EmailTransportCapability for ProtonMailSkill {
         Ok(())
     }
 
-    async fn fetch_emails(&self, options: FetchOptions) -> SkillResult<Vec<abigail_skills::capability::email::Email>> {
+    async fn fetch_emails(
+        &self,
+        options: FetchOptions,
+    ) -> SkillResult<Vec<abigail_skills::capability::email::Email>> {
         let transport = self
             .transport
             .as_ref()
@@ -346,7 +364,10 @@ impl EmailTransportCapability for ProtonMailSkill {
         guard.fetch_emails(options).await
     }
 
-    async fn send_email(&self, email: OutgoingEmail) -> SkillResult<abigail_skills::capability::email::SendResult> {
+    async fn send_email(
+        &self,
+        email: OutgoingEmail,
+    ) -> SkillResult<abigail_skills::capability::email::SendResult> {
         let transport = self
             .transport
             .as_ref()
@@ -356,10 +377,14 @@ impl EmailTransportCapability for ProtonMailSkill {
     }
 
     async fn move_email(&self, _email_id: &str, _folder: &str) -> SkillResult<()> {
-        Err(SkillError::ToolFailed("move_email not yet implemented".to_string()))
+        Err(SkillError::ToolFailed(
+            "move_email not yet implemented".to_string(),
+        ))
     }
 
     async fn delete_email(&self, _email_id: &str) -> SkillResult<()> {
-        Err(SkillError::ToolFailed("delete_email not yet implemented".to_string()))
+        Err(SkillError::ToolFailed(
+            "delete_email not yet implemented".to_string(),
+        ))
     }
 }
