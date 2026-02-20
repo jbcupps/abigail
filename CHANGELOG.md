@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - 2026-02-20 14:30 EST: Add Tauri auto-update plugin with UpdateNotification banner, fix NSIS backup for Hive multi-agent files, add SQLite migration framework with schema_versions table, and UPGRADE.md documentation
 - 2026-02-20 15:30 EST: Add CLI provider adapter for Claude Code, Gemini CLI, OpenAI Codex CLI, and xAI Grok CLI as Ego routing backends
 - 2026-02-20 16:00 EST: Add CLI provider options to birth Ignition/Connectivity stages, post-birth config menu, and LLM tool schema
+- 2026-02-20 19:30 EST: Fix CI gate by committing missing auto-updater deps, schema migration code, capabilities, and UpdateNotification component
 - Public release readiness: LICENSE, CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md
 - CI workflow for pull request validation (cargo fmt, clippy, test, frontend build)
 - CodeQL static analysis workflow
