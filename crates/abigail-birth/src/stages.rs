@@ -390,6 +390,8 @@ mod tests {
             bundled_ollama: false,
             bundled_model: None,
             preloaded_skills_version: 0,
+            primary_color: None,
+            avatar_url: None,
         }
     }
 

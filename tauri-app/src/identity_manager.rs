@@ -18,6 +18,16 @@ pub struct AgentIdentityInfo {
     pub birth_date: Option<String>,
 }
 
+/// Summary of an existing identity for the conflict screen.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdentitySummary {
+    pub name: String,
+    pub birth_date: String,
+    pub data_path: String,
+    pub has_memories: bool,
+    pub has_signatures: bool,
+}
+
 /// The loaded context for a specific agent.
 pub struct AgentContext {
     pub id: String,
@@ -250,6 +260,8 @@ impl IdentityManager {
             bundled_ollama: cfg!(windows),
             bundled_model: Some("qwen2.5:0.5b".to_string()),
             preloaded_skills_version: 0,
+            primary_color: None,
+            avatar_url: None,
         };
         let config_path = agent_dir.join("config.json");
         config.save(&config_path).map_err(|e| e.to_string())?;

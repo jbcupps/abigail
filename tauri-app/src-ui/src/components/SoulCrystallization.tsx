@@ -14,6 +14,8 @@ interface SoulCrystallizationProps {
     name: string;
     purpose: string;
     personality: string;
+    primaryColor: string;
+    avatarUrl: string;
   }) => void;
   onError: (error: string) => void;
 }
@@ -53,12 +55,16 @@ export default function SoulCrystallization({
         name: string | null;
         purpose: string | null;
         personality: string | null;
+        primary_color: string | null;
+        avatar_url: string | null;
       }>("extract_crystallization_identity");
 
       onCrystallizationComplete({
         name: identity.name || "",
         purpose: identity.purpose || "",
         personality: identity.personality || "",
+        primaryColor: identity.primary_color || "",
+        avatarUrl: identity.avatar_url || "",
       });
     } catch (e) {
       console.warn("Could not extract identity:", e);
@@ -67,6 +73,8 @@ export default function SoulCrystallization({
         name: "",
         purpose: "",
         personality: "",
+        primaryColor: "",
+        avatarUrl: "",
       });
     }
   };
@@ -90,6 +98,8 @@ export default function SoulCrystallization({
                     name: data.name || "",
                     purpose: data.purpose || "",
                     personality: data.personality || "",
+                    primaryColor: data.primary_color || "",
+                    avatarUrl: data.avatar_url || "",
                   });
                 } catch {
                   // If preview isn't valid JSON, let manual flow continue

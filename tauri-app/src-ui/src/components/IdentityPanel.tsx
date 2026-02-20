@@ -1,10 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useState, useEffect, useRef } from "react";
+import { useTheme } from "../contexts/ThemeContext";
 import LlmSetupPanel from "./LlmSetupPanel";
 import ApiKeyModal from "./ApiKeyModal";
 import DataSourcesPanel from "./DataSourcesPanel";
 
-type Tab = "status" | "llm" | "keys" | "data" | "identity" | "repair";
+type Tab = "identity" | "keys" | "llm" | "data" | "repair";
 
 interface RouterStatus {
   id_provider: string;
@@ -16,22 +17,21 @@ interface RouterStatus {
 
 interface IdentityPanelProps {
   initialTab?: Tab;
-  /** When true, hides the internal header and tab bar (used inside ForgeDrawer) */
+  /** When true, hides the internal header and tab bar (used inside SanctumDrawer) */
   embedded?: boolean;
 }
 
 export default function IdentityPanel({ initialTab, embedded }: IdentityPanelProps = {}) {
-  const [tab, setTab] = useState<Tab>(initialTab || "status");
+  const [tab, setTab] = useState<Tab>(initialTab || "identity");
   const [routerStatus, setRouterStatus] = useState<RouterStatus | null>(null);
-  const [dataDir, setDataDir] = useState("");
-  const [agentName, setAgentName] = useState<string | null>(null);
+  const { agentName, refreshAgentName, primaryColor, avatarUrl, refreshTheme } = useTheme();
 
   // API Keys tab
   const [activeApiKeyProvider, setActiveApiKeyProvider] = useState<string | null>(null);
   const [storedProviders, setStoredProviders] = useState<string[]>([]);
 
   // Identity tab
-  const [editName, setEditName] = useState("");
+  const [editName, setEditName] = useState(agentName || "");
   const [editPurpose, setEditPurpose] = useState("");
   const [editPersonality, setEditPersonality] = useState("");
   const [identityMessage, setIdentityMessage] = useState("");
@@ -54,36 +54,20 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
     };
   }, []);
 
+  useEffect(() => {
+    if (agentName) setEditName(agentName);
+  }, [agentName]);
+
   const refreshStatus = async () => {
     try {
-      const [status, name] = await Promise.all([
+      const [status, providers] = await Promise.all([
         invoke<RouterStatus>("get_router_status"),
-        invoke<string | null>("get_agent_name"),
+        invoke<string[]>("get_stored_providers"),
       ]);
+      
       if (!mountedRef.current) return;
+      
       setRouterStatus(status);
-      setAgentName(name);
-      if (name) setEditName(name);
-
-      // Get data dir from docs path (parent)
-      const docs = await invoke<string>("get_docs_path");
-      if (!mountedRef.current) return;
-      const parts = docs.replace(/\\/g, "/").split("/");
-      parts.pop();
-      setDataDir(parts.join("/"));
-
-      // Check stored providers
-      const providers: string[] = [];
-      for (const p of ["openai", "anthropic", "perplexity", "xai", "google", "tavily"]) {
-        try {
-          const exists = await invoke<boolean>("check_secret", { key: p });
-          if (exists) providers.push(p);
-        } catch (e) {
-          console.warn(`[IdentityPanel] check_secret failed for ${p}:`, e);
-        }
-        if (!mountedRef.current) return;
-      }
-      if (!mountedRef.current) return;
       setStoredProviders(providers);
     } catch (e) {
       console.warn("[IdentityPanel] refreshStatus failed:", e);
@@ -106,9 +90,13 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
         name: editName.trim(),
         purpose: editPurpose.trim() || "assist, retrieve, connect, and surface information",
         personality: editPersonality.trim() || "helpful, clear, and honest",
+        mentorName: "", // Keeping simple for now
+        primaryColor: primaryColor,
+        avatarUrl: avatarUrl,
       });
       setIdentityMessage("Soul re-crystallized. Restart to apply.");
-      refreshStatus();
+      refreshAgentName();
+      refreshTheme();
     } catch (e) {
       setIdentityMessage(`Error: ${String(e)}`);
     }
@@ -143,12 +131,11 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
   };
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: "status", label: "Status" },
-    { id: "llm", label: "LLM Setup" },
-    { id: "keys", label: "API Keys" },
-    { id: "data", label: "Data" },
-    { id: "identity", label: "Identity" },
-    { id: "repair", label: "Repair" },
+    { id: "identity", label: "Soul" },
+    { id: "keys", label: "Secrets" },
+    { id: "llm", label: "Mind" },
+    { id: "data", label: "Archives" },
+    { id: "repair", label: "Recovery" },
   ];
 
   const hasLocalLlm = routerStatus?.id_provider === "local_http";
@@ -159,8 +146,8 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
         <>
           {/* Header */}
           <div className="px-4 py-3 border-b border-theme-border">
-            <h1 className="text-theme-primary-dim text-lg font-bold">THE FORGE</h1>
-            <p className="text-theme-text-dim text-xs mt-1">Core Identity Management</p>
+            <h1 className="text-theme-primary-dim text-lg font-bold uppercase tracking-widest">THE SANCTUM</h1>
+            <p className="text-theme-text-dim text-[10px] uppercase tracking-tighter mt-1">Sovereign Core Management</p>
           </div>
 
           {/* Tabs */}
@@ -171,7 +158,7 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
                 role="tab"
                 aria-selected={tab === t.id}
                 onClick={() => setTab(t.id)}
-                className={`px-4 py-2 text-sm border-b-2 transition-colors ${
+                className={`px-4 py-2 text-[10px] uppercase tracking-widest border-b-2 transition-colors ${
                   tab === t.id
                     ? "border-theme-primary text-theme-primary"
                     : "border-transparent text-theme-text-dim hover:text-theme-text"
@@ -187,7 +174,7 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
       {/* Warning if no local LLM */}
       {!hasLocalLlm && (
         <div className="px-4 py-2 border-b border-yellow-800 bg-yellow-950/20">
-          <p className="text-yellow-500 text-xs">
+          <p className="text-yellow-500 text-[10px] uppercase tracking-tighter">
             No local LLM configured. Id mode chat requires a local LLM.
           </p>
         </div>
@@ -195,72 +182,110 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
 
       {/* Tab Content */}
       <div className="flex-1 overflow-auto">
-        {/* ── STATUS ── */}
-        {tab === "status" && (
-          <div className="p-6 space-y-4">
+        {/* ── SOUL (IDENTITY) ── */}
+        {tab === "identity" && (
+          <div className="p-6 max-w-lg space-y-6">
             <div>
-              <span className="text-theme-text-dim text-sm">Agent Name: </span>
-              <span className="text-theme-text-bright">{agentName || "Abigail (default)"}</span>
+              <h2 className="text-theme-primary-dim text-lg font-bold uppercase tracking-widest mb-2">Sovereign Soul</h2>
+              <p className="text-theme-text-dim text-[10px] uppercase tracking-tighter mb-6">
+                Refine the essence of your entity. Changes update the cryptographic soul record.
+              </p>
             </div>
-            <div>
-              <span className="text-theme-text-dim text-sm">Router: </span>
-              <span className="text-theme-text-bright">
-                {routerStatus ? `${routerStatus.routing_mode}${routerStatus.routing_mode === "council" && routerStatus.council_providers ? ` (${routerStatus.council_providers} providers)` : ""} | Id: ${routerStatus.id_provider}` : "Loading..."}
-              </span>
+
+            <div className="space-y-4 mb-6">
+              <div className="flex items-center gap-4 p-4 border border-theme-border-dim rounded bg-theme-bg-inset">
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="Soul Avatar" className="w-16 h-16 rounded-full border border-theme-primary shadow-glow" />
+                ) : (
+                  <div 
+                    className="w-16 h-16 rounded-full border border-theme-primary-dim flex items-center justify-center text-theme-primary-dim text-2xl font-bold bg-theme-primary-faint"
+                    style={{ color: primaryColor || undefined, borderColor: primaryColor || undefined }}
+                  >
+                    {editName.charAt(0) || "A"}
+                  </div>
+                )}
+                <div>
+                  <p className="text-theme-text-bright font-bold">{agentName || "Abigail"}</p>
+                  <p className="text-theme-text-dim text-[10px] uppercase tracking-tighter">Sovereign Level 1</p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-theme-text-dim text-[10px] uppercase tracking-tighter mb-1">Name</label>
+                <input
+                  type="text"
+                  className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:outline-none text-sm"
+                  placeholder="Abigail"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-theme-text-dim text-[10px] uppercase tracking-tighter mb-1">Purpose</label>
+                <input
+                  type="text"
+                  className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:outline-none text-sm"
+                  placeholder="assist, retrieve, connect, and surface information"
+                  value={editPurpose}
+                  onChange={(e) => setEditPurpose(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-theme-text-dim text-[10px] uppercase tracking-tighter mb-1">Personality / Tone</label>
+                <input
+                  type="text"
+                  className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:outline-none text-sm"
+                  placeholder="helpful, clear, and honest"
+                  value={editPersonality}
+                  onChange={(e) => setEditPersonality(e.target.value)}
+                />
+              </div>
             </div>
-            <div>
-              <span className="text-theme-text-dim text-sm">Local LLM: </span>
-              <span className={hasLocalLlm ? "text-theme-text-bright" : "text-red-400"}>
-                {routerStatus?.id_url || "Not configured"}
-              </span>
-            </div>
-            <div>
-              <span className="text-theme-text-dim text-sm">Ego (Cloud): </span>
-              <span className={routerStatus?.ego_configured ? "text-theme-text-bright" : "text-yellow-500"}>
-                {routerStatus?.ego_configured ? "Configured" : "Not configured"}
-              </span>
-            </div>
-            <div>
-              <span className="text-theme-text-dim text-sm">Data Dir: </span>
-              <span className="text-theme-text-bright text-xs break-all">{dataDir}</span>
-            </div>
-            <div>
-              <span className="text-theme-text-dim text-sm">Stored Keys: </span>
-              <span className="text-theme-text-bright">
-                {storedProviders.length > 0 ? storedProviders.join(", ") : "None"}
-              </span>
-            </div>
+            {identityMessage && (
+              <p className={`text-xs mb-4 ${identityMessage.startsWith("Error") ? "text-red-400" : "text-theme-text-bright"}`}>
+                {identityMessage}
+              </p>
+            )}
+            <button
+              onClick={handleRecrystallize}
+              className="w-full border border-theme-primary text-theme-primary px-6 py-2 rounded font-bold hover:bg-theme-primary-glow text-xs uppercase tracking-widest transition-all"
+            >
+              Re-crystallize Soul
+            </button>
           </div>
         )}
 
-        {/* ── LLM SETUP ── */}
+        {/* ── MIND (LLM SETUP) ── */}
         {tab === "llm" && (
           <LlmSetupPanel
             onConnected={() => refreshStatus()}
           />
         )}
 
-        {/* ── API KEYS ── */}
+        {/* ── SECRETS (API KEYS) ── */}
         {tab === "keys" && (
-          <div className="p-6">
-            <h2 className="text-theme-primary-dim text-lg mb-4">API Keys</h2>
-            <p className="text-theme-text-dim text-sm mb-6">
-              Manage provider API keys. Keys are encrypted with DPAPI on your device.
-            </p>
+          <div className="p-6 space-y-6">
+            <div>
+              <h2 className="text-theme-primary-dim text-lg font-bold uppercase tracking-widest mb-2">Hive Secrets</h2>
+              <p className="text-theme-text-dim text-[10px] uppercase tracking-tighter mb-6">
+                Cryptographic keys for external cognitive providers. Stored securely via DPAPI.
+              </p>
+            </div>
+            
             <div className="space-y-2">
               {["openai", "anthropic", "perplexity", "xai", "google", "tavily"].map((p) => (
-                <div key={p} className="flex items-center justify-between px-4 py-3 border border-theme-border rounded">
+                <div key={p} className="flex items-center justify-between px-4 py-3 border border-theme-border rounded bg-theme-bg-inset">
                   <div>
-                    <span className="text-theme-text-bright font-bold capitalize">{p}</span>
+                    <span className="text-theme-text-bright font-bold uppercase text-[10px] tracking-widest">{p}</span>
                     {storedProviders.includes(p) && (
-                      <span className="text-theme-text-dim text-xs ml-2">[saved]</span>
+                      <span className="text-theme-primary text-[10px] ml-2 font-bold">[READY]</span>
                     )}
                   </div>
                   <button
-                    className="text-xs border border-theme-primary px-3 py-1 rounded hover:bg-theme-primary-glow"
+                    className="text-[10px] border border-theme-primary px-3 py-1 rounded hover:bg-theme-primary-glow uppercase tracking-widest"
                     onClick={() => setActiveApiKeyProvider(p)}
                   >
-                    {storedProviders.includes(p) ? "Update" : "Add"}
+                    {storedProviders.includes(p) ? "Update" : "Add Key"}
                   </button>
                 </div>
               ))}
@@ -275,106 +300,55 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
           </div>
         )}
 
-        {/* ── DATA ── */}
+        {/* ── ARCHIVES (DATA) ── */}
         {tab === "data" && <DataSourcesPanel />}
 
-        {/* ── IDENTITY ── */}
-        {tab === "identity" && (
-          <div className="p-6 max-w-lg">
-            <h2 className="text-theme-primary-dim text-lg mb-4">Identity</h2>
-            <p className="text-theme-text-dim text-sm mb-6">
-              Edit the agent's core identity. Changes will re-write soul.md.
-            </p>
-            <div className="space-y-4 mb-6">
-              <div>
-                <label className="block text-theme-text text-sm mb-1">Name</label>
-                <input
-                  type="text"
-                  className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-primary-dim px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
-                  placeholder="Abigail"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="block text-theme-text text-sm mb-1">Purpose</label>
-                <input
-                  type="text"
-                  className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-primary-dim px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
-                  placeholder="assist, retrieve, connect, and surface information"
-                  value={editPurpose}
-                  onChange={(e) => setEditPurpose(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="block text-theme-text text-sm mb-1">Personality / Tone</label>
-                <input
-                  type="text"
-                  className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-primary-dim px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
-                  placeholder="helpful, clear, and honest"
-                  value={editPersonality}
-                  onChange={(e) => setEditPersonality(e.target.value)}
-                />
-              </div>
-            </div>
-            {identityMessage && (
-              <p className={`text-sm mb-4 ${identityMessage.startsWith("Error") ? "text-red-400" : "text-theme-text-bright"}`}>
-                {identityMessage}
-              </p>
-            )}
-            <button
-              onClick={handleRecrystallize}
-              className="border border-theme-primary px-6 py-3 rounded font-bold hover:bg-theme-primary-glow"
-            >
-              Re-crystallize Soul
-            </button>
-          </div>
-        )}
-
-        {/* ── REPAIR ── */}
+        {/* ── RECOVERY (REPAIR) ── */}
         {tab === "repair" && (
-          <div className="p-6 max-w-lg">
-            <div className="mb-8">
-              <h3 className="text-theme-text font-bold mb-2">Recover Identity</h3>
-              <p className="text-sm text-theme-text-dim mb-2">
-                If you have your <strong>Private Key</strong> (saved from first run),
-                enter it below to re-sign the documents.
-              </p>
+          <div className="p-6 max-w-lg space-y-8">
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-theme-text font-bold uppercase text-sm tracking-widest mb-2">Soul Recovery</h3>
+                <p className="text-[10px] text-theme-text-dim uppercase tracking-tighter mb-4">
+                  Restore access to this sovereign entity using your private soul key.
+                </p>
+              </div>
               <textarea
                 value={repairKey}
                 onChange={(e) => setRepairKey(e.target.value)}
-                placeholder="Paste your private key here..."
-                className="w-full bg-theme-bg-inset border border-theme-primary-faint rounded p-3 text-theme-text-bright font-mono text-sm resize-none mb-2"
+                placeholder="PASTE PRIVATE SOUL KEY..."
+                className="w-full bg-theme-bg-inset border border-theme-primary-faint rounded p-3 text-theme-text-bright font-mono text-xs resize-none mb-2 focus:border-theme-primary focus:outline-none"
                 rows={3}
               />
               <button
                 onClick={handleRepair}
                 disabled={!repairKey.trim()}
-                className={`px-4 py-2 rounded font-bold text-sm ${
+                className={`w-full px-4 py-2 rounded font-bold text-xs uppercase tracking-widest transition-all ${
                   repairKey.trim()
-                    ? "bg-theme-surface border border-theme-primary text-theme-text hover:bg-theme-primary-glow"
-                    : "bg-theme-bg-inset border border-theme-border-dim text-theme-text-dim cursor-not-allowed"
+                    ? "border border-theme-primary text-theme-text hover:bg-theme-primary-glow"
+                    : "border border-theme-border-dim text-theme-text-dim cursor-not-allowed"
                 }`}
               >
                 Recover Identity
               </button>
             </div>
 
-            {repairMessage && <p className="text-theme-text-bright text-sm mb-4">{repairMessage}</p>}
-            {repairError && <p className="text-red-400 text-sm mb-4">{repairError}</p>}
+            {repairMessage && <p className="text-theme-text-bright text-[10px] uppercase font-bold text-center italic">{repairMessage}</p>}
+            {repairError && <p className="text-red-400 text-[10px] uppercase font-bold text-center">{repairError}</p>}
 
-            <div className="border-t border-theme-border-dim pt-6">
-              <h3 className="text-red-400 font-bold mb-2">Hard Reset</h3>
-              <p className="text-sm text-theme-text-dim mb-4">
-                If you lost your key, you must reset Abigail.{" "}
-                <strong>This destroys the current trust relationship.</strong>{" "}
-                You will be treated as a new mentor.
-              </p>
+            <div className="border-t border-theme-border pt-8 space-y-4">
+              <div>
+                <h3 className="text-red-500 font-bold uppercase text-sm tracking-widest mb-2">Oblivion Protocol</h3>
+                <p className="text-[10px] text-theme-text-dim uppercase tracking-tighter mb-4">
+                  Permanently delete this entity and all its memories from the Hive. 
+                  <strong className="text-red-400/80 block mt-1">WARNING: IRREVERSIBLE ACTION.</strong>
+                </p>
+              </div>
               <button
                 onClick={handleReset}
-                className="px-4 py-2 rounded font-bold text-sm border border-red-700 text-red-500 hover:bg-red-900/20"
+                className="w-full px-4 py-2 rounded font-bold text-xs border border-red-700 text-red-500 hover:bg-red-900/20 uppercase tracking-widest transition-all"
               >
-                Reset Identity (Destructive)
+                Execute Hard Reset
               </button>
             </div>
           </div>
