@@ -21,6 +21,10 @@ const PROVIDER_INFO: Record<string, { label: string; placeholder: string; prefix
   xai: { label: "X.AI (Grok)", placeholder: "xai-...", prefix: "xai-" },
   google: { label: "Google (Gemini)", placeholder: "AIza...", prefix: "AIza" },
   tavily: { label: "Tavily (Web Search)", placeholder: "tvly-...", prefix: "tvly-" },
+  "claude-cli": { label: "Claude Code CLI", placeholder: "sk-ant-...", prefix: "sk-ant-" },
+  "gemini-cli": { label: "Gemini CLI", placeholder: "AIza...", prefix: "AIza" },
+  "codex-cli": { label: "OpenAI Codex CLI", placeholder: "sk-...", prefix: "sk-" },
+  "grok-cli": { label: "xAI Grok CLI", placeholder: "xai-...", prefix: "xai-" },
 };
 
 export default function ApiKeyModal({ provider, onSaved, onCancel }: ApiKeyModalProps) {
@@ -73,9 +77,15 @@ export default function ApiKeyModal({ provider, onSaved, onCancel }: ApiKeyModal
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-labelledby="api-key-modal-title">
       <div className="bg-theme-bg-elevated border border-theme-primary rounded-lg p-6 max-w-md w-full mx-4">
         <h2 id="api-key-modal-title" className="text-theme-primary-dim text-lg mb-2">{info.label} API Key</h2>
-        <p className="text-theme-text-dim text-sm mb-4">
+        <p className="text-theme-text-dim text-sm mb-2">
           Enter your {info.label} API key. It will be encrypted securely on your device.
         </p>
+        {provider.endsWith("-cli") && (
+          <p className="text-theme-text-dim text-xs mb-4">
+            Uses the same API key as the cloud provider. Queries route through the CLI tool.
+          </p>
+        )}
+        {!provider.endsWith("-cli") && <div className="mb-2" />}
         <div className="mb-4">
           <input
             type="password"

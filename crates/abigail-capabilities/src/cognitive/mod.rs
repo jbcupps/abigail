@@ -51,7 +51,7 @@ pub fn update_provider_key_schema() -> serde_json::Value {
                 "provider": {
                     "type": "string",
                     "description": "Provider name, e.g. 'openai', 'anthropic'",
-                    "enum": ["openai", "anthropic", "perplexity", "xai", "google", "mistral"]
+                    "enum": ["openai", "anthropic", "perplexity", "xai", "google", "mistral", "claude-cli", "gemini-cli", "codex-cli", "grok-cli"]
                 },
                 "key": {
                     "type": "string",

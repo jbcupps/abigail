@@ -444,6 +444,48 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
 
       {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
 
+      {/* CLI Tools download links */}
+      <div className="mt-6 pt-4 border-t border-theme-border-dim">
+        <p className="text-theme-primary-dim text-sm mb-2">CLI Tools (optional)</p>
+        <p className="text-theme-text-dim text-xs mb-3">
+          CLI tools are configured in the next step (Connectivity) with the same API keys.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <a
+            className="block text-theme-text-dim text-xs hover:text-theme-primary-dim"
+            href="https://docs.anthropic.com/en/docs/claude-code"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Claude Code
+          </a>
+          <a
+            className="block text-theme-text-dim text-xs hover:text-theme-primary-dim"
+            href="https://github.com/google-gemini/gemini-cli"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Gemini CLI
+          </a>
+          <a
+            className="block text-theme-text-dim text-xs hover:text-theme-primary-dim"
+            href="https://github.com/openai/codex"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Codex CLI
+          </a>
+          <a
+            className="block text-theme-text-dim text-xs hover:text-theme-primary-dim"
+            href="https://docs.x.ai/docs/grok-cli"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Grok CLI
+          </a>
+        </div>
+      </div>
+
       {showSkip && onSkip && (
         <div className="mt-8 pt-4 border-t border-theme-border-dim">
           <button
