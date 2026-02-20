@@ -12,6 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - 2026-02-19 20:45 EST: Implemented refined lightweight router – Fast Path (Id+Ego+Context) + out-of-band Superego/Trust conscience to eliminate lock-ups
 - 2026-02-19: Added abigail-auth crate (Phase 1) — AuthProvider trait, StaticToken/BasicAuth providers, in-memory TokenCache, AuthManager registry with 11 tests
 - 2026-02-19: feat(skills): add preloaded integration skills (GitHub, Slack, Jira) with auth framework wiring — embedded DynamicApiSkill configs, AuthManager in AppState, versioned bootstrap, get_integration_status/store_integration_credential commands, check_integration_status LLM tool, instruction registry entries
+- 2026-02-19: fix(router): allow credential storage through conscience monitor allowlist and enriched safety prompt
+- 2026-02-19: feat(tools): expose configure_email as LLM tool for conversational email setup
+- 2026-02-19: feat(cli): add abigail-cli crate with CLI subcommands and REST troubleshooting API
 - Public release readiness: LICENSE, CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md
 - CI workflow for pull request validation (cargo fmt, clippy, test, frontend build)
 - CodeQL static analysis workflow

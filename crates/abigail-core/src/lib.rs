@@ -7,6 +7,7 @@ pub mod error;
 pub mod global_config;
 pub mod keyring;
 pub mod local_llm_url;
+pub mod ops;
 pub mod sao_bridge;
 pub mod secrets;
 pub mod structured_failure;

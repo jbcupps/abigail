@@ -1,0 +1,23 @@
+[package]
+name = "abigail-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "abigail-cli"
+path = "src/main.rs"
+
+[dependencies]
+abigail-core = { path = "../abigail-core" }
+abigail-skills = { path = "../abigail-skills" }
+anyhow = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+axum = "0.7"
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+base64 = { workspace = true }
+rand = { workspace = true }
+tower-http = { version = "0.6", features = ["cors"] }
