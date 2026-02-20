@@ -2102,6 +2102,27 @@ fn chat_tool_definitions(
     // HTTP client capability tools
     tools.extend(http_client.tool_definitions());
 
+    // Built-in: configure_email
+    tools.push(abigail_capabilities::cognitive::ToolDefinition {
+        name: "configure_email".to_string(),
+        description: "Configure email (IMAP/SMTP) credentials for monitoring. \
+                      Stores the password securely in the DPAPI-encrypted vault. \
+                      Use this when the mentor provides email server details."
+            .to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "address": { "type": "string", "description": "Email address" },
+                "imap_host": { "type": "string", "description": "IMAP server hostname" },
+                "imap_port": { "type": "integer", "description": "IMAP server port" },
+                "smtp_host": { "type": "string", "description": "SMTP server hostname" },
+                "smtp_port": { "type": "integer", "description": "SMTP server port" },
+                "password": { "type": "string", "description": "Email password (stored encrypted)" }
+            },
+            "required": ["address", "imap_host", "imap_port", "smtp_host", "smtp_port", "password"]
+        }),
+    });
+
     // Integration status tool
     tools.push(abigail_capabilities::cognitive::ToolDefinition {
         name: "check_integration_status".to_string(),
@@ -2509,6 +2530,49 @@ fn execute_tool_call<'a>(
                     }
                 }
                 format!("Integration status:\n{}", lines.join("\n"))
+            }
+            "configure_email" => {
+                let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
+                    Ok(v) => v,
+                    Err(e) => return format!("Error parsing arguments: {}", e),
+                };
+                let address = args["address"].as_str().unwrap_or("").to_string();
+                let imap_host = args["imap_host"].as_str().unwrap_or("").to_string();
+                let imap_port = args["imap_port"].as_u64().unwrap_or(993) as u16;
+                let smtp_host = args["smtp_host"].as_str().unwrap_or("").to_string();
+                let smtp_port = args["smtp_port"].as_u64().unwrap_or(587) as u16;
+                let password = args["password"].as_str().unwrap_or("").to_string();
+
+                if address.is_empty() || imap_host.is_empty() || password.is_empty() {
+                    return "Error: address, imap_host, and password are required".to_string();
+                }
+
+                let password_encrypted = match Keyring::encrypt_bytes(password.as_bytes()) {
+                    Ok(enc) => enc,
+                    Err(e) => return format!("Error encrypting password: {}", e),
+                };
+
+                match state.config.write() {
+                    Ok(mut config) => {
+                        config.email = Some(abigail_core::EmailConfig {
+                            address: address.clone(),
+                            imap_host,
+                            imap_port,
+                            smtp_host,
+                            smtp_port,
+                            password_encrypted,
+                        });
+                        if let Err(e) = config.save(&config.config_path()) {
+                            return format!("Error saving config: {}", e);
+                        }
+                    }
+                    Err(e) => return format!("Error accessing config: {}", e),
+                }
+
+                format!(
+                    "Email configured successfully for {}. IMAP and SMTP credentials stored in encrypted vault.",
+                    address
+                )
             }
             "delegate_to_subagent" => {
                 let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
