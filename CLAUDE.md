@@ -162,6 +162,25 @@ All workspace crates inherit via `version.workspace = true`.
 
 Contains: `config.json`, `keys.bin` (DPAPI), `secrets.bin` (DPAPI), `external_pubkey.bin`, `abigail_seed.db` (SQLite), `docs/` (signed constitutional docs)
 
+## Change Tracking
+
+**Every commit** must include exactly one changelog line appended to the `### Added` section of `CHANGELOG.md` under `## [Unreleased]`. Use this exact format:
+
+```
+- YYYY-MM-DD HH:MM EST: [brief one-line description of what changed]
+```
+
+Example:
+```
+- 2026-02-19 21:45 EST: Fix credential storage refusal and add abigail-cli REST troubleshooting API
+```
+
+Rules:
+- One line per commit, no matter how many files changed. Consolidate into a single summary.
+- Always include the date AND time with EST timezone.
+- Keep it brief — one sentence describing the "what", not the "how".
+- This applies to every commit: code, test, refactor, docs, even one-line tweaks.
+
 ## Known Issues
 
 ### Ego Router
