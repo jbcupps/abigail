@@ -261,7 +261,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
     const mode = routerStatus.routing_mode;
 
     let statusText = "";
-    let statusColor = "text-yellow-500";
+    let statusColor = "text-theme-warning";
 
     const egoName = routerStatus.ego_provider || "Cloud";
     const egoLabel = egoName.charAt(0).toUpperCase() + egoName.slice(1);
@@ -273,7 +273,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
       statusColor = "text-theme-text";
     } else if (mode === "tier_based" && hasEgo) {
       statusText = `[tier] ${egoLabel}`;
-      statusColor = "text-blue-400";
+      statusColor = "text-theme-info";
     } else if (mode === "tier_based" && hasLocal) {
       statusText = "[tier] Local";
       statusColor = "text-theme-primary-dim";
@@ -285,7 +285,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
       statusColor = "text-theme-text";
     } else if (hasEgo) {
       statusText = `[cloud] ${egoLabel}`;
-      statusColor = "text-blue-400";
+      statusColor = "text-theme-info";
     } else if (hasLocal) {
       // Show "bundled" label when the local LLM is from managed Ollama
       if (ollamaStatus?.managed && ollamaStatus?.running) {
@@ -296,10 +296,10 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
       statusColor = "text-theme-primary-dim";
     } else if (ollamaStatus?.managed && !ollamaStatus?.model_ready) {
       statusText = "Starting local AI...";
-      statusColor = "text-yellow-500";
+      statusColor = "text-theme-warning";
     } else {
       statusText = "[no LLM] Press 1-3 to configure";
-      statusColor = "text-red-400";
+      statusColor = "text-theme-danger";
     }
 
     return (
@@ -359,7 +359,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
             <span className="text-theme-text-dim">http://localhost:</span>
             <input
               type="text"
-              className="flex-1 bg-black border border-theme-primary text-theme-text px-3 py-2 rounded max-w-[100px]"
+              className="flex-1 bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded max-w-[100px] focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
               placeholder={defaultPort}
               value={configInput}
               onChange={(e) => setConfigInput(e.target.value)}
@@ -391,7 +391,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
           <div className="flex gap-2">
             <input
               type="password"
-              className="flex-1 bg-black border border-theme-primary text-theme-text px-3 py-2 rounded"
+              className="flex-1 bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
               placeholder="sk-..."
               value={configInput}
               onChange={(e) => setConfigInput(e.target.value)}
@@ -420,7 +420,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
   };
 
   return (
-    <div className="min-h-screen bg-black text-theme-text font-mono flex flex-col">
+    <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col">
       {getStatusIndicator()}
       {renderConfigMenu()}
       {missingSecrets.length > 0 && (
@@ -454,28 +454,38 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
         {messages.map((msg, i) => (
           <div
             key={i}
-            className={msg.role === "user" ? "text-right" : ""}
+            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-fade-in-up`}
           >
-            <span className={msg.isError ? "text-red-400" : "text-theme-primary-dim"}>
-              {msg.role === "user" ? "You" : assistantLabel}:{" "}
-            </span>
-            <span className={msg.isError ? "text-red-300" : ""}>
-              {msg.content.split("\n").map((line, j) => (
-                <span key={j}>
-                  {line}
-                  {j < msg.content.split("\n").length - 1 && <br />}
-                </span>
-              ))}
-            </span>
-            {msg.mcpApp && (
-              <div className="mt-2">
-                <McpAppFrame
-                  serverId={msg.mcpApp.serverId}
-                  resourceUri={msg.mcpApp.resourceUri}
-                  title={msg.mcpApp.title}
-                />
-              </div>
-            )}
+            <div
+              className={`max-w-[80%] px-4 py-2.5 text-sm ${
+                msg.isError
+                  ? "bg-theme-danger-dim border border-red-800 rounded-xl"
+                  : msg.role === "user"
+                    ? "bg-theme-bubble-user rounded-xl rounded-br-sm"
+                    : "bg-theme-bubble-assistant rounded-xl rounded-bl-sm"
+              }`}
+            >
+              <p className={`text-xs mb-1 ${msg.isError ? "text-red-400" : "text-theme-text-dim"}`}>
+                {msg.role === "user" ? "You" : assistantLabel}
+              </p>
+              <span className={msg.isError ? "text-red-300" : "text-theme-text-bright"}>
+                {msg.content.split("\n").map((line, j) => (
+                  <span key={j}>
+                    {line}
+                    {j < msg.content.split("\n").length - 1 && <br />}
+                  </span>
+                ))}
+              </span>
+              {msg.mcpApp && (
+                <div className="mt-2">
+                  <McpAppFrame
+                    serverId={msg.mcpApp.serverId}
+                    resourceUri={msg.mcpApp.resourceUri}
+                    title={msg.mcpApp.title}
+                  />
+                </div>
+              )}
+            </div>
           </div>
         ))}
         {loading && <ThinkingIndicator status={chatStatus} label={assistantLabel} />}
@@ -483,13 +493,15 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
       <div className="p-4 border-t border-theme-border flex gap-2">
         <input
           type="text"
-          className="flex-1 bg-black border border-theme-primary text-theme-text px-3 py-2 rounded"
+          aria-label="Message input"
+          className="flex-1 bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
           placeholder="Message"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
         />
         <button
+          aria-label="Send message"
           className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
           onClick={send}
         >

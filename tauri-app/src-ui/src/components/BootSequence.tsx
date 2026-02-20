@@ -380,10 +380,12 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
   return (
     <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col">
-      <pre className="text-sm p-4 border-b border-theme-border-dim">
-        ABIGAIL BOOT SEQUENCE
-        ==================
-      </pre>
+      <div className="px-4 py-3 border-b border-theme-border-dim bg-theme-bg-elevated">
+        <pre className="text-sm text-theme-primary">
+          ABIGAIL BOOT SEQUENCE
+          ==================
+        </pre>
+      </div>
 
       <div className="flex-1 overflow-auto">
         {/* ── DARKNESS ── */}
@@ -420,14 +422,14 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
             </div>
 
             <div className="mb-6">
-              <p className="text-sm mb-2 text-gray-400">
+              <p className="text-sm mb-2 text-theme-text-dim">
                 Your Private Signing Key (Ed25519, Base64):
               </p>
               <div className="relative">
                 <textarea
                   readOnly
                   value={privateKey}
-                  className="w-full bg-gray-900 border border-theme-primary-faint rounded p-3 text-theme-text-bright font-mono text-sm resize-none"
+                  className="w-full bg-theme-bg-inset border border-theme-primary-faint rounded p-3 text-theme-text-bright font-mono text-sm resize-none"
                   rows={3}
                   onClick={(e) => (e.target as HTMLTextAreaElement).select()}
                 />
@@ -441,7 +443,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
             </div>
 
             <div className="mb-6 text-sm">
-              <p className="text-gray-400 mb-1">Public key saved to:</p>
+              <p className="text-theme-text-dim mb-1">Public key saved to:</p>
               <code className="text-theme-text-bright text-xs break-all">
                 {publicKeyPath}
               </code>
@@ -493,7 +495,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               className={`px-6 py-3 rounded font-bold ${
                 keySaved
                   ? "border border-theme-primary hover:bg-theme-primary-glow text-theme-text"
-                  : "border border-gray-600 text-gray-600 cursor-not-allowed"
+                  : "border border-theme-border-dim text-theme-text-dim cursor-not-allowed"
               }`}
             >
               Continue
@@ -606,7 +608,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 <label className="block text-theme-text text-sm mb-1">Your Name (Mentor)</label>
                 <input
                   type="text"
-                  className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
+                  className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-primary-dim px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
                   placeholder="Your name — woven into the soul document"
                   value={crystalMentorName}
                   onChange={(e) => setCrystalMentorName(e.target.value)}
@@ -617,7 +619,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 <label className="block text-theme-text text-sm mb-1">Agent Name</label>
                 <input
                   type="text"
-                  className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
+                  className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-primary-dim px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
                   placeholder="Abigail"
                   value={crystalName}
                   onChange={(e) => setCrystalName(e.target.value)}
@@ -629,7 +631,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 </label>
                 <input
                   type="text"
-                  className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
+                  className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-primary-dim px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
                   placeholder="assist, retrieve, connect, and surface information"
                   value={crystalPurpose}
                   onChange={(e) => setCrystalPurpose(e.target.value)}
@@ -641,7 +643,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 </label>
                 <input
                   type="text"
-                  className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
+                  className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-primary-dim px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
                   placeholder="helpful, clear, and honest"
                   value={crystalPersonality}
                   onChange={(e) => setCrystalPersonality(e.target.value)}
@@ -713,7 +715,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 IDENTITY VERIFICATION FAILED
               </h2>
               <p className="text-red-400 text-sm mb-4">{error}</p>
-              <p className="text-gray-400 text-sm">
+              <p className="text-theme-text-dim text-sm">
                 Abigail's constitutional documents cannot be verified. This usually
                 happens if files were corrupted or tampered with.
               </p>
@@ -723,7 +725,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               <h3 className="text-theme-text font-bold mb-2">
                 Option 1: Recover Identity
               </h3>
-              <p className="text-sm text-gray-400 mb-2">
+              <p className="text-sm text-theme-text-dim mb-2">
                 If you have your <strong>Private Key</strong> (saved from first
                 run), enter it below to re-sign the documents.
               </p>
@@ -731,7 +733,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 value={repairKey}
                 onChange={(e) => setRepairKey(e.target.value)}
                 placeholder="Paste your private key here..."
-                className="w-full bg-gray-900 border border-theme-primary-faint rounded p-3 text-theme-text-bright font-mono text-sm resize-none mb-2"
+                className="w-full bg-theme-bg-inset border border-theme-primary-faint rounded p-3 text-theme-text-bright font-mono text-sm resize-none mb-2"
                 rows={3}
               />
               <button
@@ -740,18 +742,18 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 className={`px-4 py-2 rounded font-bold text-sm ${
                   repairKey.trim()
                     ? "bg-theme-surface border border-theme-primary text-theme-text hover:bg-theme-primary-glow"
-                    : "bg-gray-900 border border-gray-700 text-gray-600 cursor-not-allowed"
+                    : "bg-theme-bg-inset border border-theme-border-dim text-theme-text-dim cursor-not-allowed"
                 }`}
               >
                 Recover Identity
               </button>
             </div>
 
-            <div className="border-t border-gray-800 pt-6">
+            <div className="border-t border-theme-border-dim pt-6">
               <h3 className="text-red-400 font-bold mb-2">
                 Option 2: Hard Reset
               </h3>
-              <p className="text-sm text-gray-400 mb-4">
+              <p className="text-sm text-theme-text-dim mb-4">
                 If you lost your key, you must reset Abigail.{" "}
                 <strong>
                   This destroys the current trust relationship.

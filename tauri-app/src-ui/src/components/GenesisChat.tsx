@@ -68,24 +68,24 @@ export default function GenesisChat({ mode, onComplete }: Props) {
 
   return (
     <div className="flex flex-col h-full max-w-2xl mx-auto p-4">
-      <h2 className="text-xl font-bold text-white mb-2 text-center">{title}</h2>
-      <p className="text-gray-400 text-center text-sm mb-4">
+      <h2 className="text-xl font-bold text-theme-text-bright mb-2 text-center">{title}</h2>
+      <p className="text-theme-text-dim text-center text-sm mb-4">
         {mode === "direct"
           ? "A single conversation to discover your agent's soul."
           : "A guided exploration of identity and purpose."}
       </p>
 
-      <div className="flex-1 overflow-y-auto space-y-3 mb-4 bg-gray-900 rounded-lg p-4">
+      <div className="flex-1 overflow-y-auto space-y-3 mb-4 bg-theme-bg-inset rounded-lg p-4">
         {messages.map((msg, i) => (
           <div
             key={i}
             className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
-              className={`max-w-[80%] rounded-lg px-4 py-2 text-sm ${
+              className={`max-w-[80%] px-4 py-2.5 text-sm animate-fade-in-up ${
                 msg.role === "user"
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-800 text-gray-200"
+                  ? "bg-theme-bubble-user rounded-xl rounded-br-sm text-theme-text-bright"
+                  : "bg-theme-bubble-assistant rounded-xl rounded-bl-sm text-theme-text-bright"
               }`}
             >
               {msg.content.split("\n").map((line, j) => (
@@ -99,7 +99,7 @@ export default function GenesisChat({ mode, onComplete }: Props) {
         ))}
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-gray-800 text-gray-400 rounded-lg px-4 py-2 text-sm animate-pulse">
+            <div className="bg-theme-bubble-assistant text-theme-text-dim rounded-xl rounded-bl-sm px-4 py-2 text-sm animate-pulse">
               Thinking...
             </div>
           </div>
@@ -109,7 +109,7 @@ export default function GenesisChat({ mode, onComplete }: Props) {
 
       {isComplete ? (
         <button
-          className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg mx-auto"
+          className="border border-theme-success text-theme-success hover:bg-theme-success-dim px-8 py-3 rounded-lg mx-auto transition-colors"
           onClick={onComplete}
         >
           Continue to Emergence
@@ -118,7 +118,7 @@ export default function GenesisChat({ mode, onComplete }: Props) {
         <div className="flex gap-2">
           <input
             type="text"
-            className="flex-1 bg-gray-800 text-white rounded-lg px-4 py-2 border border-gray-700 focus:border-blue-500 outline-none"
+            className="flex-1 bg-theme-input-bg text-theme-text rounded-lg px-4 py-2 border border-theme-border-dim focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring outline-none"
             placeholder="Share your thoughts..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -126,7 +126,7 @@ export default function GenesisChat({ mode, onComplete }: Props) {
             disabled={loading}
           />
           <button
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg disabled:opacity-50"
+            className="border border-theme-primary text-theme-primary hover:bg-theme-primary-glow px-4 py-2 rounded-lg disabled:opacity-50 transition-colors"
             onClick={send}
             disabled={!input.trim() || loading}
           >

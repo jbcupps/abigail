@@ -11,15 +11,19 @@ export default function PersonaToggle() {
     <button
       onClick={() => setMode(isEgo ? "id" : "ego")}
       title={tooltip}
-      className="fixed top-3 right-3 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full border bg-black/80 backdrop-blur-sm transition-colors hover:bg-black/90"
-      style={{ borderColor: isEgo ? "#22c55e" : "#f59e0b" }}
+      role="switch"
+      aria-checked={isEgo}
+      className={`fixed top-3 right-3 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full border bg-theme-bg/80 backdrop-blur-sm transition-colors hover:bg-theme-bg/90 ${
+        isEgo ? "border-green-500" : "border-amber-500"
+      }`}
     >
       <span
-        className={`w-2.5 h-2.5 rounded-full ${isEgo ? "bg-red-500 animate-pulse" : "bg-green-500"}`}
+        className={`w-2.5 h-2.5 rounded-full ${isEgo ? "bg-red-500 animate-glow-pulse" : "bg-theme-success"}`}
       />
       <span
-        className="text-xs font-mono font-bold tracking-wide"
-        style={{ color: isEgo ? "#22c55e" : "#f59e0b" }}
+        className={`text-xs font-mono font-bold tracking-wide ${
+          isEgo ? "text-green-500" : "text-amber-500"
+        }`}
       >
         {label}
       </span>

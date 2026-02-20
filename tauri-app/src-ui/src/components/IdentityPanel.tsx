@@ -144,7 +144,7 @@ export default function IdentityPanel() {
   const hasLocalLlm = routerStatus?.id_provider === "local_http";
 
   return (
-    <div className="min-h-screen bg-black text-theme-text font-mono flex flex-col">
+    <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col">
       {/* Header */}
       <div className="px-4 py-3 border-b border-theme-border">
         <h1 className="text-theme-primary-dim text-lg font-bold">THE FORGE</h1>
@@ -152,10 +152,12 @@ export default function IdentityPanel() {
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-theme-border">
+      <div className="flex border-b border-theme-border" role="tablist" aria-label="Identity management">
         {tabs.map((t) => (
           <button
             key={t.id}
+            role="tab"
+            aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
             className={`px-4 py-2 text-sm border-b-2 transition-colors ${
               tab === t.id
@@ -274,7 +276,7 @@ export default function IdentityPanel() {
                 <label className="block text-theme-text text-sm mb-1">Name</label>
                 <input
                   type="text"
-                  className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
+                  className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-primary-dim px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
                   placeholder="Abigail"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
@@ -284,7 +286,7 @@ export default function IdentityPanel() {
                 <label className="block text-theme-text text-sm mb-1">Purpose</label>
                 <input
                   type="text"
-                  className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
+                  className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-primary-dim px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
                   placeholder="assist, retrieve, connect, and surface information"
                   value={editPurpose}
                   onChange={(e) => setEditPurpose(e.target.value)}
@@ -294,7 +296,7 @@ export default function IdentityPanel() {
                 <label className="block text-theme-text text-sm mb-1">Personality / Tone</label>
                 <input
                   type="text"
-                  className="w-full bg-black border border-theme-primary text-theme-primary-dim px-3 py-2 rounded"
+                  className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-primary-dim px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
                   placeholder="helpful, clear, and honest"
                   value={editPersonality}
                   onChange={(e) => setEditPersonality(e.target.value)}
@@ -320,7 +322,7 @@ export default function IdentityPanel() {
           <div className="p-6 max-w-lg">
             <div className="mb-8">
               <h3 className="text-theme-text font-bold mb-2">Recover Identity</h3>
-              <p className="text-sm text-gray-400 mb-2">
+              <p className="text-sm text-theme-text-dim mb-2">
                 If you have your <strong>Private Key</strong> (saved from first run),
                 enter it below to re-sign the documents.
               </p>
@@ -328,7 +330,7 @@ export default function IdentityPanel() {
                 value={repairKey}
                 onChange={(e) => setRepairKey(e.target.value)}
                 placeholder="Paste your private key here..."
-                className="w-full bg-gray-900 border border-theme-primary-faint rounded p-3 text-theme-text-bright font-mono text-sm resize-none mb-2"
+                className="w-full bg-theme-bg-inset border border-theme-primary-faint rounded p-3 text-theme-text-bright font-mono text-sm resize-none mb-2"
                 rows={3}
               />
               <button
@@ -337,7 +339,7 @@ export default function IdentityPanel() {
                 className={`px-4 py-2 rounded font-bold text-sm ${
                   repairKey.trim()
                     ? "bg-theme-surface border border-theme-primary text-theme-text hover:bg-theme-primary-glow"
-                    : "bg-gray-900 border border-gray-700 text-gray-600 cursor-not-allowed"
+                    : "bg-theme-bg-inset border border-theme-border-dim text-theme-text-dim cursor-not-allowed"
                 }`}
               >
                 Recover Identity
@@ -347,9 +349,9 @@ export default function IdentityPanel() {
             {repairMessage && <p className="text-theme-text-bright text-sm mb-4">{repairMessage}</p>}
             {repairError && <p className="text-red-400 text-sm mb-4">{repairError}</p>}
 
-            <div className="border-t border-gray-800 pt-6">
+            <div className="border-t border-theme-border-dim pt-6">
               <h3 className="text-red-400 font-bold mb-2">Hard Reset</h3>
-              <p className="text-sm text-gray-400 mb-4">
+              <p className="text-sm text-theme-text-dim mb-4">
                 If you lost your key, you must reset Abigail.{" "}
                 <strong>This destroys the current trust relationship.</strong>{" "}
                 You will be treated as a new mentor.

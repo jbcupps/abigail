@@ -70,16 +70,17 @@ export default function ApiKeyModal({ provider, onSaved, onCancel }: ApiKeyModal
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-      <div className="bg-black border border-theme-primary rounded-lg p-6 max-w-md w-full mx-4">
-        <h2 className="text-theme-primary-dim text-lg mb-2">{info.label} API Key</h2>
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-labelledby="api-key-modal-title">
+      <div className="bg-theme-bg-elevated border border-theme-primary rounded-lg p-6 max-w-md w-full mx-4">
+        <h2 id="api-key-modal-title" className="text-theme-primary-dim text-lg mb-2">{info.label} API Key</h2>
         <p className="text-theme-text-dim text-sm mb-4">
           Enter your {info.label} API key. It will be encrypted securely on your device.
         </p>
         <div className="mb-4">
           <input
             type="password"
-            className="w-full bg-black border border-theme-primary text-theme-text px-3 py-2 rounded focus:border-theme-primary-dim focus:outline-none"
+            aria-label={`${info.label} API key`}
+            className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring focus:outline-none"
             placeholder={info.placeholder}
             value={value}
             onChange={(e) => setValue(e.target.value)}
