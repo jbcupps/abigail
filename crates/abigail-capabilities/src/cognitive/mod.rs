@@ -3,6 +3,7 @@
 pub mod anthropic;
 pub mod candle;
 pub mod catalog;
+pub mod cli_provider;
 pub mod download;
 pub mod local_http;
 pub mod openai;
@@ -13,6 +14,7 @@ pub mod validation;
 
 pub use anthropic::AnthropicProvider;
 pub use candle::CandleProvider;
+pub use cli_provider::{CliLlmProvider, CliVariant};
 pub use download::ModelDownloader;
 pub use local_http::{stub_heartbeat, LocalHttpProvider};
 pub use openai::OpenAiProvider;

@@ -11,9 +11,9 @@
 //!   the fast path.
 
 use abigail_capabilities::cognitive::{
-    stub_heartbeat, AnthropicProvider, CandleProvider, CompatibleProvider, CompletionRequest,
-    CompletionResponse, LlmProvider, LocalHttpProvider, Message, OpenAiCompatibleProvider,
-    OpenAiProvider, StreamEvent, ToolDefinition,
+    stub_heartbeat, AnthropicProvider, CandleProvider, CliLlmProvider, CliVariant,
+    CompatibleProvider, CompletionRequest, CompletionResponse, LlmProvider, LocalHttpProvider,
+    Message, OpenAiCompatibleProvider, OpenAiProvider, StreamEvent, ToolDefinition,
 };
 use std::sync::Arc;
 
@@ -93,6 +93,10 @@ pub enum EgoProvider {
     Perplexity,
     Xai,
     Google,
+    ClaudeCli,
+    GeminiCli,
+    CodexCli,
+    GrokCli,
 }
 
 impl std::fmt::Display for EgoProvider {
@@ -103,6 +107,10 @@ impl std::fmt::Display for EgoProvider {
             EgoProvider::Perplexity => write!(f, "perplexity"),
             EgoProvider::Xai => write!(f, "xai"),
             EgoProvider::Google => write!(f, "google"),
+            EgoProvider::ClaudeCli => write!(f, "claude-cli"),
+            EgoProvider::GeminiCli => write!(f, "gemini-cli"),
+            EgoProvider::CodexCli => write!(f, "codex-cli"),
+            EgoProvider::GrokCli => write!(f, "grok-cli"),
         }
     }
 }
@@ -1457,6 +1465,54 @@ fn build_ego_provider(
                 }
             }
         }
+        Some("claude-cli") | Some("claude-code") | Some("claude_cli") => {
+            match CliLlmProvider::new(CliVariant::ClaudeCode, key) {
+                Ok(p) => (
+                    Some(Arc::new(p) as Arc<dyn LlmProvider>),
+                    Some(EgoProvider::ClaudeCli),
+                ),
+                Err(e) => {
+                    tracing::error!("Failed to create Claude CLI provider: {}", e);
+                    (None, None)
+                }
+            }
+        }
+        Some("gemini-cli") | Some("gemini_cli") => {
+            match CliLlmProvider::new(CliVariant::GeminiCli, key) {
+                Ok(p) => (
+                    Some(Arc::new(p) as Arc<dyn LlmProvider>),
+                    Some(EgoProvider::GeminiCli),
+                ),
+                Err(e) => {
+                    tracing::error!("Failed to create Gemini CLI provider: {}", e);
+                    (None, None)
+                }
+            }
+        }
+        Some("codex-cli") | Some("codex_cli") | Some("openai-codex") | Some("openai_codex") => {
+            match CliLlmProvider::new(CliVariant::OpenAiCodex, key) {
+                Ok(p) => (
+                    Some(Arc::new(p) as Arc<dyn LlmProvider>),
+                    Some(EgoProvider::CodexCli),
+                ),
+                Err(e) => {
+                    tracing::error!("Failed to create Codex CLI provider: {}", e);
+                    (None, None)
+                }
+            }
+        }
+        Some("grok-cli") | Some("grok_cli") | Some("xai-grok") | Some("xai_grok") => {
+            match CliLlmProvider::new(CliVariant::XaiGrokCli, key) {
+                Ok(p) => (
+                    Some(Arc::new(p) as Arc<dyn LlmProvider>),
+                    Some(EgoProvider::GrokCli),
+                ),
+                Err(e) => {
+                    tracing::error!("Failed to create Grok CLI provider: {}", e);
+                    (None, None)
+                }
+            }
+        }
         Some("openai") | None => match OpenAiProvider::new(Some(key)) {
             Ok(p) => (
                 Some(Arc::new(p) as Arc<dyn LlmProvider>),
@@ -2086,6 +2142,58 @@ mod tests {
         assert_eq!(EgoProvider::Perplexity.to_string(), "perplexity");
         assert_eq!(EgoProvider::Xai.to_string(), "xai");
         assert_eq!(EgoProvider::Google.to_string(), "google");
+        assert_eq!(EgoProvider::ClaudeCli.to_string(), "claude-cli");
+        assert_eq!(EgoProvider::GeminiCli.to_string(), "gemini-cli");
+        assert_eq!(EgoProvider::CodexCli.to_string(), "codex-cli");
+        assert_eq!(EgoProvider::GrokCli.to_string(), "grok-cli");
+    }
+
+    #[tokio::test]
+    async fn test_with_provider_claude_cli() {
+        let router = IdEgoRouter::new(
+            None,
+            Some("claude-cli"),
+            Some("sk-ant-test".to_string()),
+            RoutingMode::EgoPrimary,
+        );
+        assert!(router.has_ego());
+        assert_eq!(router.ego_provider_name(), Some(&EgoProvider::ClaudeCli));
+    }
+
+    #[tokio::test]
+    async fn test_with_provider_gemini_cli() {
+        let router = IdEgoRouter::new(
+            None,
+            Some("gemini-cli"),
+            Some("AIza-test".to_string()),
+            RoutingMode::EgoPrimary,
+        );
+        assert!(router.has_ego());
+        assert_eq!(router.ego_provider_name(), Some(&EgoProvider::GeminiCli));
+    }
+
+    #[tokio::test]
+    async fn test_with_provider_codex_cli() {
+        let router = IdEgoRouter::new(
+            None,
+            Some("codex-cli"),
+            Some("sk-test".to_string()),
+            RoutingMode::EgoPrimary,
+        );
+        assert!(router.has_ego());
+        assert_eq!(router.ego_provider_name(), Some(&EgoProvider::CodexCli));
+    }
+
+    #[tokio::test]
+    async fn test_with_provider_grok_cli() {
+        let router = IdEgoRouter::new(
+            None,
+            Some("grok-cli"),
+            Some("xai-test".to_string()),
+            RoutingMode::EgoPrimary,
+        );
+        assert!(router.has_ego());
+        assert_eq!(router.ego_provider_name(), Some(&EgoProvider::GrokCli));
     }
 
     // ── Fast Path + Out-of-Band Conscience tests ─────────────────────
