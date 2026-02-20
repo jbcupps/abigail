@@ -14,8 +14,14 @@ interface RouterStatus {
   council_providers?: number;
 }
 
-export default function IdentityPanel() {
-  const [tab, setTab] = useState<Tab>("status");
+interface IdentityPanelProps {
+  initialTab?: Tab;
+  /** When true, hides the internal header and tab bar (used inside ForgeDrawer) */
+  embedded?: boolean;
+}
+
+export default function IdentityPanel({ initialTab, embedded }: IdentityPanelProps = {}) {
+  const [tab, setTab] = useState<Tab>(initialTab || "status");
   const [routerStatus, setRouterStatus] = useState<RouterStatus | null>(null);
   const [dataDir, setDataDir] = useState("");
   const [agentName, setAgentName] = useState<string | null>(null);
@@ -35,6 +41,10 @@ export default function IdentityPanel() {
   const [repairMessage, setRepairMessage] = useState("");
   const [repairError, setRepairError] = useState("");
   const mountedRef = useRef(true);
+
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -144,31 +154,35 @@ export default function IdentityPanel() {
   const hasLocalLlm = routerStatus?.id_provider === "local_http";
 
   return (
-    <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col">
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-theme-border">
-        <h1 className="text-theme-primary-dim text-lg font-bold">THE FORGE</h1>
-        <p className="text-theme-text-dim text-xs mt-1">Core Identity Management</p>
-      </div>
+    <div className={`${embedded ? "" : "min-h-screen"} bg-theme-bg text-theme-text font-mono flex flex-col`}>
+      {!embedded && (
+        <>
+          {/* Header */}
+          <div className="px-4 py-3 border-b border-theme-border">
+            <h1 className="text-theme-primary-dim text-lg font-bold">THE FORGE</h1>
+            <p className="text-theme-text-dim text-xs mt-1">Core Identity Management</p>
+          </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-theme-border" role="tablist" aria-label="Identity management">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            role="tab"
-            aria-selected={tab === t.id}
-            onClick={() => setTab(t.id)}
-            className={`px-4 py-2 text-sm border-b-2 transition-colors ${
-              tab === t.id
-                ? "border-theme-primary text-theme-primary"
-                : "border-transparent text-theme-text-dim hover:text-theme-text"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+          {/* Tabs */}
+          <div className="flex border-b border-theme-border" role="tablist" aria-label="Identity management">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={tab === t.id}
+                onClick={() => setTab(t.id)}
+                className={`px-4 py-2 text-sm border-b-2 transition-colors ${
+                  tab === t.id
+                    ? "border-theme-primary text-theme-primary"
+                    : "border-transparent text-theme-text-dim hover:text-theme-text"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Warning if no local LLM */}
       {!hasLocalLlm && (

@@ -1506,6 +1506,128 @@ fn get_router_status(state: tauri::State<AppState>) -> Result<RouterStatus, Stri
 }
 
 #[tauri::command]
+fn get_system_diagnostics(state: tauri::State<AppState>) -> Result<String, String> {
+    let mut report = String::from("# Abigail System Diagnostics\n\n");
+
+    // Router status
+    report.push_str("## Router\n");
+    match state.router.read() {
+        Ok(router) => {
+            let s = router.status();
+            report.push_str(&format!(
+                "- Id provider: {}\n",
+                if s.has_local_http {
+                    "local_http"
+                } else {
+                    "candle_stub"
+                }
+            ));
+            if let Ok(config) = state.config.read() {
+                if let Some(ref url) = config.local_llm_base_url {
+                    report.push_str(&format!("- Id URL: {}\n", url));
+                }
+            }
+            report.push_str(&format!("- Ego configured: {}\n", s.has_ego));
+            if let Some(ref provider) = s.ego_provider {
+                report.push_str(&format!("- Ego provider: {}\n", provider));
+            }
+            report.push_str(&format!("- Superego configured: {}\n", s.has_superego));
+            report.push_str(&format!("- Routing mode: {:?}\n", s.mode));
+            report.push_str(&format!(
+                "- Council providers: {}\n",
+                s.council_provider_count
+            ));
+        }
+        Err(e) => report.push_str(&format!("- Error reading router: {}\n", e)),
+    }
+
+    // Email status
+    report.push_str("\n## Email\n");
+    match state.config.read() {
+        Ok(config) => {
+            if let Some(ref email) = config.email {
+                report.push_str(&format!("- Address: {}\n", email.address));
+                report.push_str(&format!(
+                    "- IMAP: {}:{}\n",
+                    email.imap_host, email.imap_port
+                ));
+                report.push_str(&format!(
+                    "- SMTP: {}:{}\n",
+                    email.smtp_host, email.smtp_port
+                ));
+                report.push_str("- Password: stored (encrypted)\n");
+            } else {
+                report.push_str("- NOT configured. Provide IMAP/SMTP details to set up email.\n");
+            }
+        }
+        Err(e) => report.push_str(&format!("- Error reading config: {}\n", e)),
+    }
+
+    // Registered skills
+    report.push_str("\n## Registered Skills\n");
+    if let Ok(manifests) = state.registry.list() {
+        for manifest in &manifests {
+            let health = if let Ok((skill, _)) = state.registry.get_skill(&manifest.id) {
+                let h = skill.health();
+                format!("{:?}", h.status)
+            } else {
+                "unknown".to_string()
+            };
+            report.push_str(&format!(
+                "- {} ({}): {}\n",
+                manifest.name, manifest.id.0, health
+            ));
+        }
+        report.push_str(&format!("\nTotal: {} skills registered\n", manifests.len()));
+    } else {
+        report.push_str("- Error listing skills\n");
+    }
+
+    // Integration status
+    report.push_str("\n## Integrations\n");
+    {
+        let vault = match state.secrets.lock() {
+            Ok(v) => Some(v),
+            Err(_) => None,
+        };
+        let integrations = abigail_skills::preloaded_integration_skills();
+        for (config, auth) in &integrations {
+            let secret_keys = abigail_skills::dynamic::extract_secret_keys(config);
+            let missing: Vec<&str> = if let Some(ref v) = vault {
+                secret_keys
+                    .iter()
+                    .filter(|k| v.get_secret(k).is_none())
+                    .map(|s| s.as_str())
+                    .collect()
+            } else {
+                secret_keys.iter().map(|s| s.as_str()).collect()
+            };
+            if missing.is_empty() {
+                report.push_str(&format!(
+                    "- {} ({}): Configured\n",
+                    config.name, auth.service_id
+                ));
+            } else {
+                report.push_str(&format!(
+                    "- {} ({}): NOT configured (missing: {}). Setup: {}\n",
+                    config.name,
+                    auth.service_id,
+                    missing.join(", "),
+                    auth.setup_url
+                ));
+            }
+        }
+    }
+
+    // CLI info
+    report.push_str("\n## CLI Troubleshooting\n");
+    report.push_str("- Run `abigail-cli status` for headless diagnostics\n");
+    report.push_str("- Run `abigail-cli serve --port 3141` for REST API access\n");
+
+    Ok(report)
+}
+
+#[tauri::command]
 async fn get_ollama_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<ollama_manager::OllamaStatus, String> {
@@ -5659,6 +5781,8 @@ pub fn run() {
             crystallize_forge,
             genesis_chat,
             get_active_provider,
+            // Diagnostics
+            get_system_diagnostics,
         ])
         .build(tauri::generate_context!())
         .expect("error building tauri app")

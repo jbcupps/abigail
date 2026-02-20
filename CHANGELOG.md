@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - 2026-02-19 23:30 EST: Fix credential storage refusal (conscience allowlist + enriched safety prompt + configure_email LLM tool) and add abigail-cli crate with CLI subcommands + REST troubleshooting API
 - 2026-02-20 00:15 EST: Register ProtonMailSkill in runtime, add get_system_diagnostics LLM tool, troubleshooting instruction keywords, and fix skill-proton-mail compile errors
 - 2026-02-19 14:30 EST: Unified UI theme system across all 20 components — chat bubbles, softer backgrounds, focus rings, scrollbar theming, ARIA accessibility, and zero hardcoded gray/blue colors
+- 2026-02-20 10:30 EST: UI overhaul — replace single-line input with auto-growing textarea, remove top tab bar, add slide-out Forge drawer with 10 sub-tabs, expose get_system_diagnostics as Tauri command, add DiagnosticsPanel
 - Public release readiness: LICENSE, CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md
 - CI workflow for pull request validation (cargo fmt, clippy, test, frontend build)
 - CodeQL static analysis workflow

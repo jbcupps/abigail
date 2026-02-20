@@ -4,13 +4,10 @@ import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
 import BootSequence from "./components/BootSequence";
 import ChatInterface from "./components/ChatInterface";
 import PersonaToggle from "./components/PersonaToggle";
-import IdentityPanel from "./components/IdentityPanel";
 import IdentityConflictPanel, { IdentitySummary } from "./components/IdentityConflictPanel";
 import ManagementScreen from "./components/ManagementScreen";
 import SplashScreen from "./components/SplashScreen";
-import AgenticPanel from "./components/AgenticPanel";
-import OrchestrationPanel from "./components/OrchestrationPanel";
-import TierModelPanel from "./components/TierModelPanel";
+import ForgeDrawer from "./components/ForgeDrawer";
 
 type AppState =
   | "splash"
@@ -28,8 +25,6 @@ interface StartupCheckResult {
   error: string | null;
 }
 
-type ChatTab = "chat" | "agent" | "jobs" | "models";
-
 function assertNeverState(state: never): never {
   throw new Error(`Unhandled AppState: ${state}`);
 }
@@ -38,8 +33,8 @@ function AppInner() {
   const [appState, setAppState] = useState<AppState>("splash");
   const [startupError, setStartupError] = useState<string | null>(null);
   const [existingIdentity, setExistingIdentity] = useState<IdentitySummary | null>(null);
-  const [chatTab, setChatTab] = useState<ChatTab>("chat");
-  const { mode, setMode, refreshAgentName } = useTheme();
+  const [forgeOpen, setForgeOpen] = useState(false);
+  const { setMode, refreshAgentName } = useTheme();
 
   const initializeApp = async () => {
     try {
@@ -194,6 +189,7 @@ function AppInner() {
 
   // Handler for disconnecting from agent (back to management)
   const handleDisconnect = async () => {
+    setForgeOpen(false);
     try {
       await invoke("disconnect_agent");
     } catch (e) {
@@ -280,48 +276,20 @@ function AppInner() {
       );
     case "chat":
       return (
-        <>
-          <PersonaToggle />
-          {/* Tab bar */}
-          <div className="flex items-center gap-1 border-b border-theme-border bg-theme-bg px-2" role="tablist" aria-label="Main navigation">
-            {(["chat", "agent", "jobs", "models"] as ChatTab[]).map((tab) => (
-              <button
-                key={tab}
-                role="tab"
-                aria-selected={chatTab === tab}
-                className={`px-4 py-2 text-xs font-mono uppercase tracking-wide border-b-2 transition-colors ${
-                  chatTab === tab
-                    ? "border-theme-primary text-theme-primary"
-                    : "border-transparent text-theme-text-dim hover:text-theme-text"
-                }`}
-                onClick={() => setChatTab(tab)}
-              >
-                {tab}
-              </button>
-            ))}
-            <div className="flex-1" />
-            <button
-              className="text-theme-text-dim hover:text-theme-text text-xs font-mono px-2 py-1"
-              onClick={handleDisconnect}
-              title="Return to identity selector"
-            >
-              [disconnect]
-            </button>
+        <div className="h-screen flex flex-col">
+          <PersonaToggle
+            onToggle={() => setForgeOpen((prev) => !prev)}
+            forgeOpen={forgeOpen}
+          />
+          <ForgeDrawer
+            open={forgeOpen}
+            onClose={() => setForgeOpen(false)}
+            onDisconnect={handleDisconnect}
+          />
+          <div className="flex-1 min-h-0">
+            <ChatInterface target="EGO" />
           </div>
-
-          {/* Tab content */}
-          {chatTab === "chat" && (
-            <>
-              <div className={mode === "ego" ? "" : "hidden"}>
-                <ChatInterface target="EGO" />
-              </div>
-              {mode === "id" && <IdentityPanel />}
-            </>
-          )}
-          {chatTab === "agent" && <AgenticPanel />}
-          {chatTab === "jobs" && <OrchestrationPanel />}
-          {chatTab === "models" && <TierModelPanel />}
-        </>
+        </div>
       );
     default:
       return assertNeverState(appState);

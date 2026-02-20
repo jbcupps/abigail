@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import McpAppFrame from "./McpAppFrame";
 import ThinkingIndicator from "./ThinkingIndicator";
@@ -53,6 +53,15 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
 
   const assistantLabel = agentName || "Abigail";
   const mountedRef = useRef(true);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const autoGrow = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    // Clamp to ~6 rows max (approx 144px at default line-height)
+    el.style.height = Math.min(el.scrollHeight, 144) + "px";
+  }, []);
 
   const refreshRouterStatus = () => {
     invoke<RouterStatus>("get_router_status")
@@ -188,6 +197,10 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
     setMessages((m) => [...m, userMessage]);
     setInput("");
     setLoading(true);
+    // Reset textarea height after send
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
 
     // Add a placeholder assistant message for streaming
     setMessages((m) => [...m, { role: "assistant", content: "" }]);
@@ -420,7 +433,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
   };
 
   return (
-    <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col">
+    <div className="h-full bg-theme-bg text-theme-text font-mono flex flex-col">
       {getStatusIndicator()}
       {renderConfigMenu()}
       {missingSecrets.length > 0 && (
@@ -490,15 +503,24 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
         ))}
         {loading && <ThinkingIndicator status={chatStatus} label={assistantLabel} />}
       </div>
-      <div className="p-4 border-t border-theme-border flex gap-2">
-        <input
-          type="text"
+      <div className="p-4 border-t border-theme-border flex gap-2 items-end">
+        <textarea
+          ref={textareaRef}
           aria-label="Message input"
-          className="flex-1 bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
+          className="flex-1 bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded resize-none overflow-y-auto focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
           placeholder="Message"
+          rows={1}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
+          onChange={(e) => {
+            setInput(e.target.value);
+            autoGrow();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
         />
         <button
           aria-label="Send message"
