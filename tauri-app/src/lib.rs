@@ -1619,6 +1619,19 @@ fn get_system_diagnostics(state: tauri::State<AppState>) -> Result<String, Strin
         }
     }
 
+    // Database
+    report.push_str("\n## Database\n");
+    match state.config.read() {
+        Ok(config) => match MemoryStore::open_with_config(&config) {
+            Ok(store) => match store.schema_version() {
+                Ok(v) => report.push_str(&format!("- Schema version: {}\n", v)),
+                Err(e) => report.push_str(&format!("- Schema version: error ({})\n", e)),
+            },
+            Err(e) => report.push_str(&format!("- Cannot open database: {}\n", e)),
+        },
+        Err(e) => report.push_str(&format!("- Config error: {}\n", e)),
+    }
+
     // CLI info
     report.push_str("\n## CLI Troubleshooting\n");
     report.push_str("- Run `abigail-cli status` for headless diagnostics\n");
@@ -2574,10 +2587,21 @@ fn execute_tool_call<'a>(
                     Err(e) => return format!("Error: {}", e),
                 };
 
+                // Map CLI provider names to cloud counterparts for validation
+                let validation_provider = match provider.as_str() {
+                    "claude-cli" => "anthropic",
+                    "gemini-cli" => "google",
+                    "codex-cli" => "openai",
+                    "grok-cli" => "xai",
+                    other => other,
+                };
+
                 // Validate the key first
-                if let Err(e) =
-                    abigail_capabilities::cognitive::validation::validate_api_key(&provider, &key)
-                        .await
+                if let Err(e) = abigail_capabilities::cognitive::validation::validate_api_key(
+                    validation_provider,
+                    &key,
+                )
+                .await
                 {
                     return format!(
                         "API key validation failed: {}. Please check the key and try again.",
@@ -2603,10 +2627,18 @@ fn execute_tool_call<'a>(
                     let _ = hive.save();
                 }
 
-                // For known Ego providers, persist in TrinityConfig and rebuild router
+                // For known Ego providers (including CLI variants), persist in TrinityConfig and rebuild router
                 if matches!(
                     provider.as_str(),
-                    "openai" | "anthropic" | "perplexity" | "xai" | "google"
+                    "openai"
+                        | "anthropic"
+                        | "perplexity"
+                        | "xai"
+                        | "google"
+                        | "claude-cli"
+                        | "gemini-cli"
+                        | "codex-cli"
+                        | "grok-cli"
                 ) {
                     if let Ok(mut config) = state.config.write() {
                         if provider == "openai" {
@@ -4056,10 +4088,20 @@ async fn store_provider_key(
         }
     };
 
+    // Map CLI provider names to their cloud counterparts for validation
+    let validation_provider = match provider.as_str() {
+        "claude-cli" => "anthropic",
+        "gemini-cli" => "google",
+        "codex-cli" => "openai",
+        "grok-cli" => "xai",
+        other => other,
+    };
+
     // Validate if requested
     if should_validate {
         if let Err(e) =
-            abigail_capabilities::cognitive::validation::validate_api_key(&provider, &key).await
+            abigail_capabilities::cognitive::validation::validate_api_key(validation_provider, &key)
+                .await
         {
             return Ok(StoreKeyResult {
                 success: false,
@@ -4084,10 +4126,18 @@ async fn store_provider_key(
         let _ = hive.save();
     }
 
-    // For known Ego providers, update config + TrinityConfig and rebuild router
+    // For known Ego providers (including CLI variants), update config + TrinityConfig and rebuild router
     if matches!(
         provider.as_str(),
-        "openai" | "anthropic" | "perplexity" | "xai" | "google"
+        "openai"
+            | "anthropic"
+            | "perplexity"
+            | "xai"
+            | "google"
+            | "claude-cli"
+            | "gemini-cli"
+            | "codex-cli"
+            | "grok-cli"
     ) {
         {
             let mut config = state.config.write().map_err(|e| e.to_string())?;
@@ -4985,8 +5035,18 @@ fn determine_ego_provider(
         }
     }
 
-    // 3. Check secrets vault for provider keys (all supported Ego providers)
-    for provider in &["anthropic", "openai", "xai", "perplexity", "google"] {
+    // 3. Check secrets vault for provider keys (cloud providers first, then CLI variants)
+    for provider in &[
+        "anthropic",
+        "openai",
+        "xai",
+        "perplexity",
+        "google",
+        "claude-cli",
+        "gemini-cli",
+        "codex-cli",
+        "grok-cli",
+    ] {
         if let Some(key) = secrets.get_secret(provider) {
             tracing::info!(
                 "determine_ego_provider: found key in vault for '{}'",
@@ -5570,7 +5630,11 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
         .setup(move |app| {
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
             let event_bus = event_bus_for_setup.clone();
             let handle = app.handle().clone();
             std::thread::spawn(move || {

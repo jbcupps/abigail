@@ -8,6 +8,7 @@ import IdentityConflictPanel, { IdentitySummary } from "./components/IdentityCon
 import ManagementScreen from "./components/ManagementScreen";
 import SplashScreen from "./components/SplashScreen";
 import ForgeDrawer from "./components/ForgeDrawer";
+import UpdateNotification from "./components/UpdateNotification";
 
 type AppState =
   | "splash"
@@ -277,6 +278,7 @@ function AppInner() {
     case "chat":
       return (
         <div className="h-screen flex flex-col">
+          <UpdateNotification />
           <PersonaToggle
             onToggle={() => setForgeOpen((prev) => !prev)}
             forgeOpen={forgeOpen}

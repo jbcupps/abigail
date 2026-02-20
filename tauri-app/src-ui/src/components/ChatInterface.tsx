@@ -31,7 +31,7 @@ interface OllamaStatus {
   model_ready: boolean;
 }
 
-type ConfigStep = "menu" | "ollama" | "lmstudio" | "openai" | null;
+type ConfigStep = "menu" | "ollama" | "lmstudio" | "openai" | "claude-cli" | "gemini-cli" | "codex-cli" | "grok-cli" | null;
 
 interface ChatInterfaceProps {
   target?: "ID" | "EGO";
@@ -157,6 +157,18 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
       case 3:
         setConfigStep("openai");
         break;
+      case 4:
+        setConfigStep("claude-cli");
+        break;
+      case 5:
+        setConfigStep("gemini-cli");
+        break;
+      case 6:
+        setConfigStep("codex-cli");
+        break;
+      case 7:
+        setConfigStep("grok-cli");
+        break;
     }
   };
 
@@ -175,6 +187,12 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
           return;
         }
         await invoke("set_api_key", { key: configInput.trim() });
+      } else if (configStep === "claude-cli" || configStep === "gemini-cli" || configStep === "codex-cli" || configStep === "grok-cli") {
+        if (!configInput.trim()) {
+          setConfigError("API key is required");
+          return;
+        }
+        await invoke("store_provider_key", { provider: configStep, key: configInput.trim(), validate: true });
       }
       setConfigInput("");
       refreshRouterStatus();
@@ -311,7 +329,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
       statusText = "Starting local AI...";
       statusColor = "text-theme-warning";
     } else {
-      statusText = "[no LLM] Press 1-3 to configure";
+      statusText = "[no LLM] Press 1-7 to configure";
       statusColor = "text-theme-danger";
     }
 
@@ -348,6 +366,33 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
               onClick={() => handleConfigSelect(3)}
             >
               <span className="text-theme-text-bright">[3]</span> OpenAI (cloud, requires API key)
+            </button>
+            <div className="border-t border-theme-border-dim my-2 pt-2">
+              <p className="text-theme-text-dim text-xs mb-2">CLI Providers (same API keys, routed through CLI tools):</p>
+            </div>
+            <button
+              className="block w-full text-left px-3 py-2 border border-theme-primary-faint rounded hover:bg-theme-surface"
+              onClick={() => handleConfigSelect(4)}
+            >
+              <span className="text-theme-text-bright">[4]</span> Claude Code CLI (Anthropic key)
+            </button>
+            <button
+              className="block w-full text-left px-3 py-2 border border-theme-primary-faint rounded hover:bg-theme-surface"
+              onClick={() => handleConfigSelect(5)}
+            >
+              <span className="text-theme-text-bright">[5]</span> Gemini CLI (Google key)
+            </button>
+            <button
+              className="block w-full text-left px-3 py-2 border border-theme-primary-faint rounded hover:bg-theme-surface"
+              onClick={() => handleConfigSelect(6)}
+            >
+              <span className="text-theme-text-bright">[6]</span> Codex CLI (OpenAI key)
+            </button>
+            <button
+              className="block w-full text-left px-3 py-2 border border-theme-primary-faint rounded hover:bg-theme-surface"
+              onClick={() => handleConfigSelect(7)}
+            >
+              <span className="text-theme-text-bright">[7]</span> Grok CLI (xAI key)
             </button>
           </div>
           {routerStatus && (routerStatus.ego_configured || routerStatus.id_provider === "local_http") && (
@@ -406,6 +451,46 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
               type="password"
               className="flex-1 bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
               placeholder="sk-..."
+              value={configInput}
+              onChange={(e) => setConfigInput(e.target.value)}
+              onKeyDown={handleConfigKeyDown}
+              autoFocus
+            />
+            <button
+              className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
+              onClick={handleConfigSubmit}
+            >
+              Save
+            </button>
+            <button
+              className="border border-theme-primary-faint px-3 py-2 rounded hover:bg-theme-surface text-theme-text-dim"
+              onClick={() => setConfigStep("menu")}
+            >
+              Back
+            </button>
+          </div>
+          {configError && <p className="text-red-400 mt-2 text-sm">{configError}</p>}
+        </div>
+      );
+    }
+
+    if (configStep === "claude-cli" || configStep === "gemini-cli" || configStep === "codex-cli" || configStep === "grok-cli") {
+      const cliLabels: Record<string, { label: string; placeholder: string }> = {
+        "claude-cli": { label: "Claude Code CLI", placeholder: "sk-ant-..." },
+        "gemini-cli": { label: "Gemini CLI", placeholder: "AIza..." },
+        "codex-cli": { label: "Codex CLI", placeholder: "sk-..." },
+        "grok-cli": { label: "Grok CLI", placeholder: "xai-..." },
+      };
+      const cli = cliLabels[configStep];
+      return (
+        <div className="p-4 border-b border-theme-border bg-theme-surface">
+          <p className="text-theme-primary-dim mb-2">{cli.label} Configuration:</p>
+          <p className="text-theme-text-dim text-xs mb-2">Uses the same API key as the cloud provider.</p>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              className="flex-1 bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
+              placeholder={cli.placeholder}
               value={configInput}
               onChange={(e) => setConfigInput(e.target.value)}
               onKeyDown={handleConfigKeyDown}

@@ -533,6 +533,22 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                     {storedProviders.includes(p) ? `✓ ${p}` : p}
                   </button>
                 ))}
+                <span className="text-theme-text-dim text-xs mx-1">|</span>
+                <span className="text-theme-text-dim text-xs mr-1">CLI:</span>
+                {["claude-cli", "gemini-cli", "codex-cli", "grok-cli"].map((p) => (
+                  <button
+                    key={p}
+                    className={`text-xs px-2 py-1 rounded border ${
+                      storedProviders.includes(p)
+                        ? "border-green-600 text-green-500"
+                        : "border-theme-primary text-theme-text hover:bg-theme-primary-glow"
+                    }`}
+                    onClick={() => setActiveApiKeyProvider(p)}
+                    disabled={storedProviders.includes(p)}
+                  >
+                    {storedProviders.includes(p) ? `✓ ${p}` : p}
+                  </button>
+                ))}
               </div>
               {storedProviders.length > 0 && (
                 <p className="text-green-500 text-xs mt-2">

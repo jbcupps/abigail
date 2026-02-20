@@ -1,4 +1,4 @@
-use crate::schema::{CREATE_BIRTH, CREATE_MEMORIES};
+use crate::schema::{CREATE_BIRTH, CREATE_MEMORIES, CREATE_SCHEMA_VERSIONS};
 use abigail_core::AppConfig;
 use chrono::Utc;
 use rusqlite::Connection;
@@ -98,7 +98,49 @@ impl MemoryStore {
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         conn.execute_batch(CREATE_MEMORIES)?;
         conn.execute_batch(CREATE_BIRTH)?;
+        conn.execute_batch(CREATE_SCHEMA_VERSIONS)?;
+        Self::run_migrations(conn)?;
         Ok(())
+    }
+
+    /// Run pending schema migrations in order. Each migration is applied once and
+    /// recorded in `schema_versions`. Version 1 is the baseline (no SQL changes).
+    fn run_migrations(conn: &Connection) -> Result<()> {
+        let migrations: &[(i64, &str)] = &[
+            (1, ""), // Baseline: marks current schema as v1; no SQL changes needed
+        ];
+
+        for &(version, sql) in migrations {
+            let already_applied: bool = conn.query_row(
+                "SELECT COUNT(*) > 0 FROM schema_versions WHERE version = ?1",
+                [version],
+                |row| row.get(0),
+            )?;
+            if already_applied {
+                continue;
+            }
+            if !sql.is_empty() {
+                conn.execute_batch(sql)?;
+            }
+            conn.execute(
+                "INSERT INTO schema_versions (version, applied_at) VALUES (?1, ?2)",
+                rusqlite::params![version, Utc::now().to_rfc3339()],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Return the latest applied schema version, or 0 if no migrations have run.
+    pub fn schema_version(&self) -> Result<i64> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        let version: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_versions",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(version)
     }
 
     pub fn open_with_config(config: &AppConfig) -> Result<Self> {
