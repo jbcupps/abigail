@@ -1557,9 +1557,7 @@ fn get_system_diagnostics(state: tauri::State<AppState>) -> Result<String, Strin
                 ));
                 report.push_str("- Password: stored (encrypted)\n");
             } else {
-                report.push_str(
-                    "- NOT configured. Provide IMAP/SMTP details to set up email.\n",
-                );
+                report.push_str("- NOT configured. Provide IMAP/SMTP details to set up email.\n");
             }
         }
         Err(e) => report.push_str(&format!("- Error reading config: {}\n", e)),
