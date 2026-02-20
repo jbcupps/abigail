@@ -50,6 +50,7 @@ dependencies = [
  "skill-knowledge-base",
  "skill-notification",
  "skill-perplexity-search",
+ "skill-proton-mail",
  "skill-shell",
  "skill-system-monitor",
  "skill-web-search",
@@ -6765,6 +6766,21 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "skill-proton-mail"
+version = "0.0.1"
+dependencies = [
+ "abigail-core",
+ "abigail-skills",
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]

@@ -40,6 +40,7 @@ use skill_image::ImageSkill;
 use skill_knowledge_base::KnowledgeBaseSkill;
 use skill_notification::NotificationSkill;
 use skill_perplexity_search::PerplexitySearchSkill;
+use skill_proton_mail::ProtonMailSkill;
 use skill_shell::ShellSkill;
 use skill_system_monitor::SystemMonitorSkill;
 use skill_web_search::WebSearchSkill;
@@ -2139,6 +2140,21 @@ fn chat_tool_definitions(
         }),
     });
 
+    // Built-in: get_system_diagnostics
+    tools.push(abigail_capabilities::cognitive::ToolDefinition {
+        name: "get_system_diagnostics".to_string(),
+        description: "Get a comprehensive diagnostic report of Abigail's current state. \
+                      Returns router status (Id/Ego/Superego), registered skills, email \
+                      configuration, integration readiness, and system health. Use this when \
+                      the mentor asks to troubleshoot, check status, or diagnose issues."
+            .to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    });
+
     // Dynamic skill management tools
     tools.push(abigail_capabilities::cognitive::ToolDefinition {
         name: "create_dynamic_skill".to_string(),
@@ -2308,6 +2324,15 @@ fn build_tool_awareness_section(
             }
         }
     }
+
+    // Diagnostics tools
+    let mut diag = String::from("### Diagnostics & Troubleshooting\n");
+    diag.push_str("- **get_system_diagnostics**: Get a comprehensive report of your current state — router, email, skills, integrations. Use when asked to troubleshoot or check status.\n");
+    diag.push_str(
+        "- **configure_email**: Configure IMAP/SMTP credentials (stored encrypted via DPAPI).\n",
+    );
+    diag.push_str("- **check_integration_status**: Check which integrations (GitHub, Slack, Jira) are configured.\n\n");
+    sections.push(diag);
 
     // Meta-tools guidance
     let mut guidance = String::from("### Skill Management\n");
@@ -2573,6 +2598,129 @@ fn execute_tool_call<'a>(
                     "Email configured successfully for {}. IMAP and SMTP credentials stored in encrypted vault.",
                     address
                 )
+            }
+            "get_system_diagnostics" => {
+                let mut report = String::from("# Abigail System Diagnostics\n\n");
+
+                // Router status
+                report.push_str("## Router\n");
+                match state.router.read() {
+                    Ok(router) => {
+                        let s = router.status();
+                        report.push_str(&format!(
+                            "- Id provider: {}\n",
+                            if s.has_local_http {
+                                "local_http"
+                            } else {
+                                "candle_stub"
+                            }
+                        ));
+                        if let Ok(config) = state.config.read() {
+                            if let Some(ref url) = config.local_llm_base_url {
+                                report.push_str(&format!("- Id URL: {}\n", url));
+                            }
+                        }
+                        report.push_str(&format!("- Ego configured: {}\n", s.has_ego));
+                        if let Some(ref provider) = s.ego_provider {
+                            report.push_str(&format!("- Ego provider: {}\n", provider));
+                        }
+                        report.push_str(&format!("- Superego configured: {}\n", s.has_superego));
+                        report.push_str(&format!("- Routing mode: {:?}\n", s.mode));
+                        report.push_str(&format!(
+                            "- Council providers: {}\n",
+                            s.council_provider_count
+                        ));
+                    }
+                    Err(e) => report.push_str(&format!("- Error reading router: {}\n", e)),
+                }
+
+                // Email status
+                report.push_str("\n## Email\n");
+                match state.config.read() {
+                    Ok(config) => {
+                        if let Some(ref email) = config.email {
+                            report.push_str(&format!("- Address: {}\n", email.address));
+                            report.push_str(&format!(
+                                "- IMAP: {}:{}\n",
+                                email.imap_host, email.imap_port
+                            ));
+                            report.push_str(&format!(
+                                "- SMTP: {}:{}\n",
+                                email.smtp_host, email.smtp_port
+                            ));
+                            report.push_str("- Password: stored (encrypted)\n");
+                        } else {
+                            report.push_str(
+                                "- NOT configured. Provide IMAP/SMTP details to set up email.\n",
+                            );
+                        }
+                    }
+                    Err(e) => report.push_str(&format!("- Error reading config: {}\n", e)),
+                }
+
+                // Registered skills
+                report.push_str("\n## Registered Skills\n");
+                if let Ok(manifests) = state.registry.list() {
+                    for manifest in &manifests {
+                        let health = if let Ok((skill, _)) = state.registry.get_skill(&manifest.id)
+                        {
+                            let h = skill.health();
+                            format!("{:?}", h.status)
+                        } else {
+                            "unknown".to_string()
+                        };
+                        report.push_str(&format!(
+                            "- {} ({}): {}\n",
+                            manifest.name, manifest.id.0, health
+                        ));
+                    }
+                    report.push_str(&format!("\nTotal: {} skills registered\n", manifests.len()));
+                } else {
+                    report.push_str("- Error listing skills\n");
+                }
+
+                // Integration status
+                report.push_str("\n## Integrations\n");
+                {
+                    let vault = match state.secrets.lock() {
+                        Ok(v) => Some(v),
+                        Err(_) => None,
+                    };
+                    let integrations = abigail_skills::preloaded_integration_skills();
+                    for (config, auth) in &integrations {
+                        let secret_keys = abigail_skills::dynamic::extract_secret_keys(config);
+                        let missing: Vec<&str> = if let Some(ref v) = vault {
+                            secret_keys
+                                .iter()
+                                .filter(|k| v.get_secret(k).is_none())
+                                .map(|s| s.as_str())
+                                .collect()
+                        } else {
+                            secret_keys.iter().map(|s| s.as_str()).collect()
+                        };
+                        if missing.is_empty() {
+                            report.push_str(&format!(
+                                "- {} ({}): Configured\n",
+                                config.name, auth.service_id
+                            ));
+                        } else {
+                            report.push_str(&format!(
+                                "- {} ({}): NOT configured (missing: {}). Setup: {}\n",
+                                config.name,
+                                auth.service_id,
+                                missing.join(", "),
+                                auth.setup_url
+                            ));
+                        }
+                    }
+                }
+
+                // CLI info
+                report.push_str("\n## CLI Troubleshooting\n");
+                report.push_str("- Run `abigail-cli status` for headless diagnostics\n");
+                report.push_str("- Run `abigail-cli serve --port 3141` for REST API access\n");
+
+                report
             }
             "delegate_to_subagent" => {
                 let args: serde_json::Value = match serde_json::from_str(&tool_call.arguments) {
@@ -5007,6 +5155,11 @@ pub fn run() {
         let sysmon_manifest = SystemMonitorSkill::default_manifest();
         let sysmon_skill = SystemMonitorSkill::new(sysmon_manifest.clone());
         let _ = registry.register(sysmon_manifest.id.clone(), Arc::new(sysmon_skill));
+    }
+    {
+        let pm_manifest = ProtonMailSkill::default_manifest();
+        let pm_skill = ProtonMailSkill::new(pm_manifest.clone());
+        let _ = registry.register(pm_manifest.id.clone(), Arc::new(pm_skill));
     }
 
     // Load dynamic skills from data_dir/dynamic_skills/

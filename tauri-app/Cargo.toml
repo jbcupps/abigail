@@ -34,6 +34,7 @@ skill-notification = { path = "../skills/skill-notification" }
 skill-image = { path = "../skills/skill-image" }
 skill-clipboard = { path = "../skills/skill-clipboard" }
 skill-system-monitor = { path = "../skills/skill-system-monitor" }
+skill-proton-mail = { path = "../skills/skill-proton-mail" }
 tauri = { version = "2.0", features = ["tray-icon"] }
 tauri-plugin-dialog = "2.0"
 tokio.workspace = true
