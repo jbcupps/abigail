@@ -218,7 +218,8 @@ jobs:
           releaseBody: "See assets for platform installers. Auto-update checks on launch."
           releaseDraft: false
           prerelease: false
-          includeUpdaterJson: true
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
 
       - name: Upload installers (Artifacts)
         uses: actions/upload-artifact@47309c993abb98030a35d55ef7ff34b7fa1074b5 # v4

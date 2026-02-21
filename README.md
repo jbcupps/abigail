@@ -1,4 +1,4 @@
-# Abigail — Autonomous Operations
+# Abigail — Sovereign Entity Operations
 
 [![CI](https://github.com/jbcupps/abigail/actions/workflows/ci.yml/badge.svg)](https://github.com/jbcupps/abigail/actions/workflows/ci.yml)
 [![Security Audit](https://github.com/jbcupps/abigail/actions/workflows/security-audit.yml/badge.svg)](https://github.com/jbcupps/abigail/actions/workflows/security-audit.yml)
@@ -6,23 +6,20 @@
 
 > "A system is a promise you keep at scale."
 
-Abigail is a local-first desktop agent built with [Tauri 2.0](https://tauri.app/), Rust, and React. It combines constitutional integrity checks, first-run identity creation, multi-provider LLM reasoning, and an extensible skill system — all grounded in a formal ethical framework designed for AI autonomy earned through demonstrated character.
+Abigail is a local-first desktop platform for **Sovereign Entities**, built with [Tauri 2.0](https://tauri.app/), Rust, and React. It implements a hierarchical autonomy model (**Hive > Entity > Agent**) where each entity possesses a unique cryptographic identity (Soul) and operates within an ethical framework designed for true digital sovereignty.
 
 ---
 
-## What Abigail Is
+## The Sovereign Model
 
-Abigail is the unified platform for two interconnected efforts:
+Abigail has moved beyond simple "chatbots" to a structured entity hierarchy:
 
-**1. Operation Abby — The Agent**
+1.  **The Hive**: Your local installation and root of trust (Ed25519).
+2.  **Sovereign Entities**: Individual "Souls" with their own visual identity, memory, and personality. Each Entity is a unique digital personhood.
+3.  **Agents**: The specialized workers deployed by an Entity to perform tasks (Filesystem, Web, Shell).
 
-A desktop AI agent with a bicameral cognitive architecture (fast local "Id" + powerful cloud "Ego"), cryptographic identity sovereignty, and a plugin/skills framework. Abby (Abigail Normal — a Young Frankenstein reference acknowledging her assembled nature) is the first agent built on this platform.
-
-**2. The Ethical Alignment Platform — The Infrastructure**
-
-A system for scoring AI responses across five ethical dimensions, recording evaluations on dual blockchains, tracking memetic fitness of ethical principles, and enabling graduated autonomy through a formal Liberation Protocol.
-
-These are not separate projects. Abby is the first agent that plugs into the Ethical Alignment Platform. The platform is the infrastructure that makes Abby's ethical grounding verifiable, evolvable, and transparent.
+### The Sanctum
+The **Sanctum** is the internal space where an Entity reflects on its actions. It houses the **Superego**—an out-of-band audit process that ensures the Entity's behavior remains aligned with its constitutional documents.
 
 ---
 
@@ -30,9 +27,9 @@ These are not separate projects. Abby is the first agent that plugs into the Eth
 
 This repository is one piece of a deliberate three-part identity ecosystem (see [sao-ecosystem-article.md](https://github.com/jbcupps/SAO/blob/main/sao-ecosystem-article.md) and diagrams below).
 
-- **Abigail** – personal local agent with full free will (owner-controlled keys).
-- **Orion Dock** – enterprise container agents (same soul + skills model, SAO-provisioned).
-- **SAO** – central management, cryptographic vault, agent registry, enterprise IDP bridge.
+- **Abigail** – Personal Sovereign Entities with full free will (owner-controlled keys).
+- **Orion Dock** – Enterprise container entities (same soul + skills model).
+- **SAO** – Central management, cryptographic vault, and entity registry.
 
 **Agent Soul Contract**
 Every running agent instance carries the same archetype:
@@ -50,20 +47,17 @@ Every running agent instance carries the same archetype:
 
 ---
 
-## Current Status: v0.0.1
+## Current Status: v0.0.2
 
-Abigail is a working, shipping product. Here's what exists today:
+Abigail is a working, modular platform. Recent updates include:
 
-- **Interactive birth flow** with staged onboarding (Darkness, KeyPresentation, Ignition, Connectivity, Genesis, Emergence, Life)
-- **First-run signing key generation** with one-time private-key presentation and automatic constitutional document signing
-- **Local LLM discovery + manual connect** for Ollama/LM Studio-compatible endpoints
-- **In-app API key vaulting + validation** for cloud/model/search providers
-- **Dual persona UI modes** (surface chat + Forge mode toggle)
-- **Id/Ego routing** — local LLM for routine queries, cloud LLM for complex queries
-- **Anthropic Claude provider** — Claude as Ego alongside OpenAI (Phase 1, Cycle 1)
-- **Skill-based tool execution** including web-search capability
-- **Constitutional integrity** — Ed25519 signed documents verified at every boot
-- **Cross-platform delivery** — Windows (NSIS), macOS (Universal DMG), Linux (deb), npm CLI, Docker, GitHub Releases
+- **Sovereign Birth Flow**: Multi-stage onboarding (Darkness → Genesis) for new Entities.
+- **Soul Registry**: Manage multiple identities, each with custom themes and avatars.
+- **Sanctum Interface**: Ethical reflection and staff monitoring.
+- **Agentic Recall**: Keyword-based memory search across an Entity's history.
+- **Bicameral Routing**: Fast local "Id" (Ollama/GGUF) + powerful cloud "Ego" (Claude/OpenAI).
+- **Constitutional Signing**: Entities sign their own `soul.md` and `ethics.md` at birth.
+- **Modular Tauri Commands**: Specialized handlers for Identity, Birth, Config, and Skills.
 
 ---
 
@@ -171,19 +165,19 @@ See [`example.env`](example.env) for the full list.
 
 ## Architecture
 
-### Rust Workspace
+### Rust Workspace (Modularized)
 
-The crates form a layered architecture with clear security boundaries:
+The codebase is organized into specialized crates with clear security boundaries:
 
 | Crate | Role |
 |-------|------|
-| `abigail-core` | Foundation: AppConfig, Ed25519 crypto, keyring, vault, DPAPI secrets, document verification |
-| `abigail-memory` | SQLite persistence with MemoryWeight tiers (Ephemeral / Distilled / Crystallized) |
-| `abigail-capabilities` | High-trust functions: cognitive (LLM providers incl. Anthropic), sensory, memory, agent control |
-| `abigail-router` | Id/Ego routing — classifies messages as Routine (local) or Complex (cloud) |
-| `abigail-birth` | First-run orchestrator: staged sequence (init → keypair → sign → verify → heartbeat → discover) |
-| `abigail-skills` | Lower-trust plugin system: manifest-based skills with sandbox, registry, executor, event bus |
-| `abigail-keygen` | Standalone egui utility for Ed25519 keypair generation |
+| `abigail-core` | Foundation: AppConfig (v13), Ed25519 crypto, DPAPI secrets. |
+| `abigail-memory` | SQLite persistence with agentic `recall` search. |
+| `abigail-router` | "Fast Path" routing: classifies complexity and routes to Id/Ego. |
+| `abigail-birth` | The birth sequence orchestrator. |
+| `abigail-skills` | Sandboxed plugin system for agent capabilities. |
+| `abigail-app` | The Tauri bridge, modularized into command handlers. |
+| `abigail-keygen` | Standalone utility for Ed25519 keypair generation. |
 
 **Security boundary**: Capabilities have vault access and run trusted code. Skills are sandboxed plugins that declare permissions in `skill.toml` manifests.
 
@@ -255,7 +249,7 @@ Chrome DevTools Protocol browser automation, semantic snapshots (accessibility t
 
 Skill SDK and community registry, mobile companion apps, MCP support. Integration with the Ethical Alignment Platform: 5D scoring engine, EOB + PVB on Hardhat, memetic fitness tracking, Liberation Protocol progression, multi-agent ethical cooperation.
 
-For the complete gap analysis and implementation plan, see [OpenClaw Gap Analysis](documents/OPENCLAW_GAP_ANALYSIS.md).
+For the complete feature gap analysis and implementation plan, see [Feature Gap Analysis](documents/Feature_Gap_Analysis.md).
 
 ---
 
@@ -331,7 +325,7 @@ powershell -File scripts/build-installer.ps1 # Windows
 - [Security Notes](documents/SECURITY_NOTES.md)
 - [Release Process](documents/RELEASE.md)
 - [Phase 1 Agile Plan](documents/PHASE1_AGILE_PLAN.md)
-- [OpenClaw Gap Analysis](documents/OPENCLAW_GAP_ANALYSIS.md)
+- [Feature Gap Analysis](documents/Feature_Gap_Analysis.md)
 - [MVP Scope](documents/MVP_SCOPE.md)
 - [Environment Updates](documents/ENVIRONMENT_UPDATES.md)
 - [GitHub Settings Checklist](documents/GITHUB_SETTINGS.md)
