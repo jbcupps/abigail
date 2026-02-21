@@ -211,7 +211,19 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           cd tauri-app
-          tauri build ${{ matrix.args }}
+
+          # Some secret stores keep newlines escaped ("\n"). Normalize before build.
+          if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" && "$TAURI_SIGNING_PRIVATE_KEY" == *"\n"* ]]; then
+            export TAURI_SIGNING_PRIVATE_KEY="$(printf '%b' "$TAURI_SIGNING_PRIVATE_KEY")"
+          fi
+
+          if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+            echo "Signing key detected: building signed artifacts"
+            tauri build ${{ matrix.args }}
+          else
+            echo "WARNING: TAURI_SIGNING_PRIVATE_KEY is not configured; building unsigned artifacts"
+            TAURI_SKIP_SIGNING=true tauri build ${{ matrix.args }}
+          fi
 
       - name: Upload installers (Artifacts)
         uses: actions/upload-artifact@47309c993abb98030a35d55ef7ff34b7fa1074b5 # v4
@@ -248,6 +260,7 @@ jobs:
           path: artifacts
           pattern: abigail-installer-*
           merge-multiple: false
+        continue-on-error: true
 
       - name: Download MSI artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -257,7 +270,16 @@ jobs:
           merge-multiple: false
         continue-on-error: true
 
+      - name: Count downloaded installer artifacts
+        id: artifacts
+        shell: bash
+        run: |
+          COUNT=$(find artifacts -type f 2>/dev/null | wc -l | tr -d ' ')
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+          echo "Discovered $COUNT downloaded artifact file(s)"
+
       - name: Create git tag if needed
+        if: steps.artifacts.outputs.count != '0'
         shell: bash
         run: |
           TAG="${{ needs.build.outputs.tag }}"
@@ -309,7 +331,16 @@ jobs:
           echo "Release assets:"
           ls -la release-assets/ 2>/dev/null || echo "No assets found"
 
+      - name: Count release assets
+        id: assets
+        shell: bash
+        run: |
+          COUNT=$(find release-assets -type f 2>/dev/null | wc -l | tr -d ' ')
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+          echo "Discovered $COUNT release asset(s)"
+
       - name: Create GitHub Release
+        if: steps.assets.outputs.count != '0'
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
         with:
           tag_name: ${{ needs.build.outputs.tag }}
@@ -355,12 +386,14 @@ jobs:
             release-assets/*
 
       - name: Setup Node (for npm publish)
+        if: steps.assets.outputs.count != '0'
         uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
       - name: Determine npm version
+        if: steps.assets.outputs.count != '0'
         id: npm_version
         shell: bash
         run: |
@@ -370,6 +403,7 @@ jobs:
           echo "npm publish version: $VERSION"
 
       - name: Update npm package version
+        if: steps.assets.outputs.count != '0'
         working-directory: npm-package
         shell: bash
         run: |
@@ -381,6 +415,7 @@ jobs:
           "
 
       - name: Publish to npm
+        if: steps.assets.outputs.count != '0'
         working-directory: npm-package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

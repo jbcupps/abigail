@@ -3,9 +3,65 @@ use abigail_capabilities::cognitive::{Message, StreamEvent, ToolDefinition};
 use abigail_core::AppConfig;
 use abigail_memory::MemoryStore;
 use abigail_skills::{FileSystemPermission, Permission, ToolDescriptor};
+use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashMap;
 use tauri::{AppHandle, Emitter, Manager, State};
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SessionMessage {
+    pub role: String,
+    pub content: String,
+}
+
+fn sanitize_session_history(history: Option<Vec<SessionMessage>>) -> Vec<Message> {
+    const MAX_HISTORY_MESSAGES: usize = 24;
+    const MAX_MESSAGE_CHARS: usize = 4_000;
+
+    history
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|m| {
+            if m.role != "user" && m.role != "assistant" {
+                return None;
+            }
+            let trimmed = m.content.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            let content = if trimmed.chars().count() > MAX_MESSAGE_CHARS {
+                trimmed.chars().take(MAX_MESSAGE_CHARS).collect::<String>()
+            } else {
+                trimmed.to_string()
+            };
+            Some(Message::new(&m.role, &content))
+        })
+        .rev()
+        .take(MAX_HISTORY_MESSAGES)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
+fn build_contextual_messages(
+    system_prompt: &str,
+    session_messages: Option<Vec<SessionMessage>>,
+    latest_user_message: &str,
+) -> Vec<Message> {
+    let mut messages = vec![Message::new("system", system_prompt)];
+    let mut history = sanitize_session_history(session_messages);
+
+    if let Some(last) = history.last() {
+        if last.role == "user" && last.content == latest_user_message.trim() {
+            history.pop();
+        }
+    }
+
+    messages.extend(history);
+    messages.push(Message::new("user", latest_user_message));
+    messages
+}
 
 fn is_transient_retryable(error: &str) -> bool {
     let s = error.to_lowercase();
@@ -271,6 +327,7 @@ pub async fn chat(
     state: State<'_, AppState>,
     message: String,
     target: Option<String>,
+    session_messages: Option<Vec<SessionMessage>>,
 ) -> Result<String, String> {
     if needs_risk_clarification(&message) {
         return Ok("Before I continue, clarify your intent and authorization context. If this is defensive or approved testing, say so and I can provide safer guidance.".to_string());
@@ -285,10 +342,7 @@ pub async fn chat(
     };
 
     let target_mode = target.as_deref().unwrap_or("EGO");
-    let messages = vec![
-        Message::new("system", &system_prompt),
-        Message::new("user", &message),
-    ];
+    let messages = build_contextual_messages(&system_prompt, session_messages, &message);
 
     // Auto-detect and store keys
     let _ = auto_detect_and_store_key_internal(&state, &message).await;
@@ -318,6 +372,7 @@ pub async fn chat_stream(
     state: State<'_, AppState>,
     message: String,
     target: Option<String>,
+    session_messages: Option<Vec<SessionMessage>>,
 ) -> Result<String, String> {
     if let Err(remaining) = state.chat_cooldown.check().await {
         return Err(format!(
@@ -357,10 +412,7 @@ pub async fn chat_stream(
 
     let full_system_prompt = format!("{}\n\n{}", base_system_prompt, tool_awareness);
 
-    let mut messages = vec![
-        Message::new("system", &full_system_prompt),
-        Message::new("user", &message),
-    ];
+    let mut messages = build_contextual_messages(&full_system_prompt, session_messages, &message);
 
     tracing::info!(
         "chat_stream: target_mode={}, router_has_ego={}, ego_provider={:?}, routing_mode={:?}",

@@ -273,14 +273,15 @@ impl IdEgoRouter {
     /// Lightweight 3-factor classification.
     pub fn fast_path_classify(&self, user_message: &str) -> FastPathResult {
         let id_instinct = self.calculate_id_instinct(user_message);
-        let ego_feasible = self.ego.is_some() && (id_instinct > 40);
-        let context_aligned = user_message.to_lowercase().contains("search");
+        let context_aligned = self.has_external_context_signal(user_message);
+        let ego_feasible = self.ego.is_some() && (id_instinct >= 45 || context_aligned);
 
-        let target = if ego_feasible && id_instinct > 60 {
-            FastPathTarget::Ego
-        } else {
-            FastPathTarget::Id
-        };
+        let target =
+            if ego_feasible && (id_instinct >= 60 || (context_aligned && id_instinct >= 20)) {
+                FastPathTarget::Ego
+            } else {
+                FastPathTarget::Id
+            };
 
         FastPathResult {
             target,
@@ -292,13 +293,74 @@ impl IdEgoRouter {
     }
 
     fn calculate_id_instinct(&self, text: &str) -> u8 {
-        if text.len() > 500 {
-            80
-        } else if text.len() > 100 {
-            40
-        } else {
-            10
+        let lower = text.to_lowercase();
+        let mut score: i32 = match text.len() {
+            n if n > 1200 => 90,
+            n if n > 600 => 75,
+            n if n > 250 => 55,
+            n if n > 100 => 35,
+            _ => 15,
+        };
+
+        let complexity_terms = [
+            "analyze",
+            "compare",
+            "tradeoff",
+            "design",
+            "architecture",
+            "debug",
+            "investigate",
+            "optimize",
+            "benchmark",
+            "route",
+            "routing",
+            "strategy",
+            "security",
+            "incident",
+            "multiple",
+            "step-by-step",
+            "plan",
+            "refactor",
+        ];
+        score += (complexity_terms
+            .iter()
+            .filter(|k| lower.contains(**k))
+            .count() as i32)
+            * 6;
+
+        let has_structured_content =
+            text.contains('\n') || text.contains("```") || text.contains("{") || text.contains("[");
+        if has_structured_content {
+            score += 10;
         }
+
+        let question_count = text.chars().filter(|c| *c == '?').count() as i32;
+        if question_count >= 2 {
+            score += 8;
+        }
+
+        score.clamp(5, 95) as u8
+    }
+
+    fn has_external_context_signal(&self, text: &str) -> bool {
+        let lower = text.to_lowercase();
+        [
+            "search",
+            "web",
+            "http",
+            "api",
+            "fetch",
+            "docs",
+            "documentation",
+            "latest",
+            "current",
+            "today",
+            "news",
+            "url",
+            "crawl",
+        ]
+        .iter()
+        .any(|k| lower.contains(k))
     }
 
     /// Spawn the out-of-band conscience monitor.
@@ -646,6 +708,34 @@ mod tests {
         let router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
         let target = router.target_for_mode("this is a complex question that might use ego");
         assert_eq!(target, FastPathTarget::Id);
+    }
+
+    #[tokio::test]
+    async fn test_fast_path_classify_prefers_ego_for_external_context() {
+        let router = IdEgoRouter::new(
+            None,
+            Some("openai"),
+            Some("test-key".to_string()),
+            None,
+            RoutingMode::TierBased,
+        );
+        let fp =
+            router.fast_path_classify("Search the web for the latest incident response guidance");
+        assert_eq!(fp.target, FastPathTarget::Ego);
+        assert!(fp.context_aligned);
+    }
+
+    #[tokio::test]
+    async fn test_fast_path_classify_keeps_short_local_message_on_id() {
+        let router = IdEgoRouter::new(
+            None,
+            Some("openai"),
+            Some("test-key".to_string()),
+            None,
+            RoutingMode::TierBased,
+        );
+        let fp = router.fast_path_classify("hi");
+        assert_eq!(fp.target, FastPathTarget::Id);
     }
 
     #[tokio::test]
