@@ -215,7 +215,7 @@ impl Skill for HiveManagementSkill {
                     .ops
                     .list_agents()
                     .await
-                    .map_err(|e| SkillError::ToolFailed(e))?;
+                    .map_err(SkillError::ToolFailed)?;
                 Ok(ToolOutput::success(serde_json::to_value(agents).unwrap()))
             }
             "create_entity" => {
@@ -226,7 +226,7 @@ impl Skill for HiveManagementSkill {
                     .ops
                     .create_agent(&name)
                     .await
-                    .map_err(|e| SkillError::ToolFailed(e))?;
+                    .map_err(SkillError::ToolFailed)?;
                 Ok(ToolOutput::success(serde_json::json!(id)))
             }
             "switch_entity" => {
@@ -236,7 +236,7 @@ impl Skill for HiveManagementSkill {
                 self.ops
                     .load_agent(&id)
                     .await
-                    .map_err(|e| SkillError::ToolFailed(e))?;
+                    .map_err(SkillError::ToolFailed)?;
                 Ok(ToolOutput::success(serde_json::json!(true)))
             }
             "get_config" => {
@@ -247,7 +247,7 @@ impl Skill for HiveManagementSkill {
                     .ops
                     .get_config_value(&key)
                     .await
-                    .map_err(|e| SkillError::ToolFailed(e))?;
+                    .map_err(SkillError::ToolFailed)?;
                 Ok(ToolOutput::success(val))
             }
             "set_config" => {
@@ -262,7 +262,7 @@ impl Skill for HiveManagementSkill {
                 self.ops
                     .set_config_value(&key, value)
                     .await
-                    .map_err(|e| SkillError::ToolFailed(e))?;
+                    .map_err(SkillError::ToolFailed)?;
                 Ok(ToolOutput::success(serde_json::json!(true)))
             }
             "store_secret" => {
@@ -275,7 +275,7 @@ impl Skill for HiveManagementSkill {
                 self.ops
                     .set_skill_secret(&key, &value)
                     .await
-                    .map_err(|e| SkillError::ToolFailed(e))?;
+                    .map_err(SkillError::ToolFailed)?;
                 Ok(ToolOutput::success(serde_json::json!(true)))
             }
             "list_secrets" => {
@@ -283,7 +283,7 @@ impl Skill for HiveManagementSkill {
                     .ops
                     .get_skill_secret_names()
                     .await
-                    .map_err(|e| SkillError::ToolFailed(e))?;
+                    .map_err(SkillError::ToolFailed)?;
                 Ok(ToolOutput::success(serde_json::to_value(names).unwrap()))
             }
             _ => Err(SkillError::ToolFailed(format!(
