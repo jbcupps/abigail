@@ -1,7 +1,7 @@
-use tauri::{AppHandle, Emitter, State};
 use crate::state::AppState;
 use abigail_capabilities::cognitive::{Message, ToolDefinition};
 use serde_json::json;
+use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
 pub async fn chat(
@@ -11,7 +11,8 @@ pub async fn chat(
 ) -> Result<String, String> {
     let (router, system_prompt) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
-        let prompt = abigail_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
+        let prompt =
+            abigail_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
         let router = state.router.read().map_err(|e| e.to_string())?.clone();
         (router, prompt)
     };
@@ -23,9 +24,15 @@ pub async fn chat(
     ];
 
     let response = if target_mode == "ID" {
-        router.id_only(messages).await.map_err(|e: anyhow::Error| e.to_string())?
+        router
+            .id_only(messages)
+            .await
+            .map_err(|e: anyhow::Error| e.to_string())?
     } else {
-        router.route(messages).await.map_err(|e: anyhow::Error| e.to_string())?
+        router
+            .route(messages)
+            .await
+            .map_err(|e: anyhow::Error| e.to_string())?
     };
 
     Ok(response.content)
@@ -47,7 +54,8 @@ pub async fn chat_stream(
 
     let (router, base_system_prompt) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
-        let prompt = abigail_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
+        let prompt =
+            abigail_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
         let router = state.router.read().map_err(|e| e.to_string())?.clone();
         (router, prompt)
     };
@@ -57,23 +65,30 @@ pub async fn chat_stream(
 
     let target_mode = target.as_deref().unwrap_or("EGO");
     let tools = chat_tool_definitions(&state.registry, &*browser_guard, &*http_client_guard);
-    let tool_awareness = build_tool_awareness_section(&state.registry, &*browser_guard, &*http_client_guard);
-    
+    let tool_awareness =
+        build_tool_awareness_section(&state.registry, &*browser_guard, &*http_client_guard);
+
     let full_system_prompt = format!("{}\n\n{}", base_system_prompt, tool_awareness);
-    
+
     let messages = vec![
         Message::new("system", &full_system_prompt),
         Message::new("user", &message),
     ];
 
     let response = if target_mode == "ID" {
-        router.id_only(messages).await.map_err(|e: anyhow::Error| e.to_string())?
+        router
+            .id_only(messages)
+            .await
+            .map_err(|e: anyhow::Error| e.to_string())?
     } else {
-        router.route_with_tools(messages, tools).await.map_err(|e: anyhow::Error| e.to_string())?
+        router
+            .route_with_tools(messages, tools)
+            .await
+            .map_err(|e: anyhow::Error| e.to_string())?
     };
 
     let _ = app.emit("chat-token", response.content.clone());
-    
+
     Ok("Success".to_string())
 }
 
@@ -121,13 +136,18 @@ pub fn build_tool_awareness_section(
 ) -> String {
     let mut sections = Vec::new();
 
-    sections.push("### Core Capabilities\n- **recall**: Search your history and crystallized memories.\n".to_string());
+    sections.push(
+        "### Core Capabilities\n- **recall**: Search your history and crystallized memories.\n"
+            .to_string(),
+    );
 
     if let Ok(manifests) = registry.list() {
         for manifest in &manifests {
             if let Ok((skill, _)) = registry.get_skill(&manifest.id) {
                 let tools = skill.tools();
-                if tools.is_empty() { continue; }
+                if tools.is_empty() {
+                    continue;
+                }
                 let mut s = format!("### {} ({})\n", manifest.name, manifest.id.0);
                 for t in &tools {
                     s.push_str(&format!("- **{}**: {}\n", t.name, t.description));
@@ -145,12 +165,21 @@ pub fn get_system_diagnostics(state: State<AppState>) -> Result<String, String> 
     let mut report = String::from("# Abigail System Diagnostics\n\n");
     let router = state.router.read().map_err(|e| e.to_string())?;
     let s = router.status();
-    
+
     report.push_str("## Router\n");
-    report.push_str(&format!("- Id: {}\n", if s.has_local_http { "local_http" } else { "candle_stub" }));
+    report.push_str(&format!(
+        "- Id: {}\n",
+        if s.has_local_http {
+            "local_http"
+        } else {
+            "candle_stub"
+        }
+    ));
     report.push_str(&format!("- Ego Configured: {}\n", s.has_ego));
-    if let Some(ref p) = s.ego_provider { report.push_str(&format!("- Ego Provider: {}\n", p)); }
+    if let Some(ref p) = s.ego_provider {
+        report.push_str(&format!("- Ego Provider: {}\n", p));
+    }
     report.push_str(&format!("- Superego Configured: {}\n", s.has_superego));
-    
+
     Ok(report)
 }
