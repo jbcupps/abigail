@@ -5,7 +5,7 @@ import ThinkingIndicator from "./ThinkingIndicator";
 interface BirthChatResponse {
   message: string;
   stage: string;
-  action: BirthAction | null;
+  actions: BirthAction[];
 }
 
 interface BirthAction {
@@ -35,7 +35,7 @@ export interface BirthChatHandle {
 /** Defense-in-depth: redact common API key patterns before rendering. */
 function redactApiKeys(text: string): string {
   return text.replace(
-    /(?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{10,})|(?:xai-[A-Za-z0-9_-]{10,})|(?:pplx-[A-Za-z0-9_-]{10,})|(?:AIza[A-Za-z0-9_-]{10,})/g,
+    /(?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{10,})|(?:xai-[A-Za-z0-9_-]{10,})|(?:pplx-[A-Za-z0-9_-]{10,})|(?:AIza[A-Za-z0-9_-]{10,})|(?:tvly-[A-Za-z0-9_-]{10,})/g,
     (match) => {
       const dashIdx = match.indexOf("-");
       const visible = dashIdx >= 0 ? match.slice(0, dashIdx + 4) : match.slice(0, 4);
@@ -114,20 +114,22 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
       setRetryCount(0); // Reset retry count on success
       setLastMessage(null);
 
-      if (response.action) {
-        // Insert success message for KeyStored actions
-        if (response.action.type === "KeyStored" && response.action.provider) {
-          const validatedText = response.action.validated ? " and validated" : "";
-          if (!mountedRef.current) return;
-          setMessages(m => [...m, {
-            role: "system",
-            content: `${response.action!.provider!.toUpperCase()} API key stored${validatedText} successfully.`,
-            variant: "success",
-          }]);
-        }
-        if (onAction) {
-          onAction(response.action);
-        }
+      if (response.actions && response.actions.length > 0) {
+        response.actions.forEach(action => {
+          // Insert success message for KeyStored actions
+          if (action.type === "KeyStored" && action.provider) {
+            const validatedText = action.validated ? " and validated" : "";
+            if (!mountedRef.current) return;
+            setMessages(m => [...m, {
+              role: "system",
+              content: `${action.provider!.toUpperCase()} API key stored${validatedText} successfully.`,
+              variant: "success",
+            }]);
+          }
+          if (onAction) {
+            onAction(action);
+          }
+        });
       }
     } catch (e) {
       const errorMsg = String(e);
@@ -204,7 +206,7 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
               <div className="flex justify-end animate-fade-in-up">
                 <div className="max-w-[80%] bg-theme-bubble-user rounded-xl rounded-br-sm px-4 py-2.5">
                   <p className="text-xs text-theme-text-dim mb-1">Mentor</p>
-                  <span className="text-theme-primary-dim text-sm">{msg.content}</span>
+                  <span className="text-theme-primary-dim text-sm">{redactApiKeys(msg.content)}</span>
                 </div>
               </div>
             )}
@@ -213,7 +215,7 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
                 <div className="max-w-[80%] bg-theme-bubble-assistant rounded-xl rounded-bl-sm px-4 py-2.5">
                   <p className="text-xs text-theme-text-dim mb-1">Abigail</p>
                   <span className="text-theme-text-bright text-sm">
-                    {redactApiKeys(msg.content).split("\n").map((line, j, arr) => (
+                    {redactApiKeys(msg.content || "").split("\n").map((line, j, arr) => (
                       <span key={j}>
                         {line}
                         {j < arr.length - 1 && <br />}
@@ -225,7 +227,7 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
             )}
             {msg.role === "system" && (
               <div className={`text-sm px-4 py-2 rounded animate-fade-in-up ${msg.variant === "success" ? "text-theme-success bg-theme-success-dim" : "text-theme-danger bg-theme-danger-dim"}`}>
-                {msg.content}
+                {redactApiKeys(msg.content)}
               </div>
             )}
           </div>

@@ -18,6 +18,7 @@ abigail-birth = { path = "../crates/abigail-birth" }
 abigail-soul-crystallization = { path = "../crates/abigail-soul-crystallization" }
 abigail-skills = { path = "../crates/abigail-skills" }
 abigail-auth = { path = "../crates/abigail-auth" }
+abigail-cli = { path = "../crates/abigail-cli" }
 soul-forge = { path = "../crates/soul-forge" }
 skill-web-search = { path = "../skills/skill-web-search" }
 skill-filesystem = { path = "../skills/skill-filesystem" }
@@ -50,6 +51,7 @@ regex = "1"
 chrono.workspace = true
 uuid.workspace = true
 which = "7"
+axum = "0.7"
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]

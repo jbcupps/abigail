@@ -37,6 +37,18 @@ interface ChatInterfaceProps {
   target?: "ID" | "EGO";
 }
 
+/** Defense-in-depth: redact common API key patterns before rendering. */
+function redactApiKeys(text: string): string {
+  return text.replace(
+    /(?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{10,})|(?:xai-[A-Za-z0-9_-]{10,})|(?:pplx-[A-Za-z0-9_-]{10,})|(?:AIza[A-Za-z0-9_-]{10,})|(?:tvly-[A-Za-z0-9_-]{10,})/g,
+    (match) => {
+      const dashIdx = match.indexOf("-");
+      const visible = dashIdx >= 0 ? match.slice(0, dashIdx + 4) : match.slice(0, 4);
+      return `${visible}***`;
+    }
+  );
+}
+
 export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
   const { agentName } = useTheme();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -50,6 +62,10 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
   const [activeSecret, setActiveSecret] = useState<MissingSkillSecret | null>(null);
   const [chatStatus, setChatStatus] = useState<string | null>(null);
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
+  const [lmStudioStatus, setLmStudioStatus] = useState<boolean>(false);
+  const [storedProviders, setStoredProviders] = useState<string[]>([]);
+  const [cliServerStatus, setCliServerStatus] = useState<{ running: boolean, port?: number, token?: string }>({ running: false });
+  const [cliPortInput, setCliPortInput] = useState("8080");
 
   const assistantLabel = agentName || "Abigail";
   const mountedRef = useRef(true);
@@ -87,6 +103,40 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
       .catch(() => {
         if (!mountedRef.current) return;
         setOllamaStatus(null);
+      });
+
+    // Fetch LM Studio status (using probe_local_llm)
+    invoke<{ detected: { name: string; url: string; reachable: boolean }[] }>("probe_local_llm")
+      .then((res) => {
+        if (!mountedRef.current) return;
+        setLmStudioStatus(res.detected.some((d) => d.name === "LM Studio" && d.reachable));
+      })
+      .catch(() => {
+        if (!mountedRef.current) return;
+        setLmStudioStatus(false);
+      });
+
+    // Fetch stored providers
+    invoke<string[]>("get_stored_providers")
+      .then((providers) => {
+        if (!mountedRef.current) return;
+        setStoredProviders(providers);
+      })
+      .catch(() => {
+        if (!mountedRef.current) return;
+        setStoredProviders([]);
+      });
+
+    // Fetch CLI server status
+    invoke<{ running: boolean, port?: number, token?: string }>("get_cli_server_status")
+      .then((status) => {
+        if (!mountedRef.current) return;
+        setCliServerStatus(status);
+        if (status.port) setCliPortInput(status.port.toString());
+      })
+      .catch(() => {
+        if (!mountedRef.current) return;
+        setCliServerStatus({ running: false });
       });
   };
 
@@ -142,9 +192,32 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
     };
   }, []);
 
-  const handleConfigSelect = (option: number) => {
+  const handleConfigSelect = async (option: number) => {
     setConfigError("");
     setConfigInput("");
+    
+    const cliToVault: Record<string, string> = {
+      "claude-cli": "anthropic",
+      "gemini-cli": "google",
+      "codex-cli": "openai",
+      "grok-cli": "xai",
+    };
+
+    const checkAndUseStored = async (step: ConfigStep) => {
+      if (!step) return false;
+      const vaultKey = cliToVault[step];
+      if (vaultKey && storedProviders.includes(vaultKey)) {
+        try {
+          await invoke("use_stored_provider", { provider: vaultKey });
+          refreshRouterStatus();
+          return true;
+        } catch (e) {
+          console.error("Failed to use stored provider:", e);
+        }
+      }
+      return false;
+    };
+
     switch (option) {
       case 1:
         setConfigStep("ollama");
@@ -158,16 +231,24 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
         setConfigStep("openai");
         break;
       case 4:
-        setConfigStep("claude-cli");
+        if (!(await checkAndUseStored("claude-cli"))) {
+          setConfigStep("claude-cli");
+        }
         break;
       case 5:
-        setConfigStep("gemini-cli");
+        if (!(await checkAndUseStored("gemini-cli"))) {
+          setConfigStep("gemini-cli");
+        }
         break;
       case 6:
-        setConfigStep("codex-cli");
+        if (!(await checkAndUseStored("codex-cli"))) {
+          setConfigStep("codex-cli");
+        }
         break;
       case 7:
-        setConfigStep("grok-cli");
+        if (!(await checkAndUseStored("grok-cli"))) {
+          setConfigStep("grok-cli");
+        }
         break;
     }
   };
@@ -192,7 +273,31 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
           setConfigError("API key is required");
           return;
         }
-        await invoke("store_provider_key", { provider: configStep, key: configInput.trim(), validate: true });
+        const res = await invoke<{ success: boolean, error: string }>("store_provider_key", { provider: configStep, key: configInput.trim(), validate: true });
+        if (!res.success) {
+          setConfigError(res.error || "Failed to store key");
+          return;
+        }
+      }
+      setConfigInput("");
+      refreshRouterStatus();
+    } catch (e) {
+      setConfigError(String(e));
+    }
+  };
+
+  const handleUseSystemAuth = async () => {
+    if (!configStep) return;
+    setConfigError("");
+    try {
+      const res = await invoke<{ success: boolean, error: string }>("store_provider_key", { 
+        provider: configStep, 
+        key: "system", 
+        validate: false 
+      });
+      if (!res.success) {
+        setConfigError(res.error || "Failed to set system auth");
+        return;
       }
       setConfigInput("");
       refreshRouterStatus();
@@ -345,55 +450,143 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
 
   const renderConfigMenu = () => {
     if (configStep === "menu") {
+      const isOllamaAvailable = ollamaStatus?.running;
+      const isLmStudioAvailable = lmStudioStatus;
+      
+      const getHighlightClass = (available: boolean, authenticated: boolean) => {
+        if (authenticated) return "border-green-600 bg-green-950/20";
+        if (available) return "border-theme-primary bg-theme-primary-glow";
+        return "border-theme-primary-faint";
+      };
+
       return (
         <div className="p-4 border-b border-theme-border bg-theme-surface">
           <p className="text-theme-primary-dim mb-3">Configure LLM Provider:</p>
           <div className="space-y-2">
-            <button
-              className="block w-full text-left px-3 py-2 border border-theme-primary-faint rounded hover:bg-theme-surface"
-              onClick={() => handleConfigSelect(1)}
-            >
-              <span className="text-theme-text-bright">[1]</span> Ollama (local, default port 11434)
-            </button>
-            <button
-              className="block w-full text-left px-3 py-2 border border-theme-primary-faint rounded hover:bg-theme-surface"
-              onClick={() => handleConfigSelect(2)}
-            >
-              <span className="text-theme-text-bright">[2]</span> LM Studio (local, default port 1234)
-            </button>
-            <button
-              className="block w-full text-left px-3 py-2 border border-theme-primary-faint rounded hover:bg-theme-surface"
-              onClick={() => handleConfigSelect(3)}
-            >
-              <span className="text-theme-text-bright">[3]</span> OpenAI (cloud, requires API key)
-            </button>
-            <div className="border-t border-theme-border-dim my-2 pt-2">
-              <p className="text-theme-text-dim text-xs mb-2">CLI Providers (same API keys, routed through CLI tools):</p>
+            <div className="flex gap-2">
+              <button
+                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(!!isOllamaAvailable, false)}`}
+                onClick={() => handleConfigSelect(1)}
+              >
+                <span className="text-theme-text-bright">[1]</span> Ollama (local, default port 11434)
+                {isOllamaAvailable && <span className="ml-2 text-xs text-green-500 font-bold">● Running</span>}
+              </button>
+              <a href="https://ollama.com" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
-            <button
-              className="block w-full text-left px-3 py-2 border border-theme-primary-faint rounded hover:bg-theme-surface"
-              onClick={() => handleConfigSelect(4)}
-            >
-              <span className="text-theme-text-bright">[4]</span> Claude Code CLI (Anthropic key)
-            </button>
-            <button
-              className="block w-full text-left px-3 py-2 border border-theme-primary-faint rounded hover:bg-theme-surface"
-              onClick={() => handleConfigSelect(5)}
-            >
-              <span className="text-theme-text-bright">[5]</span> Gemini CLI (Google key)
-            </button>
-            <button
-              className="block w-full text-left px-3 py-2 border border-theme-primary-faint rounded hover:bg-theme-surface"
-              onClick={() => handleConfigSelect(6)}
-            >
-              <span className="text-theme-text-bright">[6]</span> Codex CLI (OpenAI key)
-            </button>
-            <button
-              className="block w-full text-left px-3 py-2 border border-theme-primary-faint rounded hover:bg-theme-surface"
-              onClick={() => handleConfigSelect(7)}
-            >
-              <span className="text-theme-text-bright">[7]</span> Grok CLI (xAI key)
-            </button>
+
+            <div className="flex gap-2">
+              <button
+                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(isLmStudioAvailable, false)}`}
+                onClick={() => handleConfigSelect(2)}
+              >
+                <span className="text-theme-text-bright">[2]</span> LM Studio (local, default port 1234)
+                {isLmStudioAvailable && <span className="ml-2 text-xs text-green-500 font-bold">● Running</span>}
+              </button>
+              <a href="https://lmstudio.ai" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("openai"))}`}
+                onClick={() => handleConfigSelect(3)}
+              >
+                <span className="text-theme-text-bright">[3]</span> OpenAI (cloud, requires API key)
+                {storedProviders.includes("openai") && <span className="ml-2 text-xs text-green-500">✓ Auth</span>}
+              </button>
+              <a href="https://platform.openai.com" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
+            </div>
+
+            <div className="border-t border-theme-border-dim my-2 pt-2">
+              <p className="text-theme-primary-dim text-xs mb-2 uppercase tracking-wider">CLI / API Access (Local Server):</p>
+              <div className="flex gap-2 items-center mb-2">
+                <span className="text-theme-text-dim text-xs">Port:</span>
+                <input
+                  type="text"
+                  className="w-16 bg-theme-input-bg border border-theme-border-dim text-theme-text px-2 py-1 rounded text-xs focus:border-theme-primary outline-none"
+                  value={cliPortInput}
+                  onChange={(e) => setCliPortInput(e.target.value)}
+                  disabled={cliServerStatus.running}
+                />
+                <button
+                  className={`px-3 py-1 rounded text-xs border ${
+                    cliServerStatus.running
+                      ? "border-red-600 text-red-400 hover:bg-red-950/20"
+                      : "border-theme-primary text-theme-primary hover:bg-theme-primary-glow"
+                  }`}
+                  onClick={async () => {
+                    if (cliServerStatus.running) {
+                      await invoke("stop_cli_server");
+                    } else {
+                      try {
+                        await invoke("start_cli_server", { port: parseInt(cliPortInput) || 8080 });
+                      } catch (e) {
+                        alert(String(e));
+                      }
+                    }
+                    refreshRouterStatus();
+                  }}
+                >
+                  {cliServerStatus.running ? "Stop Server" : "Start Server"}
+                </button>
+              </div>
+              {cliServerStatus.running && (
+                <div className="bg-black/40 p-2 rounded text-[10px] space-y-1 border border-theme-border-dim">
+                  <p className="text-green-500 font-bold">● API Active at http://localhost:{cliServerStatus.port}</p>
+                  <p className="text-theme-text-dim">Token: <span className="text-theme-text-bright select-all">{cliServerStatus.token}</span></p>
+                  <div className="pt-1 text-theme-primary-dim">
+                    Example: <code className="text-theme-text-bright break-all">curl -H &quot;Authorization: Bearer {cliServerStatus.token}&quot; -X POST -H &quot;Content-Type: application/json&quot; -d &#123;&quot;message&quot;:&quot;Hello&quot;&#125; http://localhost:{cliServerStatus.port}/chat</code>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-theme-border-dim my-2 pt-2">
+              <p className="text-theme-text-dim text-xs mb-2 uppercase tracking-wider">CLI Providers (via external tools):</p>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("anthropic"))}`}
+                onClick={() => handleConfigSelect(4)}
+              >
+                <span className="text-theme-text-bright">[4]</span> Claude Code CLI (Anthropic key)
+                {storedProviders.includes("anthropic") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Ready</span>}
+              </button>
+              <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("google"))}`}
+                onClick={() => handleConfigSelect(5)}
+              >
+                <span className="text-theme-text-bright">[5]</span> Gemini CLI (Google key)
+                {storedProviders.includes("google") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Ready</span>}
+              </button>
+              <a href="https://github.com/google-gemini/gemini-cli" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("openai"))}`}
+                onClick={() => handleConfigSelect(6)}
+              >
+                <span className="text-theme-text-bright">[6]</span> Codex CLI (OpenAI key)
+                {storedProviders.includes("openai") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Ready</span>}
+              </button>
+              <a href="https://github.com/openai/codex" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("xai"))}`}
+                onClick={() => handleConfigSelect(7)}
+              >
+                <span className="text-theme-text-bright">[7]</span> Grok CLI (xAI key)
+                {storedProviders.includes("xai") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Ready</span>}
+              </button>
+              <a href="https://docs.x.ai/docs/grok-cli" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
+            </div>
           </div>
           {routerStatus && (routerStatus.ego_configured || routerStatus.id_provider === "local_http") && (
             <button
@@ -503,6 +696,13 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
               Save
             </button>
             <button
+              className="border border-theme-primary-faint px-3 py-2 rounded hover:bg-theme-surface text-theme-text-dim text-xs"
+              onClick={handleUseSystemAuth}
+              title="Use the CLI's internal authentication (OAuth)"
+            >
+              Use OAuth
+            </button>
+            <button
               className="border border-theme-primary-faint px-3 py-2 rounded hover:bg-theme-surface text-theme-text-dim"
               onClick={() => setConfigStep("menu")}
             >
@@ -567,10 +767,10 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
                 {msg.role === "user" ? "You" : assistantLabel}
               </p>
               <span className={msg.isError ? "text-red-300" : "text-theme-text-bright"}>
-                {msg.content.split("\n").map((line, j) => (
+                {redactApiKeys(msg.content || "").split("\n").map((line, j) => (
                   <span key={j}>
                     {line}
-                    {j < msg.content.split("\n").length - 1 && <br />}
+                    {j < (msg.content || "").split("\n").length - 1 && <br />}
                   </span>
                 ))}
               </span>

@@ -9,8 +9,9 @@
 //!   the fast path.
 
 use abigail_capabilities::cognitive::{
-    stub_heartbeat, AnthropicProvider, CandleProvider, CompletionRequest, CompletionResponse,
-    LlmProvider, LocalHttpProvider, Message, OpenAiProvider, StreamEvent, ToolDefinition,
+    stub_heartbeat, AnthropicProvider, CandleProvider, CliLlmProvider, CliVariant,
+    CompatibleProvider, CompletionRequest, CompletionResponse, LlmProvider, LocalHttpProvider,
+    Message, OpenAiCompatibleProvider, OpenAiProvider, StreamEvent, ToolDefinition,
 };
 use std::sync::Arc;
 
@@ -88,6 +89,10 @@ pub enum EgoProvider {
     Perplexity,
     Xai,
     Google,
+    ClaudeCli,
+    GeminiCli,
+    CodexCli,
+    GrokCli,
 }
 
 impl std::fmt::Display for EgoProvider {
@@ -98,6 +103,10 @@ impl std::fmt::Display for EgoProvider {
             EgoProvider::Perplexity => write!(f, "perplexity"),
             EgoProvider::Xai => write!(f, "xai"),
             EgoProvider::Google => write!(f, "google"),
+            EgoProvider::ClaudeCli => write!(f, "claude-cli"),
+            EgoProvider::GeminiCli => write!(f, "gemini-cli"),
+            EgoProvider::CodexCli => write!(f, "codex-cli"),
+            EgoProvider::GrokCli => write!(f, "grok-cli"),
         }
     }
 }
@@ -339,10 +348,18 @@ impl IdEgoRouter {
             messages,
             tools: Some(tools),
         };
-        if let Some(ref ego) = self.ego {
-            ego.complete(&request).await
-        } else {
-            self.id.complete(&request).await
+
+        match self.mode {
+            RoutingMode::IdPrimary => {
+                self.id.complete(&request).await
+            }
+            RoutingMode::EgoPrimary | RoutingMode::Council | RoutingMode::TierBased => {
+                if let Some(ref ego) = self.ego {
+                    ego.complete(&request).await
+                } else {
+                    self.id.complete(&request).await
+                }
+            }
         }
     }
 
@@ -357,11 +374,31 @@ impl IdEgoRouter {
         messages: Vec<Message>,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
+        if let Some(deny) = self.run_superego_precheck(&messages).await {
+            let _ = tx.send(StreamEvent::Done(deny.clone())).await;
+            return Ok(deny);
+        }
+
+        let last_msg = messages.last().map_or("", |m| &m.content);
+        let fp = self.fast_path_classify(last_msg);
         let request = CompletionRequest {
             messages,
             tools: None,
         };
-        self.id.stream(&request, tx).await
+
+        match self.mode {
+            RoutingMode::IdPrimary => {
+                self.id.stream(&request, tx).await
+            }
+            RoutingMode::EgoPrimary | RoutingMode::Council | RoutingMode::TierBased => {
+                if fp.target == FastPathTarget::Ego {
+                    if let Some(ref ego) = self.ego {
+                        return ego.stream(&request, tx).await;
+                    }
+                }
+                self.id.stream(&request, tx).await
+            }
+        }
     }
 
     /// Streaming with tools.
@@ -371,11 +408,27 @@ impl IdEgoRouter {
         tools: Vec<ToolDefinition>,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
+        if let Some(deny) = self.run_superego_precheck(&messages).await {
+            let _ = tx.send(StreamEvent::Done(deny.clone())).await;
+            return Ok(deny);
+        }
         let request = CompletionRequest {
             messages,
             tools: Some(tools),
         };
-        self.id.stream(&request, tx).await
+
+        match self.mode {
+            RoutingMode::IdPrimary => {
+                self.id.stream(&request, tx).await
+            }
+            RoutingMode::EgoPrimary | RoutingMode::Council | RoutingMode::TierBased => {
+                if let Some(ref ego) = self.ego {
+                    ego.stream(&request, tx).await
+                } else {
+                    self.id.stream(&request, tx).await
+                }
+            }
+        }
     }
 }
 
@@ -401,6 +454,48 @@ fn build_ego_provider(
                 .ok()
                 .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
             Some(EgoProvider::Anthropic),
+        ),
+        Some("perplexity") => (
+            OpenAiCompatibleProvider::new(CompatibleProvider::Perplexity, key)
+                .ok()
+                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
+            Some(EgoProvider::Perplexity),
+        ),
+        Some("xai") => (
+            OpenAiCompatibleProvider::new(CompatibleProvider::Xai, key)
+                .ok()
+                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
+            Some(EgoProvider::Xai),
+        ),
+        Some("google") => (
+            OpenAiCompatibleProvider::new(CompatibleProvider::Google, key)
+                .ok()
+                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
+            Some(EgoProvider::Google),
+        ),
+        Some("claude-cli") => (
+            CliLlmProvider::new(CliVariant::ClaudeCode, key)
+                .ok()
+                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
+            Some(EgoProvider::ClaudeCli),
+        ),
+        Some("gemini-cli") => (
+            CliLlmProvider::new(CliVariant::GeminiCli, key)
+                .ok()
+                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
+            Some(EgoProvider::GeminiCli),
+        ),
+        Some("codex-cli") => (
+            CliLlmProvider::new(CliVariant::OpenAiCodex, key)
+                .ok()
+                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
+            Some(EgoProvider::CodexCli),
+        ),
+        Some("grok-cli") => (
+            CliLlmProvider::new(CliVariant::XaiGrokCli, key)
+                .ok()
+                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
+            Some(EgoProvider::GrokCli),
         ),
         _ => (None, None),
     }

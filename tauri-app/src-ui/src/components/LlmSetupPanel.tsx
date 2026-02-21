@@ -58,6 +58,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
   const [installing, setInstalling] = useState(false);
   const [pullingModel, setPullingModel] = useState(false);
   const [error, setError] = useState("");
+  const [showProceedAnyway, setShowProceedAnyway] = useState(false);
   const [installProgress, setInstallProgress] = useState<OllamaInstallProgress | null>(null);
   const [modelProgress, setModelProgress] = useState<OllamaModelProgress | null>(null);
 
@@ -135,6 +136,9 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
     try {
       const result = await invoke<ProbeResult>("probe_local_llm");
       setDetected(result.detected);
+      if (result.detected.length > 0 && !manualUrl) {
+        setManualUrl(result.detected[0].url);
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -142,18 +146,21 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
     }
   };
 
-  const connectTo = async (url: string) => {
+  const connectTo = async (url: string, skipHealthCheck = false) => {
     setConnecting(true);
     setError("");
+    setShowProceedAnyway(false);
     try {
-      const ok = await invoke<boolean>("set_local_llm_during_birth", { url });
+      const ok = await invoke<boolean>("set_local_llm_during_birth", { url, skipHealthCheck });
       if (ok) {
         onConnected(url);
       } else {
         setError("Could not connect. Is the server running?");
+        setShowProceedAnyway(true);
       }
     } catch (e) {
       setError(String(e));
+      setShowProceedAnyway(true);
     } finally {
       setConnecting(false);
     }
@@ -183,7 +190,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
     setError("");
     try {
       await invoke("pull_ollama_model", { model: selectedModel });
-      await connectTo("http://localhost:11434");
+      await connectTo("http://localhost:11434", false);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -350,6 +357,18 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
             </div>
           )}
 
+          {ollama.status !== "running" && (
+            <div className="pt-4 border-t border-theme-border-dim">
+              <p className="text-theme-text-dim text-xs mb-2">Alternative: wake up in the cloud first</p>
+              <button
+                className="text-xs text-theme-primary hover:underline flex items-center gap-1"
+                onClick={onSkip}
+              >
+                I have a Cloud API Key (OpenAI/Anthropic) &rsaquo;
+              </button>
+            </div>
+          )}
+
           {(pullingModel || modelProgress) && (
             <div className="border border-theme-border-dim rounded p-3">
               <p className="text-sm text-theme-text">
@@ -442,7 +461,19 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
         </div>
       )}
 
-      {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
+      {error && (
+        <div className="mt-2">
+          <p className="text-red-400 text-sm">{error}</p>
+          {showProceedAnyway && (
+            <button
+              className="mt-2 text-xs text-theme-text-dim hover:text-theme-primary underline"
+              onClick={() => connectTo(manualUrl.startsWith("http") ? manualUrl : `http://${manualUrl}`, true)}
+            >
+              The server is running, proceed anyway
+            </button>
+          )}
+        </div>
+      )}
 
       {/* CLI Tools download links */}
       <div className="mt-6 pt-4 border-t border-theme-border-dim">

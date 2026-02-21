@@ -25,6 +25,7 @@ dependencies = [
  "abigail-auth",
  "abigail-birth",
  "abigail-capabilities",
+ "abigail-cli",
  "abigail-core",
  "abigail-memory",
  "abigail-router",
@@ -32,6 +33,7 @@ dependencies = [
  "abigail-soul-crystallization",
  "anyhow",
  "async-trait",
+ "axum",
  "base64 0.22.1",
  "chrono",
  "ed25519-dalek",
@@ -128,7 +130,9 @@ dependencies = [
 name = "abigail-cli"
 version = "0.0.1"
 dependencies = [
+ "abigail-capabilities",
  "abigail-core",
+ "abigail-router",
  "abigail-skills",
  "anyhow",
  "axum",
