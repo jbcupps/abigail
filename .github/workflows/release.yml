@@ -205,21 +205,13 @@ jobs:
           fi
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@063c0231f444e55760d98acb9c469b994269d4a5 # v0
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          projectPath: tauri-app
-          args: ${{ matrix.args }}
-          tagName: ${{ steps.version.outputs.tag }}
-          releaseName: "Abigail ${{ steps.version.outputs.tag }}"
-          releaseBody: "See assets for platform installers. Auto-update checks on launch."
-          releaseDraft: false
-          prerelease: false
-          uploadUpdaterJson: true
-          uploadUpdaterSignatures: true
+        run: |
+          cd tauri-app
+          tauri build ${{ matrix.args }}
 
       - name: Upload installers (Artifacts)
         uses: actions/upload-artifact@47309c993abb98030a35d55ef7ff34b7fa1074b5 # v4
