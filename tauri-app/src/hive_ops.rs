@@ -29,7 +29,7 @@ impl HiveOperations for TauriHiveOps {
 
     async fn load_agent(&self, agent_id: &str) -> Result<(), String> {
         let state = self.app_handle.state::<AppState>();
-        crate::commands::identity::load_agent(state, agent_id.to_string())
+        crate::commands::identity::load_agent(state, agent_id.to_string()).await
     }
 
     async fn create_agent(&self, name: &str) -> Result<String, String> {
@@ -73,41 +73,42 @@ impl HiveOperations for TauriHiveOps {
         }
 
         let state = self.app_handle.state::<AppState>();
-        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        {
+            let mut config = state.config.write().map_err(|e| e.to_string())?;
 
-        match key {
-            "agent_name" => {
-                config.agent_name = Some(serde_json::from_value(value).map_err(|e| e.to_string())?)
-            }
-            "primary_color" => {
-                config.primary_color =
-                    Some(serde_json::from_value(value).map_err(|e| e.to_string())?)
-            }
-            "avatar_url" => {
-                config.avatar_url = Some(serde_json::from_value(value).map_err(|e| e.to_string())?)
-            }
-            "local_llm_base_url" => {
-                let url: Option<String> =
-                    serde_json::from_value(value).map_err(|e| e.to_string())?;
-                if let Some(u) = url {
-                    let normalized =
-                        abigail_core::validate_local_llm_url(&u).map_err(|e| e.to_string())?;
-                    config.local_llm_base_url = Some(normalized);
-                } else {
-                    config.local_llm_base_url = None;
+            match key {
+                "agent_name" => {
+                    config.agent_name = Some(serde_json::from_value(value).map_err(|e| e.to_string())?)
                 }
+                "primary_color" => {
+                    config.primary_color =
+                        Some(serde_json::from_value(value).map_err(|e| e.to_string())?)
+                }
+                "avatar_url" => {
+                    config.avatar_url = Some(serde_json::from_value(value).map_err(|e| e.to_string())?)
+                }
+                "local_llm_base_url" => {
+                    let url: Option<String> =
+                        serde_json::from_value(value).map_err(|e| e.to_string())?;
+                    if let Some(u) = url {
+                        let normalized =
+                            abigail_core::validate_local_llm_url(&u).map_err(|e| e.to_string())?;
+                        config.local_llm_base_url = Some(normalized);
+                    } else {
+                        config.local_llm_base_url = None;
+                    }
+                }
+                _ => return Err(format!("Unknown or restricted config key: {}", key)),
             }
-            _ => return Err(format!("Unknown or restricted config key: {}", key)),
-        }
 
-        config
-            .save(&config.config_path())
-            .map_err(|e| e.to_string())?;
+            config
+                .save(&config.config_path())
+                .map_err(|e| e.to_string())?;
+        }
 
         // Rebuild router if we changed the local URL
         if key == "local_llm_base_url" {
-            drop(config);
-            crate::rebuild_router_with_superego(&state)?;
+            crate::rebuild_router_with_superego(&state).await?;
         }
 
         Ok(())

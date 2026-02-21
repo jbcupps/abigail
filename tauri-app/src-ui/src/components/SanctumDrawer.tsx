@@ -3,9 +3,11 @@ import IdentityPanel from "./IdentityPanel";
 import AgenticPanel from "./AgenticPanel";
 import OrchestrationPanel from "./OrchestrationPanel";
 import DiagnosticsPanel from "./DiagnosticsPanel";
+import ForgePanel from "./ForgePanel";
 
 type SanctumTab =
   | "conscience"
+  | "forge"
   | "staff"
   | "jobs"
   | "identity"
@@ -23,6 +25,7 @@ interface SanctumDrawerProps {
 
 const TABS: { id: SanctumTab; label: string }[] = [
   { id: "conscience", label: "Conscience" },
+  { id: "forge", label: "Forge" },
   { id: "staff", label: "Staff" },
   { id: "jobs", label: "Registry" },
   { id: "identity", label: "Soul" },
@@ -115,6 +118,8 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
               </div>
             </div>
           )}
+          
+          {activeTab === "forge" && <ForgePanel />}
           
           {activeTab === "staff" && <AgenticPanel />}
           

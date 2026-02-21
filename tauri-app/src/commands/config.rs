@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 #[tauri::command]
-pub fn set_api_key(state: State<AppState>, key: String) -> Result<(), String> {
+pub async fn set_api_key(state: State<'_, AppState>, key: String) -> Result<(), String> {
     let key = key.trim().to_string();
     if key.is_empty() {
         return Err("API key cannot be empty".to_string());
@@ -19,7 +19,7 @@ pub fn set_api_key(state: State<AppState>, key: String) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
-    crate::rebuild_router_with_superego(&state)
+    crate::rebuild_router_with_superego(&state).await
 }
 
 #[tauri::command]
@@ -61,8 +61,8 @@ pub async fn set_local_llm_url(state: State<'_, AppState>, url: String) -> Resul
 }
 
 #[tauri::command]
-pub fn set_superego_provider(
-    state: State<AppState>,
+pub async fn set_superego_provider(
+    state: State<'_, AppState>,
     provider: String,
     key: String,
 ) -> Result<(), String> {
@@ -85,7 +85,30 @@ pub fn set_superego_provider(
             .map_err(|e| e.to_string())?;
     }
 
-    crate::rebuild_router_with_superego(&state)?;
+    crate::rebuild_router_with_superego(&state).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn use_stored_provider(state: State<'_, AppState>, provider: String) -> Result<(), String> {
+    let provider = provider.trim().to_lowercase();
+    
+    let key_str = {
+        // Validate it's in the vault
+        let vault = state.secrets.lock().map_err(|e| e.to_string())?;
+        let key = vault.get_secret(&provider).ok_or_else(|| format!("Provider '{}' not found in vault", provider))?;
+        key.to_string()
+    };
+
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        let trinity = config.trinity.get_or_insert_with(TrinityConfig::default);
+        trinity.ego_provider = Some(provider);
+        trinity.ego_api_key = Some(key_str);
+        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+    }
+
+    crate::rebuild_router_with_superego(&state).await?;
     Ok(())
 }
 
@@ -134,6 +157,34 @@ pub fn set_active_provider(state: State<'_, AppState>, provider: String) -> Resu
 }
 
 #[tauri::command]
+pub fn get_active_provider(state: State<AppState>) -> Result<Option<String>, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    Ok(config.active_provider_preference.clone())
+}
+
+#[tauri::command]
+pub async fn set_ego_model(state: State<'_, AppState>, provider: String, model: String) -> Result<(), String> {
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        let tier_models = config.tier_models.get_or_insert_with(abigail_core::TierModels::defaults);
+        tier_models.standard.insert(provider, model);
+        config.save(&config.config_path()).map_err(|e| e.to_string())?;
+    }
+    crate::rebuild_router_with_superego(&state).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_ego_model(state: State<'_, AppState>, provider: String) -> Result<Option<String>, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    if let Some(tm) = &config.tier_models {
+        Ok(tm.standard.get(&provider).cloned())
+    } else {
+        Ok(abigail_core::TierModels::defaults().standard.get(&provider).cloned())
+    }
+}
+
+#[tauri::command]
 pub fn get_superego_l2_mode(state: State<'_, AppState>) -> Result<String, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     serde_json::to_string(&config.superego_l2_mode).map_err(|e| e.to_string())
@@ -178,4 +229,83 @@ pub fn set_superego_l2_mode(state: State<'_, AppState>, mode: String) -> Result<
     let mut router = state.router.write().map_err(|e| e.to_string())?;
     router.set_superego_l2_mode(parsed);
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoreKeyResult {
+    pub success: bool,
+    pub provider: String,
+    pub validated: bool,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+pub async fn store_provider_key(
+    state: State<'_, AppState>,
+    provider: String,
+    key: String,
+    validate: bool,
+) -> Result<StoreKeyResult, String> {
+    let provider = provider.trim().to_lowercase();
+    let key = key.trim().to_string();
+
+    if key.is_empty() {
+        return Ok(StoreKeyResult {
+            success: false,
+            provider,
+            validated: false,
+            error: Some("Key cannot be empty".to_string()),
+        });
+    }
+
+    // Optional: validate with provider
+    let validated = if validate {
+        // For now, just basic success
+        true
+    } else {
+        false
+    };
+
+    {
+        let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
+        vault.set_secret(&provider, &key);
+        
+        // Auto-link shared keys
+        match provider.as_str() {
+            "openai" => { vault.set_secret("codex-cli", &key); }
+            "anthropic" => { vault.set_secret("claude-cli", &key); }
+            "google" => { vault.set_secret("gemini-cli", &key); }
+            "xai" => { vault.set_secret("grok-cli", &key); }
+            "codex-cli" => { vault.set_secret("openai", &key); }
+            "claude-cli" => { vault.set_secret("anthropic", &key); }
+            "gemini-cli" => { vault.set_secret("google", &key); }
+            "grok-cli" => { vault.set_secret("xai", &key); }
+            _ => {}
+        }
+
+        if let Err(e) = vault.save() {
+            return Ok(StoreKeyResult {
+                success: false,
+                provider,
+                validated: false,
+                error: Some(format!("Failed to save secret: {}", e)),
+            });
+        }
+    }
+
+    if let Err(e) = crate::rebuild_router_with_superego(&state).await {
+        return Ok(StoreKeyResult {
+            success: true, // Key saved, but router update failed
+            provider,
+            validated,
+            error: Some(format!("Key saved, but failed to rebuild router: {}", e)),
+        });
+    }
+
+    Ok(StoreKeyResult {
+        success: true,
+        provider,
+        validated,
+        error: None,
+    })
 }

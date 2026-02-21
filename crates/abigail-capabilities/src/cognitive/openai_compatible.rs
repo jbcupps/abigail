@@ -51,7 +51,7 @@ impl CompatibleProvider {
     pub fn default_model(&self) -> &str {
         match self {
             Self::Perplexity => "sonar",
-            Self::Xai => "grok-2-latest",
+            Self::Xai => "grok-2",
             Self::Google => "gemini-2.0-flash",
             Self::Custom => "default",
         }

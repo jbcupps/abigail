@@ -84,6 +84,20 @@ export default function SoulRegistry({
     }
   };
 
+  const handleDeleteSoul = async (e: React.MouseEvent, soul: SoulIdentityInfo) => {
+    e.stopPropagation();
+    if (!confirm(`Are you sure you want to delete "${soul.name}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      await invoke("delete_agent_identity", { agentId: soul.id });
+      await fetchSouls();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const handleMigrateLegacy = async () => {
     try {
       setMigrating(true);
@@ -218,9 +232,22 @@ export default function SoulRegistry({
               </div>
               
               <div className="flex-1">
-                <h2 className="text-theme-text-bright font-bold text-lg group-hover:text-theme-primary">
-                  {soul.name}
-                </h2>
+                <div className="flex justify-between items-start">
+                  <h2 className="text-theme-text-bright font-bold text-lg group-hover:text-theme-primary">
+                    {soul.name}
+                  </h2>
+                  <button
+                    onClick={(e) => handleDeleteSoul(e, soul)}
+                    className="p-1.5 text-theme-text-dim hover:text-red-500 hover:bg-red-950/20 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Delete Entity"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 6h18"></path>
+                      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                    </svg>
+                  </button>
+                </div>
                 <div className="flex items-center gap-2 mt-1">
                   <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded border ${soul.birth_complete ? "border-green-900 text-green-500 bg-green-950/20" : "border-yellow-900 text-yellow-500 bg-yellow-950/20"}`}>
                     {soul.birth_complete ? "Active" : "In-Utero"}

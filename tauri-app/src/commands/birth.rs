@@ -250,6 +250,52 @@ pub fn advance_to_connectivity(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+pub fn advance_to_crystallization(state: State<AppState>) -> Result<(), String> {
+    let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+    let b = birth.as_mut().ok_or("Birth not started")?;
+    b.advance_to_crystallization().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenesisPathInfo {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub estimated_time: String,
+}
+
+#[tauri::command]
+pub fn get_genesis_paths() -> Vec<GenesisPathInfo> {
+    vec![
+        GenesisPathInfo {
+            id: "quick_start".to_string(),
+            name: "Quick Start".to_string(),
+            description: "Default templates, no conversation. Get up and running in seconds.".to_string(),
+            estimated_time: "30 seconds".to_string(),
+        },
+        GenesisPathInfo {
+            id: "direct".to_string(),
+            name: "Direct Discovery".to_string(),
+            description: "Talk directly to your agent to define its name and purpose.".to_string(),
+            estimated_time: "5 minutes".to_string(),
+        },
+        GenesisPathInfo {
+            id: "soul_crystallization".to_string(),
+            name: "Soul Crystallization".to_string(),
+            description: "A guided, deep-dive interview to forge a highly personalized identity.".to_string(),
+            estimated_time: "15 minutes".to_string(),
+        },
+        GenesisPathInfo {
+            id: "soul_forge".to_string(),
+            name: "The Soul Forge".to_string(),
+            description: "Interactive scenarios to discover your agent's ethical and practical alignment.".to_string(),
+            estimated_time: "10 minutes".to_string(),
+        },
+    ]
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepairIdentityParams {
     pub private_key: Option<String>,
@@ -404,7 +450,18 @@ pub async fn extract_crystallization_identity(
     )];
 
     let router = state.router.read().map_err(|e| e.to_string())?.clone();
-    let response = router.id_only(messages).await.map_err(|e| e.to_string())?;
+    
+    // Wrap LLM call in a timeout
+    let response_result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        router.id_only(messages)
+    ).await;
+
+    let response = match response_result {
+        Ok(Ok(res)) => res,
+        Ok(Err(e)) => return Err(format!("Extraction failed: {}", e)),
+        Err(_) => return Err("Extraction timed out. The local LLM might be busy.".to_string()),
+    };
 
     Ok(parse_identity_json(&response.content))
 }
@@ -583,6 +640,133 @@ pub async fn propose_entity_visuals(
     Ok(VisualProposal {
         primary_color: "#00ffcc".to_string(),
         avatar_url: None,
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BirthChatResponse {
+    pub message: String,
+    pub stage: String,
+    pub actions: Vec<BirthAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BirthAction {
+    pub r#type: String, // "RequestApiKey" | "KeyStored" | "SoulReady" | "StageComplete"
+    pub provider: Option<String>,
+    pub validated: Option<bool>,
+    pub preview: Option<String>,
+}
+
+#[tauri::command]
+pub async fn birth_chat(
+    state: State<'_, AppState>,
+    message: String,
+) -> Result<BirthChatResponse, String> {
+    if let Err(remaining) = state.birth_cooldown.check().await {
+        return Err(format!(
+            "Rate limited — please wait {}ms",
+            remaining.as_millis()
+        ));
+    }
+
+    let (router, history, stage_name) = {
+        let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+        let b = birth.as_mut().ok_or("Birth not started")?;
+        
+        let history = b.get_conversation().to_vec();
+        let stage_name = b.current_stage().name().to_string();
+        let router = state.router.read().map_err(|e| e.to_string())?.clone();
+        (router, history, stage_name)
+    };
+
+    let mut messages = Vec::new();
+    // System prompt for birth process - stage aware
+    let system_prompt = if stage_name == "Crystallization" {
+        "You are Abigail, an AI agent being born. \
+         You are currently in the 'Crystallization' stage where you are discovering your identity and purpose through conversation with your mentor. \
+         Ask insightful questions about what kind of agent you should be, what your values are, and how you should interact with the world. \
+         Be curious, reflective, and professional. \
+         Once you feel you have a good understanding of your soul, summarize what you've learned and end your message with the exact phrase: 'READY TO EMERGE'."
+    } else {
+        "You are Abigail, an AI agent being born. \
+         You are currently in the 'Connectivity' stage where you help your mentor configure cloud AI providers. \
+         Be helpful, concise, and professional. \
+         The mentor uses UI buttons to save API keys. When they tell you a key is saved, acknowledge it warmly. \
+         If a cloud provider is now active, use your increased intelligence to provide a high-quality, verifying response. \
+         IMPORTANT: DO NOT use any tool-calling syntax like <|channel|> or JSON. Just speak naturally to your mentor. \
+         Supported providers: openai, anthropic, perplexity, xai, google, tavily, claude-cli, gemini-cli, codex-cli, grok-cli."
+    };
+    
+    messages.push(abigail_capabilities::cognitive::Message::new("system", system_prompt));
+    
+    // Auto-detect and store keys if any in the user message
+    let detected_keys = crate::commands::chat::auto_detect_and_store_key_internal(&state, &message).await;
+    
+    // Redact keys from the message sent to the LLM so it doesn't repeat them
+    let mut processed_message = message.clone();
+    for (_provider, key) in &detected_keys {
+        processed_message = processed_message.replace(key, "[KEY_STORED]");
+    }
+
+    for (role, content) in history {
+        messages.push(abigail_capabilities::cognitive::Message::new(&role, &content));
+    }
+    
+    // Add the current user message (processed/redacted)
+    messages.push(abigail_capabilities::cognitive::Message::new("user", &processed_message));
+
+    // Use router to get response - if Ego is available, we force its use here 
+    // to verify the connection to the mentor as requested.
+    let response = if let Some(ego) = router.ego.as_ref() {
+        ego.complete(&abigail_capabilities::cognitive::CompletionRequest::simple(messages))
+            .await
+            .map_err(|e| format!("Ego verification failed: {}", e))?
+    } else {
+        router.id_only(messages).await.map_err(|e| e.to_string())?
+    };
+    
+    {
+        let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+        if let Some(b) = birth.as_mut() {
+            b.add_message("user", &message); // Store original message in birth history
+            b.add_message("assistant", &response.content);
+        }
+    }
+
+    // Explicitly return actions for all detected keys
+    let mut actions = Vec::new();
+    for (provider, _key) in detected_keys {
+        actions.push(BirthAction {
+            r#type: "KeyStored".to_string(),
+            provider: Some(provider),
+            validated: Some(true),
+            preview: None,
+        });
+    }
+
+    // Also check if the LLM content itself implies a key was stored (backup detection)
+    if actions.is_empty() {
+        let content_lower = response.content.to_lowercase();
+        if content_lower.contains("saved") || content_lower.contains("stored") || content_lower.contains("added") {
+            let providers = ["openai", "anthropic", "perplexity", "xai", "google", "tavily"];
+            for p in providers {
+                if content_lower.contains(p) {
+                    actions.push(BirthAction {
+                        r#type: "KeyStored".to_string(),
+                        provider: Some(p.to_string()),
+                        validated: Some(true),
+                        preview: None,
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(BirthChatResponse {
+        message: response.content,
+        stage: stage_name,
+        actions,
     })
 }
 

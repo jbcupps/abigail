@@ -407,6 +407,29 @@ impl IdentityManager {
         Ok(agent_docs)
     }
 
+    /// Save the recovery key to a text file in the agent's Documents folder.
+    pub fn save_recovery_key(&self, agent_id: &str, private_key: &str) -> Result<String, String> {
+        let docs_dir = self.create_documents_folder(agent_id)?;
+        let file_path = docs_dir.join("RECOVERY_KEY.txt");
+        
+        let content = format!(
+            "ABIGAIL RECOVERY KEY\n\
+             ====================\n\n\
+             This is your Ed25519 Private Signing Key. Keep it secure!\n\
+             It is used to verify and re-sign your agent's constitutional documents.\n\n\
+             AGENT ID: {}\n\
+             PRIVATE KEY (Base64): {}\n\n\
+             Date Saved: {}\n",
+            agent_id,
+            private_key,
+            chrono::Utc::now().to_rfc3339()
+        );
+
+        std::fs::write(&file_path, content).map_err(|e| format!("Failed to write recovery key file: {}", e))?;
+        
+        Ok(file_path.to_string_lossy().to_string())
+    }
+
     /// Check if any agents exist.
     pub fn has_agents(&self) -> bool {
         self.global_config
@@ -518,6 +541,35 @@ impl IdentityManager {
             uuid
         );
         Ok(Some(uuid))
+    }
+
+    /// Delete an agent and all its data from disk.
+    pub fn delete_agent(&self, agent_id: &str) -> Result<(), String> {
+        let agent_dir = {
+            let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
+            let entry = gc
+                .find_agent(agent_id)
+                .ok_or_else(|| format!("Agent {} not registered", agent_id))?
+                .clone();
+
+            let dir = if entry.directory.is_absolute() {
+                entry.directory.clone()
+            } else {
+                self.data_root.join(&entry.directory)
+            };
+
+            gc.remove_agent(agent_id);
+            gc.save(&self.data_root).map_err(|e| e.to_string())?;
+            dir
+        };
+
+        if agent_dir.exists() {
+            tracing::info!("Deleting agent data directory: {}", agent_dir.display());
+            std::fs::remove_dir_all(&agent_dir)
+                .map_err(|e| format!("Failed to delete agent directory: {}", e))?;
+        }
+
+        Ok(())
     }
 }
 

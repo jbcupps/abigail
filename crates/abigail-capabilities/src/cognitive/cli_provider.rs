@@ -74,6 +74,7 @@ pub struct CliLlmProvider {
 
 impl CliLlmProvider {
     /// Create a new CLI provider. Returns an error if the API key is empty.
+    /// Use "system" as the key to rely on the CLI's internal auth (e.g. OAuth).
     pub fn new(variant: CliVariant, api_key: String) -> anyhow::Result<Self> {
         if api_key.trim().is_empty() {
             return Err(anyhow::anyhow!(
@@ -139,7 +140,9 @@ impl LlmProvider for CliLlmProvider {
         );
 
         let mut cmd = Command::new(self.variant.binary_name());
-        cmd.env(self.variant.api_key_env_var(), &self.api_key);
+        if self.api_key != "system" {
+            cmd.env(self.variant.api_key_env_var(), &self.api_key);
+        }
         self.configure_command(&mut cmd, &prompt);
 
         // Capture stdout, discard stderr

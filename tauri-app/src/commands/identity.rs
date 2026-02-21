@@ -25,7 +25,7 @@ pub fn get_active_agent(state: State<AppState>) -> Result<Option<String>, String
 }
 
 #[tauri::command]
-pub fn load_agent(state: State<AppState>, agent_id: String) -> Result<(), String> {
+pub async fn load_agent(state: State<'_, AppState>, agent_id: String) -> Result<(), String> {
     tracing::info!("load_agent: loading agent {}", agent_id);
 
     let agent_config = state.identity_manager.load_agent(&agent_id)?;
@@ -42,7 +42,7 @@ pub fn load_agent(state: State<AppState>, agent_id: String) -> Result<(), String
             .unwrap_or_else(|_| SecretsVault::new(config.data_dir.clone()));
     }
 
-    crate::rebuild_router_with_superego(&state)?;
+    crate::rebuild_router_with_superego(&state).await?;
 
     {
         let mut active = state.active_agent_id.write().map_err(|e| e.to_string())?;
@@ -59,6 +59,38 @@ pub fn create_agent(state: State<AppState>, name: String) -> Result<String, Stri
 }
 
 #[tauri::command]
+pub fn reset_birth(state: State<AppState>) -> Result<(), String> {
+    let active = state.active_agent_id.read().map_err(|e| e.to_string())?;
+    let _agent_id = active.as_ref().ok_or("No active agent loaded")?;
+    
+    // We don't delete the whole agent, just its birth-related state in config and memory
+    let mut config = state.config.write().map_err(|e| e.to_string())?;
+    config.birth_complete = false;
+    config.birth_stage = None;
+    config.save(&config.config_path()).map_err(|e| e.to_string())?;
+    
+    let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+    *birth = None; // Force start_birth to be called again
+    
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_agent_identity(state: State<AppState>, agent_id: String) -> Result<(), String> {
+    // Prevent deleting active agent
+    {
+        let active = state.active_agent_id.read().map_err(|e| e.to_string())?;
+        if let Some(id) = &*active {
+            if id == &agent_id {
+                return Err("Cannot delete the currently active agent. Disconnect first.".to_string());
+            }
+        }
+    }
+
+    state.identity_manager.delete_agent(&agent_id)
+}
+
+#[tauri::command]
 pub fn disconnect_agent(state: State<AppState>) -> Result<(), String> {
     let mut active = state.active_agent_id.write().map_err(|e| e.to_string())?;
     *active = None;
@@ -67,6 +99,14 @@ pub fn disconnect_agent(state: State<AppState>) -> Result<(), String> {
     *birth = None;
 
     Ok(())
+}
+
+#[tauri::command]
+pub fn save_recovery_key(state: State<AppState>, private_key: String) -> Result<String, String> {
+    let active = state.active_agent_id.read().map_err(|e| e.to_string())?;
+    let agent_id = active.as_ref().ok_or("No active agent loaded")?;
+    
+    state.identity_manager.save_recovery_key(agent_id, &private_key)
 }
 
 #[tauri::command]

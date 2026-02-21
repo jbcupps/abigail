@@ -65,6 +65,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [publicKeyPath, setPublicKeyPath] = useState("");
   const [keySaved, setKeySaved] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [autoSavedPath, setAutoSavedPath] = useState("");
   const [repairKey, setRepairKey] = useState("");
   const [activeApiKeyProvider, setActiveApiKeyProvider] = useState<string | null>(null);
   const [storedProviders, setStoredProviders] = useState<string[]>([]);
@@ -118,7 +119,8 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
           `Birth was interrupted at stage "${interrupted.stage}". ` +
           `The signing key from memory was lost. You must restart the birth process.`
         );
-        // Continue to check identity status - it should now be Clean
+        // Set a special flag or just rely on the error UI showing a retry
+        return; 
       }
 
       // 3. Check identity status
@@ -164,6 +166,13 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
   const handleSkipInteractive = async () => {
     try {
+      if (stage === "Ignition") {
+        // Cloud-First path: jump to Connectivity to enter keys
+        await invoke("advance_to_connectivity");
+        setStage("Connectivity");
+        return;
+      }
+
       setMessage("Completing default birth...");
       setStage("Emergence");
 
@@ -246,6 +255,25 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     }
   };
 
+  const handleResetBirth = async () => {
+    try {
+      await invoke("reset_birth");
+      handleStart();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const handleAutoSaveKey = async () => {
+    try {
+      const path = await invoke<string>("save_recovery_key", { privateKey });
+      setAutoSavedPath(path);
+      setKeySaved(true);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const handleContinueFromKeyPresentation = async () => {
     setPrivateKey(""); // Clear from memory
     await invoke("advance_past_darkness");
@@ -256,10 +284,11 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const handleLlmConnected = async (_url: string) => {
     // Fetch existing stored providers when entering Connectivity
     try {
+      await invoke("advance_to_connectivity");
       const providers = await invoke<string[]>("get_stored_providers");
       setStoredProviders(providers);
     } catch (e) {
-      console.error("Failed to fetch stored providers:", e);
+      console.error("Failed to advance to connectivity or fetch providers:", e);
     }
     setStage("Connectivity");
   };
@@ -273,11 +302,30 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
   const handleApiKeySaved = (result: StoreKeyResult) => {
     setActiveApiKeyProvider(null);
-    if (result.success) {
-      setStoredProviders((prev) => [...prev, result.provider]);
-      // Inject message into BirthChat so LLM knows the key was saved and validated
-      const validatedText = result.validated ? " It's been validated and is working!" : "";
-      birthChatRef.current?.injectKeyConfirmation(result.provider, validatedText);
+    if (result && result.success) {
+      setStoredProviders((prev) => {
+        const next = [...prev];
+        if (!next.includes(result.provider)) {
+          next.push(result.provider);
+        }
+        
+        // Auto-add linked providers
+        const mapping: Record<string, string> = {
+          "openai": "codex-cli", "anthropic": "claude-cli", "google": "gemini-cli", "xai": "grok-cli",
+          "codex-cli": "openai", "claude-cli": "anthropic", "gemini-cli": "google", "grok-cli": "xai"
+        };
+        const linked = mapping[result.provider];
+        if (linked && !next.includes(linked)) {
+          next.push(linked);
+        }
+        return next;
+      });
+      
+      // Inject message into BirthChat with safety check
+      if (birthChatRef.current) {
+        const validatedText = result.validated ? " It's been validated and is working!" : "";
+        birthChatRef.current.injectKeyConfirmation(result.provider, validatedText);
+      }
     }
   };
 
@@ -311,8 +359,25 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     }
   };
 
-  const handleGenesisChatComplete = () => {
-    // After direct discovery chat, move to SoulPreview
+  const handleGenesisChatComplete = async () => {
+    // After direct discovery chat, extract identity and move to SoulPreview
+    try {
+      interface CrystallizationIdentity {
+        name?: string;
+        purpose?: string;
+        personality?: string;
+        primary_color?: string;
+        avatar_url?: string;
+      }
+      const identity = await invoke<CrystallizationIdentity>("extract_crystallization_identity");
+      if (identity.name) setCrystalName(identity.name);
+      if (identity.purpose) setCrystalPurpose(identity.purpose);
+      if (identity.personality) setCrystalPersonality(identity.personality);
+      if (identity.primary_color) setCrystalPrimaryColor(identity.primary_color);
+      if (identity.avatar_url) setCrystalAvatarUrl(identity.avatar_url);
+    } catch (e) {
+      console.warn("Could not extract identity from GenesisChat:", e);
+    }
     setStage("SoulPreview");
   };
 
@@ -467,6 +532,18 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                   {copied ? "Copied!" : "Copy"}
                 </button>
               </div>
+              <button
+                onClick={handleAutoSaveKey}
+                className="mt-3 text-xs border border-theme-primary-faint px-3 py-1.5 rounded hover:bg-theme-surface flex items-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                Auto-save to Documents
+              </button>
+              {autoSavedPath && (
+                <p className="mt-2 text-[10px] text-green-500 bg-green-950/20 p-2 rounded border border-green-900">
+                  ✓ Saved to: <span className="select-all">{autoSavedPath}</span>
+                </p>
+              )}
             </div>
 
             <div className="mb-6 text-sm">
@@ -541,61 +618,120 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
         {/* ── CONNECTIVITY ── */}
         {stage === "Connectivity" && (
-          <div className="flex flex-col h-full" style={{ minHeight: "60vh" }}>
-            {/* API Key buttons and status */}
-            <div className="px-4 py-2 border-b border-theme-border bg-theme-surface">
-              <div className="flex gap-2 flex-wrap items-center">
-                <span className="text-theme-text-dim text-xs mr-2">Add key:</span>
-                {["openai", "anthropic", "perplexity", "xai", "google", "tavily"].map((p) => (
-                  <button
-                    key={p}
-                    className={`text-xs px-2 py-1 rounded border ${
-                      storedProviders.includes(p)
-                        ? "border-green-600 text-green-500"
-                        : "border-theme-primary text-theme-text hover:bg-theme-primary-glow"
-                    }`}
-                    onClick={() => setActiveApiKeyProvider(p)}
-                    disabled={storedProviders.includes(p)}
-                  >
-                    {storedProviders.includes(p) ? `✓ ${p}` : p}
-                  </button>
-                ))}
-                <span className="text-theme-text-dim text-xs mx-1">|</span>
-                <span className="text-theme-text-dim text-xs mr-1">CLI:</span>
-                {["claude-cli", "gemini-cli", "codex-cli", "grok-cli"].map((p) => (
-                  <button
-                    key={p}
-                    className={`text-xs px-2 py-1 rounded border ${
-                      storedProviders.includes(p)
-                        ? "border-green-600 text-green-500"
-                        : "border-theme-primary text-theme-text hover:bg-theme-primary-glow"
-                    }`}
-                    onClick={() => setActiveApiKeyProvider(p)}
-                    disabled={storedProviders.includes(p)}
-                  >
-                    {storedProviders.includes(p) ? `✓ ${p}` : p}
-                  </button>
-                ))}
+          <div className="flex flex-col h-full bg-theme-bg" style={{ minHeight: "80vh" }}>
+            {/* Command Center Dashboard */}
+            <div className="p-6 border-b border-theme-border-dim bg-theme-bg-elevated">
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h2 className="text-theme-primary text-xl font-bold tracking-tighter">CONNECTIVITY COMMAND CENTER</h2>
+                  <p className="text-theme-text-dim text-xs">Establish trust with cloud intelligence providers.</p>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] text-theme-text-dim uppercase mb-1 font-mono">Overall Linkage</div>
+                  <div className="w-32 h-2 bg-theme-bg-inset rounded-full overflow-hidden border border-theme-border-dim">
+                    <div 
+                      className="h-full bg-theme-primary transition-all duration-1000" 
+                      style={{ width: `${Math.min(100, (storedProviders.length / 6) * 100)}%` }} 
+                    />
+                  </div>
+                </div>
               </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Core Providers */}
+                <div className="space-y-3">
+                  <h3 className="text-[10px] text-theme-primary-dim font-bold uppercase tracking-widest border-b border-theme-border-dim pb-1">Core Cloud Minds</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    {["openai", "anthropic", "perplexity", "xai", "google", "tavily"].map((p) => (
+                      <button
+                        key={p}
+                        className={`text-left px-3 py-2 rounded border transition-all ${
+                          storedProviders.includes(p)
+                            ? "border-green-600 bg-green-950/20 text-green-500"
+                            : "border-theme-border-dim bg-theme-bg-inset text-theme-text-dim hover:border-theme-primary hover:text-theme-text"
+                        }`}
+                        onClick={() => setActiveApiKeyProvider(p)}
+                        disabled={storedProviders.includes(p)}
+                      >
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold uppercase">{p}</span>
+                          {storedProviders.includes(p) && <span className="text-[10px]">✓</span>}
+                        </div>
+                        <div className="mt-1.5 w-full h-1 bg-black/20 rounded-full overflow-hidden">
+                          <div className={`h-full transition-all duration-500 ${storedProviders.includes(p) ? "bg-green-500 w-full" : "bg-theme-primary-faint w-0"}`} />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* CLI & Tooling */}
+                <div className="space-y-3">
+                  <h3 className="text-[10px] text-theme-text-dim font-bold uppercase tracking-widest border-b border-theme-border-dim pb-1">External CLI Tools</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    {["claude-cli", "gemini-cli", "codex-cli", "grok-cli"].map((p) => (
+                      <button
+                        key={p}
+                        className={`text-left px-3 py-2 rounded border transition-all ${
+                          storedProviders.includes(p)
+                            ? "border-green-600 bg-green-950/20 text-green-500"
+                            : "border-theme-border-dim bg-theme-bg-inset text-theme-text-dim hover:border-theme-primary hover:text-theme-text"
+                        }`}
+                        onClick={() => setActiveApiKeyProvider(p)}
+                        disabled={storedProviders.includes(p)}
+                      >
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold uppercase">{p.replace("-cli", "")}</span>
+                          {storedProviders.includes(p) && <span className="text-[10px]">✓</span>}
+                        </div>
+                        <div className="mt-1.5 w-full h-1 bg-black/20 rounded-full overflow-hidden">
+                          <div className={`h-full transition-all duration-500 ${storedProviders.includes(p) ? "bg-green-500 w-full" : "bg-theme-primary-faint w-0"}`} />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              
               {storedProviders.length > 0 && (
-                <p className="text-green-500 text-xs mt-2">
-                  ✓ {storedProviders.length} provider{storedProviders.length !== 1 ? "s" : ""} configured and validated. Click "Continue to Crystallization &gt;" when ready.
-                </p>
+                <div className="mt-6 flex justify-center">
+                  <button
+                    className="px-8 py-2 bg-theme-primary text-black font-bold rounded-full hover:bg-theme-text transition-colors flex items-center gap-2 text-sm"
+                    onClick={handleConnectivityAdvance}
+                  >
+                    ESTABLISH LINKAGE &rsaquo;
+                  </button>
+                </div>
               )}
             </div>
 
-            <BirthChat
-              ref={birthChatRef}
-              stage="Connectivity"
-              onStageAdvance={handleConnectivityAdvance}
-              onAction={(action) => {
-                if (action.type === "KeyStored" && action.provider) {
-                  setStoredProviders((prev) =>
-                    prev.includes(action.provider!) ? prev : [...prev, action.provider!]
-                  );
-                }
-              }}
-            />
+            <div className="flex-1 min-h-0 bg-theme-bg-inset">
+              <BirthChat
+                ref={birthChatRef}
+                stage="Connectivity"
+                onStageAdvance={handleConnectivityAdvance}
+                onAction={(action) => {
+                  if (action.type === "KeyStored" && action.provider) {
+                    setStoredProviders((prev) => {
+                      const newProviders = [...prev];
+                      if (!newProviders.includes(action.provider!)) {
+                        newProviders.push(action.provider!);
+                      }
+                      // Also auto-add the linked provider for UI consistency
+                      const mapping: Record<string, string> = {
+                        "openai": "codex-cli", "anthropic": "claude-cli", "google": "gemini-cli", "xai": "grok-cli",
+                        "codex-cli": "openai", "claude-cli": "anthropic", "gemini-cli": "google", "grok-cli": "xai"
+                      };
+                      const linked = mapping[action.provider!];
+                      if (linked && !newProviders.includes(linked)) {
+                        newProviders.push(linked);
+                      }
+                      return newProviders;
+                    });
+                  }
+                }}
+              />
+            </div>
 
             {activeApiKeyProvider && (
               <ApiKeyModal
@@ -862,12 +998,20 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         {error && !["Repair", "SoulPreview", "Emergence"].includes(stage) && stage !== "Darkness" && (
           <div className="p-4">
             <p className="text-red-400">{error}</p>
-            <button
-              className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow mt-2"
-              onClick={handleStart}
-            >
-              Retry
-            </button>
+            <div className="flex gap-2 mt-2">
+              <button
+                className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
+                onClick={handleStart}
+              >
+                Retry
+              </button>
+              <button
+                className="border border-theme-danger text-red-400 px-4 py-2 rounded hover:bg-red-950/20"
+                onClick={handleResetBirth}
+              >
+                Fresh Start
+              </button>
+            </div>
           </div>
         )}
 

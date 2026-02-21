@@ -12,10 +12,12 @@ use crate::commands::agent::*;
 use crate::commands::agentic::*;
 use crate::commands::birth::*;
 use crate::commands::chat::*;
+use crate::commands::cli::*;
 use crate::commands::config::*;
 use crate::commands::forge::*;
 use crate::commands::identity::*;
 use crate::commands::memory::*;
+use crate::commands::ollama::*;
 use crate::commands::sensory::*;
 use crate::commands::skills::*;
 use crate::state::AppState;
@@ -159,28 +161,41 @@ pub fn determine_ego_provider(
     (None, None)
 }
 
-pub fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    let vault = state.secrets.lock().map_err(|e| e.to_string())?;
+pub async fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
+    let (local_url, ego_name, ego_key, routing_mode, superego_config) = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let vault = state.secrets.lock().map_err(|e| e.to_string())?;
 
-    let (ego_name, ego_key) = {
-        let (name, key) = determine_ego_provider(&config, &vault);
-        if name.is_some() {
-            (name, key)
-        } else {
-            let hive = state.hive_secrets.lock().map_err(|e| e.to_string())?;
-            determine_ego_provider(&config, &hive)
-        }
+        let (ego_name, ego_key) = {
+            let (name, key) = determine_ego_provider(&config, &vault);
+            if name.is_some() {
+                (name, key)
+            } else {
+                let hive = state.hive_secrets.lock().map_err(|e| e.to_string())?;
+                determine_ego_provider(&config, &hive)
+            }
+        };
+        
+        let se = extract_superego_config(&config);
+        
+        (
+            config.local_llm_base_url.clone(),
+            ego_name,
+            ego_key,
+            config.routing_mode,
+            se,
+        )
     };
 
-    let mut new_router = IdEgoRouter::new(
-        config.local_llm_base_url.clone(),
+    let mut new_router = IdEgoRouter::new_auto_detect(
+        local_url,
         ego_name.as_deref(),
-        ego_key.clone(),
-        config.routing_mode,
-    );
+        ego_key,
+        routing_mode,
+    )
+    .await;
 
-    if let Some((se_provider, se_key)) = extract_superego_config(&config) {
+    if let Some((se_provider, se_key)) = superego_config {
         let superego = build_superego_llm_provider(&se_provider, &se_key);
         new_router = new_router.with_superego(superego);
     }
@@ -197,9 +212,9 @@ pub fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
     Ok(())
 }
 
-pub fn rebuild_router_with_superego_from_handle(handle: &tauri::AppHandle) -> Result<(), String> {
+pub async fn rebuild_router_with_superego_from_handle(handle: &tauri::AppHandle) -> Result<(), String> {
     let state = handle.state::<AppState>();
-    rebuild_router_with_superego(&state)
+    rebuild_router_with_superego(&state).await
 }
 
 pub fn run() {
@@ -268,6 +283,7 @@ pub fn run() {
         instruction_registry: Arc::new(InstructionRegistry::empty()),
         chat_cooldown: CooldownGuard::new(std::time::Duration::from_millis(500)),
         birth_cooldown: CooldownGuard::new(std::time::Duration::from_millis(500)),
+        cli_server: Arc::new(tokio::sync::Mutex::new(None)),
     };
 
     tauri::Builder::default()
@@ -309,7 +325,10 @@ pub fn run() {
             get_active_agent,
             load_agent,
             create_agent,
+            reset_birth,
+            delete_agent_identity,
             disconnect_agent,
+            save_recovery_key,
             migrate_legacy_identity,
             get_birth_complete,
             get_agent_name,
@@ -326,7 +345,10 @@ pub fn run() {
             generate_identity,
             advance_past_darkness,
             advance_to_connectivity,
+            advance_to_crystallization,
+            get_genesis_paths,
             complete_birth,
+            birth_chat,
             list_skills,
             list_discovered_skills,
             list_tools,
@@ -335,13 +357,28 @@ pub fn run() {
             mcp_list_tools,
             list_approved_skills,
             approve_skill,
+            get_cli_server_status,
+            start_cli_server,
+            stop_cli_server,
             set_api_key,
             set_local_llm_url,
+            store_provider_key,
             get_router_status,
+            detect_ollama,
+            list_recommended_models,
+            install_ollama,
+            pull_ollama_model,
+            get_ollama_status,
+            probe_local_llm,
+            set_local_llm_during_birth,
+            use_stored_provider,
             set_superego_provider,
             get_entity_theme,
             get_stored_providers,
             set_active_provider,
+            get_active_provider,
+            set_ego_model,
+            get_ego_model,
             get_superego_l2_mode,
             set_superego_l2_mode,
             get_sqlite_stats,
@@ -363,7 +400,6 @@ pub fn run() {
             get_forge_scenarios,
             crystallize_forge,
             genesis_chat,
-            get_active_provider,
             chat,
             chat_stream,
             get_system_diagnostics,

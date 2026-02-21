@@ -5,6 +5,7 @@
 
 use crate::auth::{auth_middleware, AuthState};
 use abigail_core::{AppConfig, SecretsVault};
+use abigail_router::IdEgoRouter;
 use axum::{
     extract::Path,
     extract::State,
@@ -14,84 +15,97 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use tower_http::cors::{Any, CorsLayer};
 
 /// Shared application state for the REST server.
 #[derive(Clone)]
-struct AppServerState {
-    auth: AuthState,
-    config_path: std::path::PathBuf,
-    #[allow(dead_code)]
-    data_dir: std::path::PathBuf,
-    vault: Arc<Mutex<SecretsVault>>,
+pub struct AppServerState {
+    pub auth: AuthState,
+    pub config_path: std::path::PathBuf,
+    pub data_dir: std::path::PathBuf,
+    pub vault: Arc<Mutex<SecretsVault>>,
+    /// Router for handling chat requests (optional, provided when run from Tauri)
+    pub router: Option<Arc<tokio::sync::RwLock<IdEgoRouter>>>,
 }
 
 #[derive(Serialize)]
-struct StatusResponse {
-    birth_complete: bool,
-    agent_name: Option<String>,
-    routing_mode: String,
-    superego_l2_mode: String,
-    local_llm_url: Option<String>,
-    ego_provider: Option<String>,
-    ego_key_set: bool,
-    email_configured: bool,
-    email_accounts: usize,
-    mcp_servers: usize,
-    secrets_count: usize,
+pub struct StatusResponse {
+    pub birth_complete: bool,
+    pub agent_name: Option<String>,
+    pub routing_mode: String,
+    pub superego_l2_mode: String,
+    pub local_llm_url: Option<String>,
+    pub ego_provider: Option<String>,
+    pub ego_key_set: bool,
+    pub email_configured: bool,
+    pub email_accounts: usize,
+    pub mcp_servers: usize,
+    pub secrets_count: usize,
 }
 
 #[derive(Serialize)]
-struct IntegrationStatusItem {
-    service_id: String,
-    name: String,
-    configured: bool,
-    missing_secrets: Vec<String>,
-    setup_url: String,
+pub struct IntegrationStatusItem {
+    pub service_id: String,
+    pub name: String,
+    pub configured: bool,
+    pub missing_secrets: Vec<String>,
+    pub setup_url: String,
 }
 
 #[derive(Serialize)]
-struct RouterStatusResponse {
-    routing_mode: String,
-    superego_l2_mode: String,
-    id_url: Option<String>,
-    ego_provider: Option<String>,
-    ego_key_set: bool,
-    superego_provider: Option<String>,
-    superego_key_set: bool,
+pub struct RouterStatusResponse {
+    pub routing_mode: String,
+    pub superego_l2_mode: String,
+    pub id_url: Option<String>,
+    pub ego_provider: Option<String>,
+    pub ego_key_set: bool,
+    pub superego_provider: Option<String>,
+    pub superego_key_set: bool,
 }
 
 #[derive(Deserialize)]
-struct StoreSecretRequest {
-    key: String,
-    value: String,
+pub struct StoreSecretRequest {
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Deserialize)]
-struct ConfigureEmailRequest {
-    address: String,
-    imap_host: String,
-    imap_port: u16,
-    smtp_host: String,
-    smtp_port: u16,
-    password: String,
+pub struct ConfigureEmailRequest {
+    pub address: String,
+    pub imap_host: String,
+    pub imap_port: u16,
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub password: String,
+}
+
+#[derive(Deserialize)]
+pub struct ChatRequest {
+    pub message: String,
+    /// Optional target: "EGO" (default) or "ID"
+    pub target: Option<String>,
 }
 
 #[derive(Serialize)]
-struct TokenResponse {
-    token: String,
+pub struct ChatResponse {
+    pub reply: String,
 }
 
 #[derive(Serialize)]
-struct MessageResponse {
-    message: String,
+pub struct TokenResponse {
+    pub token: String,
 }
 
 #[derive(Serialize)]
-struct SecretCheckResponse {
-    key: String,
-    exists: bool,
+pub struct MessageResponse {
+    pub message: String,
+}
+
+#[derive(Serialize)]
+pub struct SecretCheckResponse {
+    pub key: String,
+    pub exists: bool,
 }
 
 /// Start the REST API server.
@@ -114,20 +128,10 @@ pub async fn serve(port: u16) -> anyhow::Result<()> {
         config_path,
         data_dir,
         vault: Arc::new(Mutex::new(vault)),
+        router: None,
     };
 
-    let app = Router::new()
-        .route("/health", get(health))
-        .route("/status", get(get_status))
-        .route("/secrets/check/{key}", get(check_secret))
-        .route("/secrets/store", post(store_secret))
-        .route("/secrets/{key}", delete(remove_secret))
-        .route("/integrations", get(get_integrations))
-        .route("/email/configure", post(configure_email_endpoint))
-        .route("/router/status", get(get_router_status))
-        .route("/rotate-key", post(rotate_key))
-        .layer(middleware::from_fn_with_state(auth, auth_middleware))
-        .with_state(state);
+    let app = build_router(state);
 
     println!("=== Abigail REST API ===");
     println!("Listening on: http://127.0.0.1:{}", port);
@@ -144,6 +148,32 @@ pub async fn serve(port: u16) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Build the axum Router with all routes and middleware.
+pub fn build_router(state: AppServerState) -> Router {
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+
+    Router::new()
+        .route("/health", get(health))
+        .route("/status", get(get_status))
+        .route("/secrets/check/:key", get(check_secret))
+        .route("/secrets/store", post(store_secret))
+        .route("/secrets/:key", delete(remove_secret))
+        .route("/integrations", get(get_integrations))
+        .route("/email/configure", post(configure_email_endpoint))
+        .route("/router/status", get(get_router_status))
+        .route("/rotate-key", post(rotate_key))
+        .route("/chat", post(chat_endpoint))
+        .layer(middleware::from_fn_with_state(
+            state.auth.clone(),
+            auth_middleware,
+        ))
+        .layer(cors)
+        .with_state(state)
+}
+
 async fn health() -> &'static str {
     "ok"
 }
@@ -152,7 +182,7 @@ async fn get_status(
     State(state): State<AppServerState>,
 ) -> Result<Json<StatusResponse>, StatusCode> {
     let config = load_config(&state).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let vault = state.vault.lock().await;
+    let vault = state.vault.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let secrets_count = vault.list_providers().len();
 
     let (ego_provider, ego_key_set) = config
@@ -180,7 +210,7 @@ async fn check_secret(
     State(state): State<AppServerState>,
     Path(key): Path<String>,
 ) -> Result<Json<SecretCheckResponse>, StatusCode> {
-    let vault = state.vault.lock().await;
+    let vault = state.vault.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(SecretCheckResponse {
         exists: vault.exists(&key),
         key,
@@ -191,7 +221,14 @@ async fn store_secret(
     State(state): State<AppServerState>,
     Json(body): Json<StoreSecretRequest>,
 ) -> Result<Json<MessageResponse>, (StatusCode, Json<MessageResponse>)> {
-    let mut vault = state.vault.lock().await;
+    let mut vault = state.vault.lock().map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(MessageResponse {
+                message: "Lock error".to_string(),
+            }),
+        )
+    })?;
     abigail_core::ops::store_vault_secret(&mut vault, &body.key, &body.value).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
@@ -209,7 +246,7 @@ async fn remove_secret(
     State(state): State<AppServerState>,
     Path(key): Path<String>,
 ) -> Result<Json<MessageResponse>, StatusCode> {
-    let mut vault = state.vault.lock().await;
+    let mut vault = state.vault.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let removed = vault.remove_secret(&key);
     if removed {
         vault
@@ -228,7 +265,7 @@ async fn remove_secret(
 async fn get_integrations(
     State(state): State<AppServerState>,
 ) -> Result<Json<Vec<IntegrationStatusItem>>, StatusCode> {
-    let vault = state.vault.lock().await;
+    let vault = state.vault.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let integrations = abigail_skills::preloaded_integration_skills();
 
     let items: Vec<IntegrationStatusItem> = integrations
@@ -313,6 +350,36 @@ async fn get_router_status(
         ego_key_set,
         superego_provider,
         superego_key_set,
+    }))
+}
+
+async fn chat_endpoint(
+    State(state): State<AppServerState>,
+    Json(body): Json<ChatRequest>,
+) -> Result<Json<ChatResponse>, StatusCode> {
+    let router_lock = state.router.as_ref().ok_or(StatusCode::NOT_IMPLEMENTED)?;
+    let router = router_lock.read().await.clone();
+
+    let target_mode = body.target.as_deref().unwrap_or("EGO");
+    let messages = vec![abigail_capabilities::cognitive::Message::new(
+        "user",
+        &body.message,
+    )];
+
+    let response = if target_mode == "ID" {
+        router
+            .id_only(messages)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    } else {
+        router
+            .route(messages)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    };
+
+    Ok(Json(ChatResponse {
+        reply: response.content,
     }))
 }
 

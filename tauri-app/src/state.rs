@@ -66,4 +66,12 @@ pub struct AppState {
     pub chat_cooldown: CooldownGuard,
     /// Rate limiter for birth_chat command
     pub birth_cooldown: CooldownGuard,
+    /// Handle to the CLI REST server (if running)
+    pub cli_server: Arc<tokio::sync::Mutex<Option<CliServerHandle>>>,
+}
+
+pub struct CliServerHandle {
+    pub task: tokio::task::JoinHandle<()>,
+    pub token: String,
+    pub port: u16,
 }

@@ -15,12 +15,17 @@ export default function GenesisChat({ mode, onComplete }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [completing, setCompleting] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (!loading && !isComplete) {
+      inputRef.current?.focus();
+    }
+  }, [messages, loading, isComplete]);
 
   // Start with an introductory message
   useEffect(() => {
@@ -35,7 +40,7 @@ export default function GenesisChat({ mode, onComplete }: Props) {
   }, [mode]);
 
   const send = async () => {
-    if (!input.trim() || loading) return;
+    if (!input.trim() || loading || completing) return;
     const userMsg: Message = { role: "user", content: input.trim() };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
@@ -64,6 +69,15 @@ export default function GenesisChat({ mode, onComplete }: Props) {
     }
   };
 
+  const handleFinish = async () => {
+    setCompleting(true);
+    try {
+      await onComplete();
+    } finally {
+      setCompleting(false);
+    }
+  };
+
   const title = mode === "direct" ? "Direct Discovery" : "Soul Crystallization";
 
   return (
@@ -75,7 +89,7 @@ export default function GenesisChat({ mode, onComplete }: Props) {
           : "A guided exploration of identity and purpose."}
       </p>
 
-      <div className="flex-1 overflow-y-auto space-y-3 mb-4 bg-theme-bg-inset rounded-lg p-4">
+      <div className="flex-1 overflow-y-auto space-y-3 mb-4 bg-theme-bg-inset rounded-lg p-4 min-h-[300px]">
         {messages.map((msg, i) => (
           <div
             key={i}
@@ -88,10 +102,10 @@ export default function GenesisChat({ mode, onComplete }: Props) {
                   : "bg-theme-bubble-assistant rounded-xl rounded-bl-sm text-theme-text-bright"
               }`}
             >
-              {msg.content.split("\n").map((line, j) => (
+              {(msg.content || "").split("\n").map((line, j) => (
                 <span key={j}>
                   {line}
-                  {j < msg.content.split("\n").length - 1 && <br />}
+                  {j < (msg.content || "").split("\n").length - 1 && <br />}
                 </span>
               ))}
             </div>
@@ -107,33 +121,53 @@ export default function GenesisChat({ mode, onComplete }: Props) {
         <div ref={messagesEndRef} />
       </div>
 
-      {isComplete ? (
-        <button
-          className="border border-theme-success text-theme-success hover:bg-theme-success-dim px-8 py-3 rounded-lg mx-auto transition-colors"
-          onClick={onComplete}
-        >
-          Continue to Emergence
-        </button>
-      ) : (
-        <div className="flex gap-2">
-          <input
-            type="text"
-            className="flex-1 bg-theme-input-bg text-theme-text rounded-lg px-4 py-2 border border-theme-border-dim focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring outline-none"
-            placeholder="Share your thoughts..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && send()}
-            disabled={loading}
-          />
+      <div className="relative z-10 bg-theme-bg pt-2">
+        {isComplete ? (
           <button
-            className="border border-theme-primary text-theme-primary hover:bg-theme-primary-glow px-4 py-2 rounded-lg disabled:opacity-50 transition-colors"
-            onClick={send}
-            disabled={!input.trim() || loading}
+            className="w-full border border-theme-success text-theme-success hover:bg-theme-success-dim px-8 py-4 rounded-lg transition-all font-bold uppercase tracking-widest flex items-center justify-center gap-3 disabled:opacity-50"
+            onClick={handleFinish}
+            disabled={completing}
           >
-            Send
+            {completing ? (
+              <span className="animate-spin text-xl">&#9696;</span>
+            ) : null}
+            {completing ? "Extracting Identity..." : "Continue to Review"}
           </button>
-        </div>
-      )}
+        ) : (
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <input
+                ref={inputRef}
+                type="text"
+                className="flex-1 bg-theme-input-bg text-theme-text rounded-lg px-4 py-2 border border-theme-border-dim focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring outline-none"
+                placeholder="Share your thoughts..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && send()}
+                disabled={loading || completing}
+              />
+              <button
+                className="border border-theme-primary text-theme-primary hover:bg-theme-primary-glow px-6 py-2 rounded-lg disabled:opacity-50 transition-colors font-bold"
+                onClick={send}
+                disabled={!input.trim() || loading || completing}
+              >
+                Send
+              </button>
+            </div>
+            {messages.length > 2 && (
+              <div className="text-center">
+                <button
+                  className="text-theme-text-dim text-[10px] hover:text-theme-primary underline uppercase tracking-tighter disabled:opacity-50"
+                  onClick={handleFinish}
+                  disabled={completing}
+                >
+                  I'm satisfied with this identity. Proceed.
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
