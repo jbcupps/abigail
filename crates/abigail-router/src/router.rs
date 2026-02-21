@@ -276,11 +276,12 @@ impl IdEgoRouter {
         let context_aligned = self.has_external_context_signal(user_message);
         let ego_feasible = self.ego.is_some() && (id_instinct >= 45 || context_aligned);
 
-        let target = if ego_feasible && (id_instinct >= 60 || (context_aligned && id_instinct >= 20)) {
-            FastPathTarget::Ego
-        } else {
-            FastPathTarget::Id
-        };
+        let target =
+            if ego_feasible && (id_instinct >= 60 || (context_aligned && id_instinct >= 20)) {
+                FastPathTarget::Ego
+            } else {
+                FastPathTarget::Id
+            };
 
         FastPathResult {
             target,
@@ -302,13 +303,33 @@ impl IdEgoRouter {
         };
 
         let complexity_terms = [
-            "analyze", "compare", "tradeoff", "design", "architecture", "debug", "investigate",
-            "optimize", "benchmark", "route", "routing", "strategy", "security", "incident",
-            "multiple", "step-by-step", "plan", "refactor",
+            "analyze",
+            "compare",
+            "tradeoff",
+            "design",
+            "architecture",
+            "debug",
+            "investigate",
+            "optimize",
+            "benchmark",
+            "route",
+            "routing",
+            "strategy",
+            "security",
+            "incident",
+            "multiple",
+            "step-by-step",
+            "plan",
+            "refactor",
         ];
-        score += (complexity_terms.iter().filter(|k| lower.contains(**k)).count() as i32) * 6;
+        score += (complexity_terms
+            .iter()
+            .filter(|k| lower.contains(**k))
+            .count() as i32)
+            * 6;
 
-        let has_structured_content = text.contains('\n') || text.contains("```") || text.contains("{") || text.contains("[");
+        let has_structured_content =
+            text.contains('\n') || text.contains("```") || text.contains("{") || text.contains("[");
         if has_structured_content {
             score += 10;
         }
@@ -324,8 +345,19 @@ impl IdEgoRouter {
     fn has_external_context_signal(&self, text: &str) -> bool {
         let lower = text.to_lowercase();
         [
-            "search", "web", "http", "api", "fetch", "docs", "documentation", "latest",
-            "current", "today", "news", "url", "crawl",
+            "search",
+            "web",
+            "http",
+            "api",
+            "fetch",
+            "docs",
+            "documentation",
+            "latest",
+            "current",
+            "today",
+            "news",
+            "url",
+            "crawl",
         ]
         .iter()
         .any(|k| lower.contains(k))
@@ -678,7 +710,6 @@ mod tests {
         assert_eq!(target, FastPathTarget::Id);
     }
 
-
     #[tokio::test]
     async fn test_fast_path_classify_prefers_ego_for_external_context() {
         let router = IdEgoRouter::new(
@@ -688,7 +719,8 @@ mod tests {
             None,
             RoutingMode::TierBased,
         );
-        let fp = router.fast_path_classify("Search the web for the latest incident response guidance");
+        let fp =
+            router.fast_path_classify("Search the web for the latest incident response guidance");
         assert_eq!(fp.target, FastPathTarget::Ego);
         assert!(fp.context_aligned);
     }
