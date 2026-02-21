@@ -116,148 +116,41 @@ This means the **Definition of Done** includes: "doesn't break any existing rele
 
 ---
 
-## Phase 1 Feature Backlog
+## Phase 1 Feature Backlog [COMPLETED]
 
 Six deliverables, ordered by dependency and value. Each is sized to fit a 2-day cycle (or split across cycles if larger).
 
-### Feature 1: Anthropic Claude Provider [DONE]
-**Why:** Opens Abigail to the best available LLM. OpenClaw recommends Claude as primary.
-**What you'll see in demo:** Type a message in Abigail, get a response from Claude instead of (or alongside) GPT.
-**Cycles:** 1 (2 days)
-
-**Current state:**
-- [x] `LlmProvider` trait exists with `complete()` method
-- [x] `OpenAiProvider` works (cloud GPT)
-- [x] `LocalHttpProvider` works (Ollama/LM Studio)
-- [x] API key validation for Anthropic already exists (just not wired to a provider)
-
-**Work items:**
-- [x] Create `AnthropicProvider` struct implementing `LlmProvider` trait
-- [x] Handle Anthropic's message format (system prompt is separate, not a message)
-- [x] Map Abigail's `ToolDefinition` to Anthropic's tool format
-- [x] Wire into `IdEgoRouter` so `set_api_key("anthropic", key)` builds an Anthropic-backed Ego
-- [x] Add Tauri command to switch Ego provider between OpenAI/Anthropic
-- [x] Test with real API key
+- [x] **Feature 1: Anthropic Claude Provider**: Full integration with the Ego router.
+- [x] **Feature 2: Streaming Responses**: Word-by-word token streaming for all providers.
+- [x] **Feature 3: Wire Superego (3-Way Routing)**: Ethical pre-check and "Fast Path" classification.
+- [x] **Feature 4: Core Skills (Filesystem + Shell + HTTP)**: Essential agent capabilities implemented.
+- [x] **Feature 5: Skills Watcher (Hot-Reload)**: Automatic detection of new skill manifests.
+- [x] **Feature 6: CLI Interface (Headless Operation)**: `abigail-cli` crate for terminal-based interaction.
 
 ---
 
-### Feature 2: Streaming Responses [DONE]
-**Why:** Currently the UI freezes while waiting for the full response. Streaming shows words as they arrive.
-**What you'll see in demo:** Type a message, see the response appear word-by-word in real time.
-**Cycles:** 1-2 (2-4 days)
+## Phase 1.5: Stability & Sovereign Refinement [IN PROGRESS]
 
-**Current state:**
-- [x] `reqwest` has "stream" feature enabled but unused
-- [x] Chat returns a complete string in one shot
-- [x] Tauri event system exists (used for download progress)
+Focus on hardening the infrastructure and completing the rebranding to the Sovereign Entity model.
 
-**Work items:**
-- [x] Add `stream()` method to `LlmProvider` trait (returns async stream of tokens)
-- [x] Implement streaming for `OpenAiProvider` (SSE parsing)
-- [x] Implement streaming for `AnthropicProvider` (SSE parsing)
-- [x] Implement streaming for `LocalHttpProvider` (SSE parsing)
-- [x] Add `chat_stream` Tauri command that emits token events
-- [x] Update React `ChatInterface` to render tokens as they arrive
-- [x] Graceful fallback: if streaming fails, fall back to non-streaming
+### 1.5.1: Fix Release Pipeline
+- **Problem**: Windows `.exe` installers are missing from GitHub Releases due to invalid `tauri-action` inputs.
+- **Goal**: Ensure every platform (Win/Mac/Linux) successfully produces and uploads its installer.
+- **Status**: Fix applied to `release.yml` (changed `includeUpdaterJson` to `uploadUpdaterJson`).
 
----
+### 1.5.2: Sovereign Entity UX Polish
+- **Goal**: Refine the Soul Registry and Sanctum interfaces for better multi-entity management.
+- **Tasks**:
+  - Implement Entity-specific avatars and primary color themes (v13 config).
+  - Transition from "Agent" terminology to "Sovereign Entity" throughout the UI.
+  - Enhance the **Sanctum** to show background reflection logs.
 
-### Feature 3: Wire Superego (3-Way Routing) [DONE]
-**Why:** Abigail's unique architectural differentiator. Adds an ethical oversight layer to every interaction.
-**What you'll see in demo:** A settings panel where you configure Id/Ego/Superego providers. Chat messages show which path they took.
-**Cycles:** 1 (2 days)
-
-**Current state:**
-- [x] `TrinityConfig` struct exists with superego fields (provider, API key)
-- [x] `SuperegoVerdict` and `check_search_query()` safety checks exist
-- [x] Comment: "Follow-up: 3-way routing" in code
-- [x] Router only uses 2-way (Id/Ego) today
-
-**Work items:**
-- [x] Extend `IdEgoRouter` to `TrinityRouter` (or add Superego layer)
-- [x] Superego pre-check: before routing to Id or Ego, run Superego safety check
-- [x] Superego can use any provider (Anthropic, OpenAI, local)
-- [x] Add Tauri commands: `set_superego_provider`, `get_trinity_status`
-- [x] Update frontend settings to show 3-provider configuration
-- [x] Show routing decision in chat UI (small label: "via Id", "via Ego", "blocked by Superego")
-
----
-
-### Feature 4: Core Skills (Filesystem + Shell + HTTP) [DONE]
-**Why:** The skill system works but only has 1 active skill. These 3 unlock the agent's ability to actually DO things.
-**What you'll see in demo:** Ask Abigail to "list files in my home directory", "run `cargo --version`", or "fetch the weather from an API" — and it does it.
-**Cycles:** 2 (4 days — one cycle per 1-2 skills)
-
-**Current state:**
-- [x] `SkillRegistry`, `SkillExecutor`, `EventBus` all work
-- [x] `skill.toml` manifest system works
-- [x] `web-search` skill is the working reference implementation
-- [x] Permission system with `Sandbox` checks exists
-
-**Work items:**
-
-**4a: Filesystem skill (Cycle 1)**
-- [x] `skill.toml` manifest with FileSystem permission
-- [x] Tools: `read_file`, `write_file`, `list_directory`, `search_files`
-- [x] Path sandboxing (restrict to allowed directories)
-- [x] Register in Tauri app alongside web-search
-
-**4b: Shell command skill (Cycle 1)**
-- [x] `skill.toml` manifest with ShellExecute permission
-- [x] Tools: `run_command` (with timeout, output capture)
-- [x] Allowlist/blocklist for dangerous commands
-- [x] Working directory control
-
-**4c: HTTP request skill (Cycle 2)**
-- [x] `skill.toml` manifest with Network permission
-- [x] Tools: `http_get`, `http_post`, `http_request` (generic)
-- [x] SSRF protection (reuse existing validation)
-- [x] Response size limits
-
----
-
-### Feature 5: Skills Watcher (Hot-Reload) [DONE]
-**Why:** During development (and for users adding skills), the app shouldn't need a restart to pick up new skills.
-**What you'll see in demo:** Drop a new skill folder into the skills directory → Abigail detects it and shows it in the skill list without restart.
-**Cycles:** 0.5 (1 day — pair with another small item)
-
-**Current state:**
-- [x] `SkillRegistry::discover()` scans directories on startup
-- [x] No file watching
-
-**Work items:**
-- [x] Add `notify` crate for filesystem watching
-- [x] Watch skills directories for changes (new/modified `skill.toml`)
-- [x] Re-run discovery on change
-- [x] Emit Tauri event when skills list updates
-- [x] Frontend reacts to skill list changes
-
----
-
-### Feature 6: CLI Interface (Headless Operation) [PARTIAL]
-**Why:** Enables Abigail to run without the desktop GUI — foundation for server/gateway deployment later. Also adds a **new release artifact** to Abigail's multi-path distribution.
-**What you'll see in demo:** Run `abigail-cli chat "What is 2+2?"` in a terminal and get a response. No window opens.
-**Cycles:** 1.5 (3 days)
-
-**Current state:**
-- [x] All logic is in library crates (`abigail-router`, `abigail-skills`, `abigail-memory`, `abigail-core`)
-- [x] But wired together only in `tauri-app/src/lib.rs`
-- [x] No standalone CLI binary (REPLACED: abigail-cli crate exists)
-- [x] `npm-package/` already has a CLI pattern (`abigail-desktop`) we can extend
-
-**Work items:**
-- [x] New crate: `abigail-cli` (or binary in existing crate)
-- [/] `clap` argument parser: `abigail-cli chat "message"`, `abigail-cli config set-key`, `abigail-cli skills list`
-- [x] Reuse `abigail-router`, `abigail-skills`, `abigail-memory` directly (no Tauri dependency)
-- [ ] Interactive REPL mode: `abigail-cli` with no args drops into a chat loop
-- [x] Add to workspace `Cargo.toml`
-- [ ] Output formatting (colored terminal output with streaming)
-
-**Release path work items (new!):**
-- [ ] Add `abigail-cli` build step to `release.yml` (3-platform matrix, like abigail-keygen)
-- [ ] Upload `abigail-cli` binaries as GitHub Release assets (abigail-cli-windows-x64.exe, abigail-cli-macos-universal, abigail-cli-linux-x64)
-- [ ] Update `npm-package/` to also offer `npx abigail-desktop cli` as a subcommand
-- [ ] Add `abigail-cli` to CI test matrix (ensure `cargo build -p abigail-cli` passes on all 3 platforms)
+### 1.5.3: Background Reflection (Superego v2)
+- **Goal**: Move from live "blocking" checks to a 24h batch audit model.
+- **Tasks**:
+  - Implement a background job that periodically audits recent conversations.
+  - Store reflection verdicts in the `abigail-memory` database.
+  - Surface "Character Growth" insights in the Sanctum.
 
 ---
 
