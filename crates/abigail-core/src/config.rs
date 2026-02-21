@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 12;
+pub const CONFIG_SCHEMA_VERSION: u32 = 13;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -333,6 +333,15 @@ pub struct AppConfig {
     /// Compared against the embedded version at startup to trigger re-bootstrap.
     #[serde(default = "default_preloaded_skills_version")]
     pub preloaded_skills_version: u32,
+
+    // ── v13 fields ─────────────────────────────────────────────────
+    /// Primary accent color for this entity (hex format, e.g. "#00ff00").
+    #[serde(default)]
+    pub primary_color: Option<String>,
+
+    /// URL or data-URI for the entity's avatar.
+    #[serde(default)]
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -381,6 +390,8 @@ impl AppConfig {
             bundled_ollama: default_bundled_ollama(),
             bundled_model: default_bundled_model(),
             preloaded_skills_version: 0,
+            primary_color: None,
+            avatar_url: None,
         }
     }
 
@@ -558,9 +569,16 @@ impl AppConfig {
             tracing::debug!("Migrated config from v11 to v12");
         }
 
+        // Migration from v12 to v13
+        if self.schema_version < 13 {
+            // v13 adds: primary_color, avatar_url (defaults to None via serde).
+            self.schema_version = 13;
+            migrated = true;
+            tracing::debug!("Migrated config from v12 to v13");
+        }
+
         migrated
     }
-
     /// Check if birth was interrupted (birth_stage set but birth_complete is false).
     /// If so, reset birth_stage and return true to indicate restart is needed.
     pub fn check_interrupted_birth(&mut self) -> bool {
@@ -624,6 +642,8 @@ mod tests {
             bundled_ollama: false,
             bundled_model: None,
             preloaded_skills_version: 0,
+            primary_color: None,
+            avatar_url: None,
         }
     }
 

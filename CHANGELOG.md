@@ -8,10 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
-- 2026-02-19: Added 10 new skill crates (knowledge-base, git, code-analysis, database, calendar, document, notification, image, clipboard, system-monitor) + browser instruction-only skill, permission parser fix, productivity subagent, and expanded file_ops/privacy subagent capabilities
+- 2026-02-20 17:30 EST: Massive cleanup and rebranding to Sovereign Entity model: modularized Tauri backend, pruned legacy routing/stubs, rebranded UI to Soul Registry and Sanctum, and implemented agentic Recall memory tool.
+- 2026-02-19 19:14 EST: Added 10 new skill crates (knowledge-base, git, code-analysis, database, calendar, document, notification, image, clipboard, system-monitor) + browser instruction-only skill, permission parser fix, productivity subagent, and expanded file_ops/privacy subagent capabilities
 - 2026-02-19 20:45 EST: Implemented refined lightweight router – Fast Path (Id+Ego+Context) + out-of-band Superego/Trust conscience to eliminate lock-ups
-- 2026-02-19: Added abigail-auth crate (Phase 1) — AuthProvider trait, StaticToken/BasicAuth providers, in-memory TokenCache, AuthManager registry with 11 tests
-- 2026-02-19: feat(skills): add preloaded integration skills (GitHub, Slack, Jira) with auth framework wiring — embedded DynamicApiSkill configs, AuthManager in AppState, versioned bootstrap, get_integration_status/store_integration_credential commands, check_integration_status LLM tool, instruction registry entries
+- 2026-02-19 13:34 EST: Added abigail-auth crate (Phase 1) — AuthProvider trait, StaticToken/BasicAuth providers, in-memory TokenCache, AuthManager registry with 11 tests
+- 2026-02-19 19:02 EST: Add preloaded integration skills (GitHub, Slack, Jira) with auth framework wiring — embedded DynamicApiSkill configs, AuthManager in AppState, versioned bootstrap, get_integration_status/store_integration_credential commands, check_integration_status LLM tool, instruction registry entries
 - 2026-02-19 23:30 EST: Fix credential storage refusal (conscience allowlist + enriched safety prompt + configure_email LLM tool) and add abigail-cli crate with CLI subcommands + REST troubleshooting API
 - 2026-02-20 00:15 EST: Register ProtonMailSkill in runtime, add get_system_diagnostics LLM tool, troubleshooting instruction keywords, and fix skill-proton-mail compile errors
 - 2026-02-19 14:30 EST: Unified UI theme system across all 20 components — chat bubbles, softer backgrounds, focus rings, scrollbar theming, ARIA accessibility, and zero hardcoded gray/blue colors
@@ -20,17 +21,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - 2026-02-20 15:30 EST: Add CLI provider adapter for Claude Code, Gemini CLI, OpenAI Codex CLI, and xAI Grok CLI as Ego routing backends
 - 2026-02-20 16:00 EST: Add CLI provider options to birth Ignition/Connectivity stages, post-birth config menu, and LLM tool schema
 - 2026-02-20 19:30 EST: Fix CI gate by committing missing auto-updater deps, schema migration code, capabilities, and UpdateNotification component
-- Public release readiness: LICENSE, CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md
-- CI workflow for pull request validation (cargo fmt, clippy, test, frontend build)
-- CodeQL static analysis workflow
-- GitHub issue and PR templates
-- CODEOWNERS file
-- All GitHub Actions pinned by commit SHA for supply chain security
+- 2026-02-19 10:55 EST: Public release readiness: LICENSE, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, CI workflows, CodeQL, and CODEOWNERS
 
 ### Changed
 
-- Enhanced README.md with badges, system requirements, and troubleshooting
-- Updated .gitignore with additional patterns for generated and data files
+- 2026-02-18 23:04 EST: Enhanced README.md with badges, system requirements, and troubleshooting
+- 2026-02-18 01:36 EST: Updated .gitignore with additional patterns for generated and data files
 
 ## [0.0.1] - 2026-02-03
 

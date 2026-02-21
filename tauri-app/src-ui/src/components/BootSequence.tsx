@@ -73,7 +73,10 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [crystalPurpose, setCrystalPurpose] = useState("");
   const [crystalPersonality, setCrystalPersonality] = useState("");
   const [crystalMentorName, setCrystalMentorName] = useState("");
+  const [crystalPrimaryColor, setCrystalPrimaryColor] = useState("#00ffcc");
+  const [crystalAvatarUrl, setCrystalAvatarUrl] = useState("");
   const [genesisPath, setGenesisPath] = useState<string | null>(null);
+  const [visualizing, setVisualizing] = useState(false);
 
   // Ref to BirthChat for injecting key confirmations
   const birthChatRef = useRef<BirthChatHandle>(null);
@@ -327,10 +330,14 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     name: string;
     purpose: string;
     personality: string;
+    primaryColor: string;
+    avatarUrl: string;
   }) => {
     if (identity.name) setCrystalName(identity.name);
     if (identity.purpose) setCrystalPurpose(identity.purpose);
     if (identity.personality) setCrystalPersonality(identity.personality);
+    if (identity.primaryColor) setCrystalPrimaryColor(identity.primaryColor);
+    if (identity.avatarUrl) setCrystalAvatarUrl(identity.avatarUrl);
     setStage("SoulPreview");
   };
 
@@ -347,11 +354,31 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         purpose: crystalPurpose.trim() || "assist, retrieve, connect, and surface information",
         personality: crystalPersonality.trim() || "helpful, clear, and honest",
         mentorName: crystalMentorName.trim(),
+        primaryColor: crystalPrimaryColor,
+        avatarUrl: crystalAvatarUrl,
       });
       setSoulPreview(preview);
       setStage("Emergence");
     } catch (e) {
       setError(String(e));
+    }
+  };
+
+  const handleVisualizeSoul = async () => {
+    setVisualizing(true);
+    try {
+      // Use Ego LLM to propose a visual identity based on current soul details
+      const proposal = await invoke<{ primary_color: string; avatar_url?: string }>("propose_entity_visuals", {
+        name: crystalName,
+        personality: crystalPersonality,
+        purpose: crystalPurpose
+      });
+      if (proposal.primary_color) setCrystalPrimaryColor(proposal.primary_color);
+      if (proposal.avatar_url) setCrystalAvatarUrl(proposal.avatar_url);
+    } catch (e) {
+      console.warn("Failed to propose visuals:", e);
+    } finally {
+      setVisualizing(false);
     }
   };
 
@@ -664,6 +691,51 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                   value={crystalPersonality}
                   onChange={(e) => setCrystalPersonality(e.target.value)}
                 />
+              </div>
+
+              {/* ── Visual Identity ── */}
+              <div className="pt-4 border-t border-theme-border-dim">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-theme-text text-sm font-bold uppercase tracking-widest">Visual Identity</h3>
+                  <button 
+                    onClick={handleVisualizeSoul}
+                    disabled={visualizing}
+                    className="text-[10px] border border-theme-primary px-2 py-1 rounded hover:bg-theme-primary-glow disabled:opacity-50"
+                  >
+                    {visualizing ? "Visualizing..." : "Visualize Your Soul"}
+                  </button>
+                </div>
+                
+                <div className="flex gap-4 items-start">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[10px] text-theme-text-dim uppercase">Accent Color</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={crystalPrimaryColor}
+                        onChange={(e) => setCrystalPrimaryColor(e.target.value)}
+                        className="w-10 h-10 bg-transparent border-none cursor-pointer"
+                      />
+                      <input
+                        type="text"
+                        value={crystalPrimaryColor}
+                        onChange={(e) => setCrystalPrimaryColor(e.target.value)}
+                        className="bg-theme-input-bg border border-theme-border-dim text-theme-text px-2 py-1 rounded text-xs w-20 font-mono"
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="flex-1 flex flex-col gap-2">
+                    <label className="text-[10px] text-theme-text-dim uppercase">Avatar URL (Optional)</label>
+                    <input
+                      type="text"
+                      value={crystalAvatarUrl}
+                      onChange={(e) => setCrystalAvatarUrl(e.target.value)}
+                      placeholder="https://... or data:image/..."
+                      className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded text-xs focus:border-theme-primary focus:outline-none"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 

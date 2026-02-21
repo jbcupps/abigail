@@ -221,6 +221,47 @@ impl MemoryStore {
         Ok(deleted as u64)
     }
 
+    /// Search memories by keyword (case-insensitive LIKE).
+    pub fn search_memories(&self, query: &str, limit: usize) -> Result<Vec<Memory>> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT id, content, weight, created_at FROM memories \
+             WHERE content LIKE ?1 \
+             ORDER BY created_at DESC LIMIT ?2",
+        )?;
+        let pattern = format!("%{}%", query);
+        let rows = stmt.query_map(rusqlite::params![pattern, limit as i64], |row| {
+            let created_at: String = row.get(3)?;
+            let created_at = chrono::DateTime::parse_from_rfc3339(&created_at)
+                .map(|dt| dt.with_timezone(&Utc))
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            let weight_str: String = row.get(2)?;
+            let weight = match weight_str.as_str() {
+                "ephemeral" => MemoryWeight::Ephemeral,
+                "distilled" => MemoryWeight::Distilled,
+                "crystallized" => MemoryWeight::Crystallized,
+                w => {
+                    return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+                        StoreError::InvalidData(format!("unknown weight: {}", w)),
+                    )))
+                }
+            };
+            Ok(Memory {
+                id: row.get(0)?,
+                content: row.get(1)?,
+                weight,
+                created_at,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     /// Recent memories (MVP: by created_at DESC; sqlite-vec stubbed).
     pub fn recent_memories(&self, limit: usize) -> Result<Vec<Memory>> {
         let conn = self.conn.lock().map_err(|e| {

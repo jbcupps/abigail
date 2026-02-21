@@ -1,13 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
+import SoulRegistry from "./components/SoulRegistry";
 import BootSequence from "./components/BootSequence";
 import ChatInterface from "./components/ChatInterface";
 import PersonaToggle from "./components/PersonaToggle";
 import IdentityConflictPanel, { IdentitySummary } from "./components/IdentityConflictPanel";
-import ManagementScreen from "./components/ManagementScreen";
 import SplashScreen from "./components/SplashScreen";
-import ForgeDrawer from "./components/ForgeDrawer";
+import SanctumDrawer from "./components/SanctumDrawer";
 import UpdateNotification from "./components/UpdateNotification";
 
 type AppState =
@@ -211,18 +211,18 @@ function AppInner() {
       );
     case "management":
       return (
-        <ManagementScreen
-          onAgentSelected={handleAgentSelected}
-          onCreateAgent={handleCreateAgent}
+        <SoulRegistry
+          onSoulSelected={handleAgentSelected}
+          onNewSoul={handleCreateAgent}
         />
       );
     case "identity_conflict":
       if (!existingIdentity) {
-        console.warn("[App] identity_conflict without identity; returning to management");
+        console.warn("[App] identity_conflict without identity; returning to registry");
         return (
-          <ManagementScreen
-            onAgentSelected={handleAgentSelected}
-            onCreateAgent={handleCreateAgent}
+          <SoulRegistry
+            onSoulSelected={handleAgentSelected}
+            onNewSoul={handleCreateAgent}
           />
         );
       }
@@ -283,7 +283,7 @@ function AppInner() {
             onToggle={() => setForgeOpen((prev) => !prev)}
             forgeOpen={forgeOpen}
           />
-          <ForgeDrawer
+          <SanctumDrawer
             open={forgeOpen}
             onClose={() => setForgeOpen(false)}
             onDisconnect={handleDisconnect}

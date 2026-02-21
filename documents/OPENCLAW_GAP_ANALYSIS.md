@@ -58,45 +58,45 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 - **Priority:** P0 (critical for parity), P1 (high value), P2 (medium), P3 (nice-to-have)
 - **Effort:** S (< 1 week), M (1-3 weeks), L (3-6 weeks), XL (6+ weeks)
 
-| # | Feature Gap | Priority | Effort | Category |
-|---|-------------|----------|--------|----------|
-| 1 | Multi-channel messaging (WhatsApp, Telegram, Discord, Slack, etc.) | P0 | XL | Messaging |
-| 2 | WebSocket gateway / control plane | P0 | L | Architecture |
-| 3 | Docker sandbox for skill/tool execution | P0 | L | Security |
-| 4 | Expanded LLM provider support (Anthropic, XAI, Google, MiniMax) | P0 | M | LLM |
-| 5 | Skills ecosystem (100+ bundled skills) | P0 | XL | Skills |
-| 6 | Browser automation (accessibility tree snapshots) | P1 | XL | Browser |
-| 7 | Voice integration (speech-to-text, text-to-speech) | P1 | L | Voice |
-| 8 | Lane queue system (serial execution, race-condition prevention) | P1 | L | Architecture |
-| 9 | Multi-agent workspaces | P1 | L | Multi-agent |
-| 10 | Cron/scheduled task execution | P1 | M | Scheduling |
-| 11 | Persistent memory as Markdown (user-editable) | P1 | M | Memory |
-| 12 | Semantic search (BM25 + vector + graph) | P1 | L | Memory |
-| 13 | Mobile companion apps (iOS/Android) | P1 | XL | Mobile |
-| 14 | Device node system (local action execution) | P1 | L | Mobile |
-| 15 | CLI interface (headless operation) | P2 | M | Interface |
-| 16 | WebChat interface (browser-accessible) | P2 | M | Interface |
-| 17 | Live Canvas (A2UI agent-driven UI) | P2 | L | UI |
-| 18 | Skills watcher (hot-reload on SKILL.md change) | P2 | S | Skills |
-| 19 | Skill install gating and managed skills | P2 | M | Skills |
-| 20 | Smart home integrations | P2 | M | Skills |
-| 21 | Music/media service integrations | P2 | M | Skills |
-| 22 | Productivity tool integrations (calendar, email, docs) | P2 | M | Skills |
-| 23 | Group chat support with mention gating | P2 | M | Messaging |
-| 24 | DM pairing and allowlists | P2 | M | Security |
-| 25 | Streaming responses (token-by-token) | P2 | M | LLM |
-| 26 | Model context protocol (MCP) support | P2 | M | LLM |
-| 27 | Agent-to-UI (A2UI) rendering protocol | P2 | L | UI |
-| 28 | Semantic snapshots for web content | P2 | M | Browser |
-| 29 | File system operations skill | P2 | S | Skills |
-| 30 | Shell command execution skill | P2 | S | Skills |
-| 31 | Per-channel memory isolation | P2 | M | Memory |
-| 32 | 3-way Superego routing (infrastructure exists) | P2 | M | LLM |
-| 33 | Community skill marketplace/registry | P3 | L | Skills |
-| 34 | Onboarding daemon (background service) | P3 | M | Architecture |
-| 35 | Telemetry and analytics (opt-in) | P3 | M | Operations |
-| 36 | Plugin/extension API for third-party developers | P3 | L | Skills |
-| 37 | Internationalization (i18n) | P3 | M | UI |
+| # | Feature Gap | Priority | Effort | Category | Status |
+|---|-------------|----------|--------|----------|--------|
+| 1 | Multi-channel messaging (WhatsApp, Telegram, Discord, Slack, etc.) | P0 | XL | Messaging | Pending |
+| 2 | WebSocket gateway / control plane | P0 | L | Architecture | Pending |
+| 3 | Docker sandbox for skill/tool execution | P0 | L | Security | Pending |
+| 4 | Expanded LLM provider support (Anthropic, XAI, Google, MiniMax) | P0 | M | LLM | Partial (Anthropic Done) |
+| 5 | Skills ecosystem (100+ bundled skills) | P0 | XL | Skills | Partial (Core Skills Done) |
+| 6 | Browser automation (accessibility tree snapshots) | P1 | XL | Browser | Pending |
+| 7 | Voice integration (speech-to-text, text-to-speech) | P1 | L | Voice | Pending |
+| 8 | Lane queue system (serial execution, race-condition prevention) | P1 | L | Architecture | Pending |
+| 9 | Multi-agent workspaces | P1 | L | Multi-agent | Pending |
+| 10 | Cron/scheduled task execution | P1 | M | Scheduling | Pending |
+| 11 | Persistent memory as Markdown (user-editable) | P1 | M | Memory | Pending |
+| 12 | Semantic search (BM25 + vector + graph) | P1 | L | Memory | Pending |
+| 13 | Mobile companion apps (iOS/Android) | P1 | XL | Mobile | Pending |
+| 14 | Device node system (local action execution) | P1 | L | Mobile | Pending |
+| 15 | CLI interface (headless operation) | P2 | M | Interface | Partial |
+| 16 | WebChat interface (browser-accessible) | P2 | M | Interface | Pending |
+| 17 | Live Canvas (A2UI agent-driven UI) | P2 | L | UI | Pending |
+| 18 | Skills watcher (hot-reload on SKILL.md change) | P2 | S | Skills | Done |
+| 19 | Skill install gating and managed skills | P2 | M | Skills | Pending |
+| 20 | Smart home integrations | P2 | M | Skills | Pending |
+| 21 | Music/media service integrations | P2 | M | Skills | Pending |
+| 22 | Productivity tool integrations (calendar, email, docs) | P2 | M | Skills | Pending |
+| 23 | Group chat support with mention gating | P2 | M | Messaging | Pending |
+| 24 | DM pairing and allowlists | P2 | M | Security | Pending |
+| 25 | Streaming responses (token-by-token) | P2 | M | LLM | Done |
+| 26 | Model context protocol (MCP) support | P2 | M | LLM | Pending |
+| 27 | Agent-to-UI (A2UI) rendering protocol | P2 | L | UI | Pending |
+| 28 | Semantic snapshots for web content | P2 | M | Browser | Pending |
+| 29 | File system operations skill | P2 | S | Skills | Done |
+| 30 | Shell command execution skill | P2 | S | Skills | Done |
+| 31 | Per-channel memory isolation | P2 | M | Memory | Pending |
+| 32 | 3-way Superego routing (infrastructure exists) | P2 | M | LLM | Done |
+| 33 | Community skill marketplace/registry | P3 | L | Skills | Pending |
+| 34 | Onboarding daemon (background service) | P3 | M | Architecture | Pending |
+| 35 | Telemetry and analytics (opt-in) | P3 | M | Operations | Pending |
+| 36 | Plugin/extension API for third-party developers | P3 | L | Skills | Pending |
+| 37 | Internationalization (i18n) | P3 | M | UI | Pending |
 
 ---
 
@@ -445,17 +445,17 @@ Abigail has several features that OpenClaw lacks. These are differentiators wort
 
 ## 6. Phased Implementation Plan
 
-### Phase 1: Foundation (Weeks 1-6)
+### Phase 1: Foundation (Weeks 1-6) [ALMOST DONE]
 **Goal:** Core infrastructure for multi-interface, multi-provider operation
 
-| # | Task | Effort | Dependencies |
-|---|------|--------|-------------|
-| 1.1 | **Add Anthropic LLM provider** — Implement `AnthropicProvider` with streaming | M | None |
-| 1.2 | **Add streaming response support** — SSE/chunked → Tauri events + generic stream trait | M | None |
-| 1.3 | **Wire 3-way Superego routing** — Connect existing `TrinityConfig` infrastructure | M | 1.1 |
-| 1.4 | **Add core skills: filesystem, shell, HTTP** — Essential tool capabilities | M | None |
-| 1.5 | **Implement skills watcher** — Hot-reload skills on file change (notify crate) | S | None |
-| 1.6 | **Add CLI interface** — clap-based binary sharing abigail-router/abigail-skills/abigail-memory | M | None |
+| # | Task | Effort | Dependencies | Status |
+|---|------|--------|-------------|--------|
+| 1.1 | **Add Anthropic LLM provider** — Implement `AnthropicProvider` with streaming | M | None | Done |
+| 1.2 | **Add streaming response support** — SSE/chunked → Tauri events + generic stream trait | M | None | Done |
+| 1.3 | **Wire 3-way Superego routing** — Connect existing `TrinityConfig` infrastructure | M | 1.1 | Done |
+| 1.4 | **Add core skills: filesystem, shell, HTTP** — Essential tool capabilities | M | None | Done |
+| 1.5 | **Implement skills watcher** — Hot-reload skills on file change (notify crate) | S | None | Done |
+| 1.6 | **Add CLI interface** — clap-based binary sharing abigail-router/abigail-skills/abigail-memory | M | None | Partial |
 
 ### Phase 2: Gateway & Messaging (Weeks 7-14)
 **Goal:** Multi-channel communication and gateway architecture
