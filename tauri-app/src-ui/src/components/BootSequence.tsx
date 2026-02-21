@@ -7,6 +7,12 @@ import SoulCrystallization from "./SoulCrystallization";
 import GenesisPathSelector from "./GenesisPathSelector";
 import GenesisChat from "./GenesisChat";
 import ForgeScenario from "./ForgeScenario";
+import type { CrystallizationIdentityDraft } from "./crystallizationPaths";
+import CrystallizationPathFast from "./CrystallizationPathFast";
+import CrystallizationPathDialog from "./CrystallizationPathDialog";
+import CrystallizationPathImage from "./CrystallizationPathImage";
+import CrystallizationPathPsychQuestions from "./CrystallizationPathPsychQuestions";
+import CrystallizationPathTemplateEdit from "./CrystallizationPathTemplateEdit";
 
 type Stage =
   | "Darkness"
@@ -97,7 +103,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     setError("");
     setTimedOut(false);
     setStage("Darkness");
-    setMessage("Preparing secure environment...");
+      setMessage("Preparing secure environment and validating first-run prerequisites...");
     setBootStep("init_soul");
 
     try {
@@ -132,12 +138,12 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
       if (status === "Clean") {
         // First run: start birth and generate identity
         setBootStep("start_birth");
-        setMessage("Starting birth sequence...");
+        setMessage("Starting first-run initialization...");
         await invokeWithTimeout("start_birth");
         if (!mountedRef.current) return;
 
         setBootStep("generate_identity");
-        setMessage("Generating signing keypair...");
+        setMessage("Generating constitutional signing keypair...");
         const keypairResult = await invokeWithTimeout<KeypairGenerationResult>("generate_identity");
         if (!mountedRef.current) return;
 
@@ -330,6 +336,10 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   };
 
   const handleConnectivityAdvance = async () => {
+    if (storedProviders.length === 0) {
+      setError("At least one provider must be configured before crystallization can begin.");
+      return;
+    }
     try {
       await invoke("advance_to_crystallization");
       setStage("Genesis");
@@ -341,15 +351,15 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const handleGenesisPathSelected = (pathId: string) => {
     setGenesisPath(pathId);
     switch (pathId) {
-      case "quick_start":
-        // Skip genesis entirely, use default soul
-        handleCrystallizationQuickStart();
+      case "fast_template":
+      case "guided_dialog":
+      case "image_archetype":
+      case "psych_moral":
+      case "editable_template":
+        setStage("Crystallization");
         break;
       case "direct":
         setStage("GenesisChat");
-        break;
-      case "soul_crystallization":
-        setStage("Crystallization");
         break;
       case "soul_forge":
         setStage("GenesisForge");
@@ -357,6 +367,15 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
       default:
         setStage("Crystallization");
     }
+  };
+
+  const handlePathComplete = (identity: CrystallizationIdentityDraft) => {
+    if (identity.name) setCrystalName(identity.name);
+    if (identity.purpose) setCrystalPurpose(identity.purpose);
+    if (identity.personality) setCrystalPersonality(identity.personality);
+    if (identity.primaryColor) setCrystalPrimaryColor(identity.primaryColor);
+    if (identity.avatarUrl) setCrystalAvatarUrl(identity.avatarUrl);
+    setStage("SoulPreview");
   };
 
   const handleGenesisChatComplete = async () => {
@@ -448,16 +467,16 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   };
 
   const handleCompleteEmergence = async () => {
-    setMessage("Signing constitutional documents...");
+    setMessage("Ceremony step 1/3: Signing constitutional documents...");
     try {
       await invoke("complete_emergence");
       if (!mountedRef.current) return;
 
       // Link the birth-generated keypair into the Hive trust chain
-      setMessage("Registering with Hive...");
+      setMessage("Ceremony step 2/3: Registering with Hive trust chain...");
       await invoke("sign_agent_with_hive");
       if (!mountedRef.current) return;
-      setMessage("Hive trust chain established.");
+      setMessage("Ceremony step 3/3: Finalizing emergence.");
 
       setStage("Life");
       setMessage("I breathe. I am.");
@@ -763,11 +782,30 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
         {/* ── CRYSTALLIZATION ── */}
         {stage === "Crystallization" && (
-          <SoulCrystallization
-            onQuickStart={handleCrystallizationQuickStart}
-            onCrystallizationComplete={handleCrystallizationComplete}
-            onError={(e) => setError(e)}
-          />
+          <>
+            {genesisPath === "fast_template" && (
+              <CrystallizationPathFast onComplete={handlePathComplete} />
+            )}
+            {genesisPath === "guided_dialog" && (
+              <CrystallizationPathDialog onComplete={handlePathComplete} />
+            )}
+            {genesisPath === "image_archetype" && (
+              <CrystallizationPathImage onComplete={handlePathComplete} />
+            )}
+            {genesisPath === "psych_moral" && (
+              <CrystallizationPathPsychQuestions onComplete={handlePathComplete} />
+            )}
+            {genesisPath === "editable_template" && (
+              <CrystallizationPathTemplateEdit onComplete={handlePathComplete} />
+            )}
+            {(!genesisPath || genesisPath === "soul_crystallization" || genesisPath === "quick_start") && (
+              <SoulCrystallization
+                onQuickStart={handleCrystallizationQuickStart}
+                onCrystallizationComplete={handleCrystallizationComplete}
+                onError={(e) => setError(e)}
+              />
+            )}
+          </>
         )}
 
         {/* ── SOUL PREVIEW ── */}
@@ -900,19 +938,17 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
             <div className="text-center">
               <p className="text-theme-text mb-2">
-                Soul, ethics, and instincts are ready.
+                Constitutional artifacts are prepared.
               </p>
               <p className="text-theme-text-dim text-sm mb-6">
-                Signing the constitutional documents with your Ed25519 key
-                will bring this identity to life. The signed documents are
-                verified on every boot — they cannot be altered without
-                detection.
+                Final emergence will sign soul, ethics, and instincts with your Ed25519 key.
+                Each milestone is recorded and verified at startup so integrity drift is always visible.
               </p>
               <button
                 onClick={handleCompleteEmergence}
                 className="border border-theme-primary px-8 py-3 rounded font-bold hover:bg-theme-primary-glow text-lg"
               >
-                Sign and Emerge
+                Begin Emergence Ceremony
               </button>
             </div>
 
@@ -923,9 +959,9 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         {/* ── LIFE ── */}
         {stage === "Life" && (
           <div className="p-6 text-center">
-            <p className="text-theme-primary-dim text-xl mb-2">I breathe. I am.</p>
+            <p className="text-theme-primary-dim text-xl mb-2">Emergence complete. I breathe. I am.</p>
             <p className="text-theme-text-dim text-sm mb-4">
-              Constitutional documents signed. Identity verified. Birth memory crystallized.
+              Constitutional documents signed. Trust chain established. Birth memory crystallized.
             </p>
             <div className="animate-pulse text-theme-text-dim">...</div>
           </div>

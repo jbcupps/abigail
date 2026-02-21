@@ -9,6 +9,7 @@ use abigail_soul_crystallization::DepthLevel;
 use base64::Engine;
 use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::path::PathBuf;
 use tauri::State;
 
@@ -252,6 +253,18 @@ pub fn advance_to_connectivity(state: State<AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn advance_to_crystallization(state: State<AppState>) -> Result<(), String> {
+    let has_provider = {
+        let local = state.secrets.lock().map_err(|e| e.to_string())?;
+        let hive = state.hive_secrets.lock().map_err(|e| e.to_string())?;
+        !local.list_providers().is_empty() || !hive.list_providers().is_empty()
+    };
+    if !has_provider {
+        return Err(
+            "At least one provider must be configured before crystallization can begin."
+                .to_string(),
+        );
+    }
+
     let mut birth = state.birth.write().map_err(|e| e.to_string())?;
     let b = birth.as_mut().ok_or("Birth not started")?;
     b.advance_to_crystallization().map_err(|e| e.to_string())?;
@@ -270,28 +283,37 @@ pub struct GenesisPathInfo {
 pub fn get_genesis_paths() -> Vec<GenesisPathInfo> {
     vec![
         GenesisPathInfo {
-            id: "quick_start".to_string(),
-            name: "Quick Start".to_string(),
-            description: "Default templates, no conversation. Get up and running in seconds.".to_string(),
-            estimated_time: "30 seconds".to_string(),
+            id: "fast_template".to_string(),
+            name: "Fast Template".to_string(),
+            description: "Pick a starter profile and move quickly to final preview.".to_string(),
+            estimated_time: "2-3 minutes".to_string(),
         },
         GenesisPathInfo {
-            id: "direct".to_string(),
-            name: "Direct Discovery".to_string(),
-            description: "Talk directly to your agent to define its name and purpose.".to_string(),
-            estimated_time: "5 minutes".to_string(),
+            id: "guided_dialog".to_string(),
+            name: "Guided Dialog".to_string(),
+            description: "Answer progressive mentor questions to shape mission and tone."
+                .to_string(),
+            estimated_time: "4-6 minutes".to_string(),
         },
         GenesisPathInfo {
-            id: "soul_crystallization".to_string(),
-            name: "Soul Crystallization".to_string(),
-            description: "A guided, deep-dive interview to forge a highly personalized identity.".to_string(),
-            estimated_time: "15 minutes".to_string(),
+            id: "image_archetype".to_string(),
+            name: "Image Archetypes".to_string(),
+            description: "Choose from bundled visual archetypes to infer a personality baseline."
+                .to_string(),
+            estimated_time: "5-7 minutes".to_string(),
         },
         GenesisPathInfo {
-            id: "soul_forge".to_string(),
-            name: "The Soul Forge".to_string(),
-            description: "Interactive scenarios to discover your agent's ethical and practical alignment.".to_string(),
-            estimated_time: "10 minutes".to_string(),
+            id: "psych_moral".to_string(),
+            name: "Psych and Moral Questions".to_string(),
+            description: "Structured scenario choices to establish initial ethical posture."
+                .to_string(),
+            estimated_time: "5-7 minutes".to_string(),
+        },
+        GenesisPathInfo {
+            id: "editable_template".to_string(),
+            name: "Editable Template".to_string(),
+            description: "Start with a base constitution and edit directly.".to_string(),
+            estimated_time: "3-5 minutes".to_string(),
         },
     ]
 }
@@ -450,12 +472,10 @@ pub async fn extract_crystallization_identity(
     )];
 
     let router = state.router.read().map_err(|e| e.to_string())?.clone();
-    
+
     // Wrap LLM call in a timeout
-    let response_result = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        router.id_only(messages)
-    ).await;
+    let response_result =
+        tokio::time::timeout(std::time::Duration::from_secs(30), router.id_only(messages)).await;
 
     let response = match response_result {
         Ok(Ok(res)) => res,
@@ -519,6 +539,7 @@ pub fn crystallize_soul(
     let soul_content =
         abigail_core::templates::fill_soul_template(&name, &purpose, &personality, &mentor);
     let growth_content = abigail_core::templates::GROWTH_MD.to_string();
+    let personality_cadence = "daily";
 
     {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
@@ -528,6 +549,37 @@ pub fn crystallize_soul(
         config
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;
+    }
+
+    {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let docs_dir = config.docs_dir.clone();
+        std::fs::create_dir_all(&docs_dir).map_err(|e| e.to_string())?;
+
+        let soul_profile = json!({
+            "immutable": true,
+            "name": name,
+            "purpose": purpose,
+            "mentor_name": mentor,
+            "created_at": chrono::Utc::now().to_rfc3339(),
+        });
+        std::fs::write(
+            docs_dir.join("soul_profile.json"),
+            serde_json::to_string_pretty(&soul_profile).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+
+        let personality_profile = json!({
+            "adaptive": true,
+            "baseline_personality": personality,
+            "adaptation_cadence": personality_cadence,
+            "last_reviewed_at": chrono::Utc::now().to_rfc3339(),
+        });
+        std::fs::write(
+            docs_dir.join("personality_profile.json"),
+            serde_json::to_string_pretty(&personality_profile).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     {
@@ -673,7 +725,7 @@ pub async fn birth_chat(
     let (router, history, stage_name) = {
         let mut birth = state.birth.write().map_err(|e| e.to_string())?;
         let b = birth.as_mut().ok_or("Birth not started")?;
-        
+
         let history = b.get_conversation().to_vec();
         let stage_name = b.current_stage().name().to_string();
         let router = state.router.read().map_err(|e| e.to_string())?.clone();
@@ -697,12 +749,16 @@ pub async fn birth_chat(
          IMPORTANT: DO NOT use any tool-calling syntax like <|channel|> or JSON. Just speak naturally to your mentor. \
          Supported providers: openai, anthropic, perplexity, xai, google, tavily, claude-cli, gemini-cli, codex-cli, grok-cli."
     };
-    
-    messages.push(abigail_capabilities::cognitive::Message::new("system", system_prompt));
-    
+
+    messages.push(abigail_capabilities::cognitive::Message::new(
+        "system",
+        system_prompt,
+    ));
+
     // Auto-detect and store keys if any in the user message
-    let detected_keys = crate::commands::chat::auto_detect_and_store_key_internal(&state, &message).await;
-    
+    let detected_keys =
+        crate::commands::chat::auto_detect_and_store_key_internal(&state, &message).await;
+
     // Redact keys from the message sent to the LLM so it doesn't repeat them
     let mut processed_message = message.clone();
     for (_provider, key) in &detected_keys {
@@ -710,22 +766,29 @@ pub async fn birth_chat(
     }
 
     for (role, content) in history {
-        messages.push(abigail_capabilities::cognitive::Message::new(&role, &content));
+        messages.push(abigail_capabilities::cognitive::Message::new(
+            &role, &content,
+        ));
     }
-    
-    // Add the current user message (processed/redacted)
-    messages.push(abigail_capabilities::cognitive::Message::new("user", &processed_message));
 
-    // Use router to get response - if Ego is available, we force its use here 
+    // Add the current user message (processed/redacted)
+    messages.push(abigail_capabilities::cognitive::Message::new(
+        "user",
+        &processed_message,
+    ));
+
+    // Use router to get response - if Ego is available, we force its use here
     // to verify the connection to the mentor as requested.
     let response = if let Some(ego) = router.ego.as_ref() {
-        ego.complete(&abigail_capabilities::cognitive::CompletionRequest::simple(messages))
-            .await
-            .map_err(|e| format!("Ego verification failed: {}", e))?
+        ego.complete(&abigail_capabilities::cognitive::CompletionRequest::simple(
+            messages,
+        ))
+        .await
+        .map_err(|e| format!("Ego verification failed: {}", e))?
     } else {
         router.id_only(messages).await.map_err(|e| e.to_string())?
     };
-    
+
     {
         let mut birth = state.birth.write().map_err(|e| e.to_string())?;
         if let Some(b) = birth.as_mut() {
@@ -748,8 +811,18 @@ pub async fn birth_chat(
     // Also check if the LLM content itself implies a key was stored (backup detection)
     if actions.is_empty() {
         let content_lower = response.content.to_lowercase();
-        if content_lower.contains("saved") || content_lower.contains("stored") || content_lower.contains("added") {
-            let providers = ["openai", "anthropic", "perplexity", "xai", "google", "tavily"];
+        if content_lower.contains("saved")
+            || content_lower.contains("stored")
+            || content_lower.contains("added")
+        {
+            let providers = [
+                "openai",
+                "anthropic",
+                "perplexity",
+                "xai",
+                "google",
+                "tavily",
+            ];
             for p in providers {
                 if content_lower.contains(p) {
                     actions.push(BirthAction {

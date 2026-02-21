@@ -78,14 +78,16 @@ impl HiveOperations for TauriHiveOps {
 
             match key {
                 "agent_name" => {
-                    config.agent_name = Some(serde_json::from_value(value).map_err(|e| e.to_string())?)
+                    config.agent_name =
+                        Some(serde_json::from_value(value).map_err(|e| e.to_string())?)
                 }
                 "primary_color" => {
                     config.primary_color =
                         Some(serde_json::from_value(value).map_err(|e| e.to_string())?)
                 }
                 "avatar_url" => {
-                    config.avatar_url = Some(serde_json::from_value(value).map_err(|e| e.to_string())?)
+                    config.avatar_url =
+                        Some(serde_json::from_value(value).map_err(|e| e.to_string())?)
                 }
                 "local_llm_base_url" => {
                     let url: Option<String> =

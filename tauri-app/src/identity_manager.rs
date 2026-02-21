@@ -262,6 +262,14 @@ impl IdentityManager {
             preloaded_skills_version: 0,
             primary_color: None,
             avatar_url: None,
+            share_skills_across_identities: false,
+            allow_minor_visual_adaptation: true,
+            allow_avatar_swap: false,
+            memory_disclosure_enabled: true,
+            forge_advanced_mode: false,
+            signed_skill_allowlist: Vec::new(),
+            known_recipients_by_identity: std::collections::HashMap::new(),
+            skill_recovery_budget: 3,
         };
         let config_path = agent_dir.join("config.json");
         config.save(&config_path).map_err(|e| e.to_string())?;
@@ -411,7 +419,7 @@ impl IdentityManager {
     pub fn save_recovery_key(&self, agent_id: &str, private_key: &str) -> Result<String, String> {
         let docs_dir = self.create_documents_folder(agent_id)?;
         let file_path = docs_dir.join("RECOVERY_KEY.txt");
-        
+
         let content = format!(
             "ABIGAIL RECOVERY KEY\n\
              ====================\n\n\
@@ -425,8 +433,9 @@ impl IdentityManager {
             chrono::Utc::now().to_rfc3339()
         );
 
-        std::fs::write(&file_path, content).map_err(|e| format!("Failed to write recovery key file: {}", e))?;
-        
+        std::fs::write(&file_path, content)
+            .map_err(|e| format!("Failed to write recovery key file: {}", e))?;
+
         Ok(file_path.to_string_lossy().to_string())
     }
 
@@ -570,6 +579,50 @@ impl IdentityManager {
         }
 
         Ok(())
+    }
+
+    /// Archive an agent by moving its directory to Hive backups and
+    /// removing it from the active registry.
+    pub fn archive_agent(&self, agent_id: &str) -> Result<String, String> {
+        let (agent_name, agent_dir) = {
+            let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
+            let entry = gc
+                .find_agent(agent_id)
+                .ok_or_else(|| format!("Agent {} not registered", agent_id))?
+                .clone();
+
+            let dir = if entry.directory.is_absolute() {
+                entry.directory.clone()
+            } else {
+                self.data_root.join(&entry.directory)
+            };
+
+            gc.remove_agent(agent_id);
+            gc.save(&self.data_root).map_err(|e| e.to_string())?;
+            (entry.name, dir)
+        };
+
+        if !agent_dir.exists() {
+            return Err(format!(
+                "Agent directory not found: {}",
+                agent_dir.display()
+            ));
+        }
+
+        let backups_dir = self.data_root.join("backups");
+        std::fs::create_dir_all(&backups_dir)
+            .map_err(|e| format!("Failed to create backups directory: {}", e))?;
+
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+        let safe_name =
+            agent_name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
+        let backup_name = format!("{}_{}", timestamp, safe_name);
+        let backup_path = backups_dir.join(backup_name);
+
+        std::fs::rename(&agent_dir, &backup_path)
+            .map_err(|e| format!("Failed to archive agent directory: {}", e))?;
+
+        Ok(backup_path.to_string_lossy().to_string())
     }
 }
 

@@ -462,24 +462,20 @@ impl LlmProvider for AnthropicProvider {
             buffer.push_str(&String::from_utf8_lossy(&chunk));
 
             // Process complete SSE lines from buffer
-            while let Some(pos) = buffer.find("\n\n") {
-                let event_block = buffer[..pos].to_string();
-                buffer = buffer[pos + 2..].to_string();
+            while let Some(pos) = buffer.find('\n') {
+                let line = buffer[..pos].trim().to_string();
+                buffer = buffer[pos + 1..].to_string();
 
-                // Parse SSE event lines
-                let mut data_line = None;
-                for line in event_block.lines() {
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        data_line = Some(data.to_string());
-                    }
+                if line.is_empty() {
+                    continue;
                 }
 
-                if let Some(data) = data_line {
+                if let Some(data) = line.strip_prefix("data: ") {
                     if data == "[DONE]" {
                         break;
                     }
 
-                    match serde_json::from_str::<SseEvent>(&data) {
+                    match serde_json::from_str::<SseEvent>(data) {
                         Ok(event) => match event {
                             SseEvent::ContentBlockStart {
                                 index,
@@ -519,7 +515,7 @@ impl LlmProvider for AnthropicProvider {
                             _ => {} // MessageStart, MessageDelta, MessageStop, Ping
                         },
                         Err(e) => {
-                            tracing::debug!("Skipping unparseable SSE event: {}", e);
+                            tracing::debug!("Skipping unparseable SSE event ({}): {}", e, data);
                         }
                     }
                 }

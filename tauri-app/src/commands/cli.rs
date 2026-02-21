@@ -31,7 +31,10 @@ pub async fn get_cli_server_status(state: State<'_, AppState>) -> Result<CliServ
 }
 
 #[tauri::command]
-pub async fn start_cli_server(state: State<'_, AppState>, port: u16) -> Result<CliServerStatus, String> {
+pub async fn start_cli_server(
+    state: State<'_, AppState>,
+    port: u16,
+) -> Result<CliServerStatus, String> {
     let mut handle_guard = state.cli_server.lock().await;
     if handle_guard.is_some() {
         return Err("CLI server is already running".to_string());
@@ -39,13 +42,24 @@ pub async fn start_cli_server(state: State<'_, AppState>, port: u16) -> Result<C
 
     let auth = AuthState::new();
     let token: String = auth.token.read().await.clone();
-    
+
     let server_state = AppServerState {
         auth: auth.clone(),
-        config_path: state.config.read().map_err(|e| e.to_string())?.config_path(),
-        data_dir: state.config.read().map_err(|e| e.to_string())?.data_dir.clone(),
+        config_path: state
+            .config
+            .read()
+            .map_err(|e| e.to_string())?
+            .config_path(),
+        data_dir: state
+            .config
+            .read()
+            .map_err(|e| e.to_string())?
+            .data_dir
+            .clone(),
         vault: state.secrets.clone(),
-        router: Some(Arc::new(tokio::sync::RwLock::new(state.router.read().map_err(|e| e.to_string())?.clone()))),
+        router: Some(Arc::new(tokio::sync::RwLock::new(
+            state.router.read().map_err(|e| e.to_string())?.clone(),
+        ))),
     };
 
     let app = build_router(server_state);

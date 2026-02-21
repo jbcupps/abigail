@@ -278,11 +278,10 @@ struct StreamFunctionDelta {
 impl LlmProvider for OpenAiCompatibleProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
         tracing::info!(
-            "OpenAiCompatible[{}]::complete model={}, messages={}, tools={}, url={}",
+            "OpenAiCompatible[{}]::complete model={}, messages={}, url={}",
             self.provider_type,
             self.model,
             request.messages.len(),
-            request.tools.as_ref().map_or(0, |t| t.len()),
             self.completions_url(),
         );
         let messages = Self::build_messages(&request.messages);
@@ -296,14 +295,17 @@ impl LlmProvider for OpenAiCompatibleProvider {
             stream: false,
         };
 
-        let response = self
+        let mut req = self
             .client
             .post(self.completions_url())
             .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
+            .header("Content-Type", "application/json");
+
+        if self.provider_type == CompatibleProvider::Google {
+            req = req.header("x-goog-api-key", self.api_key.clone());
+        }
+
+        let response = req.json(&body).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -343,11 +345,11 @@ impl LlmProvider for OpenAiCompatibleProvider {
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
         tracing::info!(
-            "OpenAiCompatible[{}]::stream model={}, messages={}, tools={}",
+            "OpenAiCompatible[{}]::stream model={}, messages={}, url={}",
             self.provider_type,
             self.model,
             request.messages.len(),
-            request.tools.as_ref().map_or(0, |t| t.len()),
+            self.completions_url(),
         );
         let messages = Self::build_messages(&request.messages);
         let tools = request.tools.as_ref().map(|t| Self::build_tools(t));
@@ -360,14 +362,17 @@ impl LlmProvider for OpenAiCompatibleProvider {
             stream: true,
         };
 
-        let response = self
+        let mut req = self
             .client
             .post(self.completions_url())
             .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
+            .header("Content-Type", "application/json");
+
+        if self.provider_type == CompatibleProvider::Google {
+            req = req.header("x-goog-api-key", self.api_key.clone());
+        }
+
+        let response = req.json(&body).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();

@@ -27,6 +27,12 @@ impl AuthState {
     }
 }
 
+impl Default for AuthState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Generate a cryptographically random bearer token (base64-encoded 32 bytes).
 fn generate_token() -> String {
     use base64::Engine as _;

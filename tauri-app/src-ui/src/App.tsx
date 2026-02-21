@@ -4,6 +4,7 @@ import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
 import SoulRegistry from "./components/SoulRegistry";
 import BootSequence from "./components/BootSequence";
 import ChatInterface from "./components/ChatInterface";
+import type { ChatSessionSnapshot } from "./components/ChatInterface";
 import PersonaToggle from "./components/PersonaToggle";
 import IdentityConflictPanel, { IdentitySummary } from "./components/IdentityConflictPanel";
 import SplashScreen from "./components/SplashScreen";
@@ -35,24 +36,16 @@ function AppInner() {
   const [startupError, setStartupError] = useState<string | null>(null);
   const [existingIdentity, setExistingIdentity] = useState<IdentitySummary | null>(null);
   const [forgeOpen, setForgeOpen] = useState(false);
+  const [activeSoulId, setActiveSoulId] = useState<string | null>(null);
+  const [suspendedSessions, setSuspendedSessions] = useState<Record<string, ChatSessionSnapshot>>({});
   const { setMode, refreshAgentName } = useTheme();
 
   const initializeApp = async () => {
     try {
-      // Check if an agent is already active (e.g. resumed session)
+      // Always enter Registry selection first for explicit mentor choice.
       const activeAgent = await invoke<string | null>("get_active_agent");
       if (activeAgent) {
-        // Agent already loaded, go to startup checks
-        const complete = await invoke<boolean>("get_birth_complete");
-        if (complete) {
-          setMode("ego");
-          setAppState("startup_check");
-          await refreshAgentName();
-          await runStartupChecks();
-        } else {
-          setAppState("boot");
-        }
-        return;
+        await invoke("suspend_agent");
       }
 
       // Check if Hive has any agents
@@ -139,6 +132,7 @@ function AppInner() {
       const uuid = await invoke<string | null>("migrate_legacy_identity");
       if (uuid) {
         await invoke("load_agent", { agentId: uuid });
+        setActiveSoulId(uuid);
         setExistingIdentity(null);
         setMode("ego");
         setAppState("startup_check");
@@ -170,6 +164,7 @@ function AppInner() {
 
   // Handler for agent selection from management screen
   const handleAgentSelected = async (_agentId: string) => {
+    setActiveSoulId(_agentId);
     const complete = await invoke<boolean>("get_birth_complete");
     if (complete) {
       setMode("ego");
@@ -183,7 +178,8 @@ function AppInner() {
   };
 
   // Handler for creating a new agent from management screen
-  const handleCreateAgent = () => {
+  const handleCreateAgent = (agentId?: string) => {
+    if (agentId) setActiveSoulId(agentId);
     // Agent was just created and loaded, go to boot sequence
     setAppState("boot");
   };
@@ -192,9 +188,9 @@ function AppInner() {
   const handleDisconnect = async () => {
     setForgeOpen(false);
     try {
-      await invoke("disconnect_agent");
+      await invoke("suspend_agent");
     } catch (e) {
-      console.warn("[App] disconnect_agent failed; continuing to management:", e);
+      console.warn("[App] suspend_agent failed; continuing to management:", e);
     }
     setMode("neutral");
     setAppState("management");
@@ -289,7 +285,14 @@ function AppInner() {
             onDisconnect={handleDisconnect}
           />
           <div className="flex-1 min-h-0">
-            <ChatInterface target="EGO" />
+            <ChatInterface
+              target="EGO"
+              initialSession={activeSoulId ? suspendedSessions[activeSoulId] ?? null : null}
+              onSessionSnapshot={(snapshot) => {
+                if (!activeSoulId) return;
+                setSuspendedSessions((prev) => ({ ...prev, [activeSoulId]: snapshot }));
+              }}
+            />
           </div>
         </div>
       );

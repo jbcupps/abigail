@@ -1,26 +1,12 @@
-import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
-
-interface GenesisPathInfo {
-  id: string;
-  name: string;
-  description: string;
-  estimated_time: string;
-}
+import { useState } from "react";
+import { CRYSTALLIZATION_PATHS } from "./crystallizationPaths";
 
 interface Props {
   onSelect: (pathId: string) => void;
 }
 
 export default function GenesisPathSelector({ onSelect }: Props) {
-  const [paths, setPaths] = useState<GenesisPathInfo[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-
-  useEffect(() => {
-    invoke<GenesisPathInfo[]>("get_genesis_paths")
-      .then(setPaths)
-      .catch(console.error);
-  }, []);
 
   const handleConfirm = () => {
     if (selected) onSelect(selected);
@@ -34,7 +20,7 @@ export default function GenesisPathSelector({ onSelect }: Props) {
       </p>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
-        {paths.map((path) => (
+        {CRYSTALLIZATION_PATHS.map((path) => (
           <button
             key={path.id}
             className={`text-left p-4 rounded-lg border-2 transition-all ${
@@ -46,7 +32,7 @@ export default function GenesisPathSelector({ onSelect }: Props) {
           >
             <h3 className="text-theme-text-bright font-semibold mb-1">{path.name}</h3>
             <p className="text-theme-text-dim text-sm mb-2">{path.description}</p>
-            <span className="text-xs text-theme-text-dim">{path.estimated_time}</span>
+            <span className="text-xs text-theme-text-dim">{path.estimatedTime}</span>
           </button>
         ))}
       </div>

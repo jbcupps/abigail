@@ -56,6 +56,9 @@ cargo test --workspace --exclude abigail-app
 
 # 5. Frontend build (tsc type-check + vite build)
 cd tauri-app/src-ui && npm run build
+
+# 6. Frontend tests with coverage (required in CI frontend job)
+cd tauri-app/src-ui && npm run test:coverage
 ```
 
 If any of these fail locally, fix them before pushing. The `gate` CI job will block the PR until all five pass.
@@ -150,9 +153,9 @@ All workspace crates inherit via `version.workspace = true`.
 
 ## Release Process
 
-- Tag `v0.0.x` on main triggers `.github/workflows/build-release.yml` (builds Windows NSIS, Linux deb, macOS dmg)
-- Tag `deva-v0.x.x` on Deva branch triggers `build-release-deva.yml` (pre-release)
-- Manual dispatch also available via GitHub Actions UI
+- Tags matching `v*` trigger `.github/workflows/release.yml` (builds and publishes Windows NSIS/MSI, Linux deb, macOS universal dmg, and npm package).
+- `workflow_dispatch` is supported for manual releases and optional version override.
+- CI quality gate and advisory scans run via `.github/workflows/ci.yml` (`gate` is the protected check).
 
 ## Data Directory
 

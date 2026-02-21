@@ -23,6 +23,7 @@ use tower_http::cors::{Any, CorsLayer};
 pub struct AppServerState {
     pub auth: AuthState,
     pub config_path: std::path::PathBuf,
+    #[allow(dead_code)]
     pub data_dir: std::path::PathBuf,
     pub vault: Arc<Mutex<SecretsVault>>,
     /// Router for handling chat requests (optional, provided when run from Tauri)
@@ -182,7 +183,10 @@ async fn get_status(
     State(state): State<AppServerState>,
 ) -> Result<Json<StatusResponse>, StatusCode> {
     let config = load_config(&state).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let vault = state.vault.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let vault = state
+        .vault
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let secrets_count = vault.list_providers().len();
 
     let (ego_provider, ego_key_set) = config
@@ -210,7 +214,10 @@ async fn check_secret(
     State(state): State<AppServerState>,
     Path(key): Path<String>,
 ) -> Result<Json<SecretCheckResponse>, StatusCode> {
-    let vault = state.vault.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let vault = state
+        .vault
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(SecretCheckResponse {
         exists: vault.exists(&key),
         key,
@@ -246,7 +253,10 @@ async fn remove_secret(
     State(state): State<AppServerState>,
     Path(key): Path<String>,
 ) -> Result<Json<MessageResponse>, StatusCode> {
-    let mut vault = state.vault.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut vault = state
+        .vault
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let removed = vault.remove_secret(&key);
     if removed {
         vault
@@ -265,7 +275,10 @@ async fn remove_secret(
 async fn get_integrations(
     State(state): State<AppServerState>,
 ) -> Result<Json<Vec<IntegrationStatusItem>>, StatusCode> {
-    let vault = state.vault.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let vault = state
+        .vault
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let integrations = abigail_skills::preloaded_integration_skills();
 
     let items: Vec<IntegrationStatusItem> = integrations

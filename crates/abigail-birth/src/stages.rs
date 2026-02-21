@@ -392,6 +392,14 @@ mod tests {
             preloaded_skills_version: 0,
             primary_color: None,
             avatar_url: None,
+            share_skills_across_identities: false,
+            allow_minor_visual_adaptation: true,
+            allow_avatar_swap: false,
+            memory_disclosure_enabled: true,
+            forge_advanced_mode: false,
+            signed_skill_allowlist: Default::default(),
+            known_recipients_by_identity: Default::default(),
+            skill_recovery_budget: 3,
         }
     }
 

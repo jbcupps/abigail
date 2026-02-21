@@ -133,6 +133,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             abigail_core::RoutingMode::default(),
         ))
     }

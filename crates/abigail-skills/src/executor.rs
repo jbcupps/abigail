@@ -7,12 +7,17 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
+use abigail_core::{
+    evaluate_gate, CapabilityEnvelope, CapabilityGateResult, RequestedCapability, SuperegoL2Mode,
+};
 use tokio::sync::Semaphore;
 
 use crate::manifest::{FileSystemPermission, NetworkPermission, Permission, SkillId};
 use crate::registry::SkillRegistry;
 use crate::sandbox::{AuditAction, AuditActionKind, ResourceLimits, SkillSandbox};
-use crate::skill::{ExecutionContext, SkillError, SkillResult, ToolOutput, ToolParams};
+use crate::skill::{
+    ExecutionContext, SkillError, SkillResult, ToolDescriptor, ToolOutput, ToolParams,
+};
 
 pub struct SkillExecutor {
     pub registry: Arc<SkillRegistry>,
@@ -83,11 +88,70 @@ impl SkillExecutor {
         actions
     }
 
+    fn capability_requests_for_tool(tool: &ToolDescriptor) -> Vec<RequestedCapability> {
+        let mut requested = Vec::new();
+        for p in &tool.required_permissions {
+            match p {
+                Permission::Network(_) => requested.push(RequestedCapability::WebAccess),
+                Permission::FileSystem(fs) => match fs {
+                    FileSystemPermission::Read(_) => requested.push(RequestedCapability::FileRead),
+                    FileSystemPermission::Write(_) | FileSystemPermission::Full => {
+                        requested.push(RequestedCapability::FileWrite)
+                    }
+                },
+                Permission::ShellExecute => requested.push(RequestedCapability::ShellExec),
+                Permission::Memory(_) => requested.push(RequestedCapability::MemoryWrite),
+                _ => {}
+            }
+        }
+        requested
+    }
+
+    fn enforce_capability_envelope(
+        tool: &ToolDescriptor,
+        l2_mode: SuperegoL2Mode,
+        mentor_confirmed: bool,
+    ) -> SkillResult<()> {
+        let envelope = CapabilityEnvelope::for_l2_mode(l2_mode);
+        for req in Self::capability_requests_for_tool(tool) {
+            match evaluate_gate(&envelope, req) {
+                CapabilityGateResult::Allowed => {}
+                CapabilityGateResult::NeedsConfirmation(reason) => {
+                    if !mentor_confirmed {
+                        return Err(SkillError::PermissionDenied(format!(
+                            "Capability policy requires mentor confirmation: {}",
+                            reason
+                        )));
+                    }
+                }
+                CapabilityGateResult::Denied(reason) => {
+                    return Err(SkillError::PermissionDenied(format!(
+                        "Capability policy denied execution: {}",
+                        reason
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn execute(
         &self,
         skill_id: &SkillId,
         tool_name: &str,
         params: ToolParams,
+    ) -> SkillResult<ToolOutput> {
+        self.execute_with_policy(skill_id, tool_name, params, SuperegoL2Mode::Off, false)
+            .await
+    }
+
+    pub async fn execute_with_policy(
+        &self,
+        skill_id: &SkillId,
+        tool_name: &str,
+        params: ToolParams,
+        l2_mode: SuperegoL2Mode,
+        mentor_confirmed: bool,
     ) -> SkillResult<ToolOutput> {
         let request_id = Uuid::new_v4().to_string();
         tracing::info!(
@@ -105,6 +169,8 @@ impl SkillExecutor {
             .into_iter()
             .find(|t| t.name == tool_name)
             .ok_or_else(|| SkillError::ToolFailed(format!("Unknown tool: {}", tool_name)))?;
+
+        Self::enforce_capability_envelope(&tool, l2_mode, mentor_confirmed)?;
 
         let limits = ResourceLimits::default();
         let mut sandbox =
@@ -886,5 +952,130 @@ mod tests {
         let executor = SkillExecutor::new(registry);
         let result = executor.execute(&skill_id, "read", ToolParams::new()).await;
         assert!(result.is_ok(), "FS read should be allowed with Full grant");
+    }
+
+    /// Skill with a ShellExecute-required tool.
+    struct ShellToolSkill {
+        manifest: crate::manifest::SkillManifest,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::skill::Skill for ShellToolSkill {
+        fn manifest(&self) -> &crate::manifest::SkillManifest {
+            &self.manifest
+        }
+        async fn initialize(&mut self, _: crate::skill::SkillConfig) -> SkillResult<()> {
+            Ok(())
+        }
+        async fn shutdown(&mut self) -> SkillResult<()> {
+            Ok(())
+        }
+        fn health(&self) -> SkillHealth {
+            SkillHealth {
+                status: HealthStatus::Healthy,
+                message: None,
+                last_check: chrono::Utc::now(),
+                metrics: HashMap::new(),
+            }
+        }
+        fn tools(&self) -> Vec<ToolDescriptor> {
+            vec![ToolDescriptor {
+                name: "shell_exec".to_string(),
+                description: "Runs shell action".to_string(),
+                parameters: serde_json::json!({}),
+                returns: serde_json::json!({}),
+                cost_estimate: crate::skill::CostEstimate::default(),
+                required_permissions: vec![Permission::ShellExecute],
+                autonomous: false,
+                requires_confirmation: true,
+            }]
+        }
+        async fn execute_tool(
+            &self,
+            _: &str,
+            _: ToolParams,
+            _: &ExecutionContext,
+        ) -> SkillResult<crate::skill::ToolOutput> {
+            Ok(crate::skill::ToolOutput::success(
+                serde_json::json!({"ok": true}),
+            ))
+        }
+        fn capabilities(&self) -> Vec<crate::manifest::CapabilityDescriptor> {
+            vec![]
+        }
+        fn get_capability(&self, _: &str) -> Option<&dyn std::any::Any> {
+            None
+        }
+        fn triggers(&self) -> Vec<crate::channel::TriggerDescriptor> {
+            vec![]
+        }
+    }
+
+    #[tokio::test]
+    async fn capability_envelope_denies_shell_exec_in_enforce_mode() {
+        let registry = Arc::new(SkillRegistry::new());
+        let skill_id = SkillId("test.shell".to_string());
+        let manifest = test_manifest("test.shell", vec![Permission::ShellExecute]);
+        let skill = ShellToolSkill { manifest };
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .unwrap();
+        let executor = SkillExecutor::new(registry);
+        let result = executor
+            .execute_with_policy(
+                &skill_id,
+                "shell_exec",
+                ToolParams::new(),
+                SuperegoL2Mode::Enforce,
+                false,
+            )
+            .await;
+        assert!(result.is_err(), "enforce mode should deny shell execution");
+        let msg = result.unwrap_err().to_string().to_lowercase();
+        assert!(
+            msg.contains("denied") || msg.contains("not allowed"),
+            "expected capability denial, got: {}",
+            msg
+        );
+    }
+
+    #[tokio::test]
+    async fn capability_envelope_advisory_requires_confirmation() {
+        let registry = Arc::new(SkillRegistry::new());
+        let skill_id = SkillId("test.shell_confirm".to_string());
+        let manifest = test_manifest("test.shell_confirm", vec![Permission::ShellExecute]);
+        let skill = ShellToolSkill { manifest };
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .unwrap();
+        let executor = SkillExecutor::new(registry);
+
+        let blocked = executor
+            .execute_with_policy(
+                &skill_id,
+                "shell_exec",
+                ToolParams::new(),
+                SuperegoL2Mode::Advisory,
+                false,
+            )
+            .await;
+        assert!(
+            blocked.is_err(),
+            "advisory mode should require mentor confirmation"
+        );
+
+        let allowed = executor
+            .execute_with_policy(
+                &skill_id,
+                "shell_exec",
+                ToolParams::new(),
+                SuperegoL2Mode::Advisory,
+                true,
+            )
+            .await;
+        assert!(
+            allowed.is_ok(),
+            "confirmation should allow advisory execution"
+        );
     }
 }
