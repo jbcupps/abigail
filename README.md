@@ -55,6 +55,8 @@ Abigail is a working, modular platform. Recent updates include:
 - **Soul Registry**: Manage multiple identities, each with custom themes and avatars.
 - **Sanctum Interface**: Ethical reflection and staff monitoring.
 - **Agentic Recall**: Keyword-based memory search across an Entity's history.
+- **Autonomous Self-Configuration**: The Entity can manage its own Hive, birth new identities, and synthesize its own skills via the Skill Factory.
+- **Dual Keyvault Architecture**: Compartmentalized storage for system-level Hive secrets and Entity-level operational credentials (Skills Vault).
 - **Bicameral Routing**: Fast local "Id" (Ollama/GGUF) + powerful cloud "Ego" (Claude/OpenAI).
 - **Constitutional Signing**: Entities sign their own `soul.md` and `ethics.md` at birth.
 - **Modular Tauri Commands**: Specialized handlers for Identity, Birth, Config, and Skills.

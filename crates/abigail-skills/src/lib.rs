@@ -3,6 +3,8 @@
 pub mod channel;
 pub mod dynamic;
 pub mod executor;
+pub mod factory;
+pub mod hive;
 pub mod instruction_registry;
 pub mod manifest;
 pub mod preloaded;
@@ -21,6 +23,8 @@ pub use protocol as capability;
 pub use channel::*;
 pub use dynamic::{DynamicApiSkill, DynamicSkillConfig, DynamicToolConfig};
 pub use executor::SkillExecutor;
+pub use factory::SkillFactory;
+pub use hive::{HiveAgentInfo, HiveManagementSkill, HiveOperations};
 pub use instruction_registry::InstructionRegistry;
 pub use manifest::*;
 pub use preloaded::{

@@ -16,19 +16,27 @@ pub struct SecretsVault {
 }
 
 impl SecretsVault {
-    /// Create a new empty vault at the given directory path.
-    /// Call `load()` to read existing secrets, or `save()` to persist.
-    pub fn new(data_dir: PathBuf) -> Self {
+    /// Create a new empty vault at the given directory path with a specific filename.
+    pub fn new_custom(data_dir: PathBuf, filename: &str) -> Self {
         Self {
-            storage_path: data_dir.join("secrets.bin"),
+            storage_path: data_dir.join(filename),
             secrets: HashMap::new(),
         }
     }
 
-    /// Load secrets from DPAPI-encrypted storage.
-    /// Returns an empty vault if the file doesn't exist yet.
+    /// Create a new empty vault with the default 'secrets.bin'.
+    pub fn new(data_dir: PathBuf) -> Self {
+        Self::new_custom(data_dir, "secrets.bin")
+    }
+
+    /// Load secrets from DPAPI-encrypted storage with the default 'secrets.bin'.
     pub fn load(data_dir: PathBuf) -> Result<Self> {
-        let storage_path = data_dir.join("secrets.bin");
+        Self::load_custom(data_dir, "secrets.bin")
+    }
+
+    /// Load secrets from DPAPI-encrypted storage with a specific filename.
+    pub fn load_custom(data_dir: PathBuf, filename: &str) -> Result<Self> {
+        let storage_path = data_dir.join(filename);
 
         if !storage_path.exists() {
             return Ok(Self {

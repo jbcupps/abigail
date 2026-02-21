@@ -64,11 +64,11 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 | 2 | WebSocket gateway / control plane | P0 | L | Architecture | Pending |
 | 3 | Docker sandbox for skill/tool execution | P0 | L | Security | Pending |
 | 4 | Expanded LLM provider support (Anthropic, XAI, Google) | P0 | M | LLM | Done (Anthropic) |
-| 5 | Skills ecosystem (100+ bundled skills) | P0 | XL | Skills | Partial (Core Done) |
+| 5 | Skills ecosystem (100+ bundled skills) | P0 | XL | Skills | Done (Hive + Factory) |
 | 6 | Browser automation (accessibility tree snapshots) | P1 | XL | Browser | Pending |
 | 7 | Voice integration (STT, TTS) | P1 | L | Voice | Pending |
 | 8 | Lane queue system (serial execution) | P1 | L | Architecture | Pending |
-| 9 | Multi-agent workspaces (Registry) | P1 | L | Multi-agent | Done |
+| 9 | Multi-agent workspaces (Registry) | P1 | L | Multi-agent | Done (Hive Ops) |
 | 10 | Cron/scheduled task execution | P1 | M | Scheduling | Pending |
 | 11 | Persistent memory as Markdown | P1 | M | Memory | Pending |
 | 12 | Semantic search (Recall) | P1 | L | Memory | Done |
@@ -78,7 +78,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 | 16 | WebChat interface | P2 | M | Interface | Pending |
 | 17 | Live Canvas | P2 | L | UI | Pending |
 | 18 | Skills watcher | P2 | S | Skills | Done |
-| 19 | Skill install gating | P2 | M | Skills | Pending |
+| 19 | Skill install gating (Skills Vault) | P2 | M | Skills | Done |
 | 20 | Smart home integrations | P2 | M | Skills | Pending |
 | 21 | Music/media service integrations | P2 | M | Skills | Pending |
 | 22 | Productivity tool integrations | P2 | M | Skills | Pending |

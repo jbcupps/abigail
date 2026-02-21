@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 pub mod commands;
+pub mod hive_ops;
 pub mod identity_manager;
 pub mod ollama_manager;
 pub mod rate_limit;
@@ -212,6 +213,11 @@ pub fn run() {
             .unwrap_or_else(|_| SecretsVault::new(data_dir.clone())),
     ));
 
+    let skills_secrets = Arc::new(Mutex::new(
+        SecretsVault::load_custom(data_dir.clone(), "skills.bin")
+            .unwrap_or_else(|_| SecretsVault::new_custom(data_dir.clone(), "skills.bin")),
+    ));
+
     let hive_data_dir = abigail_core::AppConfig::default_paths().data_dir;
     let hive_secrets = Arc::new(Mutex::new(
         SecretsVault::load(hive_data_dir.clone())
@@ -250,6 +256,7 @@ pub fn run() {
         executor,
         event_bus,
         secrets,
+        skills_secrets,
         hive_secrets,
         auth_manager,
         identity_manager,
@@ -267,6 +274,34 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .setup(|app| {
+            let handle = app.handle();
+            let state = handle.state::<AppState>();
+
+            // Register Hive Management Skill
+            let hive_ops = Arc::new(crate::hive_ops::TauriHiveOps::new(handle.clone()));
+            let hive_skill = Arc::new(abigail_skills::hive::HiveManagementSkill::new(hive_ops));
+            state
+                .registry
+                .register(
+                    abigail_skills::manifest::SkillId("builtin.hive_management".to_string()),
+                    hive_skill,
+                )
+                .map_err(|e| e.to_string())?;
+
+            // Register Skill Factory
+            let skills_dir = state.config.read().unwrap().data_dir.join("skills");
+            let factory_skill = Arc::new(abigail_skills::factory::SkillFactory::new(skills_dir));
+            state
+                .registry
+                .register(
+                    abigail_skills::manifest::SkillId("builtin.skill_factory".to_string()),
+                    factory_skill,
+                )
+                .map_err(|e| e.to_string())?;
+
+            Ok(())
+        })
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             check_hive_status,
