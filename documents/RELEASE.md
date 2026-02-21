@@ -32,7 +32,7 @@ All workspace crates use `version.workspace = true`, so they follow the root.
    ```bash
    git add Cargo.toml tauri-app/tauri.conf.json
    git commit -m "chore: release 0.0.2"
-   git push origin master
+   git push origin main
    ```
 
 3. **Create and push the tag** (triggers the release workflow):
@@ -105,64 +105,6 @@ See `documents/HOW_TO_RUN_LOCALLY.md` for full Docker development instructions.
 | 2 | Commit and push the version bump. |
 | 3 | `git tag v0.0.x` and `git push origin v0.0.x`. |
 | 4 | Wait for **Release** workflow to finish — release is published automatically. |
-
-## Build workflow (push to main)
-
-`.github/workflows/build.yml` runs on every **push to main** (no tag). It builds the workspace on all three platforms and uploads binaries as artifacts (7-day retention). This is for verification only; it does not create a GitHub Release or publish npm. Releases are only created by the **Release** workflow (tag or manual dispatch).
-
----
-
-## Deva (Development) Releases
-
-The Deva branch has its own release workflow for preview/development builds.
-
-### Tag scheme
-
-Deva releases use tags prefixed with `deva-v`. Default version is **D 0.0.0** (i.e. `0.0.0`): `deva-v0.0.0`, `deva-v0.1.0`, etc.
-
-### How to publish a Deva release
-
-1. **Ensure you're on the Deva branch:**
-   ```bash
-   git checkout Deva
-   ```
-
-2. **Commit your changes and push:**
-   ```bash
-   git add -A
-   git commit -m "feat: description of changes"
-   git push origin Deva
-   ```
-
-3. **Create and push the tag:**
-   ```bash
-   git tag deva-v0.0.0
-   git push origin deva-v0.0.0
-   ```
-   (Use `deva-v0.0.0` for the first Deva release, then bump as needed.)
-
-4. **CI:** `.github/workflows/build-release-deva.yml` runs on `deva-v*` tags:
-   - Builds installers for Windows, Linux, and macOS
-   - Creates a **pre-release** (marked as pre-release, not "latest")
-   - Installers named `Abigail-Deva-*` to distinguish from stable
-
-### Manual workflow dispatch
-
-You can also trigger a Deva build without a tag:
-1. Go to **Actions** → **build-release-deva** → **Run workflow**
-2. Select branch `Deva`
-3. Optionally set **Release version** (e.g. `0.1.0-deva`)
-
-### Key differences from stable releases
-
-| Aspect | Stable (master) | Deva |
-|--------|-----------------|------|
-| Tag format | `v0.0.x` | `deva-v0.x.x` |
-| Release type | Release (latest) | Pre-release |
-| Asset names | `Abigail-*` | `Abigail-Deva-*` |
-| Workflow | `build-release.yml` | `build-release-deva.yml` |
-
----
 
 ## npm publishing
 

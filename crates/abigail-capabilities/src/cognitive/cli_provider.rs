@@ -134,14 +134,18 @@ impl LlmProvider for CliLlmProvider {
         let prompt = Self::build_prompt(&request.messages);
 
         tracing::info!(
-            "CliLlmProvider::complete variant={}, prompt_len={}",
+            "CliLlmProvider::complete variant={}, binary={}, prompt_len={}",
             self.variant,
+            self.variant.binary_name(),
             prompt.len(),
         );
 
         let mut cmd = Command::new(self.variant.binary_name());
         if self.api_key != "system" {
+            tracing::debug!("Setting env var {} for CLI", self.variant.api_key_env_var());
             cmd.env(self.variant.api_key_env_var(), &self.api_key);
+        } else {
+            tracing::info!("Using system/OAuth auth for CLI (no env key set)");
         }
         self.configure_command(&mut cmd, &prompt);
 
@@ -150,6 +154,7 @@ impl LlmProvider for CliLlmProvider {
         cmd.stderr(std::process::Stdio::piped());
 
         let child = cmd.spawn().map_err(|e| {
+            tracing::error!("Failed to spawn {} CLI: {}", self.variant, e);
             anyhow::anyhow!(
                 "Failed to spawn {} CLI (is '{}' on PATH?): {}",
                 self.variant,
@@ -158,12 +163,22 @@ impl LlmProvider for CliLlmProvider {
             )
         })?;
 
+        tracing::info!("CLI subprocess spawned, waiting for output...");
         let output = tokio::time::timeout(Duration::from_secs(120), child.wait_with_output())
             .await
-            .map_err(|_| anyhow::anyhow!("{} CLI timed out after 120 seconds", self.variant))??;
+            .map_err(|_| {
+                tracing::error!("{} CLI timed out", self.variant);
+                anyhow::anyhow!("{} CLI timed out after 120 seconds", self.variant)
+            })??;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            tracing::error!(
+                "{} CLI failed with status {}: {}",
+                self.variant,
+                output.status,
+                stderr
+            );
             return Err(anyhow::anyhow!(
                 "{} CLI exited with {}: {}",
                 self.variant,
@@ -172,6 +187,10 @@ impl LlmProvider for CliLlmProvider {
             ));
         }
 
+        tracing::info!(
+            "CLI subprocess completed successfully. Output size: {} bytes",
+            output.stdout.len()
+        );
         let content = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
         Ok(CompletionResponse {

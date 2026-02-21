@@ -1,7 +1,65 @@
 use crate::identity_manager::{AgentIdentityInfo, IdentitySummary};
 use crate::state::AppState;
 use abigail_core::SecretsVault;
+use serde::{Deserialize, Serialize};
 use tauri::State;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StartupCheckResult {
+    pub heartbeat_ok: bool,
+    pub verification_ok: bool,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+pub async fn run_startup_checks(state: State<'_, AppState>) -> Result<StartupCheckResult, String> {
+    let mut result = StartupCheckResult {
+        heartbeat_ok: false,
+        verification_ok: false,
+        error: None,
+    };
+
+    // 1. LLM Heartbeat
+    let router = {
+        let r = state.router.read().map_err(|e| e.to_string())?;
+        r.clone()
+    };
+
+    match router.heartbeat().await {
+        Ok(_) => {
+            result.heartbeat_ok = true;
+        }
+        Err(e) => {
+            result.heartbeat_ok = false;
+            result.error = Some(format!("LLM Heartbeat failed: {}", e));
+            return Ok(result);
+        }
+    }
+
+    // 2. Identity verification
+    let active_id = {
+        let active = state.active_agent_id.read().map_err(|e| e.to_string())?;
+        active.clone()
+    };
+
+    if let Some(agent_id) = active_id {
+        match state.identity_manager.verify_agent(&agent_id) {
+            Ok(_) => {
+                result.verification_ok = true;
+            }
+            Err(e) => {
+                result.verification_ok = false;
+                result.error = Some(format!("Identity verification failed: {}", e));
+                return Ok(result);
+            }
+        }
+    } else {
+        // If no active agent, verification is skipped but not failed
+        result.verification_ok = true;
+    }
+
+    Ok(result)
+}
 
 #[tauri::command]
 pub fn check_hive_status(state: State<AppState>) -> Result<bool, String> {
@@ -62,16 +120,18 @@ pub fn create_agent(state: State<AppState>, name: String) -> Result<String, Stri
 pub fn reset_birth(state: State<AppState>) -> Result<(), String> {
     let active = state.active_agent_id.read().map_err(|e| e.to_string())?;
     let _agent_id = active.as_ref().ok_or("No active agent loaded")?;
-    
+
     // We don't delete the whole agent, just its birth-related state in config and memory
     let mut config = state.config.write().map_err(|e| e.to_string())?;
     config.birth_complete = false;
     config.birth_stage = None;
-    config.save(&config.config_path()).map_err(|e| e.to_string())?;
-    
+    config
+        .save(&config.config_path())
+        .map_err(|e| e.to_string())?;
+
     let mut birth = state.birth.write().map_err(|e| e.to_string())?;
     *birth = None; // Force start_birth to be called again
-    
+
     Ok(())
 }
 
@@ -82,7 +142,9 @@ pub fn delete_agent_identity(state: State<AppState>, agent_id: String) -> Result
         let active = state.active_agent_id.read().map_err(|e| e.to_string())?;
         if let Some(id) = &*active {
             if id == &agent_id {
-                return Err("Cannot delete the currently active agent. Disconnect first.".to_string());
+                return Err(
+                    "Cannot delete the currently active agent. Disconnect first.".to_string(),
+                );
             }
         }
     }
@@ -91,7 +153,21 @@ pub fn delete_agent_identity(state: State<AppState>, agent_id: String) -> Result
 }
 
 #[tauri::command]
-pub fn disconnect_agent(state: State<AppState>) -> Result<(), String> {
+pub fn archive_agent_identity(state: State<AppState>, agent_id: String) -> Result<String, String> {
+    {
+        let active = state.active_agent_id.read().map_err(|e| e.to_string())?;
+        if let Some(id) = &*active {
+            if id == &agent_id {
+                return Err("Cannot archive the currently active agent. Suspend first.".to_string());
+            }
+        }
+    }
+
+    state.identity_manager.archive_agent(&agent_id)
+}
+
+#[tauri::command]
+pub fn suspend_agent(state: State<AppState>) -> Result<(), String> {
     let mut active = state.active_agent_id.write().map_err(|e| e.to_string())?;
     *active = None;
 
@@ -102,11 +178,18 @@ pub fn disconnect_agent(state: State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn disconnect_agent(state: State<AppState>) -> Result<(), String> {
+    suspend_agent(state)
+}
+
+#[tauri::command]
 pub fn save_recovery_key(state: State<AppState>, private_key: String) -> Result<String, String> {
     let active = state.active_agent_id.read().map_err(|e| e.to_string())?;
     let agent_id = active.as_ref().ok_or("No active agent loaded")?;
-    
-    state.identity_manager.save_recovery_key(agent_id, &private_key)
+
+    state
+        .identity_manager
+        .save_recovery_key(agent_id, &private_key)
 }
 
 #[tauri::command]

@@ -26,9 +26,14 @@ use abigail_auth::AuthManager;
 use abigail_core::{validate_local_llm_url, AppConfig, SecretsVault};
 use abigail_router::{IdEgoRouter, SubagentManager};
 use abigail_skills::channel::EventBus;
-use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
+use abigail_skills::protocol::mcp::McpSkillRuntime;
+use abigail_skills::{
+    build_preloaded_skills, DynamicApiSkill, InstructionRegistry, ResourceLimits, Skill,
+    SkillConfig, SkillExecutor, SkillRegistry, PRELOADED_SKILLS_VERSION,
+};
 use identity_manager::IdentityManager;
 use rate_limit::CooldownGuard;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 use tauri::Manager;
@@ -132,6 +137,39 @@ pub fn determine_ego_provider(
     config: &AppConfig,
     secrets: &SecretsVault,
 ) -> (Option<String>, Option<String>) {
+    // 1. Explicit preference from Mentor menu (Forge)
+    if let Some(pref) = &config.active_provider_preference {
+        if let Some(key) = secrets.get_secret(pref) {
+            let k = key.to_string();
+            if !k.is_empty() {
+                return (Some(pref.clone()), Some(k));
+            }
+        }
+    }
+
+    // 2. Local Vault (keys pasted in chat or added in Connectivity)
+    // We check this BEFORE environment variables so user-provided keys take priority.
+    let provider_names = [
+        "anthropic",
+        "openai",
+        "xai",
+        "perplexity",
+        "google",
+        "claude-cli",
+        "gemini-cli",
+        "codex-cli",
+        "grok-cli",
+    ];
+    for name in &provider_names {
+        if let Some(key) = secrets.get_secret(name) {
+            let k = key.to_string();
+            if !k.is_empty() {
+                return (Some(name.to_string()), Some(k));
+            }
+        }
+    }
+
+    // 3. Trinity config (legacy/manual paths)
     if let Some(trinity) = &config.trinity {
         if let Some(p) = &trinity.ego_provider {
             if let Some(k) = &trinity.ego_api_key {
@@ -142,19 +180,10 @@ pub fn determine_ego_provider(
         }
     }
 
+    // 4. Environment variables (last resort)
     if let Some(k) = &config.openai_api_key {
         if !k.is_empty() {
             return (Some("openai".to_string()), Some(k.clone()));
-        }
-    }
-
-    let provider_names = ["anthropic", "openai", "xai", "perplexity", "google"];
-    for name in &provider_names {
-        if let Some(key) = secrets.get_secret(name) {
-            let k = key.to_string();
-            if !k.is_empty() {
-                return (Some(name.to_string()), Some(k));
-            }
         }
     }
 
@@ -162,28 +191,51 @@ pub fn determine_ego_provider(
 }
 
 pub async fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
-    let (local_url, ego_name, ego_key, routing_mode, superego_config) = {
+    let (local_url, ego_name, ego_key, ego_model, routing_mode, superego_config, superego_l2_mode) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
         let vault = state.secrets.lock().map_err(|e| e.to_string())?;
 
         let (ego_name, ego_key) = {
             let (name, key) = determine_ego_provider(&config, &vault);
             if name.is_some() {
+                tracing::info!("Using Ego provider from preference/vault: {:?}", name);
                 (name, key)
             } else {
                 let hive = state.hive_secrets.lock().map_err(|e| e.to_string())?;
-                determine_ego_provider(&config, &hive)
+                let (h_name, h_key) = determine_ego_provider(&config, &hive);
+                tracing::info!("Using Ego provider from Hive vault: {:?}", h_name);
+                (h_name, h_key)
             }
         };
-        
+
+        let ego_model = ego_name.as_ref().and_then(|name| {
+            let model = config
+                .tier_models
+                .as_ref()
+                .and_then(|tm| tm.standard.get(name).cloned());
+            tracing::info!("Model for {:?} found in TierModels: {:?}", name, model);
+            model
+        });
+
         let se = extract_superego_config(&config);
-        
+
+        tracing::debug!(
+            "Rebuilding router: local_url={:?}, ego_name={:?}, ego_model={:?}, has_ego_key={}, mode={:?}",
+            config.local_llm_base_url,
+            ego_name,
+            ego_model,
+            ego_key.is_some(),
+            config.routing_mode
+        );
+
         (
             config.local_llm_base_url.clone(),
             ego_name,
             ego_key,
+            ego_model,
             config.routing_mode,
             se,
+            config.superego_l2_mode,
         )
     };
 
@@ -191,6 +243,7 @@ pub async fn rebuild_router_with_superego(state: &AppState) -> Result<(), String
         local_url,
         ego_name.as_deref(),
         ego_key,
+        ego_model,
         routing_mode,
     )
     .await;
@@ -199,6 +252,7 @@ pub async fn rebuild_router_with_superego(state: &AppState) -> Result<(), String
         let superego = build_superego_llm_provider(&se_provider, &se_key);
         new_router = new_router.with_superego(superego);
     }
+    new_router = new_router.with_superego_l2_mode(superego_l2_mode);
 
     let router_arc = Arc::new(new_router.clone());
     let mut router = state.router.write().map_err(|e| e.to_string())?;
@@ -212,7 +266,9 @@ pub async fn rebuild_router_with_superego(state: &AppState) -> Result<(), String
     Ok(())
 }
 
-pub async fn rebuild_router_with_superego_from_handle(handle: &tauri::AppHandle) -> Result<(), String> {
+pub async fn rebuild_router_with_superego_from_handle(
+    handle: &tauri::AppHandle,
+) -> Result<(), String> {
     let state = handle.state::<AppState>();
     rebuild_router_with_superego(&state).await
 }
@@ -220,9 +276,6 @@ pub async fn rebuild_router_with_superego_from_handle(handle: &tauri::AppHandle)
 pub fn run() {
     let config = get_config();
     let data_dir = config.data_dir.clone();
-    let registry = Arc::new(SkillRegistry::new());
-    let executor = Arc::new(SkillExecutor::new(registry.clone()));
-    let event_bus = Arc::new(EventBus::new(100));
     let secrets = Arc::new(Mutex::new(
         SecretsVault::load(data_dir.clone())
             .unwrap_or_else(|_| SecretsVault::new(data_dir.clone())),
@@ -232,6 +285,9 @@ pub fn run() {
         SecretsVault::load_custom(data_dir.clone(), "skills.bin")
             .unwrap_or_else(|_| SecretsVault::new_custom(data_dir.clone(), "skills.bin")),
     ));
+    let registry = Arc::new(SkillRegistry::with_secrets(skills_secrets.clone()));
+    let executor = Arc::new(SkillExecutor::new(registry.clone()));
+    let event_bus = Arc::new(EventBus::new(100));
 
     let hive_data_dir = abigail_core::AppConfig::default_paths().data_dir;
     let hive_secrets = Arc::new(Mutex::new(
@@ -240,12 +296,21 @@ pub fn run() {
     ));
 
     let (ego_name, ego_key) = determine_ego_provider(&config, &secrets.lock().unwrap());
-    let router = IdEgoRouter::new(
+    let ego_model = ego_name.as_ref().and_then(|name| {
+        config
+            .tier_models
+            .as_ref()
+            .and_then(|tm| tm.standard.get(name).cloned())
+    });
+
+    let mut router = tauri::async_runtime::block_on(IdEgoRouter::new_auto_detect(
         config.local_llm_base_url.clone(),
         ego_name.as_deref(),
         ego_key,
+        ego_model,
         config.routing_mode,
-    );
+    ));
+    router.set_superego_l2_mode(config.superego_l2_mode);
 
     let auth_manager = Arc::new(AuthManager::new(secrets.clone()));
     let identity_manager =
@@ -316,10 +381,91 @@ pub fn run() {
                 )
                 .map_err(|e| e.to_string())?;
 
+            // Bootstrap preloaded dynamic skills when embedded version advances.
+            {
+                let preloaded = build_preloaded_skills(Some(state.skills_secrets.clone()));
+                for skill in preloaded {
+                    let skill_id = skill.manifest().id.clone();
+                    state
+                        .registry
+                        .register(skill_id, Arc::new(skill))
+                        .map_err(|e| e.to_string())?;
+                }
+
+                let needs_bootstrap = {
+                    let cfg = state.config.read().map_err(|e| e.to_string())?;
+                    cfg.preloaded_skills_version < PRELOADED_SKILLS_VERSION
+                };
+                if needs_bootstrap {
+                    let mut cfg = state.config.write().map_err(|e| e.to_string())?;
+                    cfg.preloaded_skills_version = PRELOADED_SKILLS_VERSION;
+                    cfg.save(&cfg.config_path()).map_err(|e| e.to_string())?;
+                }
+            }
+
+            // Discover runtime dynamic API skills from data_dir/skills/*.json
+            {
+                let cfg = state.config.read().map_err(|e| e.to_string())?;
+                let dynamic_skills = DynamicApiSkill::discover(
+                    &cfg.data_dir.join("skills"),
+                    Some(state.skills_secrets.clone()),
+                );
+                drop(cfg);
+                for skill in dynamic_skills {
+                    let skill_id = skill.manifest().id.clone();
+                    state
+                        .registry
+                        .register(skill_id, Arc::new(skill))
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+
+            // Register configured MCP servers as skills (HTTP transport).
+            {
+                let servers = {
+                    let cfg = state.config.read().map_err(|e| e.to_string())?;
+                    cfg.mcp_servers.clone()
+                };
+                for server in servers
+                    .into_iter()
+                    .filter(|s| s.transport.eq_ignore_ascii_case("http"))
+                {
+                    let mut runtime = McpSkillRuntime::new(
+                        format!("mcp.{}", server.id),
+                        format!("MCP {}", server.name),
+                        server.command_or_url.clone(),
+                    );
+                    let init = tauri::async_runtime::block_on(async {
+                        runtime
+                            .initialize(SkillConfig {
+                                values: HashMap::new(),
+                                secrets: HashMap::new(),
+                                limits: ResourceLimits::default(),
+                                permissions: vec![],
+                                event_sender: Some(Arc::new(state.event_bus.sender())),
+                            })
+                            .await
+                    });
+                    if let Err(e) = init {
+                        tracing::warn!(
+                            "Failed to initialize MCP runtime for server {}: {}",
+                            server.id,
+                            e
+                        );
+                    }
+                    let skill_id = runtime.manifest().id.clone();
+                    state
+                        .registry
+                        .register(skill_id, Arc::new(runtime))
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+
             Ok(())
         })
         .manage(state)
         .invoke_handler(tauri::generate_handler![
+            run_startup_checks,
             check_hive_status,
             get_identities,
             get_active_agent,
@@ -327,7 +473,9 @@ pub fn run() {
             create_agent,
             reset_birth,
             delete_agent_identity,
+            archive_agent_identity,
             disconnect_agent,
+            suspend_agent,
             save_recovery_key,
             migrate_legacy_identity,
             get_birth_complete,
@@ -351,12 +499,16 @@ pub fn run() {
             birth_chat,
             list_skills,
             list_discovered_skills,
+            list_missing_skill_secrets,
             list_tools,
             execute_tool,
             get_mcp_servers,
             mcp_list_tools,
             list_approved_skills,
             approve_skill,
+            list_signed_skill_allowlist,
+            upsert_signed_skill_allowlist_entry,
+            revoke_signed_skill_allowlist_entry,
             get_cli_server_status,
             start_cli_server,
             stop_cli_server,
@@ -374,11 +526,20 @@ pub fn run() {
             use_stored_provider,
             set_superego_provider,
             get_entity_theme,
+            get_identity_sharing_settings,
+            set_identity_sharing_settings,
+            get_visual_adaptation_settings,
+            set_visual_adaptation_settings,
+            get_memory_disclosure_settings,
+            set_memory_disclosure_settings,
+            get_forge_ui_settings,
+            set_forge_advanced_mode,
             get_stored_providers,
             set_active_provider,
             get_active_provider,
             set_ego_model,
             get_ego_model,
+            set_routing_mode,
             get_superego_l2_mode,
             set_superego_l2_mode,
             get_sqlite_stats,
@@ -399,6 +560,11 @@ pub fn run() {
             upload_chat_attachment,
             get_forge_scenarios,
             crystallize_forge,
+            preview_forge_primary_intelligence,
+            apply_forge_primary_intelligence,
+            forge_undo_last_change,
+            get_forge_audit_events,
+            get_forge_undo_status,
             genesis_chat,
             chat,
             chat_stream,

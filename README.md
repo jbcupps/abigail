@@ -1,7 +1,7 @@
 # Abigail — Sovereign Entity Operations
 
 [![CI](https://github.com/jbcupps/abigail/actions/workflows/ci.yml/badge.svg)](https://github.com/jbcupps/abigail/actions/workflows/ci.yml)
-[![Security Audit](https://github.com/jbcupps/abigail/actions/workflows/security-audit.yml/badge.svg)](https://github.com/jbcupps/abigail/actions/workflows/security-audit.yml)
+[![Release](https://github.com/jbcupps/abigail/actions/workflows/release.yml/badge.svg)](https://github.com/jbcupps/abigail/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 > "A system is a promise you keep at scale."
@@ -47,7 +47,7 @@ Every running agent instance carries the same archetype:
 
 ---
 
-## Current Status: v0.0.2
+## Current Status: v0.0.1 (with active in-flight development)
 
 Abigail is a working, modular platform. Recent updates include:
 
@@ -178,7 +178,7 @@ The codebase is organized into specialized crates with clear security boundaries
 | `abigail-router` | "Fast Path" routing: classifies complexity and routes to Id/Ego. |
 | `abigail-birth` | The birth sequence orchestrator. |
 | `abigail-skills` | Sandboxed plugin system for agent capabilities. |
-| `abigail-app` | The Tauri bridge, modularized into command handlers. |
+| `tauri-app` (`abigail-app` crate) | The Tauri bridge, modularized into command handlers. |
 | `abigail-keygen` | Standalone utility for Ed25519 keypair generation. |
 
 **Security boundary**: Capabilities have vault access and run trusted code. Skills are sandboxed plugins that declare permissions in `skill.toml` manifests.

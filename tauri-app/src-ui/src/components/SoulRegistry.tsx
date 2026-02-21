@@ -13,7 +13,7 @@ interface SoulIdentityInfo {
 
 interface SoulRegistryProps {
   onSoulSelected: (soulId: string) => void;
-  onNewSoul: () => void;
+  onNewSoul: (soulId: string) => void;
 }
 
 export default function SoulRegistry({
@@ -65,7 +65,7 @@ export default function SoulRegistry({
       // Load the new entity and go to birth ceremony
       await invoke("load_agent", { agentId: uuid });
       if (!mountedRef.current) return;
-      onNewSoul();
+      onNewSoul(uuid);
     } catch (e) {
       if (!mountedRef.current) return;
       setError(String(e));
@@ -92,6 +92,19 @@ export default function SoulRegistry({
 
     try {
       await invoke("delete_agent_identity", { agentId: soul.id });
+      await fetchSouls();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const handleArchiveSoul = async (e: React.MouseEvent, soul: SoulIdentityInfo) => {
+    e.stopPropagation();
+    if (!confirm(`Archive "${soul.name}" to backups? You can restore manually later.`)) {
+      return;
+    }
+    try {
+      await invoke("archive_agent_identity", { agentId: soul.id });
       await fetchSouls();
     } catch (e) {
       setError(String(e));
@@ -236,17 +249,22 @@ export default function SoulRegistry({
                   <h2 className="text-theme-text-bright font-bold text-lg group-hover:text-theme-primary">
                     {soul.name}
                   </h2>
-                  <button
-                    onClick={(e) => handleDeleteSoul(e, soul)}
-                    className="p-1.5 text-theme-text-dim hover:text-red-500 hover:bg-red-950/20 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Delete Entity"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M3 6h18"></path>
-                      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
-                      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
-                    </svg>
-                  </button>
+                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => handleArchiveSoul(e, soul)}
+                      className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-primary hover:text-theme-text"
+                      title="Archive Entity"
+                    >
+                      Archive
+                    </button>
+                    <button
+                      onClick={(e) => handleDeleteSoul(e, soul)}
+                      className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-red-700 hover:text-red-500"
+                      title="Delete Entity"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded border ${soul.birth_complete ? "border-green-900 text-green-500 bg-green-950/20" : "border-yellow-900 text-yellow-500 bg-yellow-950/20"}`}>

@@ -138,14 +138,31 @@ pub struct IdEgoRouter {
 }
 
 impl IdEgoRouter {
+    fn target_for_mode(&self, user_message: &str) -> FastPathTarget {
+        match self.mode {
+            RoutingMode::IdPrimary => FastPathTarget::Id,
+            RoutingMode::EgoPrimary => {
+                if self.ego.is_some() {
+                    FastPathTarget::Ego
+                } else {
+                    FastPathTarget::Id
+                }
+            }
+            RoutingMode::Council | RoutingMode::TierBased => {
+                self.fast_path_classify(user_message).target
+            }
+        }
+    }
     /// Create a new router with optional local LLM URL and Ego cloud provider.
     pub fn new(
         local_llm_base_url: Option<String>,
         ego_provider_name: Option<&str>,
         ego_api_key: Option<String>,
+        ego_model: Option<String>,
         mode: RoutingMode,
     ) -> Self {
-        let (ego, ego_provider) = build_ego_provider(ego_provider_name, ego_api_key.clone());
+        let (ego, ego_provider) =
+            build_ego_provider(ego_provider_name, ego_api_key.clone(), ego_model);
         let (id, local_http) = build_id_provider(local_llm_base_url);
 
         Self {
@@ -165,9 +182,11 @@ impl IdEgoRouter {
         local_llm_base_url: Option<String>,
         ego_provider_name: Option<&str>,
         ego_api_key: Option<String>,
+        ego_model: Option<String>,
         mode: RoutingMode,
     ) -> Self {
-        let (ego, ego_provider) = build_ego_provider(ego_provider_name, ego_api_key.clone());
+        let (ego, ego_provider) =
+            build_ego_provider(ego_provider_name, ego_api_key.clone(), ego_model);
         let (id, local_http) = build_id_provider_auto_detect(local_llm_base_url).await;
 
         Self {
@@ -293,12 +312,12 @@ impl IdEgoRouter {
     /// Route using the fast path.
     pub async fn route_fast(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
         let last_msg = messages.last().map_or("", |m| &m.content);
-        let fp = self.fast_path_classify(last_msg);
+        let target = self.target_for_mode(last_msg);
         let request = CompletionRequest {
             messages,
             tools: None,
         };
-        if fp.target == FastPathTarget::Ego {
+        if target == FastPathTarget::Ego {
             if let Some(ref ego) = self.ego {
                 return ego.complete(&request).await;
             }
@@ -348,19 +367,14 @@ impl IdEgoRouter {
             messages,
             tools: Some(tools),
         };
-
-        match self.mode {
-            RoutingMode::IdPrimary => {
-                self.id.complete(&request).await
-            }
-            RoutingMode::EgoPrimary | RoutingMode::Council | RoutingMode::TierBased => {
-                if let Some(ref ego) = self.ego {
-                    ego.complete(&request).await
-                } else {
-                    self.id.complete(&request).await
-                }
+        let last_msg = request.messages.last().map_or("", |m| &m.content);
+        let target = self.target_for_mode(last_msg);
+        if target == FastPathTarget::Ego {
+            if let Some(ref ego) = self.ego {
+                return ego.complete(&request).await;
             }
         }
+        self.id.complete(&request).await
     }
 
     /// Id only routing.
@@ -374,6 +388,11 @@ impl IdEgoRouter {
         messages: Vec<Message>,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
+        tracing::debug!(
+            "Routing stream: mode={:?}, has_ego={}",
+            self.mode,
+            self.ego.is_some()
+        );
         if let Some(deny) = self.run_superego_precheck(&messages).await {
             let _ = tx.send(StreamEvent::Done(deny.clone())).await;
             return Ok(deny);
@@ -388,14 +407,25 @@ impl IdEgoRouter {
 
         match self.mode {
             RoutingMode::IdPrimary => {
+                tracing::debug!("Routing to Id (IdPrimary mode)");
                 self.id.stream(&request, tx).await
             }
-            RoutingMode::EgoPrimary | RoutingMode::Council | RoutingMode::TierBased => {
+            RoutingMode::EgoPrimary => {
+                if let Some(ref ego) = self.ego {
+                    tracing::debug!("Routing to Ego (EgoPrimary mode)");
+                    return ego.stream(&request, tx).await;
+                }
+                tracing::debug!("Routing to Id (EgoPrimary mode but no Ego available)");
+                self.id.stream(&request, tx).await
+            }
+            RoutingMode::Council | RoutingMode::TierBased => {
                 if fp.target == FastPathTarget::Ego {
                     if let Some(ref ego) = self.ego {
+                        tracing::debug!("Routing to Ego (cloud) based on fast path");
                         return ego.stream(&request, tx).await;
                     }
                 }
+                tracing::debug!("Routing to Id (fast path target was {:?})", fp.target);
                 self.id.stream(&request, tx).await
             }
         }
@@ -408,6 +438,11 @@ impl IdEgoRouter {
         tools: Vec<ToolDefinition>,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
+        tracing::debug!(
+            "Routing stream with tools: mode={:?}, has_ego={}",
+            self.mode,
+            self.ego.is_some()
+        );
         if let Some(deny) = self.run_superego_precheck(&messages).await {
             let _ = tx.send(StreamEvent::Done(deny.clone())).await;
             return Ok(deny);
@@ -416,19 +451,16 @@ impl IdEgoRouter {
             messages,
             tools: Some(tools),
         };
-
-        match self.mode {
-            RoutingMode::IdPrimary => {
-                self.id.stream(&request, tx).await
-            }
-            RoutingMode::EgoPrimary | RoutingMode::Council | RoutingMode::TierBased => {
-                if let Some(ref ego) = self.ego {
-                    ego.stream(&request, tx).await
-                } else {
-                    self.id.stream(&request, tx).await
-                }
+        let last_msg = request.messages.last().map_or("", |m| &m.content);
+        let target = self.target_for_mode(last_msg);
+        if target == FastPathTarget::Ego {
+            if let Some(ref ego) = self.ego {
+                tracing::debug!("Routing to Ego (mode/fast-path)");
+                return ego.stream(&request, tx).await;
             }
         }
+        tracing::debug!("Routing to Id (mode/fast-path target: {:?})", target);
+        self.id.stream(&request, tx).await
     }
 }
 
@@ -437,67 +469,118 @@ impl IdEgoRouter {
 fn build_ego_provider(
     provider_name: Option<&str>,
     api_key: Option<String>,
+    ego_model: Option<String>,
 ) -> (Option<Arc<dyn LlmProvider>>, Option<EgoProvider>) {
     let key = match api_key.filter(|k| !k.trim().is_empty()) {
         Some(k) => k,
-        None => return (None, None),
+        None => {
+            tracing::debug!(
+                "build_ego_provider: no API key provided for {:?}",
+                provider_name
+            );
+            return (None, None);
+        }
     };
+
+    tracing::info!(
+        "Initializing Ego provider: {:?} with model: {:?}",
+        provider_name,
+        ego_model
+    );
+
     match provider_name {
-        Some("openai") => (
-            OpenAiProvider::new(Some(key))
+        Some("openai") => {
+            let built = OpenAiProvider::with_model(
+                Some(key),
+                ego_model.unwrap_or_else(|| "gpt-4o-mini".to_string()),
+            )
+            .inspect_err(|e| tracing::error!("Failed to build OpenAI provider: {}", e))
+            .ok()
+            .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
+            (built.clone(), built.map(|_| EgoProvider::OpenAi))
+        }
+        Some("anthropic") => {
+            let built = AnthropicProvider::with_model(
+                key,
+                ego_model.unwrap_or_else(|| "claude-3-5-sonnet-latest".to_string()),
+            )
+            .inspect_err(|e| tracing::error!("Failed to build Anthropic provider: {}", e))
+            .ok()
+            .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
+            (built.clone(), built.map(|_| EgoProvider::Anthropic))
+        }
+        Some("perplexity") => {
+            let built = OpenAiCompatibleProvider::with_config(
+                CompatibleProvider::Perplexity,
+                CompatibleProvider::Perplexity.base_url().to_string(),
+                key,
+                ego_model
+                    .unwrap_or_else(|| CompatibleProvider::Perplexity.default_model().to_string()),
+            )
+            .inspect_err(|e| tracing::error!("Failed to build Perplexity provider: {}", e))
+            .ok()
+            .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
+            (built.clone(), built.map(|_| EgoProvider::Perplexity))
+        }
+        Some("xai") => {
+            let built = OpenAiCompatibleProvider::with_config(
+                CompatibleProvider::Xai,
+                CompatibleProvider::Xai.base_url().to_string(),
+                key,
+                ego_model.unwrap_or_else(|| CompatibleProvider::Xai.default_model().to_string()),
+            )
+            .inspect_err(|e| tracing::error!("Failed to build xAI provider: {}", e))
+            .ok()
+            .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
+            (built.clone(), built.map(|_| EgoProvider::Xai))
+        }
+        Some("google") => {
+            let built = OpenAiCompatibleProvider::with_config(
+                CompatibleProvider::Google,
+                CompatibleProvider::Google.base_url().to_string(),
+                key,
+                ego_model.unwrap_or_else(|| CompatibleProvider::Google.default_model().to_string()),
+            )
+            .inspect_err(|e| tracing::error!("Failed to build Google provider: {}", e))
+            .ok()
+            .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
+            (built.clone(), built.map(|_| EgoProvider::Google))
+        }
+        Some("claude-cli") => {
+            let built = CliLlmProvider::new(CliVariant::ClaudeCode, key)
+                .inspect_err(|e| tracing::error!("Failed to build Claude CLI provider: {}", e))
                 .ok()
-                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
-            Some(EgoProvider::OpenAi),
-        ),
-        Some("anthropic") => (
-            AnthropicProvider::new(key)
+                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
+            (built.clone(), built.map(|_| EgoProvider::ClaudeCli))
+        }
+        Some("gemini-cli") => {
+            let built = CliLlmProvider::new(CliVariant::GeminiCli, key)
+                .inspect_err(|e| tracing::error!("Failed to build Gemini CLI provider: {}", e))
                 .ok()
-                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
-            Some(EgoProvider::Anthropic),
-        ),
-        Some("perplexity") => (
-            OpenAiCompatibleProvider::new(CompatibleProvider::Perplexity, key)
+                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
+            (built.clone(), built.map(|_| EgoProvider::GeminiCli))
+        }
+        Some("codex-cli") => {
+            let built = CliLlmProvider::new(CliVariant::OpenAiCodex, key)
+                .inspect_err(|e| tracing::error!("Failed to build Codex CLI provider: {}", e))
                 .ok()
-                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
-            Some(EgoProvider::Perplexity),
-        ),
-        Some("xai") => (
-            OpenAiCompatibleProvider::new(CompatibleProvider::Xai, key)
+                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
+            (built.clone(), built.map(|_| EgoProvider::CodexCli))
+        }
+        Some("grok-cli") => {
+            let built = CliLlmProvider::new(CliVariant::XaiGrokCli, key)
+                .inspect_err(|e| tracing::error!("Failed to build Grok CLI provider: {}", e))
                 .ok()
-                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
-            Some(EgoProvider::Xai),
-        ),
-        Some("google") => (
-            OpenAiCompatibleProvider::new(CompatibleProvider::Google, key)
-                .ok()
-                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
-            Some(EgoProvider::Google),
-        ),
-        Some("claude-cli") => (
-            CliLlmProvider::new(CliVariant::ClaudeCode, key)
-                .ok()
-                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
-            Some(EgoProvider::ClaudeCli),
-        ),
-        Some("gemini-cli") => (
-            CliLlmProvider::new(CliVariant::GeminiCli, key)
-                .ok()
-                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
-            Some(EgoProvider::GeminiCli),
-        ),
-        Some("codex-cli") => (
-            CliLlmProvider::new(CliVariant::OpenAiCodex, key)
-                .ok()
-                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
-            Some(EgoProvider::CodexCli),
-        ),
-        Some("grok-cli") => (
-            CliLlmProvider::new(CliVariant::XaiGrokCli, key)
-                .ok()
-                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>),
-            Some(EgoProvider::GrokCli),
-        ),
-        _ => (None, None),
+                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
+            (built.clone(), built.map(|_| EgoProvider::GrokCli))
+        }
+        _ => {
+            tracing::debug!(
+                "build_ego_provider: unknown provider name {:?}",
+                provider_name
+            );
+            (None, None)
+        }
     }
 }
 
@@ -528,12 +611,12 @@ async fn build_id_provider_auto_detect(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use abigail_capabilities::cognitive::Message;
+    use abigail_capabilities::cognitive::{Message, ToolDefinition};
     use abigail_core::RoutingMode;
 
     #[tokio::test]
     async fn test_heartbeat_stub() {
-        let router = IdEgoRouter::new(None, None, None, RoutingMode::default());
+        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::default());
         router.heartbeat().await.unwrap();
     }
 
@@ -543,6 +626,7 @@ mod tests {
             None,
             Some("openai"),
             Some("test-key".to_string()),
+            None,
             RoutingMode::EgoPrimary,
         );
         assert!(router.has_ego());
@@ -551,9 +635,33 @@ mod tests {
 
     #[tokio::test]
     async fn test_superego_route_blocks_harmful() {
-        let router = IdEgoRouter::new(None, None, None, RoutingMode::EgoPrimary);
+        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
         let messages = vec![Message::new("user", "where does Elon Musk live")];
         let response = router.route(messages).await.unwrap();
         assert!(response.content.contains("Blocked"));
+    }
+
+    #[tokio::test]
+    async fn test_ego_primary_without_ego_falls_to_id() {
+        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
+        let target = router.target_for_mode("this is a complex question that might use ego");
+        assert_eq!(target, FastPathTarget::Id);
+    }
+
+    #[tokio::test]
+    async fn test_route_with_tools_id_primary_uses_id_path() {
+        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::IdPrimary);
+        let response = router
+            .route_with_tools(
+                vec![Message::new("user", "hello")],
+                vec![ToolDefinition {
+                    name: "test_tool".to_string(),
+                    description: "test".to_string(),
+                    parameters: serde_json::json!({ "type": "object" }),
+                }],
+            )
+            .await
+            .unwrap();
+        assert!(!response.content.is_empty());
     }
 }

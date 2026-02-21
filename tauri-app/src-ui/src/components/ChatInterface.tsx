@@ -9,9 +9,16 @@ import VaultModal, { type MissingSkillSecret } from "./VaultModal";
 interface Message {
   role: "user" | "assistant";
   content: string;
+  provider?: string;
   isError?: boolean;
+  memoryUsed?: boolean;
   /** When set, render an MCP App (ui:// resource) in a sandboxed iframe below the message. */
   mcpApp?: { serverId: string; resourceUri: string; title?: string };
+}
+
+export interface ChatSessionSnapshot {
+  messages: Message[];
+  input: string;
 }
 
 interface RouterStatus {
@@ -35,6 +42,8 @@ type ConfigStep = "menu" | "ollama" | "lmstudio" | "openai" | "claude-cli" | "ge
 
 interface ChatInterfaceProps {
   target?: "ID" | "EGO";
+  initialSession?: ChatSessionSnapshot | null;
+  onSessionSnapshot?: (snapshot: ChatSessionSnapshot) => void;
 }
 
 /** Defense-in-depth: redact common API key patterns before rendering. */
@@ -49,10 +58,14 @@ function redactApiKeys(text: string): string {
   );
 }
 
-export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
+export default function ChatInterface({
+  target = "EGO",
+  initialSession = null,
+  onSessionSnapshot,
+}: ChatInterfaceProps) {
   const { agentName } = useTheme();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<Message[]>(() => initialSession?.messages ?? []);
+  const [input, setInput] = useState(() => initialSession?.input ?? "");
   const [loading, setLoading] = useState(false);
   const [routerStatus, setRouterStatus] = useState<RouterStatus | null>(null);
   const [configStep, setConfigStep] = useState<ConfigStep>(null);
@@ -66,10 +79,31 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
   const [storedProviders, setStoredProviders] = useState<string[]>([]);
   const [cliServerStatus, setCliServerStatus] = useState<{ running: boolean, port?: number, token?: string }>({ running: false });
   const [cliPortInput, setCliPortInput] = useState("8080");
+  const [showRoutingDetails, setShowRoutingDetails] = useState(false);
+  const [memoryDisclosureEnabled, setMemoryDisclosureEnabled] = useState(true);
+  const memoryUsedTurnRef = useRef(false);
 
   const assistantLabel = agentName || "Abigail";
   const mountedRef = useRef(true);
+  const messagesRef = useRef<Message[]>(messages);
+  const inputRef = useRef(input);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    inputRef.current = input;
+  }, [input]);
+
+  useEffect(() => {
+    setMessages(initialSession?.messages ?? []);
+    setInput(initialSession?.input ?? "");
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
+  }, [initialSession]);
 
   const autoGrow = useCallback(() => {
     const el = textareaRef.current;
@@ -159,6 +193,9 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
     // Listen for chat-status events from backend (e.g. tool execution)
     const unlisten = listen<{ status: string; tool: string; duration_ms?: number; error?: string }>("chat-status", (event) => {
       const { status, tool, duration_ms } = event.payload;
+      if (tool === "recall" && (status === "executing" || status === "done")) {
+        memoryUsedTurnRef.current = true;
+      }
       if (status === "done") {
         const dur = duration_ms ? ` (${(duration_ms / 1000).toFixed(1)}s)` : "";
         setChatStatus(`${tool} complete${dur}`);
@@ -168,6 +205,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
       }
       if (status === "error") {
         setChatStatus(`${tool} failed`);
+        setShowRoutingDetails(true);
         setTimeout(() => setChatStatus(null), 3000);
         return;
       }
@@ -184,13 +222,40 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
       };
       setChatStatus(toolMessages[tool] || `Running ${tool}...`);
     });
+    const unlistenRouting = listen<{ provider?: string; fallback_used?: boolean; safety_blocked?: boolean; error?: boolean }>(
+      "chat-routing",
+      (event) => {
+        const payload = event.payload;
+        if (payload.fallback_used || payload.safety_blocked || payload.error) {
+          setShowRoutingDetails(true);
+        }
+      }
+    );
+    invoke<{ enabled: boolean }>("get_memory_disclosure_settings")
+      .then((v) => {
+        if (!mountedRef.current) return;
+        setMemoryDisclosureEnabled(v.enabled);
+      })
+      .catch(() => {
+        if (!mountedRef.current) return;
+        setMemoryDisclosureEnabled(true);
+      });
     return () => {
+      if (onSessionSnapshot) {
+        onSessionSnapshot({
+          messages: messagesRef.current,
+          input: inputRef.current,
+        });
+      }
       mountedRef.current = false;
       unlisten.then((f) => f()).catch((e) => {
         console.warn("[ChatInterface] failed to unregister chat-status listener:", e);
       });
+      unlistenRouting.then((f) => f()).catch((e) => {
+        console.warn("[ChatInterface] failed to unregister chat-routing listener:", e);
+      });
     };
-  }, []);
+  }, [onSessionSnapshot]);
 
   const handleConfigSelect = async (option: number) => {
     setConfigError("");
@@ -317,6 +382,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
   const send = async () => {
     if (!input.trim() || loading) return;
     const userMessage: Message = { role: "user", content: input.trim() };
+    memoryUsedTurnRef.current = false;
     setMessages((m) => [...m, userMessage]);
     setInput("");
     setLoading(true);
@@ -328,23 +394,33 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
     // Add a placeholder assistant message for streaming
     setMessages((m) => [...m, { role: "assistant", content: "" }]);
 
-    // Listen for streaming tokens
-    let streamContent = "";
-    let unlisten: (() => void) | null = null;
-    try {
-      unlisten = await listen<{ token?: string; done?: boolean }>("chat-token", (event) => {
-        if (event.payload.token) {
-          streamContent += event.payload.token;
-          setMessages((m) => {
-            const updated = [...m];
-            const lastAssistant = updated[updated.length - 1];
-            if (lastAssistant && lastAssistant.role === "assistant") {
-              updated[updated.length - 1] = { ...lastAssistant, content: streamContent };
+        // Listen for streaming tokens
+        let streamContent = "";
+        let streamProvider = "";
+        let unlisten: (() => void) | null = null;
+        try {
+          unlisten = await listen<{ token?: string; provider?: string; done?: boolean }>("chat-token", (event) => {
+            if (event.payload.token) {
+              streamContent += event.payload.token;
+              if (event.payload.provider) {
+                streamProvider = event.payload.provider;
+              }
+              setMessages((m) => {
+                const updated = [...m];
+                const lastAssistant = updated[updated.length - 1];
+                if (lastAssistant && lastAssistant.role === "assistant") {
+                  updated[updated.length - 1] = { 
+                    ...lastAssistant, 
+                    content: streamContent,
+                    provider: streamProvider,
+                    memoryUsed: memoryUsedTurnRef.current,
+                  };
+                }
+                return updated;
+              });
             }
-            return updated;
           });
-        }
-      });
+    
     } catch (listenErr) {
       console.warn("[ChatInterface] listen() failed:", listenErr);
     }
@@ -358,7 +434,11 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
           const updated = [...m];
           const lastAssistant = updated[updated.length - 1];
           if (lastAssistant && lastAssistant.role === "assistant") {
-            updated[updated.length - 1] = { ...lastAssistant, content: reply };
+            updated[updated.length - 1] = {
+              ...lastAssistant,
+              content: reply,
+              memoryUsed: memoryUsedTurnRef.current,
+            };
           }
           return updated;
         });
@@ -381,6 +461,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
         }
         return updated;
       });
+      setShowRoutingDetails(true);
     } finally {
       try { if (unlisten) unlisten(); } catch { /* ignore */ }
       if (!mountedRef.current) return;
@@ -443,7 +524,7 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
         className={`text-xs ${statusColor} px-4 py-1 border-b border-theme-border cursor-pointer hover:bg-theme-surface`}
         onClick={() => setConfigStep("menu")}
       >
-        {statusText}
+        {!showRoutingDetails && !statusText.includes("[no LLM]") ? "[routing hidden]" : statusText}
       </div>
     );
   };
@@ -720,6 +801,28 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
   return (
     <div className="h-full bg-theme-bg text-theme-text font-mono flex flex-col">
       {getStatusIndicator()}
+      <div className="px-4 py-1 text-[11px] border-b border-theme-border flex items-center gap-3 bg-theme-bg-elevated">
+        <button
+          className="text-theme-text-dim hover:text-theme-text"
+          onClick={() => setShowRoutingDetails((v) => !v)}
+        >
+          {showRoutingDetails ? "Hide routing details" : "Show routing details"}
+        </button>
+        <button
+          className="text-theme-text-dim hover:text-theme-text"
+          onClick={async () => {
+            const next = !memoryDisclosureEnabled;
+            setMemoryDisclosureEnabled(next);
+            try {
+              await invoke("set_memory_disclosure_settings", { enabled: next });
+            } catch {
+              // keep UI responsive even if persistence fails
+            }
+          }}
+        >
+          Memory disclosure: {memoryDisclosureEnabled ? "On" : "Off"}
+        </button>
+      </div>
       {renderConfigMenu()}
       {missingSecrets.length > 0 && (
         <div className="px-4 py-2 border-b border-yellow-800 bg-yellow-950/20">
@@ -764,7 +867,12 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
               }`}
             >
               <p className={`text-xs mb-1 ${msg.isError ? "text-red-400" : "text-theme-text-dim"}`}>
-                {msg.role === "user" ? "You" : assistantLabel}
+                {msg.role === "user" ? "You" : (
+                  <>
+                    {assistantLabel}
+                    {showRoutingDetails && msg.provider && <span className="ml-2 opacity-50 font-normal">via {msg.provider}</span>}
+                  </>
+                )}
               </p>
               <span className={msg.isError ? "text-red-300" : "text-theme-text-bright"}>
                 {redactApiKeys(msg.content || "").split("\n").map((line, j) => (
@@ -774,6 +882,11 @@ export default function ChatInterface({ target = "EGO" }: ChatInterfaceProps) {
                   </span>
                 ))}
               </span>
+              {memoryDisclosureEnabled && msg.role === "assistant" && msg.memoryUsed && (
+                <p className="text-[10px] mt-2 text-theme-text-dim">
+                  Memory disclosure: this response used recall context.
+                </p>
+              )}
               {msg.mcpApp && (
                 <div className="mt-2">
                   <McpAppFrame

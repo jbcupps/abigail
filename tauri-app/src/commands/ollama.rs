@@ -16,7 +16,10 @@ pub fn list_recommended_models() -> Vec<RecommendedModel> {
 }
 
 #[tauri::command]
-pub async fn install_ollama(app: tauri::AppHandle, _state: State<'_, AppState>) -> Result<(), String> {
+pub async fn install_ollama(
+    app: tauri::AppHandle,
+    _state: State<'_, AppState>,
+) -> Result<(), String> {
     OllamaManager::download_and_install(|progress: OllamaInstallProgress| {
         let _ = app.emit("ollama-install-progress", progress);
     })
@@ -29,9 +32,13 @@ pub async fn pull_ollama_model(
     _state: State<'_, AppState>,
     model: String,
 ) -> Result<(), String> {
-    OllamaManager::pull_model_streaming("http://localhost:11434", &model, |progress: OllamaModelProgress| {
-        let _ = app.emit("ollama-model-progress", progress);
-    })
+    OllamaManager::pull_model_streaming(
+        "http://localhost:11434",
+        &model,
+        |progress: OllamaModelProgress| {
+            let _ = app.emit("ollama-model-progress", progress);
+        },
+    )
     .await
 }
 
@@ -56,7 +63,7 @@ pub async fn get_ollama_status(state: State<'_, AppState>) -> Result<OllamaStatu
 pub async fn probe_local_llm() -> Result<serde_json::Value, String> {
     let ports = [1234, 11434, 8080, 8000];
     let mut detected = Vec::new();
-    
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(1))
         .build()
@@ -66,7 +73,7 @@ pub async fn probe_local_llm() -> Result<serde_json::Value, String> {
         let url = format!("http://localhost:{}", port);
         let tags_url = format!("{}/api/tags", url); // Ollama
         let models_url = format!("{}/v1/models", url); // OpenAI-compatible (LM Studio, etc.)
-        
+
         if let Ok(resp) = client.get(&tags_url).send().await {
             if resp.status().is_success() {
                 detected.push(serde_json::json!({
@@ -93,7 +100,11 @@ pub async fn probe_local_llm() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-pub async fn set_local_llm_during_birth(state: State<'_, AppState>, url: String, skip_health_check: bool) -> Result<bool, String> {
+pub async fn set_local_llm_during_birth(
+    state: State<'_, AppState>,
+    url: String,
+    skip_health_check: bool,
+) -> Result<bool, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
@@ -102,9 +113,9 @@ pub async fn set_local_llm_during_birth(state: State<'_, AppState>, url: String,
     // Robust health check: try multiple common endpoints
     let url_trimmed = url.trim_end_matches('/');
     let endpoints = [
-        format!("{}/api/tags", url_trimmed),   // Ollama
+        format!("{}/api/tags", url_trimmed),  // Ollama
         format!("{}/v1/models", url_trimmed), // OpenAI-compatible
-        url_trimmed.to_string(),               // Root
+        url_trimmed.to_string(),              // Root
     ];
 
     let mut reachable = false;
@@ -126,9 +137,11 @@ pub async fn set_local_llm_during_birth(state: State<'_, AppState>, url: String,
         {
             let mut config = state.config.write().map_err(|e| e.to_string())?;
             config.local_llm_base_url = Some(url);
-            config.save(&config.config_path()).map_err(|e| e.to_string())?;
+            config
+                .save(&config.config_path())
+                .map_err(|e| e.to_string())?;
         }
-        
+
         // Rebuild router with new URL
         if let Err(e) = crate::rebuild_router_with_superego(&state).await {
             tracing::warn!("Failed to rebuild router after setting local LLM: {}", e);

@@ -2,6 +2,13 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-21 (Workspace refresh baseline after sovereign refactor wave)
+
+- **Branch + drift snapshot:** Active branch is `feat/autonomous-skills-factory` with local, uncommitted edits across router, config, capability providers, Tauri command modules, and UI surfaces (`ChatInterface`, `ForgePanel`). Untracked local artifacts include `.cargo/`, `.grok/`, `tauri-app/src-ui/coverage/`, root `node_modules/`, and `nul`.
+- **Workspace shape:** `Cargo.toml` workspace includes expanded architecture: core crates (`abigail-core`, `abigail-memory`, `abigail-router`, `abigail-capabilities`, `abigail-birth`, `abigail-skills`), newer support crates (`abigail-auth`, `abigail-cli`, `abigail-soul-crystallization`, `soul-forge`), and a broad skill pack (filesystem/shell/http/search plus git, database, code-analysis, image, notification, calendar, clipboard, system-monitor, etc.).
+- **Operational model (current):** Product positioning and docs now center on Sovereign Entity operations (Hive > Entity > Agent), Sanctum/Superego framing, multi-identity management, and autonomous self-configuration/skill-factory pathways.
+- **Recent delivery cadence:** Current branch history confirms rapid iterative shipping (router/provider expansion, CLI provider support, UI forge/drawer overhauls, diagnostics, updater + migration work, CI stabilization), so new work should assume active in-flight refactors rather than a clean release baseline.
+
 ## 2026-02-08 (Tests: executor timeout/sandbox, MCP schema mapping)
 
 - **abigail-skills**: `SkillExecutor::with_limits(registry, limits)` added for tests. Executor now uses stored `default_timeout_ms` for per-call timeout. Tests added: `executor_enforces_timeout` (short limit + sleeping skill → timeout error), `executor_denies_network_when_not_granted` (tool requires network, manifest has no permission → PermissionDenied). MCP: `mcp_tool_to_descriptor_maps_name_and_schema` in `protocol/mcp.rs` for schema mapping.

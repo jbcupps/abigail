@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-21 15:00 EST: LLM routing and skills verification — unified router rebuild/superego, trust gating and capability envelope in execution, qualified tool resolution, routing tests, and vision chunk alignment (birth, identity, chat, forge, skills).
+- 2026-02-21 12:00 EST: Refresh documentation baseline by aligning README, CLAUDE guidance, release process, GitHub settings checklist, and environment notes with current CI/release workflows.
 - 2026-02-20 17:30 EST: Massive cleanup and rebranding to Sovereign Entity model: modularized Tauri backend, pruned legacy routing/stubs, rebranded UI to Soul Registry and Sanctum, and implemented agentic Recall memory tool.
 - 2026-02-19 19:14 EST: Added 10 new skill crates (knowledge-base, git, code-analysis, database, calendar, document, notification, image, clipboard, system-monitor) + browser instruction-only skill, permission parser fix, productivity subagent, and expanded file_ops/privacy subagent capabilities
 - 2026-02-19 20:45 EST: Implemented refined lightweight router – Fast Path (Id+Ego+Context) + out-of-band Superego/Trust conscience to eliminate lock-ups

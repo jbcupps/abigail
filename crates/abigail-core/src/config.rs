@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 13;
+pub const CONFIG_SCHEMA_VERSION: u32 = 17;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -112,14 +112,14 @@ impl TierModels {
 
         standard.insert("openai".into(), "gpt-4o".into());
         standard.insert("anthropic".into(), "claude-sonnet-4-5-20250929".into());
-        standard.insert("google".into(), "gemini-2.5-pro".into());
-        standard.insert("xai".into(), "grok-3".into());
+        standard.insert("google".into(), "gemini-1.5-pro".into());
+        standard.insert("xai".into(), "grok-2".into());
         standard.insert("perplexity".into(), "sonar-pro".into());
 
         pro.insert("openai".into(), "o3".into());
         pro.insert("anthropic".into(), "claude-opus-4-6".into());
-        pro.insert("google".into(), "gemini-2.5-pro".into());
-        pro.insert("xai".into(), "grok-3".into());
+        pro.insert("google".into(), "gemini-1.5-pro".into());
+        pro.insert("xai".into(), "grok-2".into());
         pro.insert("perplexity".into(), "sonar-reasoning-pro".into());
 
         Self {
@@ -195,6 +195,22 @@ fn default_preloaded_skills_version() -> u32 {
     0
 }
 
+fn default_allow_minor_visual_adaptation() -> bool {
+    true
+}
+
+fn default_memory_disclosure_enabled() -> bool {
+    true
+}
+
+fn default_forge_advanced_mode() -> bool {
+    false
+}
+
+fn default_skill_recovery_budget() -> u8 {
+    3
+}
+
 fn default_bundled_ollama() -> bool {
     cfg!(windows)
 }
@@ -221,6 +237,28 @@ pub struct TrinityConfig {
     /// API key for Superego provider
     #[serde(default)]
     pub superego_api_key: Option<String>,
+}
+
+/// Signed auto-approval entry for a skill.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignedSkillAllowlistEntry {
+    /// Skill ID this signed entry grants trust for.
+    pub skill_id: String,
+    /// Signer identifier (key id or issuer label).
+    pub signer: String,
+    /// Detached signature payload (opaque string for now).
+    pub signature: String,
+    /// Source metadata for provenance/audit.
+    pub source: String,
+    /// Entry creation timestamp (ISO 8601).
+    pub added_at: String,
+    /// Soft-revoke support without deleting historical record.
+    #[serde(default = "default_allowlist_entry_active")]
+    pub active: bool,
+}
+
+fn default_allowlist_entry_active() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -342,6 +380,39 @@ pub struct AppConfig {
     /// URL or data-URI for the entity's avatar.
     #[serde(default)]
     pub avatar_url: Option<String>,
+
+    // ── v14 fields ─────────────────────────────────────────────────
+    /// Whether skills configuration can be selectively shared across identities.
+    #[serde(default)]
+    pub share_skills_across_identities: bool,
+
+    /// Allows minor adaptive visual changes (theme accents, subtle refinements).
+    #[serde(default = "default_allow_minor_visual_adaptation")]
+    pub allow_minor_visual_adaptation: bool,
+
+    /// Allows full avatar swaps under adaptive visual mode.
+    #[serde(default)]
+    pub allow_avatar_swap: bool,
+
+    /// Whether memory influence disclosure is shown in chat by default.
+    #[serde(default = "default_memory_disclosure_enabled")]
+    pub memory_disclosure_enabled: bool,
+
+    /// Explicit complexity toggle for Forge advanced controls.
+    #[serde(default = "default_forge_advanced_mode")]
+    pub forge_advanced_mode: bool,
+
+    /// Signed skill auto-approval entries (primary trust source).
+    #[serde(default)]
+    pub signed_skill_allowlist: Vec<SignedSkillAllowlistEntry>,
+
+    /// Known side-effect recipients, scoped by active identity id.
+    #[serde(default)]
+    pub known_recipients_by_identity: HashMap<String, Vec<String>>,
+
+    /// Recovery budget for autonomous retries before escalation.
+    #[serde(default = "default_skill_recovery_budget")]
+    pub skill_recovery_budget: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -392,6 +463,14 @@ impl AppConfig {
             preloaded_skills_version: 0,
             primary_color: None,
             avatar_url: None,
+            share_skills_across_identities: false,
+            allow_minor_visual_adaptation: default_allow_minor_visual_adaptation(),
+            allow_avatar_swap: false,
+            memory_disclosure_enabled: default_memory_disclosure_enabled(),
+            forge_advanced_mode: default_forge_advanced_mode(),
+            signed_skill_allowlist: Vec::new(),
+            known_recipients_by_identity: HashMap::new(),
+            skill_recovery_budget: default_skill_recovery_budget(),
         }
     }
 
@@ -577,6 +656,38 @@ impl AppConfig {
             tracing::debug!("Migrated config from v12 to v13");
         }
 
+        // Migration from v13 to v14
+        if self.schema_version < 14 {
+            // v14 adds: identity sharing and visual adaptation controls.
+            self.schema_version = 14;
+            migrated = true;
+            tracing::debug!("Migrated config from v13 to v14");
+        }
+
+        // Migration from v14 to v15
+        if self.schema_version < 15 {
+            // v15 adds: memory_disclosure_enabled (defaults to true via serde default).
+            self.schema_version = 15;
+            migrated = true;
+            tracing::debug!("Migrated config from v14 to v15");
+        }
+
+        // Migration from v15 to v16
+        if self.schema_version < 16 {
+            // v16 adds: forge_advanced_mode (defaults to false via serde default).
+            self.schema_version = 16;
+            migrated = true;
+            tracing::debug!("Migrated config from v15 to v16");
+        }
+
+        // Migration from v16 to v17
+        if self.schema_version < 17 {
+            // v17 adds: signed_skill_allowlist, known_recipients_by_identity, skill_recovery_budget.
+            self.schema_version = 17;
+            migrated = true;
+            tracing::debug!("Migrated config from v16 to v17");
+        }
+
         migrated
     }
     /// Check if birth was interrupted (birth_stage set but birth_complete is false).
@@ -644,6 +755,14 @@ mod tests {
             preloaded_skills_version: 0,
             primary_color: None,
             avatar_url: None,
+            share_skills_across_identities: false,
+            allow_minor_visual_adaptation: true,
+            allow_avatar_swap: false,
+            memory_disclosure_enabled: true,
+            forge_advanced_mode: false,
+            signed_skill_allowlist: Vec::new(),
+            known_recipients_by_identity: HashMap::new(),
+            skill_recovery_budget: 3,
         }
     }
 
