@@ -31,6 +31,7 @@ dependencies = [
  "abigail-skills",
  "abigail-soul-crystallization",
  "anyhow",
+ "async-trait",
  "base64 0.22.1",
  "chrono",
  "ed25519-dalek",

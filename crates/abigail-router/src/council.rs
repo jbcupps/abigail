@@ -386,14 +386,14 @@ mod tests {
     /// A deterministic mock LLM provider for testing.
     #[derive(Clone)]
     struct MockProvider {
-        name: String,
+        _name: String,
         response: String,
     }
 
     impl MockProvider {
         fn new(name: &str, response: &str) -> Self {
             Self {
-                name: name.to_string(),
+                _name: name.to_string(),
                 response: response.to_string(),
             }
         }

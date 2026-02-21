@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex, RwLock};
 ///   1. `config`            (RwLock — most frequently accessed, acquire first)
 ///   2. `birth`             (RwLock)
 ///   3. `secrets`           (Mutex)
+///   3b. `skills_secrets`    (Mutex — operational keys for Ego/Skills)
 ///   4. `hive_secrets`      (Mutex)
 ///   4b. `auth_manager`     (Arc — internal async locks, acquire after hive_secrets)
 ///   5. `router`            (RwLock)
@@ -39,6 +40,8 @@ pub struct AppState {
     pub executor: Arc<SkillExecutor>,
     pub event_bus: Arc<EventBus>,
     pub secrets: Arc<Mutex<SecretsVault>>,
+    /// Operational secrets for Ego/Skills (IMAP, Jira, etc.)
+    pub skills_secrets: Arc<Mutex<SecretsVault>>,
     /// Hive-level secrets vault (shared API keys across all agents)
     pub hive_secrets: Arc<Mutex<SecretsVault>>,
     /// Auth manager for integration credential lifecycle

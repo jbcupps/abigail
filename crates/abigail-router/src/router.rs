@@ -433,11 +433,8 @@ async fn build_id_provider_auto_detect(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use abigail_capabilities::cognitive::{
-        CompletionRequest, CompletionResponse, LlmProvider, Message,
-    };
+    use abigail_capabilities::cognitive::Message;
     use abigail_core::RoutingMode;
-    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_heartbeat_stub() {
