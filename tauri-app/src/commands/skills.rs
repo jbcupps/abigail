@@ -33,6 +33,19 @@ fn is_dangerous_tool(td: &ToolDescriptor) -> bool {
     td.requires_confirmation || destructive_name || destructive_permission
 }
 
+fn resolve_mcp_server_url(state: &State<'_, AppState>, server_id: &str) -> Result<String, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let server = config
+        .mcp_servers
+        .iter()
+        .find(|s| s.id == server_id)
+        .ok_or_else(|| format!("MCP server not found: {}", server_id))?;
+    if server.transport != "http" {
+        return Err("Only HTTP transport is supported for MCP list_tools".to_string());
+    }
+    Ok(server.command_or_url.clone())
+}
+
 #[tauri::command]
 pub fn list_skills(state: State<AppState>) -> Result<Vec<SkillManifest>, String> {
     state.registry.list().map_err(|e| e.to_string())
@@ -119,15 +132,7 @@ pub async fn mcp_list_tools(
     state: State<'_, AppState>,
     server_id: String,
 ) -> Result<Vec<McpTool>, String> {
-    let url = {
-        let config = state.config.read().map_err(|e| e.to_string())?;
-        let server = config
-            .mcp_servers
-            .iter()
-            .find(|s| s.id == server_id)
-            .ok_or_else(|| format!("MCP server not found: {}", server_id))?;
-        server.command_or_url.clone()
-    };
+    let url = resolve_mcp_server_url(&state, &server_id)?;
     let client = HttpMcpClient::new(url);
     client.initialize().await.map_err(|e| e.to_string())?;
     client.list_tools_impl().await.map_err(|e| e.to_string())
