@@ -27,6 +27,7 @@ dependencies = [
  "abigail-capabilities",
  "abigail-cli",
  "abigail-core",
+ "abigail-hive",
  "abigail-memory",
  "abigail-router",
  "abigail-skills",
@@ -168,6 +169,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "abigail-hive"
+version = "0.0.1"
+dependencies = [
+ "abigail-capabilities",
+ "abigail-core",
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "abigail-keygen"
 version = "0.0.1"
 dependencies = [
@@ -206,6 +221,7 @@ version = "0.0.1"
 dependencies = [
  "abigail-capabilities",
  "abigail-core",
+ "abigail-hive",
  "anyhow",
  "async-trait",
  "chrono",

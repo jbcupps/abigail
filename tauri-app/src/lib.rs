@@ -24,6 +24,7 @@ use crate::state::AppState;
 
 use abigail_auth::AuthManager;
 use abigail_core::{validate_local_llm_url, AppConfig, SecretsVault};
+use abigail_hive::Hive;
 use abigail_router::{IdEgoRouter, SubagentManager};
 use abigail_skills::channel::EventBus;
 use abigail_skills::protocol::mcp::McpSkillRuntime;
@@ -94,165 +95,17 @@ fn get_config() -> AppConfig {
     config
 }
 
-pub fn extract_superego_config(config: &AppConfig) -> Option<(String, String)> {
-    config.trinity.as_ref().and_then(|trinity| {
-        match (&trinity.superego_provider, &trinity.superego_api_key) {
-            (Some(provider), Some(key)) if !key.is_empty() => Some((provider.clone(), key.clone())),
-            _ => None,
-        }
-    })
-}
-
-pub fn build_superego_llm_provider(
-    provider: &str,
-    key: &str,
-) -> Arc<dyn abigail_capabilities::cognitive::LlmProvider> {
-    let fallback =
-        || match abigail_capabilities::cognitive::OpenAiProvider::new(Some(key.to_string())) {
-            Ok(p) => Arc::new(p) as Arc<dyn abigail_capabilities::cognitive::LlmProvider>,
-            Err(e) => {
-                tracing::error!(
-                    "Failed to create OpenAI fallback provider for Superego: {}",
-                    e
-                );
-                Arc::new(abigail_capabilities::cognitive::CandleProvider::new())
-                    as Arc<dyn abigail_capabilities::cognitive::LlmProvider>
-            }
-        };
-    match provider {
-        "anthropic" => {
-            match abigail_capabilities::cognitive::AnthropicProvider::new(key.to_string()) {
-                Ok(p) => Arc::new(p),
-                Err(e) => {
-                    tracing::error!("Failed to create Anthropic provider: {}", e);
-                    fallback()
-                }
-            }
-        }
-        _ => fallback(),
-    }
-}
-
-pub fn determine_ego_provider(
-    config: &AppConfig,
-    secrets: &SecretsVault,
-) -> (Option<String>, Option<String>) {
-    // 1. Explicit preference from Mentor menu (Forge)
-    if let Some(pref) = &config.active_provider_preference {
-        if let Some(key) = secrets.get_secret(pref) {
-            let k = key.to_string();
-            if !k.is_empty() {
-                return (Some(pref.clone()), Some(k));
-            }
-        }
-    }
-
-    // 2. Local Vault (keys pasted in chat or added in Connectivity)
-    // We check this BEFORE environment variables so user-provided keys take priority.
-    let provider_names = [
-        "openai",
-        "google",
-        "xai",
-        "perplexity",
-        "anthropic",
-        "claude-cli",
-        "gemini-cli",
-        "codex-cli",
-        "grok-cli",
-    ];
-    for name in &provider_names {
-        if let Some(key) = secrets.get_secret(name) {
-            let k = key.to_string();
-            if !k.is_empty() {
-                return (Some(name.to_string()), Some(k));
-            }
-        }
-    }
-
-    // 3. Trinity config (legacy/manual paths)
-    if let Some(trinity) = &config.trinity {
-        if let Some(p) = &trinity.ego_provider {
-            if let Some(k) = &trinity.ego_api_key {
-                if !k.is_empty() {
-                    return (Some(p.clone()), Some(k.clone()));
-                }
-            }
-        }
-    }
-
-    // 4. Environment variables (last resort)
-    if let Some(k) = &config.openai_api_key {
-        if !k.is_empty() {
-            return (Some("openai".to_string()), Some(k.clone()));
-        }
-    }
-
-    (None, None)
-}
-
 pub async fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
-    let (local_url, ego_name, ego_key, ego_model, routing_mode, superego_config, superego_l2_mode) = {
+    // Resolve config synchronously (acquires only sync locks), then drop guards
+    // before the async build_providers call.
+    let hive_config = {
         let config = state.config.read().map_err(|e| e.to_string())?;
-        let vault = state.secrets.lock().map_err(|e| e.to_string())?;
-
-        let (ego_name, ego_key) = {
-            let (name, key) = determine_ego_provider(&config, &vault);
-            if name.is_some() {
-                tracing::info!("Using Ego provider from preference/vault: {:?}", name);
-                (name, key)
-            } else {
-                let hive = state.hive_secrets.lock().map_err(|e| e.to_string())?;
-                let (h_name, h_key) = determine_ego_provider(&config, &hive);
-                tracing::info!("Using Ego provider from Hive vault: {:?}", h_name);
-                (h_name, h_key)
-            }
-        };
-
-        let ego_model = ego_name.as_ref().and_then(|name| {
-            let model = config
-                .tier_models
-                .as_ref()
-                .and_then(|tm| tm.standard.get(name).cloned());
-            tracing::info!("Model for {:?} found in TierModels: {:?}", name, model);
-            model
-        });
-
-        let se = extract_superego_config(&config);
-
-        tracing::debug!(
-            "Rebuilding router: local_url={:?}, ego_name={:?}, ego_model={:?}, has_ego_key={}, mode={:?}",
-            config.local_llm_base_url,
-            ego_name,
-            ego_model,
-            ego_key.is_some(),
-            config.routing_mode
-        );
-
-        (
-            config.local_llm_base_url.clone(),
-            ego_name,
-            ego_key,
-            ego_model,
-            config.routing_mode,
-            se,
-            config.superego_l2_mode,
-        )
+        state.hive.resolve_config(&config)?
     };
 
-    let mut new_router = IdEgoRouter::new_auto_detect(
-        local_url,
-        ego_name.as_deref(),
-        ego_key,
-        ego_model,
-        routing_mode,
-    )
-    .await;
+    let built = abigail_hive::Hive::build_providers(&hive_config).await;
 
-    if let Some((se_provider, se_key)) = superego_config {
-        let superego = build_superego_llm_provider(&se_provider, &se_key);
-        new_router = new_router.with_superego(superego);
-    }
-    new_router = new_router.with_superego_l2_mode(superego_l2_mode);
+    let new_router = IdEgoRouter::from_built_providers(built);
 
     let router_arc = Arc::new(new_router.clone());
     let mut router = state.router.write().map_err(|e| e.to_string())?;
@@ -295,22 +148,15 @@ pub fn run() {
             .unwrap_or_else(|_| SecretsVault::new(hive_data_dir.clone())),
     ));
 
-    let (ego_name, ego_key) = determine_ego_provider(&config, &secrets.lock().unwrap());
-    let ego_model = ego_name.as_ref().and_then(|name| {
-        config
-            .tier_models
-            .as_ref()
-            .and_then(|tm| tm.standard.get(name).cloned())
-    });
+    let hive = Arc::new(Hive::new(secrets.clone(), hive_secrets.clone()));
 
-    let mut router = tauri::async_runtime::block_on(IdEgoRouter::new_auto_detect(
-        config.local_llm_base_url.clone(),
-        ego_name.as_deref(),
-        ego_key,
-        ego_model,
-        config.routing_mode,
-    ));
-    router.set_superego_l2_mode(config.superego_l2_mode);
+    let router = tauri::async_runtime::block_on(async {
+        let built = hive
+            .build_providers_from_config(&config)
+            .await
+            .expect("Failed to build initial providers");
+        IdEgoRouter::from_built_providers(built)
+    });
 
     let auth_manager = Arc::new(AuthManager::new(secrets.clone()));
     let identity_manager =
@@ -338,6 +184,7 @@ pub fn run() {
         secrets,
         skills_secrets,
         hive_secrets,
+        hive,
         auth_manager,
         identity_manager,
         active_agent_id: RwLock::new(None),

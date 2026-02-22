@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-22 19:00 EST: Create abigail-hive crate as single authority for secret resolution and provider construction, moving builder functions out of router and Tauri app
 - 2026-02-22 01:30 EST: Harden release signing key pipeline to auto-strip whitespace from base64, validate encoding, and pass sanitized key to build step
 - 2026-02-22 00:10 EST: Fix CI lint gate by correcting import ordering in config.rs
 - 2026-02-21 23:20 EST: Fix native birth/chat provider reliability and improve Forge feedback/readability while hardening browser harness tests to catch real-world provider failure and recovery behavior.
