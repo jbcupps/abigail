@@ -1,34 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/abigail-core",
-    "crates/abigail-memory",
-    "crates/abigail-capabilities",
-    "crates/abigail-router",
-    "crates/abigail-birth",
-    "crates/abigail-soul-crystallization",
-    "crates/abigail-skills",
-    "crates/abigail-hive",
-    "crates/abigail-auth",
-    "crates/abigail-keygen",
-    "crates/abigail-cli",
-    "crates/soul-forge",
-    "skills/skill-web-search",
-    "skills/skill-filesystem",
-    "skills/skill-shell",
-    "skills/skill-http",
-    "skills/skill-perplexity-search",
-    "skills/skill-knowledge-base",
-    "skills/skill-git",
-    "skills/skill-code-analysis",
-    "skills/skill-database",
-    "skills/skill-calendar",
-    "skills/skill-document",
-    "skills/skill-notification",
-    "skills/skill-image",
-    "skills/skill-clipboard",
-    "skills/skill-system-monitor",
-    "tauri-app",
+    "crates/hive-core",
+    "crates/entity-core",
+    "crates/hive-daemon",
+    "crates/hive-cli",
+    "crates/entity-daemon",
+    "crates/entity-cli",
 ]
 
 [workspace.package]
@@ -38,20 +16,14 @@ authors = ["Abigail's Mentor"]
 license = "MIT"
 
 [workspace.dependencies]
-tokio = { version = "1.35", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net", "process", "signal"] }
-async-trait = "0.1"
+anyhow = "1.0"
+axum = "0.8"
+clap = { version = "4.5", features = ["derive"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-ed25519-dalek = { version = "2.1", features = ["rand_core"] }
-rand = "0.8"
-base64 = "0.22"
-rusqlite = { version = "0.32", features = ["bundled", "blob"] }
-thiserror = "1.0"
-anyhow = "1.0"
+tokio = { version = "1.35", features = ["rt-multi-thread", "macros", "signal", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.6", features = ["v4", "serde"] }
-tokio-util = { version = "0.7", features = ["io", "compat"] }
-reqwest = { version = "0.12", features = ["json", "stream"] }
-abigail-auth = { path = "crates/abigail-auth" }
+hive-core = { path = "crates/hive-core" }
+entity-core = { path = "crates/entity-core" }
