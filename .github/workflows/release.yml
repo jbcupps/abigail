@@ -215,15 +215,12 @@ jobs:
       - name: Build Tauri app
         shell: bash
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # TAURI_SIGNING_PRIVATE_KEY is set via GITHUB_ENV by the validation step above.
+          # Only fall back to secrets if the validation step didn't run or didn't export.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           cd tauri-app
-
-          # Some secret stores keep newlines escaped ("\n"). Normalize before build.
-          if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" && "$TAURI_SIGNING_PRIVATE_KEY" == *"\n"* ]]; then
-            export TAURI_SIGNING_PRIVATE_KEY="$(printf '%b' "$TAURI_SIGNING_PRIVATE_KEY")"
-          fi
 
           if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
             echo "Signing key detected: building signed artifacts"
@@ -282,7 +279,11 @@ jobs:
         id: artifacts
         shell: bash
         run: |
-          COUNT=$(find artifacts -type f 2>/dev/null | wc -l | tr -d ' ')
+          if [ -d artifacts ]; then
+            COUNT=$(find artifacts -type f | wc -l | tr -d ' ')
+          else
+            COUNT=0
+          fi
           echo "count=$COUNT" >> $GITHUB_OUTPUT
           echo "Discovered $COUNT downloaded artifact file(s)"
 
