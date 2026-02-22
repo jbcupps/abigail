@@ -2,6 +2,20 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-22 (Hive/Entity alignment baseline locked)
+
+- **Canonical decisions locked:** Standardized terminology is now `Hive > Entity > Agent`.
+- **Launch/session contract:** Soul Registry is always first at launch with explicit entity selection each session.
+- **Lifecycle contract:** Entity creation remains always available, archive is primary, delete is secondary.
+- **Isolation and sharing:** Cross-entity sharing defaults to off; explicit opt-in sharing can include skills, memory, and tools.
+- **Disconnect contract:** Soft suspend preserves chat/context only.
+- **Migration posture (current phase):** Clean restart assumption; migration is low-priority for now. Future migration path is silent auto-migrate with prompt-per-conflict and risk-scoring hooks.
+- **Visual policy:** Full avatar/theme swaps are allowed post-birth.
+- **Provider scope:** Hive-global by default with per-entity overrides for task optimization.
+- **Runtime cap:** Maximum 3 concurrently running agents for now, with hooks planned for future dynamic hardware/usage-based limits.
+- **Governance timing:** Strict office governance remains deferred to Chunk 4+.
+- **Release handling note:** Current branch assumes clean restarts per release while updater/key constraints are deferred.
+
 ## 2026-02-21 (Workspace refresh baseline after sovereign refactor wave)
 
 - **Branch + drift snapshot:** Active branch is `feat/autonomous-skills-factory` with local, uncommitted edits across router, config, capability providers, Tauri command modules, and UI surfaces (`ChatInterface`, `ForgePanel`). Untracked local artifacts include `.cargo/`, `.grok/`, `tauri-app/src-ui/coverage/`, root `node_modules/`, and `nul`.

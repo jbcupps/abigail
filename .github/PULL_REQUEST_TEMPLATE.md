@@ -28,8 +28,10 @@
 
 - [ ] `cargo fmt --check` passes
 - [ ] `cargo clippy` passes with no warnings
-- [ ] `cargo test --all` passes
-- [ ] Frontend builds (`cd tauri-app/src-ui && npm run build`)
+- [ ] `cargo check --workspace` passes
+- [ ] `cargo test --workspace` passes
+- [ ] For non-trivial changes: plan and progress tracked in `tasks/todo.md`
+- [ ] For user/data-facing changes: risks and rollback strategy documented
 - [ ] Manual testing performed (describe below)
 
 ## Screenshots
@@ -43,3 +45,4 @@
 - [ ] I have updated documentation as needed
 - [ ] No secrets or sensitive data in this PR
 - [ ] Changes are backwards compatible (or breaking changes are documented)
+- [ ] Verification evidence includes relevant edge cases and error paths

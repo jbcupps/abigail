@@ -9,9 +9,6 @@
 /crates/ @jbcupps
 /skills/ @jbcupps
 
-# Tauri app
-/tauri-app/ @jbcupps
-
 # CI/CD and GitHub config
 /.github/ @jbcupps
 

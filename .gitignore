@@ -10,12 +10,9 @@ keys.bin
 target/
 *.pdb
 
-# Node / frontend
-tauri-app/src-ui/node_modules/
-tauri-app/src-ui/dist/
-
-# Tauri generated files
-tauri-app/gen/
+# Node
+node_modules/
+dist/
 
 # Application data files (created at runtime, not in repo)
 config.json

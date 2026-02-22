@@ -12,7 +12,7 @@ updates: []
 #   labels: ["dependencies", "rust"]
 #
 # - package-ecosystem: "npm"
-#   directory: "tauri-app/src-ui"
+#   directory: "/"
 #   schedule:
 #     interval: "weekly"
 #   open-pull-requests-limit: 5
