@@ -564,7 +564,7 @@ fn build_ego_provider(
         Some("anthropic") => {
             let built = AnthropicProvider::with_model(
                 key,
-                ego_model.unwrap_or_else(|| "claude-3-5-sonnet-latest".to_string()),
+                ego_model.unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
             )
             .inspect_err(|e| tracing::error!("Failed to build Anthropic provider: {}", e))
             .ok()

@@ -150,11 +150,11 @@ pub fn determine_ego_provider(
     // 2. Local Vault (keys pasted in chat or added in Connectivity)
     // We check this BEFORE environment variables so user-provided keys take priority.
     let provider_names = [
-        "anthropic",
         "openai",
+        "google",
         "xai",
         "perplexity",
-        "google",
+        "anthropic",
         "claude-cli",
         "gemini-cli",
         "codex-cli",

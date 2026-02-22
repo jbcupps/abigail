@@ -46,7 +46,9 @@ async fn validate_anthropic(key: &str) -> anyhow::Result<()> {
         .header("x-api-key", key)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
-        .body(r#"{"model":"claude-3-5-haiku-latest","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}"#)
+        .body(
+            r#"{"model":"claude-sonnet-4-20250514","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}"#,
+        )
         .send()
         .await?;
 

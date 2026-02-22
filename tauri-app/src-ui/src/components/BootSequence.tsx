@@ -307,6 +307,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   }
 
   const handleApiKeySaved = (result: StoreKeyResult) => {
+    setError("");
     setActiveApiKeyProvider(null);
     if (result && result.success) {
       setStoredProviders((prev) => {
@@ -669,7 +670,10 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                             ? "border-green-600 bg-green-950/20 text-green-500"
                             : "border-theme-border-dim bg-theme-bg-inset text-theme-text-dim hover:border-theme-primary hover:text-theme-text"
                         }`}
-                        onClick={() => setActiveApiKeyProvider(p)}
+                        onClick={() => {
+                          setError("");
+                          setActiveApiKeyProvider(p);
+                        }}
                         disabled={storedProviders.includes(p)}
                       >
                         <div className="flex justify-between items-center">
@@ -696,7 +700,10 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                             ? "border-green-600 bg-green-950/20 text-green-500"
                             : "border-theme-border-dim bg-theme-bg-inset text-theme-text-dim hover:border-theme-primary hover:text-theme-text"
                         }`}
-                        onClick={() => setActiveApiKeyProvider(p)}
+                        onClick={() => {
+                          setError("");
+                          setActiveApiKeyProvider(p);
+                        }}
                         disabled={storedProviders.includes(p)}
                       >
                         <div className="flex justify-between items-center">
@@ -715,7 +722,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               {storedProviders.length > 0 && (
                 <div className="mt-6 flex justify-center">
                   <button
-                    className="px-8 py-2 bg-theme-primary text-black font-bold rounded-full hover:bg-theme-text transition-colors flex items-center gap-2 text-sm"
+                    className="px-8 py-2 bg-theme-primary text-theme-bg font-bold rounded-full hover:bg-theme-text transition-colors flex items-center gap-2 text-sm"
                     onClick={handleConnectivityAdvance}
                   >
                     ESTABLISH LINKAGE &rsaquo;

@@ -5,6 +5,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import McpAppFrame from "./McpAppFrame";
 import ThinkingIndicator from "./ThinkingIndicator";
 import VaultModal, { type MissingSkillSecret } from "./VaultModal";
+import { isBrowserHarnessRuntime, isHarnessDebugEnabled } from "../runtimeMode";
 
 interface Message {
   role: "user" | "assistant";
@@ -81,6 +82,8 @@ export default function ChatInterface({
   const [cliPortInput, setCliPortInput] = useState("8080");
   const [showRoutingDetails, setShowRoutingDetails] = useState(false);
   const [memoryDisclosureEnabled, setMemoryDisclosureEnabled] = useState(true);
+  const [lastDebugTraceId, setLastDebugTraceId] = useState<string | null>(null);
+  const showDebugTelemetry = isBrowserHarnessRuntime() && isHarnessDebugEnabled();
   const memoryUsedTurnRef = useRef(false);
 
   const assistantLabel = agentName || "Abigail";
@@ -191,8 +194,11 @@ export default function ChatInterface({
     refreshMissingSecrets();
 
     // Listen for chat-status events from backend (e.g. tool execution)
-    const unlisten = listen<{ status: string; tool: string; duration_ms?: number; error?: string }>("chat-status", (event) => {
+    const unlisten = listen<{ status: string; tool: string; duration_ms?: number; error?: string; trace_id?: string }>("chat-status", (event) => {
       const { status, tool, duration_ms } = event.payload;
+      if (event.payload.trace_id) {
+        setLastDebugTraceId(event.payload.trace_id);
+      }
       if (tool === "recall" && (status === "executing" || status === "done")) {
         memoryUsedTurnRef.current = true;
       }
@@ -222,10 +228,13 @@ export default function ChatInterface({
       };
       setChatStatus(toolMessages[tool] || `Running ${tool}...`);
     });
-    const unlistenRouting = listen<{ provider?: string; fallback_used?: boolean; safety_blocked?: boolean; error?: boolean }>(
+    const unlistenRouting = listen<{ provider?: string; fallback_used?: boolean; safety_blocked?: boolean; error?: boolean; trace_id?: string }>(
       "chat-routing",
       (event) => {
         const payload = event.payload;
+        if (payload.trace_id) {
+          setLastDebugTraceId(payload.trace_id);
+        }
         if (payload.fallback_used || payload.safety_blocked || payload.error) {
           setShowRoutingDetails(true);
         }
@@ -397,10 +406,42 @@ export default function ChatInterface({
     // Add a placeholder assistant message for streaming
     setMessages((m) => [...m, { role: "assistant", content: "" }]);
 
-        // Listen for streaming tokens
+        // Listen for streaming tokens. Coalesce UI updates to animation frames
+        // so very fast token streams do not trigger visible flicker.
         let streamContent = "";
         let streamProvider = "";
         let unlisten: (() => void) | null = null;
+        let rafId: number | null = null;
+        let streamFlushTimerId: number | null = null;
+
+        const flushStreamToUi = () => {
+          setMessages((m) => {
+            const updated = [...m];
+            const lastAssistant = updated[updated.length - 1];
+            if (lastAssistant && lastAssistant.role === "assistant") {
+              updated[updated.length - 1] = {
+                ...lastAssistant,
+                content: streamContent,
+                provider: streamProvider,
+                memoryUsed: memoryUsedTurnRef.current,
+              };
+            }
+            return updated;
+          });
+        };
+
+        const scheduleStreamFlush = () => {
+          // Throttle streaming paints to avoid rapid visual flashing in the chat list.
+          if (streamFlushTimerId !== null) return;
+          streamFlushTimerId = window.setTimeout(() => {
+            streamFlushTimerId = null;
+            if (rafId !== null) return;
+            rafId = window.requestAnimationFrame(() => {
+              rafId = null;
+              flushStreamToUi();
+            });
+          }, 45);
+        };
         try {
           unlisten = await listen<{ token?: string; provider?: string; done?: boolean }>("chat-token", (event) => {
             if (event.payload.token) {
@@ -408,19 +449,7 @@ export default function ChatInterface({
               if (event.payload.provider) {
                 streamProvider = event.payload.provider;
               }
-              setMessages((m) => {
-                const updated = [...m];
-                const lastAssistant = updated[updated.length - 1];
-                if (lastAssistant && lastAssistant.role === "assistant") {
-                  updated[updated.length - 1] = { 
-                    ...lastAssistant, 
-                    content: streamContent,
-                    provider: streamProvider,
-                    memoryUsed: memoryUsedTurnRef.current,
-                  };
-                }
-                return updated;
-              });
+              scheduleStreamFlush();
             }
           });
     
@@ -449,6 +478,9 @@ export default function ChatInterface({
           }
           return updated;
         });
+      } else {
+        // Ensure final buffered tokens are rendered immediately.
+        flushStreamToUi();
       }
     } catch (e) {
       if (!mountedRef.current) return;
@@ -470,6 +502,12 @@ export default function ChatInterface({
       });
       setShowRoutingDetails(true);
     } finally {
+      if (streamFlushTimerId !== null) {
+        window.clearTimeout(streamFlushTimerId);
+      }
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+      }
       try { if (unlisten) unlisten(); } catch { /* ignore */ }
       if (!mountedRef.current) return;
       setLoading(false);
@@ -829,6 +867,11 @@ export default function ChatInterface({
         >
           Memory disclosure: {memoryDisclosureEnabled ? "On" : "Off"}
         </button>
+        {showDebugTelemetry && (
+          <span className="text-theme-text-dim">
+            trace: {lastDebugTraceId ?? "none"}
+          </span>
+        )}
       </div>
       {renderConfigMenu()}
       {missingSecrets.length > 0 && (
@@ -862,7 +905,7 @@ export default function ChatInterface({
         {messages.map((msg, i) => (
           <div
             key={i}
-            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-fade-in-up`}
+            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
               className={`max-w-[80%] px-4 py-2.5 text-sm ${

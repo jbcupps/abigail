@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 
 const COMMON_MODELS: Record<string, string[]> = {
   openai: ["gpt-4o", "gpt-4o-mini", "o1", "o1-mini", "o3-mini"],
-  anthropic: ["claude-3-5-sonnet-latest", "claude-3-5-haiku-latest", "claude-3-opus-latest"],
+  anthropic: ["claude-sonnet-4-20250514", "claude-haiku-4-5-20251001", "claude-opus-4-6"],
   google: ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
   xai: ["grok-2-latest", "grok-beta"],
   perplexity: ["sonar", "sonar-pro", "sonar-reasoning"],
@@ -33,6 +33,11 @@ type UndoStatus = {
   window_minutes: number;
 };
 
+type ApplyStatus = {
+  kind: "success" | "error";
+  message: string;
+} | null;
+
 export default function ForgePanel() {
   const [storedProviders, setStoredProviders] = useState<string[]>([]);
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
@@ -58,6 +63,7 @@ export default function ForgePanel() {
   const [personaCreativity, setPersonaCreativity] = useState(50);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [applyStatus, setApplyStatus] = useState<ApplyStatus>(null);
 
   const fetchData = async () => {
     try {
@@ -104,6 +110,7 @@ export default function ForgePanel() {
   const handleProviderChange = async (provider: string) => {
     setActiveProvider(provider);
     setPreview(null);
+    setApplyStatus(null);
     const model = await invoke<string | null>("get_ego_model", { provider });
     setCurrentModel(model || "");
   };
@@ -136,7 +143,7 @@ export default function ForgePanel() {
     setSaving(true);
     try {
       const modelToSave = customModel || currentModel;
-      await invoke("apply_forge_primary_intelligence", {
+      const result = await invoke<{ success: boolean; changes_applied: string[] }>("apply_forge_primary_intelligence", {
         provider: activeProvider,
         model: modelToSave,
         routingMode,
@@ -148,6 +155,19 @@ export default function ForgePanel() {
       setCustomModel("");
       setPreview(null);
       await fetchData();
+      const changeCount = result?.changes_applied?.length ?? 0;
+      setApplyStatus({
+        kind: "success",
+        message:
+          changeCount > 0
+            ? `Applied ${changeCount} change${changeCount === 1 ? "" : "s"} (active: ${activeProvider}).`
+            : `No effective changes. Active provider remains ${activeProvider}.`,
+      });
+      window.setTimeout(() => {
+        setApplyStatus((prev) => (prev?.kind === "success" ? null : prev));
+      }, 2500);
+    } catch (e) {
+      setApplyStatus({ kind: "error", message: String(e) });
     } finally {
       setSaving(false);
     }
@@ -174,7 +194,7 @@ export default function ForgePanel() {
               onClick={() => handleProviderChange(p)}
               className={`px-3 py-2 border rounded text-xs text-left transition-all ${
                 activeProvider === p
-                  ? "border-theme-primary bg-theme-primary-glow text-theme-text"
+                  ? "border-theme-primary bg-theme-primary-glow text-theme-text-bright"
                   : "border-theme-border-dim text-theme-text-dim hover:border-theme-primary"
               }`}
             >
@@ -199,7 +219,7 @@ export default function ForgePanel() {
               onClick={() => setRoutingMode(m.id)}
               className={`px-3 py-2 border rounded text-xs text-left transition-all ${
                 routingMode === m.id
-                  ? "border-theme-primary bg-theme-primary-glow text-theme-text"
+                  ? "border-theme-primary bg-theme-primary-glow text-theme-text-bright"
                   : "border-theme-border-dim text-theme-text-dim hover:border-theme-primary"
               }`}
             >
@@ -207,7 +227,7 @@ export default function ForgePanel() {
                 <span className="font-bold">{m.label}</span>
                 {routingMode === m.id && <span className="text-theme-primary text-[10px]">ACTIVE</span>}
               </div>
-              <p className="text-[10px] opacity-70">{m.desc}</p>
+              <p className="text-[10px] text-theme-text-bright/80">{m.desc}</p>
             </button>
           ))}
         </div>
@@ -223,7 +243,7 @@ export default function ForgePanel() {
                 onClick={() => setCurrentModel(m)}
                 className={`px-2 py-1 border rounded text-[10px] transition-all ${
                   currentModel === m && !customModel
-                    ? "border-theme-primary bg-theme-primary-glow text-theme-text"
+                    ? "border-theme-primary bg-theme-primary-glow text-theme-text-bright"
                     : "border-theme-border-dim text-theme-text-dim hover:border-theme-primary"
                 }`}
               >
@@ -276,13 +296,13 @@ export default function ForgePanel() {
               setAdvancedMode(next);
               await invoke("set_forge_advanced_mode", { advancedMode: next });
             }}
-            className="px-3 py-2 border border-theme-border-dim rounded text-xs hover:border-theme-primary"
+            className="px-3 py-2 border border-theme-border-dim rounded text-xs text-theme-text-bright hover:border-theme-primary"
           >
             Complexity: {advancedMode ? "Advanced" : "Basic"}
           </button>
           <button
             onClick={() => setAuditOpen(v => !v)}
-            className="px-3 py-2 border border-theme-border-dim rounded text-xs hover:border-theme-primary"
+            className="px-3 py-2 border border-theme-border-dim rounded text-xs text-theme-text-bright hover:border-theme-primary"
           >
             {auditOpen ? "Hide Audit" : "Show Audit"}
           </button>
@@ -292,13 +312,13 @@ export default function ForgePanel() {
       <div className="grid grid-cols-2 gap-2">
         <button
           onClick={() => setViewMode("task")}
-          className={`px-3 py-2 border rounded text-xs ${viewMode === "task" ? "border-theme-primary bg-theme-primary-glow" : "border-theme-border-dim"}`}
+          className={`px-3 py-2 border rounded text-xs text-theme-text-bright ${viewMode === "task" ? "border-theme-primary bg-theme-primary-glow" : "border-theme-border-dim"}`}
         >
           Task View
         </button>
         <button
           onClick={() => setViewMode("system")}
-          className={`px-3 py-2 border rounded text-xs ${viewMode === "system" ? "border-theme-primary bg-theme-primary-glow" : "border-theme-border-dim"}`}
+          className={`px-3 py-2 border rounded text-xs text-theme-text-bright ${viewMode === "system" ? "border-theme-primary bg-theme-primary-glow" : "border-theme-border-dim"}`}
         >
           System View
         </button>
@@ -311,7 +331,7 @@ export default function ForgePanel() {
               <button
                 key={t}
                 onClick={() => setTaskTab(t)}
-                className={`px-3 py-2 border rounded text-xs capitalize ${taskTab === t ? "border-theme-primary bg-theme-primary-glow" : "border-theme-border-dim"}`}
+                className={`px-3 py-2 border rounded text-xs capitalize text-theme-text-bright ${taskTab === t ? "border-theme-primary bg-theme-primary-glow" : "border-theme-border-dim"}`}
               >
                 {t}
               </button>
@@ -355,7 +375,7 @@ export default function ForgePanel() {
               <button
                 key={t}
                 onClick={() => setSystemTab(t)}
-                className={`px-3 py-2 border rounded text-xs uppercase ${systemTab === t ? "border-theme-primary bg-theme-primary-glow" : "border-theme-border-dim"}`}
+                className={`px-3 py-2 border rounded text-xs uppercase text-theme-text-bright ${systemTab === t ? "border-theme-primary bg-theme-primary-glow" : "border-theme-border-dim"}`}
               >
                 {t}
               </button>
@@ -417,10 +437,21 @@ export default function ForgePanel() {
       )}
 
       <div className="space-y-2 border-t border-theme-border-dim pt-4">
+        {applyStatus && (
+          <div
+            className={`border rounded px-3 py-2 text-xs ${
+              applyStatus.kind === "success"
+                ? "border-green-700 bg-green-950/20 text-green-400"
+                : "border-red-800 bg-red-950/20 text-red-400"
+            }`}
+          >
+            {applyStatus.message}
+          </div>
+        )}
         <button
           onClick={handlePreview}
           disabled={!activeProvider}
-          className="w-full py-2 border border-theme-border-dim text-theme-text text-xs uppercase tracking-widest hover:border-theme-primary"
+          className="w-full py-2 border border-theme-border-dim text-theme-text-bright text-xs uppercase tracking-widest hover:border-theme-primary"
         >
           Preview Impact
         </button>
@@ -443,7 +474,7 @@ export default function ForgePanel() {
         <button
           onClick={handleApply}
           disabled={saving || !activeProvider}
-          className="w-full py-3 border border-theme-primary text-theme-text font-bold uppercase tracking-widest hover:bg-theme-primary-glow disabled:opacity-50"
+          className="w-full py-3 border border-theme-primary text-theme-text-bright font-bold uppercase tracking-widest hover:bg-theme-primary-glow disabled:opacity-50"
         >
           {saving ? "APPLYING..." : "Apply Changes"}
         </button>
