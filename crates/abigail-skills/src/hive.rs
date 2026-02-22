@@ -110,7 +110,7 @@ impl Skill for HiveManagementSkill {
             },
             ToolDescriptor {
                 name: "create_entity".to_string(),
-                description: "Birth a new Sovereign Entity with the given name.".to_string(),
+                description: "Birth a new Entity with the given name.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -126,7 +126,7 @@ impl Skill for HiveManagementSkill {
             },
             ToolDescriptor {
                 name: "switch_entity".to_string(),
-                description: "Switch the active consciousness to a different Sovereign Entity.".to_string(),
+                description: "Switch the active consciousness to a different Entity.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {

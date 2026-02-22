@@ -19,7 +19,7 @@ impl SkillFactory {
             id: SkillId("builtin.skill_factory".to_string()),
             name: "Skill Factory".to_string(),
             version: "0.1.0".to_string(),
-            description: "Allows the Sovereign Entity to autonomously create, update, and manage its own skills.".to_string(),
+            description: "Allows the Entity to autonomously create, update, and manage its own skills.".to_string(),
             license: Some("MIT".to_string()),
             category: "System".to_string(),
             keywords: vec!["factory".to_string(), "meta".to_string(), "code".to_string()],

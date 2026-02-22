@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 17;
+pub const CONFIG_SCHEMA_VERSION: u32 = 18;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -386,6 +386,14 @@ pub struct AppConfig {
     #[serde(default)]
     pub share_skills_across_identities: bool,
 
+    /// Whether memory can be selectively shared across identities.
+    #[serde(default)]
+    pub share_memory_across_identities: bool,
+
+    /// Whether tools can be selectively shared across identities.
+    #[serde(default)]
+    pub share_tools_across_identities: bool,
+
     /// Allows minor adaptive visual changes (theme accents, subtle refinements).
     #[serde(default = "default_allow_minor_visual_adaptation")]
     pub allow_minor_visual_adaptation: bool,
@@ -464,6 +472,8 @@ impl AppConfig {
             primary_color: None,
             avatar_url: None,
             share_skills_across_identities: false,
+            share_memory_across_identities: false,
+            share_tools_across_identities: false,
             allow_minor_visual_adaptation: default_allow_minor_visual_adaptation(),
             allow_avatar_swap: false,
             memory_disclosure_enabled: default_memory_disclosure_enabled(),
@@ -688,6 +698,14 @@ impl AppConfig {
             tracing::debug!("Migrated config from v16 to v17");
         }
 
+        // Migration from v17 to v18
+        if self.schema_version < 18 {
+            // v18 adds: share_memory_across_identities, share_tools_across_identities.
+            self.schema_version = 18;
+            migrated = true;
+            tracing::debug!("Migrated config from v17 to v18");
+        }
+
         migrated
     }
     /// Check if birth was interrupted (birth_stage set but birth_complete is false).
@@ -756,6 +774,8 @@ mod tests {
             primary_color: None,
             avatar_url: None,
             share_skills_across_identities: false,
+            share_memory_across_identities: false,
+            share_tools_across_identities: false,
             allow_minor_visual_adaptation: true,
             allow_avatar_swap: false,
             memory_disclosure_enabled: true,
