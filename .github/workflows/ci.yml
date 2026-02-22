@@ -60,6 +60,9 @@ jobs:
       - name: Check abigail-app compiles
         run: cargo check -p abigail-app
 
+      - name: Clippy abigail-app lock safety
+        run: cargo clippy -p abigail-app --no-deps -- -A warnings -D clippy::await_holding_lock
+
       - name: Test release signing key validator script
         shell: bash
         run: bash scripts/test_validate_tauri_signing_key.sh
