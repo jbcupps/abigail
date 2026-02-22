@@ -1,5 +1,6 @@
 use crate::state::AppState;
 use abigail_core::{validate_local_llm_url, TrinityConfig};
+use abigail_capabilities::cognitive::validation::validate_api_key;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -386,10 +387,19 @@ pub async fn store_provider_key(
         });
     }
 
-    // Optional: validate with provider
+    // Optional: validate with provider before saving.
     let validated = if validate {
-        // For now, just basic success
-        true
+        match validate_api_key(&provider, &key).await {
+            Ok(_) => true,
+            Err(e) => {
+                return Ok(StoreKeyResult {
+                    success: false,
+                    provider,
+                    validated: false,
+                    error: Some(e.to_string()),
+                })
+            }
+        }
     } else {
         false
     };

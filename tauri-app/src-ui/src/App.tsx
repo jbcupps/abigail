@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
 import SoulRegistry from "./components/SoulRegistry";
 import BootSequence from "./components/BootSequence";
@@ -10,6 +10,13 @@ import IdentityConflictPanel, { IdentitySummary } from "./components/IdentityCon
 import SplashScreen from "./components/SplashScreen";
 import SanctumDrawer from "./components/SanctumDrawer";
 import UpdateNotification from "./components/UpdateNotification";
+import HarnessDebugPanel from "./components/HarnessDebugPanel";
+import {
+  detectRuntimeMode,
+  isBrowserHarnessRuntime,
+  isHarnessDebugEnabled,
+  setHarnessDebugEnabled,
+} from "./runtimeMode";
 
 type AppState =
   | "splash"
@@ -196,6 +203,14 @@ function AppInner() {
     setAppState("management");
   };
 
+  const handleSessionSnapshot = useCallback(
+    (snapshot: ChatSessionSnapshot) => {
+      if (!activeSoulId) return;
+      setSuspendedSessions((prev) => ({ ...prev, [activeSoulId]: snapshot }));
+    },
+    [activeSoulId]
+  );
+
   switch (appState) {
     case "splash":
       return <SplashScreen onComplete={handleSplashComplete} />;
@@ -288,10 +303,7 @@ function AppInner() {
             <ChatInterface
               target="EGO"
               initialSession={activeSoulId ? suspendedSessions[activeSoulId] ?? null : null}
-              onSessionSnapshot={(snapshot) => {
-                if (!activeSoulId) return;
-                setSuspendedSessions((prev) => ({ ...prev, [activeSoulId]: snapshot }));
-              }}
+              onSessionSnapshot={handleSessionSnapshot}
             />
           </div>
         </div>
@@ -302,8 +314,31 @@ function AppInner() {
 }
 
 function App() {
+  const runtimeMode = detectRuntimeMode();
+  const showRuntimeBadge = runtimeMode === "browser-harness" || isHarnessDebugEnabled();
+  const showHarnessDebugPanel = isBrowserHarnessRuntime() && isHarnessDebugEnabled();
+
   return (
     <ThemeProvider initialMode="neutral">
+      {showHarnessDebugPanel && <HarnessDebugPanel />}
+      {showRuntimeBadge && (
+        <button
+          className="fixed bottom-2 right-2 z-[9999] text-[10px] px-2 py-1 rounded border border-theme-border-dim bg-theme-bg-elevated text-theme-text-dim hover:text-theme-text"
+          onClick={() => {
+            if (isBrowserHarnessRuntime()) {
+              setHarnessDebugEnabled(!isHarnessDebugEnabled());
+              window.location.reload();
+            }
+          }}
+          title={
+            isBrowserHarnessRuntime()
+              ? "Click to toggle harness debug panel"
+              : "Native runtime mode"
+          }
+        >
+          runtime: {runtimeMode}
+        </button>
+      )}
       <AppInner />
     </ThemeProvider>
   );

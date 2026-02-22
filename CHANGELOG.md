@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-21 23:20 EST: Fix native birth/chat provider reliability and improve Forge feedback/readability while hardening browser harness tests to catch real-world provider failure and recovery behavior.
 - 2026-02-21 19:30 EST: Fix TAURI signing-key validator escaped-newline detection so CI preflight tests pass for valid minisign secret formats.
 - 2026-02-21 19:15 EST: Add lock-safe MCP server URL resolution and focused clippy guard to catch lock-across-await regressions in abigail-app CI.
 - 2026-02-21 15:40 EST: Add release signing-key preflight validation and CI regression test to catch malformed TAURI updater secret format before Tauri bundling.

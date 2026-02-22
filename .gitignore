@@ -1,6 +1,7 @@
 # Environment and secrets
 .env
 .env.local
+.env.e2e.local
 *.local
 secrets.bin
 keys.bin

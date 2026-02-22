@@ -33,6 +33,54 @@ cd tauri-app/src-ui && npm install && cd ../..
 cargo tauri dev
 ```
 
+## Dual runtime debug testing (desktop + browser)
+
+Abigail now supports a development browser parity mode alongside native Tauri.
+
+### Native desktop path
+
+From repo root:
+
+```bash
+cargo tauri dev
+```
+
+Expected runtime indicator: `runtime: native` (no harness override).
+
+### Browser parity path
+
+From `tauri-app/src-ui`:
+
+```bash
+npm run dev
+```
+
+Open `http://localhost:1420`.
+
+Expected runtime indicator: `runtime: browser-harness`.
+
+### Harness debug panel
+
+Enable with either:
+- query flag: `http://localhost:1420/?harnessDebug=1`
+- or runtime badge toggle (click the runtime badge in browser mode).
+
+The panel exposes:
+- snapshot/state visibility,
+- fault injection (`chat_error`, `chat_timeout`, provider validation error),
+- harness reset,
+- trace on/off control.
+
+### Browser harness validation commands
+
+Run from `tauri-app/src-ui`:
+
+```bash
+npm run build
+npx vitest run src/__tests__/App.browserFlow.test.tsx src/__tests__/HarnessDebug.test.tsx
+npm run test:coverage
+```
+
 If `cargo tauri` is not available:
 
 ```bash
