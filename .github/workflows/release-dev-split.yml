@@ -1,0 +1,319 @@
+# Build Abigail installers, publish GitHub Release, and publish npm package.
+#
+# Triggers:
+#   - Tags matching 'v*' (e.g., v0.0.3)
+#   - Manual workflow_dispatch with optional version input
+#
+# Stage 1: Parallel 3-platform builds (Windows, Ubuntu, macOS).
+# Stage 2: Create GitHub Release + publish npm package.
+#          Proceeds if at least one platform built successfully.
+#
+# Platforms: Windows (NSIS), Ubuntu (deb), macOS (dmg universal binary)
+
+name: Release (dev-split)
+
+on:
+  push:
+    branches:
+      - dev-split
+  pull_request:
+    branches:
+      - dev-split
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Release version (e.g. 0.0.3). Leave empty for auto-increment.'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+
+  # -- Stage 1: Windows-only build for dev-split ------------------------------
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+            target: x86_64-pc-windows-msvc
+            installer_path: target/release/bundle/nsis/*.exe
+            asset_name: Abigail-windows-x64-setup.exe
+            asset_glob: "*.exe"
+            keygen_bin: abigail-keygen.exe
+            resource_name: abigail-keygen.exe
+
+    runs-on: ${{ matrix.platform }}
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Install NSIS (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: choco install nsis --no-progress -y
+
+      # Linux/macOS dependencies are omitted in dev-split.
+
+      - name: Setup Node
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: tauri-app/src-ui/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#v}"
+            TAG="${{ github.ref_name }}"
+          elif [[ -n "${{ github.event.inputs.release_version }}" ]]; then
+            VERSION="${{ github.event.inputs.release_version }}"
+            TAG="v${VERSION}"
+          else
+            git fetch --tags
+            LATEST=$(git tag -l 'v*' --sort=-v:refname | head -n 1)
+            if [[ -z "$LATEST" ]]; then
+              VERSION="0.0.1"
+            else
+              LATEST_VER="${LATEST#v}"
+              IFS='.' read -r MAJOR MINOR PATCH <<< "$LATEST_VER"
+              PATCH=$((PATCH + 1))
+              VERSION="${MAJOR}.${MINOR}.${PATCH}"
+            fi
+            TAG="v${VERSION}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION (tag: $TAG)"
+
+      - name: Update version in tauri.conf.json
+        shell: bash
+        run: |
+          cd tauri-app
+          node -e "
+            const fs = require('fs');
+            const conf = JSON.parse(fs.readFileSync('tauri.conf.json', 'utf8'));
+            conf.version = '${{ steps.version.outputs.version }}';
+            fs.writeFileSync('tauri.conf.json', JSON.stringify(conf, null, 2) + '\n');
+          "
+
+      - name: Disable beforeBuildCommand for CI
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = 'tauri-app/tauri.conf.json';
+            const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+            data.build = data.build || {};
+            data.build.beforeBuildCommand = '';
+            fs.writeFileSync(path, JSON.stringify(data, null, 2) + '\n');
+          "
+
+      - name: Set platform-specific resources in tauri.conf.json
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = 'tauri-app/tauri.conf.json';
+            const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+            data.bundle = data.bundle || {};
+            data.bundle.resources = ['${{ matrix.resource_name }}'];
+            fs.writeFileSync(path, JSON.stringify(data, null, 2) + '\n');
+          "
+
+      - name: Generate Cargo.lock
+        run: cargo generate-lockfile
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          workspaces: "."
+          shared-key: release-${{ matrix.platform }}
+
+      - name: Install and build frontend
+        run: |
+          cd tauri-app/src-ui && npm ci && npm run build
+
+      - name: Generate app icons
+        run: |
+          npm install -g @tauri-apps/cli@v2
+          cd tauri-app && tauri icon icons/icon.png -o icons
+
+      - name: Ensure icons at repo root (bundler cwd workaround)
+        shell: bash
+        run: |
+          mkdir -p icons
+          cp tauri-app/icons/icon.ico icons/ 2>/dev/null || true
+          cp tauri-app/icons/icon.icns icons/ 2>/dev/null || true
+          cp tauri-app/icons/*.png icons/ 2>/dev/null || true
+
+      - name: Build abigail-keygen binary
+        shell: bash
+        run: |
+          if [[ "${{ matrix.platform }}" == "macos-latest" ]]; then
+            cargo build --release -p abigail-keygen --target aarch64-apple-darwin
+            cargo build --release -p abigail-keygen --target x86_64-apple-darwin
+            lipo -create \
+              target/aarch64-apple-darwin/release/abigail-keygen \
+              target/x86_64-apple-darwin/release/abigail-keygen \
+              -output tauri-app/abigail-keygen
+          else
+            cargo build --release -p abigail-keygen
+            cp target/release/${{ matrix.keygen_bin }} tauri-app/${{ matrix.resource_name }}
+          fi
+
+      - name: Build Tauri app
+        shell: bash
+        run: |
+          cd tauri-app
+          tauri build ${{ matrix.args }}
+
+      - name: Upload installers (Artifacts)
+        uses: actions/upload-artifact@47309c993abb98030a35d55ef7ff34b7fa1074b5 # v4
+        with:
+          name: abigail-installer-${{ matrix.platform }}
+          path: ${{ matrix.installer_path }}
+          if-no-files-found: error
+
+      - name: Upload MSI installer (Windows)
+        if: matrix.platform == 'windows-latest'
+        uses: actions/upload-artifact@47309c993abb98030a35d55ef7ff34b7fa1074b5 # v4
+        with:
+          name: abigail-msi-windows-latest
+          path: target/release/bundle/msi/*.msi
+          if-no-files-found: warn
+
+  # -- Stage 2: Create GitHub Release (dev-split) -----------------------------
+  publish:
+    needs: build
+    if: github.event_name == 'push' && always() && (needs.build.result == 'success' || needs.build.result == 'failure')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Download all installer artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+          pattern: abigail-installer-*
+          merge-multiple: false
+        continue-on-error: true
+
+      - name: Download MSI artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+          pattern: abigail-msi-*
+          merge-multiple: false
+        continue-on-error: true
+
+      - name: Count downloaded installer artifacts
+        id: artifacts
+        shell: bash
+        run: |
+          if [ -d artifacts ]; then
+            COUNT=$(find artifacts -type f | wc -l | tr -d ' ')
+          else
+            COUNT=0
+          fi
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+          echo "Discovered $COUNT downloaded artifact file(s)"
+
+      - name: Rename to stable asset names for download URLs
+        shell: bash
+        run: |
+          mkdir -p release-assets
+
+          INSTALLER=$(find artifacts/abigail-installer-windows-latest -name "*.exe" -type f 2>/dev/null | head -1 || true)
+          if [ -z "$INSTALLER" ]; then
+            echo "WARNING: No Windows installer found in artifacts"
+          else
+            echo "Found Windows installer: $INSTALLER"
+            cp "$INSTALLER" release-assets/Abigail-windows-x64-setup.exe
+          fi
+
+          MSI=$(find artifacts/abigail-msi-windows-latest -name "*.msi" -type f 2>/dev/null | head -1 || true)
+          if [ -z "$MSI" ]; then
+            echo "WARNING: No Windows MSI found in artifacts"
+          else
+            echo "Found Windows MSI: $MSI"
+            cp "$MSI" release-assets/Abigail-windows-x64.msi
+          fi
+
+          echo "Release assets:"
+          ls -la release-assets/ 2>/dev/null || echo "No assets found"
+
+      - name: Count release assets
+        id: assets
+        shell: bash
+        run: |
+          COUNT=$(find release-assets -type f 2>/dev/null | wc -l | tr -d ' ')
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+          echo "Discovered $COUNT release asset(s)"
+
+      - name: Create GitHub Release
+        if: steps.assets.outputs.count != '0'
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
+        with:
+          tag_name: dev-split-${{ github.run_number }}
+          name: Abigail dev-split-${{ github.run_number }}
+          draft: true
+          prerelease: true
+          body: |
+            ## Abigail dev-split-${{ github.run_number }}
+
+            ### Installation
+
+            Download the installer for your platform:
+            - **Windows**: `Abigail-windows-x64-setup.exe` (NSIS installer)
+            - **Windows (MSI)**: `Abigail-windows-x64.msi` (Windows Installer)
+
+            ### First Run Setup
+
+            On first launch, Abigail will:
+            1. Generate a signing keypair for verifying document integrity
+            2. **Present your private key** — you MUST save this securely
+            3. Run integrity checks and complete the birth sequence
+
+            ### Security Note
+
+            The private key shown during first run is NEVER stored by Abigail.
+            Keep it safe — you will need it to verify your Abigail instance
+            or recover from data loss.
+
+            ### Platform Notes
+
+            - **macOS**: The app is not notarized. Right-click then Open on first launch to bypass Gatekeeper.
+            - **Linux**: Requires `libwebkit2gtk-4.1-0` and `libayatana-appindicator3-1`. Ubuntu 22.04+ recommended.
+
+            See [SECURITY_NOTES.md](https://github.com/${{ github.repository }}/blob/main/documents/SECURITY_NOTES.md) for details.
+          files: |
+            release-assets/*
+
+      # npm publish is intentionally skipped for dev-split.
