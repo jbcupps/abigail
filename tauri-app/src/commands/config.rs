@@ -1,6 +1,6 @@
 use crate::state::AppState;
-use abigail_core::{validate_local_llm_url, TrinityConfig};
 use abigail_capabilities::cognitive::validation::validate_api_key;
+use abigail_core::{validate_local_llm_url, TrinityConfig};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 

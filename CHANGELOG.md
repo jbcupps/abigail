@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-22 00:10 EST: Fix CI lint gate by correcting import ordering in config.rs
 - 2026-02-21 23:20 EST: Fix native birth/chat provider reliability and improve Forge feedback/readability while hardening browser harness tests to catch real-world provider failure and recovery behavior.
 - 2026-02-21 19:30 EST: Fix TAURI signing-key validator escaped-newline detection so CI preflight tests pass for valid minisign secret formats.
 - 2026-02-21 19:15 EST: Add lock-safe MCP server URL resolution and focused clippy guard to catch lock-across-await regressions in abigail-app CI.
