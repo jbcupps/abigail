@@ -4,6 +4,7 @@ use crate::rate_limit::CooldownGuard;
 use abigail_auth::AuthManager;
 use abigail_birth::BirthOrchestrator;
 use abigail_core::{AppConfig, SecretsVault};
+use abigail_hive::Hive;
 use abigail_router::{IdEgoRouter, SubagentManager};
 use abigail_skills::channel::EventBus;
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
@@ -20,7 +21,8 @@ use std::sync::{Arc, Mutex, RwLock};
 ///   3. `secrets`           (Mutex)
 ///   3b. `skills_secrets`    (Mutex — operational keys for Ego/Skills)
 ///   4. `hive_secrets`      (Mutex)
-///   4b. `auth_manager`     (Arc — internal async locks, acquire after hive_secrets)
+///   4b. `hive`             (Arc — acquires secrets+hive_secrets internally in documented order)
+///   4c. `auth_manager`     (Arc — internal async locks, acquire after hive_secrets)
 ///   5. `router`            (RwLock)
 ///   6. `active_agent_id`   (RwLock)
 ///   7. `subagent_manager`  (RwLock)
@@ -44,6 +46,8 @@ pub struct AppState {
     pub skills_secrets: Arc<Mutex<SecretsVault>>,
     /// Hive-level secrets vault (shared API keys across all agents)
     pub hive_secrets: Arc<Mutex<SecretsVault>>,
+    /// Hive: single authority for secret resolution and provider construction
+    pub hive: Arc<Hive>,
     /// Auth manager for integration credential lifecycle
     pub auth_manager: Arc<AuthManager>,
     /// Identity manager for the Hive multi-agent system

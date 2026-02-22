@@ -9,10 +9,10 @@
 //!   the fast path.
 
 use abigail_capabilities::cognitive::{
-    stub_heartbeat, AnthropicProvider, CandleProvider, CliLlmProvider, CliVariant,
-    CompatibleProvider, CompletionRequest, CompletionResponse, LlmProvider, LocalHttpProvider,
-    Message, OpenAiCompatibleProvider, OpenAiProvider, StreamEvent, ToolDefinition,
+    stub_heartbeat, CompletionRequest, CompletionResponse, LlmProvider, LocalHttpProvider, Message,
+    StreamEvent, ToolDefinition,
 };
+use abigail_hive::{BuiltProviders, ProviderKind, ProviderRegistry};
 use std::sync::Arc;
 
 use crate::council::CouncilEngine;
@@ -111,6 +111,22 @@ impl std::fmt::Display for EgoProvider {
     }
 }
 
+impl From<ProviderKind> for EgoProvider {
+    fn from(kind: ProviderKind) -> Self {
+        match kind {
+            ProviderKind::OpenAi => EgoProvider::OpenAi,
+            ProviderKind::Anthropic => EgoProvider::Anthropic,
+            ProviderKind::Perplexity => EgoProvider::Perplexity,
+            ProviderKind::Xai => EgoProvider::Xai,
+            ProviderKind::Google => EgoProvider::Google,
+            ProviderKind::ClaudeCli => EgoProvider::ClaudeCli,
+            ProviderKind::GeminiCli => EgoProvider::GeminiCli,
+            ProviderKind::CodexCli => EgoProvider::CodexCli,
+            ProviderKind::GrokCli => EgoProvider::GrokCli,
+        }
+    }
+}
+
 /// Structured snapshot of the router's configuration for diagnostics and UI display.
 #[derive(Debug, Clone)]
 pub struct RouterStatusInfo {
@@ -161,17 +177,16 @@ impl IdEgoRouter {
         ego_model: Option<String>,
         mode: RoutingMode,
     ) -> Self {
-        let (ego, ego_provider) =
-            build_ego_provider(ego_provider_name, ego_api_key.clone(), ego_model);
-        let (id, local_http) = build_id_provider(local_llm_base_url);
+        let ego_result = ProviderRegistry::build_ego(ego_provider_name, ego_api_key, ego_model);
+        let id_result = ProviderRegistry::build_id(local_llm_base_url);
 
         Self {
-            id,
-            ego,
-            ego_provider,
+            id: id_result.provider,
+            ego: ego_result.provider,
+            ego_provider: ego_result.kind.map(EgoProvider::from),
             superego: None,
             council: None,
-            local_http,
+            local_http: id_result.local_http,
             mode,
             superego_l2_mode: SuperegoL2Mode::Off,
         }
@@ -185,19 +200,32 @@ impl IdEgoRouter {
         ego_model: Option<String>,
         mode: RoutingMode,
     ) -> Self {
-        let (ego, ego_provider) =
-            build_ego_provider(ego_provider_name, ego_api_key.clone(), ego_model);
-        let (id, local_http) = build_id_provider_auto_detect(local_llm_base_url).await;
+        let ego_result = ProviderRegistry::build_ego(ego_provider_name, ego_api_key, ego_model);
+        let id_result = ProviderRegistry::build_id_auto_detect(local_llm_base_url).await;
 
         Self {
-            id,
-            ego,
-            ego_provider,
+            id: id_result.provider,
+            ego: ego_result.provider,
+            ego_provider: ego_result.kind.map(EgoProvider::from),
             superego: None,
             council: None,
-            local_http,
+            local_http: id_result.local_http,
             mode,
             superego_l2_mode: SuperegoL2Mode::Off,
+        }
+    }
+
+    /// Create a router from pre-built providers (constructed by the Hive).
+    pub fn from_built_providers(providers: BuiltProviders) -> Self {
+        Self {
+            id: providers.id,
+            ego: providers.ego,
+            ego_provider: providers.ego_kind.map(EgoProvider::from),
+            superego: providers.superego,
+            council: None,
+            local_http: providers.local_http,
+            mode: providers.routing_mode,
+            superego_l2_mode: providers.superego_l2_mode,
         }
     }
 
@@ -524,150 +552,6 @@ impl IdEgoRouter {
         tracing::debug!("Routing to Id (mode/fast-path target: {:?})", target);
         self.id.stream(&request, tx).await
     }
-}
-
-// ── Helper functions for building providers ──────────────────────────
-
-fn build_ego_provider(
-    provider_name: Option<&str>,
-    api_key: Option<String>,
-    ego_model: Option<String>,
-) -> (Option<Arc<dyn LlmProvider>>, Option<EgoProvider>) {
-    let key = match api_key.filter(|k| !k.trim().is_empty()) {
-        Some(k) => k,
-        None => {
-            tracing::debug!(
-                "build_ego_provider: no API key provided for {:?}",
-                provider_name
-            );
-            return (None, None);
-        }
-    };
-
-    tracing::info!(
-        "Initializing Ego provider: {:?} with model: {:?}",
-        provider_name,
-        ego_model
-    );
-
-    match provider_name {
-        Some("openai") => {
-            let built = OpenAiProvider::with_model(
-                Some(key),
-                ego_model.unwrap_or_else(|| "gpt-4o-mini".to_string()),
-            )
-            .inspect_err(|e| tracing::error!("Failed to build OpenAI provider: {}", e))
-            .ok()
-            .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
-            (built.clone(), built.map(|_| EgoProvider::OpenAi))
-        }
-        Some("anthropic") => {
-            let built = AnthropicProvider::with_model(
-                key,
-                ego_model.unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
-            )
-            .inspect_err(|e| tracing::error!("Failed to build Anthropic provider: {}", e))
-            .ok()
-            .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
-            (built.clone(), built.map(|_| EgoProvider::Anthropic))
-        }
-        Some("perplexity") => {
-            let built = OpenAiCompatibleProvider::with_config(
-                CompatibleProvider::Perplexity,
-                CompatibleProvider::Perplexity.base_url().to_string(),
-                key,
-                ego_model
-                    .unwrap_or_else(|| CompatibleProvider::Perplexity.default_model().to_string()),
-            )
-            .inspect_err(|e| tracing::error!("Failed to build Perplexity provider: {}", e))
-            .ok()
-            .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
-            (built.clone(), built.map(|_| EgoProvider::Perplexity))
-        }
-        Some("xai") => {
-            let built = OpenAiCompatibleProvider::with_config(
-                CompatibleProvider::Xai,
-                CompatibleProvider::Xai.base_url().to_string(),
-                key,
-                ego_model.unwrap_or_else(|| CompatibleProvider::Xai.default_model().to_string()),
-            )
-            .inspect_err(|e| tracing::error!("Failed to build xAI provider: {}", e))
-            .ok()
-            .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
-            (built.clone(), built.map(|_| EgoProvider::Xai))
-        }
-        Some("google") => {
-            let built = OpenAiCompatibleProvider::with_config(
-                CompatibleProvider::Google,
-                CompatibleProvider::Google.base_url().to_string(),
-                key,
-                ego_model.unwrap_or_else(|| CompatibleProvider::Google.default_model().to_string()),
-            )
-            .inspect_err(|e| tracing::error!("Failed to build Google provider: {}", e))
-            .ok()
-            .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
-            (built.clone(), built.map(|_| EgoProvider::Google))
-        }
-        Some("claude-cli") => {
-            let built = CliLlmProvider::new(CliVariant::ClaudeCode, key)
-                .inspect_err(|e| tracing::error!("Failed to build Claude CLI provider: {}", e))
-                .ok()
-                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
-            (built.clone(), built.map(|_| EgoProvider::ClaudeCli))
-        }
-        Some("gemini-cli") => {
-            let built = CliLlmProvider::new(CliVariant::GeminiCli, key)
-                .inspect_err(|e| tracing::error!("Failed to build Gemini CLI provider: {}", e))
-                .ok()
-                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
-            (built.clone(), built.map(|_| EgoProvider::GeminiCli))
-        }
-        Some("codex-cli") => {
-            let built = CliLlmProvider::new(CliVariant::OpenAiCodex, key)
-                .inspect_err(|e| tracing::error!("Failed to build Codex CLI provider: {}", e))
-                .ok()
-                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
-            (built.clone(), built.map(|_| EgoProvider::CodexCli))
-        }
-        Some("grok-cli") => {
-            let built = CliLlmProvider::new(CliVariant::XaiGrokCli, key)
-                .inspect_err(|e| tracing::error!("Failed to build Grok CLI provider: {}", e))
-                .ok()
-                .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
-            (built.clone(), built.map(|_| EgoProvider::GrokCli))
-        }
-        _ => {
-            tracing::debug!(
-                "build_ego_provider: unknown provider name {:?}",
-                provider_name
-            );
-            (None, None)
-        }
-    }
-}
-
-fn build_id_provider(
-    local_llm_base_url: Option<String>,
-) -> (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) {
-    if let Some(url) = local_llm_base_url.filter(|u| !u.trim().is_empty()) {
-        if let Ok(p) = LocalHttpProvider::with_url(url) {
-            let p = Arc::new(p);
-            return (p.clone() as Arc<dyn LlmProvider>, Some(p));
-        }
-    }
-    (Arc::new(CandleProvider::new()), None)
-}
-
-async fn build_id_provider_auto_detect(
-    local_llm_base_url: Option<String>,
-) -> (Arc<dyn LlmProvider>, Option<Arc<LocalHttpProvider>>) {
-    if let Some(url) = local_llm_base_url.filter(|u| !u.trim().is_empty()) {
-        if let Ok(p) = LocalHttpProvider::with_url_auto_model(url).await {
-            let p = Arc::new(p);
-            return (p.clone() as Arc<dyn LlmProvider>, Some(p));
-        }
-    }
-    (Arc::new(CandleProvider::new()), None)
 }
 
 #[cfg(test)]

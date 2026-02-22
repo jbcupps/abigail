@@ -8,6 +8,7 @@ members = [
     "crates/abigail-birth",
     "crates/abigail-soul-crystallization",
     "crates/abigail-skills",
+    "crates/abigail-hive",
     "crates/abigail-auth",
     "crates/abigail-keygen",
     "crates/abigail-cli",

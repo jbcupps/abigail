@@ -14,6 +14,7 @@ ed25519-dalek.workspace = true
 abigail-memory = { path = "../crates/abigail-memory" }
 abigail-capabilities = { path = "../crates/abigail-capabilities" }
 abigail-router = { path = "../crates/abigail-router" }
+abigail-hive = { path = "../crates/abigail-hive" }
 abigail-birth = { path = "../crates/abigail-birth" }
 abigail-soul-crystallization = { path = "../crates/abigail-soul-crystallization" }
 abigail-skills = { path = "../crates/abigail-skills" }

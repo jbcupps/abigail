@@ -1,19 +1,14 @@
 [package]
-name = "abigail-router"
+name = "abigail-hive"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 abigail-core = { path = "../abigail-core" }
 abigail-capabilities = { path = "../abigail-capabilities" }
-abigail-hive = { path = "../abigail-hive" }
 async-trait.workspace = true
 tokio.workspace = true
-thiserror.workspace = true
-anyhow.workspace = true
 tracing.workspace = true
+anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-chrono.workspace = true
-uuid.workspace = true
-tokio-util.workspace = true
