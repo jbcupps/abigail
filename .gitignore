@@ -30,3 +30,9 @@ external_pubkey.bin
 # OS
 .DS_Store
 Thumbs.db
+
+# Local agent/dev artifacts
+.cargo/
+.grok/
+tasks/
+nul
