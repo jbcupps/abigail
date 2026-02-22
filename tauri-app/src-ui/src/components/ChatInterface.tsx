@@ -382,6 +382,9 @@ export default function ChatInterface({
   const send = async () => {
     if (!input.trim() || loading) return;
     const userMessage: Message = { role: "user", content: input.trim() };
+    const sessionBeforeTurn = messagesRef.current
+      .filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim().length > 0)
+      .map((m) => ({ role: m.role, content: m.content }));
     memoryUsedTurnRef.current = false;
     setMessages((m) => [...m, userMessage]);
     setInput("");
@@ -426,7 +429,11 @@ export default function ChatInterface({
     }
 
     try {
-      const reply = await invoke<string>("chat_stream", { message: userMessage.content, target });
+      const reply = await invoke<string>("chat_stream", {
+        message: userMessage.content,
+        target,
+        sessionMessages: sessionBeforeTurn,
+      });
       if (!mountedRef.current) return;
       // If streaming didn't produce content (fallback), use the return value
       if (!streamContent) {
