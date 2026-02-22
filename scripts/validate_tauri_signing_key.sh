@@ -38,7 +38,7 @@ if [[ -z "$KEY_PASSWORD" ]]; then
 fi
 
 KEY_NORMALIZED="$KEY_RAW"
-if [[ "$KEY_RAW" == *'\\n'* ]]; then
+if [[ "$KEY_RAW" == *'\n'* ]]; then
   KEY_NORMALIZED="$(printf '%b' "${KEY_RAW//\\n/$'\n'}")"
   log_debug "H1" "scripts/validate_tauri_signing_key.sh:38" "normalized escaped newlines" '{"hadEscapedNewlines":true}'
 else
