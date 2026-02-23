@@ -1,6 +1,7 @@
 //! Entity daemon shared state.
 
 use abigail_core::AppConfig;
+use abigail_memory::MemoryStore;
 use abigail_router::IdEgoRouter;
 use abigail_skills::channel::EventBus;
 use abigail_skills::{SkillExecutor, SkillRegistry};
@@ -20,4 +21,6 @@ pub struct EntityDaemonState {
     pub event_bus: Arc<EventBus>,
     /// Path to this entity's constitutional documents directory.
     pub docs_dir: PathBuf,
+    /// SQLite memory store for persistent memory across conversations.
+    pub memory: Arc<MemoryStore>,
 }

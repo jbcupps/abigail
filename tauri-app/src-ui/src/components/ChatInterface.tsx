@@ -442,8 +442,21 @@ export default function ChatInterface({
             });
           }, 45);
         };
+        // Create a promise that resolves when the backend emits { done: true }.
+        // This ensures we wait for the full streaming response before finalizing.
+        let streamDoneResolve: (() => void) | null = null;
+        const streamDonePromise = new Promise<void>((resolve) => {
+          streamDoneResolve = resolve;
+        });
+
         try {
           unlisten = await listen<{ token?: string; provider?: string; done?: boolean }>("chat-token", (event) => {
+            if (event.payload.done) {
+              // Final flush and resolve when backend signals completion.
+              flushStreamToUi();
+              if (streamDoneResolve) streamDoneResolve();
+              return;
+            }
             if (event.payload.token) {
               streamContent += event.payload.token;
               if (event.payload.provider) {
@@ -452,35 +465,53 @@ export default function ChatInterface({
               scheduleStreamFlush();
             }
           });
-    
+
     } catch (listenErr) {
       console.warn("[ChatInterface] listen() failed:", listenErr);
     }
 
     try {
-      const reply = await invoke<string>("chat_stream", {
+      // Kick off the streaming task. The return value ("Success") is just an
+      // acknowledgment that the background task started — NOT the LLM response.
+      const invokePromise = invoke<string>("chat_stream", {
         message: userMessage.content,
         target,
         sessionMessages: sessionBeforeTurn,
       });
+
+      // Wait for BOTH: the invoke to complete AND the stream-done signal.
+      // The invoke returns immediately; the stream-done arrives when the
+      // background tokio task finishes emitting all tokens.
+      // Timeout after 120s to prevent hanging if the background task dies.
+      const streamTimeout = new Promise<void>((resolve) => setTimeout(resolve, 120_000));
+      const [reply] = await Promise.all([
+        invokePromise,
+        Promise.race([streamDonePromise, streamTimeout]),
+      ]) as [string, unknown];
+
       if (!mountedRef.current) return;
-      // If streaming didn't produce content (fallback), use the return value
+
+      // The stream-done handler already flushed content. If streaming
+      // produced content, we're done. Otherwise show a meaningful error.
       if (!streamContent) {
+        // No tokens arrived at all — likely a provider error that wasn't
+        // emitted as a token. Show a helpful message instead of "Success".
+        const fallbackMsg = (reply && reply !== "Success")
+          ? reply
+          : "No response received. Check your LLM provider configuration.";
         setMessages((m) => {
           const updated = [...m];
           const lastAssistant = updated[updated.length - 1];
           if (lastAssistant && lastAssistant.role === "assistant") {
             updated[updated.length - 1] = {
               ...lastAssistant,
-              content: reply,
+              content: fallbackMsg,
               memoryUsed: memoryUsedTurnRef.current,
+              isError: true,
             };
           }
           return updated;
         });
-      } else {
-        // Ensure final buffered tokens are rendered immediately.
-        flushStreamToUi();
       }
     } catch (e) {
       if (!mountedRef.current) return;

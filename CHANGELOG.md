@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-24 15:30 EST: Wire abigail-memory into entity-daemon with REST endpoints, chat persistence, memory CLI commands, tool-use loop, skill auto-loading, and skill scaffolding CLI
 - 2026-02-23 22:00 EST: Add full chat pipeline to entity-daemon (system prompt, message sanitization, tool awareness, deduplication, risk clarification) for parity with Tauri app
 - 2026-02-23 18:30 EST: Disable Tauri updater artifact signing (createUpdaterArtifacts: false) to fix release build failure from malformed signing key
 - 2026-02-23 18:00 EST: Update all documentation to reflect Hive/Entity daemon architecture; remove superfluous MVP_SCOPE, PHASE1_AGILE_PLAN, and prompt-routing-review docs

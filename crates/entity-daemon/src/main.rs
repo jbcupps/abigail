@@ -10,9 +10,10 @@ mod state;
 
 use abigail_core::AppConfig;
 use abigail_hive::Hive;
+use abigail_memory::MemoryStore;
 use abigail_router::IdEgoRouter;
 use abigail_skills::channel::EventBus;
-use abigail_skills::{SkillExecutor, SkillRegistry};
+use abigail_skills::{Skill, SkillExecutor, SkillRegistry};
 use axum::routing::{get, post};
 use axum::Router;
 use clap::Parser;
@@ -90,12 +91,18 @@ async fn main() -> anyhow::Result<()> {
     let router = Arc::new(router);
     tracing::info!("Router built: {:?}", router.status());
 
-    // 4. Create skill registry and executor
+    // 4. Compute per-entity paths: {data_root}/identities/{entity_id}/
+    let data_root = AppConfig::default_paths().data_dir;
+    let entity_dir = data_root.join("identities").join(&cli.entity_id);
+    let docs_dir = entity_dir.join("docs");
+    let skills_dir = entity_dir.join("skills");
+
+    // 5. Create skill registry and executor
     let registry = Arc::new(SkillRegistry::new());
     let executor = Arc::new(SkillExecutor::new(registry.clone()));
     let event_bus = Arc::new(EventBus::new(256));
 
-    // 5. Register HiveManagementSkill with HTTP ops
+    // 6. Register HiveManagementSkill (built-in)
     let http_hive_ops = Arc::new(hive_client::HttpHiveOps::new(&cli.hive_url));
     let hive_skill = abigail_skills::HiveManagementSkill::new(http_hive_ops);
     let _ = registry.register(
@@ -103,10 +110,36 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(hive_skill),
     );
 
-    // Compute per-entity paths: {data_root}/identities/{entity_id}/
-    let data_root = AppConfig::default_paths().data_dir;
-    let entity_dir = data_root.join("identities").join(&cli.entity_id);
-    let docs_dir = entity_dir.join("docs");
+    // 7. Load preloaded integration skills (GitHub, Slack, Jira)
+    {
+        let preloaded = abigail_skills::build_preloaded_skills(None);
+        for skill in preloaded {
+            let skill_id = skill.manifest().id.clone();
+            if let Err(e) = registry.register(skill_id.clone(), Arc::new(skill)) {
+                tracing::warn!("Failed to register preloaded skill {}: {}", skill_id.0, e);
+            }
+        }
+        tracing::info!("Preloaded integration skills registered (secrets resolved at call time)");
+    }
+
+    // 8. Discover dynamic API skills from {entity_dir}/skills/*.json
+    {
+        let dynamic_skills = abigail_skills::DynamicApiSkill::discover(&skills_dir, None);
+        let count = dynamic_skills.len();
+        for skill in dynamic_skills {
+            let skill_id = skill.manifest().id.clone();
+            if let Err(e) = registry.register(skill_id.clone(), Arc::new(skill)) {
+                tracing::warn!("Failed to register dynamic skill {}: {}", skill_id.0, e);
+            }
+        }
+        if count > 0 {
+            tracing::info!(
+                "Discovered {} dynamic skill(s) from {:?}",
+                count,
+                skills_dir
+            );
+        }
+    }
 
     let config = AppConfig {
         agent_name: Some(entity_info.name),
@@ -119,6 +152,17 @@ async fn main() -> anyhow::Result<()> {
         ..AppConfig::default_paths()
     };
 
+    // Log total skills loaded
+    let total_skills = registry.list().map(|s| s.len()).unwrap_or(0);
+    tracing::info!("Total skills registered: {}", total_skills);
+
+    // 9. Open memory store (SQLite, auto-creates schema)
+    let memory = Arc::new(
+        MemoryStore::open_with_config(&config)
+            .expect("Failed to open memory store — check db_path permissions"),
+    );
+    tracing::info!("Memory store opened: {:?}", config.db_path);
+
     let state = EntityDaemonState {
         entity_id: cli.entity_id.clone(),
         config,
@@ -127,6 +171,7 @@ async fn main() -> anyhow::Result<()> {
         executor,
         event_bus,
         docs_dir,
+        memory,
     };
 
     // Build HTTP router
@@ -141,6 +186,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/chat", post(routes::chat))
         .route("/v1/skills", get(routes::list_skills))
         .route("/v1/tools/execute", post(routes::execute_tool))
+        .route("/v1/memory/stats", get(routes::memory_stats))
+        .route("/v1/memory/search", post(routes::memory_search))
+        .route("/v1/memory/recent", get(routes::memory_recent))
+        .route("/v1/memory/insert", post(routes::memory_insert))
         .layer(cors)
         .with_state(state);
 
