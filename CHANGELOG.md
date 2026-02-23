@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-23 22:00 EST: Add full chat pipeline to entity-daemon (system prompt, message sanitization, tool awareness, deduplication, risk clarification) for parity with Tauri app
 - 2026-02-23 18:30 EST: Disable Tauri updater artifact signing (createUpdaterArtifacts: false) to fix release build failure from malformed signing key
 - 2026-02-23 18:00 EST: Update all documentation to reflect Hive/Entity daemon architecture; remove superfluous MVP_SCOPE, PHASE1_AGILE_PLAN, and prompt-routing-review docs
 - 2026-02-23 16:00 EST: Implement Hive/Entity separation Phase 1 — seven new crates (hive-core, entity-core, abigail-identity, hive-daemon, entity-daemon, hive-cli, entity-cli) splitting the Tauri monolith into separate control-plane and agent-runtime HTTP daemons

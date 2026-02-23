@@ -3,6 +3,7 @@
 //! Wraps `IdEgoRouter`, `SkillRegistry`, `SkillExecutor`, and `EventBus` behind
 //! an Axum REST API. Fetches provider configuration from hive-daemon on startup.
 
+mod chat_pipeline;
 mod hive_client;
 mod routes;
 mod state;
@@ -102,11 +103,19 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(hive_skill),
     );
 
-    // Load the entity's AppConfig for the state
+    // Compute per-entity paths: {data_root}/identities/{entity_id}/
+    let data_root = AppConfig::default_paths().data_dir;
+    let entity_dir = data_root.join("identities").join(&cli.entity_id);
+    let docs_dir = entity_dir.join("docs");
+
     let config = AppConfig {
         agent_name: Some(entity_info.name),
         birth_complete: entity_info.birth_complete,
         routing_mode: hive_config.routing_mode,
+        data_dir: entity_dir.clone(),
+        docs_dir: docs_dir.clone(),
+        db_path: entity_dir.join("abigail_memory.db"),
+        models_dir: entity_dir.join("models"),
         ..AppConfig::default_paths()
     };
 
@@ -117,6 +126,7 @@ async fn main() -> anyhow::Result<()> {
         registry,
         executor,
         event_bus,
+        docs_dir,
     };
 
     // Build HTTP router
