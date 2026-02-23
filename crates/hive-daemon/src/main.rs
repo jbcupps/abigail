@@ -150,6 +150,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/status", get(get_status))
         .route("/v1/entity/list", get(list_entities))
         .route("/v1/entity/birth", post(birth_entity))
+        .route("/v1/entity/select", post(select_entity))
         .route("/v1/entity/start", post(start_entity))
         .route("/v1/entity/stop", post(stop_entity))
         .route("/v1/logs", get(get_logs))
@@ -185,22 +186,36 @@ async fn list_entities(State(state): State<HiveState>) -> Json<ApiEnvelope<Vec<E
     })
 }
 
+async fn upsert_entity_status(state: &HiveState, id: String, status: EntityStatus) -> EntityRecord {
+    let mut lock = state.entities.write().await;
+    lock.entry(id.clone())
+        .and_modify(|e| e.status = status.clone())
+        .or_insert(EntityRecord {
+            id,
+            status,
+            birth_complete: false,
+            birth_path: None,
+        })
+        .clone()
+}
+
+async fn select_entity(
+    State(state): State<HiveState>,
+    Json(req): Json<StartStopEntityRequest>,
+) -> Json<ApiEnvelope<EntityRecord>> {
+    let record = upsert_entity_status(&state, req.id, EntityStatus::Running).await;
+    persist_or_log(&state, "select_entity").await;
+    Json(ApiEnvelope {
+        ok: true,
+        data: record,
+    })
+}
+
 async fn start_entity(
     State(state): State<HiveState>,
     Json(req): Json<StartStopEntityRequest>,
 ) -> Json<ApiEnvelope<EntityRecord>> {
-    let record = {
-        let mut lock = state.entities.write().await;
-        lock.entry(req.id.clone())
-            .and_modify(|e| e.status = EntityStatus::Running)
-            .or_insert(EntityRecord {
-                id: req.id,
-                status: EntityStatus::Running,
-                birth_complete: false,
-                birth_path: None,
-            })
-            .clone()
-    };
+    let record = upsert_entity_status(&state, req.id, EntityStatus::Running).await;
     persist_or_log(&state, "start_entity").await;
     Json(ApiEnvelope {
         ok: true,
@@ -212,18 +227,7 @@ async fn stop_entity(
     State(state): State<HiveState>,
     Json(req): Json<StartStopEntityRequest>,
 ) -> Json<ApiEnvelope<EntityRecord>> {
-    let record = {
-        let mut lock = state.entities.write().await;
-        lock.entry(req.id.clone())
-            .and_modify(|e| e.status = EntityStatus::Stopped)
-            .or_insert(EntityRecord {
-                id: req.id,
-                status: EntityStatus::Stopped,
-                birth_complete: false,
-                birth_path: None,
-            })
-            .clone()
-    };
+    let record = upsert_entity_status(&state, req.id, EntityStatus::Stopped).await;
     persist_or_log(&state, "stop_entity").await;
     Json(ApiEnvelope {
         ok: true,
@@ -347,6 +351,37 @@ mod tests {
         assert_eq!(stopped.0.data.status, EntityStatus::Stopped);
         assert!(stopped.0.data.birth_complete);
         assert_eq!(stopped.0.data.birth_path, Some(BirthPath::SoulForge));
+        if registry_path.exists() {
+            std::fs::remove_file(registry_path).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn select_after_birth_preserves_birth_metadata() {
+        let (state, registry_path) = test_state("select_preserve_birth");
+        let shared = State(state.clone());
+        let _ = birth_entity(
+            shared.clone(),
+            Json(BirthEntityRequest {
+                id: "eve".to_string(),
+                path: BirthPath::SoulCrystallization,
+            }),
+        )
+        .await;
+        let selected = select_entity(
+            shared,
+            Json(StartStopEntityRequest {
+                id: "eve".to_string(),
+            }),
+        )
+        .await;
+
+        assert_eq!(selected.0.data.status, EntityStatus::Running);
+        assert!(selected.0.data.birth_complete);
+        assert_eq!(
+            selected.0.data.birth_path,
+            Some(BirthPath::SoulCrystallization)
+        );
         if registry_path.exists() {
             std::fs::remove_file(registry_path).unwrap();
         }

@@ -110,7 +110,7 @@ pub async fn run_shell() -> anyhow::Result<()> {
         );
     }
 
-    register_and_start_entity(&state, &entity_id).await?;
+    register_and_select_entity(&state, &entity_id).await?;
     run_entity_chat_loop(&state, &entity_id).await?;
     Ok(())
 }
@@ -598,7 +598,7 @@ fn ensure_constitutional_docs(docs_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn register_and_start_entity(state: &ShellState, entity_id: &str) -> anyhow::Result<()> {
+async fn register_and_select_entity(state: &ShellState, entity_id: &str) -> anyhow::Result<()> {
     let birth = state
         .client
         .post(format!("{}/entity/birth", state.hive_base))
@@ -615,24 +615,24 @@ async fn register_and_start_entity(state: &ShellState, entity_id: &str) -> anyho
         .await
         .context("failed parsing hive birth response")?;
 
-    let started = state
+    let selected = state
         .client
-        .post(format!("{}/entity/start", state.hive_base))
+        .post(format!("{}/entity/select", state.hive_base))
         .json(&StartStopEntityRequest {
             id: entity_id.to_string(),
         })
         .send()
         .await
-        .context("failed to call hive start endpoint")?
+        .context("failed to call hive select endpoint")?
         .error_for_status()
-        .context("hive start endpoint returned error")?
+        .context("hive select endpoint returned error")?
         .json::<HiveApiEnvelope<EntityRecord>>()
         .await
-        .context("failed parsing hive start response")?;
+        .context("failed parsing hive select response")?;
 
     println!(
         "entity '{}' ready (birth_path={:?}, status={:?})",
-        birth.data.id, birth.data.birth_path, started.data.status
+        birth.data.id, birth.data.birth_path, selected.data.status
     );
     Ok(())
 }

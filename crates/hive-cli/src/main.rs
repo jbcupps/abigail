@@ -2,8 +2,7 @@ use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
 use hive_core::{
     ApiEnvelope, BirthEntityRequest, BirthPath, EntityRecord, HiveStatus, StartStopEntityRequest,
-    DEFAULT_HIVE_ADDR,
-    HIVE_API_VERSION_PREFIX,
+    DEFAULT_HIVE_ADDR, HIVE_API_VERSION_PREFIX,
 };
 use reqwest::Client;
 
@@ -34,8 +33,15 @@ enum EntityCommand {
         #[arg(long, value_enum, default_value_t = BirthPathArg::QuickStart)]
         path: BirthPathArg,
     },
-    Start { id: String },
-    Stop { id: String },
+    Select {
+        id: String,
+    },
+    Start {
+        id: String,
+    },
+    Stop {
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -119,6 +125,22 @@ async fn main() -> anyhow::Result<()> {
                     "birthed entity {} via {:?}",
                     res.data.id,
                     res.data.birth_path.unwrap_or(BirthPath::QuickStart)
+                );
+            }
+            EntityCommand::Select { id } => {
+                let payload = StartStopEntityRequest { id };
+                let res = client
+                    .post(format!("{base}/entity/select"))
+                    .json(&payload)
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json::<ApiEnvelope<EntityRecord>>()
+                    .await
+                    .context("failed to parse hive select response")?;
+                println!(
+                    "selected entity {} status={:?}",
+                    res.data.id, res.data.status
                 );
             }
             EntityCommand::Start { id } => {

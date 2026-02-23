@@ -362,10 +362,15 @@
       <section class="screen" id="screen-chat">
         <div class="hero">
           <h2>Mentor ↔ Entity Chat</h2>
-          <p>Calls <code>http://127.0.0.1:7702/v1/chat</code> when reachable, otherwise runs preview mode.</p>
+          <p>Choose an entity first. Selection auto-starts it in Hive, then chat uses <code>http://127.0.0.1:7702/v1/chat</code>.</p>
         </div>
         <div class="grid">
           <article class="card s12">
+            <div class="field">
+              <label for="activeEntity">Active Entity</label>
+              <input id="activeEntity" list="entityOptions" placeholder="abigail">
+              <datalist id="entityOptions"></datalist>
+            </div>
             <div class="chat-log" id="chatLog">
               <div class="bubble entity">I am online. Ask your first question.</div>
             </div>
@@ -383,6 +388,12 @@
   <script>
     const tabs = document.querySelectorAll("#tabs button");
     const splash = document.getElementById("splash");
+    const HIVE_BASE = "http://127.0.0.1:7701/v1";
+    const ENTITY_BASE = "http://127.0.0.1:7702/v1";
+    const appState = {
+      activeEntity: "",
+      birthedEntities: new Set()
+    };
 
     function showScreen(name) {
       ["start", "providers", "birth", "chat"].forEach((id) => {
@@ -409,6 +420,87 @@
       }
     }
 
+    function toEntityId(raw) {
+      const value = (raw || "").trim().toLowerCase();
+      const normalized = value.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+      return normalized || "abigail";
+    }
+
+    function updateEntityInput(entityId) {
+      document.getElementById("activeEntity").value = entityId;
+      appState.activeEntity = entityId;
+    }
+
+    function setEntityOptions(records) {
+      const list = document.getElementById("entityOptions");
+      list.innerHTML = "";
+      records.forEach((record) => {
+        const option = document.createElement("option");
+        option.value = record.id;
+        option.label = `${record.id} (${record.status})`;
+        list.appendChild(option);
+      });
+    }
+
+    async function fetchEntities() {
+      const res = await fetch(`${HIVE_BASE}/entity/list`, { method: "GET" });
+      if (!res.ok) {
+        throw new Error(String(res.status));
+      }
+      const payload = await res.json();
+      return Array.isArray(payload?.data) ? payload.data : [];
+    }
+
+    async function refreshEntityOptions() {
+      try {
+        const records = await fetchEntities();
+        setEntityOptions(records);
+      } catch {
+        setEntityOptions([]);
+      }
+    }
+
+    async function selectEntity(entityId) {
+      const res = await fetch(`${HIVE_BASE}/entity/select`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: entityId })
+      });
+      if (!res.ok) {
+        throw new Error(String(res.status));
+      }
+      return res.json();
+    }
+
+    async function birthEntity(entityId) {
+      const res = await fetch(`${HIVE_BASE}/entity/birth`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: entityId, path: "quick_start" })
+      });
+      if (!res.ok) {
+        throw new Error(String(res.status));
+      }
+      return res.json();
+    }
+
+    async function chooseEntity(entityId, hintEl) {
+      try {
+        await selectEntity(entityId);
+        updateEntityInput(entityId);
+        if (hintEl) {
+          hintEl.textContent = `Entity '${entityId}' is selected and running.`;
+        }
+        await refreshEntityOptions();
+        return true;
+      } catch {
+        if (hintEl) {
+          hintEl.textContent = "Failed to start selected entity. Ensure hive-daemon is running.";
+        }
+        return false;
+      }
+    }
+
     async function refreshStatus() {
       const hiveBadge = document.getElementById("hiveBadge");
       const entityBadge = document.getElementById("entityBadge");
@@ -425,6 +517,9 @@
       const ready = hiveOk && entityOk;
       nextBtn.disabled = !ready;
       hint.textContent = ready ? "Both services are online." : "Start daemons, then refresh.";
+      if (hiveOk) {
+        await refreshEntityOptions();
+      }
     }
 
     async function probeLocal() {
@@ -467,10 +562,15 @@
       const hint = document.getElementById("chatHint");
       const text = input.value.trim();
       if (!text) return;
+      const chosen = toEntityId(document.getElementById("activeEntity").value || appState.activeEntity);
+      const started = await chooseEntity(chosen, hint);
+      if (!started) {
+        return;
+      }
       input.value = "";
       bubble("mentor", text);
       try {
-        const res = await fetch("http://127.0.0.1:7702/v1/chat", {
+        const res = await fetch(`${ENTITY_BASE}/chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message: text })
@@ -503,7 +603,7 @@
       hint.textContent = `Saved ${provider} key in UI session state.`;
     });
     document.getElementById("toBirthBtn").addEventListener("click", () => showScreen("birth"));
-    document.getElementById("completeBirthBtn").addEventListener("click", () => {
+    document.getElementById("completeBirthBtn").addEventListener("click", async () => {
       const mentor = document.getElementById("mentorName").value.trim();
       const entity = document.getElementById("entityName").value.trim();
       const purpose = document.getElementById("entityPurpose").value.trim();
@@ -513,15 +613,35 @@
         hint.textContent = "Fill all birth fields first.";
         return;
       }
-      hint.textContent = `Birth flow complete in UI state for ${entity}.`;
-      bubble("entity", `${entity} is initialized and ready.`);
+      const entityId = toEntityId(entity);
+      try {
+        if (!appState.birthedEntities.has(entityId)) {
+          await birthEntity(entityId);
+          appState.birthedEntities.add(entityId);
+        }
+        const started = await chooseEntity(entityId, hint);
+        if (!started) {
+          return;
+        }
+        hint.textContent = `Birth complete for ${entityId}. Entity auto-started and selected.`;
+        bubble("entity", `${entity} is initialized and ready.`);
+      } catch {
+        hint.textContent = "Birth/start failed. Ensure hive-daemon is reachable, then retry.";
+      }
     });
     document.getElementById("toChatBtn").addEventListener("click", () => showScreen("chat"));
     document.getElementById("sendBtn").addEventListener("click", sendChat);
     document.getElementById("chatInput").addEventListener("keydown", (e) => { if (e.key === "Enter") sendChat(); });
+    document.getElementById("activeEntity").addEventListener("change", async () => {
+      const hint = document.getElementById("chatHint");
+      const entityId = toEntityId(document.getElementById("activeEntity").value);
+      await chooseEntity(entityId, hint);
+    });
 
     (async function boot() {
       await refreshStatus();
+      const defaultEntity = toEntityId(document.getElementById("entityName").value || "abigail");
+      updateEntityInput(defaultEntity);
       setTimeout(() => splash.classList.add("hide"), 900);
     })();
   </script>
