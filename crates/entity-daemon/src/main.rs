@@ -13,7 +13,7 @@ use abigail_hive::Hive;
 use abigail_memory::MemoryStore;
 use abigail_router::IdEgoRouter;
 use abigail_skills::channel::EventBus;
-use abigail_skills::{SkillExecutor, SkillRegistry};
+use abigail_skills::{Skill, SkillExecutor, SkillRegistry};
 use axum::routing::{get, post};
 use axum::Router;
 use clap::Parser;
