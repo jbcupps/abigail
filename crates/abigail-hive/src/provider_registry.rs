@@ -425,4 +425,46 @@ mod tests {
             assert_eq!(r.kind, Some(expected), "kind mismatch for {}", name);
         }
     }
+
+    #[test]
+    fn build_ego_from_env_provider_keys() {
+        let provider_envs = [
+            ("openai", "OPENAI_API_KEY", ProviderKind::OpenAi),
+            ("anthropic", "ANTHROPIC_API_KEY", ProviderKind::Anthropic),
+            ("xai", "XAI_API_KEY", ProviderKind::Xai),
+            ("google", "GOOGLE_API_KEY", ProviderKind::Google),
+            ("perplexity", "PERPLEXITY_API_KEY", ProviderKind::Perplexity),
+        ];
+
+        let mut tested = 0usize;
+        for (provider_name, env_var, expected_kind) in provider_envs {
+            let Ok(key) = std::env::var(env_var) else {
+                continue;
+            };
+            if key.trim().is_empty() {
+                continue;
+            }
+
+            tested += 1;
+            let r = ProviderRegistry::build_ego(Some(provider_name), Some(key), None);
+            assert!(
+                r.provider.is_some(),
+                "expected provider to build for '{}' using {}",
+                provider_name,
+                env_var
+            );
+            assert_eq!(
+                r.kind,
+                Some(expected_kind),
+                "expected provider kind {:?} for {}",
+                expected_kind,
+                provider_name
+            );
+        }
+
+        assert!(
+            tested > 0,
+            "no provider keys detected in environment; load .env.e2e.local before running this test"
+        );
+    }
 }

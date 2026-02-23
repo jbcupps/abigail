@@ -1,7 +1,8 @@
 use anyhow::Context;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use hive_core::{
-    ApiEnvelope, EntityRecord, HiveStatus, StartStopEntityRequest, DEFAULT_HIVE_ADDR,
+    ApiEnvelope, BirthEntityRequest, BirthPath, EntityRecord, HiveStatus, StartStopEntityRequest,
+    DEFAULT_HIVE_ADDR,
     HIVE_API_VERSION_PREFIX,
 };
 use reqwest::Client;
@@ -28,8 +29,32 @@ enum Command {
 #[derive(Subcommand)]
 enum EntityCommand {
     List,
+    Birth {
+        id: String,
+        #[arg(long, value_enum, default_value_t = BirthPathArg::QuickStart)]
+        path: BirthPathArg,
+    },
     Start { id: String },
     Stop { id: String },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum BirthPathArg {
+    QuickStart,
+    Direct,
+    SoulCrystallization,
+    SoulForge,
+}
+
+impl From<BirthPathArg> for BirthPath {
+    fn from(value: BirthPathArg) -> Self {
+        match value {
+            BirthPathArg::QuickStart => BirthPath::QuickStart,
+            BirthPathArg::Direct => BirthPath::Direct,
+            BirthPathArg::SoulCrystallization => BirthPath::SoulCrystallization,
+            BirthPathArg::SoulForge => BirthPath::SoulForge,
+        }
+    }
 }
 
 #[tokio::main]
@@ -65,9 +90,36 @@ async fn main() -> anyhow::Result<()> {
                     println!("no entities registered");
                 } else {
                     for entity in res.data {
-                        println!("{} {:?}", entity.id, entity.status);
+                        let birth_path = entity
+                            .birth_path
+                            .map(|p| format!("{:?}", p))
+                            .unwrap_or_else(|| "none".to_string());
+                        println!(
+                            "{} status={:?} birth_complete={} birth_path={}",
+                            entity.id, entity.status, entity.birth_complete, birth_path
+                        );
                     }
                 }
+            }
+            EntityCommand::Birth { id, path } => {
+                let payload = BirthEntityRequest {
+                    id,
+                    path: path.into(),
+                };
+                let res = client
+                    .post(format!("{base}/entity/birth"))
+                    .json(&payload)
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json::<ApiEnvelope<EntityRecord>>()
+                    .await
+                    .context("failed to parse hive birth response")?;
+                println!(
+                    "birthed entity {} via {:?}",
+                    res.data.id,
+                    res.data.birth_path.unwrap_or(BirthPath::QuickStart)
+                );
             }
             EntityCommand::Start { id } => {
                 let payload = StartStopEntityRequest { id };

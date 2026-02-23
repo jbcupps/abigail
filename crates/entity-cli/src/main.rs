@@ -4,6 +4,7 @@ use entity_core::{
     DEFAULT_ENTITY_ADDR, ENTITY_API_VERSION_PREFIX,
 };
 use reqwest::Client;
+use std::io::{self, Write};
 
 #[derive(Parser)]
 #[command(name = "entity-cli", about = "Entity runtime CLI")]
@@ -20,7 +21,11 @@ struct Cli {
 enum Command {
     Status,
     Run { task: String },
-    Chat { message: String },
+    Chat {
+        message: Option<String>,
+        #[arg(long, default_value_t = false)]
+        interactive: bool,
+    },
     Logs,
 }
 
@@ -61,16 +66,26 @@ async fn main() -> anyhow::Result<()> {
                 .await?;
             println!("accepted={} task={}", res.data.accepted, res.data.task);
         }
-        Command::Chat { message } => {
-            let res = client
-                .post(format!("{base}/chat"))
-                .json(&ChatRequest { message })
-                .send()
-                .await?
-                .error_for_status()?
-                .json::<ApiEnvelope<ChatResponse>>()
-                .await?;
-            println!("{}", res.data.reply);
+        Command::Chat {
+            message,
+            interactive,
+        } => {
+            if interactive {
+                run_chat_repl(&client, &base).await?;
+            } else {
+                let message = message.ok_or_else(|| {
+                    anyhow::anyhow!("chat message is required unless --interactive is used")
+                })?;
+                let res = client
+                    .post(format!("{base}/chat"))
+                    .json(&ChatRequest { message })
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json::<ApiEnvelope<ChatResponse>>()
+                    .await?;
+                println!("{}", res.data.reply);
+            }
         }
         Command::Logs => {
             let res = client
@@ -97,12 +112,63 @@ fn run_oneshot(command: Command) -> anyhow::Result<()> {
         Command::Run { task } => {
             println!("accepted=true task={task}");
         }
-        Command::Chat { message } => {
+        Command::Chat {
+            message,
+            interactive,
+        } => {
+            if interactive {
+                anyhow::bail!("oneshot mode does not support --interactive chat");
+            }
+            let message = message.ok_or_else(|| {
+                anyhow::anyhow!("chat message is required unless --interactive is used")
+            })?;
             println!("entity oneshot reply: {message}");
         }
         Command::Logs => {
             println!("oneshot mode has no daemon logs");
         }
     }
+    Ok(())
+}
+
+async fn run_chat_repl(client: &Client, base: &str) -> anyhow::Result<()> {
+    println!("interactive chat started (type 'exit' or '/exit' to quit)");
+    let stdin = io::stdin();
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        print!("you> ");
+        io::stdout().flush()?;
+
+        let n = stdin.read_line(&mut line)?;
+        if n == 0 {
+            println!();
+            break;
+        }
+
+        let message = line.trim();
+        if message.is_empty() {
+            continue;
+        }
+        if matches!(message, "exit" | "/exit" | "quit" | "/quit") {
+            break;
+        }
+
+        let res = client
+            .post(format!("{base}/chat"))
+            .json(&ChatRequest {
+                message: message.to_string(),
+            })
+            .send()
+            .await?;
+        let res = res
+            .error_for_status()?
+            .json::<ApiEnvelope<ChatResponse>>()
+            .await?;
+        println!("adam> {}", res.data.reply);
+    }
+
+    println!("interactive chat ended");
     Ok(())
 }

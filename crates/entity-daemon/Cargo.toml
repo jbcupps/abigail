@@ -8,9 +8,14 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
+abigail-core = { path = "../abigail-core" }
+abigail-capabilities = { path = "../abigail-capabilities" }
+abigail-hive = { path = "../abigail-hive" }
+abigail-router = { path = "../abigail-router" }
 entity-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+tower-http = { version = "0.6", features = ["cors"] }

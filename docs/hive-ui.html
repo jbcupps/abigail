@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Abigail Hive UI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #eff5f2;
+      --bg-alt: #e0ebe6;
+      --text: #10241f;
+      --sub: #4a665f;
+      --line: #b6cbc3;
+      --accent: #1e8f6d;
+      --accent-2: #28699a;
+      --ok: #0b7f4d;
+      --warn: #c16f17;
+      --bad: #a12b45;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      font-family: "Sora", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(900px 420px at 0% 0%, rgba(30, 143, 109, 0.20), transparent 72%),
+        radial-gradient(900px 520px at 100% -10%, rgba(40, 105, 154, 0.18), transparent 72%),
+        linear-gradient(180deg, var(--bg), var(--bg-alt));
+    }
+
+    body { padding: 16px; }
+
+    .shell {
+      max-width: 1100px;
+      margin: 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      overflow: hidden;
+      background: rgba(255,255,255,0.9);
+      box-shadow: 0 20px 44px rgba(12, 31, 26, 0.15);
+      animation: rise 620ms ease both;
+    }
+
+    .top {
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,0.7);
+    }
+
+    .title h1 {
+      margin: 0;
+      font-size: 1.05rem;
+    }
+
+    .title p {
+      margin: 3px 0 0;
+      color: var(--sub);
+      font-size: 0.76rem;
+      font-family: "IBM Plex Mono", Consolas, monospace;
+    }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .tabs button {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 0.74rem;
+      font-family: "IBM Plex Mono", Consolas, monospace;
+      background: #f7fbf9;
+      color: var(--sub);
+      cursor: pointer;
+    }
+
+    .tabs button.active {
+      border-color: transparent;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #fff;
+    }
+
+    main { padding: 18px; }
+    .screen { display: none; animation: fade 320ms ease; }
+    .screen.active { display: block; }
+
+    .hero h2 {
+      margin: 0 0 7px;
+      font-size: clamp(1.3rem, 3vw, 1.9rem);
+    }
+    .hero p { margin: 0; color: var(--sub); }
+
+    .grid {
+      margin-top: 14px;
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      background: #fff;
+    }
+
+    .s6 { grid-column: span 6; }
+    .s12 { grid-column: span 12; }
+
+    .card h3 { margin: 0 0 7px; font-size: 0.95rem; }
+    .card p { margin: 0; color: var(--sub); font-size: 0.85rem; }
+
+    .status { margin-top: 10px; display: grid; gap: 8px; }
+    .status-row {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 9px 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.76rem;
+      font-family: "IBM Plex Mono", Consolas, monospace;
+    }
+
+    .badge { border-radius: 999px; padding: 4px 8px; font-size: 0.67rem; text-transform: uppercase; }
+    .ok { color: var(--ok); background: rgba(11,127,77,0.12); }
+    .warn { color: var(--warn); background: rgba(193,111,23,0.15); }
+    .bad { color: var(--bad); background: rgba(161,43,69,0.12); }
+
+    .row { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 9px; }
+    button.primary, button.secondary {
+      border-radius: 10px;
+      border: 1px solid transparent;
+      padding: 9px 12px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button.primary {
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    }
+    button.secondary {
+      color: var(--sub);
+      background: #f3faf6;
+      border-color: var(--line);
+    }
+
+    .mono {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f6fbf8;
+      font-family: "IBM Plex Mono", Consolas, monospace;
+      font-size: 0.73rem;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+
+    .field { margin-top: 10px; display: grid; gap: 6px; }
+    .field label {
+      font-family: "IBM Plex Mono", Consolas, monospace;
+      color: var(--sub);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+    input, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 9px 10px;
+      font-family: "Sora", sans-serif;
+      font-size: 0.86rem;
+    }
+    textarea { min-height: 90px; resize: vertical; }
+
+    .hint {
+      margin-top: 8px;
+      color: var(--sub);
+      font-size: 0.73rem;
+      font-family: "IBM Plex Mono", Consolas, monospace;
+    }
+
+    .chat-log {
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fbfefc;
+      min-height: 260px;
+      max-height: 420px;
+      overflow: auto;
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .bubble {
+      border-radius: 10px;
+      padding: 9px 10px;
+      font-size: 0.84rem;
+      line-height: 1.4;
+      max-width: 82%;
+    }
+
+    .bubble.mentor { justify-self: end; background: #ddf4eb; border: 1px solid #bfe2d3; }
+    .bubble.entity { justify-self: start; background: #ebf4fb; border: 1px solid #c7deef; }
+
+    .splash {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(165deg, #112a24, #1b3f36);
+      color: #effbf5;
+      transition: opacity 420ms ease, visibility 420ms ease;
+    }
+
+    .splash.hide { opacity: 0; visibility: hidden; pointer-events: none; }
+
+    .splash-card { text-align: center; display: grid; gap: 12px; }
+    .glyph {
+      width: 78px; height: 78px; margin: 0 auto;
+      border-radius: 22px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      box-shadow: 0 14px 30px rgba(30,143,109,0.4);
+      animation: pulse 1.9s ease-in-out infinite;
+    }
+
+    @media (max-width: 920px) {
+      .s6 { grid-column: span 12; }
+    }
+
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse { 0%,100% { transform: scale(1);} 50% { transform: scale(1.05);} }
+  </style>
+</head>
+<body>
+  <div class="splash" id="splash">
+    <div class="splash-card">
+      <div class="glyph"></div>
+      <h2 style="margin:0">Entering the Hive</h2>
+      <p style="margin:0; font-family:'IBM Plex Mono', monospace; font-size:0.79rem;">Splash start check running...</p>
+    </div>
+  </div>
+
+  <section class="shell">
+    <header class="top">
+      <div class="title">
+        <h1>Abigail Hive Console</h1>
+        <p>UI surfaces + splash start screen for dev-split</p>
+      </div>
+      <nav class="tabs" id="tabs">
+        <button class="active" data-screen="start">Hive Start</button>
+        <button data-screen="providers">Providers</button>
+        <button data-screen="birth">Birth</button>
+        <button data-screen="chat">Chat</button>
+      </nav>
+    </header>
+
+    <main>
+      <section class="screen active" id="screen-start">
+        <div class="hero">
+          <h2>Hive Splash Start Screen</h2>
+          <p>Checks hive + entity readiness, then unlocks onboarding flow.</p>
+        </div>
+        <div class="grid">
+          <article class="card s6">
+            <h3>Service Readiness</h3>
+            <p>Live checks against local daemon status endpoints.</p>
+            <div class="status">
+              <div class="status-row"><span>Hive <code>127.0.0.1:7701</code></span><span id="hiveBadge" class="badge warn">Checking</span></div>
+              <div class="status-row"><span>Entity <code>127.0.0.1:7702</code></span><span id="entityBadge" class="badge warn">Checking</span></div>
+            </div>
+            <div class="row">
+              <button class="primary" id="refreshBtn">Refresh Status</button>
+              <button class="secondary" id="toProvidersBtn" disabled>Continue</button>
+            </div>
+            <div class="hint" id="startHint">Waiting for status checks.</div>
+          </article>
+          <article class="card s6">
+            <h3>Daemon Start Commands</h3>
+            <p>If services are down, run these commands in separate terminals.</p>
+            <div class="mono">cargo run -p hive-daemon</div>
+            <div class="mono">cargo run -p entity-daemon</div>
+            <div class="mono">cargo run -p abigail-cli --bin abigail</div>
+          </article>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-providers">
+        <div class="hero">
+          <h2>Provider Setup UI</h2>
+          <p>Probe local LM Studio/Ollama first, then collect one cloud key if needed.</p>
+        </div>
+        <div class="grid">
+          <article class="card s6">
+            <h3>Local Probe</h3>
+            <div class="status">
+              <div class="status-row"><span>LM Studio <code>:1234/v1/models</code></span><span id="lmBadge" class="badge warn">Unknown</span></div>
+              <div class="status-row"><span>Ollama <code>:11434/v1/models</code></span><span id="ollamaBadge" class="badge warn">Unknown</span></div>
+            </div>
+            <div class="row"><button class="primary" id="probeBtn">Probe Local Providers</button></div>
+            <div class="hint" id="probeHint">No probe yet.</div>
+          </article>
+          <article class="card s6">
+            <h3>Cloud Key</h3>
+            <p>Aliases: <code>codex</code>, <code>claude</code>, <code>gemini</code>, <code>grok</code>.</p>
+            <div class="field">
+              <label for="providerName">Provider</label>
+              <input id="providerName" placeholder="openai | codex | claude | gemini | grok">
+            </div>
+            <div class="field">
+              <label for="providerKey">API Key</label>
+              <input id="providerKey" placeholder="sk-...">
+            </div>
+            <div class="row">
+              <button class="primary" id="saveProviderBtn">Save (UI session)</button>
+              <button class="secondary" id="toBirthBtn">To Birth</button>
+            </div>
+            <div class="hint" id="providerHint">Not saved yet.</div>
+          </article>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-birth">
+        <div class="hero">
+          <h2>Simple Birth Dialog</h2>
+          <p>Single-path mentor prompts mirroring CLI birth intent.</p>
+        </div>
+        <div class="grid">
+          <article class="card s12">
+            <div class="field"><label for="mentorName">Mentor Name</label><input id="mentorName" placeholder="Your name"></div>
+            <div class="field"><label for="entityName">Entity Name</label><input id="entityName" placeholder="Abigail"></div>
+            <div class="field"><label for="entityPurpose">Purpose</label><textarea id="entityPurpose" placeholder="Help my mentor build and execute safely."></textarea></div>
+            <div class="field"><label for="entityTone">Personality / Tone</label><input id="entityTone" placeholder="Warm, direct, pragmatic."></div>
+            <div class="row">
+              <button class="primary" id="completeBirthBtn">Complete Birth (UI)</button>
+              <button class="secondary" id="toChatBtn">To Chat</button>
+            </div>
+            <div class="hint" id="birthHint">Birth not completed yet.</div>
+          </article>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-chat">
+        <div class="hero">
+          <h2>Mentor ↔ Entity Chat</h2>
+          <p>Calls <code>http://127.0.0.1:7702/v1/chat</code> when reachable, otherwise runs preview mode.</p>
+        </div>
+        <div class="grid">
+          <article class="card s12">
+            <div class="chat-log" id="chatLog">
+              <div class="bubble entity">I am online. Ask your first question.</div>
+            </div>
+            <div class="row">
+              <input id="chatInput" style="flex:1" placeholder="Type a mentor message...">
+              <button class="primary" id="sendBtn">Send</button>
+            </div>
+            <div class="hint" id="chatHint">Idle.</div>
+          </article>
+        </div>
+      </section>
+    </main>
+  </section>
+
+  <script>
+    const tabs = document.querySelectorAll("#tabs button");
+    const splash = document.getElementById("splash");
+
+    function showScreen(name) {
+      ["start", "providers", "birth", "chat"].forEach((id) => {
+        const active = id === name;
+        document.getElementById(`screen-${id}`).classList.toggle("active", active);
+        document.querySelector(`#tabs button[data-screen='${id}']`).classList.toggle("active", active);
+      });
+    }
+
+    tabs.forEach((tab) => tab.addEventListener("click", () => showScreen(tab.dataset.screen)));
+
+    function setBadge(el, type, text) {
+      el.classList.remove("ok", "warn", "bad");
+      el.classList.add(type);
+      el.textContent = text;
+    }
+
+    async function ping(url) {
+      try {
+        const res = await fetch(url, { method: "GET" });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    }
+
+    async function refreshStatus() {
+      const hiveBadge = document.getElementById("hiveBadge");
+      const entityBadge = document.getElementById("entityBadge");
+      const hint = document.getElementById("startHint");
+      const nextBtn = document.getElementById("toProvidersBtn");
+      setBadge(hiveBadge, "warn", "Checking");
+      setBadge(entityBadge, "warn", "Checking");
+      const [hiveOk, entityOk] = await Promise.all([
+        ping("http://127.0.0.1:7701/v1/status"),
+        ping("http://127.0.0.1:7702/v1/status")
+      ]);
+      setBadge(hiveBadge, hiveOk ? "ok" : "bad", hiveOk ? "Online" : "Down");
+      setBadge(entityBadge, entityOk ? "ok" : "bad", entityOk ? "Online" : "Down");
+      const ready = hiveOk && entityOk;
+      nextBtn.disabled = !ready;
+      hint.textContent = ready ? "Both services are online." : "Start daemons, then refresh.";
+    }
+
+    async function probeLocal() {
+      const lmBadge = document.getElementById("lmBadge");
+      const ollamaBadge = document.getElementById("ollamaBadge");
+      const hint = document.getElementById("probeHint");
+      setBadge(lmBadge, "warn", "Checking");
+      setBadge(ollamaBadge, "warn", "Checking");
+      const [lm, ol] = await Promise.all([
+        ping("http://127.0.0.1:1234/v1/models"),
+        ping("http://127.0.0.1:11434/v1/models")
+      ]);
+      setBadge(lmBadge, lm ? "ok" : "bad", lm ? "Detected" : "Not Found");
+      setBadge(ollamaBadge, ol ? "ok" : "bad", ol ? "Detected" : "Not Found");
+      hint.textContent = (lm || ol) ? "Local provider found." : "No local provider found. Add cloud key.";
+    }
+
+    function normalizeProvider(raw) {
+      const p = (raw || "").trim().toLowerCase();
+      if (["openai", "codex", "codex-cli", "chatgpt", "gpt"].includes(p)) return "openai";
+      if (["anthropic", "claude", "claude-cli"].includes(p)) return "anthropic";
+      if (["google", "gemini", "gemini-cli"].includes(p)) return "google";
+      if (["xai", "grok", "grok-cli"].includes(p)) return "xai";
+      if (["perplexity", "pplx"].includes(p)) return "perplexity";
+      if (["tavily", "search"].includes(p)) return "tavily";
+      return "";
+    }
+
+    function bubble(role, text) {
+      const log = document.getElementById("chatLog");
+      const el = document.createElement("div");
+      el.className = `bubble ${role}`;
+      el.textContent = text;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    async function sendChat() {
+      const input = document.getElementById("chatInput");
+      const hint = document.getElementById("chatHint");
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      bubble("mentor", text);
+      try {
+        const res = await fetch("http://127.0.0.1:7702/v1/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text })
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        const payload = await res.json();
+        bubble("entity", payload?.data?.reply || "No reply content");
+        hint.textContent = "Live reply from entity daemon.";
+      } catch {
+        bubble("entity", "Preview mode reply: local daemon unavailable from this browser context.");
+        hint.textContent = "Preview mode active.";
+      }
+    }
+
+    document.getElementById("refreshBtn").addEventListener("click", refreshStatus);
+    document.getElementById("toProvidersBtn").addEventListener("click", () => showScreen("providers"));
+    document.getElementById("probeBtn").addEventListener("click", probeLocal);
+    document.getElementById("saveProviderBtn").addEventListener("click", () => {
+      const provider = normalizeProvider(document.getElementById("providerName").value);
+      const key = document.getElementById("providerKey").value.trim();
+      const hint = document.getElementById("providerHint");
+      if (!provider) {
+        hint.textContent = "Unknown provider alias.";
+        return;
+      }
+      if (!key) {
+        hint.textContent = "Key cannot be empty.";
+        return;
+      }
+      hint.textContent = `Saved ${provider} key in UI session state.`;
+    });
+    document.getElementById("toBirthBtn").addEventListener("click", () => showScreen("birth"));
+    document.getElementById("completeBirthBtn").addEventListener("click", () => {
+      const mentor = document.getElementById("mentorName").value.trim();
+      const entity = document.getElementById("entityName").value.trim();
+      const purpose = document.getElementById("entityPurpose").value.trim();
+      const tone = document.getElementById("entityTone").value.trim();
+      const hint = document.getElementById("birthHint");
+      if (!mentor || !entity || !purpose || !tone) {
+        hint.textContent = "Fill all birth fields first.";
+        return;
+      }
+      hint.textContent = `Birth flow complete in UI state for ${entity}.`;
+      bubble("entity", `${entity} is initialized and ready.`);
+    });
+    document.getElementById("toChatBtn").addEventListener("click", () => showScreen("chat"));
+    document.getElementById("sendBtn").addEventListener("click", sendChat);
+    document.getElementById("chatInput").addEventListener("keydown", (e) => { if (e.key === "Enter") sendChat(); });
+
+    (async function boot() {
+      await refreshStatus();
+      setTimeout(() => splash.classList.add("hide"), 900);
+    })();
+  </script>
+</body>
+</html>

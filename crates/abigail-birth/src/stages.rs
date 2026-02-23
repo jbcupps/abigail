@@ -392,6 +392,8 @@ mod tests {
             preloaded_skills_version: 0,
             primary_color: None,
             avatar_url: None,
+            share_memory_across_identities: false,
+            share_tools_across_identities: false,
             share_skills_across_identities: false,
             allow_minor_visual_adaptation: true,
             allow_avatar_swap: false,

@@ -6,18 +6,24 @@
 mod auth;
 mod commands;
 mod server;
+mod shell;
 
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "abigail-cli", about = "Abigail troubleshooting CLI")]
+#[command(
+    name = "abigail",
+    about = "Abigail CLI shell and troubleshooting tools"
+)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Launch the interactive onboarding + chat shell
+    Shell,
     /// Show agent status (config, router, skills, integrations)
     Status,
     /// Store a secret in the vault
@@ -68,7 +74,7 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -79,27 +85,30 @@ async fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Status => commands::status(),
-        Commands::StoreSecret { key, value } => commands::store_secret(&key, &value),
-        Commands::CheckSecret { key } => commands::check_secret(&key),
-        Commands::ListSecrets => commands::list_secrets(),
-        Commands::ConfigureEmail {
+        None | Some(Commands::Shell) => shell::run_shell().await,
+        Some(Commands::Status) => commands::status(),
+        Some(Commands::StoreSecret { key, value }) => commands::store_secret(&key, &value),
+        Some(Commands::CheckSecret { key }) => commands::check_secret(&key),
+        Some(Commands::ListSecrets) => commands::list_secrets(),
+        Some(Commands::ConfigureEmail {
             address,
             imap_host,
             imap_port,
             smtp_host,
             smtp_port,
             password,
-        } => commands::configure_email(
+        }) => commands::configure_email(
             &address, &imap_host, imap_port, &smtp_host, smtp_port, &password,
         ),
-        Commands::IntegrationStatus => commands::integration_status(),
-        Commands::RouterStatus => commands::router_status(),
-        Commands::Serve { port } => server::serve(port).await,
+        Some(Commands::IntegrationStatus) => commands::integration_status(),
+        Some(Commands::RouterStatus) => commands::router_status(),
+        Some(Commands::Serve { port }) => server::serve(port).await,
     };
 
     if let Err(e) = result {
         eprintln!("Error: {}", e);
-        std::process::exit(1);
+        return Err(e);
     }
+
+    Ok(())
 }

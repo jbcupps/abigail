@@ -11,6 +11,7 @@ use axum::{
     extract::State,
     http::StatusCode,
     middleware,
+    response::Html,
     routing::{delete, get, post},
     Json, Router,
 };
@@ -109,6 +110,8 @@ pub struct SecretCheckResponse {
     pub exists: bool,
 }
 
+const HIVE_UI_HTML: &str = include_str!("../../../docs/hive-ui.html");
+
 /// Start the REST API server.
 pub async fn serve(port: u16) -> anyhow::Result<()> {
     let defaults = AppConfig::default_paths();
@@ -158,6 +161,8 @@ pub fn build_router(state: AppServerState) -> Router {
 
     Router::new()
         .route("/health", get(health))
+        .route("/ui", get(get_ui))
+        .route("/ui/", get(get_ui))
         .route("/status", get(get_status))
         .route("/secrets/check/:key", get(check_secret))
         .route("/secrets/store", post(store_secret))
@@ -177,6 +182,10 @@ pub fn build_router(state: AppServerState) -> Router {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+async fn get_ui() -> Html<&'static str> {
+    Html(HIVE_UI_HTML)
 }
 
 async fn get_status(

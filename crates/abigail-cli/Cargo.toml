@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "abigail-cli"
+name = "abigail"
 path = "src/main.rs"
 
 [lib]
@@ -15,6 +15,7 @@ abigail-core = { path = "../abigail-core" }
 abigail-skills = { path = "../abigail-skills" }
 abigail-router = { path = "../abigail-router" }
 abigail-capabilities = { path = "../abigail-capabilities" }
+abigail-birth = { path = "../abigail-birth" }
 anyhow = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 axum = "0.7"
@@ -25,4 +26,8 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 base64 = { workspace = true }
 rand = { workspace = true }
+chrono = { workspace = true }
+reqwest = { workspace = true }
+hive-core = { workspace = true }
+entity-core = { workspace = true }
 tower-http = { version = "0.6", features = ["cors"] }

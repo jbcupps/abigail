@@ -1,0 +1,130 @@
+name: Iterative Loops
+
+on:
+  push:
+    branches: [ "main", "dev-split" ]
+  pull_request:
+    branches: [ "main", "dev-split" ]
+  workflow_dispatch:
+
+jobs:
+  loops-core:
+    name: Loop 1 + Loop 3 (Core)
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Create CI env file
+        shell: pwsh
+        run: |
+          @"
+          OPENAI_API_KEY=
+          ANTHROPIC_API_KEY=
+          XAI_API_KEY=
+          TAVILY_API_KEY=
+          GOOGLE_API_KEY=
+          PERPLEXITY_API_KEY=
+          "@ | Set-Content .env.e2e.local -Encoding UTF8
+
+      - name: Run loop 1
+        shell: pwsh
+        run: ./scripts/run-iterative-loops.ps1 -Loop 1 -EnvFile .env.e2e.local
+
+      - name: Run loop 3
+        shell: pwsh
+        run: ./scripts/run-iterative-loops.ps1 -Loop 3 -EnvFile .env.e2e.local
+
+      - name: Upload loop logs
+        if: always() && hashFiles('target/loop-logs/*') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: iterative-loop-core-logs
+          path: target/loop-logs/*
+
+  loops-provider:
+    name: Loop 2 + Loop 4 (Provider Keys)
+    runs-on: windows-latest
+    timeout-minutes: 120
+    needs: loops-core
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Detect provider secret availability
+        id: provider-secrets
+        shell: pwsh
+        run: |
+          $required = @(
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "XAI_API_KEY",
+            "TAVILY_API_KEY",
+            "GOOGLE_API_KEY",
+            "PERPLEXITY_API_KEY"
+          )
+          $missing = @()
+          foreach ($name in $required) {
+            $value = [System.Environment]::GetEnvironmentVariable($name)
+            if ([string]::IsNullOrWhiteSpace($value)) {
+              $missing += $name
+            }
+          }
+
+          if ($missing.Count -gt 0) {
+            "available=false" >> $env:GITHUB_OUTPUT
+            "missing=$($missing -join ',')" >> $env:GITHUB_OUTPUT
+          } else {
+            "available=true" >> $env:GITHUB_OUTPUT
+            "missing=" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Create provider env file
+        shell: pwsh
+        run: |
+          @"
+          OPENAI_API_KEY=$env:OPENAI_API_KEY
+          ANTHROPIC_API_KEY=$env:ANTHROPIC_API_KEY
+          XAI_API_KEY=$env:XAI_API_KEY
+          TAVILY_API_KEY=$env:TAVILY_API_KEY
+          GOOGLE_API_KEY=$env:GOOGLE_API_KEY
+          PERPLEXITY_API_KEY=$env:PERPLEXITY_API_KEY
+          "@ | Set-Content .env.e2e.local -Encoding UTF8
+
+      - name: Skip provider loops when secrets are unavailable
+        if: steps.provider-secrets.outputs.available != 'true'
+        shell: pwsh
+        run: |
+          Write-Host "Provider loops skipped. Missing secrets: ${{ steps.provider-secrets.outputs.missing }}"
+
+      - name: Run loop 2
+        if: steps.provider-secrets.outputs.available == 'true'
+        shell: pwsh
+        run: ./scripts/run-iterative-loops.ps1 -Loop 2 -EnvFile .env.e2e.local
+
+      - name: Run loop 4
+        if: steps.provider-secrets.outputs.available == 'true'
+        shell: pwsh
+        run: ./scripts/run-iterative-loops.ps1 -Loop 4 -EnvFile .env.e2e.local
