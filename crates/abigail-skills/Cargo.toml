@@ -16,7 +16,7 @@ tokio.workspace = true
 tracing.workspace = true
 toml = "0.8"
 uuid = { version = "1.6", features = ["v4"] }
-async-imap = "0.9"
+async-imap = "0.11"
 async-native-tls = "0.5"
 futures-util = "0.3"
 tokio-util.workspace = true
