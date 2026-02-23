@@ -59,10 +59,8 @@ pub async fn chat(
     }
 
     // 2. Build system prompt from constitutional documents
-    let base_system_prompt = abigail_core::system_prompt::build_system_prompt(
-        &state.docs_dir,
-        &state.config.agent_name,
-    );
+    let base_system_prompt =
+        abigail_core::system_prompt::build_system_prompt(&state.docs_dir, &state.config.agent_name);
 
     // 3. Build tool awareness section from registered skills
     let tool_awareness = chat_pipeline::build_tool_awareness_section(&state.registry);
