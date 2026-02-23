@@ -2,10 +2,16 @@
 //!
 //! Ported from `tauri-app/src/commands/chat.rs` to bring entity-daemon chat
 //! to functional parity: sanitization, system prompt, tool awareness, dedup.
+//! Phase 2a adds the tool-use loop: convert skill tools to LLM-native
+//! ToolDefinitions, call `route_with_tools`, execute returned tool calls,
+//! feed results back, and iterate until the LLM produces a final text reply.
 
-use abigail_capabilities::cognitive::Message;
-use abigail_skills::SkillRegistry;
-use entity_core::SessionMessage;
+use abigail_capabilities::cognitive::{CompletionResponse, Message, ToolCall, ToolDefinition};
+use abigail_router::IdEgoRouter;
+use abigail_skills::manifest::SkillId;
+use abigail_skills::skill::ToolParams;
+use abigail_skills::{SkillExecutor, SkillRegistry};
+use entity_core::{SessionMessage, ToolCallRecord};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -110,6 +116,185 @@ pub fn build_tool_awareness_section(registry: &SkillRegistry) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Tool definitions: SkillRegistry → ToolDefinition[]
+// ---------------------------------------------------------------------------
+
+/// Convert all registered skill tools into LLM-native `ToolDefinition`s.
+///
+/// Tool names are qualified as `{skill_id}::{tool_name}` so the LLM knows
+/// which skill to invoke and we can split them back apart in the loop.
+pub fn build_tool_definitions(registry: &SkillRegistry) -> Vec<ToolDefinition> {
+    let mut defs = Vec::new();
+    if let Ok(manifests) = registry.list() {
+        for manifest in &manifests {
+            if let Ok((skill, _)) = registry.get_skill(&manifest.id) {
+                for t in skill.tools() {
+                    defs.push(ToolDefinition {
+                        name: format!("{}::{}", manifest.id.0, t.name),
+                        description: t.description.clone(),
+                        parameters: t.parameters.clone(),
+                    });
+                }
+            }
+        }
+    }
+    defs
+}
+
+/// Split a qualified tool name `skill_id::tool_name` back into its parts.
+fn split_qualified_tool_name(qualified: &str) -> Option<(String, String)> {
+    let idx = qualified.find("::")?;
+    let skill_id = qualified[..idx].to_string();
+    let tool_name = qualified[idx + 2..].to_string();
+    if skill_id.is_empty() || tool_name.is_empty() {
+        return None;
+    }
+    Some((skill_id, tool_name))
+}
+
+// ---------------------------------------------------------------------------
+// Tool-use loop
+// ---------------------------------------------------------------------------
+
+/// Maximum number of tool-use round-trips before forcing a text response.
+const MAX_TOOL_ROUNDS: usize = 8;
+
+/// Outcome of the tool-use loop.
+pub struct ToolUseResult {
+    /// The final text reply from the LLM.
+    pub content: String,
+    /// All tool calls executed during the loop.
+    pub tool_calls_made: Vec<ToolCallRecord>,
+}
+
+/// Run the full tool-use loop:
+/// 1. Send messages + tool definitions to the LLM via `route_with_tools`.
+/// 2. If the LLM returns `tool_calls`, execute each one via `SkillExecutor`.
+/// 3. Append the assistant's tool-call message and each tool result to the
+///    conversation, then re-prompt.
+/// 4. Repeat until the LLM returns a plain text response (no tool_calls)
+///    or we hit `MAX_TOOL_ROUNDS`.
+pub async fn run_tool_use_loop(
+    router: &IdEgoRouter,
+    executor: &SkillExecutor,
+    mut messages: Vec<Message>,
+    tools: Vec<ToolDefinition>,
+) -> anyhow::Result<ToolUseResult> {
+    let mut all_records = Vec::new();
+
+    for round in 0..MAX_TOOL_ROUNDS {
+        tracing::debug!("Tool-use loop round {}", round);
+
+        let response: CompletionResponse = router
+            .route_with_tools(messages.clone(), tools.clone())
+            .await?;
+
+        // If no tool_calls, we're done — return the text reply.
+        let tool_calls = match response.tool_calls {
+            Some(ref tcs) if !tcs.is_empty() => tcs.clone(),
+            _ => {
+                return Ok(ToolUseResult {
+                    content: response.content,
+                    tool_calls_made: all_records,
+                });
+            }
+        };
+
+        // Append the assistant message (with tool_calls metadata) to history.
+        messages.push(Message {
+            role: "assistant".into(),
+            content: response.content.clone(),
+            tool_call_id: None,
+            tool_calls: Some(tool_calls.clone()),
+        });
+
+        // Execute each tool call and append results.
+        for tc in &tool_calls {
+            let (output_json, record) = execute_single_tool_call(executor, tc).await;
+            all_records.push(record);
+            messages.push(Message::tool_result(&tc.id, output_json));
+        }
+    }
+
+    // Safety: if we exhausted rounds, return what we have.
+    tracing::warn!(
+        "Tool-use loop exhausted {} rounds, returning partial result",
+        MAX_TOOL_ROUNDS
+    );
+    Ok(ToolUseResult {
+        content: "I attempted several tool calls but hit the maximum number of rounds. Here's what I have so far.".to_string(),
+        tool_calls_made: all_records,
+    })
+}
+
+/// Execute a single tool call, returning the JSON result string and a record.
+async fn execute_single_tool_call(
+    executor: &SkillExecutor,
+    tc: &ToolCall,
+) -> (String, ToolCallRecord) {
+    let Some((skill_id_str, tool_name)) = split_qualified_tool_name(&tc.name) else {
+        let err_msg = format!("Invalid tool name format: {}", tc.name);
+        tracing::warn!("{}", err_msg);
+        return (
+            serde_json::json!({"error": err_msg}).to_string(),
+            ToolCallRecord {
+                skill_id: tc.name.clone(),
+                tool_name: tc.name.clone(),
+                success: false,
+            },
+        );
+    };
+
+    // Parse the arguments JSON into ToolParams.
+    let params = match serde_json::from_str::<serde_json::Value>(&tc.arguments) {
+        Ok(serde_json::Value::Object(obj)) => {
+            let mut tp = ToolParams::new();
+            for (k, v) in obj {
+                tp.values.insert(k, v);
+            }
+            tp
+        }
+        _ => ToolParams::new(),
+    };
+
+    tracing::info!("Executing tool: {}::{}", skill_id_str, tool_name);
+
+    let skill_id = SkillId(skill_id_str.clone());
+    match executor.execute(&skill_id, &tool_name, params).await {
+        Ok(output) => {
+            let result_json = serde_json::json!({
+                "success": output.success,
+                "data": output.data,
+            })
+            .to_string();
+            (
+                result_json,
+                ToolCallRecord {
+                    skill_id: skill_id_str,
+                    tool_name,
+                    success: output.success,
+                },
+            )
+        }
+        Err(e) => {
+            let err_json = serde_json::json!({
+                "error": e.to_string(),
+            })
+            .to_string();
+            tracing::warn!("Tool execution failed: {}", e);
+            (
+                err_json,
+                ToolCallRecord {
+                    skill_id: skill_id_str,
+                    tool_name,
+                    success: false,
+                },
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Risk clarification
 // ---------------------------------------------------------------------------
 
@@ -126,6 +311,28 @@ pub fn needs_risk_clarification(message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_split_qualified_tool_name_valid() {
+        let (skill, tool) =
+            split_qualified_tool_name("com.abigail.skills.hive::create_entity").unwrap();
+        assert_eq!(skill, "com.abigail.skills.hive");
+        assert_eq!(tool, "create_entity");
+    }
+
+    #[test]
+    fn test_split_qualified_tool_name_invalid() {
+        assert!(split_qualified_tool_name("no_separator").is_none());
+        assert!(split_qualified_tool_name("::tool").is_none());
+        assert!(split_qualified_tool_name("skill::").is_none());
+    }
+
+    #[test]
+    fn test_build_tool_definitions_empty_registry() {
+        let registry = SkillRegistry::new();
+        let defs = build_tool_definitions(&registry);
+        assert!(defs.is_empty());
+    }
 
     #[test]
     fn test_sanitize_empty_history() {

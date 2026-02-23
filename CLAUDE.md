@@ -111,7 +111,7 @@ The crates form a layered architecture with clear security boundaries:
 | `abigail-capabilities` | **High-trust** functions: cognitive (LLM providers), sensory, memory, agent control |
 | `abigail-skills` | **Lower-trust** plugin system: manifest-based skills with sandbox, registry, executor, event bus |
 | `entity-daemon` | Axum HTTP server wrapping router + skills + executor (port 3142) |
-| `entity-cli` | CLI client for entity-daemon (chat, skills, tool execution) |
+| `entity-cli` | CLI client for entity-daemon (chat, skills, tool execution, memory, scaffolding) |
 
 **Shared foundation:**
 
@@ -161,7 +161,58 @@ Templates in `templates/` (soul.md, ethics.md, instincts.md) are compiled into t
 
 ### Skills System
 
-Skills live in `skills/` with a `skill.toml` manifest declaring tools, permissions, and secrets. The `SkillRegistry` discovers and loads skills; `SkillExecutor` runs tool calls; `EventBus` (broadcast channel) enables inter-skill communication relayed to the frontend via Tauri events.
+Skills are the primary way the Entity gains capabilities beyond conversation. The system has three implementation strategies with a unified permission/sandbox model.
+
+**Core components** (`abigail-skills`):
+- `Skill` trait — contract all skills implement: `manifest()`, `tools()`, `execute_tool()`, `initialize()`, `shutdown()`
+- `SkillManifest` — parsed from `skill.toml`: id, permissions, secrets, runtime config
+- `SkillRegistry` — thread-safe registry with discovery (scans dirs for `*/skill.toml`), registration, secret validation
+- `SkillExecutor` — execution engine with concurrency semaphore, per-tool timeouts, sandbox permission checks, capability envelope (SuperegoL2Mode)
+- `SkillSandbox` — validates audit actions (network, file read/write, shell) against declared permissions
+- `EventBus` — broadcast channel for inter-skill communication, relayed to UI via Tauri events
+
+**Implementation strategies:**
+1. **Native Rust** — implement `Skill` trait directly, compiled into binary. Example: `HiveManagementSkill`
+2. **Dynamic API** — JSON config defining REST tools with URL/header/body templates, secret injection, response extractors. SSRF-protected. Example: preloaded GitHub/Slack/Jira integrations
+3. **MCP (Model Context Protocol)** — bridge to external MCP servers via HTTP transport (`/tools/list`, `/tools/call`)
+
+**Skill manifest format** (`skill.toml`):
+```toml
+[skill]
+id = "com.abigail.skills.example"
+name = "Example"
+version = "0.1.0"
+description = "What this skill does"
+category = "Productivity"
+keywords = ["example", "demo"]
+
+[[permissions]]
+permission = { Network = { Domains = ["api.example.com"] } }
+reason = "Call Example API"
+
+[[secrets]]
+name = "api_key"
+description = "API key for Example service"
+required = true
+```
+
+**Permission types:** `Network` (Full/LocalOnly/Domains), `FileSystem` (Full/Read/Write with paths), `Memory` (ReadOnly/ReadWrite/Namespace), `ShellExecute`, `Notifications`, `Clipboard`, `Microphone`, `Camera`, `ScreenCapture`, `SkillInteraction`
+
+**Trust model (layered):**
+1. Registry-level: manifests loaded from disk
+2. Permission-level: sandbox enforces declared permissions
+3. Capability-level: SuperegoL2Mode gates high-risk actions
+4. Approval-level: `approved_skill_ids` + `signed_skill_allowlist` in Tauri app
+5. Execution-level: timeout + concurrency limits
+
+**On-disk layout:** `skills/` directory contains 18+ skill subdirectories, `registry.toml` (maps skill IDs to LLM instruction files + keywords), and `instructions/` (markdown files injected into system prompt when keywords match)
+
+**Current wiring:**
+- Entity-daemon: `SkillRegistry` + `SkillExecutor` created at startup, `HiveManagementSkill` auto-registered, routes at `GET /v1/skills` and `POST /v1/tools/execute`
+- Chat pipeline: `build_tool_awareness_section()` generates markdown listing all registered tools for the LLM system prompt
+- Tauri app: full command surface (list, discover, execute, approve, MCP integration)
+
+**Key gap:** No LLM tool-use loop yet — the LLM sees tools in the system prompt but there's no code to parse tool calls from LLM output, execute them via `SkillExecutor`, and feed results back into the conversation.
 
 ## Key Patterns
 
@@ -244,7 +295,26 @@ cargo run -p entity-cli -- --url http://127.0.0.1:3142 chat "hello"
 
 **Hive (`:3141`):** `GET /health`, `GET /v1/status`, `GET /v1/entities`, `POST /v1/entities`, `GET /v1/entities/:id/provider-config`, `POST /v1/secrets`
 
-**Entity (`:3142`):** `GET /health`, `GET /v1/status`, `POST /v1/chat`, `GET /v1/skills`, `POST /v1/tools/execute`
+**Entity (`:3142`):** `GET /health`, `GET /v1/status`, `POST /v1/chat`, `GET /v1/skills`, `POST /v1/tools/execute`, `GET /v1/memory/stats`, `POST /v1/memory/search`, `GET /v1/memory/recent?limit=N`, `POST /v1/memory/insert`
+
+## Development Roadmap
+
+Current priorities, in order:
+
+### Phase 2a: Skills Use (P1)
+1. **LLM tool-use loop** — Parse tool-call blocks from LLM responses (OpenAI function-calling format), execute via `SkillExecutor`, inject results back, re-prompt until the LLM produces a final text response. Implement in `entity-daemon/src/chat_pipeline.rs`.
+2. **Auto-load skills from disk** — On entity-daemon startup, scan `skills/` for `*/skill.toml`, register discovered skills in the `SkillRegistry` alongside the built-in `HiveManagementSkill`.
+3. **Wire tools into LLM requests** — Convert registered `ToolDescriptor`s into the `tools` array for the OpenAI-compatible chat completion request so the LLM can invoke them natively.
+
+### Phase 2b: Skill Creation (P2)
+4. **Scaffolding CLI** — `entity-cli new-skill <name>` generates a skill directory with `skill.toml` template, boilerplate Rust or JSON config, and an instruction markdown file.
+5. **Dynamic API skill authoring docs** — Document the JSON config format with examples for common patterns (REST CRUD, OAuth, webhook).
+6. **Skill hot-reload** — File-watcher on `skills/` directory to re-discover and register new/updated skills without daemon restart.
+
+### Phase 2c: Memory & Integration (P3)
+7. **Memory persistence** — Wire `abigail-memory` SQLite into entity-daemon for conversation history, recall tool, and memory weight tiers.
+8. **End-to-end daemon testing** — Automated integration tests: hive-daemon + entity-daemon + skill execution + memory round-trip.
+9. **Tauri app → daemon delegation** — Desktop app calls daemons via HTTP instead of running everything in-process.
 
 ## Known Issues
 

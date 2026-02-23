@@ -463,6 +463,7 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
       for (const token of reply.split(" ")) {
         emitEvent("chat-token", { token: `${token} `, provider, trace_id: traceId });
       }
+      emitEvent("chat-token", { done: true, trace_id: traceId });
       return reply;
     }
 

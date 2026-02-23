@@ -35,6 +35,17 @@ pub struct ChatResponse {
     /// Which provider handled the request ("id", "ego", provider name).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+    /// Tool calls executed during this chat turn (empty if none).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls_made: Vec<ToolCallRecord>,
+}
+
+/// Record of a single tool call made during a chat turn.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallRecord {
+    pub skill_id: String,
+    pub tool_name: String,
+    pub success: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -91,4 +102,49 @@ pub struct ToolExecResponse {
     pub output: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Memory
+// ---------------------------------------------------------------------------
+
+/// Request to search memories.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemorySearchRequest {
+    pub query: String,
+    #[serde(default = "default_memory_limit")]
+    pub limit: usize,
+}
+
+fn default_memory_limit() -> usize {
+    10
+}
+
+/// Request to insert a memory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryInsertRequest {
+    pub content: String,
+    /// Weight tier: "ephemeral", "distilled", or "crystallized".
+    #[serde(default = "default_memory_weight")]
+    pub weight: String,
+}
+
+fn default_memory_weight() -> String {
+    "ephemeral".to_string()
+}
+
+/// A single memory entry returned by the API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryEntry {
+    pub id: String,
+    pub content: String,
+    pub weight: String,
+    pub created_at: String,
+}
+
+/// Memory store statistics.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryStats {
+    pub memory_count: u64,
+    pub has_birth: bool,
 }
