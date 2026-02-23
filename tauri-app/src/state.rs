@@ -66,7 +66,7 @@ pub struct AppState {
     pub ollama: Arc<tokio::sync::Mutex<Option<OllamaManager>>>,
     /// Skill instruction registry for injecting skill-specific LLM instructions
     pub instruction_registry: Arc<InstructionRegistry>,
-    /// Rate limiter for chat_stream command
+    /// Rate limiter for chat command
     pub chat_cooldown: CooldownGuard,
     /// Rate limiter for birth_chat command
     pub birth_cooldown: CooldownGuard,

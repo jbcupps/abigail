@@ -414,7 +414,6 @@ pub fn run() {
             get_forge_undo_status,
             genesis_chat,
             chat,
-            chat_stream,
             get_system_diagnostics,
             propose_entity_visuals,
             start_crystallization,

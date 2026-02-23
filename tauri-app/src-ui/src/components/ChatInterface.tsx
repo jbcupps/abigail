@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import McpAppFrame from "./McpAppFrame";
@@ -82,9 +81,7 @@ export default function ChatInterface({
   const [cliPortInput, setCliPortInput] = useState("8080");
   const [showRoutingDetails, setShowRoutingDetails] = useState(false);
   const [memoryDisclosureEnabled, setMemoryDisclosureEnabled] = useState(true);
-  const [lastDebugTraceId, setLastDebugTraceId] = useState<string | null>(null);
   const showDebugTelemetry = isBrowserHarnessRuntime() && isHarnessDebugEnabled();
-  const memoryUsedTurnRef = useRef(false);
 
   const assistantLabel = agentName || "Abigail";
   const mountedRef = useRef(true);
@@ -193,53 +190,6 @@ export default function ChatInterface({
     refreshRouterStatus();
     refreshMissingSecrets();
 
-    // Listen for chat-status events from backend (e.g. tool execution)
-    const unlisten = listen<{ status: string; tool: string; duration_ms?: number; error?: string; trace_id?: string }>("chat-status", (event) => {
-      const { status, tool, duration_ms } = event.payload;
-      if (event.payload.trace_id) {
-        setLastDebugTraceId(event.payload.trace_id);
-      }
-      if (tool === "recall" && (status === "executing" || status === "done")) {
-        memoryUsedTurnRef.current = true;
-      }
-      if (status === "done") {
-        const dur = duration_ms ? ` (${(duration_ms / 1000).toFixed(1)}s)` : "";
-        setChatStatus(`${tool} complete${dur}`);
-        // Auto-clear after a brief display
-        setTimeout(() => setChatStatus(null), 2000);
-        return;
-      }
-      if (status === "error") {
-        setChatStatus(`${tool} failed`);
-        setShowRoutingDetails(true);
-        setTimeout(() => setChatStatus(null), 3000);
-        return;
-      }
-      // tool_executing status — show contextual messages
-      const toolMessages: Record<string, string> = {
-        web_search: "Searching the web...",
-        perplexity_search: "Searching with Perplexity...",
-        read_file: "Reading file...",
-        write_file: "Writing file...",
-        list_directory: "Listing directory...",
-        http_get: "Fetching URL...",
-        http_post: "Sending HTTP request...",
-        execute: "Running command...",
-      };
-      setChatStatus(toolMessages[tool] || `Running ${tool}...`);
-    });
-    const unlistenRouting = listen<{ provider?: string; fallback_used?: boolean; safety_blocked?: boolean; error?: boolean; trace_id?: string }>(
-      "chat-routing",
-      (event) => {
-        const payload = event.payload;
-        if (payload.trace_id) {
-          setLastDebugTraceId(payload.trace_id);
-        }
-        if (payload.fallback_used || payload.safety_blocked || payload.error) {
-          setShowRoutingDetails(true);
-        }
-      }
-    );
     invoke<{ enabled: boolean }>("get_memory_disclosure_settings")
       .then((v) => {
         if (!mountedRef.current) return;
@@ -257,12 +207,6 @@ export default function ChatInterface({
         });
       }
       mountedRef.current = false;
-      unlisten.then((f) => f()).catch((e) => {
-        console.warn("[ChatInterface] failed to unregister chat-status listener:", e);
-      });
-      unlistenRouting.then((f) => f()).catch((e) => {
-        console.warn("[ChatInterface] failed to unregister chat-routing listener:", e);
-      });
     };
   }, [onSessionSnapshot]);
 
@@ -394,152 +338,53 @@ export default function ChatInterface({
     const sessionBeforeTurn = messagesRef.current
       .filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim().length > 0)
       .map((m) => ({ role: m.role, content: m.content }));
-    memoryUsedTurnRef.current = false;
+
     setMessages((m) => [...m, userMessage]);
     setInput("");
     setLoading(true);
-    // Reset textarea height after send
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
 
-    // Add a placeholder assistant message for streaming
-    setMessages((m) => [...m, { role: "assistant", content: "" }]);
-
-        // Listen for streaming tokens. Coalesce UI updates to animation frames
-        // so very fast token streams do not trigger visible flicker.
-        let streamContent = "";
-        let streamProvider = "";
-        let unlisten: (() => void) | null = null;
-        let rafId: number | null = null;
-        let streamFlushTimerId: number | null = null;
-
-        const flushStreamToUi = () => {
-          setMessages((m) => {
-            const updated = [...m];
-            const lastAssistant = updated[updated.length - 1];
-            if (lastAssistant && lastAssistant.role === "assistant") {
-              updated[updated.length - 1] = {
-                ...lastAssistant,
-                content: streamContent,
-                provider: streamProvider,
-                memoryUsed: memoryUsedTurnRef.current,
-              };
-            }
-            return updated;
-          });
-        };
-
-        const scheduleStreamFlush = () => {
-          // Throttle streaming paints to avoid rapid visual flashing in the chat list.
-          if (streamFlushTimerId !== null) return;
-          streamFlushTimerId = window.setTimeout(() => {
-            streamFlushTimerId = null;
-            if (rafId !== null) return;
-            rafId = window.requestAnimationFrame(() => {
-              rafId = null;
-              flushStreamToUi();
-            });
-          }, 45);
-        };
-        // Create a promise that resolves when the backend emits { done: true }.
-        // This ensures we wait for the full streaming response before finalizing.
-        let streamDoneResolve: (() => void) | null = null;
-        const streamDonePromise = new Promise<void>((resolve) => {
-          streamDoneResolve = resolve;
-        });
-
-        try {
-          unlisten = await listen<{ token?: string; provider?: string; done?: boolean }>("chat-token", (event) => {
-            if (event.payload.done) {
-              // Final flush and resolve when backend signals completion.
-              flushStreamToUi();
-              if (streamDoneResolve) streamDoneResolve();
-              return;
-            }
-            if (event.payload.token) {
-              streamContent += event.payload.token;
-              if (event.payload.provider) {
-                streamProvider = event.payload.provider;
-              }
-              scheduleStreamFlush();
-            }
-          });
-
-    } catch (listenErr) {
-      console.warn("[ChatInterface] listen() failed:", listenErr);
-    }
-
     try {
-      // Kick off the streaming task. The return value ("Success") is just an
-      // acknowledgment that the background task started — NOT the LLM response.
-      const invokePromise = invoke<string>("chat_stream", {
+      // Non-streaming invoke — same flow as entity-daemon POST /v1/chat.
+      // Returns JSON-serialized ChatResponse { reply, provider, tool_calls_made }.
+      const responseJson = await invoke<string>("chat", {
         message: userMessage.content,
         target,
         sessionMessages: sessionBeforeTurn,
       });
 
-      // Wait for BOTH: the invoke to complete AND the stream-done signal.
-      // The invoke returns immediately; the stream-done arrives when the
-      // background tokio task finishes emitting all tokens.
-      // Timeout after 120s to prevent hanging if the background task dies.
-      const streamTimeout = new Promise<void>((resolve) => setTimeout(resolve, 120_000));
-      const [reply] = await Promise.all([
-        invokePromise,
-        Promise.race([streamDonePromise, streamTimeout]),
-      ]) as [string, unknown];
-
       if (!mountedRef.current) return;
 
-      // The stream-done handler already flushed content. If streaming
-      // produced content, we're done. Otherwise show a meaningful error.
-      if (!streamContent) {
-        // No tokens arrived at all — likely a provider error that wasn't
-        // emitted as a token. Show a helpful message instead of "Success".
-        const fallbackMsg = (reply && reply !== "Success")
-          ? reply
-          : "No response received. Check your LLM provider configuration.";
-        setMessages((m) => {
-          const updated = [...m];
-          const lastAssistant = updated[updated.length - 1];
-          if (lastAssistant && lastAssistant.role === "assistant") {
-            updated[updated.length - 1] = {
-              ...lastAssistant,
-              content: fallbackMsg,
-              memoryUsed: memoryUsedTurnRef.current,
-              isError: true,
-            };
-          }
-          return updated;
-        });
-      }
+      const response: { reply: string; provider?: string; tool_calls_made?: Array<{ skill_id: string; tool_name: string; success: boolean }> } =
+        JSON.parse(responseJson);
+
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: response.reply,
+          provider: response.provider,
+        },
+      ]);
     } catch (e) {
       if (!mountedRef.current) return;
       const errorMsg = String(e);
       let content = errorMsg;
       if (errorMsg.includes("No local LLM configured")) {
-        content = "No LLM available. The bundled Ollama may still be starting.\n" +
+        content =
+          "No LLM available. The bundled Ollama may still be starting.\n" +
           "Please wait a moment, or configure a provider:\n" +
           "1. Set OPENAI_API_KEY environment variable, or\n" +
           "2. Install Ollama and set LOCAL_LLM_BASE_URL=http://localhost:11434";
       }
-      setMessages((m) => {
-        const updated = [...m];
-        const lastAssistant = updated[updated.length - 1];
-        if (lastAssistant && lastAssistant.role === "assistant") {
-          updated[updated.length - 1] = { ...lastAssistant, content, isError: true };
-        }
-        return updated;
-      });
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", content, isError: true },
+      ]);
       setShowRoutingDetails(true);
     } finally {
-      if (streamFlushTimerId !== null) {
-        window.clearTimeout(streamFlushTimerId);
-      }
-      if (rafId !== null) {
-        window.cancelAnimationFrame(rafId);
-      }
-      try { if (unlisten) unlisten(); } catch { /* ignore */ }
       if (!mountedRef.current) return;
       setLoading(false);
       setChatStatus(null);
@@ -900,7 +745,7 @@ export default function ChatInterface({
         </button>
         {showDebugTelemetry && (
           <span className="text-theme-text-dim">
-            trace: {lastDebugTraceId ?? "none"}
+            mode: non-streaming
           </span>
         )}
       </div>
