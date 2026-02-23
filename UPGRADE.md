@@ -78,6 +78,17 @@ If auto-update is not available (Linux DEB, network issues):
 3. Choose "Yes" to preserve your data when prompted
 4. The installer backs up your data, installs the new version, and restores data
 
+## Daemon Upgrades
+
+When running the Hive/Entity daemons directly (outside the Tauri desktop app):
+
+1. Stop all running daemons (`entity-daemon` first, then `hive-daemon`)
+2. Build the new version: `cargo build -p hive-daemon -p entity-daemon --release`
+3. Start `hive-daemon` with the same `--data-dir` as before
+4. Start `entity-daemon` with the same `--entity-id`
+
+The daemons share the same data directory and config format as the Tauri desktop app. No separate migration is needed.
+
 ## Downgrade
 
 Downgrading is not supported via auto-update. To downgrade manually:

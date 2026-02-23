@@ -61,7 +61,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 | # | Feature Gap | Priority | Effort | Category | Status |
 |---|-------------|----------|--------|----------|--------|
 | 1 | Multi-channel messaging (WhatsApp, Telegram, Discord, Slack, etc.) | P0 | XL | Messaging | Pending |
-| 2 | WebSocket gateway / control plane | P0 | L | Architecture | Pending |
+| 2 | WebSocket gateway / control plane | P0 | L | Architecture | Partial (HTTP daemons done; WebSocket/SSE pending) |
 | 3 | Docker sandbox for skill/tool execution | P0 | L | Security | Pending |
 | 4 | Expanded LLM provider support (Anthropic, XAI, Google) | P0 | M | LLM | Done (Anthropic) |
 | 5 | Skills ecosystem (100+ bundled skills) | P0 | XL | Skills | Done (Hive + Factory) |
@@ -93,7 +93,7 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 | 31 | Per-channel memory isolation | P2 | M | Memory | Pending |
 | 32 | 3-way Superego routing | P2 | M | LLM | Done |
 | 33 | Community skill marketplace/registry | P3 | L | Skills | Pending |
-| 34 | Onboarding daemon (background service) | P3 | M | Architecture | Pending |
+| 34 | Onboarding daemon (background service) | P3 | M | Architecture | Done (Hive/Entity daemons) |
 | 35 | Telemetry and analytics (opt-in) | P3 | M | Operations | Pending |
 | 36 | Plugin/extension API for third-party developers | P3 | L | Skills | Pending |
 | 37 | Internationalization (i18n) | P3 | M | UI | Pending |
@@ -338,27 +338,22 @@ Abigail has several features that OpenClaw lacks. These are differentiators wort
 
 ## 5. Architecture Comparison
 
-### Abigail (Current)
+### Abigail (Current — Hive/Entity Separation)
 ```
-┌─────────────────────────────────┐
-│         Tauri Desktop App       │
-│  ┌──────────┐  ┌─────────────┐  │
-│  │  React   │  │ Rust Backend │  │
-│  │  UI      │──│ (commands)   │  │
-│  └──────────┘  └──────┬──────┘  │
-│                       │         │
-│  ┌────────────────────┼───────┐ │
-│  │    abigail-router        │       │ │
-│  │  ┌─────┐ ┌───────┐ │       │ │
-│  │  │ Id  │ │  Ego  │ │       │ │
-│  │  │Local│ │ Cloud │ │       │ │
-│  │  └─────┘ └───────┘ │       │ │
-│  └─────────────────────┘       │ │
-│  ┌──────────┐ ┌──────────────┐ │ │
-│  │abigail-skills │ │  abigail-memory   │ │ │
-│  │ Registry │ │   SQLite     │ │ │
-│  └──────────┘ └──────────────┘ │ │
-└─────────────────────────────────┘
+┌───────────────────────────────────────────────────────┐
+│                Tauri Desktop App (GUI)                 │
+│            (wraps both daemons for end users)          │
+└────────────────────┬──────────────────┬───────────────┘
+                     │                  │
+        ┌────────────▼──────┐  ┌───────▼───────────────┐
+        │  Hive Daemon      │  │  Entity Daemon        │
+        │  (:3141)          │  │  (:3142)              │
+        │                   │  │                       │
+        │ IdentityManager   │  │ IdEgoRouter           │
+        │ SecretsVault      │◄─│ SkillRegistry         │
+        │ Hive (resolve)    │  │ SkillExecutor         │
+        │ ProviderConfig    │  │ EventBus              │
+        └───────────────────┘  └───────────────────────┘
 ```
 
 ### OpenClaw

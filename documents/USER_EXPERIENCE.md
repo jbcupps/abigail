@@ -47,8 +47,19 @@ Accessible via the drawer or Forge mode, the **Sanctum** is the Entity's interna
 
 ---
 
-## 5. Security and Sovereignty
+## 5. Headless Operation (CLI)
+
+For power users who prefer terminal access, the Hive/Entity daemons can run independently:
+
+- **Hive Daemon** (`hive-daemon`): Control plane on port 3141 — manages identity, secrets, provider config.
+- **Entity Daemon** (`entity-daemon`): Agent runtime on port 3142 — routes messages, executes skills.
+- **CLI Tools**: `hive-cli` and `entity-cli` provide full access without the desktop GUI.
+
+This enables server deployments, automation, and multi-entity households where each family member runs their own Entity daemon under a shared Hive.
+
+## 6. Security and Sovereignty
 
 - **Local-First**: Your data, memories, and keys stay on your machine.
 - **Cryptographic Trust**: Every constitutional document (Soul, Ethics) is signed by your Hive key.
 - **No Cloud Lock-in**: Swap providers at any time via the Connectivity menu in the Soul Registry.
+- **Hive/Entity Boundary**: The Hive controls secrets and identity. Entities never access raw secret vaults — they receive only resolved provider configurations.

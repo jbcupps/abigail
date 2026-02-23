@@ -1,0 +1,13 @@
+[package]
+name = "abigail-identity"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+abigail-core = { path = "../abigail-core" }
+ed25519-dalek.workspace = true
+serde.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+chrono.workspace = true

@@ -1,0 +1,23 @@
+[package]
+name = "hive-daemon"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "hive-daemon"
+path = "src/main.rs"
+
+[dependencies]
+hive-core = { path = "../hive-core" }
+abigail-core = { path = "../abigail-core" }
+abigail-identity = { path = "../abigail-identity" }
+abigail-hive = { path = "../abigail-hive" }
+axum.workspace = true
+tower-http.workspace = true
+tokio.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true

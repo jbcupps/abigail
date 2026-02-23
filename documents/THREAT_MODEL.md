@@ -87,7 +87,27 @@ A skill or MCP tool sends user or system data to an external party without conse
 - **Skill with network permission exfiltrates memory or files:** Mitigated by granting only the permissions needed and, where possible, restricting to specific domains; memory/storage caps (when enforced) limit scope.
 - **MCP server forwards prompts/responses to third party:** Mitigated by configuring only trusted MCP servers and using HTTP allowlist so that connections go only to intended hosts.
 
+## 5. Hive/Entity daemon threats
+
+### Threat
+
+The Hive and Entity daemons communicate over HTTP on localhost. An attacker with local access could impersonate one daemon to the other, intercept provider config (including API keys), or send malicious requests.
+
+### Mitigations
+
+| Control | Status |
+|--------|--------|
+| **Localhost binding** | Implemented. Both daemons bind to `127.0.0.1` only — not exposed to LAN or internet. |
+| **No raw secret exposure** | Implemented. Hive's `/v1/entities/:id/provider-config` returns resolved provider config. Entity never accesses the raw `SecretsVault`. |
+| **CORS** | Implemented. Both daemons use `tower-http` CORS layer. Currently permissive (`Any`) for development; should be restricted in production. |
+| **Auth tokens** | Planned. Hive should issue a short-lived token to Entity at startup for subsequent API calls. Not yet implemented. |
+
+### Abuse cases
+
+- **Local process reads Hive API keys:** Mitigated by localhost-only binding; any local process with network access can reach the daemon. Future: add bearer token auth.
+- **Entity daemon spoofing:** A malicious process could impersonate entity-daemon to hive-daemon. Mitigated when auth tokens are implemented.
+
 ## Document maintenance
 
-- Update this document when adding new extension points (e.g. WASM runtime, new MCP transports) or when changing approval, signing, or sandbox behavior.
-- See [SECURITY_NOTES.md](SECURITY_NOTES.md) for key management, DPAPI, and constitutional integrity.
+- Update this document when adding new extension points (e.g. WASM runtime, new MCP transports, daemon auth) or when changing approval, signing, or sandbox behavior.
+- See [SECURITY_NOTES.md](SECURITY_NOTES.md) for key management, DPAPI, constitutional integrity, and Hive/Entity security boundaries.

@@ -51,6 +51,7 @@ Every running agent instance carries the same archetype:
 
 Abigail is a working, modular platform. Recent updates include:
 
+- **Hive/Entity Separation**: Independent HTTP daemons for control plane (Hive) and agent runtime (Entity), enabling multi-entity households and independent evolution.
 - **Sovereign Birth Flow**: Multi-stage onboarding (Darkness → Genesis) for new Entities.
 - **Soul Registry**: Manage multiple identities, each with custom themes and avatars.
 - **Sanctum Interface**: Ethical reflection and staff monitoring.
@@ -59,7 +60,7 @@ Abigail is a working, modular platform. Recent updates include:
 - **Dual Keyvault Architecture**: Compartmentalized storage for system-level Hive secrets and Entity-level operational credentials (Skills Vault).
 - **Bicameral Routing**: Fast local "Id" (Ollama/GGUF) + powerful cloud "Ego" (Claude/OpenAI).
 - **Constitutional Signing**: Entities sign their own `soul.md` and `ethics.md` at birth.
-- **Modular Tauri Commands**: Specialized handlers for Identity, Birth, Config, and Skills.
+- **CLI Access**: `hive-cli` and `entity-cli` for headless operation alongside the Tauri desktop app.
 
 ---
 
@@ -148,7 +149,14 @@ git clone https://github.com/jbcupps/abigail.git
 cd abigail
 cargo build
 cd tauri-app/src-ui && npm install && cd ../..
+
+# Option A: Desktop app (full GUI)
 cargo tauri dev
+
+# Option B: Headless daemons
+cargo run -p hive-daemon                             # Control plane on :3141
+cargo run -p entity-daemon -- --entity-id <uuid>     # Agent runtime on :3142
+cargo run -p entity-cli -- chat "hello"              # CLI chat
 ```
 
 For Docker-based development, see [How to Run Locally](documents/HOW_TO_RUN_LOCALLY.md).
@@ -167,21 +175,52 @@ See [`example.env`](example.env) for the full list.
 
 ## Architecture
 
+### Hive/Entity Separation
+
+The system follows a two-daemon architecture:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Tauri Desktop App (GUI)                   │
+│                 (wraps both daemons for end users)           │
+└─────────────────────┬───────────────────────┬───────────────┘
+                      │                       │
+         ┌────────────▼──────────┐  ┌────────▼──────────────┐
+         │   Hive Daemon (:3141) │  │ Entity Daemon (:3142) │
+         │   Control Plane       │  │ Agent Runtime          │
+         │                       │  │                        │
+         │ • Identity management │  │ • Id/Ego/Superego      │
+         │ • Secret resolution   │  │   routing              │
+         │ • Provider config     │◄─│ • Skill execution      │
+         │ • Agent creation      │  │ • Memory management    │
+         │ • Constitutional docs │  │ • Tool orchestration   │
+         └───────────────────────┘  └────────────────────────┘
+```
+
+**Hive** is the household-level security boundary — one per installation. **Entity** is a personal agent runtime — one per family member or persona. Entities fetch their provider configuration from Hive on startup, then operate independently.
+
 ### Rust Workspace (Modularized)
 
-The codebase is organized into specialized crates with clear security boundaries:
+| Layer | Crate | Role |
+|-------|-------|------|
+| **Hive** | `hive-core` | API contracts (DTOs): `ApiEnvelope<T>`, `EntityInfo`, `ProviderConfig` |
+| | `abigail-identity` | `IdentityManager` — Ed25519 agent creation, signing, listing |
+| | `abigail-hive` | Secret resolution, provider construction, priority chain |
+| | `hive-daemon` | Axum HTTP server (port 3141) |
+| | `hive-cli` | CLI client for Hive |
+| **Entity** | `entity-core` | API contracts: `ChatRequest/Response`, `EntityStatus`, tool DTOs |
+| | `abigail-router` | "Fast Path" routing: classifies complexity, routes to Id/Ego |
+| | `abigail-capabilities` | High-trust cognitive/sensory/memory/agent functions |
+| | `abigail-skills` | Sandboxed plugin system with registry, executor, event bus |
+| | `entity-daemon` | Axum HTTP server (port 3142) |
+| | `entity-cli` | CLI client for Entity |
+| **Shared** | `abigail-core` | Foundation: AppConfig, Ed25519 crypto, DPAPI secrets |
+| | `abigail-memory` | SQLite persistence with agentic `recall` search |
+| | `abigail-birth` | Birth sequence orchestrator |
+| | `abigail-keygen` | Standalone Ed25519 keypair generation utility |
+| **App** | `tauri-app` | Tauri desktop bridge (wraps daemons for GUI users) |
 
-| Crate | Role |
-|-------|------|
-| `abigail-core` | Foundation: AppConfig (v13), Ed25519 crypto, DPAPI secrets. |
-| `abigail-memory` | SQLite persistence with agentic `recall` search. |
-| `abigail-router` | "Fast Path" routing: classifies complexity and routes to Id/Ego. |
-| `abigail-birth` | The birth sequence orchestrator. |
-| `abigail-skills` | Sandboxed plugin system for agent capabilities. |
-| `tauri-app` (`abigail-app` crate) | The Tauri bridge, modularized into command handlers. |
-| `abigail-keygen` | Standalone utility for Ed25519 keypair generation. |
-
-**Security boundary**: Capabilities have vault access and run trusted code. Skills are sandboxed plugins that declare permissions in `skill.toml` manifests.
+**Security boundary**: Hive controls secrets and identity (high trust). Skills run in Entity's sandboxed plugin system with declared permissions.
 
 ### Id/Ego Router (Bicameral Architecture)
 
@@ -189,10 +228,10 @@ The codebase is organized into specialized crates with clear security boundaries
 User Input → Router classifies complexity
   → Routine → Id (local LLM via Ollama/LM Studio)
   → Complex → Ego (cloud LLM via OpenAI/Anthropic)
-Background: Skills poll inputs → classify → notify
+Background: Superego audits routing decisions against alignment criteria
 ```
 
-Infrastructure exists for a third layer — the **Superego** (ethical oversight) — which will pre-check all routing decisions against alignment criteria. This maps directly to the TriangleEthic: the Superego applies deontological checks, the Ego reasons about outcomes, and the Id provides fast intuitive responses.
+The **Superego** (ethical oversight) pre-checks routing decisions against alignment criteria. This maps directly to the TriangleEthic: the Superego applies deontological checks, the Ego reasons about outcomes, and the Id provides fast intuitive responses.
 
 ### Constitutional Documents
 
@@ -231,17 +270,17 @@ For detailed architecture reference (crate responsibilities, security boundaries
 
 ## Roadmap
 
-### Phase 1: Foundation (In Progress)
+### Phase 1: Foundation (Complete)
 
-Anthropic Claude provider (done), streaming responses, Superego wiring, core skills (filesystem, shell, HTTP), skills watcher, CLI interface. See [Phase 1 Agile Plan](documents/PHASE1_AGILE_PLAN.md).
+Anthropic Claude provider, streaming responses, Superego wiring, core skills (filesystem, shell, HTTP), skills watcher, Hive/Entity daemon separation, CLI interfaces.
 
-### Phase 2: Gateway & Messaging
+### Phase 2: Wire Full Capabilities (In Progress)
 
-WebSocket gateway (`abigail-gateway`), lane queue system, channel adapters (Telegram, Discord, Slack, WebChat).
+Streaming chat via SSE, agentic multi-turn tool loop, memory integration in chat context, birth flow over HTTP, entity self-registration.
 
-### Phase 3: Execution & Memory
+### Phase 3: Gateway & Messaging
 
-Docker sandbox for skill execution, FTS5 full-text search, vector embeddings, per-channel memory isolation, cron scheduler, multi-agent workspaces.
+Channel adapters (Telegram, Discord, Slack, WebChat), Hive process management (spawn/stop entity daemons).
 
 ### Phase 4: Sensory & Browser
 
@@ -251,7 +290,7 @@ Chrome DevTools Protocol browser automation, semantic snapshots (accessibility t
 
 Skill SDK and community registry, mobile companion apps, MCP support. Integration with the Ethical Alignment Platform: 5D scoring engine, EOB + PVB on Hardhat, memetic fitness tracking, Liberation Protocol progression, multi-agent ethical cooperation.
 
-For the complete feature gap analysis and implementation plan, see [Feature Gap Analysis](documents/Feature_Gap_Analysis.md).
+For the complete feature gap analysis, see [Feature Gap Analysis](documents/Feature_Gap_Analysis.md).
 
 ---
 
@@ -294,15 +333,24 @@ The platform is the infrastructure layer that makes Abigail's ethical grounding 
 ## Common Commands
 
 ```bash
-# Full workspace tests
-cargo test --all
+# Full workspace tests (CI-equivalent)
+cargo test --workspace --exclude abigail-app
 
 # Focused crate tests
 cargo test -p abigail-core
+cargo test -p abigail-identity
 
 # Lint and format
 cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
+cargo clippy --workspace --exclude abigail-app -- -D warnings
+
+# Run daemons
+cargo run -p hive-daemon
+cargo run -p entity-daemon -- --entity-id <uuid>
+
+# CLI tools
+cargo run -p hive-cli -- status
+cargo run -p entity-cli -- chat "hello"
 
 # Build installer locally
 ./scripts/build-installer.sh                 # macOS/Linux
@@ -325,10 +373,11 @@ powershell -File scripts/build-installer.ps1 # Windows
 
 - [How to Run Locally](documents/HOW_TO_RUN_LOCALLY.md)
 - [Security Notes](documents/SECURITY_NOTES.md)
+- [Threat Model](documents/THREAT_MODEL.md)
 - [Release Process](documents/RELEASE.md)
-- [Phase 1 Agile Plan](documents/PHASE1_AGILE_PLAN.md)
 - [Feature Gap Analysis](documents/Feature_Gap_Analysis.md)
-- [MVP Scope](documents/MVP_SCOPE.md)
+- [User Experience Guide](documents/USER_EXPERIENCE.md)
+- [Upgrade Guide](UPGRADE.md)
 - [Environment Updates](documents/ENVIRONMENT_UPDATES.md)
 - [GitHub Settings Checklist](documents/GITHUB_SETTINGS.md)
 

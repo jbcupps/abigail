@@ -1,0 +1,17 @@
+[package]
+name = "entity-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "entity-cli"
+path = "src/main.rs"
+
+[dependencies]
+entity-core = { path = "../entity-core" }
+hive-core = { path = "../hive-core" }
+clap.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
