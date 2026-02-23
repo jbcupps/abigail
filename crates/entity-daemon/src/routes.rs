@@ -1,7 +1,6 @@
 //! Entity daemon HTTP route handlers.
 
 use crate::state::EntityDaemonState;
-use abigail_capabilities::cognitive::Message;
 use axum::{extract::State, Json};
 use entity_core::{
     ApiEnvelope, ChatRequest, ChatResponse, EntityStatus, SkillInfo, ToolExecRequest,
@@ -47,16 +46,42 @@ pub async fn chat(
     State(state): State<EntityDaemonState>,
     Json(body): Json<ChatRequest>,
 ) -> Json<ApiEnvelope<ChatResponse>> {
-    // Build message list
-    let mut messages: Vec<Message> = body
-        .session_messages
-        .unwrap_or_default()
-        .into_iter()
-        .map(|m| Message::new(&m.role, &m.content))
-        .collect();
-    messages.push(Message::new("user", &body.message));
+    use crate::chat_pipeline;
 
-    // Route based on target
+    // 1. Risk clarification check
+    if chat_pipeline::needs_risk_clarification(&body.message) {
+        return Json(ApiEnvelope::success(ChatResponse {
+            reply: "Before I continue, clarify your intent and authorization context. \
+                    If this is defensive or approved testing, say so and I can provide safer guidance."
+                .to_string(),
+            provider: Some("safety".to_string()),
+        }));
+    }
+
+    // 2. Build system prompt from constitutional documents
+    let base_system_prompt = abigail_core::system_prompt::build_system_prompt(
+        &state.docs_dir,
+        &state.config.agent_name,
+    );
+
+    // 3. Build tool awareness section from registered skills
+    let tool_awareness = chat_pipeline::build_tool_awareness_section(&state.registry);
+
+    // 4. Combine system prompt + tool awareness
+    let full_system_prompt = if tool_awareness.is_empty() {
+        base_system_prompt
+    } else {
+        format!("{}\n\n{}", base_system_prompt, tool_awareness)
+    };
+
+    // 5. Build contextual messages with sanitization + deduplication
+    let messages = chat_pipeline::build_contextual_messages(
+        &full_system_prompt,
+        body.session_messages,
+        &body.message,
+    );
+
+    // 6. Route based on target
     let target = body.target.as_deref().unwrap_or("AUTO");
     let result = match target {
         "ID" => state.router.id_only(messages).await,
@@ -74,8 +99,15 @@ pub async fn chat(
             } else {
                 "id".to_string()
             };
+
+            // 7. Append safety alternative if response starts with "Blocked:"
+            let mut content = response.content;
+            if content.starts_with("Blocked:") {
+                content.push_str("\nSafer alternative: I can help with defensive hardening, detection strategies, and incident response best practices.");
+            }
+
             Json(ApiEnvelope::success(ChatResponse {
-                reply: response.content,
+                reply: content,
                 provider: Some(provider),
             }))
         }

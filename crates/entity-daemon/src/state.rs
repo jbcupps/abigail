@@ -4,6 +4,7 @@ use abigail_core::AppConfig;
 use abigail_router::IdEgoRouter;
 use abigail_skills::channel::EventBus;
 use abigail_skills::{SkillExecutor, SkillRegistry};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Shared state for all entity-daemon route handlers.
@@ -17,4 +18,6 @@ pub struct EntityDaemonState {
     /// Event bus for skill-to-skill communication (used in Phase 2 streaming).
     #[allow(dead_code)]
     pub event_bus: Arc<EventBus>,
+    /// Path to this entity's constitutional documents directory.
+    pub docs_dir: PathBuf,
 }
