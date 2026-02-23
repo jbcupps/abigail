@@ -29,8 +29,8 @@ Manual configuration steps for the GitHub repository. These settings cannot be m
 
 ## Repository Settings (Settings > General)
 
-- [ ] **Description**: "Abigail - Local-first desktop AI agent with constitutional integrity, Ed25519 verification, and multi-provider LLM routing"
-- [ ] **Topics**: `tauri`, `rust`, `react`, `desktop-app`, `ai-agent`, `llm`, `ed25519`, `local-first`
+- [ ] **Description**: "Abigail - Sovereign Entity platform with Hive/Entity daemon architecture, constitutional integrity, Ed25519 verification, and multi-provider LLM routing"
+- [ ] **Topics**: `tauri`, `rust`, `react`, `desktop-app`, `ai-agent`, `llm`, `ed25519`, `local-first`, `sovereign-entity`
 - [ ] **Website**: Set to GitHub Pages URL or releases page
 - [ ] **Social preview**: Upload a social preview image (1280x640 recommended)
 - [ ] **Features**:

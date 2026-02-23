@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Abigail is a desktop agent application built with Tauri 2.0 (Rust backend) and React (TypeScript frontend). It implements a first-run "birth" sequence, Ed25519 signature verification of constitutional documents, Id/Ego LLM routing, and an extensible skill system.
+Abigail is a Sovereign Entity platform built with Tauri 2.0 (Rust backend) and React (TypeScript frontend). The architecture follows a **Hive/Entity separation**: the **Hive** is the household-level control plane (secrets, identity, provider resolution) and each **Entity** is a personal agent runtime (routing, skills, memory). Both run as independent HTTP daemons composed from shared `abigail-*` crates, with the Tauri desktop app wrapping them for end users.
 
 ## Build & Run Commands
 
@@ -13,22 +13,29 @@ Abigail is a desktop agent application built with Tauri 2.0 (Rust backend) and R
 cargo build                              # Build all Rust crates
 cd tauri-app/src-ui && npm install       # Install frontend deps (one-time)
 
-# Development (from repo root)
+# Development — Tauri desktop app (from repo root)
 cargo tauri dev                          # Launches app with hot-reload at localhost:1420
 
+# Development — Hive/Entity daemons (headless)
+cargo run -p hive-daemon                             # Control plane on :3141
+cargo run -p entity-daemon -- --entity-id <uuid>     # Agent runtime on :3142
+cargo run -p hive-cli -- status                      # CLI: query Hive
+cargo run -p entity-cli -- chat "hello"              # CLI: chat with Entity
+
 # Tests
-cargo test --all                         # Run all tests
-cargo test -p abigail-core                    # Signature verification, config
-cargo test -p abigail-memory                  # SQLite schema, memory CRUD
-cargo test -p abigail-router                  # Routing decisions
-cargo test -p abigail-skills                  # Requires ABIGAIL_IMAP_TEST=1 + credentials
+cargo test --workspace --exclude abigail-app         # All tests (CI-equivalent)
+cargo test -p abigail-core                           # Signature verification, config
+cargo test -p abigail-identity                       # Identity manager
+cargo test -p abigail-memory                         # SQLite schema, memory CRUD
+cargo test -p abigail-router                         # Routing decisions
+cargo test -p abigail-skills                         # Requires ABIGAIL_IMAP_TEST=1 + credentials
 
 # Single test
 cargo test -p abigail-core verify             # Run tests matching "verify" in abigail-core
 
 # Linting
-cargo clippy
-cargo fmt --check
+cargo clippy --workspace --exclude abigail-app -- -D warnings
+cargo fmt --all -- --check
 
 # Frontend only
 cd tauri-app/src-ui && npm run build     # tsc + vite build
@@ -72,25 +79,57 @@ If any of these fail locally, fix them before pushing. The `gate` CI job will bl
 
 ## Architecture
 
+### Hive/Entity Separation
+
+The system is split into two independent daemons:
+
+- **Hive daemon** (`hive-daemon`, port 3141) — Control plane: manages identity, secrets, and provider resolution. Wraps `IdentityManager` + `Hive` + `SecretsVault` behind an Axum REST API.
+- **Entity daemon** (`entity-daemon`, port 3142) — Agent runtime: routes messages, executes skills, manages memory. Fetches provider config from Hive on startup, then runs independently.
+
+Entity calls `GET /v1/entities/:id/provider-config` on Hive to get its LLM provider configuration, then builds providers locally via `Hive::build_providers()`.
+
 ### Rust Workspace (crates/)
 
 The crates form a layered architecture with clear security boundaries:
+
+**Hive layer (control plane):**
+
+| Crate | Role |
+|-------|------|
+| `hive-core` | Pure DTO crate: `ApiEnvelope<T>`, `EntityInfo`, `ProviderConfig`, `HiveStatus`, request/response types |
+| `abigail-identity` | `IdentityManager` — Ed25519 agent creation, signing, listing (extracted from tauri-app) |
+| `abigail-hive` | `Hive` — secret resolution, provider construction, priority chain |
+| `hive-daemon` | Axum HTTP server wrapping identity + hive + secrets (port 3141) |
+| `hive-cli` | CLI client for hive-daemon (status, entities, secrets) |
+
+**Entity layer (agent runtime):**
+
+| Crate | Role |
+|-------|------|
+| `entity-core` | Pure DTO crate: `ChatRequest/Response`, `EntityStatus`, `ToolExecRequest/Response` |
+| `abigail-router` | Id/Ego routing — classifies messages as Routine (local LLM) or Complex (cloud) |
+| `abigail-capabilities` | **High-trust** functions: cognitive (LLM providers), sensory, memory, agent control |
+| `abigail-skills` | **Lower-trust** plugin system: manifest-based skills with sandbox, registry, executor, event bus |
+| `entity-daemon` | Axum HTTP server wrapping router + skills + executor (port 3142) |
+| `entity-cli` | CLI client for entity-daemon (chat, skills, tool execution) |
+
+**Shared foundation:**
 
 | Crate | Role |
 |-------|------|
 | `abigail-core` | Foundation: AppConfig, Ed25519 crypto, keyring, vault, DPAPI secrets, document verification |
 | `abigail-memory` | SQLite persistence with MemoryWeight tiers (Ephemeral/Distilled/Crystallized) |
-| `abigail-capabilities` | **High-trust** functions: cognitive (LLM providers), sensory, memory, agent control |
-| `abigail-router` | Id/Ego routing — classifies messages as Routine (local LLM) or Complex (cloud), delegates accordingly |
 | `abigail-birth` | First-run orchestrator: staged sequence (init → keypair → sign → verify → heartbeat → discover) |
-| `abigail-skills` | **Lower-trust** plugin system: manifest-based skills with sandbox, registry, executor, event bus |
 | `abigail-keygen` | Standalone egui utility for Ed25519 keypair generation |
 
-**Security boundary**: Capabilities have vault access and run trusted code. Skills are sandboxed plugins that declare permissions in `skill.toml` manifests.
+**Security boundary**: Hive controls secrets and identity (high trust). Entity executes skills in a sandboxed plugin system with declared permissions.
 
 ### Tauri App (tauri-app/)
 
+The desktop app wraps the Hive/Entity architecture for end users:
+
 - `src/lib.rs` — All `#[tauri::command]` handlers; manages `AppState` with `RwLock<AppConfig>`, `RwLock<IdEgoRouter>`, `Arc<SkillRegistry>`, `Arc<SkillExecutor>`, `Arc<EventBus>`
+- `src/identity_manager.rs` — Re-exports from `abigail-identity` crate
 - `src/templates.rs` — Embedded constitutional document text (soul.md, ethics.md, instincts.md)
 - `src-ui/` — React frontend (Vite + Tailwind)
 
@@ -113,7 +152,8 @@ The router (`abigail-router`) implements a dual-LLM pattern:
 - **Ego** = cloud LLM (OpenAiProvider wrapping Azure/OpenAI API)
 - `RoutingMode::IdPrimary` — local first, cloud for complex queries
 - `RoutingMode::EgoPrimary` — cloud first
-- Router is rebuilt via `set_api_key`/`set_local_llm_url` commands when config changes
+- In Tauri: router is rebuilt via `set_api_key`/`set_local_llm_url` commands when config changes
+- In entity-daemon: router is built once at startup from `ProviderConfig` fetched from Hive
 
 ### Constitutional Documents
 
@@ -183,6 +223,28 @@ Rules:
 - Always include the date AND time with EST timezone.
 - Keep it brief — one sentence describing the "what", not the "how".
 - This applies to every commit: code, test, refactor, docs, even one-line tweaks.
+
+## Daemon Development
+
+### Running daemons locally
+
+```bash
+# Terminal 1: Start Hive control plane
+cargo run -p hive-daemon -- --port 3141
+
+# Terminal 2: Start Entity agent runtime (needs a registered entity UUID)
+cargo run -p entity-daemon -- --entity-id <uuid> --hive-url http://127.0.0.1:3141 --port 3142
+
+# Terminal 3: Interact via CLI
+cargo run -p hive-cli -- --url http://127.0.0.1:3141 status
+cargo run -p entity-cli -- --url http://127.0.0.1:3142 chat "hello"
+```
+
+### Key daemon endpoints
+
+**Hive (`:3141`):** `GET /health`, `GET /v1/status`, `GET /v1/entities`, `POST /v1/entities`, `GET /v1/entities/:id/provider-config`, `POST /v1/secrets`
+
+**Entity (`:3142`):** `GET /health`, `GET /v1/status`, `POST /v1/chat`, `GET /v1/skills`, `POST /v1/tools/execute`
 
 ## Known Issues
 

@@ -28,6 +28,7 @@ dependencies = [
  "abigail-cli",
  "abigail-core",
  "abigail-hive",
+ "abigail-identity",
  "abigail-memory",
  "abigail-router",
  "abigail-skills",
@@ -180,6 +181,19 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "abigail-identity"
+version = "0.0.1"
+dependencies = [
+ "abigail-core",
+ "anyhow",
+ "chrono",
+ "ed25519-dalek",
+ "serde",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2292,6 +2306,53 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
+name = "entity-cli"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "entity-core",
+ "hive-core",
+ "reqwest 0.13.2",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "entity-core"
+version = "0.0.1"
+dependencies = [
+ "hive-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "entity-daemon"
+version = "0.0.1"
+dependencies = [
+ "abigail-capabilities",
+ "abigail-core",
+ "abigail-hive",
+ "abigail-memory",
+ "abigail-router",
+ "abigail-skills",
+ "anyhow",
+ "async-trait",
+ "axum",
+ "clap",
+ "entity-core",
+ "hive-core",
+ "reqwest 0.13.2",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "enumflags2"
 version = "0.7.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3380,6 +3441,45 @@ name = "hexf-parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
+
+[[package]]
+name = "hive-cli"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "hive-core",
+ "reqwest 0.13.2",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "hive-core"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hive-daemon"
+version = "0.0.1"
+dependencies = [
+ "abigail-core",
+ "abigail-hive",
+ "abigail-identity",
+ "anyhow",
+ "axum",
+ "clap",
+ "hive-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "hkdf"

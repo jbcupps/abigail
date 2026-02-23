@@ -33,6 +33,36 @@ cd tauri-app/src-ui && npm install && cd ../..
 cargo tauri dev
 ```
 
+## Quick start (headless daemons)
+
+Run the Hive control plane and Entity agent runtime as separate HTTP daemons without the Tauri GUI:
+
+```bash
+# Terminal 1: Start Hive daemon (control plane, port 3141)
+cargo run -p hive-daemon
+
+# Terminal 2: Start Entity daemon (agent runtime, port 3142)
+# Requires a registered entity UUID — create one via hive-cli first
+cargo run -p hive-cli -- create "MyEntity"
+cargo run -p entity-daemon -- --entity-id <uuid-from-above>
+
+# Terminal 3: Interact via CLI
+cargo run -p hive-cli -- status
+cargo run -p entity-cli -- chat "hello"
+cargo run -p entity-cli -- skills
+```
+
+### Daemon CLI flags
+
+**hive-daemon:**
+- `--port <PORT>` — Listen port (default: 3141)
+- `--data-dir <PATH>` — Data directory (default: platform app data dir)
+
+**entity-daemon:**
+- `--entity-id <UUID>` — Entity UUID (required, must be registered in Hive)
+- `--hive-url <URL>` — Hive daemon URL (default: `http://127.0.0.1:3141`)
+- `--port <PORT>` — Listen port (default: 3142)
+
 ## Dual runtime debug testing (desktop + browser)
 
 Abigail now supports a development browser parity mode alongside native Tauri.
@@ -223,16 +253,19 @@ Helper scripts from repo root:
 Run from repo root:
 
 ```bash
-cargo test
+cargo test --workspace --exclude abigail-app
 ```
 
 Focused crate tests:
 
 - `cargo test -p abigail-core`
+- `cargo test -p abigail-identity`
 - `cargo test -p abigail-birth`
 - `cargo test -p abigail-router`
 - `cargo test -p abigail-capabilities`
 - `cargo test -p abigail-memory`
 - `cargo test -p abigail-skills`
+- `cargo test -p hive-core`
+- `cargo test -p entity-core`
 
 Note: some provider/skill tests may require credentials, feature flags, or running external services.

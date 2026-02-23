@@ -2,6 +2,15 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+## 2026-02-23 (Hive/Entity Separation Phase 1)
+
+- **Architecture:** Implemented Hive/Entity separation — seven new crates (`hive-core`, `entity-core`, `abigail-identity`, `hive-daemon`, `entity-daemon`, `hive-cli`, `entity-cli`) splitting the monolith into independent control-plane and agent-runtime HTTP daemons.
+- **Workspace:** Added 7 new members and 6 workspace-level dependencies (`axum`, `clap`, `tower-http`, `hive-core`, `entity-core`, `abigail-identity`).
+- **Identity extraction:** `tauri-app/src/identity_manager.rs` (645 lines) extracted to `abigail-identity` crate; tauri-app re-exports via `pub use abigail_identity::*`.
+- **Hive daemon:** Axum server on `:3141` wrapping `IdentityManager` + `Hive` + `SecretsVault`. 9 endpoints for identity, secrets, and provider config resolution.
+- **Entity daemon:** Axum server on `:3142` wrapping `IdEgoRouter` + `SkillRegistry` + `SkillExecutor`. Fetches provider config from Hive on startup. `HttpHiveOps` replaces `TauriHiveOps` for the `HiveOperations` trait.
+- **Documentation:** Updated CLAUDE.md, README.md, CONTRIBUTING.md, HOW_TO_RUN_LOCALLY.md, RELEASE.md, SECURITY_NOTES.md, THREAT_MODEL.md, Feature_Gap_Analysis.md, USER_EXPERIENCE.md, UPGRADE.md, GITHUB_SETTINGS.md. Removed superfluous docs: MVP_SCOPE.md, PHASE1_AGILE_PLAN.md, prompt-routing-review.md.
+
 ## 2026-02-21 (Workspace refresh baseline after sovereign refactor wave)
 
 - **Branch + drift snapshot:** Active branch is `feat/autonomous-skills-factory` with local, uncommitted edits across router, config, capability providers, Tauri command modules, and UI surfaces (`ChatInterface`, `ForgePanel`). Untracked local artifacts include `.cargo/`, `.grok/`, `tauri-app/src-ui/coverage/`, root `node_modules/`, and `nul`.

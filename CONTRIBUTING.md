@@ -92,14 +92,20 @@ Example: `feat: add skill event filtering by category`
 # Rust formatting
 cargo fmt --all -- --check
 
-# Rust linting
-cargo clippy --all-targets --all-features -- -D warnings
+# Rust linting (excludes abigail-app which needs Tauri)
+cargo clippy --workspace --exclude abigail-app -- -D warnings
 
-# Rust tests
-cargo test --all
+# Check abigail-app compiles
+cargo check -p abigail-app
+
+# Rust tests (excludes abigail-app)
+cargo test --workspace --exclude abigail-app
 
 # Frontend build
 cd tauri-app/src-ui && npm run build
+
+# Frontend tests with coverage
+cd tauri-app/src-ui && npm run test:coverage
 ```
 
 ## Pull Request Process
@@ -113,9 +119,11 @@ cd tauri-app/src-ui && npm run build
 
 ### PR Checklist
 
-- [ ] Code compiles without warnings (`cargo clippy`)
-- [ ] Tests pass (`cargo test --all`)
-- [ ] Formatting is correct (`cargo fmt --check`)
+- [ ] Code compiles without warnings (`cargo clippy --workspace --exclude abigail-app -- -D warnings`)
+- [ ] Tests pass (`cargo test --workspace --exclude abigail-app`)
+- [ ] Formatting is correct (`cargo fmt --all -- --check`)
+- [ ] Tauri app compiles (`cargo check -p abigail-app`)
+- [ ] Frontend builds (`cd tauri-app/src-ui && npm run build`)
 - [ ] Documentation updated if needed
 - [ ] No secrets or sensitive data in the diff
 

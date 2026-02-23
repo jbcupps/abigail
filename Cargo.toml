@@ -13,6 +13,13 @@ members = [
     "crates/abigail-keygen",
     "crates/abigail-cli",
     "crates/soul-forge",
+    "crates/abigail-identity",
+    "crates/hive-core",
+    "crates/entity-core",
+    "crates/hive-daemon",
+    "crates/entity-daemon",
+    "crates/hive-cli",
+    "crates/entity-cli",
     "skills/skill-web-search",
     "skills/skill-filesystem",
     "skills/skill-shell",
@@ -55,3 +62,9 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 tokio-util = { version = "0.7", features = ["io", "compat"] }
 reqwest = { version = "0.13", features = ["json", "stream"] }
 abigail-auth = { path = "crates/abigail-auth" }
+axum = "0.7"
+clap = { version = "4", features = ["derive"] }
+tower-http = { version = "0.6", features = ["cors"] }
+hive-core = { path = "crates/hive-core" }
+entity-core = { path = "crates/entity-core" }
+abigail-identity = { path = "crates/abigail-identity" }

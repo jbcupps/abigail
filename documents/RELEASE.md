@@ -79,6 +79,19 @@ docker compose -f docker/docker-compose.yml exec abigail-dev bash
 
 See `documents/HOW_TO_RUN_LOCALLY.md` for full Docker development instructions.
 
+## Daemon binaries
+
+In addition to the Tauri desktop installer, the workspace produces standalone daemon binaries:
+
+| Binary | Purpose | Build command |
+|--------|---------|---------------|
+| `hive-daemon` | Hive control plane HTTP server | `cargo build -p hive-daemon --release` |
+| `entity-daemon` | Entity agent runtime HTTP server | `cargo build -p entity-daemon --release` |
+| `hive-cli` | CLI client for Hive | `cargo build -p hive-cli --release` |
+| `entity-cli` | CLI client for Entity | `cargo build -p entity-cli --release` |
+
+These are not yet included in the automated release pipeline. Future releases will add them as standalone artifacts alongside the desktop installer.
+
 ## Platform-specific notes
 
 | Platform | Installer | Notes |
