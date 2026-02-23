@@ -18,6 +18,7 @@ abigail-hive = { path = "../crates/abigail-hive" }
 abigail-birth = { path = "../crates/abigail-birth" }
 abigail-soul-crystallization = { path = "../crates/abigail-soul-crystallization" }
 abigail-skills = { path = "../crates/abigail-skills" }
+entity-core = { path = "../crates/entity-core" }
 abigail-auth = { path = "../crates/abigail-auth" }
 abigail-identity = { path = "../crates/abigail-identity" }
 abigail-cli = { path = "../crates/abigail-cli" }

@@ -49,42 +49,21 @@ pub async fn chat(
 ) -> Json<ApiEnvelope<ChatResponse>> {
     use crate::chat_pipeline;
 
-    // 1. Risk clarification check
-    if chat_pipeline::needs_risk_clarification(&body.message) {
-        return Json(ApiEnvelope::success(ChatResponse {
-            reply: "Before I continue, clarify your intent and authorization context. \
-                    If this is defensive or approved testing, say so and I can provide safer guidance."
-                .to_string(),
-            provider: Some("safety".to_string()),
-            tool_calls_made: Vec::new(),
-        }));
-    }
-
-    // 2. Build system prompt from constitutional documents
-    let base_system_prompt =
+    // 1. Build system prompt from constitutional documents
+    let system_prompt =
         abigail_core::system_prompt::build_system_prompt(&state.docs_dir, &state.config.agent_name);
 
-    // 3. Build tool awareness section from registered skills
-    let tool_awareness = chat_pipeline::build_tool_awareness_section(&state.registry);
-
-    // 4. Combine system prompt + tool awareness
-    let full_system_prompt = if tool_awareness.is_empty() {
-        base_system_prompt
-    } else {
-        format!("{}\n\n{}", base_system_prompt, tool_awareness)
-    };
-
-    // 5. Build contextual messages with sanitization + deduplication
+    // 2. Build contextual messages with sanitization + deduplication
     let messages = chat_pipeline::build_contextual_messages(
-        &full_system_prompt,
+        &system_prompt,
         body.session_messages,
         &body.message,
     );
 
-    // 6. Build tool definitions from registered skills
+    // 3. Build tool definitions from registered skills
     let tools = chat_pipeline::build_tool_definitions(&state.registry);
 
-    // 7. Route — use tool-use loop if tools are available, plain route otherwise
+    // 4. Route — use tool-use loop if tools are available, plain route otherwise
     let target = body.target.as_deref().unwrap_or("AUTO");
     let result = if tools.is_empty() || target == "ID" {
         // No tools or explicit Id-only: simple route
@@ -114,38 +93,14 @@ pub async fn chat(
                 "id".to_string()
             };
 
-            // 8. Append safety alternative if response starts with "Blocked:"
-            let mut content = tool_result.content;
-            if content.starts_with("Blocked:") {
-                content.push_str("\nSafer alternative: I can help with defensive hardening, detection strategies, and incident response best practices.");
-            }
-
-            // 9. Persist chat exchange as ephemeral memories (fire-and-forget)
-            persist_chat_memories(&state, &body.message, &content);
-
+            // 5. Return response
             Json(ApiEnvelope::success(ChatResponse {
-                reply: content,
+                reply: tool_result.content,
                 provider: Some(provider),
                 tool_calls_made: tool_result.tool_calls_made,
             }))
         }
         Err(e) => Json(ApiEnvelope::error(e.to_string())),
-    }
-}
-
-/// Persist user message and assistant reply as ephemeral memories.
-/// Best-effort: logs warnings but doesn't fail the chat response.
-fn persist_chat_memories(state: &EntityDaemonState, user_msg: &str, assistant_reply: &str) {
-    use abigail_memory::Memory;
-
-    let user_memory = Memory::ephemeral(format!("User: {}", user_msg));
-    if let Err(e) = state.memory.insert_memory(&user_memory) {
-        tracing::warn!("Failed to persist user memory: {}", e);
-    }
-
-    let assistant_memory = Memory::ephemeral(format!("Assistant: {}", assistant_reply));
-    if let Err(e) = state.memory.insert_memory(&assistant_memory) {
-        tracing::warn!("Failed to persist assistant memory: {}", e);
     }
 }
 

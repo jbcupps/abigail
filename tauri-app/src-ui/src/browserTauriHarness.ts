@@ -58,7 +58,6 @@ let callbackCounter = 1;
 let eventListenerCounter = 1;
 let traceLog: HarnessTraceEntry[] = [];
 let faultMode: HarnessFaultMode = "none";
-let traceSeq = 1;
 let agentSeq = 1;
 const providerValidationResults = new Map<string, string>();
 const harnessConfig = {
@@ -433,8 +432,8 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
       state.memoryDisclosureEnabled = Boolean(args.enabled);
       return null;
 
-    // Chat responses + synthetic streaming/events
-    case "chat_stream": {
+    // Chat responses (non-streaming, mirrors entity-daemon flow)
+    case "chat": {
       if (faultMode === "chat_timeout") {
         trace("fault", "chat_timeout");
         await sleep(1500);
@@ -447,24 +446,12 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
 
       const message = String(args.message ?? "").toLowerCase();
       const provider = preferredProvider();
-      const traceId = `trace-${traceSeq++}`;
-      emitEvent("chat-routing", { provider, fallback_used: false, safety_blocked: false, error: false, trace_id: traceId });
 
-      if (message.includes("clipboard")) {
-        emitEvent("chat-status", { status: "executing", tool: "execute", trace_id: traceId });
-        await sleep(5);
-        emitEvent("chat-status", { status: "done", tool: "execute", duration_ms: 90, trace_id: traceId });
-      }
-
-      const reply = message.includes("clipboard")
+      const replyText = message.includes("clipboard")
         ? "Clipboard skill result: read succeeded. Current clipboard text is 'sample clipboard value'."
         : `Harness reply via ${provider}: acknowledged "${String(args.message ?? "")}".`;
 
-      for (const token of reply.split(" ")) {
-        emitEvent("chat-token", { token: `${token} `, provider, trace_id: traceId });
-      }
-      emitEvent("chat-token", { done: true, trace_id: traceId });
-      return reply;
+      return JSON.stringify({ reply: replyText, provider, tool_calls_made: [] });
     }
 
     default:
@@ -479,7 +466,6 @@ function resetHarnessState(): void {
   callbackCounter = 1;
   eventListenerCounter = 1;
   faultMode = "none";
-  traceSeq = 1;
   agentSeq = 1;
   providerValidationResults.clear();
   traceLog = [];

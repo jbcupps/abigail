@@ -41,12 +41,13 @@ describe("Browser harness debug controls", () => {
   it("supports injected chat faults and recovery", async () => {
     await invoke("harness_debug_set_fault", { mode: "chat_error" });
     await expect(
-      invoke("chat_stream", { message: "hello", target: "EGO", sessionMessages: [] })
+      invoke("chat", { message: "hello", target: "EGO", sessionMessages: [] })
     ).rejects.toThrow(/synthetic chat failure/i);
 
     await invoke("harness_debug_set_fault", { mode: "none" });
-    const ok = await invoke<string>("chat_stream", { message: "hello", target: "EGO", sessionMessages: [] });
-    expect(ok).toMatch(/harness reply via/i);
+    const ok = await invoke<string>("chat", { message: "hello", target: "EGO", sessionMessages: [] });
+    const parsed = JSON.parse(ok);
+    expect(parsed.reply).toMatch(/harness reply via/i);
   });
 
   it("supports injected provider validation failures", async () => {

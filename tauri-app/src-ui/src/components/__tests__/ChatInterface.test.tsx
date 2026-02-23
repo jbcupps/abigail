@@ -37,8 +37,8 @@ beforeEach(() => {
         });
       case "list_missing_skill_secrets":
         return Promise.resolve([]);
-      case "chat_stream":
-        return Promise.resolve("assistant fallback reply");
+      case "chat":
+        return Promise.resolve(JSON.stringify({ reply: "assistant fallback reply", provider: "id", tool_calls_made: [] }));
       default:
         return Promise.resolve(null);
     }
@@ -59,7 +59,7 @@ describe("ChatInterface", () => {
     expect(input).toBeInTheDocument();
   });
 
-  it("shows fallback reply when no stream tokens arrive", async () => {
+  it("shows assistant reply after chat invoke", async () => {
     const user = userEvent.setup();
     renderWithTheme(<ChatInterface />);
 

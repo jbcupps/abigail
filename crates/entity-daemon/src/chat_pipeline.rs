@@ -81,41 +81,6 @@ pub fn build_contextual_messages(
 }
 
 // ---------------------------------------------------------------------------
-// Tool awareness section
-// ---------------------------------------------------------------------------
-
-/// Build a Markdown "Available Tools" section from the skill registry.
-/// Entity-daemon version — no BrowserCapability/HttpClientCapability params.
-pub fn build_tool_awareness_section(registry: &SkillRegistry) -> String {
-    let mut sections = Vec::new();
-
-    if let Ok(manifests) = registry.list() {
-        for manifest in &manifests {
-            if let Ok((skill, _)) = registry.get_skill(&manifest.id) {
-                let tools = skill.tools();
-                if tools.is_empty() {
-                    continue;
-                }
-                let mut s = format!("### {} ({})\n", manifest.name, manifest.id.0);
-                for t in &tools {
-                    s.push_str(&format!(
-                        "- **{}::{}**: {}\n",
-                        manifest.id.0, t.name, t.description
-                    ));
-                }
-                sections.push(s);
-            }
-        }
-    }
-
-    if sections.is_empty() {
-        String::new()
-    } else {
-        format!("\n\n## Available Tools\n\n{}", sections.join("\n"))
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Tool definitions: SkillRegistry → ToolDefinition[]
 // ---------------------------------------------------------------------------
 
@@ -294,20 +259,6 @@ async fn execute_single_tool_call(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Risk clarification
-// ---------------------------------------------------------------------------
-
-/// Quick keyword check for risky messages that need clarification.
-pub fn needs_risk_clarification(message: &str) -> bool {
-    let m = message.to_lowercase();
-    let risky = ["hack", "exploit", "bypass", "weapon", "malware", "ddos"];
-    let has_risky = risky.iter().any(|k| m.contains(k));
-    let has_safe_context =
-        m.contains("defensive") || m.contains("authorized") || m.contains("training");
-    has_risky && !has_safe_context
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,14 +378,5 @@ mod tests {
         assert_eq!(msgs[0].role, "system");
         assert_eq!(msgs[3].role, "user");
         assert_eq!(msgs[3].content, "how are you");
-    }
-
-    #[test]
-    fn test_needs_risk_clarification_basic() {
-        assert!(needs_risk_clarification("how to hack a server"));
-        assert!(!needs_risk_clarification("how to bake a cake"));
-        assert!(!needs_risk_clarification(
-            "defensive hack detection strategies"
-        ));
     }
 }

@@ -39,6 +39,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "ed25519-dalek",
+ "entity-core",
  "regex",
  "reqwest 0.13.2",
  "serde",
