@@ -72,6 +72,23 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // 2. Build providers from the resolved config
+    let tier_models = provider_config
+        .tier_models_json
+        .as_deref()
+        .and_then(|json| serde_json::from_str::<abigail_core::TierModels>(json).ok())
+        .unwrap_or_else(abigail_core::TierModels::defaults);
+
+    let tier_thresholds = abigail_core::TierThresholds {
+        fast_ceiling: provider_config.tier_threshold_fast_ceiling.unwrap_or(35),
+        pro_floor: provider_config.tier_threshold_pro_floor.unwrap_or(70),
+    };
+
+    let force_override = provider_config
+        .force_override_json
+        .as_deref()
+        .and_then(|json| serde_json::from_str::<abigail_core::ForceOverride>(json).ok())
+        .unwrap_or_default();
+
     let hive_config = abigail_hive::HiveConfig {
         local_llm_base_url: provider_config.local_llm_base_url,
         ego_provider_name: provider_config.ego_provider_name,
@@ -81,6 +98,9 @@ async fn main() -> anyhow::Result<()> {
         superego_provider: provider_config.superego_provider,
         superego_api_key: provider_config.superego_api_key,
         superego_l2_mode: parse_superego_l2_mode(&provider_config.superego_l2_mode),
+        tier_models,
+        tier_thresholds,
+        force_override,
     };
 
     let built = Hive::build_providers(&hive_config).await;
@@ -227,10 +247,10 @@ async fn main() -> anyhow::Result<()> {
 
 fn parse_routing_mode(s: &str) -> abigail_core::RoutingMode {
     match s {
-        "IdPrimary" => abigail_core::RoutingMode::IdPrimary,
         "EgoPrimary" => abigail_core::RoutingMode::EgoPrimary,
         "Council" => abigail_core::RoutingMode::Council,
-        "TierBased" => abigail_core::RoutingMode::TierBased,
+        // Legacy "IdPrimary" maps to TierBased (local LLM is now failsafe-only)
+        "TierBased" | "IdPrimary" => abigail_core::RoutingMode::TierBased,
         _ => abigail_core::RoutingMode::default(),
     }
 }

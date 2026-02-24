@@ -15,7 +15,7 @@ pub struct OpenAiProvider {
 
 impl OpenAiProvider {
     pub fn new(api_key: Option<String>) -> anyhow::Result<Self> {
-        Self::with_model(api_key, "gpt-4o-mini".to_string())
+        Self::with_model(api_key, "gpt-4.1".to_string())
     }
 
     pub fn with_model(api_key: Option<String>, model: String) -> anyhow::Result<Self> {
@@ -184,12 +184,13 @@ struct StreamFunctionDelta {
 #[async_trait]
 impl LlmProvider for OpenAiProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
-        tracing::info!("OpenAiProvider::complete model={}", self.model);
+        let model = request.model_override.as_deref().unwrap_or(&self.model);
+        tracing::info!("OpenAiProvider::complete model={}", model);
         let messages = Self::build_messages(&request.messages);
         let tools = request.tools.as_ref().map(|t| Self::build_tools(t));
 
         let body = ChatRequest {
-            model: self.model.clone(),
+            model: model.to_string(),
             messages,
             tools,
             stream: false,
@@ -241,12 +242,13 @@ impl LlmProvider for OpenAiProvider {
         request: &CompletionRequest,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
-        tracing::info!("OpenAiProvider::stream model={}", self.model);
+        let model = request.model_override.as_deref().unwrap_or(&self.model);
+        tracing::info!("OpenAiProvider::stream model={}", model);
         let messages = Self::build_messages(&request.messages);
         let tools = request.tools.as_ref().map(|t| Self::build_tools(t));
 
         let body = ChatRequest {
-            model: self.model.clone(),
+            model: model.to_string(),
             messages,
             tools,
             stream: true,

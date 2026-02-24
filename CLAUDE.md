@@ -145,15 +145,40 @@ splash → loading → management → boot → chat
 - `BootSequence.tsx` — First-run UI: intro → init soul → generate keypair → key presentation → verify → complete
 - `ChatInterface.tsx` — Main chat: sends messages through `classify()` → `complete()` Tauri commands
 
-### Id/Ego Router
+### Tier-Based Model Routing
 
-The router (`abigail-router`) implements a dual-LLM pattern:
-- **Id** = local LLM (LocalHttpProvider for OpenAI-compatible servers, or CandleProvider stub)
-- **Ego** = cloud LLM (OpenAiProvider wrapping Azure/OpenAI API)
-- `RoutingMode::IdPrimary` — local first, cloud for complex queries
-- `RoutingMode::EgoPrimary` — cloud first
-- In Tauri: router is rebuilt via `set_api_key`/`set_local_llm_url` commands when config changes
+The router (`abigail-router`) implements a **tier-based dual-LLM pattern** with three quality tiers:
+- **Fast** — cheapest, fastest models (e.g. `gpt-4.1-mini`, `claude-haiku-4-5`)
+- **Standard** — balanced quality/speed (e.g. `gpt-4.1`, `claude-sonnet-4-6`)
+- **Pro** — highest quality (e.g. `gpt-5.2`, `claude-opus-4-6`)
+
+**Core components:**
+- **Id** = local LLM (LocalHttpProvider for OpenAI-compatible servers, or CandleProvider stub) — **failsafe only**
+- **Ego** = cloud LLM (provider selected via `active_provider_preference`)
+- `CompletionRequest.model_override` — per-request model selection (single provider instance, model chosen at routing time)
+
+**Routing modes:**
+- `RoutingMode::TierBased` — classifies message complexity (score 5–95), maps to tier via `TierThresholds` (default: <35 → Fast, 35–69 → Standard, ≥70 → Pro)
+- `RoutingMode::EgoPrimary` — all queries to cloud (uses Standard tier model)
+- `RoutingMode::Council` — multi-provider consensus
+
+**Force override (3 levels, highest priority first):**
+1. `ForceOverride.pinned_model` — exact model ID, bypasses all tier logic
+2. `ForceOverride.pinned_tier` (+ optional `pinned_provider`) — forces a specific tier
+3. Normal complexity-based selection
+
+**Config types** (`abigail-core`): `ModelTier`, `TierModels`, `TierThresholds`, `ForceOverride`
+
+**Dynamic model registry** (`abigail-hive::ModelRegistry`):
+- Discovers available models from provider APIs (OpenAI, Anthropic, Google, xAI)
+- Per-provider caching with 24h TTL
+- Persisted to `provider_catalog` in config.json
+- Validates tier model assignments against discovered models
+
+**Wiring:**
+- In Tauri: router is rebuilt via `set_api_key`/`set_local_llm_url`/`set_force_override`/`set_tier_thresholds` commands when config changes
 - In entity-daemon: router is built once at startup from `ProviderConfig` fetched from Hive
+- `ChatResponse` includes `tier`, `model_used`, and `complexity_score` metadata
 
 ### Constitutional Documents
 
@@ -318,10 +343,12 @@ Current priorities, in order:
 
 ## Known Issues
 
-### Ego Router
-The Ego (cloud LLM) router has been refactored to streaming-first but may still have edge cases.
-Debug with `RUST_LOG=abigail_router=debug`. Key diagnostics:
+### Tier-Based Router
+The router uses tier-based routing with complexity classification. Debug with `RUST_LOG=abigail_router=debug`. Key diagnostics:
 - `get_router_status` Tauri command returns current Id/Ego/Superego state
 - If Ego shows as unconfigured after birth, check TrinityConfig in config.json
 - CandleProvider stub returns a helpful message instead of erroring when no local LLM exists
-- The `chat_stream` Ego path now streams from the start instead of doing a non-streaming initial request
+- The `chat_stream` Ego path streams from the start
+- `ChatResponse` now includes `tier`, `model_used`, and `complexity_score` — check these to verify tier routing is working
+- Force overrides (`ForceOverride`) bypass complexity scoring — if routing seems stuck on one tier, check `config.json` `force_override`
+- Model registry discovery runs in background at startup — check logs for `ModelRegistry:` messages

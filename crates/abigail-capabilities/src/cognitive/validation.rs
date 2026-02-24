@@ -6,7 +6,7 @@ use std::time::Duration;
 /// Information about a model available from a provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {
-    /// Model identifier (e.g. "gpt-4o", "claude-sonnet-4-20250514").
+    /// Model identifier (e.g. "gpt-4.1", "claude-sonnet-4-6").
     pub id: String,
     /// Human-readable name, if available.
     pub display_name: Option<String>,
@@ -59,7 +59,7 @@ async fn validate_anthropic(key: &str) -> anyhow::Result<()> {
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
         .body(
-            r#"{"model":"claude-sonnet-4-20250514","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}"#,
+            r#"{"model":"claude-sonnet-4-6","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}"#,
         )
         .send()
         .await?;
@@ -328,22 +328,22 @@ async fn discover_google_models(key: &str) -> Result<Vec<ModelInfo>, String> {
     Ok(models)
 }
 
-/// Anthropic: no listing API — return curated models.
+/// Anthropic: no listing API — return curated models (Feb 2026).
 fn curated_anthropic_models() -> Vec<ModelInfo> {
     vec![
         ModelInfo {
-            id: "claude-sonnet-4-20250514".to_string(),
-            display_name: Some("Claude Sonnet 4".to_string()),
+            id: "claude-sonnet-4-6".to_string(),
+            display_name: Some("Claude Sonnet 4.6".to_string()),
             created: None,
         },
         ModelInfo {
-            id: "claude-haiku-3-5-20241022".to_string(),
-            display_name: Some("Claude 3.5 Haiku".to_string()),
+            id: "claude-haiku-4-5".to_string(),
+            display_name: Some("Claude Haiku 4.5".to_string()),
             created: None,
         },
         ModelInfo {
-            id: "claude-opus-4-20250514".to_string(),
-            display_name: Some("Claude Opus 4".to_string()),
+            id: "claude-opus-4-6".to_string(),
+            display_name: Some("Claude Opus 4.6".to_string()),
             created: None,
         },
     ]

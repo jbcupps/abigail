@@ -304,17 +304,18 @@ impl LocalHttpProvider {
 #[async_trait]
 impl LlmProvider for LocalHttpProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
+        let model = request.model_override.as_deref().unwrap_or(&self.model);
         tracing::info!(
             "LocalHttp::complete base_url={}, model={}, messages={}, tools={}",
             self.base_url,
-            self.model,
+            model,
             request.messages.len(),
             request.tools.as_ref().map_or(0, |t| t.len()),
         );
         validate_local_llm_url(&self.base_url).map_err(|e| anyhow::anyhow!("{}", e))?;
 
         let chat_request = ChatRequest {
-            model: self.model.clone(),
+            model: model.to_string(),
             messages: Self::build_messages(request),
             max_tokens: None,
             tools: Self::build_tools(request),
@@ -379,17 +380,18 @@ impl LlmProvider for LocalHttpProvider {
         request: &CompletionRequest,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
+        let model = request.model_override.as_deref().unwrap_or(&self.model);
         tracing::info!(
             "LocalHttp::stream base_url={}, model={}, messages={}, tools={}",
             self.base_url,
-            self.model,
+            model,
             request.messages.len(),
             request.tools.as_ref().map_or(0, |t| t.len()),
         );
         validate_local_llm_url(&self.base_url).map_err(|e| anyhow::anyhow!("{}", e))?;
 
         let chat_request = ChatRequest {
-            model: self.model.clone(),
+            model: model.to_string(),
             messages: Self::build_messages(request),
             max_tokens: None,
             tools: Self::build_tools(request),

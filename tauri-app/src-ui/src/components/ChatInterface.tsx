@@ -12,6 +12,10 @@ interface Message {
   provider?: string;
   isError?: boolean;
   memoryUsed?: boolean;
+  /** Model quality tier: "fast", "standard", or "pro". */
+  tier?: string;
+  /** Actual model ID used (e.g. "gpt-4.1", "claude-sonnet-4-6"). */
+  modelUsed?: string;
   /** When set, render an MCP App (ui:// resource) in a sandboxed iframe below the message. */
   mcpApp?: { serverId: string; resourceUri: string; title?: string };
 }
@@ -348,7 +352,7 @@ export default function ChatInterface({
 
     try {
       // Non-streaming invoke — same flow as entity-daemon POST /v1/chat.
-      // Returns JSON-serialized ChatResponse { reply, provider, tool_calls_made }.
+      // Returns JSON-serialized ChatResponse { reply, provider, tool_calls_made, tier, model_used, complexity_score }.
       const responseJson = await invoke<string>("chat", {
         message: userMessage.content,
         target,
@@ -357,8 +361,14 @@ export default function ChatInterface({
 
       if (!mountedRef.current) return;
 
-      const response: { reply: string; provider?: string; tool_calls_made?: Array<{ skill_id: string; tool_name: string; success: boolean }> } =
-        JSON.parse(responseJson);
+      const response: {
+        reply: string;
+        provider?: string;
+        tool_calls_made?: Array<{ skill_id: string; tool_name: string; success: boolean }>;
+        tier?: string;
+        model_used?: string;
+        complexity_score?: number;
+      } = JSON.parse(responseJson);
 
       setMessages((m) => [
         ...m,
@@ -366,6 +376,8 @@ export default function ChatInterface({
           role: "assistant",
           content: response.reply,
           provider: response.provider,
+          tier: response.tier,
+          modelUsed: response.model_used,
         },
       ]);
     } catch (e) {
@@ -797,6 +809,11 @@ export default function ChatInterface({
                   <>
                     {assistantLabel}
                     {showRoutingDetails && msg.provider && <span className="ml-2 opacity-50 font-normal">via {msg.provider}</span>}
+                    {msg.tier && msg.modelUsed && (
+                      <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-theme-input-bg text-theme-text-dim font-mono">
+                        {msg.tier.charAt(0).toUpperCase() + msg.tier.slice(1)} · {msg.modelUsed}
+                      </span>
+                    )}
                   </>
                 )}
               </p>

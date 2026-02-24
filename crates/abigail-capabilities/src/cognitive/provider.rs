@@ -23,6 +23,11 @@ pub struct CompletionRequest {
     pub messages: Vec<Message>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolDefinition>>,
+    /// Optional model override. When set, providers use this model ID instead of
+    /// their configured default. Used by tier-based routing to select Fast/Standard/Pro
+    /// models on a per-request basis without rebuilding the provider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_override: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,7 +86,14 @@ impl CompletionRequest {
         Self {
             messages,
             tools: None,
+            model_override: None,
         }
+    }
+
+    /// Create a request with a specific model override.
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model_override = Some(model.into());
+        self
     }
 }
 
@@ -157,5 +169,22 @@ mod tests {
         let req = CompletionRequest::simple(vec![Message::new("user", "hi")]);
         let json = serde_json::to_string(&req).unwrap();
         assert!(!json.contains("tools"));
+        assert!(!json.contains("model_override"));
+    }
+
+    #[test]
+    fn test_completion_request_model_override() {
+        let req =
+            CompletionRequest::simple(vec![Message::new("user", "hi")]).with_model("gpt-4.1-mini");
+        assert_eq!(req.model_override.as_deref(), Some("gpt-4.1-mini"));
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("model_override"));
+        assert!(json.contains("gpt-4.1-mini"));
+    }
+
+    #[test]
+    fn test_completion_request_model_override_none_by_default() {
+        let req = CompletionRequest::simple(vec![Message::new("user", "hi")]);
+        assert!(req.model_override.is_none());
     }
 }

@@ -142,6 +142,10 @@ pub async fn get_provider_config(
             superego_provider: hive_config.superego_provider,
             superego_api_key: hive_config.superego_api_key,
             superego_l2_mode: format!("{:?}", hive_config.superego_l2_mode),
+            tier_models_json: serde_json::to_string(&hive_config.tier_models).ok(),
+            tier_threshold_fast_ceiling: Some(hive_config.tier_thresholds.fast_ceiling),
+            tier_threshold_pro_floor: Some(hive_config.tier_thresholds.pro_floor),
+            force_override_json: serde_json::to_string(&hive_config.force_override).ok(),
         })),
         Err(e) => Json(ApiEnvelope::error(e)),
     }

@@ -6,7 +6,9 @@
 
 use crate::provider_registry::{ProviderKind, ProviderRegistry};
 use abigail_capabilities::cognitive::{LlmProvider, LocalHttpProvider};
-use abigail_core::{AppConfig, RoutingMode, SecretsVault, SuperegoL2Mode};
+use abigail_core::{
+    AppConfig, ForceOverride, RoutingMode, SecretsVault, SuperegoL2Mode, TierModels, TierThresholds,
+};
 use std::sync::{Arc, Mutex};
 
 /// Fully resolved configuration ready for provider construction.
@@ -20,6 +22,12 @@ pub struct HiveConfig {
     pub superego_provider: Option<String>,
     pub superego_api_key: Option<String>,
     pub superego_l2_mode: SuperegoL2Mode,
+    /// Per-provider model assignments for Fast/Standard/Pro tiers.
+    pub tier_models: TierModels,
+    /// Complexity score thresholds for tier selection.
+    pub tier_thresholds: TierThresholds,
+    /// Force override for model selection.
+    pub force_override: ForceOverride,
 }
 
 /// All providers built and ready to be injected into a router.
@@ -31,6 +39,12 @@ pub struct BuiltProviders {
     pub superego: Option<Arc<dyn LlmProvider>>,
     pub superego_l2_mode: SuperegoL2Mode,
     pub routing_mode: RoutingMode,
+    /// Per-provider model assignments for Fast/Standard/Pro tiers.
+    pub tier_models: TierModels,
+    /// Complexity score thresholds for tier selection.
+    pub tier_thresholds: TierThresholds,
+    /// Force override for model selection.
+    pub force_override: ForceOverride,
 }
 
 /// The Hive owns vault references and acts as the single entry-point for
@@ -164,6 +178,11 @@ impl Hive {
             config.routing_mode
         );
 
+        let tier_models = config
+            .tier_models
+            .clone()
+            .unwrap_or_else(TierModels::defaults);
+
         Ok(HiveConfig {
             local_llm_base_url: config.local_llm_base_url.clone(),
             ego_provider_name: ego_name,
@@ -173,6 +192,9 @@ impl Hive {
             superego_provider: superego_config.as_ref().map(|(p, _)| p.clone()),
             superego_api_key: superego_config.map(|(_, k)| k),
             superego_l2_mode: config.superego_l2_mode,
+            tier_models,
+            tier_thresholds: config.tier_thresholds,
+            force_override: config.force_override.clone(),
         })
     }
 
@@ -205,6 +227,9 @@ impl Hive {
             superego,
             superego_l2_mode: hive_config.superego_l2_mode,
             routing_mode: hive_config.routing_mode,
+            tier_models: hive_config.tier_models.clone(),
+            tier_thresholds: hive_config.tier_thresholds,
+            force_override: hive_config.force_override.clone(),
         }
     }
 

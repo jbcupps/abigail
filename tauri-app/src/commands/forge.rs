@@ -37,6 +37,8 @@ struct ForgeConfigSnapshot {
     routing_mode: abigail_core::RoutingMode,
     tier_models: Option<abigail_core::TierModels>,
     superego_l2_mode: abigail_core::SuperegoL2Mode,
+    force_override: abigail_core::ForceOverride,
+    tier_thresholds: abigail_core::TierThresholds,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,6 +188,8 @@ pub async fn apply_forge_primary_intelligence(
             routing_mode: config.routing_mode,
             tier_models: config.tier_models.clone(),
             superego_l2_mode: config.superego_l2_mode,
+            force_override: config.force_override.clone(),
+            tier_thresholds: config.tier_thresholds,
         };
         if let Ok(mut undo) = undo_log().lock() {
             undo.push(ForgeUndoEntry {
@@ -271,6 +275,8 @@ pub async fn forge_undo_last_change(state: State<'_, AppState>) -> Result<String
         config.routing_mode = entry.snapshot.routing_mode;
         config.tier_models = entry.snapshot.tier_models;
         config.superego_l2_mode = entry.snapshot.superego_l2_mode;
+        config.force_override = entry.snapshot.force_override;
+        config.tier_thresholds = entry.snapshot.tier_thresholds;
         config
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;

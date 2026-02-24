@@ -3,22 +3,25 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 17;
+pub const CONFIG_SCHEMA_VERSION: u32 = 18;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
+///
+/// Note: `IdPrimary` was removed in schema v18. Legacy configs with `"id_primary"` are
+/// migrated to `TierBased` automatically. Local LLM is used as a failsafe only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RoutingMode {
-    /// Id (local) classifies, routes complex to Ego (legacy behavior)
-    IdPrimary,
     /// Ego (cloud) is primary when available, Id is fallback
     EgoPrimary,
     /// Council (mixture-of-agents): all available providers deliberate together.
     /// With 1 provider this is passthrough (same as EgoPrimary).
     Council,
     /// Tier-based: classifies prompt complexity → routes to optimal provider+model.
-    /// T1Fast → local/fast, T2Standard → standard, T3Pro → pro, T4Specialist → pro.
+    /// Fast → fast cloud model, Standard → standard, Pro → most capable.
+    /// Local LLM is failsafe only (used when cloud provider fails).
     #[default]
+    #[serde(alias = "id_primary")]
     TierBased,
 }
 
@@ -62,12 +65,12 @@ pub struct McpTrustPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelTier {
-    /// Fastest, cheapest model (e.g. gpt-4o-mini)
+    /// Fastest, cheapest model (e.g. gpt-4.1-mini, claude-haiku-4-5)
     Fast,
-    /// Balanced quality/speed (e.g. gpt-4o)
+    /// Balanced quality/speed (e.g. gpt-4.1, claude-sonnet-4-6)
     #[default]
     Standard,
-    /// Highest quality, may be slower (e.g. o1, claude-opus)
+    /// Highest quality, may be slower (e.g. gpt-5.2, claude-opus-4-6)
     Pro,
 }
 
@@ -98,28 +101,28 @@ impl TierModels {
         }
     }
 
-    /// Build default tier model mappings with curated defaults.
+    /// Build default tier model mappings with curated defaults (Feb 2026).
     pub fn defaults() -> Self {
         let mut fast = HashMap::new();
         let mut standard = HashMap::new();
         let mut pro = HashMap::new();
 
-        fast.insert("openai".into(), "gpt-4o-mini".into());
-        fast.insert("anthropic".into(), "claude-haiku-4-5-20251001".into());
-        fast.insert("google".into(), "gemini-2.0-flash".into());
-        fast.insert("xai".into(), "grok-2-mini".into());
+        fast.insert("openai".into(), "gpt-4.1-mini".into());
+        fast.insert("anthropic".into(), "claude-haiku-4-5".into());
+        fast.insert("google".into(), "gemini-2.5-flash-lite".into());
+        fast.insert("xai".into(), "grok-4-1-fast-non-reasoning".into());
         fast.insert("perplexity".into(), "sonar".into());
 
-        standard.insert("openai".into(), "gpt-4o".into());
-        standard.insert("anthropic".into(), "claude-sonnet-4-5-20250929".into());
-        standard.insert("google".into(), "gemini-1.5-pro".into());
-        standard.insert("xai".into(), "grok-2".into());
+        standard.insert("openai".into(), "gpt-4.1".into());
+        standard.insert("anthropic".into(), "claude-sonnet-4-6".into());
+        standard.insert("google".into(), "gemini-2.5-flash".into());
+        standard.insert("xai".into(), "grok-4-1-fast-reasoning".into());
         standard.insert("perplexity".into(), "sonar-pro".into());
 
-        pro.insert("openai".into(), "o3".into());
+        pro.insert("openai".into(), "gpt-5.2".into());
         pro.insert("anthropic".into(), "claude-opus-4-6".into());
-        pro.insert("google".into(), "gemini-1.5-pro".into());
-        pro.insert("xai".into(), "grok-2".into());
+        pro.insert("google".into(), "gemini-2.5-pro".into());
+        pro.insert("xai".into(), "grok-4-0709".into());
         pro.insert("perplexity".into(), "sonar-reasoning-pro".into());
 
         Self {
@@ -130,12 +133,93 @@ impl TierModels {
     }
 }
 
+/// Complexity score thresholds for tier routing.
+///
+/// Scores are in range 5–95 (produced by the router's classifier).
+/// - Below `fast_ceiling` → Fast tier
+/// - At or above `pro_floor` → Pro tier
+/// - Between the two → Standard tier
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TierThresholds {
+    /// Complexity scores strictly below this value route to the Fast tier.
+    /// Default: 35
+    #[serde(default = "default_fast_ceiling")]
+    pub fast_ceiling: u8,
+    /// Complexity scores at or above this value route to the Pro tier.
+    /// Default: 70
+    #[serde(default = "default_pro_floor")]
+    pub pro_floor: u8,
+}
+
+fn default_fast_ceiling() -> u8 {
+    35
+}
+
+fn default_pro_floor() -> u8 {
+    70
+}
+
+impl Default for TierThresholds {
+    fn default() -> Self {
+        Self {
+            fast_ceiling: default_fast_ceiling(),
+            pro_floor: default_pro_floor(),
+        }
+    }
+}
+
+impl TierThresholds {
+    /// Map a complexity score (5–95) to a model tier.
+    pub fn score_to_tier(&self, score: u8) -> ModelTier {
+        if score < self.fast_ceiling {
+            ModelTier::Fast
+        } else if score >= self.pro_floor {
+            ModelTier::Pro
+        } else {
+            ModelTier::Standard
+        }
+    }
+}
+
+/// Force override for model selection.
+///
+/// Priority chain (highest to lowest):
+/// 1. `pinned_model` — exact model ID, bypasses tier logic entirely
+/// 2. `pinned_tier` (+ optional `pinned_provider`) — forces a specific tier
+/// 3. None — normal complexity-based tier selection
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ForceOverride {
+    /// Pin an exact model ID (e.g. "gpt-4.1"). Highest priority — overrides everything.
+    #[serde(default)]
+    pub pinned_model: Option<String>,
+    /// Pin a tier regardless of complexity score.
+    #[serde(default)]
+    pub pinned_tier: Option<ModelTier>,
+    /// Pin a provider (used together with `pinned_tier` to select a specific provider's model).
+    #[serde(default)]
+    pub pinned_provider: Option<String>,
+}
+
+impl ForceOverride {
+    /// Returns true if any override is set.
+    pub fn is_active(&self) -> bool {
+        self.pinned_model.is_some() || self.pinned_tier.is_some() || self.pinned_provider.is_some()
+    }
+
+    /// Clear all overrides.
+    pub fn clear(&mut self) {
+        self.pinned_model = None;
+        self.pinned_tier = None;
+        self.pinned_provider = None;
+    }
+}
+
 /// A cached entry from a provider's model catalog.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderCatalogEntry {
     /// Provider name (e.g. "openai", "anthropic")
     pub provider: String,
-    /// Model ID as the provider knows it (e.g. "gpt-4o")
+    /// Model ID as the provider knows it (e.g. "gpt-4.1")
     pub model_id: String,
     /// Human-readable display name
     pub display_name: String,
@@ -297,7 +381,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub local_llm_base_url: Option<String>,
 
-    /// Routing mode: council (default), ego_primary, or id_primary
+    /// Routing mode: tier_based (default), ego_primary, or council
     #[serde(default)]
     pub routing_mode: RoutingMode,
 
@@ -339,6 +423,17 @@ pub struct AppConfig {
     /// Per-provider model assignments for Fast/Standard/Pro tiers.
     #[serde(default)]
     pub tier_models: Option<TierModels>,
+
+    // ── v18 fields ─────────────────────────────────────────────────
+    /// Complexity score thresholds for tier-based routing.
+    /// Controls how complexity scores map to Fast/Standard/Pro tiers.
+    #[serde(default)]
+    pub tier_thresholds: TierThresholds,
+
+    /// Force override for model selection.
+    /// Allows pinning a specific tier, model, or provider+tier combination.
+    #[serde(default)]
+    pub force_override: ForceOverride,
 
     /// Cached model catalog entries from provider APIs.
     #[serde(default)]
@@ -454,6 +549,8 @@ impl AppConfig {
             trusted_skill_signers: Vec::new(),
             sao_endpoint: None,
             tier_models: None,
+            tier_thresholds: TierThresholds::default(),
+            force_override: ForceOverride::default(),
             provider_catalog: Vec::new(),
             active_provider_preference: None,
             superego_l2_mode: SuperegoL2Mode::default(),
@@ -688,6 +785,16 @@ impl AppConfig {
             tracing::debug!("Migrated config from v16 to v17");
         }
 
+        // Migration from v17 to v18
+        if self.schema_version < 18 {
+            // v18: Remove IdPrimary routing mode. Existing "id_primary" configs are
+            // migrated to "tier_based" via the serde alias on TierBased. This migration
+            // step ensures the schema version is bumped so the alias is applied on save.
+            self.schema_version = 18;
+            migrated = true;
+            tracing::debug!("Migrated config from v17 to v18 (IdPrimary → TierBased)");
+        }
+
         migrated
     }
     /// Check if birth was interrupted (birth_stage set but birth_complete is false).
@@ -746,6 +853,8 @@ mod tests {
             trusted_skill_signers: Vec::new(),
             sao_endpoint: None,
             tier_models: None,
+            tier_thresholds: TierThresholds::default(),
+            force_override: ForceOverride::default(),
             provider_catalog: Vec::new(),
             active_provider_preference: None,
             superego_l2_mode: SuperegoL2Mode::default(),
@@ -872,12 +981,12 @@ mod tests {
     #[test]
     fn test_tier_models_defaults() {
         let tiers = TierModels::defaults();
-        assert_eq!(tiers.fast.get("openai"), Some(&"gpt-4o-mini".to_string()));
-        assert_eq!(tiers.standard.get("openai"), Some(&"gpt-4o".to_string()));
-        assert_eq!(tiers.pro.get("openai"), Some(&"o3".to_string()));
+        assert_eq!(tiers.fast.get("openai"), Some(&"gpt-4.1-mini".to_string()));
+        assert_eq!(tiers.standard.get("openai"), Some(&"gpt-4.1".to_string()));
+        assert_eq!(tiers.pro.get("openai"), Some(&"gpt-5.2".to_string()));
         assert_eq!(
             tiers.standard.get("anthropic"),
-            Some(&"claude-sonnet-4-5-20250929".to_string())
+            Some(&"claude-sonnet-4-6".to_string())
         );
     }
 
@@ -998,5 +1107,120 @@ mod tests {
     fn test_preloaded_skills_version_default() {
         let config = AppConfig::default_paths();
         assert_eq!(config.preloaded_skills_version, 0);
+    }
+
+    #[test]
+    fn test_tier_thresholds_default() {
+        let t = TierThresholds::default();
+        assert_eq!(t.fast_ceiling, 35);
+        assert_eq!(t.pro_floor, 70);
+    }
+
+    #[test]
+    fn test_tier_thresholds_score_to_tier() {
+        let t = TierThresholds::default();
+        // Below fast_ceiling → Fast
+        assert_eq!(t.score_to_tier(5), ModelTier::Fast);
+        assert_eq!(t.score_to_tier(34), ModelTier::Fast);
+        // At fast_ceiling → Standard
+        assert_eq!(t.score_to_tier(35), ModelTier::Standard);
+        assert_eq!(t.score_to_tier(50), ModelTier::Standard);
+        assert_eq!(t.score_to_tier(69), ModelTier::Standard);
+        // At pro_floor → Pro
+        assert_eq!(t.score_to_tier(70), ModelTier::Pro);
+        assert_eq!(t.score_to_tier(95), ModelTier::Pro);
+    }
+
+    #[test]
+    fn test_tier_thresholds_custom_boundaries() {
+        let t = TierThresholds {
+            fast_ceiling: 20,
+            pro_floor: 80,
+        };
+        assert_eq!(t.score_to_tier(19), ModelTier::Fast);
+        assert_eq!(t.score_to_tier(20), ModelTier::Standard);
+        assert_eq!(t.score_to_tier(79), ModelTier::Standard);
+        assert_eq!(t.score_to_tier(80), ModelTier::Pro);
+    }
+
+    #[test]
+    fn test_tier_thresholds_serde_roundtrip() {
+        let t = TierThresholds {
+            fast_ceiling: 25,
+            pro_floor: 80,
+        };
+        let json = serde_json::to_string(&t).unwrap();
+        let parsed: TierThresholds = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.fast_ceiling, 25);
+        assert_eq!(parsed.pro_floor, 80);
+    }
+
+    #[test]
+    fn test_force_override_default_inactive() {
+        let fo = ForceOverride::default();
+        assert!(!fo.is_active());
+        assert!(fo.pinned_model.is_none());
+        assert!(fo.pinned_tier.is_none());
+        assert!(fo.pinned_provider.is_none());
+    }
+
+    #[test]
+    fn test_force_override_pinned_model() {
+        let fo = ForceOverride {
+            pinned_model: Some("gpt-4.1".to_string()),
+            pinned_tier: None,
+            pinned_provider: None,
+        };
+        assert!(fo.is_active());
+    }
+
+    #[test]
+    fn test_force_override_pinned_tier() {
+        let fo = ForceOverride {
+            pinned_model: None,
+            pinned_tier: Some(ModelTier::Pro),
+            pinned_provider: None,
+        };
+        assert!(fo.is_active());
+    }
+
+    #[test]
+    fn test_force_override_clear() {
+        let mut fo = ForceOverride {
+            pinned_model: Some("gpt-4.1".to_string()),
+            pinned_tier: Some(ModelTier::Fast),
+            pinned_provider: Some("openai".to_string()),
+        };
+        assert!(fo.is_active());
+        fo.clear();
+        assert!(!fo.is_active());
+    }
+
+    #[test]
+    fn test_force_override_serde_roundtrip() {
+        let fo = ForceOverride {
+            pinned_model: Some("gpt-5.2".to_string()),
+            pinned_tier: Some(ModelTier::Pro),
+            pinned_provider: Some("openai".to_string()),
+        };
+        let json = serde_json::to_string(&fo).unwrap();
+        let parsed: ForceOverride = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.pinned_model, Some("gpt-5.2".to_string()));
+        assert_eq!(parsed.pinned_tier, Some(ModelTier::Pro));
+        assert_eq!(parsed.pinned_provider, Some("openai".to_string()));
+    }
+
+    #[test]
+    fn test_id_primary_deserializes_to_tier_based() {
+        // Legacy "id_primary" config values should deserialize as TierBased
+        let parsed: RoutingMode = serde_json::from_str("\"id_primary\"").unwrap();
+        assert_eq!(parsed, RoutingMode::TierBased);
+    }
+
+    #[test]
+    fn test_config_includes_tier_thresholds_and_force_override() {
+        let config = AppConfig::default_paths();
+        assert_eq!(config.tier_thresholds, TierThresholds::default());
+        assert_eq!(config.force_override, ForceOverride::default());
     }
 }

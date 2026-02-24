@@ -1,9 +1,9 @@
 //! Generic OpenAI-compatible HTTP provider for cloud LLM APIs.
 //!
 //! Works with any API that follows the OpenAI chat completions format:
-//! - Perplexity (sonar, sonar-pro)
-//! - xAI Grok (grok-2, grok-3)
-//! - Google Gemini (gemini-2.0-flash, gemini-2.5-pro)
+//! - Perplexity (sonar, sonar-pro, sonar-reasoning-pro)
+//! - xAI Grok (grok-4-1-fast-reasoning, grok-4-0709)
+//! - Google Gemini (gemini-2.5-flash, gemini-2.5-pro)
 //! - Any other OpenAI-compatible endpoint
 
 use crate::cognitive::provider::{
@@ -47,12 +47,12 @@ impl CompatibleProvider {
         }
     }
 
-    /// Default model for this provider.
+    /// Default model for this provider (Feb 2026 — Standard tier).
     pub fn default_model(&self) -> &str {
         match self {
-            Self::Perplexity => "sonar",
-            Self::Xai => "grok-2",
-            Self::Google => "gemini-2.0-flash",
+            Self::Perplexity => "sonar-pro",
+            Self::Xai => "grok-4-1-fast-reasoning",
+            Self::Google => "gemini-2.5-flash",
             Self::Custom => "default",
         }
     }
@@ -277,10 +277,11 @@ struct StreamFunctionDelta {
 #[async_trait]
 impl LlmProvider for OpenAiCompatibleProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
+        let model = request.model_override.as_deref().unwrap_or(&self.model);
         tracing::info!(
             "OpenAiCompatible[{}]::complete model={}, messages={}, url={}",
             self.provider_type,
-            self.model,
+            model,
             request.messages.len(),
             self.completions_url(),
         );
@@ -288,7 +289,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
         let tools = request.tools.as_ref().map(|t| Self::build_tools(t));
 
         let body = ChatRequest {
-            model: self.model.clone(),
+            model: model.to_string(),
             messages,
             max_tokens: Some(4096),
             tools,
@@ -344,10 +345,11 @@ impl LlmProvider for OpenAiCompatibleProvider {
         request: &CompletionRequest,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
+        let model = request.model_override.as_deref().unwrap_or(&self.model);
         tracing::info!(
             "OpenAiCompatible[{}]::stream model={}, messages={}, url={}",
             self.provider_type,
-            self.model,
+            model,
             request.messages.len(),
             self.completions_url(),
         );
@@ -355,7 +357,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
         let tools = request.tools.as_ref().map(|t| Self::build_tools(t));
 
         let body = ChatRequest {
-            model: self.model.clone(),
+            model: model.to_string(),
             messages,
             max_tokens: Some(4096),
             tools,
@@ -510,11 +512,15 @@ mod tests {
 
     #[test]
     fn test_provider_default_models() {
-        assert_eq!(CompatibleProvider::Perplexity.default_model(), "sonar");
-        assert!(CompatibleProvider::Xai.default_model().contains("grok"));
-        assert!(CompatibleProvider::Google
-            .default_model()
-            .contains("gemini"));
+        assert_eq!(CompatibleProvider::Perplexity.default_model(), "sonar-pro");
+        assert_eq!(
+            CompatibleProvider::Xai.default_model(),
+            "grok-4-1-fast-reasoning"
+        );
+        assert_eq!(
+            CompatibleProvider::Google.default_model(),
+            "gemini-2.5-flash"
+        );
     }
 
     #[test]

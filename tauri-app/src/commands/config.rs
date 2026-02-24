@@ -4,6 +4,26 @@ use abigail_core::{validate_local_llm_url, TrinityConfig};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+// ---------------------------------------------------------------------------
+// Model registry DTOs
+// ---------------------------------------------------------------------------
+
+/// Info about a single model from the registry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelRegistryEntry {
+    pub provider: String,
+    pub model_id: String,
+    pub display_name: Option<String>,
+}
+
+/// Summary of the entire model registry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelRegistrySummary {
+    pub providers: Vec<String>,
+    pub total_models: usize,
+    pub models: Vec<ModelRegistryEntry>,
+}
+
 #[tauri::command]
 pub async fn set_api_key(state: State<'_, AppState>, key: String) -> Result<(), String> {
     let key = key.trim().to_string();
@@ -190,6 +210,87 @@ pub fn get_ego_model(
             .get(&provider)
             .cloned())
     }
+}
+
+// ---------------------------------------------------------------------------
+// Tier model assignment commands (Fast / Standard / Pro grid)
+// ---------------------------------------------------------------------------
+
+/// DTO for tier model assignments across all providers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TierModelAssignments {
+    pub fast: std::collections::HashMap<String, String>,
+    pub standard: std::collections::HashMap<String, String>,
+    pub pro: std::collections::HashMap<String, String>,
+}
+
+/// Get all tier model assignments, falling back to defaults.
+#[tauri::command]
+pub fn get_tier_models(state: State<AppState>) -> Result<TierModelAssignments, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let tm = config
+        .tier_models
+        .clone()
+        .unwrap_or_else(abigail_core::TierModels::defaults);
+    Ok(TierModelAssignments {
+        fast: tm.fast,
+        standard: tm.standard,
+        pro: tm.pro,
+    })
+}
+
+/// Set a specific tier model for a provider.
+///
+/// `tier` must be one of: "fast", "standard", "pro".
+#[tauri::command]
+pub async fn set_tier_model(
+    state: State<'_, AppState>,
+    provider: String,
+    tier: String,
+    model: String,
+) -> Result<(), String> {
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        let tier_models = config
+            .tier_models
+            .get_or_insert_with(abigail_core::TierModels::defaults);
+        match tier.as_str() {
+            "fast" => {
+                tier_models.fast.insert(provider, model);
+            }
+            "standard" => {
+                tier_models.standard.insert(provider, model);
+            }
+            "pro" => {
+                tier_models.pro.insert(provider, model);
+            }
+            _ => {
+                return Err(format!(
+                    "Invalid tier '{}'. Must be fast, standard, or pro.",
+                    tier
+                ))
+            }
+        }
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
+    }
+    crate::rebuild_router_with_superego(&state).await?;
+    Ok(())
+}
+
+/// Reset tier models back to defaults.
+#[tauri::command]
+pub async fn reset_tier_models(state: State<'_, AppState>) -> Result<(), String> {
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.tier_models = Some(abigail_core::TierModels::defaults());
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
+    }
+    crate::rebuild_router_with_superego(&state).await?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -462,4 +563,211 @@ pub async fn store_provider_key(
         validated,
         error: None,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Model registry Tauri commands
+// ---------------------------------------------------------------------------
+
+/// Get the current model registry contents (all cached providers + models).
+#[tauri::command]
+pub async fn get_model_registry(
+    state: State<'_, AppState>,
+) -> Result<ModelRegistrySummary, String> {
+    let reg = state.model_registry.lock().await;
+    let providers: Vec<String> = reg.providers().iter().map(|s| s.to_string()).collect();
+    let total_models = reg.total_models();
+
+    let mut models = Vec::new();
+    for provider in &providers {
+        if let Some(cache) = reg.get_cached(provider) {
+            for m in &cache.models {
+                models.push(ModelRegistryEntry {
+                    provider: provider.clone(),
+                    model_id: m.id.clone(),
+                    display_name: m.display_name.clone(),
+                });
+            }
+        }
+    }
+
+    Ok(ModelRegistrySummary {
+        providers,
+        total_models,
+        models,
+    })
+}
+
+/// Discover (or re-discover) models for a specific provider.
+///
+/// Fetches from the provider API, updates the in-memory cache, and persists
+/// the catalog to config.json.
+#[tauri::command]
+pub async fn discover_provider_models(
+    state: State<'_, AppState>,
+    provider: String,
+) -> Result<Vec<ModelRegistryEntry>, String> {
+    let api_key = {
+        let vault = state.secrets.lock().map_err(|e| e.to_string())?;
+        vault
+            .get_secret(&provider)
+            .map(|s| s.to_string())
+            .unwrap_or_default()
+    };
+
+    if api_key.is_empty() {
+        return Err(format!(
+            "No API key found for provider '{}'. Store a key first.",
+            provider
+        ));
+    }
+
+    let mut reg = state.model_registry.lock().await;
+    let cache = reg
+        .refresh_provider(&provider, &api_key)
+        .await
+        .map_err(|e| format!("Discovery failed for {}: {}", provider, e))?;
+
+    let entries: Vec<ModelRegistryEntry> = cache
+        .models
+        .iter()
+        .map(|m| ModelRegistryEntry {
+            provider: provider.clone(),
+            model_id: m.id.clone(),
+            display_name: m.display_name.clone(),
+        })
+        .collect();
+
+    // Persist updated catalog to config
+    let catalog = reg.to_catalog();
+    drop(reg);
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.provider_catalog = catalog;
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(entries)
+}
+
+/// Refresh the entire model registry — re-discover models for all providers
+/// that have stored API keys.
+#[tauri::command]
+pub async fn refresh_model_registry(
+    state: State<'_, AppState>,
+) -> Result<ModelRegistrySummary, String> {
+    // Collect all providers that have stored keys
+    let providers_with_keys: Vec<(String, String)> = {
+        let vault = state.secrets.lock().map_err(|e| e.to_string())?;
+        let known = ["openai", "anthropic", "google", "xai", "perplexity"];
+        known
+            .iter()
+            .filter_map(|p| {
+                vault
+                    .get_secret(p)
+                    .map(|k| k.to_string())
+                    .filter(|k| !k.is_empty())
+                    .map(|k| (p.to_string(), k))
+            })
+            .collect()
+    };
+
+    let mut reg = state.model_registry.lock().await;
+    for (provider, key) in &providers_with_keys {
+        match reg.refresh_provider(provider, key).await {
+            Ok(cache) => {
+                tracing::info!(
+                    "ModelRegistry refresh: {} → {} model(s)",
+                    provider,
+                    cache.models.len()
+                );
+            }
+            Err(e) => {
+                tracing::warn!("ModelRegistry refresh failed for {}: {}", provider, e);
+            }
+        }
+    }
+
+    // Build summary
+    let providers: Vec<String> = reg.providers().iter().map(|s| s.to_string()).collect();
+    let total_models = reg.total_models();
+    let mut models = Vec::new();
+    for provider in &providers {
+        if let Some(cache) = reg.get_cached(provider) {
+            for m in &cache.models {
+                models.push(ModelRegistryEntry {
+                    provider: provider.clone(),
+                    model_id: m.id.clone(),
+                    display_name: m.display_name.clone(),
+                });
+            }
+        }
+    }
+
+    // Persist updated catalog to config
+    let catalog = reg.to_catalog();
+    drop(reg);
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.provider_catalog = catalog;
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(ModelRegistrySummary {
+        providers,
+        total_models,
+        models,
+    })
+}
+
+/// Get/set force override settings.
+#[tauri::command]
+pub fn get_force_override(state: State<AppState>) -> Result<serde_json::Value, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    serde_json::to_value(&config.force_override).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_force_override(
+    state: State<'_, AppState>,
+    force_override: serde_json::Value,
+) -> Result<(), String> {
+    let parsed: abigail_core::ForceOverride =
+        serde_json::from_value(force_override).map_err(|e| e.to_string())?;
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.force_override = parsed;
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
+    }
+    crate::rebuild_router_with_superego(&state).await
+}
+
+/// Get/set tier thresholds.
+#[tauri::command]
+pub fn get_tier_thresholds(state: State<AppState>) -> Result<serde_json::Value, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    serde_json::to_value(&config.tier_thresholds).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_tier_thresholds(
+    state: State<'_, AppState>,
+    tier_thresholds: serde_json::Value,
+) -> Result<(), String> {
+    let parsed: abigail_core::TierThresholds =
+        serde_json::from_value(tier_thresholds).map_err(|e| e.to_string())?;
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.tier_thresholds = parsed;
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
+    }
+    crate::rebuild_router_with_superego(&state).await
 }

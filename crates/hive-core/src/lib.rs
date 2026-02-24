@@ -80,6 +80,18 @@ pub struct ProviderConfig {
     pub superego_provider: Option<String>,
     pub superego_api_key: Option<String>,
     pub superego_l2_mode: String,
+    /// JSON-serialized TierModels (provider→model mappings for Fast/Standard/Pro).
+    #[serde(default)]
+    pub tier_models_json: Option<String>,
+    /// Fast tier ceiling threshold (complexity scores below this → Fast).
+    #[serde(default)]
+    pub tier_threshold_fast_ceiling: Option<u8>,
+    /// Pro tier floor threshold (complexity scores at/above this → Pro).
+    #[serde(default)]
+    pub tier_threshold_pro_floor: Option<u8>,
+    /// JSON-serialized ForceOverride (pinned model/tier/provider).
+    #[serde(default)]
+    pub force_override_json: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
