@@ -17,6 +17,7 @@ members = [
     "crates/hive-core",
     "crates/entity-core",
     "crates/hive-daemon",
+    "crates/entity-chat",
     "crates/entity-daemon",
     "crates/hive-cli",
     "crates/entity-cli",
@@ -67,4 +68,5 @@ clap = { version = "4", features = ["derive"] }
 tower-http = { version = "0.6", features = ["cors"] }
 hive-core = { path = "crates/hive-core" }
 entity-core = { path = "crates/entity-core" }
+entity-chat = { path = "crates/entity-chat" }
 abigail-identity = { path = "crates/abigail-identity" }

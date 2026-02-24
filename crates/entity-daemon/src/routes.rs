@@ -47,21 +47,19 @@ pub async fn chat(
     State(state): State<EntityDaemonState>,
     Json(body): Json<ChatRequest>,
 ) -> Json<ApiEnvelope<ChatResponse>> {
-    use crate::chat_pipeline;
-
     // 1. Build system prompt from constitutional documents
     let system_prompt =
         abigail_core::system_prompt::build_system_prompt(&state.docs_dir, &state.config.agent_name);
 
     // 2. Build contextual messages with sanitization + deduplication
-    let messages = chat_pipeline::build_contextual_messages(
+    let messages = entity_chat::build_contextual_messages(
         &system_prompt,
         body.session_messages,
         &body.message,
     );
 
     // 3. Build tool definitions from registered skills
-    let tools = chat_pipeline::build_tool_definitions(&state.registry);
+    let tools = entity_chat::build_tool_definitions(&state.registry);
 
     // 4. Route — use tool-use loop if tools are available, plain route otherwise
     let target = body.target.as_deref().unwrap_or("AUTO");
@@ -72,13 +70,13 @@ pub async fn chat(
         } else {
             state.router.route(messages).await
         };
-        res.map(|r| chat_pipeline::ToolUseResult {
+        res.map(|r| entity_chat::ToolUseResult {
             content: r.content,
             tool_calls_made: Vec::new(),
         })
     } else {
         // Tools available: run the agentic tool-use loop
-        chat_pipeline::run_tool_use_loop(&state.router, &state.executor, messages, tools).await
+        entity_chat::run_tool_use_loop(&state.router, &state.executor, messages, tools).await
     };
 
     match result {

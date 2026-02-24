@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-25 06:00 EST: Extract shared chat engine into entity-chat library crate, eliminating ~200 lines of duplicated pipeline code between entity-daemon and Tauri app so CLI and GUI use a single engine
 - 2026-02-25 04:30 EST: Fix HiveManagementSkill tool schemas causing OpenAI 400 errors, add defensive schema validation in build_tool_definitions, implement dynamic model discovery (discover_models API + Hive endpoint + startup diagnostics)
 - 2026-02-25 03:00 EST: Strip chat flow to standard minimum — remove redundant tool awareness markdown, dead "Blocked:" postfix, and write-only memory persistence from both GUI and CLI pipelines (10→6 steps GUI, 8→5 steps CLI)
 - 2026-02-25 02:00 EST: Unify GUI and CLI chat flows — replace streaming chat_stream with non-streaming chat command mirroring entity-daemon pipeline (tool-use loop, tool awareness, memory persistence), delete ~650 lines of superfluous code, simplify ChatInterface.tsx frontend

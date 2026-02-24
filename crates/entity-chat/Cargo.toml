@@ -1,0 +1,13 @@
+[package]
+name = "entity-chat"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+entity-core = { path = "../entity-core" }
+abigail-capabilities = { path = "../abigail-capabilities" }
+abigail-router = { path = "../abigail-router" }
+abigail-skills = { path = "../abigail-skills" }
+serde_json.workspace = true
+tracing.workspace = true
+anyhow.workspace = true

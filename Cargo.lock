@@ -39,6 +39,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "ed25519-dalek",
+ "entity-chat",
  "entity-core",
  "regex",
  "reqwest 0.13.2",
@@ -2307,6 +2308,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
+name = "entity-chat"
+version = "0.0.1"
+dependencies = [
+ "abigail-capabilities",
+ "abigail-router",
+ "abigail-skills",
+ "anyhow",
+ "entity-core",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "entity-cli"
 version = "0.0.1"
 dependencies = [
@@ -2342,6 +2356,7 @@ dependencies = [
  "async-trait",
  "axum",
  "clap",
+ "entity-chat",
  "entity-core",
  "hive-core",
  "reqwest 0.13.2",

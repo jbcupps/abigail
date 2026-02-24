@@ -1,10 +1,8 @@
-//! Chat pipeline utilities for entity-daemon.
+//! Shared chat pipeline for entity-daemon and Tauri app.
 //!
-//! Ported from `tauri-app/src/commands/chat.rs` to bring entity-daemon chat
-//! to functional parity: sanitization, system prompt, tool awareness, dedup.
-//! Phase 2a adds the tool-use loop: convert skill tools to LLM-native
-//! ToolDefinitions, call `route_with_tools`, execute returned tool calls,
-//! feed results back, and iterate until the LLM produces a final text reply.
+//! This crate owns the single chat engine used by both the CLI (entity-daemon)
+//! and the GUI (Tauri desktop app). Changes here automatically affect both
+//! consumers, so testing `cargo test -p entity-chat` validates the shared engine.
 
 use abigail_capabilities::cognitive::{CompletionResponse, Message, ToolCall, ToolDefinition};
 use abigail_router::IdEgoRouter;
