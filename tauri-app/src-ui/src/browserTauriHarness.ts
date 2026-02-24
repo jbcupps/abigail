@@ -447,10 +447,29 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
       const message = String(args.message ?? "").toLowerCase();
       const provider = preferredProvider();
 
-      const replyText = message.includes("clipboard")
-        ? "Clipboard skill result: read succeeded. Current clipboard text is 'sample clipboard value'."
-        : `Harness reply via ${provider}: acknowledged "${String(args.message ?? "")}".`;
+      if (message.includes("clipboard")) {
+        return JSON.stringify({
+          reply: "Clipboard skill result: read succeeded. Current clipboard text is 'sample clipboard value'.",
+          provider,
+          tool_calls_made: [{ skill_id: "builtin.clipboard", tool_name: "read_clipboard", success: true }],
+          tier: "fast",
+          model_used: "harness-model",
+          complexity_score: 15,
+        });
+      }
 
+      if (message.includes("create a skill") || message.includes("author skill")) {
+        return JSON.stringify({
+          reply: "I've created the skill 'custom.greeter' with an author_skill tool call. The skill directory has been set up.",
+          provider,
+          tool_calls_made: [{ skill_id: "builtin.skill_factory", tool_name: "author_skill", success: true }],
+          tier: "standard",
+          model_used: "harness-model",
+          complexity_score: 55,
+        });
+      }
+
+      const replyText = `Harness reply via ${provider}: acknowledged "${String(args.message ?? "")}".`;
       return JSON.stringify({ reply: replyText, provider, tool_calls_made: [] });
     }
 

@@ -152,6 +152,15 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(hive_skill),
     );
 
+    // 6b. Register SkillFactory (allows entity to author skills via chat)
+    {
+        let factory_skill = abigail_skills::SkillFactory::new(skills_dir.clone());
+        let _ = registry.register(
+            abigail_skills::manifest::SkillId("builtin.skill_factory".to_string()),
+            Arc::new(factory_skill),
+        );
+    }
+
     // 7. Load preloaded integration skills (GitHub, Slack, Jira)
     {
         let preloaded = abigail_skills::build_preloaded_skills(None);

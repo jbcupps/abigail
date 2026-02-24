@@ -100,6 +100,52 @@ describe("App browser harness full flow", () => {
     });
   }, 20000);
 
+  it("triggers skill factory tool call and renders result", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /\[skip\]/i }));
+    await user.type(screen.getByPlaceholderText(/entity name/i), "Skill Flow Test");
+    await user.click(screen.getByRole("button", { name: /^birth$/i }));
+    await user.click(await screen.findByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+    await user.click(await screen.findByRole("button", { name: /continue without model/i }));
+
+    const saveProvider = async (providerLabel: RegExp, ariaLabel: RegExp, key: string) => {
+      await user.click(screen.getByRole("button", { name: providerLabel }));
+      const dialog = await screen.findByRole("dialog");
+      await user.type(within(dialog).getByLabelText(ariaLabel), key);
+      await user.click(within(dialog).getByRole("button", { name: /save & validate/i }));
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+    };
+
+    await saveProvider(
+      /^openai$/i,
+      /openai api key/i,
+      getTestKey("OPENAI_API_KEY", "sk-test-skill-flow")
+    );
+
+    await advanceFromConnectivity(user);
+    await user.click(await screen.findByRole("button", { name: /fast template/i }));
+    await user.click(screen.getByRole("button", { name: /begin/i }));
+    await user.click(await screen.findByRole("button", { name: /use template/i }));
+    await user.click(await screen.findByRole("button", { name: /crystallize soul/i }));
+    await user.click(await screen.findByRole("button", { name: /begin emergence ceremony/i }));
+
+    const messageInput = await waitFor(
+      () => screen.getByPlaceholderText(/^message$/i),
+      { timeout: 7000 }
+    );
+
+    await user.type(messageInput, "please create a skill called greeter");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/I've created the skill 'custom.greeter'/i)).toBeInTheDocument();
+    });
+  }, 20000);
+
   it("enforces connectivity provider requirement and crystallization name validation", async () => {
     const user = userEvent.setup();
     render(<App />);

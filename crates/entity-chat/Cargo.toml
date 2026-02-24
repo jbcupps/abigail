@@ -11,3 +11,8 @@ abigail-skills = { path = "../abigail-skills" }
 serde_json.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -2316,8 +2316,11 @@ dependencies = [
  "abigail-router",
  "abigail-skills",
  "anyhow",
+ "async-trait",
+ "chrono",
  "entity-core",
  "serde_json",
+ "tokio",
  "tracing",
 ]
 
@@ -2325,8 +2328,10 @@ dependencies = [
 name = "entity-cli"
 version = "0.0.1"
 dependencies = [
+ "abigail-skills",
  "anyhow",
  "clap",
+ "entity-chat",
  "entity-core",
  "hive-core",
  "reqwest 0.13.2",
