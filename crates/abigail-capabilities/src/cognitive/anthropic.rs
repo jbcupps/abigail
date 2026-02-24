@@ -14,7 +14,7 @@ use std::time::Duration;
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const API_VERSION: &str = "2023-06-01";
-const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
+const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
 const MAX_TOKENS: u32 = 4096;
 
 pub struct AnthropicProvider {
@@ -311,9 +311,13 @@ fn convert_tools(tools: &[ToolDefinition]) -> Vec<AnthropicTool> {
 #[async_trait]
 impl LlmProvider for AnthropicProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
+        let model = request
+            .model_override
+            .as_deref()
+            .unwrap_or(&self.model);
         tracing::info!(
             "Anthropic::complete model={}, messages={}, tools={}",
-            self.model,
+            model,
             request.messages.len(),
             request.tools.as_ref().map_or(0, |t| t.len()),
         );
@@ -321,7 +325,7 @@ impl LlmProvider for AnthropicProvider {
         let tools = request.tools.as_ref().map(|t| convert_tools(t));
 
         let body = AnthropicRequest {
-            model: self.model.clone(),
+            model: model.to_string(),
             max_tokens: MAX_TOKENS,
             system,
             messages,
@@ -399,9 +403,13 @@ impl LlmProvider for AnthropicProvider {
         request: &CompletionRequest,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
+        let model = request
+            .model_override
+            .as_deref()
+            .unwrap_or(&self.model);
         tracing::info!(
             "Anthropic::stream model={}, messages={}, tools={}",
-            self.model,
+            model,
             request.messages.len(),
             request.tools.as_ref().map_or(0, |t| t.len()),
         );
@@ -409,7 +417,7 @@ impl LlmProvider for AnthropicProvider {
         let tools = request.tools.as_ref().map(|t| convert_tools(t));
 
         let api_request = AnthropicRequest {
-            model: self.model.clone(),
+            model: model.to_string(),
             max_tokens: MAX_TOKENS,
             system,
             messages,

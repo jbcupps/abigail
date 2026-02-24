@@ -61,7 +61,11 @@ pub async fn chat(
     // 3. Build tool definitions from registered skills
     let tools = entity_chat::build_tool_definitions(&state.registry);
 
-    // 4. Route — use tool-use loop if tools are available, plain route otherwise
+    // 4. Compute tier metadata from the user's message
+    let (tier, model_used, complexity_score) =
+        state.router.tier_metadata_for_message(&body.message);
+
+    // 5. Route — use tool-use loop if tools are available, plain route otherwise
     let target = body.target.as_deref().unwrap_or("AUTO");
     let result = if tools.is_empty() || target == "ID" {
         // No tools or explicit Id-only: simple route
@@ -73,6 +77,9 @@ pub async fn chat(
         res.map(|r| entity_chat::ToolUseResult {
             content: r.content,
             tool_calls_made: Vec::new(),
+            tier: tier.clone(),
+            model_used: model_used.clone(),
+            complexity_score,
         })
     } else {
         // Tools available: run the agentic tool-use loop
@@ -91,11 +98,14 @@ pub async fn chat(
                 "id".to_string()
             };
 
-            // 5. Return response
+            // 6. Return response with tier metadata
             Json(ApiEnvelope::success(ChatResponse {
                 reply: tool_result.content,
                 provider: Some(provider),
                 tool_calls_made: tool_result.tool_calls_made,
+                tier: tool_result.tier,
+                model_used: tool_result.model_used,
+                complexity_score: tool_result.complexity_score,
             }))
         }
         Err(e) => Json(ApiEnvelope::error(e.to_string())),

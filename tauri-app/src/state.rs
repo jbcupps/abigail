@@ -4,7 +4,7 @@ use crate::rate_limit::CooldownGuard;
 use abigail_auth::AuthManager;
 use abigail_birth::BirthOrchestrator;
 use abigail_core::{AppConfig, SecretsVault};
-use abigail_hive::Hive;
+use abigail_hive::{Hive, ModelRegistry};
 use abigail_router::{IdEgoRouter, SubagentManager};
 use abigail_skills::channel::EventBus;
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
@@ -64,6 +64,8 @@ pub struct AppState {
         Arc<tokio::sync::RwLock<abigail_capabilities::sensory::http_client::HttpClientCapability>>,
     /// Managed Ollama instance (bundled or system)
     pub ollama: Arc<tokio::sync::Mutex<Option<OllamaManager>>>,
+    /// Dynamic model registry — caches discovered models per provider with TTL
+    pub model_registry: Arc<tokio::sync::Mutex<ModelRegistry>>,
     /// Skill instruction registry for injecting skill-specific LLM instructions
     pub instruction_registry: Arc<InstructionRegistry>,
     /// Rate limiter for chat command

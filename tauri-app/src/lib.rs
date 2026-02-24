@@ -24,7 +24,7 @@ use crate::state::AppState;
 
 use abigail_auth::AuthManager;
 use abigail_core::{validate_local_llm_url, AppConfig, SecretsVault};
-use abigail_hive::Hive;
+use abigail_hive::{Hive, ModelRegistry};
 use abigail_router::{IdEgoRouter, SubagentManager};
 use abigail_skills::channel::EventBus;
 use abigail_skills::protocol::mcp::McpSkillRuntime;
@@ -116,22 +116,27 @@ pub async fn rebuild_router_with_superego(state: &AppState) -> Result<(), String
         mgr.update_router(router_arc);
     }
 
-    // Background model discovery (non-blocking)
+    // Background model discovery via ModelRegistry (non-blocking).
+    // Refreshes the active ego provider's model list and persists to config.
     let ego_provider = hive_config.ego_provider_name.clone();
     let ego_key = hive_config.ego_api_key.clone();
+    let registry_handle = state.model_registry.clone();
     tokio::spawn(async move {
         if let (Some(provider), Some(key)) = (ego_provider, ego_key) {
-            match abigail_capabilities::cognitive::validation::discover_models(&provider, &key)
-                .await
-            {
-                Ok(models) => {
-                    tracing::info!("Discovered {} model(s) from {}", models.len(), provider);
-                    for m in models.iter().take(5) {
+            let mut reg = registry_handle.lock().await;
+            match reg.refresh_provider(&provider, &key).await {
+                Ok(cache) => {
+                    tracing::info!(
+                        "ModelRegistry: discovered {} model(s) from {}",
+                        cache.models.len(),
+                        provider
+                    );
+                    for m in cache.models.iter().take(5) {
                         tracing::info!("  - {}", m.id);
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Model discovery failed for {}: {}", provider, e);
+                    tracing::warn!("ModelRegistry: discovery failed for {}: {}", provider, e);
                 }
             }
         }
@@ -179,6 +184,20 @@ pub fn run() {
         IdEgoRouter::from_built_providers(built)
     });
 
+    // Initialize model registry from persisted catalog
+    let model_registry = {
+        let mut reg = ModelRegistry::new();
+        reg.load_from_catalog(&config.provider_catalog);
+        if reg.total_models() > 0 {
+            tracing::info!(
+                "ModelRegistry: loaded {} model(s) across {} provider(s) from persisted catalog",
+                reg.total_models(),
+                reg.providers().len()
+            );
+        }
+        Arc::new(tokio::sync::Mutex::new(reg))
+    };
+
     let auth_manager = Arc::new(AuthManager::new(secrets.clone()));
     let identity_manager =
         Arc::new(IdentityManager::new(hive_data_dir).expect("Failed to init IdentityManager"));
@@ -213,6 +232,7 @@ pub fn run() {
         browser,
         http_client,
         ollama: Arc::new(tokio::sync::Mutex::new(None)),
+        model_registry,
         instruction_registry: Arc::new(InstructionRegistry::empty()),
         chat_cooldown: CooldownGuard::new(std::time::Duration::from_millis(500)),
         birth_cooldown: CooldownGuard::new(std::time::Duration::from_millis(500)),
@@ -442,7 +462,17 @@ pub fn run() {
             crystallize_soul,
             complete_emergence,
             sign_agent_with_hive,
-            get_birth_transcript
+            get_birth_transcript,
+            get_model_registry,
+            discover_provider_models,
+            refresh_model_registry,
+            get_force_override,
+            set_force_override,
+            get_tier_thresholds,
+            set_tier_thresholds,
+            get_tier_models,
+            set_tier_model,
+            reset_tier_models
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri app");

@@ -4,7 +4,9 @@
 //! vault internals directly.
 
 pub mod hive;
+pub mod model_registry;
 pub mod provider_registry;
 
 pub use hive::{BuiltProviders, Hive, HiveConfig};
+pub use model_registry::ModelRegistry;
 pub use provider_registry::{ProviderKind, ProviderRegistry};

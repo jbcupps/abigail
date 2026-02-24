@@ -103,7 +103,10 @@ pub async fn chat(
     // 4. Build tool definitions from registered skills (shared engine)
     let tools = entity_chat::build_tool_definitions(&state.registry);
 
-    // 5. Route — use tool-use loop if tools are available, plain route otherwise
+    // 5. Compute tier metadata from the user's message
+    let (tier, model_used, complexity_score) = router.tier_metadata_for_message(&message);
+
+    // 6. Route — use tool-use loop if tools are available, plain route otherwise
     let target_mode = target.as_deref().unwrap_or("AUTO");
     let result = if tools.is_empty() || target_mode == "ID" {
         let res = if target_mode == "ID" {
@@ -114,6 +117,9 @@ pub async fn chat(
         res.map(|r| entity_chat::ToolUseResult {
             content: r.content,
             tool_calls_made: Vec::new(),
+            tier: tier.clone(),
+            model_used: model_used.clone(),
+            complexity_score,
         })
     } else {
         entity_chat::run_tool_use_loop(&router, &state.executor, messages, tools).await
@@ -130,11 +136,14 @@ pub async fn chat(
                 "id".to_string()
             };
 
-            // 6. Return JSON-serialized ChatResponse (same DTO as entity-daemon)
+            // 7. Return JSON-serialized ChatResponse (same DTO as entity-daemon)
             let response = ChatResponse {
                 reply: tool_result.content,
                 provider: Some(provider),
                 tool_calls_made: tool_result.tool_calls_made,
+                tier: tool_result.tier,
+                model_used: tool_result.model_used,
+                complexity_score: tool_result.complexity_score,
             };
             serde_json::to_string(&response).map_err(|e| e.to_string())
         }

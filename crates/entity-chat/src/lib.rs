@@ -137,6 +137,12 @@ pub struct ToolUseResult {
     pub content: String,
     /// All tool calls executed during the loop.
     pub tool_calls_made: Vec<ToolCallRecord>,
+    /// Model quality tier used: "fast", "standard", or "pro".
+    pub tier: Option<String>,
+    /// Actual model ID used for this request.
+    pub model_used: Option<String>,
+    /// Complexity score (5–95) that determined tier selection.
+    pub complexity_score: Option<u8>,
 }
 
 /// Run the full tool-use loop:
@@ -154,6 +160,15 @@ pub async fn run_tool_use_loop(
 ) -> anyhow::Result<ToolUseResult> {
     let mut all_records = Vec::new();
 
+    // Compute tier metadata from the user's original message (last user msg).
+    let user_msg = messages
+        .iter()
+        .rev()
+        .find(|m| m.role == "user")
+        .map(|m| m.content.as_str())
+        .unwrap_or("");
+    let (tier, model_used, complexity_score) = router.tier_metadata_for_message(user_msg);
+
     for round in 0..MAX_TOOL_ROUNDS {
         tracing::debug!("Tool-use loop round {}", round);
 
@@ -168,6 +183,9 @@ pub async fn run_tool_use_loop(
                 return Ok(ToolUseResult {
                     content: response.content,
                     tool_calls_made: all_records,
+                    tier: tier.clone(),
+                    model_used: model_used.clone(),
+                    complexity_score,
                 });
             }
         };
@@ -196,6 +214,9 @@ pub async fn run_tool_use_loop(
     Ok(ToolUseResult {
         content: "I attempted several tool calls but hit the maximum number of rounds. Here's what I have so far.".to_string(),
         tool_calls_made: all_records,
+        tier,
+        model_used,
+        complexity_score,
     })
 }
 

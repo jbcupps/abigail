@@ -271,6 +271,7 @@ impl AgenticEngine {
                 } else {
                     Some(self.tools.clone())
                 },
+                model_override: None,
             };
 
             let response = match self.provider.complete(&request).await {

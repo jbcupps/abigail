@@ -131,6 +131,14 @@ impl CliLlmProvider {
 #[async_trait]
 impl LlmProvider for CliLlmProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
+        if let Some(ref override_model) = request.model_override {
+            tracing::warn!(
+                "CliLlmProvider ignoring model_override='{}' — CLI variant {} uses its own model selection",
+                override_model,
+                self.variant,
+            );
+        }
+
         let prompt = Self::build_prompt(&request.messages);
 
         tracing::info!(

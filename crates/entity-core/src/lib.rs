@@ -38,6 +38,15 @@ pub struct ChatResponse {
     /// Tool calls executed during this chat turn (empty if none).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls_made: Vec<ToolCallRecord>,
+    /// Model quality tier used: "fast", "standard", or "pro".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tier: Option<String>,
+    /// Actual model ID used for this request (e.g. "gpt-4.1", "claude-sonnet-4-6").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_used: Option<String>,
+    /// Complexity score (5–95) that determined the tier selection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complexity_score: Option<u8>,
 }
 
 /// Record of a single tool call made during a chat turn.

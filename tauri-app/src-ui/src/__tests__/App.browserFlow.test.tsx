@@ -144,7 +144,7 @@ describe("App browser harness full flow", () => {
   it("surfaces provider failure then recovers with working provider", async () => {
     await invoke("harness_debug_set_provider_validation", {
       provider: "anthropic",
-      error: "Anthropic API error (404 Not Found): not_found_error - model: claude-sonnet-4-20250514",
+      error: "Anthropic API error (404 Not Found): not_found_error - model: claude-sonnet-4-6",
     });
 
     const user = userEvent.setup();

@@ -102,6 +102,7 @@ impl SubagentManager {
                 let request = CompletionRequest {
                     messages,
                     tools: if tools.is_empty() { None } else { Some(tools) },
+                    model_override: None,
                 };
                 self.router
                     .route_with_tools(request.messages, request.tools.unwrap_or_default())
@@ -115,6 +116,7 @@ impl SubagentManager {
                 let request = CompletionRequest {
                     messages,
                     tools: if tools.is_empty() { None } else { Some(tools) },
+                    model_override: None,
                 };
                 self.router
                     .route_with_tools(request.messages, request.tools.unwrap_or_default())

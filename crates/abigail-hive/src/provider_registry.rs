@@ -83,7 +83,7 @@ impl ProviderRegistry {
             Some("openai") => {
                 let built = OpenAiProvider::with_model(
                     Some(key),
-                    ego_model.unwrap_or_else(|| "gpt-4o-mini".to_string()),
+                    ego_model.unwrap_or_else(|| "gpt-4.1".to_string()),
                 )
                 .inspect_err(|e| tracing::error!("Failed to build OpenAI provider: {}", e))
                 .ok()
@@ -96,7 +96,7 @@ impl ProviderRegistry {
             Some("anthropic") => {
                 let built = AnthropicProvider::with_model(
                     key,
-                    ego_model.unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
+                    ego_model.unwrap_or_else(|| "claude-sonnet-4-6".to_string()),
                 )
                 .inspect_err(|e| tracing::error!("Failed to build Anthropic provider: {}", e))
                 .ok()
