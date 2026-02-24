@@ -290,12 +290,12 @@ async fn execute_single_tool_call(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use abigail_skills::channel::TriggerDescriptor;
     use abigail_skills::manifest::SkillManifest;
     use abigail_skills::skill::{
         CostEstimate, ExecutionContext, HealthStatus, Skill, SkillConfig, SkillHealth, SkillResult,
         ToolDescriptor, ToolOutput,
     };
-    use abigail_skills::channel::TriggerDescriptor;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -327,9 +327,15 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Skill for StubSkill {
-        fn manifest(&self) -> &SkillManifest { &self.manifest }
-        async fn initialize(&mut self, _: SkillConfig) -> SkillResult<()> { Ok(()) }
-        async fn shutdown(&mut self) -> SkillResult<()> { Ok(()) }
+        fn manifest(&self) -> &SkillManifest {
+            &self.manifest
+        }
+        async fn initialize(&mut self, _: SkillConfig) -> SkillResult<()> {
+            Ok(())
+        }
+        async fn shutdown(&mut self) -> SkillResult<()> {
+            Ok(())
+        }
         fn health(&self) -> SkillHealth {
             SkillHealth {
                 status: HealthStatus::Healthy,
@@ -338,16 +344,33 @@ mod tests {
                 metrics: HashMap::new(),
             }
         }
-        fn tools(&self) -> Vec<ToolDescriptor> { self.tool_descriptors.clone() }
-        async fn execute_tool(
-            &self, tool_name: &str, params: ToolParams, _: &ExecutionContext,
-        ) -> SkillResult<ToolOutput> {
-            let echo = params.values.get("input").cloned().unwrap_or(serde_json::json!("none"));
-            Ok(ToolOutput::success(serde_json::json!({ "tool": tool_name, "echo": echo })))
+        fn tools(&self) -> Vec<ToolDescriptor> {
+            self.tool_descriptors.clone()
         }
-        fn capabilities(&self) -> Vec<abigail_skills::manifest::CapabilityDescriptor> { vec![] }
-        fn get_capability(&self, _: &str) -> Option<&dyn std::any::Any> { None }
-        fn triggers(&self) -> Vec<TriggerDescriptor> { vec![] }
+        async fn execute_tool(
+            &self,
+            tool_name: &str,
+            params: ToolParams,
+            _: &ExecutionContext,
+        ) -> SkillResult<ToolOutput> {
+            let echo = params
+                .values
+                .get("input")
+                .cloned()
+                .unwrap_or(serde_json::json!("none"));
+            Ok(ToolOutput::success(
+                serde_json::json!({ "tool": tool_name, "echo": echo }),
+            ))
+        }
+        fn capabilities(&self) -> Vec<abigail_skills::manifest::CapabilityDescriptor> {
+            vec![]
+        }
+        fn get_capability(&self, _: &str) -> Option<&dyn std::any::Any> {
+            None
+        }
+        fn triggers(&self) -> Vec<TriggerDescriptor> {
+            vec![]
+        }
     }
 
     fn valid_tool(name: &str) -> ToolDescriptor {
@@ -421,7 +444,9 @@ mod tests {
             manifest: test_manifest("test.echo"),
             tool_descriptors: vec![valid_tool("echo")],
         };
-        registry.register(SkillId("test.echo".to_string()), Arc::new(skill)).unwrap();
+        registry
+            .register(SkillId("test.echo".to_string()), Arc::new(skill))
+            .unwrap();
         let defs = build_tool_definitions(&registry);
         assert_eq!(defs.len(), 1);
         assert_eq!(defs[0].name, "test.echo::echo");
@@ -441,8 +466,12 @@ mod tests {
             manifest: test_manifest("beta"),
             tool_descriptors: vec![valid_tool("three")],
         };
-        registry.register(SkillId("alpha".to_string()), Arc::new(skill_a)).unwrap();
-        registry.register(SkillId("beta".to_string()), Arc::new(skill_b)).unwrap();
+        registry
+            .register(SkillId("alpha".to_string()), Arc::new(skill_a))
+            .unwrap();
+        registry
+            .register(SkillId("beta".to_string()), Arc::new(skill_b))
+            .unwrap();
 
         let defs = build_tool_definitions(&registry);
         assert_eq!(defs.len(), 3);
@@ -459,7 +488,9 @@ mod tests {
             manifest: test_manifest("test.mixed"),
             tool_descriptors: vec![valid_tool("good"), malformed_tool("bad")],
         };
-        registry.register(SkillId("test.mixed".to_string()), Arc::new(skill)).unwrap();
+        registry
+            .register(SkillId("test.mixed".to_string()), Arc::new(skill))
+            .unwrap();
         let defs = build_tool_definitions(&registry);
         assert_eq!(defs.len(), 1, "malformed tool should be skipped");
         assert_eq!(defs[0].name, "test.mixed::good");
@@ -472,7 +503,9 @@ mod tests {
             manifest: test_manifest("test.broken"),
             tool_descriptors: vec![malformed_tool("bad1"), malformed_tool("bad2")],
         };
-        registry.register(SkillId("test.broken".to_string()), Arc::new(skill)).unwrap();
+        registry
+            .register(SkillId("test.broken".to_string()), Arc::new(skill))
+            .unwrap();
         let defs = build_tool_definitions(&registry);
         assert!(defs.is_empty(), "all-malformed skill should yield no defs");
     }
@@ -486,7 +519,9 @@ mod tests {
             manifest: test_manifest("test.echo"),
             tool_descriptors: vec![valid_tool("echo")],
         };
-        registry.register(SkillId("test.echo".to_string()), Arc::new(skill)).unwrap();
+        registry
+            .register(SkillId("test.echo".to_string()), Arc::new(skill))
+            .unwrap();
         let executor = SkillExecutor::new(registry);
 
         let tc = ToolCall {
@@ -515,7 +550,10 @@ mod tests {
         let (json, record) = execute_single_tool_call(&executor, &tc).await;
         assert!(!record.success);
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(parsed["error"].as_str().unwrap().contains("Invalid tool name"));
+        assert!(parsed["error"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid tool name"));
     }
 
     #[tokio::test]
@@ -525,7 +563,9 @@ mod tests {
             manifest: test_manifest("test.echo"),
             tool_descriptors: vec![valid_tool("echo")],
         };
-        registry.register(SkillId("test.echo".to_string()), Arc::new(skill)).unwrap();
+        registry
+            .register(SkillId("test.echo".to_string()), Arc::new(skill))
+            .unwrap();
         let executor = SkillExecutor::new(registry);
 
         let tc = ToolCall {
@@ -534,7 +574,10 @@ mod tests {
             arguments: "not valid json!!!".into(),
         };
         let (json, record) = execute_single_tool_call(&executor, &tc).await;
-        assert!(record.success, "malformed args should default to empty params, not fail");
+        assert!(
+            record.success,
+            "malformed args should default to empty params, not fail"
+        );
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["success"], true);
     }
@@ -566,9 +609,18 @@ mod tests {
     #[test]
     fn test_sanitize_filters_invalid_roles() {
         let history = vec![
-            SessionMessage { role: "user".into(), content: "hello".into() },
-            SessionMessage { role: "system".into(), content: "should be filtered".into() },
-            SessionMessage { role: "assistant".into(), content: "world".into() },
+            SessionMessage {
+                role: "user".into(),
+                content: "hello".into(),
+            },
+            SessionMessage {
+                role: "system".into(),
+                content: "should be filtered".into(),
+            },
+            SessionMessage {
+                role: "assistant".into(),
+                content: "world".into(),
+            },
         ];
         let result = sanitize_session_history(Some(history));
         assert_eq!(result.len(), 2);
@@ -579,8 +631,14 @@ mod tests {
     #[test]
     fn test_sanitize_filters_empty_content() {
         let history = vec![
-            SessionMessage { role: "user".into(), content: "   ".into() },
-            SessionMessage { role: "assistant".into(), content: "ok".into() },
+            SessionMessage {
+                role: "user".into(),
+                content: "   ".into(),
+            },
+            SessionMessage {
+                role: "assistant".into(),
+                content: "ok".into(),
+            },
         ];
         let result = sanitize_session_history(Some(history));
         assert_eq!(result.len(), 1);
@@ -617,9 +675,18 @@ mod tests {
     #[test]
     fn test_build_contextual_deduplicates_last() {
         let history = vec![
-            SessionMessage { role: "user".into(), content: "hello".into() },
-            SessionMessage { role: "assistant".into(), content: "hi".into() },
-            SessionMessage { role: "user".into(), content: "how are you".into() },
+            SessionMessage {
+                role: "user".into(),
+                content: "hello".into(),
+            },
+            SessionMessage {
+                role: "assistant".into(),
+                content: "hi".into(),
+            },
+            SessionMessage {
+                role: "user".into(),
+                content: "how are you".into(),
+            },
         ];
         let msgs = build_contextual_messages("sys", Some(history), "how are you");
         assert_eq!(msgs.len(), 4);
@@ -644,9 +711,11 @@ mod tests {
     fn test_tool_use_result_fields() {
         let result = ToolUseResult {
             content: "done".into(),
-            tool_calls_made: vec![
-                ToolCallRecord { skill_id: "a".into(), tool_name: "b".into(), success: true },
-            ],
+            tool_calls_made: vec![ToolCallRecord {
+                skill_id: "a".into(),
+                tool_name: "b".into(),
+                success: true,
+            }],
             tier: Some("fast".into()),
             model_used: Some("gpt-4.1-mini".into()),
             complexity_score: Some(25),

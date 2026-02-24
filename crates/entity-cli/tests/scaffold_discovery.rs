@@ -159,9 +159,7 @@ fn scaffold_then_register_and_build_tool_defs() {
     let registry = abigail_skills::SkillRegistry::new();
     for skill in abigail_skills::DynamicApiSkill::discover(&entity_skills, None) {
         let id = skill.manifest().id.clone();
-        registry
-            .register(id, std::sync::Arc::new(skill))
-            .unwrap();
+        registry.register(id, std::sync::Arc::new(skill)).unwrap();
     }
 
     let defs = entity_chat::build_tool_definitions(&registry);

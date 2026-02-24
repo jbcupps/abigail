@@ -108,7 +108,10 @@ fn build_tool_definitions_includes_discovered_skills() {
     }
 
     let defs = entity_chat::build_tool_definitions(&registry);
-    assert!(!defs.is_empty(), "should produce at least one tool definition");
+    assert!(
+        !defs.is_empty(),
+        "should produce at least one tool definition"
+    );
     assert!(
         defs.iter().any(|d| d.name == "dynamic.test_api::get_data"),
         "qualified tool name should be skill_id::tool_name, got: {:?}",
@@ -127,7 +130,10 @@ fn skill_factory_registers_and_lists_tools() {
     let registry = SkillRegistry::new();
     let factory = SkillFactory::new(tmp.clone());
     registry
-        .register(SkillId("builtin.skill_factory".to_string()), Arc::new(factory))
+        .register(
+            SkillId("builtin.skill_factory".to_string()),
+            Arc::new(factory),
+        )
         .unwrap();
 
     let defs = entity_chat::build_tool_definitions(&registry);
@@ -159,7 +165,10 @@ async fn skill_factory_author_creates_files() {
     let registry = Arc::new(SkillRegistry::new());
     let factory = SkillFactory::new(tmp.clone());
     registry
-        .register(SkillId("builtin.skill_factory".to_string()), Arc::new(factory))
+        .register(
+            SkillId("builtin.skill_factory".to_string()),
+            Arc::new(factory),
+        )
         .unwrap();
     let executor = SkillExecutor::new(registry);
 
@@ -182,8 +191,14 @@ async fn skill_factory_author_creates_files() {
     assert!(result.success);
 
     let skill_dir = tmp.join("custom.greeter");
-    assert!(skill_dir.join("skill.toml").exists(), "skill.toml should be created");
-    assert!(skill_dir.join("main.py").exists(), "script should be created");
+    assert!(
+        skill_dir.join("skill.toml").exists(),
+        "skill.toml should be created"
+    );
+    assert!(
+        skill_dir.join("main.py").exists(),
+        "script should be created"
+    );
     assert!(
         skill_dir.join("how-to-use.md").exists(),
         "how-to-use.md should be created"
@@ -197,7 +212,10 @@ async fn executor_returns_error_for_missing_tool() {
     let registry = Arc::new(SkillRegistry::new());
     let factory = SkillFactory::new(std::env::temp_dir());
     registry
-        .register(SkillId("builtin.skill_factory".to_string()), Arc::new(factory))
+        .register(
+            SkillId("builtin.skill_factory".to_string()),
+            Arc::new(factory),
+        )
         .unwrap();
     let executor = SkillExecutor::new(registry);
 
