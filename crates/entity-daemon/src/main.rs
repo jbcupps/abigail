@@ -91,6 +91,29 @@ async fn main() -> anyhow::Result<()> {
     let router = Arc::new(router);
     tracing::info!("Router built: {:?}", router.status());
 
+    // 3b. Background model discovery (non-blocking diagnostic)
+    {
+        let ego_provider = hive_config.ego_provider_name.clone();
+        let ego_key = hive_config.ego_api_key.clone();
+        tokio::spawn(async move {
+            if let (Some(provider), Some(key)) = (ego_provider, ego_key) {
+                match abigail_capabilities::cognitive::validation::discover_models(&provider, &key)
+                    .await
+                {
+                    Ok(models) => {
+                        tracing::info!("Discovered {} model(s) from {}", models.len(), provider);
+                        for m in models.iter().take(5) {
+                            tracing::info!("  - {}", m.id);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Model discovery failed for {}: {}", provider, e);
+                    }
+                }
+            }
+        });
+    }
+
     // 4. Compute per-entity paths: {data_root}/identities/{entity_id}/
     let data_root = AppConfig::default_paths().data_dir;
     let entity_dir = data_root.join("identities").join(&cli.entity_id);

@@ -7,7 +7,8 @@ use axum::{
 };
 use hive_core::{
     ApiEnvelope, CreateEntityRequest, CreateEntityResponse, EntityInfo, HiveStatus, ProviderConfig,
-    SecretListResponse, SignEntityRequest, StoreSecretRequest,
+    ProviderModelInfo, ProviderModelsRequest, ProviderModelsResponse, SecretListResponse,
+    SignEntityRequest, StoreSecretRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -201,5 +202,37 @@ pub async fn list_secrets(
             Json(ApiEnvelope::success(SecretListResponse { keys }))
         }
         Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/providers/models
+// ---------------------------------------------------------------------------
+
+/// Discover available models from a provider using its API key.
+pub async fn discover_models(
+    State(_state): State<HiveDaemonState>,
+    Json(body): Json<ProviderModelsRequest>,
+) -> Json<ApiEnvelope<ProviderModelsResponse>> {
+    match abigail_capabilities::cognitive::validation::discover_models(
+        &body.provider,
+        &body.api_key,
+    )
+    .await
+    {
+        Ok(models) => {
+            let model_infos: Vec<ProviderModelInfo> = models
+                .into_iter()
+                .map(|m| ProviderModelInfo {
+                    model_id: m.id,
+                    display_name: m.display_name,
+                })
+                .collect();
+            Json(ApiEnvelope::success(ProviderModelsResponse {
+                provider: body.provider,
+                models: model_infos,
+            }))
+        }
+        Err(e) => Json(ApiEnvelope::error(e)),
     }
 }

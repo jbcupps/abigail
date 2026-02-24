@@ -82,8 +82,17 @@ fn build_tool_definitions(registry: &SkillRegistry) -> Vec<ToolDefinition> {
         for manifest in &manifests {
             if let Ok((skill, _)) = registry.get_skill(&manifest.id) {
                 for t in skill.tools() {
+                    let qualified = format!("{}::{}", manifest.id.0, t.name);
+                    // Validate: OpenAI requires parameters to have "type":"object"
+                    if t.parameters.get("type").and_then(|v| v.as_str()) != Some("object") {
+                        tracing::warn!(
+                            "Skipping tool '{}': parameters missing \"type\":\"object\" — would cause API errors",
+                            qualified
+                        );
+                        continue;
+                    }
                     defs.push(ToolDefinition {
-                        name: format!("{}::{}", manifest.id.0, t.name),
+                        name: qualified,
                         description: t.description.clone(),
                         parameters: t.parameters.clone(),
                     });

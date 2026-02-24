@@ -97,6 +97,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/entities/{id}/sign", post(routes::sign_entity))
         .route("/v1/secrets", post(routes::store_secret))
         .route("/v1/secrets/list", get(routes::list_secrets))
+        .route("/v1/providers/models", post(routes::discover_models))
         .layer(cors)
         .with_state(state);
 

@@ -92,7 +92,7 @@ impl Skill for HiveManagementSkill {
             ToolDescriptor {
                 name: "list_entities".to_string(),
                 description: "List all Sovereign Entities (agents) registered in this Hive.".to_string(),
-                parameters: serde_json::json!({}),
+                parameters: serde_json::json!({"type": "object", "properties": {}}),
                 returns: serde_json::json!({
                     "type": "array",
                     "items": {
@@ -150,7 +150,7 @@ impl Skill for HiveManagementSkill {
                     },
                     "required": ["key"]
                 }),
-                returns: serde_json::json!({ "type": "any" }),
+                returns: serde_json::json!({ "type": "string" }),
                 cost_estimate: CostEstimate::default(),
                 required_permissions: vec![],
                 autonomous: true,
@@ -163,7 +163,7 @@ impl Skill for HiveManagementSkill {
                     "type": "object",
                     "properties": {
                         "key": { "type": "string", "description": "The configuration key" },
-                        "value": { "type": "any", "description": "The new value" }
+                        "value": { "type": "string", "description": "The new value (JSON-encoded if complex)" }
                     },
                     "required": ["key", "value"]
                 }),
@@ -193,7 +193,7 @@ impl Skill for HiveManagementSkill {
             ToolDescriptor {
                 name: "list_secrets".to_string(),
                 description: "List the names of all secrets currently stored in the Skills Vault.".to_string(),
-                parameters: serde_json::json!({}),
+                parameters: serde_json::json!({"type": "object", "properties": {}}),
                 returns: serde_json::json!({ "type": "array", "items": { "type": "string" } }),
                 cost_estimate: CostEstimate::default(),
                 required_permissions: vec![],
