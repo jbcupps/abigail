@@ -1,5 +1,2 @@
-# Use the GNU toolchain on Windows so we don't require Visual Studio (msvcrt.lib).
-# You need MinGW-w64 on PATH (e.g. from msys2: pacman -S mingw-w64-ucrt-x86_64-gcc).
-# CI overrides to MSVC on Windows so GitHub's runner (which has VS) still passes.
 [toolchain]
-channel = "stable-x86_64-pc-windows-gnu"
+channel = "stable"
