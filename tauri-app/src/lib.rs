@@ -116,6 +116,27 @@ pub async fn rebuild_router_with_superego(state: &AppState) -> Result<(), String
         mgr.update_router(router_arc);
     }
 
+    // Background model discovery (non-blocking)
+    let ego_provider = hive_config.ego_provider_name.clone();
+    let ego_key = hive_config.ego_api_key.clone();
+    tokio::spawn(async move {
+        if let (Some(provider), Some(key)) = (ego_provider, ego_key) {
+            match abigail_capabilities::cognitive::validation::discover_models(&provider, &key)
+                .await
+            {
+                Ok(models) => {
+                    tracing::info!("Discovered {} model(s) from {}", models.len(), provider);
+                    for m in models.iter().take(5) {
+                        tracing::info!("  - {}", m.id);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Model discovery failed for {}: {}", provider, e);
+                }
+            }
+        }
+    });
+
     Ok(())
 }
 

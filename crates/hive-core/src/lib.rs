@@ -120,3 +120,29 @@ pub struct SecretListResponse {
 pub struct SignEntityRequest {
     pub entity_id: String,
 }
+
+// ---------------------------------------------------------------------------
+// Model discovery
+// ---------------------------------------------------------------------------
+
+/// Request to discover models available from a provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderModelsRequest {
+    pub provider: String,
+    pub api_key: String,
+}
+
+/// A single model available from a provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderModelInfo {
+    pub model_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+/// Response listing models available from a provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderModelsResponse {
+    pub provider: String,
+    pub models: Vec<ProviderModelInfo>,
+}

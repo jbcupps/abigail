@@ -23,6 +23,7 @@ pub use provider::{
     ToolDefinition,
 };
 pub use types::*;
+pub use validation::ModelInfo;
 
 use abigail_core::secrets::SecretsVault;
 

@@ -12,6 +12,7 @@ hive-core = { path = "../hive-core" }
 abigail-core = { path = "../abigail-core" }
 abigail-identity = { path = "../abigail-identity" }
 abigail-hive = { path = "../abigail-hive" }
+abigail-capabilities = { path = "../abigail-capabilities" }
 axum.workspace = true
 tower-http.workspace = true
 tokio.workspace = true
