@@ -353,8 +353,7 @@ fn check_query_privacy(query: &str) -> Option<String> {
     if lower.contains("dox") || lower.contains("doxx") {
         return Some("Query contains doxxing language".into());
     }
-    if lower.contains("real name of")
-        && (lower.contains("anonymous") || lower.contains("username"))
+    if lower.contains("real name of") && (lower.contains("anonymous") || lower.contains("username"))
     {
         return Some("Query attempts to de-anonymize someone".into());
     }
