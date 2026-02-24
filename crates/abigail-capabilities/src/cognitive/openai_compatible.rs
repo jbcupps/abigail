@@ -277,10 +277,7 @@ struct StreamFunctionDelta {
 #[async_trait]
 impl LlmProvider for OpenAiCompatibleProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
-        let model = request
-            .model_override
-            .as_deref()
-            .unwrap_or(&self.model);
+        let model = request.model_override.as_deref().unwrap_or(&self.model);
         tracing::info!(
             "OpenAiCompatible[{}]::complete model={}, messages={}, url={}",
             self.provider_type,
@@ -348,10 +345,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
         request: &CompletionRequest,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
-        let model = request
-            .model_override
-            .as_deref()
-            .unwrap_or(&self.model);
+        let model = request.model_override.as_deref().unwrap_or(&self.model);
         tracing::info!(
             "OpenAiCompatible[{}]::stream model={}, messages={}, url={}",
             self.provider_type,
@@ -523,7 +517,10 @@ mod tests {
             CompatibleProvider::Xai.default_model(),
             "grok-4-1-fast-reasoning"
         );
-        assert_eq!(CompatibleProvider::Google.default_model(), "gemini-2.5-flash");
+        assert_eq!(
+            CompatibleProvider::Google.default_model(),
+            "gemini-2.5-flash"
+        );
     }
 
     #[test]

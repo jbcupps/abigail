@@ -184,10 +184,7 @@ struct StreamFunctionDelta {
 #[async_trait]
 impl LlmProvider for OpenAiProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
-        let model = request
-            .model_override
-            .as_deref()
-            .unwrap_or(&self.model);
+        let model = request.model_override.as_deref().unwrap_or(&self.model);
         tracing::info!("OpenAiProvider::complete model={}", model);
         let messages = Self::build_messages(&request.messages);
         let tools = request.tools.as_ref().map(|t| Self::build_tools(t));
@@ -245,10 +242,7 @@ impl LlmProvider for OpenAiProvider {
         request: &CompletionRequest,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
-        let model = request
-            .model_override
-            .as_deref()
-            .unwrap_or(&self.model);
+        let model = request.model_override.as_deref().unwrap_or(&self.model);
         tracing::info!("OpenAiProvider::stream model={}", model);
         let messages = Self::build_messages(&request.messages);
         let tools = request.tools.as_ref().map(|t| Self::build_tools(t));

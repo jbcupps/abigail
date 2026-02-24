@@ -190,10 +190,7 @@ impl ModelRegistry {
     ///
     /// Returns a list of warnings for models that are assigned to tiers
     /// but not found in the provider's model catalog.
-    pub fn validate_tier_models(
-        &self,
-        tier_models: &abigail_core::TierModels,
-    ) -> Vec<String> {
+    pub fn validate_tier_models(&self, tier_models: &abigail_core::TierModels) -> Vec<String> {
         let mut warnings = Vec::new();
 
         let tiers = [
@@ -285,15 +282,13 @@ mod tests {
 
     #[test]
     fn test_to_catalog_roundtrip() {
-        let catalog = vec![
-            ProviderCatalogEntry {
-                provider: "openai".to_string(),
-                model_id: "gpt-4.1".to_string(),
-                display_name: "GPT 4.1".to_string(),
-                lifecycle: None,
-                last_fetched: Some(Utc::now().to_rfc3339()),
-            },
-        ];
+        let catalog = vec![ProviderCatalogEntry {
+            provider: "openai".to_string(),
+            model_id: "gpt-4.1".to_string(),
+            display_name: "GPT 4.1".to_string(),
+            lifecycle: None,
+            last_fetched: Some(Utc::now().to_rfc3339()),
+        }];
 
         let mut reg = ModelRegistry::new();
         reg.load_from_catalog(&catalog);
@@ -336,15 +331,13 @@ mod tests {
 
     #[test]
     fn test_validate_tier_models_warns_on_missing() {
-        let catalog = vec![
-            ProviderCatalogEntry {
-                provider: "openai".to_string(),
-                model_id: "gpt-4.1".to_string(),
-                display_name: "GPT 4.1".to_string(),
-                lifecycle: None,
-                last_fetched: Some(Utc::now().to_rfc3339()),
-            },
-        ];
+        let catalog = vec![ProviderCatalogEntry {
+            provider: "openai".to_string(),
+            model_id: "gpt-4.1".to_string(),
+            display_name: "GPT 4.1".to_string(),
+            lifecycle: None,
+            last_fetched: Some(Utc::now().to_rfc3339()),
+        }];
 
         let mut reg = ModelRegistry::new();
         reg.load_from_catalog(&catalog);

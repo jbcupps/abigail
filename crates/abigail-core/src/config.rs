@@ -203,9 +203,7 @@ pub struct ForceOverride {
 impl ForceOverride {
     /// Returns true if any override is set.
     pub fn is_active(&self) -> bool {
-        self.pinned_model.is_some()
-            || self.pinned_tier.is_some()
-            || self.pinned_provider.is_some()
+        self.pinned_model.is_some() || self.pinned_tier.is_some() || self.pinned_provider.is_some()
     }
 
     /// Clear all overrides.
@@ -984,10 +982,7 @@ mod tests {
     fn test_tier_models_defaults() {
         let tiers = TierModels::defaults();
         assert_eq!(tiers.fast.get("openai"), Some(&"gpt-4.1-mini".to_string()));
-        assert_eq!(
-            tiers.standard.get("openai"),
-            Some(&"gpt-4.1".to_string())
-        );
+        assert_eq!(tiers.standard.get("openai"), Some(&"gpt-4.1".to_string()));
         assert_eq!(tiers.pro.get("openai"), Some(&"gpt-5.2".to_string()));
         assert_eq!(
             tiers.standard.get("anthropic"),

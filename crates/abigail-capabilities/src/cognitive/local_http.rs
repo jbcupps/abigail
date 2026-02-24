@@ -304,10 +304,7 @@ impl LocalHttpProvider {
 #[async_trait]
 impl LlmProvider for LocalHttpProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
-        let model = request
-            .model_override
-            .as_deref()
-            .unwrap_or(&self.model);
+        let model = request.model_override.as_deref().unwrap_or(&self.model);
         tracing::info!(
             "LocalHttp::complete base_url={}, model={}, messages={}, tools={}",
             self.base_url,
@@ -383,10 +380,7 @@ impl LlmProvider for LocalHttpProvider {
         request: &CompletionRequest,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
-        let model = request
-            .model_override
-            .as_deref()
-            .unwrap_or(&self.model);
+        let model = request.model_override.as_deref().unwrap_or(&self.model);
         tracing::info!(
             "LocalHttp::stream base_url={}, model={}, messages={}, tools={}",
             self.base_url,

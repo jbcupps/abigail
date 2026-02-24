@@ -311,10 +311,7 @@ fn convert_tools(tools: &[ToolDefinition]) -> Vec<AnthropicTool> {
 #[async_trait]
 impl LlmProvider for AnthropicProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
-        let model = request
-            .model_override
-            .as_deref()
-            .unwrap_or(&self.model);
+        let model = request.model_override.as_deref().unwrap_or(&self.model);
         tracing::info!(
             "Anthropic::complete model={}, messages={}, tools={}",
             model,
@@ -403,10 +400,7 @@ impl LlmProvider for AnthropicProvider {
         request: &CompletionRequest,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
-        let model = request
-            .model_override
-            .as_deref()
-            .unwrap_or(&self.model);
+        let model = request.model_override.as_deref().unwrap_or(&self.model);
         tracing::info!(
             "Anthropic::stream model={}, messages={}, tools={}",
             model,

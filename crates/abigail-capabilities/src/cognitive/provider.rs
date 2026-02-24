@@ -174,8 +174,8 @@ mod tests {
 
     #[test]
     fn test_completion_request_model_override() {
-        let req = CompletionRequest::simple(vec![Message::new("user", "hi")])
-            .with_model("gpt-4.1-mini");
+        let req =
+            CompletionRequest::simple(vec![Message::new("user", "hi")]).with_model("gpt-4.1-mini");
         assert_eq!(req.model_override.as_deref(), Some("gpt-4.1-mini"));
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("model_override"));
