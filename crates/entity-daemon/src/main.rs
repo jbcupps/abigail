@@ -3,7 +3,6 @@
 //! Wraps `IdEgoRouter`, `SkillRegistry`, `SkillExecutor`, and `EventBus` behind
 //! an Axum REST API. Fetches provider configuration from hive-daemon on startup.
 
-mod chat_pipeline;
 mod hive_client;
 mod routes;
 mod state;

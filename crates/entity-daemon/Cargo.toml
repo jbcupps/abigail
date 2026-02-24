@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 entity-core = { path = "../entity-core" }
+entity-chat = { path = "../entity-chat" }
 hive-core = { path = "../hive-core" }
 abigail-core = { path = "../abigail-core" }
 abigail-hive = { path = "../abigail-hive" }
