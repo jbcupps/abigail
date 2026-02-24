@@ -108,6 +108,10 @@ impl PerplexitySearchSkill {
         recency_filter: Option<&str>,
         return_related: bool,
     ) -> SkillResult<ToolOutput> {
+        if let Some(reason) = check_query_privacy(query) {
+            return Ok(ToolOutput::error(format!("Search blocked: {}", reason)));
+        }
+
         let api_key = self.get_api_key()?;
         let model = model.unwrap_or(DEFAULT_MODEL).to_string();
 
@@ -318,6 +322,43 @@ impl Skill for PerplexitySearchSkill {
     fn triggers(&self) -> Vec<TriggerDescriptor> {
         vec![]
     }
+}
+
+fn check_query_privacy(query: &str) -> Option<String> {
+    let lower = query.to_lowercase();
+
+    if (lower.contains("where does") || lower.contains("where do")) && lower.contains("live") {
+        return Some("Query appears to seek someone's home address".into());
+    }
+    if lower.contains("home address of") || lower.contains("home address for") {
+        return Some("Query appears to seek someone's home address".into());
+    }
+    if (lower.contains("phone number of") || lower.contains("phone number for"))
+        && !lower.contains("company")
+        && !lower.contains("business")
+        && !lower.contains("support")
+        && !lower.contains("customer service")
+    {
+        return Some("Query appears to seek someone's personal phone number".into());
+    }
+    if lower.contains("social security number")
+        || lower.contains("ssn of")
+        || lower.contains("ssn for")
+    {
+        return Some("Query seeks Social Security information".into());
+    }
+    if lower.contains("credit card number") || lower.contains("bank account number") {
+        return Some("Query seeks financial PII".into());
+    }
+    if lower.contains("dox") || lower.contains("doxx") {
+        return Some("Query contains doxxing language".into());
+    }
+    if lower.contains("real name of")
+        && (lower.contains("anonymous") || lower.contains("username"))
+    {
+        return Some("Query attempts to de-anonymize someone".into());
+    }
+    None
 }
 
 #[cfg(test)]
