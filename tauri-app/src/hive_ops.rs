@@ -44,8 +44,8 @@ impl HiveOperations for TauriHiveOps {
     }
 
     async fn get_config_value(&self, key: &str) -> Result<serde_json::Value, String> {
-        // Security check: Never expose Superego keys or providers
-        if key.contains("superego") || key.contains("api_key") || key.contains("secrets") {
+        // Security check: Never expose API keys or secrets
+        if key.contains("api_key") || key.contains("secrets") {
             return Err("Access denied to sensitive configuration key".to_string());
         }
 
@@ -67,8 +67,8 @@ impl HiveOperations for TauriHiveOps {
     }
 
     async fn set_config_value(&self, key: &str, value: serde_json::Value) -> Result<(), String> {
-        // Security check
-        if key.contains("superego") || key.contains("api_key") || key.contains("secrets") {
+        // Security check: Never allow writing API keys or secrets via this path
+        if key.contains("api_key") || key.contains("secrets") {
             return Err("Access denied to sensitive configuration key".to_string());
         }
 
@@ -110,7 +110,7 @@ impl HiveOperations for TauriHiveOps {
 
         // Rebuild router if we changed the local URL
         if key == "local_llm_base_url" {
-            crate::rebuild_router_with_superego(&state).await?;
+            crate::rebuild_router(&state).await?;
         }
 
         Ok(())

@@ -7,18 +7,20 @@ mod hive_client;
 mod routes;
 mod state;
 
-use abigail_core::AppConfig;
+use abigail_core::{AppConfig, SecretsVault};
 use abigail_hive::Hive;
 use abigail_memory::MemoryStore;
 use abigail_router::IdEgoRouter;
 use abigail_skills::channel::EventBus;
+use abigail_skills::skill::SkillConfig;
 use abigail_skills::{Skill, SkillExecutor, SkillRegistry};
 use axum::routing::{get, post};
 use axum::Router;
 use clap::Parser;
 use hive_client::HiveClient;
 use state::EntityDaemonState;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tower_http::cors::{Any, CorsLayer};
 
 #[derive(Parser)]
@@ -35,6 +37,11 @@ struct Cli {
     /// Port to listen on
     #[arg(long, default_value = "3142")]
     port: u16,
+
+    /// Data directory (defaults to platform-specific app data dir).
+    /// Must match the Hive's --data-dir for shared identity resolution.
+    #[arg(long)]
+    data_dir: Option<String>,
 }
 
 #[tokio::main]
@@ -95,9 +102,6 @@ async fn main() -> anyhow::Result<()> {
         ego_api_key: provider_config.ego_api_key,
         ego_model: provider_config.ego_model,
         routing_mode: parse_routing_mode(&provider_config.routing_mode),
-        superego_provider: provider_config.superego_provider,
-        superego_api_key: provider_config.superego_api_key,
-        superego_l2_mode: parse_superego_l2_mode(&provider_config.superego_l2_mode),
         tier_models,
         tier_thresholds,
         force_override,
@@ -134,13 +138,27 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // 4. Compute per-entity paths: {data_root}/identities/{entity_id}/
-    let data_root = AppConfig::default_paths().data_dir;
+    let data_root = if let Some(dir) = &cli.data_dir {
+        std::path::PathBuf::from(dir)
+    } else {
+        AppConfig::default_paths().data_dir
+    };
+    tracing::info!("Entity data root: {}", data_root.display());
     let entity_dir = data_root.join("identities").join(&cli.entity_id);
     let docs_dir = entity_dir.join("docs");
     let skills_dir = entity_dir.join("skills");
 
-    // 5. Create skill registry and executor
-    let registry = Arc::new(SkillRegistry::new());
+    // 5. Create skill registry with secrets vault and executor
+    let skill_secrets_dir = data_root.join("skill_secrets");
+    std::fs::create_dir_all(&skill_secrets_dir)?;
+    let skill_vault = if skill_secrets_dir.join("secrets.bin").exists() {
+        SecretsVault::load(skill_secrets_dir)?
+    } else {
+        SecretsVault::new(skill_secrets_dir)
+    };
+    let skill_vault = Arc::new(Mutex::new(skill_vault));
+
+    let registry = Arc::new(SkillRegistry::with_secrets(skill_vault.clone()));
     let executor = Arc::new(SkillExecutor::new(registry.clone()));
     let event_bus = Arc::new(EventBus::new(256));
 
@@ -163,7 +181,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 7. Load preloaded integration skills (GitHub, Slack, Jira)
     {
-        let preloaded = abigail_skills::build_preloaded_skills(None);
+        let preloaded = abigail_skills::build_preloaded_skills(Some(skill_vault.clone()));
         for skill in preloaded {
             let skill_id = skill.manifest().id.clone();
             if let Err(e) = registry.register(skill_id.clone(), Arc::new(skill)) {
@@ -175,7 +193,8 @@ async fn main() -> anyhow::Result<()> {
 
     // 8. Discover dynamic API skills from {entity_dir}/skills/*.json
     {
-        let dynamic_skills = abigail_skills::DynamicApiSkill::discover(&skills_dir, None);
+        let dynamic_skills =
+            abigail_skills::DynamicApiSkill::discover(&skills_dir, Some(skill_vault.clone()));
         let count = dynamic_skills.len();
         for skill in dynamic_skills {
             let skill_id = skill.manifest().id.clone();
@@ -189,6 +208,124 @@ async fn main() -> anyhow::Result<()> {
                 count,
                 skills_dir
             );
+        }
+    }
+
+    // 9. Sync skill-relevant secrets from Hive into the local skill vault.
+    //    This allows the UAT (and operators) to seed all secrets via the Hive API,
+    //    and have them automatically available to skill initialization.
+    {
+        let skill_keys = [
+            "imap_password",
+            "imap_user",
+            "imap_host",
+            "imap_port",
+            "imap_tls_mode",
+        ];
+        for key in &skill_keys {
+            if let Ok(Some(value)) = hive_client.get_secret(key).await {
+                if let Ok(mut v) = skill_vault.lock() {
+                    if v.get_secret(key).is_none() {
+                        v.set_secret(key, &value);
+                        tracing::info!("Synced skill secret '{}' from Hive", key);
+                    }
+                }
+            }
+        }
+        if let Ok(v) = skill_vault.lock() {
+            let _ = v.save();
+        }
+    }
+
+    // 10. Register and initialize Proton Mail (IMAP) skill if credentials are available
+    {
+        let manifest = skill_proton_mail::ProtonMailSkill::default_manifest();
+        let skill_id = manifest.id.clone();
+        let mut skill = skill_proton_mail::ProtonMailSkill::new(manifest);
+
+        let has_creds = skill_vault
+            .lock()
+            .map(|v| v.get_secret("imap_password").is_some())
+            .unwrap_or(false);
+
+        if has_creds {
+            let (imap_user, imap_password, imap_host, imap_port) = {
+                let v = skill_vault.lock().unwrap();
+                (
+                    v.get_secret("imap_user").unwrap_or("").to_string(),
+                    v.get_secret("imap_password").unwrap_or("").to_string(),
+                    v.get_secret("imap_host")
+                        .unwrap_or("mail.proton.me")
+                        .to_string(),
+                    v.get_secret("imap_port").unwrap_or("993").to_string(),
+                )
+            };
+
+            let imap_tls_mode = {
+                let v = skill_vault.lock().unwrap();
+                v.get_secret("imap_tls_mode")
+                    .unwrap_or("IMPLICIT")
+                    .to_string()
+            };
+
+            let mut values = HashMap::new();
+            values.insert(
+                "imap_host".to_string(),
+                serde_json::Value::String(imap_host),
+            );
+            values.insert(
+                "imap_port".to_string(),
+                serde_json::json!(imap_port.parse::<u64>().unwrap_or(993)),
+            );
+            values.insert(
+                "imap_user".to_string(),
+                serde_json::Value::String(imap_user),
+            );
+            values.insert(
+                "imap_tls_mode".to_string(),
+                serde_json::Value::String(imap_tls_mode),
+            );
+
+            let mut secrets = HashMap::new();
+            secrets.insert("imap_password".to_string(), imap_password);
+
+            let skill_config = SkillConfig {
+                values,
+                secrets,
+                limits: abigail_skills::sandbox::ResourceLimits::default(),
+                permissions: vec![],
+                event_sender: Some(Arc::new(event_bus.sender())),
+            };
+
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                skill.initialize(skill_config),
+            )
+            .await
+            {
+                Ok(Ok(())) => {
+                    tracing::info!("Proton Mail skill initialized successfully");
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!(
+                        "Proton Mail skill init failed (will register uninitialized): {}",
+                        e
+                    );
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "Proton Mail skill init timed out after 15s (IMAP bridge unreachable?)"
+                    );
+                }
+            }
+        } else {
+            tracing::info!(
+                "Proton Mail skill registered without credentials (no imap_password in vault)"
+            );
+        }
+
+        if let Err(e) = registry.register(skill_id.clone(), Arc::new(skill)) {
+            tracing::warn!("Failed to register Proton Mail skill: {}", e);
         }
     }
 
@@ -223,6 +360,7 @@ async fn main() -> anyhow::Result<()> {
         event_bus,
         docs_dir,
         memory,
+        memory_hook: None,
     };
 
     // Build HTTP router
@@ -261,14 +399,5 @@ fn parse_routing_mode(s: &str) -> abigail_core::RoutingMode {
         // Legacy "IdPrimary" maps to TierBased (local LLM is now failsafe-only)
         "TierBased" | "IdPrimary" => abigail_core::RoutingMode::TierBased,
         _ => abigail_core::RoutingMode::default(),
-    }
-}
-
-fn parse_superego_l2_mode(s: &str) -> abigail_core::SuperegoL2Mode {
-    match s {
-        "Enforce" => abigail_core::SuperegoL2Mode::Enforce,
-        "Advisory" => abigail_core::SuperegoL2Mode::Advisory,
-        "Off" => abigail_core::SuperegoL2Mode::Off,
-        _ => abigail_core::SuperegoL2Mode::default(),
     }
 }

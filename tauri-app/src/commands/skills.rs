@@ -105,18 +105,10 @@ pub async fn execute_tool(
             }
         }
     }
-    let mentor_confirmed = params
-        .get("mentor_confirmed")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let l2_mode = {
-        let config = state.config.read().map_err(|e| e.to_string())?;
-        config.superego_l2_mode
-    };
     let tool_params = ToolParams { values: params };
     state
         .executor
-        .execute_with_policy(&id, &tool_name, tool_params, l2_mode, mentor_confirmed)
+        .execute(&id, &tool_name, tool_params)
         .await
         .map_err(|e| e.to_string())
 }

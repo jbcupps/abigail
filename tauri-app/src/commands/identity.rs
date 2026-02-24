@@ -100,7 +100,7 @@ pub async fn load_agent(state: State<'_, AppState>, agent_id: String) -> Result<
             .unwrap_or_else(|_| SecretsVault::new(config.data_dir.clone()));
     }
 
-    crate::rebuild_router_with_superego(&state).await?;
+    crate::rebuild_router(&state).await?;
 
     {
         let mut active = state.active_agent_id.write().map_err(|e| e.to_string())?;

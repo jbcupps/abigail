@@ -8,7 +8,7 @@ use axum::{
 use hive_core::{
     ApiEnvelope, CreateEntityRequest, CreateEntityResponse, EntityInfo, HiveStatus, ProviderConfig,
     ProviderModelInfo, ProviderModelsRequest, ProviderModelsResponse, SecretListResponse,
-    SignEntityRequest, StoreSecretRequest,
+    SecretValueResponse, SignEntityRequest, StoreSecretRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -139,9 +139,6 @@ pub async fn get_provider_config(
             ego_api_key: hive_config.ego_api_key,
             ego_model: hive_config.ego_model,
             routing_mode: format!("{:?}", hive_config.routing_mode),
-            superego_provider: hive_config.superego_provider,
-            superego_api_key: hive_config.superego_api_key,
-            superego_l2_mode: format!("{:?}", hive_config.superego_l2_mode),
             tier_models_json: serde_json::to_string(&hive_config.tier_models).ok(),
             tier_threshold_fast_ceiling: Some(hive_config.tier_thresholds.fast_ceiling),
             tier_threshold_pro_floor: Some(hive_config.tier_thresholds.pro_floor),
@@ -205,6 +202,27 @@ pub async fn list_secrets(
                 .collect();
             Json(ApiEnvelope::success(SecretListResponse { keys }))
         }
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/secrets/:key
+// ---------------------------------------------------------------------------
+
+/// Fetch a single secret value by key (localhost-only, for entity daemon startup sync).
+pub async fn get_secret(
+    State(state): State<HiveDaemonState>,
+    Path(key): Path<String>,
+) -> Json<ApiEnvelope<SecretValueResponse>> {
+    match state.hive_secrets.lock() {
+        Ok(vault) => match vault.get_secret(&key) {
+            Some(value) => Json(ApiEnvelope::success(SecretValueResponse {
+                key,
+                value: value.to_string(),
+            })),
+            None => Json(ApiEnvelope::error(format!("Secret '{}' not found", key))),
+        },
         Err(e) => Json(ApiEnvelope::error(e.to_string())),
     }
 }

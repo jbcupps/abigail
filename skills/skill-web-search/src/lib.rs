@@ -1,4 +1,4 @@
-//! Web Search skill — searches the web via Tavily API, gated by Superego safety checks.
+//! Web Search skill — searches the web via Tavily API.
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex};
 
 use abigail_capabilities::sensory::web_search;
 use abigail_core::secrets::SecretsVault;
-use abigail_core::superego;
 use abigail_skills::channel::TriggerDescriptor;
 use abigail_skills::manifest::{
     CapabilityDescriptor, NetworkPermission, Permission, SkillManifest,
@@ -131,16 +130,6 @@ impl Skill for WebSearchSkill {
         })?;
 
         let max_results: u32 = params.get("max_results").unwrap_or(5);
-
-        // Superego safety check
-        let verdict = superego::check_search_query(&query);
-        if !verdict.allowed {
-            let reason = verdict
-                .reason
-                .unwrap_or_else(|| "Query blocked by safety check".to_string());
-            tracing::warn!("Superego blocked search query: {}", reason);
-            return Ok(ToolOutput::error(format!("Search blocked: {}", reason)));
-        }
 
         // Get Tavily API key from vault
         let api_key = {

@@ -302,7 +302,19 @@ pub async fn memory_insert(
     };
 
     match state.memory.insert_memory(&memory) {
-        Ok(()) => Json(ApiEnvelope::success(entry)),
+        Ok(()) => {
+            if let Some(ref hook) = state.memory_hook {
+                if let Err(e) = hook.on_memory_persisted(
+                    &entry.id,
+                    &entry.content,
+                    &entry.weight,
+                    &entry.created_at,
+                ) {
+                    tracing::warn!("Memory hook error: {}", e);
+                }
+            }
+            Json(ApiEnvelope::success(entry))
+        }
         Err(e) => Json(ApiEnvelope::error(e.to_string())),
     }
 }

@@ -108,15 +108,6 @@ impl PerplexitySearchSkill {
         recency_filter: Option<&str>,
         return_related: bool,
     ) -> SkillResult<ToolOutput> {
-        // Superego check on the search query
-        let verdict = abigail_core::check_search_query(query);
-        if !verdict.allowed {
-            return Ok(ToolOutput::error(format!(
-                "Search blocked: {}",
-                verdict.reason.unwrap_or_default()
-            )));
-        }
-
         let api_key = self.get_api_key()?;
         let model = model.unwrap_or(DEFAULT_MODEL).to_string();
 

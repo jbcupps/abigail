@@ -39,7 +39,7 @@ pub async fn set_api_key(state: State<'_, AppState>, key: String) -> Result<(), 
             .map_err(|e| e.to_string())?;
     }
 
-    crate::rebuild_router_with_superego(&state).await
+    crate::rebuild_router(&state).await
 }
 
 #[tauri::command]
@@ -57,36 +57,7 @@ pub async fn set_local_llm_url(state: State<'_, AppState>, url: String) -> Resul
             .map_err(|e| e.to_string())?;
     }
 
-    crate::rebuild_router_with_superego(&state).await
-}
-
-#[tauri::command]
-pub async fn set_superego_provider(
-    state: State<'_, AppState>,
-    provider: String,
-    key: String,
-) -> Result<(), String> {
-    let provider = provider.trim().to_lowercase();
-    let key = key.trim().to_string();
-    if key.is_empty() {
-        return Err("Superego API key cannot be empty".to_string());
-    }
-    if provider.is_empty() {
-        return Err("Superego provider cannot be empty".to_string());
-    }
-
-    {
-        let mut config = state.config.write().map_err(|e| e.to_string())?;
-        let trinity = config.trinity.get_or_insert_with(TrinityConfig::default);
-        trinity.superego_provider = Some(provider.clone());
-        trinity.superego_api_key = Some(key.clone());
-        config
-            .save(&config.config_path())
-            .map_err(|e| e.to_string())?;
-    }
-
-    crate::rebuild_router_with_superego(&state).await?;
-    Ok(())
+    crate::rebuild_router(&state).await
 }
 
 #[tauri::command]
@@ -115,7 +86,7 @@ pub async fn use_stored_provider(
             .map_err(|e| e.to_string())?;
     }
 
-    crate::rebuild_router_with_superego(&state).await?;
+    crate::rebuild_router(&state).await?;
     Ok(())
 }
 
@@ -145,7 +116,7 @@ pub fn get_router_status(state: State<AppState>) -> Result<RouterStatus, String>
         id_url: config.local_llm_base_url.clone(),
         ego_configured: status.has_ego,
         ego_provider: status.ego_provider,
-        superego_configured: status.has_superego,
+        superego_configured: false,
         routing_mode: serde_json::to_value(&config.routing_mode)
             .ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -167,7 +138,7 @@ pub async fn set_active_provider(
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;
     }
-    crate::rebuild_router_with_superego(&state).await
+    crate::rebuild_router(&state).await
 }
 
 #[tauri::command]
@@ -192,7 +163,7 @@ pub async fn set_ego_model(
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;
     }
-    crate::rebuild_router_with_superego(&state).await?;
+    crate::rebuild_router(&state).await?;
     Ok(())
 }
 
@@ -275,7 +246,7 @@ pub async fn set_tier_model(
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;
     }
-    crate::rebuild_router_with_superego(&state).await?;
+    crate::rebuild_router(&state).await?;
     Ok(())
 }
 
@@ -289,14 +260,8 @@ pub async fn reset_tier_models(state: State<'_, AppState>) -> Result<(), String>
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;
     }
-    crate::rebuild_router_with_superego(&state).await?;
+    crate::rebuild_router(&state).await?;
     Ok(())
-}
-
-#[tauri::command]
-pub fn get_superego_l2_mode(state: State<'_, AppState>) -> Result<String, String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    serde_json::to_string(&config.superego_l2_mode).map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -337,7 +302,7 @@ pub async fn set_routing_mode(state: State<'_, AppState>, mode: String) -> Resul
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;
     }
-    crate::rebuild_router_with_superego(&state).await
+    crate::rebuild_router(&state).await
 }
 
 #[tauri::command]
@@ -445,22 +410,6 @@ pub fn get_stored_providers(state: State<AppState>) -> Result<Vec<String>, Strin
         .collect())
 }
 
-#[tauri::command]
-pub fn set_superego_l2_mode(state: State<'_, AppState>, mode: String) -> Result<(), String> {
-    let parsed: abigail_core::SuperegoL2Mode =
-        serde_json::from_str(&format!("\"{}\"", mode)).map_err(|e| e.to_string())?;
-    {
-        let mut config = state.config.write().map_err(|e| e.to_string())?;
-        config.superego_l2_mode = parsed;
-        config
-            .save(&config.config_path())
-            .map_err(|e| e.to_string())?;
-    }
-    let mut router = state.router.write().map_err(|e| e.to_string())?;
-    router.set_superego_l2_mode(parsed);
-    Ok(())
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreKeyResult {
     pub success: bool,
@@ -548,7 +497,7 @@ pub async fn store_provider_key(
         }
     }
 
-    if let Err(e) = crate::rebuild_router_with_superego(&state).await {
+    if let Err(e) = crate::rebuild_router(&state).await {
         return Ok(StoreKeyResult {
             success: true, // Key saved, but router update failed
             provider,
@@ -745,7 +694,7 @@ pub async fn set_force_override(
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;
     }
-    crate::rebuild_router_with_superego(&state).await
+    crate::rebuild_router(&state).await
 }
 
 /// Get/set tier thresholds.
@@ -769,5 +718,5 @@ pub async fn set_tier_thresholds(
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;
     }
-    crate::rebuild_router_with_superego(&state).await
+    crate::rebuild_router(&state).await
 }

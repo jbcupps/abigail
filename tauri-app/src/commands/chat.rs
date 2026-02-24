@@ -67,7 +67,7 @@ pub async fn auto_detect_and_store_key_internal(
                 let _ = vault.save();
             }
         }
-        let _ = crate::rebuild_router_with_superego(state).await;
+        let _ = crate::rebuild_router(state).await;
     }
 
     detected
@@ -174,7 +174,6 @@ pub fn get_system_diagnostics(state: State<AppState>) -> Result<String, String> 
     if let Some(ref p) = s.ego_provider {
         report.push_str(&format!("- Ego Provider: {}\n", p));
     }
-    report.push_str(&format!("- Superego Configured: {}\n", s.has_superego));
 
     Ok(report)
 }

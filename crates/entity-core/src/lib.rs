@@ -157,3 +157,27 @@ pub struct MemoryStats {
     pub memory_count: u64,
     pub has_birth: bool,
 }
+
+// ---------------------------------------------------------------------------
+// Chat memory hook (for future Hive / Superego integration)
+// ---------------------------------------------------------------------------
+
+/// Hook invoked when the entity persists a chat memory.
+///
+/// The only extension point for future Hive-side policy (e.g. Superego) is at
+/// chat memory: when a memory is written, this hook is called. The Hive can
+/// later implement this to audit, replicate, or apply alignment checks.
+#[allow(dead_code)]
+pub trait ChatMemoryHook: Send + Sync {
+    /// Called after a memory has been persisted. Default is a no-op.
+    fn on_memory_persisted(
+        &self,
+        id: &str,
+        content: &str,
+        weight: &str,
+        created_at: &str,
+    ) -> Result<(), String> {
+        let _ = (id, content, weight, created_at);
+        Ok(())
+    }
+}

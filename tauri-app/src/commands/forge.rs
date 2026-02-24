@@ -36,7 +36,6 @@ struct ForgeConfigSnapshot {
     active_provider_preference: Option<String>,
     routing_mode: abigail_core::RoutingMode,
     tier_models: Option<abigail_core::TierModels>,
-    superego_l2_mode: abigail_core::SuperegoL2Mode,
     force_override: abigail_core::ForceOverride,
     tier_thresholds: abigail_core::TierThresholds,
 }
@@ -144,15 +143,6 @@ pub fn preview_forge_primary_intelligence(
         ));
     }
 
-    if let Some(s) = superego_mode {
-        let current_sup = serde_json::to_string(&config.superego_l2_mode)
-            .unwrap_or_else(|_| "\"off\"".to_string())
-            .replace('\"', "");
-        if current_sup != s {
-            changes.push(format!("Superego mode: {} -> {}", current_sup, s));
-        }
-    }
-
     let risk = if changes.is_empty() { "low" } else { "high" };
     Ok(ForgeChangePreview {
         changes,
@@ -172,14 +162,6 @@ pub async fn apply_forge_primary_intelligence(
     let mut changes_applied = Vec::new();
     let parsed_mode: abigail_core::RoutingMode =
         serde_json::from_str(&format!("\"{}\"", routing_mode)).map_err(|e| e.to_string())?;
-    let parsed_superego = if let Some(mode) = superego_mode {
-        Some(
-            serde_json::from_str::<abigail_core::SuperegoL2Mode>(&format!("\"{}\"", mode))
-                .map_err(|e| e.to_string())?,
-        )
-    } else {
-        None
-    };
 
     {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
@@ -187,7 +169,6 @@ pub async fn apply_forge_primary_intelligence(
             active_provider_preference: config.active_provider_preference.clone(),
             routing_mode: config.routing_mode,
             tier_models: config.tier_models.clone(),
-            superego_l2_mode: config.superego_l2_mode,
             force_override: config.force_override.clone(),
             tier_thresholds: config.tier_thresholds,
         };
@@ -217,19 +198,13 @@ pub async fn apply_forge_primary_intelligence(
             changes_applied.push(format!("Routing mode set to {}", routing_mode));
             config.routing_mode = parsed_mode;
         }
-        if let Some(sup) = parsed_superego {
-            if config.superego_l2_mode != sup {
-                changes_applied.push("Superego mode updated".to_string());
-                config.superego_l2_mode = sup;
-            }
-        }
 
         config
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;
     }
 
-    if let Err(e) = crate::rebuild_router_with_superego(&state).await {
+    if let Err(e) = crate::rebuild_router(&state).await {
         push_audit(
             if changes_applied.is_empty() {
                 "No changes".to_string()
@@ -274,14 +249,13 @@ pub async fn forge_undo_last_change(state: State<'_, AppState>) -> Result<String
         config.active_provider_preference = entry.snapshot.active_provider_preference;
         config.routing_mode = entry.snapshot.routing_mode;
         config.tier_models = entry.snapshot.tier_models;
-        config.superego_l2_mode = entry.snapshot.superego_l2_mode;
         config.force_override = entry.snapshot.force_override;
         config.tier_thresholds = entry.snapshot.tier_thresholds;
         config
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;
     }
-    crate::rebuild_router_with_superego(&state).await?;
+    crate::rebuild_router(&state).await?;
     push_audit(
         "Undo applied: primary intelligence settings restored".to_string(),
         "high",

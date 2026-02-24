@@ -17,6 +17,7 @@ abigail-router = { path = "../abigail-router" }
 abigail-capabilities = { path = "../abigail-capabilities" }
 abigail-skills = { path = "../abigail-skills" }
 abigail-memory = { path = "../abigail-memory" }
+skill-proton-mail = { path = "../../skills/skill-proton-mail" }
 axum.workspace = true
 tower-http.workspace = true
 tokio.workspace = true
