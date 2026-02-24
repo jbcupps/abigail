@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Abigail is a Sovereign Entity platform built with Tauri 2.0 (Rust backend) and React (TypeScript frontend). The architecture follows a **Hive/Entity separation**: the **Hive** is the household-level control plane (secrets, identity, provider resolution) and each **Entity** is a personal agent runtime (routing, skills, memory). Both run as independent HTTP daemons composed from shared `abigail-*` crates, with the Tauri desktop app wrapping them for end users.
 
+## Windows: GNU vs MSVC toolchain
+
+On Windows, Rust can use two toolchains:
+
+- **MSVC** (`x86_64-pc-windows-msvc`) — uses Microsoft’s linker and C runtime (`msvcrt.lib`). Requires Visual Studio Build Tools and a proper `LIB`/`INCLUDE` setup (e.g. “x64 Native Tools” prompt or a full “Desktop development with C++” install).
+- **GNU** (`x86_64-pc-windows-gnu`) — uses MinGW/GCC. No Visual Studio needed; only MinGW-w64 on `PATH` (e.g. from [msys2](https://www.msys2.org/): `pacman -S mingw-w64-ucrt-x86_64-gcc`).
+
+This repo sets `rust-toolchain.toml` to **GNU** so local Windows builds work without VS. Ensure MinGW is on your `PATH` (e.g. `C:\msys64\mingw64\bin` or `C:\msys64\ucrt64\bin`). CI still uses MSVC on Windows so GitHub’s runner (which has VS) is unchanged.
+
 ## Build & Run Commands
 
 ```bash

@@ -89,12 +89,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/status", get(routes::get_status))
         .route("/v1/entities", get(routes::list_entities))
         .route("/v1/entities", post(routes::create_entity))
-        .route("/v1/entities/{id}", get(routes::get_entity))
+        .route("/v1/entities/:id", get(routes::get_entity))
         .route(
-            "/v1/entities/{id}/provider-config",
+            "/v1/entities/:id/provider-config",
             get(routes::get_provider_config),
         )
-        .route("/v1/entities/{id}/sign", post(routes::sign_entity))
+        .route("/v1/entities/:id/sign", post(routes::sign_entity))
         .route("/v1/secrets", post(routes::store_secret))
         .route("/v1/secrets/list", get(routes::list_secrets))
         .route("/v1/providers/models", post(routes::discover_models))

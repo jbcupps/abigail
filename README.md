@@ -52,13 +52,14 @@ Every running agent instance carries the same archetype:
 Abigail is a working, modular platform. Recent updates include:
 
 - **Hive/Entity Separation**: Independent HTTP daemons for control plane (Hive) and agent runtime (Entity), enabling multi-entity households and independent evolution.
+- **Tier-Based Model Routing**: 3-tier model selection (Fast/Standard/Pro) with complexity scoring, force overrides, and a dynamic model registry that discovers available models from provider APIs (OpenAI, Anthropic, Google, xAI).
+- **Shared Chat Engine**: Unified `entity-chat` library crate powering both GUI and CLI with tool-use loop, memory persistence, and skill awareness.
 - **Sovereign Birth Flow**: Multi-stage onboarding (Darkness → Genesis) for new Entities.
 - **Soul Registry**: Manage multiple identities, each with custom themes and avatars.
 - **Sanctum Interface**: Ethical reflection and staff monitoring.
 - **Agentic Recall**: Keyword-based memory search across an Entity's history.
 - **Autonomous Self-Configuration**: The Entity can manage its own Hive, birth new identities, and synthesize its own skills via the Skill Factory.
 - **Dual Keyvault Architecture**: Compartmentalized storage for system-level Hive secrets and Entity-level operational credentials (Skills Vault).
-- **Bicameral Routing**: Fast local "Id" (Ollama/GGUF) + powerful cloud "Ego" (Claude/OpenAI).
 - **Constitutional Signing**: Entities sign their own `soul.md` and `ethics.md` at birth.
 - **CLI Access**: `hive-cli` and `entity-cli` for headless operation alongside the Tauri desktop app.
 
@@ -165,7 +166,7 @@ For Docker-based development, see [How to Run Locally](documents/HOW_TO_RUN_LOCA
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` | Cloud provider fallback (Ego routing) |
+| `OPENAI_API_KEY` | Cloud provider for tier-based routing |
 | `LOCAL_LLM_BASE_URL` | Local LLM endpoint override (e.g., `http://localhost:1234`) |
 | `EXTERNAL_PUBKEY_PATH` | Explicit public key path (otherwise auto-detected) |
 
@@ -189,11 +190,11 @@ The system follows a two-daemon architecture:
          │   Hive Daemon (:3141) │  │ Entity Daemon (:3142) │
          │   Control Plane       │  │ Agent Runtime          │
          │                       │  │                        │
-         │ • Identity management │  │ • Id/Ego/Superego      │
-         │ • Secret resolution   │  │   routing              │
+         │ • Identity management │  │ • Tier-based routing   │
+         │ • Secret resolution   │  │   (Fast/Standard/Pro)  │
          │ • Provider config     │◄─│ • Skill execution      │
-         │ • Agent creation      │  │ • Memory management    │
-         │ • Constitutional docs │  │ • Tool orchestration   │
+         │ • Model registry      │  │ • Memory management    │
+         │ • Agent creation      │  │ • Tool-use loop        │
          └───────────────────────┘  └────────────────────────┘
 ```
 
@@ -208,8 +209,9 @@ The system follows a two-daemon architecture:
 | | `abigail-hive` | Secret resolution, provider construction, priority chain |
 | | `hive-daemon` | Axum HTTP server (port 3141) |
 | | `hive-cli` | CLI client for Hive |
+| | `entity-chat` | Shared chat engine: system prompt, tool-use loop, memory, dedup |
 | **Entity** | `entity-core` | API contracts: `ChatRequest/Response`, `EntityStatus`, tool DTOs |
-| | `abigail-router` | "Fast Path" routing: classifies complexity, routes to Id/Ego |
+| | `abigail-router` | Tier-based routing: complexity scoring, tier selection, force overrides |
 | | `abigail-capabilities` | High-trust cognitive/sensory/memory/agent functions |
 | | `abigail-skills` | Sandboxed plugin system with registry, executor, event bus |
 | | `entity-daemon` | Axum HTTP server (port 3142) |
@@ -222,16 +224,17 @@ The system follows a two-daemon architecture:
 
 **Security boundary**: Hive controls secrets and identity (high trust). Skills run in Entity's sandboxed plugin system with declared permissions.
 
-### Id/Ego Router (Bicameral Architecture)
+### Tier-Based Model Routing
 
 ```
-User Input → Router classifies complexity
-  → Routine → Id (local LLM via Ollama/LM Studio)
-  → Complex → Ego (cloud LLM via OpenAI/Anthropic)
-Background: Superego audits routing decisions against alignment criteria
+User Input → Router scores complexity (5–95)
+  → Fast tier  (<35)   → cheapest model (e.g. gpt-4.1-mini, claude-haiku-4-5)
+  → Standard   (35–69) → balanced model  (e.g. gpt-4.1, claude-sonnet-4-6)
+  → Pro tier   (≥70)   → strongest model (e.g. gpt-5.2, claude-opus-4-6)
+Failsafe: local LLM (Ollama/LM Studio) activates only when cloud providers fail
 ```
 
-The **Superego** (ethical oversight) pre-checks routing decisions against alignment criteria. This maps directly to the TriangleEthic: the Superego applies deontological checks, the Ego reasons about outcomes, and the Id provides fast intuitive responses.
+The router classifies message complexity and maps it to one of three quality tiers via configurable thresholds. **Force overrides** let users pin a specific tier, model, or provider+tier combination. A **dynamic model registry** discovers available models from provider APIs (OpenAI, Anthropic, Google, xAI) with 24-hour caching. The **Superego** (ethical oversight) pre-checks routing decisions against alignment criteria.
 
 ### Constitutional Documents
 
@@ -272,11 +275,19 @@ For detailed architecture reference (crate responsibilities, security boundaries
 
 ### Phase 1: Foundation (Complete)
 
-Anthropic Claude provider, streaming responses, Superego wiring, core skills (filesystem, shell, HTTP), skills watcher, Hive/Entity daemon separation, CLI interfaces.
+Anthropic Claude provider, Superego wiring, core skills (filesystem, shell, HTTP), skills watcher, Hive/Entity daemon separation, CLI interfaces.
 
-### Phase 2: Wire Full Capabilities (In Progress)
+### Phase 2a: Skills Use (Complete)
 
-Streaming chat via SSE, agentic multi-turn tool loop, memory integration in chat context, birth flow over HTTP, entity self-registration.
+LLM tool-use loop (parse tool-call blocks → execute via SkillExecutor → inject results → re-prompt), auto-load skills from disk, wire tools into LLM requests. Shared `entity-chat` engine for GUI and CLI.
+
+### Phase 2b: Routing & Models (Complete)
+
+Tier-based model routing (Fast/Standard/Pro), complexity scoring with configurable thresholds, force overrides (pin tier/model/provider+tier), dynamic model registry with provider API discovery and 24h caching, per-request model override.
+
+### Phase 2c: Memory & Integration (In Progress)
+
+Memory persistence wired into chat pipeline, end-to-end daemon testing, Tauri app → daemon delegation via HTTP.
 
 ### Phase 3: Gateway & Messaging
 

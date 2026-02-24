@@ -221,9 +221,11 @@ fn extract_json_path(value: &serde_json::Value, path: &str) -> Option<serde_json
 // ── Validation ──────────────────────────────────────────────────────
 
 fn validate_config(config: &DynamicSkillConfig) -> Result<(), String> {
-    // ID must start with "dynamic."
-    if !config.id.starts_with("dynamic.") {
-        return Err("Skill ID must start with 'dynamic.'".to_string());
+    // ID must start with a recognized namespace prefix
+    if !config.id.starts_with("dynamic.") && !config.id.starts_with("custom.") {
+        return Err(
+            "Skill ID must start with 'dynamic.' or 'custom.'".to_string(),
+        );
     }
     // ID chars: alphanumeric, dots, underscores
     if !config
