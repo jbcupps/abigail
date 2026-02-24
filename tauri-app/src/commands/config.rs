@@ -264,7 +264,12 @@ pub async fn set_tier_model(
             "pro" => {
                 tier_models.pro.insert(provider, model);
             }
-            _ => return Err(format!("Invalid tier '{}'. Must be fast, standard, or pro.", tier)),
+            _ => {
+                return Err(format!(
+                    "Invalid tier '{}'. Must be fast, standard, or pro.",
+                    tier
+                ))
+            }
         }
         config
             .save(&config.config_path())
@@ -566,7 +571,9 @@ pub async fn store_provider_key(
 
 /// Get the current model registry contents (all cached providers + models).
 #[tauri::command]
-pub async fn get_model_registry(state: State<'_, AppState>) -> Result<ModelRegistrySummary, String> {
+pub async fn get_model_registry(
+    state: State<'_, AppState>,
+) -> Result<ModelRegistrySummary, String> {
     let reg = state.model_registry.lock().await;
     let providers: Vec<String> = reg.providers().iter().map(|s| s.to_string()).collect();
     let total_models = reg.total_models();
@@ -654,13 +661,7 @@ pub async fn refresh_model_registry(
     // Collect all providers that have stored keys
     let providers_with_keys: Vec<(String, String)> = {
         let vault = state.secrets.lock().map_err(|e| e.to_string())?;
-        let known = [
-            "openai",
-            "anthropic",
-            "google",
-            "xai",
-            "perplexity",
-        ];
+        let known = ["openai", "anthropic", "google", "xai", "perplexity"];
         known
             .iter()
             .filter_map(|p| {

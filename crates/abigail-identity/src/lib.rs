@@ -258,6 +258,8 @@ impl IdentityManager {
             trusted_skill_signers: Default::default(),
             sao_endpoint: None,
             tier_models: None,
+            force_override: Default::default(),
+            tier_thresholds: Default::default(),
             provider_catalog: Vec::new(),
             active_provider_preference: None,
             superego_l2_mode: Default::default(),

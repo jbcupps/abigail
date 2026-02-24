@@ -332,11 +332,7 @@ impl IdEgoRouter {
         }
         let score = self.calculate_id_instinct(user_message);
         let tier = self.tier_thresholds.score_to_tier(score);
-        tracing::debug!(
-            "Tier selected by complexity score {}: {:?}",
-            score,
-            tier
-        );
+        tracing::debug!("Tier selected by complexity score {}: {:?}", score, tier);
         tier
     }
 
@@ -356,11 +352,8 @@ impl IdEgoRouter {
         }
 
         // Determine provider name for tier_models lookup
-        let provider_name = self
-            .force_override
-            .pinned_provider
-            .as_deref()
-            .or_else(|| self.ego_provider.as_ref().map(|p| match p {
+        let provider_name = self.force_override.pinned_provider.as_deref().or_else(|| {
+            self.ego_provider.as_ref().map(|p| match p {
                 EgoProvider::OpenAi => "openai",
                 EgoProvider::Anthropic => "anthropic",
                 EgoProvider::Perplexity => "perplexity",
@@ -371,7 +364,8 @@ impl IdEgoRouter {
                 | EgoProvider::GeminiCli
                 | EgoProvider::CodexCli
                 | EgoProvider::GrokCli => "cli",
-            }));
+            })
+        });
 
         let provider_name = match provider_name {
             Some(name) if name != "cli" => name,
@@ -606,7 +600,10 @@ impl IdEgoRouter {
                 match ego.complete(&request).await {
                     Ok(response) => return Ok(response),
                     Err(e) => {
-                        tracing::warn!("Ego provider failed (with tools), falling back to Id: {}", e);
+                        tracing::warn!(
+                            "Ego provider failed (with tools), falling back to Id: {}",
+                            e
+                        );
                         return self.id.complete(&request).await;
                     }
                 }
