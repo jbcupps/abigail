@@ -85,3 +85,8 @@ Notes:
 - `documents/tests/AUTOMATION_MATRIX.md`
 - `documents/tests/VALIDATION_AND_GATE_REPORT.md`
 
+## Integration Test Guides
+
+- `documents/tests/EMAIL_INTEGRATION_TEST_GUIDE.md` — Step-by-step instructions for running the live email E2E tests (`entity-chat` crate, env-gated)
+- `documents/tests/EMAIL_INTEGRATION_REPORT.md` — Detailed report of email integration test results, bugs found, and fixes applied
+

@@ -87,18 +87,24 @@ pub async fn chat(
     // 1. Auto-detect and store API keys (Tauri-specific pre-hook, GUI only)
     auto_detect_and_store_key_internal(&state, &message).await;
 
-    // 2. Build system prompt + router snapshot
-    let (router, base_system_prompt) = {
+    // 2. Build system prompt + router snapshot, augmented with tool awareness and skill instructions
+    let (router, system_prompt) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
-        let prompt =
+        let base =
             abigail_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
+        let augmented = entity_chat::augment_system_prompt(
+            &base,
+            &state.registry,
+            &state.instruction_registry,
+            &message,
+        );
         let router = state.router.read().map_err(|e| e.to_string())?.clone();
-        (router, prompt)
+        (router, augmented)
     };
 
     // 3. Build contextual messages with sanitization + deduplication (shared engine)
     let messages =
-        entity_chat::build_contextual_messages(&base_system_prompt, session_messages, &message);
+        entity_chat::build_contextual_messages(&system_prompt, session_messages, &message);
 
     // 4. Build tool definitions from registered skills (shared engine)
     let tools = entity_chat::build_tool_definitions(&state.registry);

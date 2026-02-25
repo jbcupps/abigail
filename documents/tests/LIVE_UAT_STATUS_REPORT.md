@@ -77,11 +77,13 @@ The skills system is **functionally complete and proven** for direct tool execut
 
 | ID | Severity | Description | Status |
 |----|----------|-------------|--------|
-| RISK-001 | Medium | Chat-triggered tool-use loop untested with real LLM — requires API key or local LLM to prove full agentic cycle (LLM generates tool-call block -> executor runs tool -> result fed back -> LLM produces final answer) | Open — configuration dependency |
+| RISK-001 | Medium | Chat-triggered tool-use loop untested with real LLM — requires API key or local LLM to prove full agentic cycle (LLM generates tool-call block -> executor runs tool -> result fed back -> LLM produces final answer) | **Resolved** — Turn 1 of `live_email.rs` proves the full cycle with Anthropic Claude. See `documents/tests/EMAIL_INTEGRATION_REPORT.md`. |
 | RISK-002 | Low | GUI live UAT-MODIFY not proven in native Tauri — harness + CLI REST prove the shared engine path, but native desktop visual verification pending | Open — requires LLM + manual session |
 | DEF-001 | Fixed | Hive daemon `:id` route syntax — `{id}` caused 404 in axum 0.7.9 | Fixed in this session |
 | DEF-002 | Fixed | `DynamicApiSkill` validation rejected `custom.*` skill IDs created by CLI scaffold | Fixed in this session |
 | DEF-003 | Fixed | Missing `Skill` trait import in integration tests | Fixed in this session |
+| DEF-004 | Fixed | Anthropic API rejects qualified tool names (`.`, `::`) — all tool-use through Claude was broken | Fixed: `sanitize_tool_name()` in `anthropic.rs` |
+| DEF-005 | Fixed | Live email tests hang on IMAP timeout when bridge unavailable | Fixed: `tokio::time::timeout` wrapper |
 
 ---
 
@@ -116,4 +118,4 @@ All code paths are proven:
 - The shared `entity-chat` engine routes through both CLI and GUI surfaces.
 - 32 targeted Rust tests + 20 frontend tests all pass with 0 failures.
 
-**Condition for full GO**: Configure at least one LLM provider (cloud API key or local LLM) and verify the agentic tool-use loop fires during chat — i.e., the LLM generates a tool-call block, the executor runs it, and the result is fed back to produce a final answer.
+**Condition for full GO**: ~~Configure at least one LLM provider (cloud API key or local LLM) and verify the agentic tool-use loop fires during chat.~~ **MET** — `live_email.rs` Turn 1 proves the full agentic cycle with Anthropic Claude: LLM generates `store_secret` tool-call blocks, executor runs them, results fed back, LLM produces final answer. See `documents/tests/EMAIL_INTEGRATION_REPORT.md`.

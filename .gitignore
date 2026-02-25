@@ -15,6 +15,14 @@ target/
 tauri-app/src-ui/node_modules/
 tauri-app/src-ui/dist/
 
+# Test coverage outputs
+tauri-app/src-ui/coverage/
+*.lcov
+lcov.info
+
+# Log files
+*.log
+
 # Tauri generated files
 tauri-app/gen/
 
@@ -34,3 +42,4 @@ external_pubkey.bin
 # OS
 .DS_Store
 Thumbs.db
+nul

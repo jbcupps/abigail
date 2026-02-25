@@ -2314,6 +2314,7 @@ name = "entity-chat"
 version = "0.0.1"
 dependencies = [
  "abigail-capabilities",
+ "abigail-core",
  "abigail-router",
  "abigail-skills",
  "anyhow",
@@ -2321,6 +2322,7 @@ dependencies = [
  "chrono",
  "entity-core",
  "serde_json",
+ "skill-proton-mail",
  "tokio",
  "tracing",
 ]

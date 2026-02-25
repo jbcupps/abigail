@@ -231,7 +231,16 @@ pub fn run() {
         http_client,
         ollama: Arc::new(tokio::sync::Mutex::new(None)),
         model_registry,
-        instruction_registry: Arc::new(InstructionRegistry::empty()),
+        instruction_registry: Arc::new({
+            let skills_dir = data_dir.join("skills");
+            let registry_path = skills_dir.join("registry.toml");
+            let instructions_dir = skills_dir.join("instructions");
+            if registry_path.exists() {
+                InstructionRegistry::load(&registry_path, &instructions_dir)
+            } else {
+                InstructionRegistry::empty()
+            }
+        }),
         chat_cooldown: CooldownGuard::new(std::time::Duration::from_millis(500)),
         birth_cooldown: CooldownGuard::new(std::time::Duration::from_millis(500)),
         cli_server: Arc::new(tokio::sync::Mutex::new(None)),
@@ -386,6 +395,7 @@ pub fn run() {
             list_skills,
             list_discovered_skills,
             list_missing_skill_secrets,
+            store_secret,
             list_tools,
             execute_tool,
             get_mcp_servers,

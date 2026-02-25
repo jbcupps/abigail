@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-24 23:00 EST: Implement SMTP client, wire ProtonMailSkill send_email, add live email E2E tests (entity-chat), fix Anthropic tool-name sanitization for all skill tool-use, extract HiveOperations trait for Tauri/daemon parity
 - 2026-02-24 17:30 EST: Add tabula rasa UAT harness with STARTTLS IMAP support, entity-daemon --data-dir isolation, Hive-to-entity secret sync, and automated 9-stage test pipeline
 - 2026-02-26 12:00 EST: Remove Superego from entity entirely; add ChatMemoryHook at entity memory persist as sole hook for future Hive/Superego use
 - 2026-02-26 01:00 EST: Implement tier-based model routing overhaul — 3-tier model selection (Fast/Standard/Pro) with complexity scoring, force overrides (pin tier/model/provider+tier), dynamic model registry with provider API discovery and 24h TTL caching, per-request model_override in CompletionRequest, remove IdPrimary routing mode, add tier metadata to ChatResponse, and build full Forge UI with tier assignment grid, force override controls, and threshold tuning

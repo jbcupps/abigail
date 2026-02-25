@@ -9,6 +9,8 @@ use abigail_skills::{
 use std::collections::HashMap;
 use tauri::State;
 
+const RESERVED_PROVIDER_KEYS: &[&str] = &["openai", "anthropic", "xai", "google", "tavily"];
+
 fn is_signed_allowlisted(config: &abigail_core::AppConfig, skill_id: &str) -> bool {
     config
         .signed_skill_allowlist
@@ -65,6 +67,50 @@ pub fn list_missing_skill_secrets(
     let config = state.config.read().map_err(|e| e.to_string())?;
     let paths = vec![config.data_dir.join("skills")];
     Ok(state.registry.list_all_missing_secrets(&paths))
+}
+
+/// Validate that `key` is in the allowed secret namespace: either a reserved
+/// provider name or a secret declared by any registered/discovered skill.
+fn validate_secret_namespace(state: &State<AppState>, key: &str) -> Result<(), String> {
+    if RESERVED_PROVIDER_KEYS.contains(&key) {
+        return Ok(());
+    }
+    let skills = state.registry.list().map_err(|e| e.to_string())?;
+    let skill_declared = skills
+        .iter()
+        .any(|m| m.secrets.iter().any(|s| s.name == key));
+    if skill_declared {
+        return Ok(());
+    }
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let discovered = abigail_skills::SkillRegistry::discover(&[config.data_dir.join("skills")]);
+    let discovered_declared = discovered
+        .iter()
+        .any(|m| m.secrets.iter().any(|s| s.name == key));
+    if discovered_declared {
+        return Ok(());
+    }
+    Err(format!(
+        "Secret key '{}' is not in the allowed namespace. Keys must be a reserved provider name ({}) or declared in a skill manifest.",
+        key,
+        RESERVED_PROVIDER_KEYS.join(", ")
+    ))
+}
+
+#[tauri::command]
+pub fn store_secret(state: State<AppState>, key: String, value: String) -> Result<(), String> {
+    let key = key.trim().to_string();
+    let value = value.trim().to_string();
+    if key.is_empty() {
+        return Err("Secret key cannot be empty".to_string());
+    }
+    if value.is_empty() {
+        return Err("Secret value cannot be empty".to_string());
+    }
+    validate_secret_namespace(&state, &key)?;
+    let mut vault = state.skills_secrets.lock().map_err(|e| e.to_string())?;
+    vault.set_secret(&key, &value);
+    vault.save().map_err(|e| e.to_string())
 }
 
 #[tauri::command]

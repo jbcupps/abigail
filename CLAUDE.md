@@ -30,6 +30,10 @@ cargo test -p abigail-memory                         # SQLite schema, memory CRU
 cargo test -p abigail-router                         # Routing decisions
 cargo test -p abigail-skills                         # Requires ABIGAIL_IMAP_TEST=1 + credentials
 
+# Live email E2E (env-gated — see documents/tests/EMAIL_INTEGRATION_TEST_GUIDE.md)
+# Requires: ABIGAIL_IMAP_TEST=1 + LLM API key + IMAP/SMTP credentials
+cargo test -p entity-chat --test live_email -- --nocapture
+
 # Single test
 cargo test -p abigail-core verify             # Run tests matching "verify" in abigail-core
 
@@ -243,6 +247,7 @@ required = true
 
 - **RwLock for shared state** — AppState fields use `RwLock`, not `Mutex`. Drop locks before `await` boundaries (RwLock is not Send).
 - **Trait-based providers** — `LlmProvider`, `Skill`, `Capability`, `ExternalVault` traits enable swappable implementations.
+- **HiveOperations trait** — Both Tauri (`TauriHiveOps`) and tests (`TestHiveOps`) implement this trait for secret storage, agent management, and config access. Keeps skill code decoupled from the runtime.
 - **Idempotent init** — `init_soul` and birth stages are safe to call multiple times.
 - **DPAPI on Windows** — Keyring and email passwords encrypted via Windows DPAPI (user scope). Other platforms use plaintext stub (dev only).
 
@@ -352,3 +357,6 @@ The router uses tier-based routing with complexity classification. Debug with `R
 - `ChatResponse` now includes `tier`, `model_used`, and `complexity_score` — check these to verify tier routing is working
 - Force overrides (`ForceOverride`) bypass complexity scoring — if routing seems stuck on one tier, check `config.json` `force_override`
 - Model registry discovery runs in background at startup — check logs for `ModelRegistry:` messages
+
+### Anthropic Tool-Name Sanitization
+The Anthropic API requires tool names to match `^[a-zA-Z0-9_-]{1,64}$`. The `entity-chat` engine uses qualified names like `builtin.hive_management::store_secret` internally. The `AnthropicProvider` in `abigail-capabilities` automatically sanitizes these (replacing `::` with `__` and `.` with `_`) and reverse-maps them in responses. If adding a new provider, check its tool-name constraints and add similar sanitization if needed.

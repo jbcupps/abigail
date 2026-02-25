@@ -281,15 +281,50 @@ impl IdEgoRouter {
 
     // ── Tier selection & model resolution ──────────────────────────
 
-    /// Select the model tier based on force override or complexity score.
+    /// Keywords that signal a setup, configuration, or credential-storage intent.
+    const SETUP_INTENT_KEYWORDS: &'static [&'static str] = &[
+        "set up",
+        "setup",
+        "configure",
+        "configuration",
+        "credential",
+        "credentials",
+        "imap",
+        "smtp",
+        "mailbox",
+        "api key",
+        "api_key",
+        "password",
+        "hostname",
+        "connect my",
+        "store secret",
+        "store_secret",
+        "account setup",
+        "login details",
+    ];
+
+    /// Returns `true` if the message appears to be a setup / credential operation.
+    pub fn detect_setup_intent(user_message: &str) -> bool {
+        let lower = user_message.to_lowercase();
+        Self::SETUP_INTENT_KEYWORDS
+            .iter()
+            .any(|kw| lower.contains(kw))
+    }
+
+    /// Select the model tier based on force override, setup intent, or complexity score.
     ///
     /// Priority:
     /// 1. `force_override.pinned_tier` — user pinned a tier
-    /// 2. Complexity score → `tier_thresholds.score_to_tier()`
+    /// 2. Setup / credential intent → Pro (auto-escalation)
+    /// 3. Complexity score → `tier_thresholds.score_to_tier()`
     pub fn select_tier(&self, user_message: &str) -> ModelTier {
         if let Some(tier) = self.force_override.pinned_tier {
             tracing::debug!("Tier pinned by force override: {:?}", tier);
             return tier;
+        }
+        if Self::detect_setup_intent(user_message) {
+            tracing::debug!("Setup/credential intent detected — escalating to Pro tier");
+            return ModelTier::Pro;
         }
         let score = self.calculate_id_instinct(user_message);
         let tier = self.tier_thresholds.score_to_tier(score);
@@ -901,5 +936,53 @@ mod tests {
         assert_eq!(model, Some("gpt-4.1-mini".to_string())); // openai fast model
         assert!(score.is_some());
         assert!(score.unwrap() < 35); // Simple msg should be below fast_ceiling
+    }
+
+    // ── Setup intent detection ─────────────────────────────────────
+
+    #[test]
+    fn test_detect_setup_intent_positive() {
+        assert!(IdEgoRouter::detect_setup_intent(
+            "Please set up your email Mailbox details"
+        ));
+        assert!(IdEgoRouter::detect_setup_intent(
+            "configure my IMAP credentials"
+        ));
+        assert!(IdEgoRouter::detect_setup_intent(
+            "I need to store my API key"
+        ));
+        assert!(IdEgoRouter::detect_setup_intent("Setup SMTP with password"));
+    }
+
+    #[test]
+    fn test_detect_setup_intent_negative() {
+        assert!(!IdEgoRouter::detect_setup_intent("hi"));
+        assert!(!IdEgoRouter::detect_setup_intent(
+            "what is the weather in Miami"
+        ));
+        assert!(!IdEgoRouter::detect_setup_intent("tell me a joke"));
+    }
+
+    #[test]
+    fn test_setup_intent_escalates_to_pro() {
+        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::TierBased);
+        let tier = router.select_tier("please set up my mailbox with IMAP credentials");
+        assert_eq!(tier, ModelTier::Pro);
+    }
+
+    #[test]
+    fn test_pinned_tier_overrides_setup_intent() {
+        let mut router = IdEgoRouter::new(None, None, None, None, RoutingMode::TierBased);
+        router.force_override = ForceOverride {
+            pinned_model: None,
+            pinned_tier: Some(ModelTier::Fast),
+            pinned_provider: None,
+        };
+        let tier = router.select_tier("configure my IMAP credentials");
+        assert_eq!(
+            tier,
+            ModelTier::Fast,
+            "User pinned tier should take precedence over intent escalation"
+        );
     }
 }

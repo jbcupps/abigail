@@ -82,6 +82,41 @@ pub fn build_contextual_messages(
 // Tool definitions: SkillRegistry → ToolDefinition[]
 // ---------------------------------------------------------------------------
 
+/// Augment the base system prompt with tool-awareness and skill-specific
+/// instructions matched from the `InstructionRegistry`.
+///
+/// Returns a new prompt string: `base + tool_list + matched_instructions`.
+pub fn augment_system_prompt(
+    base: &str,
+    registry: &SkillRegistry,
+    instruction_registry: &abigail_skills::InstructionRegistry,
+    user_message: &str,
+) -> String {
+    let mut prompt = base.to_string();
+
+    if let Ok(manifests) = registry.list() {
+        let mut tool_lines = Vec::new();
+        for m in &manifests {
+            if let Ok((skill, _)) = registry.get_skill(&m.id) {
+                for t in skill.tools() {
+                    tool_lines.push(format!("- `{}::{}`: {}", m.id.0, t.name, t.description));
+                }
+            }
+        }
+        if !tool_lines.is_empty() {
+            prompt.push_str("\n\n## Available Tools\n\n");
+            prompt.push_str(&tool_lines.join("\n"));
+        }
+    }
+
+    let skill_section = instruction_registry.format_for_prompt(user_message);
+    if !skill_section.is_empty() {
+        prompt.push_str(&skill_section);
+    }
+
+    prompt
+}
+
 /// Convert all registered skill tools into LLM-native `ToolDefinition`s.
 ///
 /// Tool names are qualified as `{skill_id}::{tool_name}` so the LLM knows
@@ -703,6 +738,34 @@ mod tests {
         assert_eq!(msgs[0].content, "system prompt");
         assert_eq!(msgs[1].role, "user");
         assert_eq!(msgs[1].content, "hi");
+    }
+
+    // ── augment_system_prompt ──────────────────────────────────────
+
+    #[test]
+    fn test_augment_prompt_adds_tool_section() {
+        let registry = SkillRegistry::new();
+        let skill = StubSkill {
+            manifest: test_manifest("test.echo"),
+            tool_descriptors: vec![valid_tool("echo")],
+        };
+        registry
+            .register(SkillId("test.echo".to_string()), Arc::new(skill))
+            .unwrap();
+
+        let instr_reg = abigail_skills::InstructionRegistry::empty();
+        let result = augment_system_prompt("Base prompt.", &registry, &instr_reg, "hello");
+        assert!(result.starts_with("Base prompt."));
+        assert!(result.contains("## Available Tools"));
+        assert!(result.contains("test.echo::echo"));
+    }
+
+    #[test]
+    fn test_augment_prompt_no_tools_no_section() {
+        let registry = SkillRegistry::new();
+        let instr_reg = abigail_skills::InstructionRegistry::empty();
+        let result = augment_system_prompt("Base.", &registry, &instr_reg, "hi");
+        assert_eq!(result, "Base.");
     }
 
     // ── ToolUseResult struct ─────────────────────────────────────────

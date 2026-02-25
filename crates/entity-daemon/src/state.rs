@@ -4,7 +4,7 @@ use abigail_core::AppConfig;
 use abigail_memory::MemoryStore;
 use abigail_router::IdEgoRouter;
 use abigail_skills::channel::EventBus;
-use abigail_skills::{SkillExecutor, SkillRegistry};
+use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use entity_core::ChatMemoryHook;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,4 +26,6 @@ pub struct EntityDaemonState {
     pub memory: Arc<MemoryStore>,
     /// Optional hook called when a chat memory is persisted (for future Hive/Superego use).
     pub memory_hook: Option<Arc<dyn ChatMemoryHook>>,
+    /// Skill instruction registry for injecting matched LLM instructions into prompts.
+    pub instruction_registry: Arc<InstructionRegistry>,
 }
