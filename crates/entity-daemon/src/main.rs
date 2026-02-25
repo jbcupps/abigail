@@ -171,8 +171,12 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // 6b. Register SkillFactory (allows entity to author skills via chat)
+    //     Attach registry + secrets so newly created dynamic_api skills are
+    //     immediately registered and usable within the same session.
     {
-        let factory_skill = abigail_skills::SkillFactory::new(skills_dir.clone());
+        let factory_skill = abigail_skills::SkillFactory::new(skills_dir.clone())
+            .with_registry(registry.clone())
+            .with_secrets(skill_vault.clone());
         let _ = registry.register(
             abigail_skills::manifest::SkillId("builtin.skill_factory".to_string()),
             Arc::new(factory_skill),
@@ -375,6 +379,51 @@ async fn main() -> anyhow::Result<()> {
         instruction_registry,
     };
 
+    // Spawn SkillsWatcher for hot-reload of new skills (before state is consumed)
+    let _watcher = {
+        let watch_dir = skills_dir.clone();
+        let registry_for_watcher = state.registry.clone();
+        let vault_for_watcher = Some(skill_vault.clone());
+
+        match abigail_skills::SkillsWatcher::start(vec![watch_dir]) {
+            Ok((watcher, mut rx)) => {
+                tokio::spawn(async move {
+                    while let Ok(event) = rx.recv().await {
+                        match event {
+                            abigail_skills::SkillFileEvent::Changed(path) => {
+                                tracing::info!("Skill watcher: detected change at {:?}", path);
+                                // Check for a sibling JSON file (DynamicApiSkill)
+                                if let Some(parent) = path.parent() {
+                                    for entry in std::fs::read_dir(parent).into_iter().flatten().flatten() {
+                                        let p = entry.path();
+                                        if p.extension().and_then(|e| e.to_str()) == Some("json") {
+                                            match abigail_skills::DynamicApiSkill::load_from_path(&p, vault_for_watcher.clone()) {
+                                                Ok(skill) => {
+                                                    let sid = abigail_skills::manifest::SkillId(skill.manifest().id.0.clone());
+                                                    let _ = registry_for_watcher.register(sid.clone(), Arc::new(skill));
+                                                    tracing::info!("Skill watcher: registered {}", sid.0);
+                                                }
+                                                Err(e) => tracing::debug!("Skill watcher: skip {:?}: {}", p, e),
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            abigail_skills::SkillFileEvent::Removed(path) => {
+                                tracing::info!("Skill watcher: skill removed at {:?}", path);
+                            }
+                        }
+                    }
+                });
+                Some(watcher)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to start skills watcher: {}", e);
+                None
+            }
+        }
+    };
+
     // Build HTTP router
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -385,6 +434,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", get(routes::health))
         .route("/v1/status", get(routes::get_status))
         .route("/v1/chat", post(routes::chat))
+        .route("/v1/chat/stream", post(routes::chat_stream))
         .route("/v1/skills", get(routes::list_skills))
         .route("/v1/tools/execute", post(routes::execute_tool))
         .route("/v1/memory/stats", get(routes::memory_stats))

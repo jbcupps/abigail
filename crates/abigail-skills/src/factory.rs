@@ -1,16 +1,22 @@
 use crate::channel::TriggerDescriptor;
+use crate::dynamic::{DynamicApiSkill, DynamicSkillConfig, DynamicToolConfig};
 use crate::manifest::{FileSystemPermission, Permission, SkillId, SkillManifest};
 use crate::skill::{
     CostEstimate, ExecutionContext, HealthStatus, Skill, SkillConfig, SkillError, SkillHealth,
     SkillResult, ToolDescriptor, ToolOutput, ToolParams,
 };
+use crate::SkillRegistry;
+use abigail_core::SecretsVault;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 pub struct SkillFactory {
     manifest: SkillManifest,
     skills_dir: PathBuf,
+    registry: Option<Arc<SkillRegistry>>,
+    secrets: Option<Arc<Mutex<SecretsVault>>>,
 }
 
 impl SkillFactory {
@@ -35,7 +41,21 @@ impl SkillFactory {
         Self {
             manifest,
             skills_dir,
+            registry: None,
+            secrets: None,
         }
+    }
+
+    /// Attach a live registry so newly created skills are immediately registered.
+    pub fn with_registry(mut self, registry: Arc<SkillRegistry>) -> Self {
+        self.registry = Some(registry);
+        self
+    }
+
+    /// Attach a secrets vault for newly created dynamic API skills.
+    pub fn with_secrets(mut self, secrets: Arc<Mutex<SecretsVault>>) -> Self {
+        self.secrets = Some(secrets);
+        self
     }
 }
 
@@ -66,18 +86,20 @@ impl Skill for SkillFactory {
         vec![
             ToolDescriptor {
                 name: "author_skill".to_string(),
-                description: "Create a new permanent skill by writing a skill.toml and script file. Use this for repeatable tasks.".to_string(),
+                description: "Create a new permanent skill. Use format='dynamic_api' for HTTP-based skills (immediately usable) or format='script' for code-based skills.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "id": { "type": "string", "description": "The skill ID (e.g., 'custom.my_tool')" },
+                        "id": { "type": "string", "description": "The skill ID (e.g., 'custom.my_tool' or 'dynamic.my_api')" },
                         "name": { "type": "string", "description": "Human-readable name" },
                         "description": { "type": "string" },
-                        "script_content": { "type": "string", "description": "The code for the skill (Python or Node.js preferred)" },
-                        "script_filename": { "type": "string", "description": "e.g., 'main.py' or 'index.js'" },
+                        "format": { "type": "string", "enum": ["dynamic_api", "script"], "description": "Skill type. 'dynamic_api' creates an HTTP-based skill (default, immediately available). 'script' creates a code-based skill." },
+                        "tools_json": { "type": "string", "description": "For dynamic_api format: JSON array of tool configs, each with name, description, parameters, method, url_template, headers, body_template, response_extract" },
+                        "script_content": { "type": "string", "description": "For script format: the code (Python or Node.js preferred)" },
+                        "script_filename": { "type": "string", "description": "For script format: e.g., 'main.py' or 'index.js'" },
                         "how_to_use_md": { "type": "string", "description": "Instructional legacy for future Egos" }
                     },
-                    "required": ["id", "name", "script_content", "script_filename", "how_to_use_md"]
+                    "required": ["id", "name", "how_to_use_md"]
                 }),
                 returns: serde_json::json!({ "type": "boolean" }),
                 cost_estimate: CostEstimate::default(),
@@ -119,50 +141,32 @@ impl Skill for SkillFactory {
                     .get("name")
                     .ok_or_else(|| SkillError::ToolFailed("Missing 'name'".to_string()))?;
                 let desc: String = params.get("description").unwrap_or_default();
-                let content: String = params.get("script_content").ok_or_else(|| {
-                    SkillError::ToolFailed("Missing 'script_content'".to_string())
-                })?;
-                let filename: String = params.get("script_filename").ok_or_else(|| {
-                    SkillError::ToolFailed("Missing 'script_filename'".to_string())
-                })?;
                 let how_to: String = params
                     .get("how_to_use_md")
                     .ok_or_else(|| SkillError::ToolFailed("Missing 'how_to_use_md'".to_string()))?;
+
+                let format: String = params.get("format").unwrap_or_else(|| "dynamic_api".into());
 
                 let skill_dir = self.skills_dir.join(&id);
                 std::fs::create_dir_all(&skill_dir)
                     .map_err(|e| SkillError::ToolFailed(e.to_string()))?;
 
-                // 1. Write skill.toml
-                let manifest = format!(
-                    r#"[skill]
-id = "{}"
-name = "{}"
-version = "0.1.0"
-description = "{}"
-runtime = "Native"
-category = "Custom"
-
-[[tools]]
-name = "execute"
-description = "Execute the custom logic for {}"
-parameters = {{ "type" = "object", "properties" = {{}}, "required" = [] }}
-"#,
-                    id, name, desc, name
-                );
-
-                std::fs::write(skill_dir.join("skill.toml"), manifest)
+                // Write how-to-use.md (common to both formats)
+                std::fs::write(skill_dir.join("how-to-use.md"), &how_to)
                     .map_err(|e| SkillError::ToolFailed(e.to_string()))?;
 
-                // 2. Write script
-                std::fs::write(skill_dir.join(filename), content)
-                    .map_err(|e| SkillError::ToolFailed(e.to_string()))?;
+                if format == "dynamic_api" {
+                    self.author_dynamic_api(&id, &name, &desc, &skill_dir, &params)?;
+                } else {
+                    self.author_script(&id, &name, &desc, &skill_dir, &params)?;
+                }
 
-                // 3. Write how-to-use.md
-                std::fs::write(skill_dir.join("how-to-use.md"), how_to)
-                    .map_err(|e| SkillError::ToolFailed(e.to_string()))?;
-
-                Ok(ToolOutput::success(serde_json::json!(true)))
+                Ok(ToolOutput::success(serde_json::json!({
+                    "created": true,
+                    "id": id,
+                    "format": format,
+                    "registered": self.registry.is_some()
+                })))
             }
             "delete_skill" => {
                 let id: String = params
@@ -196,5 +200,103 @@ parameters = {{ "type" = "object", "properties" = {{}}, "required" = [] }}
 
     fn triggers(&self) -> Vec<TriggerDescriptor> {
         vec![]
+    }
+}
+
+impl SkillFactory {
+    fn author_dynamic_api(
+        &self,
+        id: &str,
+        name: &str,
+        desc: &str,
+        skill_dir: &std::path::Path,
+        params: &ToolParams,
+    ) -> SkillResult<()> {
+        let tools_json_str: String = params.get("tools_json").unwrap_or_else(|| {
+            serde_json::json!([{
+                "name": "execute",
+                "description": format!("Execute {}", name),
+                "parameters": { "type": "object", "properties": {}, "required": [] },
+                "method": "GET",
+                "url_template": "https://example.com",
+                "headers": {},
+                "response_extract": {}
+            }])
+            .to_string()
+        });
+
+        let tools: Vec<DynamicToolConfig> = serde_json::from_str(&tools_json_str)
+            .map_err(|e| SkillError::ToolFailed(format!("Invalid tools_json: {}", e)))?;
+
+        if tools.len() > 10 {
+            return Err(SkillError::ToolFailed(
+                "Maximum 10 tools per dynamic skill".into(),
+            ));
+        }
+
+        let config = DynamicSkillConfig {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: desc.to_string(),
+            version: "0.1.0".to_string(),
+            category: "Custom".to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            tools,
+        };
+
+        let json_path = skill_dir.join(format!("{}.json", id.replace('.', "_")));
+        let json =
+            serde_json::to_string_pretty(&config).map_err(|e| SkillError::ToolFailed(e.to_string()))?;
+        std::fs::write(&json_path, json).map_err(|e| SkillError::ToolFailed(e.to_string()))?;
+
+        // Immediately register the skill if we have a registry.
+        if let Some(ref registry) = self.registry {
+            match DynamicApiSkill::load_from_path(&json_path, self.secrets.clone()) {
+                Ok(skill) => {
+                    let skill_id = SkillId(id.to_string());
+                    let _ = registry.register(skill_id, Arc::new(skill));
+                    tracing::info!("SkillFactory: auto-registered dynamic skill {}", id);
+                }
+                Err(e) => {
+                    tracing::warn!("SkillFactory: created skill but failed to register: {}", e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn author_script(
+        &self,
+        id: &str,
+        name: &str,
+        desc: &str,
+        skill_dir: &std::path::Path,
+        params: &ToolParams,
+    ) -> SkillResult<()> {
+        let content: String = params.get("script_content").ok_or_else(|| {
+            SkillError::ToolFailed("Missing 'script_content' for script format".into())
+        })?;
+        let filename: String = params.get("script_filename").ok_or_else(|| {
+            SkillError::ToolFailed("Missing 'script_filename' for script format".into())
+        })?;
+
+        let manifest = format!(
+            r#"[skill]
+id = "{id}"
+name = "{name}"
+version = "0.1.0"
+description = "{desc}"
+runtime = "Native"
+category = "Custom"
+"#
+        );
+
+        std::fs::write(skill_dir.join("skill.toml"), manifest)
+            .map_err(|e| SkillError::ToolFailed(e.to_string()))?;
+        std::fs::write(skill_dir.join(filename), content)
+            .map_err(|e| SkillError::ToolFailed(e.to_string()))?;
+
+        Ok(())
     }
 }

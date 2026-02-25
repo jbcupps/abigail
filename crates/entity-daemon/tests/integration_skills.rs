@@ -176,6 +176,7 @@ async fn skill_factory_author_creates_files() {
         .with("id", "custom.greeter")
         .with("name", "Greeter")
         .with("description", "Says hello")
+        .with("format", "script")
         .with("script_content", "print('hello')")
         .with("script_filename", "main.py")
         .with("how_to_use_md", "# Greeter\nJust say hello.");
@@ -256,6 +257,76 @@ fn empty_skills_dir_yields_no_dynamic_skills() {
 
     let skills = DynamicApiSkill::discover(&tmp, None);
     assert!(skills.is_empty(), "empty dir should yield no skills");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// Skill Factory round-trip: author_skill (dynamic_api) -> immediate registration -> execute.
+#[tokio::test]
+async fn skill_factory_creates_and_registers_dynamic_skill() {
+    let tmp = std::env::temp_dir().join("abigail_factory_roundtrip");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    let registry = Arc::new(SkillRegistry::new());
+    let executor = SkillExecutor::new(registry.clone());
+
+    // Create SkillFactory with registry attached for immediate registration
+    let factory = SkillFactory::new(tmp.clone()).with_registry(registry.clone());
+    let factory_id = SkillId("builtin.skill_factory".to_string());
+    registry
+        .register(factory_id.clone(), Arc::new(factory))
+        .unwrap();
+
+    // Author a dynamic_api skill via the factory tool
+    let mut params = ToolParams::new();
+    params.values.insert("id".into(), serde_json::json!("dynamic.roundtrip_test"));
+    params.values.insert("name".into(), serde_json::json!("Roundtrip Test"));
+    params.values.insert("description".into(), serde_json::json!("Test skill"));
+    params.values.insert("format".into(), serde_json::json!("dynamic_api"));
+    params.values.insert("how_to_use_md".into(), serde_json::json!("# Test\nUse get_data."));
+    params.values.insert(
+        "tools_json".into(),
+        serde_json::json!(serde_json::json!([{
+            "name": "get_data",
+            "description": "Fetch data",
+            "parameters": { "type": "object", "properties": {}, "required": [] },
+            "method": "GET",
+            "url_template": "https://httpbin.org/get",
+            "headers": {},
+            "response_extract": {},
+            "response_format": null
+        }])
+        .to_string()),
+    );
+
+    let result = executor
+        .execute(&factory_id, "author_skill", params)
+        .await
+        .expect("author_skill should succeed");
+    assert!(result.success, "author_skill should report success");
+
+    // Verify the skill was immediately registered
+    let list = registry.list().expect("list should work");
+    let found = list.iter().any(|m| m.id.0 == "dynamic.roundtrip_test");
+    assert!(found, "newly created skill should be in the registry");
+
+    // Verify files on disk
+    let skill_dir = tmp.join("dynamic.roundtrip_test");
+    assert!(skill_dir.join("how-to-use.md").exists());
+    assert!(skill_dir.join("dynamic_roundtrip_test.json").exists());
+
+    // Clean up via delete_skill
+    let mut delete_params = ToolParams::new();
+    delete_params
+        .values
+        .insert("id".into(), serde_json::json!("dynamic.roundtrip_test"));
+    let delete_result = executor
+        .execute(&factory_id, "delete_skill", delete_params)
+        .await
+        .expect("delete_skill should succeed");
+    assert!(delete_result.success);
+    assert!(!skill_dir.exists(), "skill dir should be removed");
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import McpAppFrame from "./McpAppFrame";
@@ -350,56 +351,109 @@ export default function ChatInterface({
       textareaRef.current.style.height = "auto";
     }
 
+    const unlisteners: UnlistenFn[] = [];
+
     try {
-      // Non-streaming invoke — same flow as entity-daemon POST /v1/chat.
-      // Returns JSON-serialized ChatResponse { reply, provider, tool_calls_made, tier, model_used, complexity_score }.
-      const responseJson = await invoke<string>("chat", {
+      // Add a placeholder assistant message for streaming tokens.
+      setMessages((m) => [...m, { role: "assistant", content: "" }]);
+
+      // Register event listeners for streaming tokens.
+      unlisteners.push(
+        await listen<string>("chat-token", (event) => {
+          if (!mountedRef.current) return;
+          setMessages((m) => {
+            const updated = [...m];
+            const last = updated[updated.length - 1];
+            if (last && last.role === "assistant") {
+              updated[updated.length - 1] = { ...last, content: last.content + event.payload };
+            }
+            return updated;
+          });
+        }),
+      );
+
+      unlisteners.push(
+        await listen<{
+          reply: string;
+          provider?: string;
+          tool_calls_made?: Array<{ skill_id: string; tool_name: string; success: boolean }>;
+          tier?: string;
+          model_used?: string;
+          complexity_score?: number;
+        }>("chat-done", (event) => {
+          if (!mountedRef.current) return;
+          const resp = event.payload;
+          setMessages((m) => {
+            const updated = [...m];
+            const last = updated[updated.length - 1];
+            if (last && last.role === "assistant") {
+              updated[updated.length - 1] = {
+                ...last,
+                content: last.content || resp.reply,
+                provider: resp.provider,
+                tier: resp.tier,
+                modelUsed: resp.model_used,
+              };
+            }
+            return updated;
+          });
+          setLoading(false);
+          setChatStatus(null);
+          unlisteners.forEach((u) => u());
+        }),
+      );
+
+      unlisteners.push(
+        await listen<string>("chat-error", (event) => {
+          if (!mountedRef.current) return;
+          const errorMsg = event.payload;
+          let content = errorMsg;
+          if (errorMsg.includes("No local LLM configured")) {
+            content =
+              "No LLM available. The bundled Ollama may still be starting.\n" +
+              "Please wait a moment, or configure a provider:\n" +
+              "1. Set OPENAI_API_KEY environment variable, or\n" +
+              "2. Install Ollama and set LOCAL_LLM_BASE_URL=http://localhost:11434";
+          }
+          setMessages((m) => {
+            const updated = [...m];
+            const last = updated[updated.length - 1];
+            if (last && last.role === "assistant") {
+              updated[updated.length - 1] = { ...last, content, isError: true };
+            }
+            return updated;
+          });
+          setShowRoutingDetails(true);
+          setLoading(false);
+          setChatStatus(null);
+          unlisteners.forEach((u) => u());
+        }),
+      );
+
+      // Fire the streaming chat command (does not return the response itself).
+      await invoke("chat_stream", {
         message: userMessage.content,
         target,
         sessionMessages: sessionBeforeTurn,
       });
-
-      if (!mountedRef.current) return;
-
-      const response: {
-        reply: string;
-        provider?: string;
-        tool_calls_made?: Array<{ skill_id: string; tool_name: string; success: boolean }>;
-        tier?: string;
-        model_used?: string;
-        complexity_score?: number;
-      } = JSON.parse(responseJson);
-
-      setMessages((m) => [
-        ...m,
-        {
-          role: "assistant",
-          content: response.reply,
-          provider: response.provider,
-          tier: response.tier,
-          modelUsed: response.model_used,
-        },
-      ]);
     } catch (e) {
       if (!mountedRef.current) return;
+      // Invocation-level error (command not found, state lock failure, etc.)
       const errorMsg = String(e);
-      let content = errorMsg;
-      if (errorMsg.includes("No local LLM configured")) {
-        content =
-          "No LLM available. The bundled Ollama may still be starting.\n" +
-          "Please wait a moment, or configure a provider:\n" +
-          "1. Set OPENAI_API_KEY environment variable, or\n" +
-          "2. Install Ollama and set LOCAL_LLM_BASE_URL=http://localhost:11434";
-      }
-      setMessages((m) => [
-        ...m,
-        { role: "assistant", content, isError: true },
-      ]);
+      setMessages((m) => {
+        const updated = [...m];
+        const last = updated[updated.length - 1];
+        if (last && last.role === "assistant" && !last.content) {
+          updated[updated.length - 1] = { ...last, content: errorMsg, isError: true };
+        } else {
+          updated.push({ role: "assistant", content: errorMsg, isError: true });
+        }
+        return updated;
+      });
       setShowRoutingDetails(true);
-    } finally {
-      if (!mountedRef.current) return;
       setLoading(false);
       setChatStatus(null);
+      unlisteners.forEach((u) => u());
     }
   };
 
