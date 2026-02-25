@@ -231,19 +231,6 @@ pub struct ProviderCatalogEntry {
     pub last_fetched: Option<String>,
 }
 
-/// Superego Layer-2 enforcement mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum SuperegoL2Mode {
-    /// No LLM-based safety check (pattern-based L1 always runs)
-    #[default]
-    Off,
-    /// Run LLM safety check, log warnings but don't block
-    Advisory,
-    /// Run LLM safety check, block on DENY
-    Enforce,
-}
-
 /// Email account configuration supporting multiple accounts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailAccountConfig {
@@ -303,7 +290,7 @@ fn default_bundled_model() -> Option<String> {
     Some("qwen2.5:0.5b".to_string())
 }
 
-/// Trinity configuration: maps providers to Superego/Ego/Id roles.
+/// Trinity configuration: Ego/Id provider mapping (Superego removed; future policy at Hive via chat-memory hook).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TrinityConfig {
     /// Local LLM URL for Id
@@ -315,12 +302,6 @@ pub struct TrinityConfig {
     /// API key for Ego provider
     #[serde(default)]
     pub ego_api_key: Option<String>,
-    /// Cloud provider name for Superego (e.g. "anthropic", "openai")
-    #[serde(default)]
-    pub superego_provider: Option<String>,
-    /// API key for Superego provider
-    #[serde(default)]
-    pub superego_api_key: Option<String>,
 }
 
 /// Signed auto-approval entry for a skill.
@@ -444,10 +425,6 @@ pub struct AppConfig {
     #[serde(default)]
     pub active_provider_preference: Option<String>,
 
-    /// Superego Layer-2 enforcement mode.
-    #[serde(default)]
-    pub superego_l2_mode: SuperegoL2Mode,
-
     /// Multiple email account configurations (replaces single `email` field).
     #[serde(default)]
     pub email_accounts: Vec<EmailAccountConfig>,
@@ -553,7 +530,6 @@ impl AppConfig {
             force_override: ForceOverride::default(),
             provider_catalog: Vec::new(),
             active_provider_preference: None,
-            superego_l2_mode: SuperegoL2Mode::default(),
             email_accounts: Vec::new(),
             bundled_ollama: default_bundled_ollama(),
             bundled_model: default_bundled_model(),
@@ -679,7 +655,6 @@ impl AppConfig {
 
         // Migration from v6 to v7
         if self.schema_version < 7 {
-            // v7 adds: superego_l2_mode (defaults to Off)
             self.schema_version = 7;
             migrated = true;
             tracing::debug!("Migrated config from v6 to v7");
@@ -857,7 +832,6 @@ mod tests {
             force_override: ForceOverride::default(),
             provider_catalog: Vec::new(),
             active_provider_preference: None,
-            superego_l2_mode: SuperegoL2Mode::default(),
             email_accounts: Vec::new(),
             bundled_ollama: false,
             bundled_model: None,
@@ -1006,11 +980,6 @@ mod tests {
     }
 
     #[test]
-    fn test_superego_l2_mode_default() {
-        assert_eq!(SuperegoL2Mode::default(), SuperegoL2Mode::Off);
-    }
-
-    #[test]
     fn test_migrate_v4_to_v8() {
         let mut config = AppConfig::default_paths();
         config.schema_version = 4;
@@ -1073,15 +1042,6 @@ mod tests {
         assert_eq!(json, "\"tier_based\"");
         let parsed: RoutingMode = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, RoutingMode::TierBased);
-    }
-
-    #[test]
-    fn test_superego_l2_mode_serde() {
-        let mode = SuperegoL2Mode::Enforce;
-        let json = serde_json::to_string(&mode).unwrap();
-        assert_eq!(json, "\"enforce\"");
-        let parsed: SuperegoL2Mode = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed, SuperegoL2Mode::Enforce);
     }
 
     #[test]

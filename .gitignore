@@ -5,6 +5,7 @@
 *.local
 secrets.bin
 keys.bin
+scripts/uat/uat-keys.env
 
 # Rust
 target/

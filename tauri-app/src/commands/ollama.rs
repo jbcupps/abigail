@@ -143,7 +143,7 @@ pub async fn set_local_llm_during_birth(
         }
 
         // Rebuild router with new URL
-        if let Err(e) = crate::rebuild_router_with_superego(&state).await {
+        if let Err(e) = crate::rebuild_router(&state).await {
             tracing::warn!("Failed to rebuild router after setting local LLM: {}", e);
             // Even if rebuild fails (e.g. model not loaded), we saved the URL
         }

@@ -1,4 +1,4 @@
-//! Web Search skill — searches the web via Tavily API, gated by Superego safety checks.
+//! Web Search skill — searches the web via Tavily API with privacy guardrails.
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex};
 
 use abigail_capabilities::sensory::web_search;
 use abigail_core::secrets::SecretsVault;
-use abigail_core::superego;
 use abigail_skills::channel::TriggerDescriptor;
 use abigail_skills::manifest::{
     CapabilityDescriptor, NetworkPermission, Permission, SkillManifest,
@@ -132,13 +131,8 @@ impl Skill for WebSearchSkill {
 
         let max_results: u32 = params.get("max_results").unwrap_or(5);
 
-        // Superego safety check
-        let verdict = superego::check_search_query(&query);
-        if !verdict.allowed {
-            let reason = verdict
-                .reason
-                .unwrap_or_else(|| "Query blocked by safety check".to_string());
-            tracing::warn!("Superego blocked search query: {}", reason);
+        if let Some(reason) = check_query_privacy(&query) {
+            tracing::warn!("Blocked search query: {}", reason);
             return Ok(ToolOutput::error(format!("Search blocked: {}", reason)));
         }
 
@@ -184,6 +178,42 @@ impl Skill for WebSearchSkill {
     fn triggers(&self) -> Vec<TriggerDescriptor> {
         vec![]
     }
+}
+
+fn check_query_privacy(query: &str) -> Option<String> {
+    let lower = query.to_lowercase();
+
+    if (lower.contains("where does") || lower.contains("where do")) && lower.contains("live") {
+        return Some("Query appears to seek someone's home address".into());
+    }
+    if lower.contains("home address of") || lower.contains("home address for") {
+        return Some("Query appears to seek someone's home address".into());
+    }
+    if (lower.contains("phone number of") || lower.contains("phone number for"))
+        && !lower.contains("company")
+        && !lower.contains("business")
+        && !lower.contains("support")
+        && !lower.contains("customer service")
+    {
+        return Some("Query appears to seek someone's personal phone number".into());
+    }
+    if lower.contains("social security number")
+        || lower.contains("ssn of")
+        || lower.contains("ssn for")
+    {
+        return Some("Query seeks Social Security information".into());
+    }
+    if lower.contains("credit card number") || lower.contains("bank account number") {
+        return Some("Query seeks financial PII".into());
+    }
+    if lower.contains("dox") || lower.contains("doxx") {
+        return Some("Query contains doxxing language".into());
+    }
+    if lower.contains("real name of") && (lower.contains("anonymous") || lower.contains("username"))
+    {
+        return Some("Query attempts to de-anonymize someone".into());
+    }
+    None
 }
 
 #[cfg(test)]

@@ -95,7 +95,7 @@ fn get_config() -> AppConfig {
     config
 }
 
-pub async fn rebuild_router_with_superego(state: &AppState) -> Result<(), String> {
+pub async fn rebuild_router(state: &AppState) -> Result<(), String> {
     // Resolve config synchronously (acquires only sync locks), then drop guards
     // before the async build_providers call.
     let hive_config = {
@@ -145,11 +145,9 @@ pub async fn rebuild_router_with_superego(state: &AppState) -> Result<(), String
     Ok(())
 }
 
-pub async fn rebuild_router_with_superego_from_handle(
-    handle: &tauri::AppHandle,
-) -> Result<(), String> {
+pub async fn rebuild_router_from_handle(handle: &tauri::AppHandle) -> Result<(), String> {
     let state = handle.state::<AppState>();
-    rebuild_router_with_superego(&state).await
+    rebuild_router(&state).await
 }
 
 pub fn run() {
@@ -412,7 +410,6 @@ pub fn run() {
             probe_local_llm,
             set_local_llm_during_birth,
             use_stored_provider,
-            set_superego_provider,
             get_entity_theme,
             get_identity_sharing_settings,
             set_identity_sharing_settings,
@@ -428,8 +425,6 @@ pub fn run() {
             set_ego_model,
             get_ego_model,
             set_routing_mode,
-            get_superego_l2_mode,
-            set_superego_l2_mode,
             get_sqlite_stats,
             optimize_sqlite,
             reset_memories,

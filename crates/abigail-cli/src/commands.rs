@@ -31,7 +31,6 @@ pub fn status() -> anyhow::Result<()> {
         config.agent_name.as_deref().unwrap_or("(not set)")
     );
     println!("Routing mode: {:?}", config.routing_mode);
-    println!("Superego L2: {:?}", config.superego_l2_mode);
 
     if let Some(ref trinity) = config.trinity {
         println!(
@@ -45,10 +44,6 @@ pub fn status() -> anyhow::Result<()> {
             } else {
                 "not set"
             }
-        );
-        println!(
-            "Superego provider: {}",
-            trinity.superego_provider.as_deref().unwrap_or("(none)")
         );
         println!("Id URL: {}", trinity.id_url.as_deref().unwrap_or("(none)"));
     } else {
@@ -187,7 +182,6 @@ pub fn router_status() -> anyhow::Result<()> {
     let config = load_config()?;
     println!("=== Router Status ===");
     println!("Routing mode: {:?}", config.routing_mode);
-    println!("Superego L2 mode: {:?}", config.superego_l2_mode);
 
     if let Some(ref trinity) = config.trinity {
         println!(
@@ -198,18 +192,6 @@ pub fn router_status() -> anyhow::Result<()> {
             "Ego (cloud): {} {}",
             trinity.ego_provider.as_deref().unwrap_or("not configured"),
             if trinity.ego_api_key.is_some() {
-                "(key set)"
-            } else {
-                "(no key)"
-            }
-        );
-        println!(
-            "Superego: {} {}",
-            trinity
-                .superego_provider
-                .as_deref()
-                .unwrap_or("not configured"),
-            if trinity.superego_api_key.is_some() {
                 "(key set)"
             } else {
                 "(no key)"

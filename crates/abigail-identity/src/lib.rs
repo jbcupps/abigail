@@ -262,7 +262,6 @@ impl IdentityManager {
             tier_thresholds: Default::default(),
             provider_catalog: Vec::new(),
             active_provider_preference: None,
-            superego_l2_mode: Default::default(),
             email_accounts: Vec::new(),
             bundled_ollama: cfg!(windows),
             bundled_model: Some("qwen2.5:0.5b".to_string()),

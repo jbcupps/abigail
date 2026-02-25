@@ -17,6 +17,7 @@ use abigail_skills::skill::{
     CostEstimate, ExecutionContext, HealthStatus, Skill, SkillConfig, SkillError, SkillHealth,
     SkillResult, ToolDescriptor, ToolOutput, ToolParams,
 };
+use abigail_skills::transport::imap::ImapTlsMode;
 use abigail_skills::transport::ImapClient;
 
 use crate::transport::ProtonMailTransport;
@@ -202,7 +203,17 @@ impl Skill for ProtonMailSkill {
             ));
         }
 
-        let imap = ImapClient::new(&host, port, &user, &password);
+        let tls_mode = config
+            .values
+            .get("imap_tls_mode")
+            .and_then(|v| v.as_str())
+            .map(|s| match s.to_uppercase().as_str() {
+                "STARTTLS" => ImapTlsMode::StartTls,
+                _ => ImapTlsMode::Implicit,
+            })
+            .unwrap_or(ImapTlsMode::Implicit);
+
+        let imap = ImapClient::new(&host, port, &user, &password).with_tls_mode(tls_mode);
         imap.test_connection()
             .await
             .map_err(|e| SkillError::InitFailed(e.to_string()))?;

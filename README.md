@@ -19,7 +19,7 @@ Abigail has moved beyond simple "chatbots" to a structured entity hierarchy:
 3.  **Agents**: The specialized workers deployed by an Entity to perform tasks (Filesystem, Web, Shell).
 
 ### The Sanctum
-The **Sanctum** is the internal space where an Entity reflects on its actions. It houses the **Superego**—an out-of-band audit process that ensures the Entity's behavior remains aligned with its constitutional documents.
+The **Sanctum** is the internal space where an Entity reflects on its actions. Policy and audit (e.g. Superego-style alignment) will be handled by the Hive; the entity exposes a **chat memory hook** so the Hive can apply oversight when memories are persisted.
 
 ---
 
@@ -234,7 +234,7 @@ User Input → Router scores complexity (5–95)
 Failsafe: local LLM (Ollama/LM Studio) activates only when cloud providers fail
 ```
 
-The router classifies message complexity and maps it to one of three quality tiers via configurable thresholds. **Force overrides** let users pin a specific tier, model, or provider+tier combination. A **dynamic model registry** discovers available models from provider APIs (OpenAI, Anthropic, Google, xAI) with 24-hour caching. The **Superego** (ethical oversight) pre-checks routing decisions against alignment criteria.
+The router classifies message complexity and maps it to one of three quality tiers via configurable thresholds. **Force overrides** let users pin a specific tier, model, or provider+tier combination. A **dynamic model registry** discovers available models from provider APIs (OpenAI, Anthropic, Google, xAI) with 24-hour caching. Policy/oversight (e.g. Superego) will be handled by the Hive later; the entity exposes a **chat memory hook** for future Hive-side alignment (see invariants).
 
 ### Constitutional Documents
 

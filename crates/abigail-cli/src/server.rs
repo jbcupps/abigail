@@ -35,7 +35,6 @@ pub struct StatusResponse {
     pub birth_complete: bool,
     pub agent_name: Option<String>,
     pub routing_mode: String,
-    pub superego_l2_mode: String,
     pub local_llm_url: Option<String>,
     pub ego_provider: Option<String>,
     pub ego_key_set: bool,
@@ -57,12 +56,9 @@ pub struct IntegrationStatusItem {
 #[derive(Serialize)]
 pub struct RouterStatusResponse {
     pub routing_mode: String,
-    pub superego_l2_mode: String,
     pub id_url: Option<String>,
     pub ego_provider: Option<String>,
     pub ego_key_set: bool,
-    pub superego_provider: Option<String>,
-    pub superego_key_set: bool,
 }
 
 #[derive(Deserialize)]
@@ -199,7 +195,6 @@ async fn get_status(
         birth_complete: config.birth_complete,
         agent_name: config.agent_name,
         routing_mode: format!("{:?}", config.routing_mode),
-        superego_l2_mode: format!("{:?}", config.superego_l2_mode),
         local_llm_url: config.local_llm_base_url,
         ego_provider,
         ego_key_set,
@@ -341,7 +336,7 @@ async fn get_router_status(
 ) -> Result<Json<RouterStatusResponse>, StatusCode> {
     let config = load_config(&state).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let (id_url, ego_provider, ego_key_set, superego_provider, superego_key_set) = config
+    let (id_url, ego_provider, ego_key_set) = config
         .trinity
         .as_ref()
         .map(|t| {
@@ -349,20 +344,15 @@ async fn get_router_status(
                 t.id_url.clone(),
                 t.ego_provider.clone(),
                 t.ego_api_key.is_some(),
-                t.superego_provider.clone(),
-                t.superego_api_key.is_some(),
             )
         })
-        .unwrap_or((None, None, false, None, false));
+        .unwrap_or((None, None, false));
 
     Ok(Json(RouterStatusResponse {
         routing_mode: format!("{:?}", config.routing_mode),
-        superego_l2_mode: format!("{:?}", config.superego_l2_mode),
         id_url,
         ego_provider,
         ego_key_set,
-        superego_provider,
-        superego_key_set,
     }))
 }
 

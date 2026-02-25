@@ -83,7 +83,6 @@ export default function ForgePanel() {
   const [storedProviders, setStoredProviders] = useState<string[]>([]);
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const [routingMode, setRoutingMode] = useState<string>("tier_based");
-  const [superegoMode, setSuperegoMode] = useState<string>("off");
   const [currentModel, setCurrentModel] = useState<string>("");
   const [customModel, setCustomModel] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("task");
@@ -137,13 +136,12 @@ export default function ForgePanel() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [providers, active, router, forgeUi, supModeRaw, sharing, undo, audit, registry, tModels, fOverride, tThresholds] =
+      const [providers, active, router, forgeUi, sharing, undo, audit, registry, tModels, fOverride, tThresholds] =
         await Promise.all([
           invoke<string[]>("get_stored_providers"),
           invoke<string | null>("get_active_provider"),
           invoke<any>("get_router_status"),
           invoke<{ advanced_mode: boolean }>("get_forge_ui_settings"),
-          invoke<string>("get_superego_l2_mode"),
           invoke<{ skills_sharing_enabled: boolean }>("get_identity_sharing_settings"),
           invoke<UndoStatus>("get_forge_undo_status"),
           invoke<AuditEvent[]>("get_forge_audit_events"),
@@ -164,7 +162,6 @@ export default function ForgePanel() {
       setStoredProviders(coreProviders);
 
       setRoutingMode(router.routing_mode);
-      setSuperegoMode(supModeRaw.replace(/"/g, ""));
       setAdvancedMode(forgeUi.advanced_mode);
       setSkillsSharing(sharing.skills_sharing_enabled);
       setUndoStatus(undo);
@@ -211,7 +208,7 @@ export default function ForgePanel() {
         provider: activeProvider,
         model: modelToSave,
         routingMode,
-        superegoMode,
+        superegoMode: undefined,
       });
       setPreview(next);
     } catch (e) {
@@ -238,7 +235,7 @@ export default function ForgePanel() {
         provider: activeProvider,
         model: modelToSave,
         routingMode,
-        superegoMode,
+        superegoMode: undefined,
       });
       await invoke("set_identity_sharing_settings", {
         skillsSharingEnabled: skillsSharing,
@@ -720,7 +717,7 @@ export default function ForgePanel() {
     );
   };
 
-  /** Primary intelligence section — provider, routing, model, superego. */
+  /** Primary intelligence section — provider, routing, model. */
   const renderPrimaryIntelligence = () => (
     <div className="space-y-6">
       {/* Active Provider */}
@@ -842,21 +839,6 @@ export default function ForgePanel() {
         </>
       )}
 
-      {/* Superego Mode */}
-      <div className="space-y-2 pt-2">
-        <label className="text-[10px] text-theme-text-dim uppercase tracking-widest">
-          Superego Mode
-        </label>
-        <select
-          value={superegoMode}
-          onChange={(e) => setSuperegoMode(e.target.value)}
-          className="w-full bg-theme-bg-inset border border-theme-border-dim rounded px-2 py-2 text-xs"
-        >
-          <option value="off">Off</option>
-          <option value="advisory">Advisory</option>
-          <option value="enforce">Enforce</option>
-        </select>
-      </div>
     </div>
   );
 

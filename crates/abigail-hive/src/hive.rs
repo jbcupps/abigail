@@ -7,7 +7,7 @@
 use crate::provider_registry::{ProviderKind, ProviderRegistry};
 use abigail_capabilities::cognitive::{LlmProvider, LocalHttpProvider};
 use abigail_core::{
-    AppConfig, ForceOverride, RoutingMode, SecretsVault, SuperegoL2Mode, TierModels, TierThresholds,
+    AppConfig, ForceOverride, RoutingMode, SecretsVault, TierModels, TierThresholds,
 };
 use std::sync::{Arc, Mutex};
 
@@ -19,9 +19,6 @@ pub struct HiveConfig {
     pub ego_api_key: Option<String>,
     pub ego_model: Option<String>,
     pub routing_mode: RoutingMode,
-    pub superego_provider: Option<String>,
-    pub superego_api_key: Option<String>,
-    pub superego_l2_mode: SuperegoL2Mode,
     /// Per-provider model assignments for Fast/Standard/Pro tiers.
     pub tier_models: TierModels,
     /// Complexity score thresholds for tier selection.
@@ -36,8 +33,6 @@ pub struct BuiltProviders {
     pub local_http: Option<Arc<LocalHttpProvider>>,
     pub ego: Option<Arc<dyn LlmProvider>>,
     pub ego_kind: Option<ProviderKind>,
-    pub superego: Option<Arc<dyn LlmProvider>>,
-    pub superego_l2_mode: SuperegoL2Mode,
     pub routing_mode: RoutingMode,
     /// Per-provider model assignments for Fast/Standard/Pro tiers.
     pub tier_models: TierModels,
@@ -127,18 +122,6 @@ impl Hive {
         (None, None)
     }
 
-    /// Extract Superego provider config from TrinityConfig.
-    fn extract_superego_config(config: &AppConfig) -> Option<(String, String)> {
-        config.trinity.as_ref().and_then(|trinity| {
-            match (&trinity.superego_provider, &trinity.superego_api_key) {
-                (Some(provider), Some(key)) if !key.is_empty() => {
-                    Some((provider.clone(), key.clone()))
-                }
-                _ => None,
-            }
-        })
-    }
-
     /// Resolve the full provider configuration from AppConfig + vaults.
     ///
     /// Acquires locks on `secrets` then `hive_secrets` (in documented order).
@@ -167,8 +150,6 @@ impl Hive {
             model
         });
 
-        let superego_config = Self::extract_superego_config(config);
-
         tracing::debug!(
             "Resolved config: local_url={:?}, ego_name={:?}, ego_model={:?}, has_ego_key={}, mode={:?}",
             config.local_llm_base_url,
@@ -189,9 +170,6 @@ impl Hive {
             ego_api_key: ego_key,
             ego_model,
             routing_mode: config.routing_mode,
-            superego_provider: superego_config.as_ref().map(|(p, _)| p.clone()),
-            superego_api_key: superego_config.map(|(_, k)| k),
-            superego_l2_mode: config.superego_l2_mode,
             tier_models,
             tier_thresholds: config.tier_thresholds,
             force_override: config.force_override.clone(),
@@ -209,23 +187,11 @@ impl Hive {
         let id_result =
             ProviderRegistry::build_id_auto_detect(hive_config.local_llm_base_url.clone()).await;
 
-        let superego = match (
-            &hive_config.superego_provider,
-            &hive_config.superego_api_key,
-        ) {
-            (Some(provider), Some(key)) if !key.is_empty() => {
-                Some(ProviderRegistry::build_superego(provider, key))
-            }
-            _ => None,
-        };
-
         BuiltProviders {
             id: id_result.provider,
             local_http: id_result.local_http,
             ego: ego_result.provider,
             ego_kind: ego_result.kind,
-            superego,
-            superego_l2_mode: hive_config.superego_l2_mode,
             routing_mode: hive_config.routing_mode,
             tier_models: hive_config.tier_models.clone(),
             tier_thresholds: hive_config.tier_thresholds,
@@ -296,8 +262,6 @@ mod tests {
             id_url: None,
             ego_provider: Some("google".to_string()),
             ego_api_key: Some("google-key".to_string()),
-            superego_provider: None,
-            superego_api_key: None,
         });
         let vault = temp_vault();
 
@@ -369,44 +333,6 @@ mod tests {
         assert_eq!(resolved.ego_api_key.as_deref(), Some("hive-key"));
     }
 
-    #[test]
-    fn extract_superego_config_present() {
-        let mut config = default_config();
-        config.trinity = Some(abigail_core::TrinityConfig {
-            id_url: None,
-            ego_provider: None,
-            ego_api_key: None,
-            superego_provider: Some("anthropic".to_string()),
-            superego_api_key: Some("se-key".to_string()),
-        });
-
-        let result = Hive::extract_superego_config(&config);
-        assert_eq!(
-            result,
-            Some(("anthropic".to_string(), "se-key".to_string()))
-        );
-    }
-
-    #[test]
-    fn extract_superego_config_missing() {
-        let config = default_config();
-        assert!(Hive::extract_superego_config(&config).is_none());
-    }
-
-    #[test]
-    fn extract_superego_config_empty_key() {
-        let mut config = default_config();
-        config.trinity = Some(abigail_core::TrinityConfig {
-            id_url: None,
-            ego_provider: None,
-            ego_api_key: None,
-            superego_provider: Some("anthropic".to_string()),
-            superego_api_key: Some("".to_string()),
-        });
-
-        assert!(Hive::extract_superego_config(&config).is_none());
-    }
-
     #[tokio::test]
     async fn build_providers_from_config_no_keys() {
         let config = default_config();
@@ -415,7 +341,6 @@ mod tests {
 
         assert!(built.ego.is_none());
         assert!(built.ego_kind.is_none());
-        assert!(built.superego.is_none());
         assert!(built.local_http.is_none());
     }
 

@@ -77,9 +77,6 @@ pub struct ProviderConfig {
     pub ego_api_key: Option<String>,
     pub ego_model: Option<String>,
     pub routing_mode: String,
-    pub superego_provider: Option<String>,
-    pub superego_api_key: Option<String>,
-    pub superego_l2_mode: String,
     /// JSON-serialized TierModels (provider→model mappings for Fast/Standard/Pro).
     #[serde(default)]
     pub tier_models_json: Option<String>,
@@ -121,6 +118,13 @@ pub struct StoreSecretRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecretListResponse {
     pub keys: Vec<String>,
+}
+
+/// Response returning a single secret value (localhost-only, for entity daemon startup).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretValueResponse {
+    pub key: String,
+    pub value: String,
 }
 
 // ---------------------------------------------------------------------------

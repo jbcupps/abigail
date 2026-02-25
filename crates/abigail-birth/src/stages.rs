@@ -387,7 +387,6 @@ mod tests {
             tier_thresholds: Default::default(),
             provider_catalog: Default::default(),
             active_provider_preference: None,
-            superego_l2_mode: Default::default(),
             email_accounts: Default::default(),
             bundled_ollama: false,
             bundled_model: None,

@@ -20,7 +20,6 @@ use crate::council::CouncilEngine;
 
 // Re-export RoutingMode from abigail-core for convenience
 pub use abigail_core::RoutingMode;
-pub use abigail_core::SuperegoL2Mode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteDecision {
@@ -133,7 +132,6 @@ impl From<ProviderKind> for EgoProvider {
 pub struct RouterStatusInfo {
     pub has_ego: bool,
     pub ego_provider: Option<String>,
-    pub has_superego: bool,
     pub has_local_http: bool,
     pub mode: RoutingMode,
     /// Number of providers enrolled in the council (0 if no council attached).
@@ -151,12 +149,9 @@ pub struct IdEgoRouter {
     pub id: Arc<dyn LlmProvider>,
     pub ego: Option<Arc<dyn LlmProvider>>,
     pub ego_provider: Option<EgoProvider>,
-    pub superego: Option<Arc<dyn LlmProvider>>,
     pub council: Option<Arc<CouncilEngine>>,
     pub local_http: Option<Arc<LocalHttpProvider>>,
     pub mode: RoutingMode,
-    /// Superego Layer-2 enforcement mode.
-    pub superego_l2_mode: SuperegoL2Mode,
     /// Per-provider model assignments for each tier.
     pub tier_models: TierModels,
     /// Complexity score thresholds for tier selection.
@@ -195,11 +190,9 @@ impl IdEgoRouter {
             id: id_result.provider,
             ego: ego_result.provider,
             ego_provider: ego_result.kind.map(EgoProvider::from),
-            superego: None,
             council: None,
             local_http: id_result.local_http,
             mode,
-            superego_l2_mode: SuperegoL2Mode::Off,
             tier_models: TierModels::defaults(),
             tier_thresholds: TierThresholds::default(),
             force_override: ForceOverride::default(),
@@ -221,11 +214,9 @@ impl IdEgoRouter {
             id: id_result.provider,
             ego: ego_result.provider,
             ego_provider: ego_result.kind.map(EgoProvider::from),
-            superego: None,
             council: None,
             local_http: id_result.local_http,
             mode,
-            superego_l2_mode: SuperegoL2Mode::Off,
             tier_models: TierModels::defaults(),
             tier_thresholds: TierThresholds::default(),
             force_override: ForceOverride::default(),
@@ -238,11 +229,9 @@ impl IdEgoRouter {
             id: providers.id,
             ego: providers.ego,
             ego_provider: providers.ego_kind.map(EgoProvider::from),
-            superego: providers.superego,
             council: None,
             local_http: providers.local_http,
             mode: providers.routing_mode,
-            superego_l2_mode: providers.superego_l2_mode,
             tier_models: providers.tier_models,
             tier_thresholds: providers.tier_thresholds,
             force_override: providers.force_override,
@@ -258,42 +247,15 @@ impl IdEgoRouter {
         }
     }
 
-    /// Builder method: attach a Superego (safety) provider.
-    pub fn with_superego(mut self, provider: Arc<dyn LlmProvider>) -> Self {
-        self.superego = Some(provider);
-        self
-    }
-
-    /// Builder method: set the Superego L2 mode.
-    pub fn with_superego_l2_mode(mut self, mode: SuperegoL2Mode) -> Self {
-        self.superego_l2_mode = mode;
-        self
-    }
-
     /// Builder method: attach a Council engine for deliberative routing.
     pub fn with_council(mut self, council: CouncilEngine) -> Self {
         self.council = Some(Arc::new(council));
         self
     }
 
-    /// Get the current Superego L2 mode.
-    pub fn superego_l2_mode(&self) -> SuperegoL2Mode {
-        self.superego_l2_mode
-    }
-
-    /// Set the Superego L2 mode.
-    pub fn set_superego_l2_mode(&mut self, mode: SuperegoL2Mode) {
-        self.superego_l2_mode = mode;
-    }
-
     /// Return true if an Ego provider is configured.
     pub fn has_ego(&self) -> bool {
         self.ego.is_some()
-    }
-
-    /// Return true if a Superego provider is configured.
-    pub fn has_superego(&self) -> bool {
-        self.superego.is_some()
     }
 
     /// Return the name of the current Ego provider.
@@ -311,7 +273,6 @@ impl IdEgoRouter {
         RouterStatusInfo {
             has_ego: self.ego.is_some(),
             ego_provider: self.ego_provider.as_ref().map(|p| p.to_string()),
-            has_superego: self.superego.is_some(),
             has_local_http: self.local_http.is_some(),
             mode: self.mode,
             council_provider_count: self.council.as_ref().map_or(0, |c| c.provider_count()),
@@ -547,31 +508,7 @@ impl IdEgoRouter {
 
     /// Main route method.
     pub async fn route(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
-        if let Some(deny) = self.run_superego_precheck(&messages).await {
-            return Ok(deny);
-        }
         self.route_fast(messages).await
-    }
-
-    /// Run Superego pre-check.
-    pub async fn run_superego_precheck(&self, messages: &[Message]) -> Option<CompletionResponse> {
-        let last_user_msg = messages
-            .iter()
-            .rev()
-            .find(|m| m.role == "user")
-            .map_or("", |m| &m.content);
-        if last_user_msg.is_empty() {
-            return None;
-        }
-        let verdict = abigail_core::check_message(last_user_msg);
-        if !verdict.allowed {
-            let reason = verdict.reason.unwrap_or_else(|| "Blocked".to_string());
-            return Some(CompletionResponse {
-                content: format!("Blocked: {}", reason),
-                tool_calls: None,
-            });
-        }
-        None
     }
 
     /// Route with tools and tier-based model selection.
@@ -580,9 +517,6 @@ impl IdEgoRouter {
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
     ) -> anyhow::Result<CompletionResponse> {
-        if let Some(deny) = self.run_superego_precheck(&messages).await {
-            return Ok(deny);
-        }
         let last_msg = messages.last().map_or("", |m| &m.content);
         let target = self.target_for_mode(last_msg);
         let model_override = if self.mode == RoutingMode::TierBased {
@@ -628,11 +562,6 @@ impl IdEgoRouter {
             self.mode,
             self.ego.is_some()
         );
-        if let Some(deny) = self.run_superego_precheck(&messages).await {
-            let _ = tx.send(StreamEvent::Done(deny.clone())).await;
-            return Ok(deny);
-        }
-
         let last_msg = messages.last().map_or("", |m| &m.content);
         let fp = self.fast_path_classify(last_msg);
         let model_override = if self.mode == RoutingMode::TierBased {
@@ -692,10 +621,6 @@ impl IdEgoRouter {
             self.mode,
             self.ego.is_some()
         );
-        if let Some(deny) = self.run_superego_precheck(&messages).await {
-            let _ = tx.send(StreamEvent::Done(deny.clone())).await;
-            return Ok(deny);
-        }
         let last_msg = messages.last().map_or("", |m| &m.content);
         let target = self.target_for_mode(last_msg);
         let model_override = if self.mode == RoutingMode::TierBased {
@@ -783,14 +708,6 @@ mod tests {
         );
         assert!(router.has_ego());
         assert_eq!(router.ego_provider_name(), Some(&EgoProvider::OpenAi));
-    }
-
-    #[tokio::test]
-    async fn test_superego_route_blocks_harmful() {
-        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
-        let messages = vec![Message::new("user", "where does Elon Musk live")];
-        let response = router.route(messages).await.unwrap();
-        assert!(response.content.contains("Blocked"));
     }
 
     #[tokio::test]

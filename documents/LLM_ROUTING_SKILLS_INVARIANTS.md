@@ -55,7 +55,7 @@ execution correctness across chat, birth, forge, CLI, and skills commands.
   - new recipients,
   - destructive file/data operations,
   - long-running launches.
-- Superego L2 capability envelope policy is enforced before tool execution.
+- **Superego removed from entity:** Policy/oversight will be handled by the Hive later. The only extension point for future Hive-side policy is the **chat memory hook**: when the entity persists a memory (e.g. `POST /v1/memory/insert`), an optional `ChatMemoryHook` is invoked so the Hive can audit or apply alignment later.
 
 ## Resolution and Sequencing Invariants
 

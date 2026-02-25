@@ -4,6 +4,7 @@ use abigail_skills::{HiveAgentInfo, HiveOperations};
 use async_trait::async_trait;
 use hive_core::{
     ApiEnvelope, CreateEntityResponse, EntityInfo, ProviderConfig, SecretListResponse,
+    SecretValueResponse,
 };
 
 /// HTTP client for fetching data from the Hive daemon.
@@ -36,6 +37,18 @@ impl HiveClient {
                 "Hive error: {}",
                 resp.error.unwrap_or_default()
             ))
+        }
+    }
+
+    /// Fetch a secret value from Hive by key. Returns None if not found.
+    pub async fn get_secret(&self, key: &str) -> anyhow::Result<Option<String>> {
+        let url = format!("{}/v1/secrets/{}", self.base_url, key);
+        let resp: ApiEnvelope<SecretValueResponse> =
+            self.client.get(&url).send().await?.json().await?;
+        if resp.ok {
+            Ok(resp.data.map(|d| d.value))
+        } else {
+            Ok(None)
         }
     }
 
