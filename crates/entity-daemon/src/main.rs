@@ -351,6 +351,17 @@ async fn main() -> anyhow::Result<()> {
     );
     tracing::info!("Memory store opened: {:?}", config.db_path);
 
+    let instruction_registry = Arc::new({
+        let skills_base = data_root.join("skills");
+        let reg_path = skills_base.join("registry.toml");
+        let instr_dir = skills_base.join("instructions");
+        if reg_path.exists() {
+            abigail_skills::InstructionRegistry::load(&reg_path, &instr_dir)
+        } else {
+            abigail_skills::InstructionRegistry::empty()
+        }
+    });
+
     let state = EntityDaemonState {
         entity_id: cli.entity_id.clone(),
         config,
@@ -361,6 +372,7 @@ async fn main() -> anyhow::Result<()> {
         docs_dir,
         memory,
         memory_hook: None,
+        instruction_registry,
     };
 
     // Build HTTP router

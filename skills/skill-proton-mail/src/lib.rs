@@ -18,7 +18,8 @@ use abigail_skills::skill::{
     SkillResult, ToolDescriptor, ToolOutput, ToolParams,
 };
 use abigail_skills::transport::imap::ImapTlsMode;
-use abigail_skills::transport::ImapClient;
+use abigail_skills::transport::smtp::SmtpTlsMode;
+use abigail_skills::transport::{ImapClient, SmtpClient};
 
 use crate::transport::ProtonMailTransport;
 
@@ -109,7 +110,7 @@ impl ProtonMailSkill {
     fn tool_send_email() -> ToolDescriptor {
         ToolDescriptor {
             name: "send_email".to_string(),
-            description: "Send an email (stub; not yet implemented).".to_string(),
+            description: "Send an email via SMTP.".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -218,7 +219,34 @@ impl Skill for ProtonMailSkill {
             .await
             .map_err(|e| SkillError::InitFailed(e.to_string()))?;
 
-        let transport = ProtonMailTransport::new(Some(imap), None);
+        let smtp_host = config
+            .values
+            .get("smtp_host")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .or_else(|| config.secrets.get("smtp_host").cloned())
+            .unwrap_or_else(|| "smtp.proton.me".to_string());
+        let smtp_port = config
+            .values
+            .get("smtp_port")
+            .and_then(|v| v.as_u64())
+            .or_else(|| {
+                config
+                    .secrets
+                    .get("smtp_port")
+                    .and_then(|s| s.parse::<u64>().ok())
+            })
+            .unwrap_or(587) as u16;
+
+        let smtp_tls_mode = if tls_mode == ImapTlsMode::StartTls {
+            SmtpTlsMode::StartTls
+        } else {
+            SmtpTlsMode::Implicit
+        };
+        let smtp =
+            SmtpClient::new(&smtp_host, smtp_port, &user, &password).with_tls_mode(smtp_tls_mode);
+
+        let transport = ProtonMailTransport::new(Some(imap), Some(smtp), &user);
         self.transport = Some(Arc::new(RwLock::new(transport)));
         Ok(())
     }
@@ -292,7 +320,50 @@ impl Skill for ProtonMailSkill {
                 }
                 Ok(out)
             }
-            "send_email" => Ok(ToolOutput::error("send_email not yet implemented")),
+            "send_email" => {
+                let to_raw = params
+                    .get::<serde_json::Value>("to")
+                    .unwrap_or(serde_json::Value::Array(vec![]));
+                let to_addrs: Vec<abigail_skills::capability::email::EmailAddress> = match to_raw {
+                    serde_json::Value::Array(arr) => arr
+                        .into_iter()
+                        .filter_map(|v| {
+                            let email = v
+                                .get("email")
+                                .and_then(|e| e.as_str())
+                                .map(String::from)
+                                .or_else(|| v.as_str().map(String::from))?;
+                            let name = v.get("name").and_then(|n| n.as_str()).map(String::from);
+                            Some(abigail_skills::capability::email::EmailAddress { email, name })
+                        })
+                        .collect(),
+                    serde_json::Value::String(s) => {
+                        vec![abigail_skills::capability::email::EmailAddress {
+                            email: s,
+                            name: None,
+                        }]
+                    }
+                    _ => vec![],
+                };
+                let subject = params.get::<String>("subject").unwrap_or_default();
+                let body = params.get::<String>("body").unwrap_or_default();
+
+                if to_addrs.is_empty() {
+                    return Ok(ToolOutput::error("No valid recipients in 'to' field"));
+                }
+
+                let outgoing = OutgoingEmail {
+                    to: to_addrs,
+                    subject,
+                    body,
+                };
+                let guard = transport.write().await;
+                let result = guard.send_email(outgoing).await?;
+                Ok(ToolOutput::success(serde_json::json!({
+                    "success": true,
+                    "message_id": result.message_id,
+                })))
+            }
             "classify_importance" => {
                 let _email_id = params.get::<String>("email_id").unwrap_or_default();
                 Ok(ToolOutput::success(serde_json::json!("normal")))

@@ -212,7 +212,7 @@ fn convert_messages(
                             serde_json::from_str(&tc.arguments).unwrap_or_default();
                         blocks.push(ContentBlock::ToolUse {
                             id: tc.id.clone(),
-                            name: tc.name.clone(),
+                            name: sanitize_tool_name(&tc.name),
                             input,
                         });
                     }
@@ -295,15 +295,42 @@ fn to_blocks(content: &AnthropicContent) -> Vec<ContentBlock> {
     }
 }
 
-fn convert_tools(tools: &[ToolDefinition]) -> Vec<AnthropicTool> {
-    tools
-        .iter()
-        .map(|td| AnthropicTool {
-            name: td.name.clone(),
-            description: td.description.clone(),
-            input_schema: td.parameters.clone(),
+/// Sanitize a tool name to match Anthropic's `^[a-zA-Z0-9_-]{1,64}$` constraint.
+/// `::` → `__`, `.` → `_`, other invalid chars → `_`.
+fn sanitize_tool_name(name: &str) -> String {
+    name.replace("::", "__")
+        .replace('.', "_")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
         })
         .collect()
+}
+
+/// Convert tool definitions and return the Anthropic-safe tools plus a
+/// reverse map from sanitized name back to the original qualified name.
+fn convert_tools(
+    tools: &[ToolDefinition],
+) -> (
+    Vec<AnthropicTool>,
+    std::collections::HashMap<String, String>,
+) {
+    let mut api_tools = Vec::new();
+    let mut name_map = std::collections::HashMap::new();
+    for td in tools {
+        let safe_name = sanitize_tool_name(&td.name);
+        name_map.insert(safe_name.clone(), td.name.clone());
+        api_tools.push(AnthropicTool {
+            name: safe_name,
+            description: td.description.clone(),
+            input_schema: td.parameters.clone(),
+        });
+    }
+    (api_tools, name_map)
 }
 
 // ── LlmProvider impl ───────────────────────────────────────────────
@@ -319,7 +346,13 @@ impl LlmProvider for AnthropicProvider {
             request.tools.as_ref().map_or(0, |t| t.len()),
         );
         let (system, messages) = convert_messages(&request.messages);
-        let tools = request.tools.as_ref().map(|t| convert_tools(t));
+        let (tools, name_map) = match request.tools.as_ref() {
+            Some(t) => {
+                let (api_tools, map) = convert_tools(t);
+                (Some(api_tools), map)
+            }
+            None => (None, std::collections::HashMap::new()),
+        };
 
         let body = AnthropicRequest {
             model: model.to_string(),
@@ -360,7 +393,6 @@ impl LlmProvider for AnthropicProvider {
 
         let api_response: AnthropicResponse = response.json().await?;
 
-        // Extract text content and tool calls from response blocks
         let mut text_parts = Vec::new();
         let mut tool_calls = Vec::new();
 
@@ -368,9 +400,13 @@ impl LlmProvider for AnthropicProvider {
             match block {
                 ResponseContentBlock::Text { text } => text_parts.push(text.clone()),
                 ResponseContentBlock::ToolUse { id, name, input } => {
+                    let original_name = name_map
+                        .get(name.as_str())
+                        .cloned()
+                        .unwrap_or_else(|| name.clone());
                     tool_calls.push(ToolCall {
                         id: id.clone(),
-                        name: name.clone(),
+                        name: original_name,
                         arguments: input.to_string(),
                     });
                 }
@@ -384,7 +420,6 @@ impl LlmProvider for AnthropicProvider {
             Some(tool_calls)
         };
 
-        // Log stop reason for debugging
         if let Some(ref reason) = api_response.stop_reason {
             tracing::debug!("Anthropic stop_reason: {}", reason);
         }
@@ -408,7 +443,13 @@ impl LlmProvider for AnthropicProvider {
             request.tools.as_ref().map_or(0, |t| t.len()),
         );
         let (system, messages) = convert_messages(&request.messages);
-        let tools = request.tools.as_ref().map(|t| convert_tools(t));
+        let (tools, name_map) = match request.tools.as_ref() {
+            Some(t) => {
+                let (api_tools, map) = convert_tools(t);
+                (Some(api_tools), map)
+            }
+            None => (None, std::collections::HashMap::new()),
+        };
 
         let api_request = AnthropicRequest {
             model: model.to_string(),
@@ -483,7 +524,9 @@ impl LlmProvider for AnthropicProvider {
                                 index,
                                 content_block: SseContentBlock::ToolUse { id, name },
                             } => {
-                                tool_ids.insert(index, (id, name));
+                                let original_name =
+                                    name_map.get(name.as_str()).cloned().unwrap_or(name);
+                                tool_ids.insert(index, (id, original_name));
                                 tool_args.insert(index, String::new());
                             }
                             SseEvent::ContentBlockDelta { index, delta } => match delta {
@@ -599,9 +642,35 @@ mod tests {
             description: "Search the web".to_string(),
             parameters: serde_json::json!({"type": "object"}),
         }];
-        let result = convert_tools(&tools);
+        let (result, map) = convert_tools(&tools);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].name, "search");
+        assert_eq!(map["search"], "search");
+    }
+
+    #[test]
+    fn test_sanitize_tool_name_qualified() {
+        let name = "builtin.hive_management::store_secret";
+        let safe = sanitize_tool_name(name);
+        assert_eq!(safe, "builtin_hive_management__store_secret");
+    }
+
+    #[test]
+    fn test_convert_tools_round_trip() {
+        let tools = vec![ToolDefinition {
+            name: "com.abigail.skills.proton-mail::fetch_emails".to_string(),
+            description: "Fetch emails".to_string(),
+            parameters: serde_json::json!({"type": "object"}),
+        }];
+        let (result, map) = convert_tools(&tools);
+        assert_eq!(
+            result[0].name,
+            "com_abigail_skills_proton-mail__fetch_emails"
+        );
+        assert_eq!(
+            map["com_abigail_skills_proton-mail__fetch_emails"],
+            "com.abigail.skills.proton-mail::fetch_emails"
+        );
     }
 
     #[tokio::test]

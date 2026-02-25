@@ -26,5 +26,35 @@ name = "imap_password"
 description = "App password or account password for IMAP login"
 required = true
 
+[[secrets]]
+name = "imap_user"
+description = "IMAP username / email address"
+required = true
+
+[[secrets]]
+name = "imap_host"
+description = "IMAP server hostname (default: mail.proton.me)"
+required = false
+
+[[secrets]]
+name = "imap_port"
+description = "IMAP server port (default: 993)"
+required = false
+
+[[secrets]]
+name = "imap_tls_mode"
+description = "TLS mode: IMPLICIT (default) or STARTTLS"
+required = false
+
+[[secrets]]
+name = "smtp_host"
+description = "SMTP server hostname (default: smtp.proton.me)"
+required = false
+
+[[secrets]]
+name = "smtp_port"
+description = "SMTP server port (default: 587)"
+required = false
+
 [config]
 defaults = { imap_host = "mail.proton.me", imap_port = 993, smtp_host = "smtp.proton.me", smtp_port = 587 }

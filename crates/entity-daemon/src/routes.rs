@@ -47,9 +47,15 @@ pub async fn chat(
     State(state): State<EntityDaemonState>,
     Json(body): Json<ChatRequest>,
 ) -> Json<ApiEnvelope<ChatResponse>> {
-    // 1. Build system prompt from constitutional documents
-    let system_prompt =
+    // 1. Build system prompt from constitutional documents, augmented with tool + skill instructions
+    let base_prompt =
         abigail_core::system_prompt::build_system_prompt(&state.docs_dir, &state.config.agent_name);
+    let system_prompt = entity_chat::augment_system_prompt(
+        &base_prompt,
+        &state.registry,
+        &state.instruction_registry,
+        &body.message,
+    );
 
     // 2. Build contextual messages with sanitization + deduplication
     let messages = entity_chat::build_contextual_messages(

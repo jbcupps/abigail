@@ -192,7 +192,28 @@
       "Bash(nvm list:*)",
       "Bash(fnm list:*)",
       "WebFetch(domain:ratulmaharaj.com)",
-      "WebFetch(domain:thatgurjot.com)"
+      "WebFetch(domain:thatgurjot.com)",
+      "Bash(git rm:*)",
+      "mcp__filesystem__directory_tree",
+      "mcp__filesystem__list_directory",
+      "mcp__filesystem__read_text_file",
+      "Bash(tail:*)",
+      "Bash(cd /e/Agents/abigail && rm -f tasks/todo.md tasks/lessons.md 2>&1)",
+      "Bash(xargs -I {} sh -c 'echo \"\"=== {} ===\"\" && cat \"\"{}\"\"')",
+      "Bash(xargs:*)",
+      "Bash(npx vitest:*)",
+      "Bash(# Check if there are other MSVC toolset versions that might have the full CRT find \"\"/c/Program Files \\(x86\\)/Microsoft Visual Studio\"\" -name \"\"msvcrt.lib\"\")",
+      "mcp__filesystem__write_file",
+      "Bash(\"C:\\\\Program Files \\(x86\\)\\\\Microsoft Visual Studio\\\\2022\\\\BuildTools\\\\Common7\\\\Tools\\\\VsDevCmd.bat\" -arch=x64)",
+      "mcp__Claude_Preview__preview_start",
+      "WebFetch(domain:ai.google.dev)",
+      "WebFetch(domain:docs.x.ai)",
+      "WebFetch(domain:platform.openai.com)",
+      "WebFetch(domain:docs.perplexity.ai)",
+      "WebFetch(domain:openrouter.ai)",
+      "Bash(\"C:\\\\Program Files \\(x86\\)\\\\Microsoft Visual Studio\\\\2022\\\\BuildTools\\\\VC\\\\Auxiliary\\\\Build\\\\vcvarsall.bat\" x64)",
+      "Bash(E:)",
+      "Bash(LIB=\"C:/Program Files \\(x86\\)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files \\(x86\\)/Windows Kits/10/Lib/10.0.26100.0/um/x64;C:/Program Files \\(x86\\)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/lib/x64\" cargo check:*)"
     ]
   }
 }

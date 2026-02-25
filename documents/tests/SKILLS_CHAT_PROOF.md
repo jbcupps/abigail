@@ -93,6 +93,20 @@ Prove, with repeatable local evidence, that:
   - Created skill is discoverable by `DynamicApiSkill::discover` (or registry scan).
 - **Result**: PASS (covered by `skill_factory_author_creates_files` test; lint-clean)
 
+### PROOF-006: Live email E2E via entity-chat
+- **Layer**: `entity-chat` crate (integration test)
+- **Check**: `cargo test -p entity-chat --test live_email -- --nocapture` (env-gated, requires `ABIGAIL_IMAP_TEST=1`)
+- **Criteria**:
+  - Turn 1: LLM receives credential-setup intent, calls `store_secret` via tool-use loop, vault populated.
+  - Turn 2: LLM calls `fetch_emails` on ProtonMailSkill, returns messages from IMAP server.
+  - Turn 3: LLM calls `send_email` on ProtonMailSkill, SMTP transport delivers message.
+- **Tests added** (`crates/entity-chat/tests/live_email.rs`):
+  - `turn1_credential_setup`
+  - `turn2_fetch_emails`
+  - `turn3_send_email`
+- **Bug discovered**: Anthropic API rejects qualified tool names containing `.` and `::`. Fixed by adding `sanitize_tool_name()` in `abigail-capabilities/src/cognitive/anthropic.rs`.
+- **Result**: Turn 1 **PASS** (real Anthropic LLM). Turns 2-3 **SKIP** (graceful timeout — mail bridge not running). See `documents/tests/EMAIL_INTEGRATION_REPORT.md` for full details.
+
 ## Gate Alignment
 
 | Gate | Command | Status |

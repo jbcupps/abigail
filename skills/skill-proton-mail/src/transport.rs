@@ -10,11 +10,16 @@ use abigail_skills::{SkillError, SkillResult};
 pub struct ProtonMailTransport {
     pub imap: Option<ImapClient>,
     pub smtp: Option<SmtpClient>,
+    pub from_address: String,
 }
 
 impl ProtonMailTransport {
-    pub fn new(imap: Option<ImapClient>, smtp: Option<SmtpClient>) -> Self {
-        Self { imap, smtp }
+    pub fn new(imap: Option<ImapClient>, smtp: Option<SmtpClient>, from_address: &str) -> Self {
+        Self {
+            imap,
+            smtp,
+            from_address: from_address.to_string(),
+        }
     }
 
     pub async fn test_connection(&self) -> SkillResult<()> {
@@ -64,14 +69,21 @@ impl ProtonMailTransport {
         Ok(emails)
     }
 
-    pub async fn send_email(&self, _email: OutgoingEmail) -> SkillResult<SendResult> {
-        if self.smtp.is_none() {
-            return Err(SkillError::ToolFailed(
-                "SMTP not configured (send_email not implemented)".to_string(),
-            ));
-        }
-        Err(SkillError::ToolFailed(
-            "send_email not yet implemented".to_string(),
-        ))
+    pub async fn send_email(&self, email: OutgoingEmail) -> SkillResult<SendResult> {
+        let smtp = self
+            .smtp
+            .as_ref()
+            .ok_or_else(|| SkillError::ToolFailed("SMTP not configured".to_string()))?;
+
+        let to_addrs: Vec<&str> = email.to.iter().map(|a| a.email.as_str()).collect();
+
+        let response = smtp
+            .send(&self.from_address, &to_addrs, &email.subject, &email.body)
+            .await
+            .map_err(|e| SkillError::ToolFailed(format!("SMTP send failed: {}", e)))?;
+
+        Ok(SendResult {
+            message_id: Some(response),
+        })
     }
 }
