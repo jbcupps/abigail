@@ -179,9 +179,11 @@ pub async fn chat_stream(
                             complexity_score,
                         };
                         let _ = sse_tx
-                            .send(Event::default().event("done").data(
-                                serde_json::to_string(&response).unwrap_or_default(),
-                            ))
+                            .send(
+                                Event::default()
+                                    .event("done")
+                                    .data(serde_json::to_string(&response).unwrap_or_default()),
+                            )
                             .await;
                         return;
                     }

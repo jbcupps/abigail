@@ -394,16 +394,31 @@ async fn main() -> anyhow::Result<()> {
                                 tracing::info!("Skill watcher: detected change at {:?}", path);
                                 // Check for a sibling JSON file (DynamicApiSkill)
                                 if let Some(parent) = path.parent() {
-                                    for entry in std::fs::read_dir(parent).into_iter().flatten().flatten() {
+                                    for entry in
+                                        std::fs::read_dir(parent).into_iter().flatten().flatten()
+                                    {
                                         let p = entry.path();
                                         if p.extension().and_then(|e| e.to_str()) == Some("json") {
-                                            match abigail_skills::DynamicApiSkill::load_from_path(&p, vault_for_watcher.clone()) {
+                                            match abigail_skills::DynamicApiSkill::load_from_path(
+                                                &p,
+                                                vault_for_watcher.clone(),
+                                            ) {
                                                 Ok(skill) => {
-                                                    let sid = abigail_skills::manifest::SkillId(skill.manifest().id.0.clone());
-                                                    let _ = registry_for_watcher.register(sid.clone(), Arc::new(skill));
-                                                    tracing::info!("Skill watcher: registered {}", sid.0);
+                                                    let sid = abigail_skills::manifest::SkillId(
+                                                        skill.manifest().id.0.clone(),
+                                                    );
+                                                    let _ = registry_for_watcher
+                                                        .register(sid.clone(), Arc::new(skill));
+                                                    tracing::info!(
+                                                        "Skill watcher: registered {}",
+                                                        sid.0
+                                                    );
                                                 }
-                                                Err(e) => tracing::debug!("Skill watcher: skip {:?}: {}", p, e),
+                                                Err(e) => tracing::debug!(
+                                                    "Skill watcher: skip {:?}: {}",
+                                                    p,
+                                                    e
+                                                ),
                                             }
                                         }
                                     }

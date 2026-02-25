@@ -119,7 +119,8 @@ mod tests {
 
     #[test]
     fn detects_multiple_keys() {
-        let msg = "OpenAI: sk-abcdefghijklmnopqrstuvwxyz and Anthropic: sk-ant-abc123def456ghi789jklmno";
+        let msg =
+            "OpenAI: sk-abcdefghijklmnopqrstuvwxyz and Anthropic: sk-ant-abc123def456ghi789jklmno";
         let keys = detect_api_keys(msg);
         assert_eq!(keys.len(), 2);
     }

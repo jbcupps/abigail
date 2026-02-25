@@ -12,8 +12,8 @@ use abigail_core::{ForceOverride, RoutingMode, TierModels, TierThresholds};
 use abigail_router::IdEgoRouter;
 use abigail_skills::manifest::{SkillId, SkillManifest};
 use abigail_skills::skill::{
-    CostEstimate, ExecutionContext, HealthStatus, Skill, SkillConfig, SkillHealth,
-    SkillResult, ToolDescriptor, ToolOutput, ToolParams,
+    CostEstimate, ExecutionContext, HealthStatus, Skill, SkillConfig, SkillHealth, SkillResult,
+    ToolDescriptor, ToolOutput, ToolParams,
 };
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use async_trait::async_trait;
@@ -272,8 +272,7 @@ async fn long_message_is_capped() {
         content: long_msg.clone(),
     }];
 
-    let system =
-        entity_chat::augment_system_prompt("prompt", &registry, &instr, "hi");
+    let system = entity_chat::augment_system_prompt("prompt", &registry, &instr, "hi");
     let messages = entity_chat::build_contextual_messages(&system, Some(history), "hi");
 
     // History message should be capped at 4000 chars
@@ -301,8 +300,7 @@ async fn rounds_only_returns_final_text_when_no_tools_called() {
     let (router, registry, executor) = build_test_env(MockProvider::text_only());
     let instr = InstructionRegistry::empty();
 
-    let system =
-        entity_chat::augment_system_prompt("You are a test bot.", &registry, &instr, "hi");
+    let system = entity_chat::augment_system_prompt("You are a test bot.", &registry, &instr, "hi");
     let mut messages = entity_chat::build_contextual_messages(&system, None, "hi");
     let tools = entity_chat::build_tool_definitions(&registry);
 

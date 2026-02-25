@@ -280,11 +280,22 @@ async fn skill_factory_creates_and_registers_dynamic_skill() {
 
     // Author a dynamic_api skill via the factory tool
     let mut params = ToolParams::new();
-    params.values.insert("id".into(), serde_json::json!("dynamic.roundtrip_test"));
-    params.values.insert("name".into(), serde_json::json!("Roundtrip Test"));
-    params.values.insert("description".into(), serde_json::json!("Test skill"));
-    params.values.insert("format".into(), serde_json::json!("dynamic_api"));
-    params.values.insert("how_to_use_md".into(), serde_json::json!("# Test\nUse get_data."));
+    params
+        .values
+        .insert("id".into(), serde_json::json!("dynamic.roundtrip_test"));
+    params
+        .values
+        .insert("name".into(), serde_json::json!("Roundtrip Test"));
+    params
+        .values
+        .insert("description".into(), serde_json::json!("Test skill"));
+    params
+        .values
+        .insert("format".into(), serde_json::json!("dynamic_api"));
+    params.values.insert(
+        "how_to_use_md".into(),
+        serde_json::json!("# Test\nUse get_data."),
+    );
     params.values.insert(
         "tools_json".into(),
         serde_json::json!(serde_json::json!([{

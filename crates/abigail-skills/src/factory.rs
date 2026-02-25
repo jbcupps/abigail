@@ -245,8 +245,8 @@ impl SkillFactory {
         };
 
         let json_path = skill_dir.join(format!("{}.json", id.replace('.', "_")));
-        let json =
-            serde_json::to_string_pretty(&config).map_err(|e| SkillError::ToolFailed(e.to_string()))?;
+        let json = serde_json::to_string_pretty(&config)
+            .map_err(|e| SkillError::ToolFailed(e.to_string()))?;
         std::fs::write(&json_path, json).map_err(|e| SkillError::ToolFailed(e.to_string()))?;
 
         // Immediately register the skill if we have a registry.
