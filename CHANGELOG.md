@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-25 17:40 EST: Implement streaming chat (Tauri events + daemon SSE), wire SkillFactory runtime auto-registration with DynamicApiSkill output, add E2E parity tests with mock providers across entity-chat/daemon/frontend
 - 2026-02-24 23:00 EST: Implement SMTP client, wire ProtonMailSkill send_email, add live email E2E tests (entity-chat), fix Anthropic tool-name sanitization for all skill tool-use, extract HiveOperations trait for Tauri/daemon parity
 - 2026-02-24 17:30 EST: Add tabula rasa UAT harness with STARTTLS IMAP support, entity-daemon --data-dir isolation, Hive-to-entity secret sync, and automated 9-stage test pipeline
 - 2026-02-26 12:00 EST: Remove Superego from entity entirely; add ChatMemoryHook at entity memory persist as sole hook for future Hive/Superego use

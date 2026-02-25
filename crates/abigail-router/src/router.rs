@@ -586,6 +586,17 @@ impl IdEgoRouter {
         self.id.complete(&CompletionRequest::simple(messages)).await
     }
 
+    /// Id only streaming.
+    pub async fn id_stream(
+        &self,
+        messages: Vec<Message>,
+        tx: tokio::sync::mpsc::Sender<StreamEvent>,
+    ) -> anyhow::Result<CompletionResponse> {
+        self.id
+            .stream(&CompletionRequest::simple(messages), tx)
+            .await
+    }
+
     /// Streaming routing with tier-based model selection and failsafe.
     pub async fn route_stream(
         &self,

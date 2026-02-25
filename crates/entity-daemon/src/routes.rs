@@ -1,12 +1,16 @@
 //! Entity daemon HTTP route handlers.
 
 use crate::state::EntityDaemonState;
+use abigail_capabilities::cognitive::StreamEvent;
 use axum::extract::{Query, State};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::Json;
 use entity_core::{
     ApiEnvelope, ChatRequest, ChatResponse, EntityStatus, MemoryEntry, MemoryInsertRequest,
     MemorySearchRequest, MemoryStats, SkillInfo, ToolExecRequest, ToolExecResponse, ToolInfo,
 };
+use futures_util::{Stream, StreamExt};
+use std::convert::Infallible;
 
 // ---------------------------------------------------------------------------
 // GET /health
@@ -115,6 +119,157 @@ pub async fn chat(
             }))
         }
         Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/chat/stream — SSE streaming variant
+// ---------------------------------------------------------------------------
+
+pub async fn chat_stream(
+    State(state): State<EntityDaemonState>,
+    Json(body): Json<ChatRequest>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let base_prompt =
+        abigail_core::system_prompt::build_system_prompt(&state.docs_dir, &state.config.agent_name);
+    let system_prompt = entity_chat::augment_system_prompt(
+        &base_prompt,
+        &state.registry,
+        &state.instruction_registry,
+        &body.message,
+    );
+
+    let mut messages = entity_chat::build_contextual_messages(
+        &system_prompt,
+        body.session_messages,
+        &body.message,
+    );
+    let tools = entity_chat::build_tool_definitions(&state.registry);
+    let (tier, model_used, complexity_score) =
+        state.router.tier_metadata_for_message(&body.message);
+    let target: String = body.target.unwrap_or_else(|| "AUTO".to_string());
+
+    let (sse_tx, sse_rx) = tokio::sync::mpsc::channel::<Event>(64);
+
+    let router = state.router.clone();
+    let executor = state.executor.clone();
+
+    tokio::spawn(async move {
+        // Run non-streaming tool rounds if tools are available.
+        let mut tool_calls_made = Vec::new();
+        if !tools.is_empty() && target != "ID" {
+            match entity_chat::run_tool_use_loop_rounds_only(
+                &router,
+                &executor,
+                &mut messages,
+                &tools,
+            )
+            .await
+            {
+                Ok(intermediate) => {
+                    tool_calls_made = intermediate.tool_calls_made;
+                    if let Some(final_text) = intermediate.final_text {
+                        let provider = provider_label(&router);
+                        let response = ChatResponse {
+                            reply: final_text,
+                            provider: Some(provider),
+                            tool_calls_made,
+                            tier,
+                            model_used,
+                            complexity_score,
+                        };
+                        let _ = sse_tx
+                            .send(
+                                Event::default()
+                                    .event("done")
+                                    .data(serde_json::to_string(&response).unwrap_or_default()),
+                            )
+                            .await;
+                        return;
+                    }
+                }
+                Err(e) => {
+                    let _ = sse_tx
+                        .send(Event::default().event("error").data(e.to_string()))
+                        .await;
+                    return;
+                }
+            }
+        }
+
+        // Stream the final (or only) LLM response.
+        let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+
+        let router_clone = router.clone();
+        let tools_clone = tools.clone();
+        let messages_clone = messages.clone();
+        let stream_handle = tokio::spawn(async move {
+            if target == "ID" {
+                router_clone.id_stream(messages_clone, stream_tx).await
+            } else if tools_clone.is_empty() {
+                router_clone.route_stream(messages_clone, stream_tx).await
+            } else {
+                router_clone
+                    .route_stream_with_tools(messages_clone, tools_clone, stream_tx)
+                    .await
+            }
+        });
+
+        while let Some(event) = stream_rx.recv().await {
+            match event {
+                StreamEvent::Token(token) => {
+                    let _ = sse_tx
+                        .send(Event::default().event("token").data(token))
+                        .await;
+                }
+                StreamEvent::Done(_) => {}
+            }
+        }
+
+        match stream_handle.await {
+            Ok(Ok(final_response)) => {
+                let provider = provider_label(&router);
+                let response = ChatResponse {
+                    reply: final_response.content,
+                    provider: Some(provider),
+                    tool_calls_made,
+                    tier,
+                    model_used,
+                    complexity_score,
+                };
+                let _ = sse_tx
+                    .send(
+                        Event::default()
+                            .event("done")
+                            .data(serde_json::to_string(&response).unwrap_or_default()),
+                    )
+                    .await;
+            }
+            Ok(Err(e)) => {
+                let _ = sse_tx
+                    .send(Event::default().event("error").data(e.to_string()))
+                    .await;
+            }
+            Err(e) => {
+                let _ = sse_tx
+                    .send(Event::default().event("error").data(e.to_string()))
+                    .await;
+            }
+        }
+    });
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(sse_rx).map(Ok);
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+fn provider_label(router: &abigail_router::IdEgoRouter) -> String {
+    if router.has_ego() {
+        router
+            .ego_provider_name()
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| "id".to_string())
+    } else {
+        "id".to_string()
     }
 }
 

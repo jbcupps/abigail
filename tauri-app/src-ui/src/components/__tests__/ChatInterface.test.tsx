@@ -2,6 +2,7 @@ import "../../test/tauri-mock";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { describe, it, expect, beforeEach, type Mock } from "vitest";
 import { ThemeProvider } from "../../contexts/ThemeContext";
 import ChatInterface from "../ChatInterface";
@@ -11,6 +12,7 @@ function renderWithTheme(ui: React.ReactElement) {
 }
 
 const mockInvoke = invoke as unknown as Mock;
+const mockListen = listen as unknown as Mock;
 
 const defaultRouterStatus = {
   id_provider: "local_http",
@@ -24,6 +26,16 @@ const defaultRouterStatus = {
 
 beforeEach(() => {
   mockInvoke.mockReset();
+  mockListen.mockReset();
+
+  const listeners: Record<string, (event: { payload: unknown }) => void> = {};
+  mockListen.mockImplementation(
+    (eventName: string, callback: (event: { payload: unknown }) => void) => {
+      listeners[eventName] = callback;
+      return Promise.resolve(() => {});
+    },
+  );
+
   mockInvoke.mockImplementation((cmd: string) => {
     switch (cmd) {
       case "get_router_status":
@@ -37,8 +49,22 @@ beforeEach(() => {
         });
       case "list_missing_skill_secrets":
         return Promise.resolve([]);
-      case "chat":
-        return Promise.resolve(JSON.stringify({ reply: "assistant fallback reply", provider: "id", tool_calls_made: [] }));
+      case "chat_stream":
+        setTimeout(() => {
+          if (listeners["chat-token"]) {
+            listeners["chat-token"]({ payload: "assistant fallback reply" });
+          }
+          if (listeners["chat-done"]) {
+            listeners["chat-done"]({
+              payload: {
+                reply: "assistant fallback reply",
+                provider: "id",
+                tool_calls_made: [],
+              },
+            });
+          }
+        }, 10);
+        return Promise.resolve();
       default:
         return Promise.resolve(null);
     }

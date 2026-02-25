@@ -255,6 +255,87 @@ pub async fn run_tool_use_loop(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Streaming-compatible tool-use: run tool rounds, stop before final text
+// ---------------------------------------------------------------------------
+
+/// Intermediate result from `run_tool_use_loop_rounds_only`.
+pub struct IntermediateToolResult {
+    /// Tool calls executed so far.
+    pub tool_calls_made: Vec<ToolCallRecord>,
+    /// If the LLM produced a final text response during the tool rounds
+    /// (i.e. it stopped calling tools), this contains that text. When `None`,
+    /// the caller should stream one more LLM call using the updated `messages`.
+    pub final_text: Option<String>,
+}
+
+/// Run tool-use rounds non-streaming, but stop *before* the final text
+/// response so the caller can stream it. Mutates `messages` in place so
+/// the caller can pass the updated conversation to a streaming route.
+///
+/// Returns `IntermediateToolResult`:
+/// - `final_text = Some(...)` means the loop completed and no streaming is needed.
+/// - `final_text = None` means tool calls were executed and `messages` now
+///   contains the full conversation; the caller should stream the next completion.
+pub async fn run_tool_use_loop_rounds_only(
+    router: &IdEgoRouter,
+    executor: &SkillExecutor,
+    messages: &mut Vec<Message>,
+    tools: &[ToolDefinition],
+) -> anyhow::Result<IntermediateToolResult> {
+    let mut all_records = Vec::new();
+    let mut did_tool_calls = false;
+
+    for round in 0..MAX_TOOL_ROUNDS {
+        tracing::debug!("Tool-use loop (rounds-only) round {}", round);
+
+        let response: CompletionResponse = router
+            .route_with_tools(messages.clone(), tools.to_vec())
+            .await?;
+
+        let tool_calls = match response.tool_calls {
+            Some(ref tcs) if !tcs.is_empty() => tcs.clone(),
+            _ => {
+                if did_tool_calls {
+                    // The LLM finished with text after tool rounds — return it
+                    // directly since there's nothing left to stream.
+                    return Ok(IntermediateToolResult {
+                        tool_calls_made: all_records,
+                        final_text: Some(response.content),
+                    });
+                }
+                // First round with no tool calls — let the caller stream the response
+                // instead so it benefits from token-by-token delivery.
+                return Ok(IntermediateToolResult {
+                    tool_calls_made: all_records,
+                    final_text: Some(response.content),
+                });
+            }
+        };
+
+        did_tool_calls = true;
+
+        messages.push(Message {
+            role: "assistant".into(),
+            content: response.content.clone(),
+            tool_call_id: None,
+            tool_calls: Some(tool_calls.clone()),
+        });
+
+        for tc in &tool_calls {
+            let (output_json, record) = execute_single_tool_call(executor, tc).await;
+            all_records.push(record);
+            messages.push(Message::tool_result(&tc.id, output_json));
+        }
+    }
+
+    // Exhausted rounds — messages are updated; caller should stream the final call.
+    Ok(IntermediateToolResult {
+        tool_calls_made: all_records,
+        final_text: None,
+    })
+}
+
 /// Execute a single tool call, returning the JSON result string and a record.
 async fn execute_single_tool_call(
     executor: &SkillExecutor,

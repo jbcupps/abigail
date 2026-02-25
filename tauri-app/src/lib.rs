@@ -265,9 +265,13 @@ pub fn run() {
                 )
                 .map_err(|e| e.to_string())?;
 
-            // Register Skill Factory
+            // Register Skill Factory with registry + secrets for immediate re-registration
             let skills_dir = state.config.read().unwrap().data_dir.join("skills");
-            let factory_skill = Arc::new(abigail_skills::factory::SkillFactory::new(skills_dir));
+            let factory_skill = Arc::new(
+                abigail_skills::factory::SkillFactory::new(skills_dir)
+                    .with_registry(state.registry.clone())
+                    .with_secrets(state.skills_secrets.clone()),
+            );
             state
                 .registry
                 .register(
@@ -460,6 +464,7 @@ pub fn run() {
             get_forge_undo_status,
             genesis_chat,
             chat,
+            chat_stream,
             get_system_diagnostics,
             propose_entity_visuals,
             start_crystallization,
