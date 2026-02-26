@@ -538,7 +538,16 @@ impl IdEgoRouter {
                 }
             }
         }
-        self.id.complete(&request).await
+        match self.id.complete(&request).await {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                if let Some(ref ego) = self.ego {
+                    tracing::warn!("Id provider failed, falling back to Ego: {}", e);
+                    return ego.complete(&request).await;
+                }
+                Err(e)
+            }
+        }
     }
 
     /// Main route method.
@@ -578,23 +587,53 @@ impl IdEgoRouter {
                 }
             }
         }
-        self.id.complete(&request).await
+        match self.id.complete(&request).await {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                if let Some(ref ego) = self.ego {
+                    tracing::warn!(
+                        "Id provider failed (with tools), falling back to Ego: {}",
+                        e
+                    );
+                    return ego.complete(&request).await;
+                }
+                Err(e)
+            }
+        }
     }
 
-    /// Id only routing.
+    /// Id only routing (falls back to Ego when Id fails).
     pub async fn id_only(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
-        self.id.complete(&CompletionRequest::simple(messages)).await
+        let request = CompletionRequest::simple(messages);
+        match self.id.complete(&request).await {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                if let Some(ref ego) = self.ego {
+                    tracing::warn!("Id-only failed, falling back to Ego: {}", e);
+                    return ego.complete(&request).await;
+                }
+                Err(e)
+            }
+        }
     }
 
-    /// Id only streaming.
+    /// Id only streaming (falls back to Ego when Id fails).
     pub async fn id_stream(
         &self,
         messages: Vec<Message>,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
-        self.id
-            .stream(&CompletionRequest::simple(messages), tx)
-            .await
+        let request = CompletionRequest::simple(messages);
+        match self.id.stream(&request, tx.clone()).await {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                if let Some(ref ego) = self.ego {
+                    tracing::warn!("Id-only stream failed, falling back to Ego: {}", e);
+                    return ego.stream(&request, tx).await;
+                }
+                Err(e)
+            }
+        }
     }
 
     /// Streaming routing with tier-based model selection and failsafe.
@@ -634,7 +673,16 @@ impl IdEgoRouter {
                     }
                 }
                 tracing::debug!("Routing to Id (EgoPrimary mode but no Ego available)");
-                self.id.stream(&request, tx).await
+                match self.id.stream(&request, tx.clone()).await {
+                    Ok(response) => Ok(response),
+                    Err(e) => {
+                        if let Some(ref ego) = self.ego {
+                            tracing::warn!("Id stream failed, falling back to Ego: {}", e);
+                            return ego.stream(&request, tx).await;
+                        }
+                        Err(e)
+                    }
+                }
             }
             RoutingMode::Council | RoutingMode::TierBased => {
                 if fp.target == FastPathTarget::Ego {
@@ -650,7 +698,16 @@ impl IdEgoRouter {
                     }
                 }
                 tracing::debug!("Routing to Id (fast path target was {:?})", fp.target);
-                self.id.stream(&request, tx).await
+                match self.id.stream(&request, tx.clone()).await {
+                    Ok(response) => Ok(response),
+                    Err(e) => {
+                        if let Some(ref ego) = self.ego {
+                            tracing::warn!("Id stream failed, falling back to Ego: {}", e);
+                            return ego.stream(&request, tx).await;
+                        }
+                        Err(e)
+                    }
+                }
             }
         }
     }
@@ -692,7 +749,16 @@ impl IdEgoRouter {
             }
         }
         tracing::debug!("Routing to Id (mode/fast-path target: {:?})", target);
-        self.id.stream(&request, tx).await
+        match self.id.stream(&request, tx.clone()).await {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                if let Some(ref ego) = self.ego {
+                    tracing::warn!("Id stream with tools failed, falling back to Ego: {}", e);
+                    return ego.stream(&request, tx).await;
+                }
+                Err(e)
+            }
+        }
     }
 
     // ── Builder methods for tier configuration ──────────────────────

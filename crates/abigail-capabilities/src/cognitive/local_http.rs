@@ -338,11 +338,8 @@ impl LlmProvider for LocalHttpProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!(
-                "LLM request failed: HTTP {} - {}",
-                status,
-                body
-            ));
+            let friendly = extract_local_llm_error(&body, status.as_u16());
+            return Err(anyhow::anyhow!("{}", friendly));
         }
 
         let chat_response: ChatResponse = response
@@ -414,11 +411,8 @@ impl LlmProvider for LocalHttpProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!(
-                "LLM request failed: HTTP {} - {}",
-                status,
-                body
-            ));
+            let friendly = extract_local_llm_error(&body, status.as_u16());
+            return Err(anyhow::anyhow!("{}", friendly));
         }
 
         let mut full_text = String::new();
@@ -501,6 +495,28 @@ impl LlmProvider for LocalHttpProvider {
         let _ = tx.send(StreamEvent::Done(response.clone())).await;
         Ok(response)
     }
+}
+
+/// Parse an error response body from a local LLM server and return a
+/// human-friendly message. Falls back to the raw body when the format is
+/// unrecognised.
+fn extract_local_llm_error(body: &str, status_code: u16) -> String {
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(msg) = parsed
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+        {
+            let lower = msg.to_lowercase();
+            if lower.contains("no models loaded") || lower.contains("model not found") {
+                return "Local LLM has no model loaded. Please load a model in LM Studio \
+                     or run `lms load <model>`, then try again."
+                    .to_string();
+            }
+            return format!("Local LLM error: {msg}");
+        }
+    }
+    format!("LLM request failed: HTTP {status_code} - {body}")
 }
 
 /// Perform a heartbeat check using the Candle stub (always succeeds).
