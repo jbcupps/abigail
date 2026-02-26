@@ -5,7 +5,8 @@
 //! parameter, not a message in the array.
 
 use crate::cognitive::provider::{
-    CompletionRequest, CompletionResponse, LlmProvider, StreamEvent, ToolCall, ToolDefinition,
+    sanitize_tool_name, CompletionRequest, CompletionResponse, LlmProvider, StreamEvent, ToolCall,
+    ToolDefinition,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -295,23 +296,7 @@ fn to_blocks(content: &AnthropicContent) -> Vec<ContentBlock> {
     }
 }
 
-/// Sanitize a tool name to match Anthropic's `^[a-zA-Z0-9_-]{1,64}$` constraint.
-/// `::` → `__`, `.` → `_`, other invalid chars → `_`.
-fn sanitize_tool_name(name: &str) -> String {
-    name.replace("::", "__")
-        .replace('.', "_")
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-/// Convert tool definitions and return the Anthropic-safe tools plus a
+/// Convert tool definitions and return the API-safe tools plus a
 /// reverse map from sanitized name back to the original qualified name.
 fn convert_tools(
     tools: &[ToolDefinition],

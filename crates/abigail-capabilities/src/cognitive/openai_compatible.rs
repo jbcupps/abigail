@@ -7,8 +7,8 @@
 //! - Any other OpenAI-compatible endpoint
 
 use crate::cognitive::provider::{
-    CompletionRequest, CompletionResponse, LlmProvider, Message, StreamEvent, ToolCall,
-    ToolDefinition,
+    build_tool_name_map, sanitize_tool_name, CompletionRequest, CompletionResponse, LlmProvider,
+    Message, StreamEvent, ToolCall, ToolDefinition,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -135,7 +135,7 @@ impl OpenAiCompatibleProvider {
                             id: tc.id.clone(),
                             r#type: "function".to_string(),
                             function: ChatFunctionCall {
-                                name: tc.name.clone(),
+                                name: sanitize_tool_name(&tc.name),
                                 arguments: tc.arguments.clone(),
                             },
                         })
@@ -158,7 +158,7 @@ impl OpenAiCompatibleProvider {
             .map(|td| ChatTool {
                 r#type: "function".to_string(),
                 function: ChatFunction {
-                    name: td.name.clone(),
+                    name: sanitize_tool_name(&td.name),
                     description: Some(td.description.clone()),
                     parameters: Some(td.parameters.clone()),
                 },
@@ -285,6 +285,11 @@ impl LlmProvider for OpenAiCompatibleProvider {
             request.messages.len(),
             self.completions_url(),
         );
+        let name_map = request
+            .tools
+            .as_ref()
+            .map(|t| build_tool_name_map(t))
+            .unwrap_or_default();
         let messages = Self::build_messages(&request.messages);
         let tools = request.tools.as_ref().map(|t| Self::build_tools(t));
 
@@ -327,7 +332,10 @@ impl LlmProvider for OpenAiCompatibleProvider {
                 tcs.iter()
                     .map(|tc| ToolCall {
                         id: tc.id.clone(),
-                        name: tc.function.name.clone(),
+                        name: name_map
+                            .get(&tc.function.name)
+                            .cloned()
+                            .unwrap_or_else(|| tc.function.name.clone()),
                         arguments: tc.function.arguments.clone(),
                     })
                     .collect::<Vec<_>>()
@@ -353,6 +361,11 @@ impl LlmProvider for OpenAiCompatibleProvider {
             request.messages.len(),
             self.completions_url(),
         );
+        let name_map = request
+            .tools
+            .as_ref()
+            .map(|t| build_tool_name_map(t))
+            .unwrap_or_default();
         let messages = Self::build_messages(&request.messages);
         let tools = request.tools.as_ref().map(|t| Self::build_tools(t));
 
@@ -446,7 +459,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
             .into_values()
             .map(|(id, name, arguments)| ToolCall {
                 id,
-                name,
+                name: name_map.get(&name).cloned().unwrap_or(name),
                 arguments,
             })
             .collect();
