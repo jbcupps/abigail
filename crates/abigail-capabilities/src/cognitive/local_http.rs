@@ -4,7 +4,8 @@
 //! the OpenAI-compatible chat completions API.
 
 use crate::cognitive::provider::{
-    CompletionRequest, CompletionResponse, LlmProvider, Message, StreamEvent, ToolCall,
+    build_tool_name_map, sanitize_tool_name, CompletionRequest, CompletionResponse, LlmProvider,
+    Message, StreamEvent, ToolCall,
 };
 use abigail_core::validate_local_llm_url;
 use async_trait::async_trait;
@@ -274,7 +275,7 @@ impl LocalHttpProvider {
                             id: tc.id.clone(),
                             r#type: "function".to_string(),
                             function: ChatFunctionCall {
-                                name: tc.name.clone(),
+                                name: sanitize_tool_name(&tc.name),
                                 arguments: tc.arguments.clone(),
                             },
                         })
@@ -291,7 +292,7 @@ impl LocalHttpProvider {
                 .map(|td| ChatTool {
                     r#type: "function".to_string(),
                     function: ChatFunction {
-                        name: td.name.clone(),
+                        name: sanitize_tool_name(&td.name),
                         description: Some(td.description.clone()),
                         parameters: Some(td.parameters.clone()),
                     },
@@ -313,6 +314,11 @@ impl LlmProvider for LocalHttpProvider {
             request.tools.as_ref().map_or(0, |t| t.len()),
         );
         validate_local_llm_url(&self.base_url).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let name_map = request
+            .tools
+            .as_ref()
+            .map(|t| build_tool_name_map(t))
+            .unwrap_or_default();
 
         let chat_request = ChatRequest {
             model: model.to_string(),
@@ -359,7 +365,10 @@ impl LlmProvider for LocalHttpProvider {
                 tcs.iter()
                     .map(|tc| ToolCall {
                         id: tc.id.clone(),
-                        name: tc.function.name.clone(),
+                        name: name_map
+                            .get(&tc.function.name)
+                            .cloned()
+                            .unwrap_or_else(|| tc.function.name.clone()),
                         arguments: tc.function.arguments.clone(),
                     })
                     .collect::<Vec<_>>()
@@ -386,6 +395,11 @@ impl LlmProvider for LocalHttpProvider {
             request.tools.as_ref().map_or(0, |t| t.len()),
         );
         validate_local_llm_url(&self.base_url).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let name_map = request
+            .tools
+            .as_ref()
+            .map(|t| build_tool_name_map(t))
+            .unwrap_or_default();
 
         let chat_request = ChatRequest {
             model: model.to_string(),
@@ -416,9 +430,8 @@ impl LlmProvider for LocalHttpProvider {
         }
 
         let mut full_text = String::new();
-        // Track tool calls being built incrementally
         let mut tool_call_map: std::collections::HashMap<usize, (String, String, String)> =
-            std::collections::HashMap::new(); // index -> (id, name, arguments)
+            std::collections::HashMap::new();
 
         let mut byte_stream = response.bytes_stream();
         let mut buffer = String::new();
@@ -473,12 +486,11 @@ impl LlmProvider for LocalHttpProvider {
             }
         }
 
-        // Assemble tool calls
         let tool_calls: Vec<ToolCall> = tool_call_map
             .into_values()
             .map(|(id, name, arguments)| ToolCall {
                 id,
-                name,
+                name: name_map.get(&name).cloned().unwrap_or(name),
                 arguments,
             })
             .collect();

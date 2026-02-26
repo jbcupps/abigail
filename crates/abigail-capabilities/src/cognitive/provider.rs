@@ -119,6 +119,37 @@ pub trait LlmProvider: Send + Sync {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Tool-name sanitization (shared across providers)
+// ---------------------------------------------------------------------------
+
+/// Sanitize a qualified tool name for provider APIs that require
+/// `^[a-zA-Z0-9_-]+$` (OpenAI, Anthropic, etc.).
+/// `::` → `__`, `.` → `_`, other invalid chars → `_`.
+pub fn sanitize_tool_name(name: &str) -> String {
+    name.replace("::", "__")
+        .replace('.', "_")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Build a reverse map from sanitized tool names back to their original
+/// qualified names. Used to restore `skill_id::tool_name` after the API
+/// returns the sanitized variant.
+pub fn build_tool_name_map(tools: &[ToolDefinition]) -> std::collections::HashMap<String, String> {
+    tools
+        .iter()
+        .map(|td| (sanitize_tool_name(&td.name), td.name.clone()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,5 +217,32 @@ mod tests {
     fn test_completion_request_model_override_none_by_default() {
         let req = CompletionRequest::simple(vec![Message::new("user", "hi")]);
         assert!(req.model_override.is_none());
+    }
+
+    #[test]
+    fn test_sanitize_tool_name_qualified() {
+        assert_eq!(
+            sanitize_tool_name("builtin.hive_management::store_secret"),
+            "builtin_hive_management__store_secret"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_tool_name_already_clean() {
+        assert_eq!(sanitize_tool_name("my_tool-v2"), "my_tool-v2");
+    }
+
+    #[test]
+    fn test_build_tool_name_map_roundtrip() {
+        let tools = vec![ToolDefinition {
+            name: "com.example::do_thing".into(),
+            description: "test".into(),
+            parameters: serde_json::json!({}),
+        }];
+        let map = build_tool_name_map(&tools);
+        assert_eq!(
+            map.get("com_example__do_thing"),
+            Some(&"com.example::do_thing".to_string())
+        );
     }
 }

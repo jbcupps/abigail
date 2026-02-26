@@ -1,6 +1,6 @@
 use crate::cognitive::provider::{
-    CompletionRequest, CompletionResponse, LlmProvider, Message, StreamEvent, ToolCall,
-    ToolDefinition,
+    build_tool_name_map, sanitize_tool_name, CompletionRequest, CompletionResponse, LlmProvider,
+    Message, StreamEvent, ToolCall, ToolDefinition,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -44,7 +44,7 @@ impl OpenAiProvider {
                             id: tc.id.clone(),
                             r#type: "function".to_string(),
                             function: ChatFunctionCall {
-                                name: tc.name.clone(),
+                                name: sanitize_tool_name(&tc.name),
                                 arguments: tc.arguments.clone(),
                             },
                         })
@@ -66,7 +66,7 @@ impl OpenAiProvider {
             .map(|td| ChatTool {
                 r#type: "function".to_string(),
                 function: ChatFunction {
-                    name: td.name.clone(),
+                    name: sanitize_tool_name(&td.name),
                     description: Some(td.description.clone()),
                     parameters: Some(td.parameters.clone()),
                 },
@@ -186,6 +186,11 @@ impl LlmProvider for OpenAiProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
         let model = request.model_override.as_deref().unwrap_or(&self.model);
         tracing::info!("OpenAiProvider::complete model={}", model);
+        let name_map = request
+            .tools
+            .as_ref()
+            .map(|t| build_tool_name_map(t))
+            .unwrap_or_default();
         let messages = Self::build_messages(&request.messages);
         let tools = request.tools.as_ref().map(|t| Self::build_tools(t));
 
@@ -224,7 +229,10 @@ impl LlmProvider for OpenAiProvider {
                 tcs.iter()
                     .map(|tc| ToolCall {
                         id: tc.id.clone(),
-                        name: tc.function.name.clone(),
+                        name: name_map
+                            .get(&tc.function.name)
+                            .cloned()
+                            .unwrap_or_else(|| tc.function.name.clone()),
                         arguments: tc.function.arguments.clone(),
                     })
                     .collect::<Vec<_>>()
@@ -244,6 +252,11 @@ impl LlmProvider for OpenAiProvider {
     ) -> anyhow::Result<CompletionResponse> {
         let model = request.model_override.as_deref().unwrap_or(&self.model);
         tracing::info!("OpenAiProvider::stream model={}", model);
+        let name_map = request
+            .tools
+            .as_ref()
+            .map(|t| build_tool_name_map(t))
+            .unwrap_or_default();
         let messages = Self::build_messages(&request.messages);
         let tools = request.tools.as_ref().map(|t| Self::build_tools(t));
 
@@ -332,7 +345,7 @@ impl LlmProvider for OpenAiProvider {
             .into_values()
             .map(|(id, name, arguments)| ToolCall {
                 id,
-                name,
+                name: name_map.get(&name).cloned().unwrap_or(name),
                 arguments,
             })
             .collect();
