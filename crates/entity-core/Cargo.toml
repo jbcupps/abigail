@@ -5,5 +5,7 @@ edition.workspace = true
 
 [dependencies]
 hive-core = { path = "../hive-core" }
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+uuid.workspace = true
