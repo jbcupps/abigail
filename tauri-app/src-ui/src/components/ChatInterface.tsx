@@ -29,6 +29,13 @@ interface ExecutionTrace {
   fallback_occurred: boolean;
 }
 
+/** Normalize raw trace/provider labels for chat-facing display.
+ *  Id is a background system function, never a conversational actor. */
+function normalizeProviderLabel(raw: string): string {
+  if (raw === "id" || raw.startsWith("id(")) return "local";
+  return raw;
+}
+
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -907,8 +914,8 @@ export default function ChatInterface({
                     {showRoutingDetails && msg.executionTrace ? (() => {
                       const trace = msg.executionTrace!;
                       const finalStep = trace.steps[trace.final_step_index];
-                      const cfgLabel = trace.configured_provider ?? "id";
-                      const ranLabel = finalStep?.provider_label ?? msg.provider ?? "unknown";
+                      const cfgLabel = normalizeProviderLabel(trace.configured_provider ?? "local");
+                      const ranLabel = normalizeProviderLabel(finalStep?.provider_label ?? msg.provider ?? "unknown");
                       const showBoth = cfgLabel !== ranLabel;
                       const ts = new Date(trace.timestamp_utc).toLocaleTimeString();
                       return (
@@ -935,7 +942,7 @@ export default function ChatInterface({
                       );
                     })() : (
                       <>
-                        {showRoutingDetails && msg.provider && <span className="ml-2 opacity-50 font-normal">via {msg.provider}</span>}
+                        {showRoutingDetails && msg.provider && <span className="ml-2 opacity-50 font-normal">via {normalizeProviderLabel(msg.provider)}</span>}
                         {msg.tier && msg.modelUsed && (
                           <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-theme-input-bg text-theme-text-dim font-mono">
                             {msg.tier.charAt(0).toUpperCase() + msg.tier.slice(1)} · {msg.modelUsed}
@@ -953,7 +960,7 @@ export default function ChatInterface({
                       <span className={step.result === "success" ? "text-green-400" : "text-red-400"}>
                         {step.result === "success" ? "\u2713" : "\u2717"}
                       </span>
-                      <span>{step.provider_label}</span>
+                      <span>{normalizeProviderLabel(step.provider_label)}</span>
                       {step.model_requested && <span className="opacity-50">({step.model_requested})</span>}
                       {step.error_summary && <span className="text-red-400 truncate max-w-[200px]" title={step.error_summary}>{step.error_summary}</span>}
                     </div>

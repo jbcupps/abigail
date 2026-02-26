@@ -72,7 +72,12 @@ impl RuntimeContext {
             "When asked what model or provider you are using, report ONLY the \
              provider and model shown above. Do not guess or repeat stale information \
              from previous turns. If the information above is absent, say you are \
-             unsure and suggest the user check the routing details panel.",
+             unsure and suggest the user check the routing details panel.\n\
+             \n\
+             You are always the Entity — the single conversational agent. If a \
+             local fallback path was used, describe it as an internal execution \
+             path, not as a separate identity. Never refer to yourself as \"Id\" \
+             or claim to be a different system than the Entity.",
         );
         section.push('\n');
         section
@@ -485,15 +490,16 @@ pub async fn stream_chat_pipeline(
 }
 
 /// Human-readable label for the active provider ("openai", "anthropic", etc.
-/// or "id" when no Ego is configured).
+/// or "local" when no Ego is configured). Id is a background subsystem and
+/// should never appear as a conversational actor label.
 pub fn provider_label(router: &IdEgoRouter) -> String {
     if router.has_ego() {
         router
             .ego_provider_name()
             .map(|p| p.to_string())
-            .unwrap_or_else(|| "id".to_string())
+            .unwrap_or_else(|| "local".to_string())
     } else {
-        "id".to_string()
+        "local".to_string()
     }
 }
 
@@ -1163,6 +1169,22 @@ mod tests {
             prompt.contains("report ONLY the provider and model shown above"),
             "Prompt should contain self-awareness instruction"
         );
+        assert!(
+            prompt.contains("You are always the Entity"),
+            "Prompt should contain entity-first identity rule"
+        );
+        assert!(
+            prompt.contains("Never refer to yourself as \"Id\""),
+            "Prompt should forbid self-identifying as Id"
+        );
+    }
+
+    #[test]
+    fn test_provider_label_never_returns_id() {
+        use abigail_router::{IdEgoRouter, RoutingMode};
+        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::TierBased);
+        let label = provider_label(&router);
+        assert_eq!(label, "local", "provider_label must never return 'id'");
     }
 
     #[test]

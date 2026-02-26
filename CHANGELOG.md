@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-26 16:30 EST: Entity-First Attribution — normalize chat-facing labels so Id never appears as conversational actor, map id(...) to "local" in UI and provider_label(), add entity-identity self-report rule to runtime prompt
 - 2026-02-26 16:00 EST: Execution Truth Refactor — add execution_trace DTO and traced router paths, thread trace through entity-chat and Tauri/daemon responses, show configured+executed attribution and fallback chain in chat UI
 - 2026-02-26 19:45 EST: Add entity runtime self-awareness — inject RuntimeContext (provider, model, tier, entity name) into system prompt, filter phantom skill instructions against registered skills, track provider change timestamps in config (schema v19)
 - 2026-02-26 16:15 EST: Fix Tauri skill/secrets flow — register ProtonMailSkill at startup, unify secret namespace validation, bootstrap skill instructions into data_dir, add live E2E probe and PowerShell runner

@@ -184,6 +184,12 @@ describe("ChatInterface", () => {
     await waitFor(() => {
       expect(screen.getByText("fallback")).toBeInTheDocument();
     });
+
+    // Id labels must never appear as chat-facing actor names.
+    // The raw "id(candle_stub)" should be normalized to "local".
+    expect(screen.queryByText(/id\(candle_stub\)/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/id\(local_http\)/)).not.toBeInTheDocument();
+    expect(screen.getByText("local")).toBeInTheDocument();
   });
 
   it("shows timestamp in execution trace header", async () => {
