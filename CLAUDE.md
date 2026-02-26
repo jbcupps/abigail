@@ -74,6 +74,14 @@ cd tauri-app/src-ui && npm run test:coverage
 
 If any of these fail locally, fix them before pushing. The `gate` CI job will block the PR until all five pass.
 
+When changing skill registration, secrets, or instruction-loading code, also run
+the desktop-runtime probe (no external deps needed):
+
+```powershell
+# 7. Tauri live E2E probe (validates skill/secrets/instruction wiring in the real binary)
+.\scripts\tests\live_tauri_skill_secrets_e2e.ps1
+```
+
 ## Environment Variables
 
 - `OPENAI_API_KEY` — enables Ego (cloud) routing for complex queries

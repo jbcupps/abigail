@@ -179,3 +179,112 @@ These tests are fully isolated from CI:
 - They use environment variables for all credentials (no hardcoded secrets).
 - The `TestHiveOps` struct provides an in-memory vault (no filesystem side effects).
 - Timeouts prevent hangs if external services are unavailable.
+
+---
+
+## Tauri Live E2E (Desktop Runtime Probe)
+
+### Purpose
+
+The `entity-chat` tests above exercise the *shared engine* in isolation. They do
+**not** run the real Tauri desktop startup path — so they cannot catch regressions
+in skill registration, secret namespace validation, or instruction bootstrap that
+only manifest in a packaged/installed build.
+
+The **Tauri probe mode** fills this gap.  It builds the actual Tauri binary,
+launches it with `ABIGAIL_E2E_PROBE=1`, and validates the production wiring
+against a temporary data directory.  No GUI window is opened; the process exits
+with code 0 (pass) or 1 (fail).
+
+### What It Checks
+
+| Check | Description |
+|-------|-------------|
+| `instruction_bootstrap` | `registry.toml` + `instructions/*.md` seeded into fresh data dir |
+| `instruction_email_keyword` | Instruction registry matches "email" keyword after bootstrap |
+| `proton_skill_registered` | `ProtonMailSkill` is present in the skill registry |
+| `namespace_imap_password` | `imap_password` accepted by namespace validator |
+| `namespace_imap_user` | `imap_user` accepted |
+| `namespace_smtp_host` | `smtp_host` accepted |
+| `namespace_reserved_openai` | Reserved key `openai` accepted |
+| `namespace_rejects_unknown` | Unknown key `totally_bogus_key_xyz` rejected |
+| `store_secret_roundtrip` | `store_secret` tool call succeeds via `SkillExecutor` |
+| `live_imap_init` | *(Optional)* IMAP bridge connectivity when `ABIGAIL_IMAP_*` env vars set |
+
+### Running (No External Dependencies)
+
+```powershell
+.\scripts\tests\live_tauri_skill_secrets_e2e.ps1
+```
+
+This builds the release binary and runs the probe.  All deterministic checks run
+without any API key or IMAP bridge.
+
+### Running (With Live IMAP Bridge)
+
+```powershell
+$env:ABIGAIL_IMAP_HOST = "127.0.0.1"
+$env:ABIGAIL_IMAP_PORT = "7654"
+$env:ABIGAIL_IMAP_USER = "user@pm.me"
+$env:ABIGAIL_IMAP_PASS = "bridge-password"
+$env:ABIGAIL_IMAP_TLS_MODE = "STARTTLS"
+
+.\scripts\tests\live_tauri_skill_secrets_e2e.ps1
+```
+
+### Running Probe Directly (Skip Build)
+
+If you already have a release binary:
+
+```powershell
+$env:ABIGAIL_E2E_PROBE = "1"
+.\target\release\Abigail.exe
+```
+
+### Expected Output (Pass)
+
+```
+=== Abigail E2E Probe ===
+
+  [PASS] instruction_bootstrap
+  [PASS] instruction_email_keyword
+  [PASS] proton_skill_registered
+  [PASS] namespace_imap_password
+  [PASS] namespace_imap_user
+  [PASS] namespace_smtp_host
+  [PASS] namespace_reserved_openai
+  [PASS] namespace_rejects_unknown
+  [PASS] store_secret_roundtrip
+  [SKIP] live_imap (ABIGAIL_IMAP_HOST not set)
+
+=== Probe complete: 9 passed, 0 failed ===
+RESULT: PASS
+```
+
+### Expected Output (Failure — Pre-Fix Behavior)
+
+If ProtonMailSkill is not registered at startup, the probe would show:
+
+```
+  [FAIL] namespace_imap_password — imap_password rejected
+  [FAIL] namespace_imap_user — imap_user rejected
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Exit code 2 | Build failure | Check `cargo build -p abigail-app --release` output |
+| `proton_skill_registered` FAIL | ProtonMailSkill not wired in `lib.rs` setup | Verify the registration block exists after dynamic skill discovery |
+| `namespace_imap_*` FAIL | Skill not registered so manifest secrets unknown | Same as above |
+| `instruction_bootstrap` FAIL | `skills/` dir permissions or missing embedded files | Check `skill_instructions.rs` compile includes |
+| `live_imap_init` FAIL | IMAP bridge not running or wrong credentials | Verify bridge is up and env vars match |
+
+### Pre-Push Checklist Addition
+
+Add to the existing pre-push checklist when changing skill/secrets/instruction code:
+
+```powershell
+# 7. Tauri live E2E probe (no external deps needed)
+.\scripts\tests\live_tauri_skill_secrets_e2e.ps1
+```
