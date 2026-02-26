@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-25 22:15 EST: Add graceful local LLM error handling — parse JSON error bodies for friendly messages, add Id→Ego fallback on all router paths, and surface actionable guidance in chat UI for "no model loaded" and connection errors
 - 2026-02-25 17:40 EST: Implement streaming chat (Tauri events + daemon SSE), wire SkillFactory runtime auto-registration with DynamicApiSkill output, add E2E parity tests with mock providers across entity-chat/daemon/frontend
 - 2026-02-24 23:00 EST: Implement SMTP client, wire ProtonMailSkill send_email, add live email E2E tests (entity-chat), fix Anthropic tool-name sanitization for all skill tool-use, extract HiveOperations trait for Tauri/daemon parity
 - 2026-02-24 17:30 EST: Add tabula rasa UAT harness with STARTTLS IMAP support, entity-daemon --data-dir isolation, Hive-to-entity secret sync, and automated 9-stage test pipeline

@@ -414,6 +414,22 @@ export default function ChatInterface({
               "Please wait a moment, or configure a provider:\n" +
               "1. Set OPENAI_API_KEY environment variable, or\n" +
               "2. Install Ollama and set LOCAL_LLM_BASE_URL=http://localhost:11434";
+          } else if (
+            errorMsg.includes("No models loaded") ||
+            errorMsg.includes("no model loaded") ||
+            errorMsg.includes("model not found")
+          ) {
+            content =
+              "Your local LLM server is running but has no model loaded.\n" +
+              "Please load a model in LM Studio or run `lms load <model>`, then try again.";
+          } else if (
+            errorMsg.includes("Connection refused") ||
+            errorMsg.includes("connection refused") ||
+            errorMsg.includes("error sending request")
+          ) {
+            content =
+              "Cannot reach the local LLM server.\n" +
+              "Make sure LM Studio or Ollama is running, or configure a cloud provider in Settings.";
           }
           setMessages((m) => {
             const updated = [...m];
