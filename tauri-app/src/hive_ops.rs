@@ -119,38 +119,11 @@ impl HiveOperations for TauriHiveOps {
     async fn set_skill_secret(&self, key: &str, value: &str) -> Result<(), String> {
         let state = self.app_handle.state::<AppState>();
 
-        let allowed = {
-            const RESERVED: &[&str] = &["openai", "anthropic", "xai", "google", "tavily"];
-            if RESERVED.contains(&key) {
-                true
-            } else {
-                let in_registered = state
-                    .registry
-                    .list()
-                    .map(|skills| {
-                        skills
-                            .iter()
-                            .any(|m| m.secrets.iter().any(|s| s.name == key))
-                    })
-                    .unwrap_or(false);
-                if in_registered {
-                    true
-                } else {
-                    let config = state.config.read().map_err(|e| e.to_string())?;
-                    let discovered =
-                        abigail_skills::SkillRegistry::discover(&[config.data_dir.join("skills")]);
-                    discovered
-                        .iter()
-                        .any(|m| m.secrets.iter().any(|s| s.name == key))
-                }
-            }
+        let data_dir = {
+            let config = state.config.read().map_err(|e| e.to_string())?;
+            config.data_dir.clone()
         };
-        if !allowed {
-            return Err(format!(
-                "Secret key '{}' is not in the allowed namespace (must be a reserved provider or skill-declared secret).",
-                key
-            ));
-        }
+        crate::commands::skills::validate_secret_namespace_with(&state.registry, &data_dir, key)?;
 
         let mut vault = state.skills_secrets.lock().map_err(|e| e.to_string())?;
         vault.set_secret(key, value);

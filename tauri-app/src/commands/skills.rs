@@ -9,7 +9,7 @@ use abigail_skills::{
 use std::collections::HashMap;
 use tauri::State;
 
-const RESERVED_PROVIDER_KEYS: &[&str] = &["openai", "anthropic", "xai", "google", "tavily"];
+pub const RESERVED_PROVIDER_KEYS: &[&str] = &["openai", "anthropic", "xai", "google", "tavily"];
 
 fn is_signed_allowlisted(config: &abigail_core::AppConfig, skill_id: &str) -> bool {
     config
@@ -71,23 +71,30 @@ pub fn list_missing_skill_secrets(
 
 /// Validate that `key` is in the allowed secret namespace: either a reserved
 /// provider name or a secret declared by any registered/discovered skill.
-fn validate_secret_namespace(state: &State<AppState>, key: &str) -> Result<(), String> {
+///
+/// This is the single source of truth for secret-key validation.  Both the
+/// Tauri `store_secret` command and the `TauriHiveOps::set_skill_secret`
+/// trait impl delegate here.
+pub fn validate_secret_namespace_with(
+    registry: &abigail_skills::SkillRegistry,
+    data_dir: &std::path::Path,
+    key: &str,
+) -> Result<(), String> {
     if RESERVED_PROVIDER_KEYS.contains(&key) {
         return Ok(());
     }
-    let skills = state.registry.list().map_err(|e| e.to_string())?;
-    let skill_declared = skills
+    let skills = registry.list().map_err(|e| e.to_string())?;
+    if skills
         .iter()
-        .any(|m| m.secrets.iter().any(|s| s.name == key));
-    if skill_declared {
+        .any(|m| m.secrets.iter().any(|s| s.name == key))
+    {
         return Ok(());
     }
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    let discovered = abigail_skills::SkillRegistry::discover(&[config.data_dir.join("skills")]);
-    let discovered_declared = discovered
+    let discovered = abigail_skills::SkillRegistry::discover(&[data_dir.join("skills")]);
+    if discovered
         .iter()
-        .any(|m| m.secrets.iter().any(|s| s.name == key));
-    if discovered_declared {
+        .any(|m| m.secrets.iter().any(|s| s.name == key))
+    {
         return Ok(());
     }
     Err(format!(
@@ -95,6 +102,11 @@ fn validate_secret_namespace(state: &State<AppState>, key: &str) -> Result<(), S
         key,
         RESERVED_PROVIDER_KEYS.join(", ")
     ))
+}
+
+fn validate_secret_namespace(state: &State<AppState>, key: &str) -> Result<(), String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    validate_secret_namespace_with(&state.registry, &config.data_dir, key)
 }
 
 #[tauri::command]
@@ -268,4 +280,96 @@ pub fn revoke_signed_skill_allowlist_entry(
         "No signed allowlist entry found for skill {}",
         skill_id
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use abigail_skills::SkillRegistry;
+    use std::sync::Arc;
+
+    fn tmp_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir()
+            .join("abigail_skills_cmd_tests")
+            .join(name);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn reserved_keys_always_accepted() {
+        let tmp = tmp_dir("reserved");
+        let registry = SkillRegistry::new();
+        for key in RESERVED_PROVIDER_KEYS {
+            assert!(
+                validate_secret_namespace_with(&registry, &tmp, key).is_ok(),
+                "reserved key '{}' should be accepted",
+                key
+            );
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn unknown_key_rejected_with_empty_registry() {
+        let tmp = tmp_dir("unknown");
+        let registry = SkillRegistry::new();
+        let result = validate_secret_namespace_with(&registry, &tmp, "totally_bogus");
+        assert!(result.is_err(), "unknown key should be rejected");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn imap_keys_accepted_when_proton_skill_registered() {
+        let tmp = tmp_dir("imap");
+        let registry = SkillRegistry::new();
+        let manifest = skill_proton_mail::ProtonMailSkill::default_manifest();
+        let skill = skill_proton_mail::ProtonMailSkill::new(manifest.clone());
+        registry
+            .register(manifest.id.clone(), Arc::new(skill))
+            .unwrap();
+
+        for key in &[
+            "imap_password",
+            "imap_user",
+            "imap_host",
+            "imap_port",
+            "imap_tls_mode",
+            "smtp_host",
+            "smtp_port",
+        ] {
+            assert!(
+                validate_secret_namespace_with(&registry, &tmp, key).is_ok(),
+                "IMAP key '{}' should be accepted with ProtonMailSkill registered",
+                key
+            );
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn imap_keys_rejected_without_proton_skill() {
+        let tmp = tmp_dir("no_proton");
+        let registry = SkillRegistry::new();
+        let result = validate_secret_namespace_with(&registry, &tmp, "imap_password");
+        assert!(
+            result.is_err(),
+            "imap_password should be rejected when ProtonMailSkill is NOT registered"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn proton_manifest_declares_expected_secrets() {
+        let manifest = skill_proton_mail::ProtonMailSkill::default_manifest();
+        let names: Vec<&str> = manifest.secrets.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"imap_password"), "missing imap_password");
+        assert!(names.contains(&"imap_user"), "missing imap_user");
+        assert!(names.contains(&"imap_host"), "missing imap_host");
+        assert!(names.contains(&"imap_port"), "missing imap_port");
+        assert!(names.contains(&"imap_tls_mode"), "missing imap_tls_mode");
+        assert!(names.contains(&"smtp_host"), "missing smtp_host");
+        assert!(names.contains(&"smtp_port"), "missing smtp_port");
+    }
 }

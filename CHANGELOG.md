@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-26 16:15 EST: Fix Tauri skill/secrets flow — register ProtonMailSkill at startup, unify secret namespace validation, bootstrap skill instructions into data_dir, add live E2E probe and PowerShell runner
 - 2026-02-26 02:30 EST: Fix OpenAI/xAI/Google/local tool-name sanitization — extract shared sanitize_tool_name and build_tool_name_map to provider.rs, apply to all OpenAI-compatible providers (build_tools, build_messages, and reverse-map in complete/stream), consolidate Anthropic's local copy
 - 2026-02-26 01:30 EST: Align streaming router path — refactor route_stream() to use target_for_mode() matching all other routing methods, remove dead EgoPrimary fallback code, extract shared stream_chat_pipeline() and provider_label() into entity-chat eliminating ~90 lines of duplication between Tauri and daemon
 - 2026-02-25 22:15 EST: Add graceful local LLM error handling — parse JSON error bodies for friendly messages, add Id→Ego fallback on all router paths, and surface actionable guidance in chat UI for "no model loaded" and connection errors
