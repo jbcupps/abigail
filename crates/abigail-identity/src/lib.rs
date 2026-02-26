@@ -276,6 +276,7 @@ impl IdentityManager {
             signed_skill_allowlist: Vec::new(),
             known_recipients_by_identity: std::collections::HashMap::new(),
             skill_recovery_budget: 3,
+            last_provider_change_at: None,
         };
         let config_path = agent_dir.join("config.json");
         config.save(&config_path).map_err(|e| e.to_string())?;

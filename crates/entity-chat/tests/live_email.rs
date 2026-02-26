@@ -248,6 +248,7 @@ async fn turn1_credential_setup() {
         &registry,
         &instruction_reg,
         &user_message,
+        &entity_chat::RuntimeContext::default(),
     );
     let messages = build_contextual_messages(&augmented_prompt, None, &user_message);
     let tools = build_tool_definitions(&registry);
@@ -389,6 +390,7 @@ async fn turn2_fetch_emails() {
         &registry,
         &instruction_reg,
         user_message,
+        &entity_chat::RuntimeContext::default(),
     );
     let messages = build_contextual_messages(&augmented_prompt, None, user_message);
     let tools = build_tool_definitions(&registry);
@@ -501,6 +503,7 @@ async fn turn3_send_email() {
         &registry,
         &instruction_reg,
         user_message,
+        &entity_chat::RuntimeContext::default(),
     );
     let messages = build_contextual_messages(&augmented_prompt, None, user_message);
     let tools = build_tool_definitions(&registry);

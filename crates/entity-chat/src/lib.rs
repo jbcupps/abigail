@@ -12,6 +12,67 @@ use abigail_skills::manifest::SkillId;
 use abigail_skills::skill::ToolParams;
 use abigail_skills::{SkillExecutor, SkillRegistry};
 use entity_core::{SessionMessage, ToolCallRecord};
+use std::collections::HashSet;
+
+// ---------------------------------------------------------------------------
+// RuntimeContext — per-request metadata injected into the system prompt
+// ---------------------------------------------------------------------------
+
+/// Carries per-request runtime metadata so the entity knows what provider,
+/// model, and routing mode are active. This prevents identity confusion
+/// (e.g. "what model are you?") and makes provider switches visible.
+#[derive(Debug, Clone, Default)]
+pub struct RuntimeContext {
+    pub provider_name: Option<String>,
+    pub model_id: Option<String>,
+    pub routing_mode: Option<String>,
+    pub tier: Option<String>,
+    pub complexity_score: Option<u8>,
+    pub entity_name: Option<String>,
+    pub entity_id: Option<String>,
+    pub has_local_llm: bool,
+    pub last_provider_change_at: Option<String>,
+}
+
+impl RuntimeContext {
+    /// Render a concise `## Runtime Context` markdown section for the system prompt.
+    /// Returns an empty string when the context is entirely empty.
+    pub fn format_for_prompt(&self) -> String {
+        let mut lines = Vec::new();
+
+        if let Some(ref name) = self.entity_name {
+            lines.push(format!("- Entity name: {}", name));
+        }
+        if let Some(ref provider) = self.provider_name {
+            lines.push(format!("- Active provider: {}", provider));
+        }
+        if let Some(ref model) = self.model_id {
+            lines.push(format!("- Model: {}", model));
+        }
+        if let Some(ref mode) = self.routing_mode {
+            lines.push(format!("- Routing mode: {}", mode));
+        }
+        if let Some(ref tier) = self.tier {
+            lines.push(format!("- Quality tier: {}", tier));
+        }
+        if self.has_local_llm {
+            lines.push("- Local LLM: available (failsafe)".to_string());
+        }
+        if let Some(ref ts) = self.last_provider_change_at {
+            lines.push(format!("- Provider last changed: {}", ts));
+        }
+
+        if lines.is_empty() {
+            return String::new();
+        }
+
+        let mut section = String::from("\n\n## Runtime Context\n\n");
+        section.push_str("You are executing within the following runtime environment:\n\n");
+        section.push_str(&lines.join("\n"));
+        section.push('\n');
+        section
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -84,21 +145,36 @@ pub fn build_contextual_messages(
 // Tool definitions: SkillRegistry → ToolDefinition[]
 // ---------------------------------------------------------------------------
 
-/// Augment the base system prompt with tool-awareness and skill-specific
-/// instructions matched from the `InstructionRegistry`.
+/// Augment the base system prompt with tool-awareness, skill-specific
+/// instructions matched from the `InstructionRegistry`, and runtime context.
 ///
-/// Returns a new prompt string: `base + tool_list + matched_instructions`.
+/// Returns a new prompt string: `base + runtime_context + tool_list + matched_instructions`.
+///
+/// Skill instructions are filtered against actually-registered skill IDs to
+/// prevent "phantom tool" hallucinations (where the LLM sees instructions for
+/// skills that aren't loaded).
 pub fn augment_system_prompt(
     base: &str,
     registry: &SkillRegistry,
     instruction_registry: &abigail_skills::InstructionRegistry,
     user_message: &str,
+    runtime_ctx: &RuntimeContext,
 ) -> String {
     let mut prompt = base.to_string();
+
+    // Inject runtime context so the entity knows its own provider/model
+    let ctx_section = runtime_ctx.format_for_prompt();
+    if !ctx_section.is_empty() {
+        prompt.push_str(&ctx_section);
+    }
+
+    // Collect registered skill IDs for instruction filtering
+    let mut registered_ids = HashSet::new();
 
     if let Ok(manifests) = registry.list() {
         let mut tool_lines = Vec::new();
         for m in &manifests {
+            registered_ids.insert(m.id.0.clone());
             if let Ok((skill, _)) = registry.get_skill(&m.id) {
                 for t in skill.tools() {
                     tool_lines.push(format!("- `{}::{}`: {}", m.id.0, t.name, t.description));
@@ -111,7 +187,9 @@ pub fn augment_system_prompt(
         }
     }
 
-    let skill_section = instruction_registry.format_for_prompt(user_message);
+    // Only inject instructions for skills that are actually registered
+    let skill_section =
+        instruction_registry.format_for_prompt_filtered(user_message, &registered_ids);
     if !skill_section.is_empty() {
         prompt.push_str(&skill_section);
     }
@@ -916,7 +994,13 @@ mod tests {
             .unwrap();
 
         let instr_reg = abigail_skills::InstructionRegistry::empty();
-        let result = augment_system_prompt("Base prompt.", &registry, &instr_reg, "hello");
+        let result = augment_system_prompt(
+            "Base prompt.",
+            &registry,
+            &instr_reg,
+            "hello",
+            &RuntimeContext::default(),
+        );
         assert!(result.starts_with("Base prompt."));
         assert!(result.contains("## Available Tools"));
         assert!(result.contains("test.echo::echo"));
@@ -926,8 +1010,74 @@ mod tests {
     fn test_augment_prompt_no_tools_no_section() {
         let registry = SkillRegistry::new();
         let instr_reg = abigail_skills::InstructionRegistry::empty();
-        let result = augment_system_prompt("Base.", &registry, &instr_reg, "hi");
+        let result = augment_system_prompt(
+            "Base.",
+            &registry,
+            &instr_reg,
+            "hi",
+            &RuntimeContext::default(),
+        );
         assert_eq!(result, "Base.");
+    }
+
+    #[test]
+    fn test_augment_prompt_includes_runtime_context() {
+        let registry = SkillRegistry::new();
+        let instr_reg = abigail_skills::InstructionRegistry::empty();
+        let ctx = RuntimeContext {
+            provider_name: Some("anthropic".to_string()),
+            model_id: Some("claude-sonnet-4-6".to_string()),
+            entity_name: Some("Adam".to_string()),
+            ..Default::default()
+        };
+        let result = augment_system_prompt("Base.", &registry, &instr_reg, "hi", &ctx);
+        assert!(result.contains("## Runtime Context"));
+        assert!(result.contains("anthropic"));
+        assert!(result.contains("claude-sonnet-4-6"));
+        assert!(result.contains("Adam"));
+    }
+
+    // ── RuntimeContext ────────────────────────────────────────────
+
+    #[test]
+    fn test_runtime_context_empty() {
+        let ctx = RuntimeContext::default();
+        assert!(ctx.format_for_prompt().is_empty());
+    }
+
+    #[test]
+    fn test_runtime_context_partial() {
+        let ctx = RuntimeContext {
+            provider_name: Some("openai".to_string()),
+            ..Default::default()
+        };
+        let prompt = ctx.format_for_prompt();
+        assert!(prompt.contains("## Runtime Context"));
+        assert!(prompt.contains("openai"));
+        assert!(!prompt.contains("Model:"));
+    }
+
+    #[test]
+    fn test_runtime_context_full() {
+        let ctx = RuntimeContext {
+            provider_name: Some("anthropic".to_string()),
+            model_id: Some("claude-opus-4-6".to_string()),
+            routing_mode: Some("tier_based".to_string()),
+            tier: Some("pro".to_string()),
+            complexity_score: Some(85),
+            entity_name: Some("Adam".to_string()),
+            entity_id: Some("abc-123".to_string()),
+            has_local_llm: true,
+            last_provider_change_at: Some("2026-02-26T10:00:00Z".to_string()),
+        };
+        let prompt = ctx.format_for_prompt();
+        assert!(prompt.contains("anthropic"));
+        assert!(prompt.contains("claude-opus-4-6"));
+        assert!(prompt.contains("tier_based"));
+        assert!(prompt.contains("pro"));
+        assert!(prompt.contains("Adam"));
+        assert!(prompt.contains("Local LLM: available"));
+        assert!(prompt.contains("2026-02-26T10:00:00Z"));
     }
 
     // ── ToolUseResult struct ─────────────────────────────────────────

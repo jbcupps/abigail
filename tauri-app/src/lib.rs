@@ -99,6 +99,13 @@ fn get_config() -> AppConfig {
 }
 
 pub async fn rebuild_router(state: &AppState) -> Result<(), String> {
+    // Record provider change timestamp before rebuilding
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.last_provider_change_at = Some(chrono::Utc::now().to_rfc3339());
+        let _ = config.save(&config.config_path());
+    }
+
     // Resolve config synchronously (acquires only sync locks), then drop guards
     // before the async build_providers call.
     let hive_config = {

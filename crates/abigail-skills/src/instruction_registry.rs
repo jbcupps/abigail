@@ -2,7 +2,7 @@
 //! LLM instructions into the system prompt based on keyword matching.
 
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 /// A single skill entry deserialized from `registry.toml`.
@@ -128,6 +128,30 @@ impl InstructionRegistry {
         section
     }
 
+    /// Like [`format_for_prompt`], but only includes instructions for skills
+    /// whose IDs are present in `registered_skill_ids`. This prevents "phantom
+    /// tool" hallucinations where the LLM sees instructions for skills that
+    /// aren't actually loaded in the runtime.
+    pub fn format_for_prompt_filtered(
+        &self,
+        user_message: &str,
+        registered_skill_ids: &HashSet<String>,
+    ) -> String {
+        let matched = self.select_instructions(user_message);
+        let filtered: Vec<_> = matched
+            .into_iter()
+            .filter(|(id, _)| registered_skill_ids.contains(*id))
+            .collect();
+        if filtered.is_empty() {
+            return String::new();
+        }
+        let mut section = String::from("\n\n## Skill-Specific Instructions\n\n");
+        for (id, content) in &filtered {
+            section.push_str(&format!("<!-- skill: {} -->\n{}\n\n", id, content));
+        }
+        section
+    }
+
     /// List all loaded entries (for diagnostics).
     pub fn list_entries(&self) -> Vec<&SkillInstructionEntry> {
         self.entries.values().map(|(entry, _)| entry).collect()
@@ -137,6 +161,7 @@ impl InstructionRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     use std::fs;
     use std::path::PathBuf;
 
@@ -223,6 +248,82 @@ enabled = true
         assert!(reg.list_entries().is_empty());
         assert!(reg.select_instructions("anything").is_empty());
         assert!(reg.format_for_prompt("anything").is_empty());
+    }
+
+    #[test]
+    fn test_format_for_prompt_filtered_drops_unregistered() {
+        let toml = r#"
+[[skill]]
+id = "test.email"
+instruction_file = "email.md"
+keywords = ["email"]
+enabled = true
+
+[[skill]]
+id = "test.search"
+instruction_file = "search.md"
+keywords = ["email"]
+enabled = true
+"#;
+        let (_dir, reg) = setup_registry(
+            "filtered_drops_unregistered",
+            toml,
+            &[
+                ("email.md", "# Email\nUse fetch_emails."),
+                ("search.md", "# Search\nUse web_search."),
+            ],
+        );
+
+        // Both match on "email", but only test.email is registered
+        let mut registered = HashSet::new();
+        registered.insert("test.email".to_string());
+
+        let prompt = reg.format_for_prompt_filtered("check email", &registered);
+        assert!(prompt.contains("test.email"));
+        assert!(!prompt.contains("test.search"));
+    }
+
+    #[test]
+    fn test_format_for_prompt_filtered_passes_registered() {
+        let toml = r#"
+[[skill]]
+id = "test.email"
+instruction_file = "email.md"
+keywords = ["email"]
+enabled = true
+"#;
+        let (_dir, reg) = setup_registry(
+            "filtered_passes_registered",
+            toml,
+            &[("email.md", "# Email\nUse fetch_emails.")],
+        );
+
+        let mut registered = HashSet::new();
+        registered.insert("test.email".to_string());
+
+        let prompt = reg.format_for_prompt_filtered("check email", &registered);
+        assert!(prompt.contains("test.email"));
+        assert!(prompt.contains("## Skill-Specific Instructions"));
+    }
+
+    #[test]
+    fn test_format_for_prompt_filtered_empty_registry() {
+        let toml = r#"
+[[skill]]
+id = "test.email"
+instruction_file = "email.md"
+keywords = ["email"]
+enabled = true
+"#;
+        let (_dir, reg) = setup_registry(
+            "filtered_empty_registry",
+            toml,
+            &[("email.md", "# Email\nUse fetch_emails.")],
+        );
+
+        let registered = HashSet::new();
+        let prompt = reg.format_for_prompt_filtered("check email", &registered);
+        assert!(prompt.is_empty());
     }
 
     #[test]

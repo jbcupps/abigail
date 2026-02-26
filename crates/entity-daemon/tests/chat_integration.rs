@@ -123,6 +123,7 @@ async fn chat_handler(
         &state.registry,
         &state.instruction_registry,
         &body.message,
+        &entity_chat::RuntimeContext::default(),
     );
     let messages = entity_chat::build_contextual_messages(
         &system_prompt,

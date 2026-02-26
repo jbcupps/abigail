@@ -51,14 +51,31 @@ pub async fn chat(
     State(state): State<EntityDaemonState>,
     Json(body): Json<ChatRequest>,
 ) -> Json<ApiEnvelope<ChatResponse>> {
-    // 1. Build system prompt from constitutional documents, augmented with tool + skill instructions
+    // 1. Build system prompt from constitutional documents, augmented with tool + skill instructions + runtime context
     let base_prompt =
         abigail_core::system_prompt::build_system_prompt(&state.docs_dir, &state.config.agent_name);
+    let (tier, model_used, complexity_score) =
+        state.router.tier_metadata_for_message(&body.message);
+    let status = state.router.status();
+
+    let runtime_ctx = entity_chat::RuntimeContext {
+        provider_name: status.ego_provider.clone(),
+        model_id: model_used.clone(),
+        routing_mode: Some(format!("{:?}", status.mode)),
+        tier: tier.clone(),
+        complexity_score,
+        entity_name: state.config.agent_name.clone(),
+        entity_id: Some(state.entity_id.clone()),
+        has_local_llm: status.has_local_http,
+        last_provider_change_at: None,
+    };
+
     let system_prompt = entity_chat::augment_system_prompt(
         &base_prompt,
         &state.registry,
         &state.instruction_registry,
         &body.message,
+        &runtime_ctx,
     );
 
     // 2. Build contextual messages with sanitization + deduplication
@@ -70,10 +87,6 @@ pub async fn chat(
 
     // 3. Build tool definitions from registered skills
     let tools = entity_chat::build_tool_definitions(&state.registry);
-
-    // 4. Compute tier metadata from the user's message
-    let (tier, model_used, complexity_score) =
-        state.router.tier_metadata_for_message(&body.message);
 
     // 5. Route — use tool-use loop if tools are available, plain route otherwise
     let target = body.target.as_deref().unwrap_or("AUTO");
@@ -124,11 +137,28 @@ pub async fn chat_stream(
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let base_prompt =
         abigail_core::system_prompt::build_system_prompt(&state.docs_dir, &state.config.agent_name);
+    let (tier, model_used, complexity_score) =
+        state.router.tier_metadata_for_message(&body.message);
+    let router_status = state.router.status();
+
+    let runtime_ctx = entity_chat::RuntimeContext {
+        provider_name: router_status.ego_provider.clone(),
+        model_id: model_used.clone(),
+        routing_mode: Some(format!("{:?}", router_status.mode)),
+        tier: tier.clone(),
+        complexity_score,
+        entity_name: state.config.agent_name.clone(),
+        entity_id: Some(state.entity_id.clone()),
+        has_local_llm: router_status.has_local_http,
+        last_provider_change_at: None,
+    };
+
     let system_prompt = entity_chat::augment_system_prompt(
         &base_prompt,
         &state.registry,
         &state.instruction_registry,
         &body.message,
+        &runtime_ctx,
     );
 
     let messages = entity_chat::build_contextual_messages(
@@ -137,8 +167,6 @@ pub async fn chat_stream(
         &body.message,
     );
     let tools = entity_chat::build_tool_definitions(&state.registry);
-    let (tier, model_used, complexity_score) =
-        state.router.tier_metadata_for_message(&body.message);
     let target: String = body.target.unwrap_or_else(|| "AUTO".to_string());
 
     let (sse_tx, sse_rx) = tokio::sync::mpsc::channel::<Event>(64);

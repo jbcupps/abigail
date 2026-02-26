@@ -401,6 +401,7 @@ mod tests {
             signed_skill_allowlist: Default::default(),
             known_recipients_by_identity: Default::default(),
             skill_recovery_budget: 3,
+            last_provider_change_at: None,
         }
     }
 
