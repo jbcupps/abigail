@@ -7,6 +7,35 @@ import ThinkingIndicator from "./ThinkingIndicator";
 import VaultModal, { type MissingSkillSecret } from "./VaultModal";
 import { isBrowserHarnessRuntime, isHarnessDebugEnabled } from "../runtimeMode";
 
+interface ExecutionStep {
+  provider_label: string;
+  model_requested?: string;
+  model_reported?: string;
+  result: "success" | "error";
+  error_summary?: string;
+  started_at_utc: string;
+  ended_at_utc: string;
+}
+
+interface ExecutionTrace {
+  turn_id: string;
+  timestamp_utc: string;
+  routing_mode: string;
+  configured_provider?: string;
+  configured_model?: string;
+  target_selected: string;
+  steps: ExecutionStep[];
+  final_step_index: number;
+  fallback_occurred: boolean;
+}
+
+/** Normalize raw trace/provider labels for chat-facing display.
+ *  Id is a background system function, never a conversational actor. */
+function normalizeProviderLabel(raw: string): string {
+  if (raw === "id" || raw.startsWith("id(")) return "local";
+  return raw;
+}
+
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -19,6 +48,8 @@ interface Message {
   modelUsed?: string;
   /** When set, render an MCP App (ui:// resource) in a sandboxed iframe below the message. */
   mcpApp?: { serverId: string; resourceUri: string; title?: string };
+  /** Authoritative execution trace for this turn. */
+  executionTrace?: ExecutionTrace;
 }
 
 export interface ChatSessionSnapshot {
@@ -380,6 +411,7 @@ export default function ChatInterface({
           tier?: string;
           model_used?: string;
           complexity_score?: number;
+          execution_trace?: ExecutionTrace;
         }>("chat-done", (event) => {
           if (!mountedRef.current) return;
           const resp = event.payload;
@@ -393,6 +425,7 @@ export default function ChatInterface({
                 provider: resp.provider,
                 tier: resp.tier,
                 modelUsed: resp.model_used,
+                executionTrace: resp.execution_trace,
               };
             }
             return updated;
@@ -878,15 +911,62 @@ export default function ChatInterface({
                 {msg.role === "user" ? "You" : (
                   <>
                     {assistantLabel}
-                    {showRoutingDetails && msg.provider && <span className="ml-2 opacity-50 font-normal">via {msg.provider}</span>}
-                    {msg.tier && msg.modelUsed && (
-                      <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-theme-input-bg text-theme-text-dim font-mono">
-                        {msg.tier.charAt(0).toUpperCase() + msg.tier.slice(1)} · {msg.modelUsed}
-                      </span>
+                    {showRoutingDetails && msg.executionTrace ? (() => {
+                      const trace = msg.executionTrace!;
+                      const finalStep = trace.steps[trace.final_step_index];
+                      const cfgLabel = normalizeProviderLabel(trace.configured_provider ?? "local");
+                      const ranLabel = normalizeProviderLabel(finalStep?.provider_label ?? msg.provider ?? "unknown");
+                      const showBoth = cfgLabel !== ranLabel;
+                      const ts = new Date(trace.timestamp_utc).toLocaleTimeString();
+                      return (
+                        <>
+                          <span className="ml-2 opacity-50 font-normal">
+                            {showBoth ? (
+                              <>cfg: {cfgLabel} | ran: {ranLabel}</>
+                            ) : (
+                              <>via {ranLabel}</>
+                            )}
+                          </span>
+                          {finalStep?.model_requested && (
+                            <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-theme-input-bg text-theme-text-dim font-mono">
+                              {msg.tier ? `${msg.tier.charAt(0).toUpperCase()}${msg.tier.slice(1)} · ` : ""}{finalStep.model_requested}
+                            </span>
+                          )}
+                          <span className="ml-2 text-[10px] opacity-40">{ts}</span>
+                          {trace.fallback_occurred && (
+                            <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-yellow-900/30 text-yellow-400 font-mono">
+                              fallback
+                            </span>
+                          )}
+                        </>
+                      );
+                    })() : (
+                      <>
+                        {showRoutingDetails && msg.provider && <span className="ml-2 opacity-50 font-normal">via {normalizeProviderLabel(msg.provider)}</span>}
+                        {msg.tier && msg.modelUsed && (
+                          <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-theme-input-bg text-theme-text-dim font-mono">
+                            {msg.tier.charAt(0).toUpperCase() + msg.tier.slice(1)} · {msg.modelUsed}
+                          </span>
+                        )}
+                      </>
                     )}
                   </>
                 )}
               </p>
+              {msg.role === "assistant" && showRoutingDetails && msg.executionTrace?.fallback_occurred && (
+                <div className="mb-1 text-[10px] text-theme-text-dim opacity-60 font-mono space-y-0.5">
+                  {msg.executionTrace.steps.map((step, si) => (
+                    <div key={si} className="flex items-center gap-1">
+                      <span className={step.result === "success" ? "text-green-400" : "text-red-400"}>
+                        {step.result === "success" ? "\u2713" : "\u2717"}
+                      </span>
+                      <span>{normalizeProviderLabel(step.provider_label)}</span>
+                      {step.model_requested && <span className="opacity-50">({step.model_requested})</span>}
+                      {step.error_summary && <span className="text-red-400 truncate max-w-[200px]" title={step.error_summary}>{step.error_summary}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
               <span className={msg.isError ? "text-red-300" : "text-theme-text-bright"}>
                 {redactApiKeys(msg.content || "").split("\n").map((line, j) => (
                   <span key={j}>

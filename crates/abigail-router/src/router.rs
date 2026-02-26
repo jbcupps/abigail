@@ -14,6 +14,7 @@ use abigail_capabilities::cognitive::{
 };
 use abigail_core::{ForceOverride, ModelTier, TierModels, TierThresholds};
 use abigail_hive::{BuiltProviders, ProviderKind, ProviderRegistry};
+use entity_core::ExecutionTrace;
 use std::sync::Arc;
 
 use crate::council::CouncilEngine;
@@ -733,6 +734,382 @@ impl IdEgoRouter {
         }
     }
 
+    // ── Traced routing methods ────────────────────────────────────────
+    //
+    // Each `*_traced` variant returns `(CompletionResponse, ExecutionTrace)`.
+    // The trace captures configured intent, actual execution path, timing,
+    // and fallback chain — making it the single source of truth for
+    // per-turn attribution.
+
+    fn id_label(&self) -> &str {
+        if self.local_http.is_some() {
+            "id(local_http)"
+        } else {
+            "id(candle_stub)"
+        }
+    }
+
+    fn ego_label(&self) -> String {
+        self.ego_provider
+            .as_ref()
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| "ego".to_string())
+    }
+
+    fn routing_mode_str(&self) -> String {
+        format!("{:?}", self.mode).to_lowercase()
+    }
+
+    /// Build a fresh trace pre-populated with routing intent for a user message.
+    pub fn begin_trace(
+        &self,
+        user_message: &str,
+        model_override: &Option<String>,
+    ) -> ExecutionTrace {
+        let target = self.target_for_mode(user_message);
+        let target_str = match target {
+            FastPathTarget::Ego => "ego",
+            FastPathTarget::Id => "id",
+        };
+        ExecutionTrace::new(
+            &self.routing_mode_str(),
+            self.ego_provider.as_ref().map(|p| p.to_string()),
+            model_override.clone(),
+            target_str,
+        )
+    }
+
+    /// Traced variant of `route_fast` / `route`.
+    pub async fn route_traced(
+        &self,
+        messages: Vec<Message>,
+    ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
+        let last_msg = messages.last().map_or("", |m| &m.content).to_string();
+        let target = self.target_for_mode(&last_msg);
+        let model_override = if self.mode == RoutingMode::TierBased {
+            self.resolve_model_for_request(&last_msg)
+        } else {
+            None
+        };
+        let mut trace = self.begin_trace(&last_msg, &model_override);
+        let request = CompletionRequest {
+            messages,
+            tools: None,
+            model_override: model_override.clone(),
+        };
+
+        if target == FastPathTarget::Ego {
+            if let Some(ref ego) = self.ego {
+                let t0 = chrono::Utc::now();
+                match ego.complete(&request).await {
+                    Ok(response) => {
+                        trace.record_success(&self.ego_label(), model_override, t0);
+                        return Ok((response, trace));
+                    }
+                    Err(e) => {
+                        trace.record_error(
+                            &self.ego_label(),
+                            model_override.clone(),
+                            &e.to_string(),
+                            t0,
+                        );
+                        tracing::warn!("Ego provider failed, falling back to Id: {}", e);
+                        let t1 = chrono::Utc::now();
+                        let resp = self.id.complete(&request).await?;
+                        trace.record_success(self.id_label(), None, t1);
+                        return Ok((resp, trace));
+                    }
+                }
+            }
+        }
+
+        let t0 = chrono::Utc::now();
+        match self.id.complete(&request).await {
+            Ok(response) => {
+                trace.record_success(self.id_label(), None, t0);
+                Ok((response, trace))
+            }
+            Err(e) => {
+                trace.record_error(self.id_label(), None, &e.to_string(), t0);
+                if let Some(ref ego) = self.ego {
+                    tracing::warn!("Id provider failed, falling back to Ego: {}", e);
+                    let t1 = chrono::Utc::now();
+                    let resp = ego.complete(&request).await?;
+                    trace.record_success(&self.ego_label(), model_override, t1);
+                    return Ok((resp, trace));
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Traced variant of `route_with_tools`.
+    pub async fn route_with_tools_traced(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+    ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
+        let last_msg = messages.last().map_or("", |m| &m.content).to_string();
+        let target = self.target_for_mode(&last_msg);
+        let model_override = if self.mode == RoutingMode::TierBased {
+            self.resolve_model_for_request(&last_msg)
+        } else {
+            None
+        };
+        let mut trace = self.begin_trace(&last_msg, &model_override);
+        let request = CompletionRequest {
+            messages,
+            tools: Some(tools),
+            model_override: model_override.clone(),
+        };
+
+        if target == FastPathTarget::Ego {
+            if let Some(ref ego) = self.ego {
+                let t0 = chrono::Utc::now();
+                match ego.complete(&request).await {
+                    Ok(response) => {
+                        trace.record_success(&self.ego_label(), model_override, t0);
+                        return Ok((response, trace));
+                    }
+                    Err(e) => {
+                        trace.record_error(
+                            &self.ego_label(),
+                            model_override.clone(),
+                            &e.to_string(),
+                            t0,
+                        );
+                        tracing::warn!(
+                            "Ego provider failed (with tools), falling back to Id: {}",
+                            e
+                        );
+                        let t1 = chrono::Utc::now();
+                        let resp = self.id.complete(&request).await?;
+                        trace.record_success(self.id_label(), None, t1);
+                        return Ok((resp, trace));
+                    }
+                }
+            }
+        }
+
+        let t0 = chrono::Utc::now();
+        match self.id.complete(&request).await {
+            Ok(response) => {
+                trace.record_success(self.id_label(), None, t0);
+                Ok((response, trace))
+            }
+            Err(e) => {
+                trace.record_error(self.id_label(), None, &e.to_string(), t0);
+                if let Some(ref ego) = self.ego {
+                    tracing::warn!(
+                        "Id provider failed (with tools), falling back to Ego: {}",
+                        e
+                    );
+                    let t1 = chrono::Utc::now();
+                    let resp = ego.complete(&request).await?;
+                    trace.record_success(&self.ego_label(), model_override, t1);
+                    return Ok((resp, trace));
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Traced variant of `id_only`.
+    pub async fn id_only_traced(
+        &self,
+        messages: Vec<Message>,
+    ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
+        let mut trace = ExecutionTrace::new(
+            &self.routing_mode_str(),
+            self.ego_provider.as_ref().map(|p| p.to_string()),
+            None,
+            "id",
+        );
+        let request = CompletionRequest::simple(messages);
+        let t0 = chrono::Utc::now();
+        match self.id.complete(&request).await {
+            Ok(response) => {
+                trace.record_success(self.id_label(), None, t0);
+                Ok((response, trace))
+            }
+            Err(e) => {
+                trace.record_error(self.id_label(), None, &e.to_string(), t0);
+                if let Some(ref ego) = self.ego {
+                    tracing::warn!("Id-only failed, falling back to Ego: {}", e);
+                    let t1 = chrono::Utc::now();
+                    let resp = ego.complete(&request).await?;
+                    trace.record_success(&self.ego_label(), None, t1);
+                    return Ok((resp, trace));
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Traced variant of `id_stream`.
+    pub async fn id_stream_traced(
+        &self,
+        messages: Vec<Message>,
+        tx: tokio::sync::mpsc::Sender<StreamEvent>,
+    ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
+        let mut trace = ExecutionTrace::new(
+            &self.routing_mode_str(),
+            self.ego_provider.as_ref().map(|p| p.to_string()),
+            None,
+            "id",
+        );
+        let request = CompletionRequest::simple(messages);
+        let t0 = chrono::Utc::now();
+        match self.id.stream(&request, tx.clone()).await {
+            Ok(response) => {
+                trace.record_success(self.id_label(), None, t0);
+                Ok((response, trace))
+            }
+            Err(e) => {
+                trace.record_error(self.id_label(), None, &e.to_string(), t0);
+                if let Some(ref ego) = self.ego {
+                    tracing::warn!("Id-only stream failed, falling back to Ego: {}", e);
+                    let t1 = chrono::Utc::now();
+                    let resp = ego.stream(&request, tx).await?;
+                    trace.record_success(&self.ego_label(), None, t1);
+                    return Ok((resp, trace));
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Traced variant of `route_stream`.
+    pub async fn route_stream_traced(
+        &self,
+        messages: Vec<Message>,
+        tx: tokio::sync::mpsc::Sender<StreamEvent>,
+    ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
+        let last_msg = messages.last().map_or("", |m| &m.content).to_string();
+        let target = self.target_for_mode(&last_msg);
+        let model_override = if self.mode == RoutingMode::TierBased {
+            self.resolve_model_for_request(&last_msg)
+        } else {
+            None
+        };
+        let mut trace = self.begin_trace(&last_msg, &model_override);
+        let request = CompletionRequest {
+            messages,
+            tools: None,
+            model_override: model_override.clone(),
+        };
+
+        if target == FastPathTarget::Ego {
+            if let Some(ref ego) = self.ego {
+                let t0 = chrono::Utc::now();
+                match ego.stream(&request, tx.clone()).await {
+                    Ok(response) => {
+                        trace.record_success(&self.ego_label(), model_override, t0);
+                        return Ok((response, trace));
+                    }
+                    Err(e) => {
+                        trace.record_error(
+                            &self.ego_label(),
+                            model_override.clone(),
+                            &e.to_string(),
+                            t0,
+                        );
+                        tracing::warn!("Ego stream failed, falling back to Id: {}", e);
+                        let t1 = chrono::Utc::now();
+                        let resp = self.id.stream(&request, tx).await?;
+                        trace.record_success(self.id_label(), None, t1);
+                        return Ok((resp, trace));
+                    }
+                }
+            }
+        }
+
+        let t0 = chrono::Utc::now();
+        match self.id.stream(&request, tx.clone()).await {
+            Ok(response) => {
+                trace.record_success(self.id_label(), None, t0);
+                Ok((response, trace))
+            }
+            Err(e) => {
+                trace.record_error(self.id_label(), None, &e.to_string(), t0);
+                if let Some(ref ego) = self.ego {
+                    tracing::warn!("Id stream failed, falling back to Ego: {}", e);
+                    let t1 = chrono::Utc::now();
+                    let resp = ego.stream(&request, tx).await?;
+                    trace.record_success(&self.ego_label(), model_override, t1);
+                    return Ok((resp, trace));
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Traced variant of `route_stream_with_tools`.
+    pub async fn route_stream_with_tools_traced(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        tx: tokio::sync::mpsc::Sender<StreamEvent>,
+    ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
+        let last_msg = messages.last().map_or("", |m| &m.content).to_string();
+        let target = self.target_for_mode(&last_msg);
+        let model_override = if self.mode == RoutingMode::TierBased {
+            self.resolve_model_for_request(&last_msg)
+        } else {
+            None
+        };
+        let mut trace = self.begin_trace(&last_msg, &model_override);
+        let request = CompletionRequest {
+            messages,
+            tools: Some(tools),
+            model_override: model_override.clone(),
+        };
+
+        if target == FastPathTarget::Ego {
+            if let Some(ref ego) = self.ego {
+                let t0 = chrono::Utc::now();
+                match ego.stream(&request, tx.clone()).await {
+                    Ok(response) => {
+                        trace.record_success(&self.ego_label(), model_override, t0);
+                        return Ok((response, trace));
+                    }
+                    Err(e) => {
+                        trace.record_error(
+                            &self.ego_label(),
+                            model_override.clone(),
+                            &e.to_string(),
+                            t0,
+                        );
+                        tracing::warn!("Ego stream with tools failed, falling back to Id: {}", e);
+                        let t1 = chrono::Utc::now();
+                        let resp = self.id.stream(&request, tx).await?;
+                        trace.record_success(self.id_label(), None, t1);
+                        return Ok((resp, trace));
+                    }
+                }
+            }
+        }
+
+        let t0 = chrono::Utc::now();
+        match self.id.stream(&request, tx.clone()).await {
+            Ok(response) => {
+                trace.record_success(self.id_label(), None, t0);
+                Ok((response, trace))
+            }
+            Err(e) => {
+                trace.record_error(self.id_label(), None, &e.to_string(), t0);
+                if let Some(ref ego) = self.ego {
+                    tracing::warn!("Id stream with tools failed, falling back to Ego: {}", e);
+                    let t1 = chrono::Utc::now();
+                    let resp = ego.stream(&request, tx).await?;
+                    trace.record_success(&self.ego_label(), model_override, t1);
+                    return Ok((resp, trace));
+                }
+                Err(e)
+            }
+        }
+    }
+
     // ── Builder methods for tier configuration ──────────────────────
 
     /// Builder method: set tier models.
@@ -1033,5 +1410,86 @@ mod tests {
             ModelTier::Fast,
             "User pinned tier should take precedence over intent escalation"
         );
+    }
+
+    // ── Execution trace tests ─────────────────────────────────────
+
+    #[test]
+    fn test_begin_trace_captures_routing_intent() {
+        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::TierBased);
+        let trace = router.begin_trace("hello", &None);
+        assert_eq!(trace.routing_mode, "tierbased");
+        assert_eq!(trace.target_selected, "id");
+        assert!(trace.configured_provider.is_none());
+        assert!(trace.configured_model.is_none());
+        assert!(trace.steps.is_empty());
+        assert!(!trace.fallback_occurred);
+    }
+
+    #[test]
+    fn test_trace_record_success_no_fallback() {
+        let mut trace = ExecutionTrace::new(
+            "tierbased",
+            Some("openai".into()),
+            Some("gpt-4.1-mini".into()),
+            "ego",
+        );
+        let t0 = chrono::Utc::now();
+        trace.record_success("openai", Some("gpt-4.1-mini".into()), t0);
+        assert_eq!(trace.steps.len(), 1);
+        assert_eq!(trace.final_step_index, 0);
+        assert!(!trace.fallback_occurred);
+        assert_eq!(trace.final_provider(), Some("openai"));
+        assert_eq!(trace.final_model(), Some("gpt-4.1-mini"));
+    }
+
+    #[test]
+    fn test_trace_record_error_then_fallback() {
+        let mut trace = ExecutionTrace::new("tierbased", Some("openai".into()), None, "ego");
+        let t0 = chrono::Utc::now();
+        trace.record_error("openai", Some("gpt-4.1".into()), "timeout", t0);
+        assert_eq!(trace.steps.len(), 1);
+        assert_eq!(trace.steps[0].result, entity_core::StepResult::Error);
+
+        let t1 = chrono::Utc::now();
+        trace.record_success("id(candle_stub)", None, t1);
+        assert_eq!(trace.steps.len(), 2);
+        assert_eq!(trace.final_step_index, 1);
+        assert!(trace.fallback_occurred);
+        assert_eq!(trace.final_provider(), Some("id(candle_stub)"));
+        assert_eq!(trace.final_model(), None);
+    }
+
+    #[tokio::test]
+    async fn test_route_traced_id_only_success() {
+        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::TierBased);
+        let messages = vec![Message {
+            role: "user".to_string(),
+            content: "hello".to_string(),
+            tool_call_id: None,
+            tool_calls: None,
+        }];
+        let (resp, trace) = router.route_traced(messages).await.unwrap();
+        assert!(!resp.content.is_empty());
+        assert_eq!(trace.target_selected, "id");
+        assert!(!trace.fallback_occurred);
+        assert_eq!(trace.steps.len(), 1);
+        assert_eq!(trace.steps[0].result, entity_core::StepResult::Success);
+    }
+
+    #[tokio::test]
+    async fn test_id_only_traced_success() {
+        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::TierBased);
+        let messages = vec![Message {
+            role: "user".to_string(),
+            content: "hello".to_string(),
+            tool_call_id: None,
+            tool_calls: None,
+        }];
+        let (resp, trace) = router.id_only_traced(messages).await.unwrap();
+        assert!(!resp.content.is_empty());
+        assert_eq!(trace.target_selected, "id");
+        assert!(!trace.fallback_occurred);
+        assert!(trace.final_provider().is_some());
     }
 }

@@ -4,9 +4,7 @@
 //! and the GUI (Tauri desktop app). Changes here automatically affect both
 //! consumers, so testing `cargo test -p entity-chat` validates the shared engine.
 
-use abigail_capabilities::cognitive::{
-    CompletionResponse, Message, StreamEvent, ToolCall, ToolDefinition,
-};
+use abigail_capabilities::cognitive::{Message, StreamEvent, ToolCall, ToolDefinition};
 use abigail_router::IdEgoRouter;
 use abigail_skills::manifest::SkillId;
 use abigail_skills::skill::ToolParams;
@@ -69,6 +67,18 @@ impl RuntimeContext {
         let mut section = String::from("\n\n## Runtime Context\n\n");
         section.push_str("You are executing within the following runtime environment:\n\n");
         section.push_str(&lines.join("\n"));
+        section.push_str("\n\n");
+        section.push_str(
+            "When asked what model or provider you are using, report ONLY the \
+             provider and model shown above. Do not guess or repeat stale information \
+             from previous turns. If the information above is absent, say you are \
+             unsure and suggest the user check the routing details panel.\n\
+             \n\
+             You are always the Entity — the single conversational agent. If a \
+             local fallback path was used, describe it as an internal execution \
+             path, not as a separate identity. Never refer to yourself as \"Id\" \
+             or claim to be a different system than the Entity.",
+        );
         section.push('\n');
         section
     }
@@ -258,6 +268,9 @@ pub struct ToolUseResult {
     pub model_used: Option<String>,
     /// Complexity score (5–95) that determined tier selection.
     pub complexity_score: Option<u8>,
+    /// Authoritative execution trace from the final LLM call that produced
+    /// the text response (captures fallback chain and timing).
+    pub execution_trace: Option<entity_core::ExecutionTrace>,
 }
 
 /// Run the full tool-use loop:
@@ -275,7 +288,6 @@ pub async fn run_tool_use_loop(
 ) -> anyhow::Result<ToolUseResult> {
     let mut all_records = Vec::new();
 
-    // Compute tier metadata from the user's original message (last user msg).
     let user_msg = messages
         .iter()
         .rev()
@@ -284,14 +296,16 @@ pub async fn run_tool_use_loop(
         .unwrap_or("");
     let (tier, model_used, complexity_score) = router.tier_metadata_for_message(user_msg);
 
+    let mut last_trace: Option<entity_core::ExecutionTrace> = None;
+
     for round in 0..MAX_TOOL_ROUNDS {
         tracing::debug!("Tool-use loop round {}", round);
 
-        let response: CompletionResponse = router
-            .route_with_tools(messages.clone(), tools.clone())
+        let (response, trace) = router
+            .route_with_tools_traced(messages.clone(), tools.clone())
             .await?;
+        last_trace = Some(trace);
 
-        // If no tool_calls, we're done — return the text reply.
         let tool_calls = match response.tool_calls {
             Some(ref tcs) if !tcs.is_empty() => tcs.clone(),
             _ => {
@@ -301,11 +315,11 @@ pub async fn run_tool_use_loop(
                     tier: tier.clone(),
                     model_used: model_used.clone(),
                     complexity_score,
+                    execution_trace: last_trace,
                 });
             }
         };
 
-        // Append the assistant message (with tool_calls metadata) to history.
         messages.push(Message {
             role: "assistant".into(),
             content: response.content.clone(),
@@ -313,7 +327,6 @@ pub async fn run_tool_use_loop(
             tool_calls: Some(tool_calls.clone()),
         });
 
-        // Execute each tool call and append results.
         for tc in &tool_calls {
             let (output_json, record) = execute_single_tool_call(executor, tc).await;
             all_records.push(record);
@@ -321,7 +334,6 @@ pub async fn run_tool_use_loop(
         }
     }
 
-    // Safety: if we exhausted rounds, return what we have.
     tracing::warn!(
         "Tool-use loop exhausted {} rounds, returning partial result",
         MAX_TOOL_ROUNDS
@@ -332,6 +344,7 @@ pub async fn run_tool_use_loop(
         tier,
         model_used,
         complexity_score,
+        execution_trace: last_trace,
     })
 }
 
@@ -347,6 +360,8 @@ pub struct IntermediateToolResult {
     /// (i.e. it stopped calling tools), this contains that text. When `None`,
     /// the caller should stream one more LLM call using the updated `messages`.
     pub final_text: Option<String>,
+    /// Execution trace from the final LLM call in the tool-use rounds.
+    pub execution_trace: Option<entity_core::ExecutionTrace>,
 }
 
 /// Run tool-use rounds non-streaming, but stop *before* the final text
@@ -365,31 +380,23 @@ pub async fn run_tool_use_loop_rounds_only(
 ) -> anyhow::Result<IntermediateToolResult> {
     let mut all_records = Vec::new();
     let mut did_tool_calls = false;
+    let mut last_trace: Option<entity_core::ExecutionTrace> = None;
 
     for round in 0..MAX_TOOL_ROUNDS {
         tracing::debug!("Tool-use loop (rounds-only) round {}", round);
 
-        let response: CompletionResponse = router
-            .route_with_tools(messages.clone(), tools.to_vec())
+        let (response, trace) = router
+            .route_with_tools_traced(messages.clone(), tools.to_vec())
             .await?;
+        last_trace = Some(trace);
 
         let tool_calls = match response.tool_calls {
             Some(ref tcs) if !tcs.is_empty() => tcs.clone(),
             _ => {
-                if did_tool_calls {
-                    // The LLM finished with text after tool rounds — return it
-                    // directly since there's nothing left to stream.
-                    return Ok(IntermediateToolResult {
-                        tool_calls_made: all_records,
-                        final_text: Some(response.content),
-                    });
-                }
-                // First round produced text with no tool calls. Return it
-                // directly to avoid a redundant LLM roundtrip — the caller
-                // will emit this as the final response without streaming.
                 return Ok(IntermediateToolResult {
                     tool_calls_made: all_records,
                     final_text: Some(response.content),
+                    execution_trace: last_trace,
                 });
             }
         };
@@ -410,10 +417,11 @@ pub async fn run_tool_use_loop_rounds_only(
         }
     }
 
-    // Exhausted rounds — messages are updated; caller should stream the final call.
+    let _ = did_tool_calls;
     Ok(IntermediateToolResult {
         tool_calls_made: all_records,
         final_text: None,
+        execution_trace: last_trace,
     })
 }
 
@@ -426,6 +434,8 @@ pub async fn run_tool_use_loop_rounds_only(
 pub struct StreamPipelineResult {
     pub content: String,
     pub tool_calls_made: Vec<ToolCallRecord>,
+    /// Authoritative execution trace for the final streaming LLM call.
+    pub execution_trace: Option<entity_core::ExecutionTrace>,
 }
 
 /// Run the full streaming chat pipeline: tool-use rounds (non-streaming) then
@@ -455,39 +465,41 @@ pub async fn stream_chat_pipeline(
             return Ok(StreamPipelineResult {
                 content: final_text,
                 tool_calls_made,
+                execution_trace: intermediate.execution_trace,
             });
         }
     }
 
-    let stream_result = if target_mode == "ID" {
-        router.id_stream(messages, tx.clone()).await
+    let (final_response, trace) = if target_mode == "ID" {
+        router.id_stream_traced(messages, tx.clone()).await?
     } else if tools.is_empty() {
-        router.route_stream(messages, tx.clone()).await
+        router.route_stream_traced(messages, tx.clone()).await?
     } else {
         router
-            .route_stream_with_tools(messages, tools, tx.clone())
-            .await
+            .route_stream_with_tools_traced(messages, tools, tx.clone())
+            .await?
     };
 
     drop(tx);
 
-    let final_response = stream_result?;
     Ok(StreamPipelineResult {
         content: final_response.content,
         tool_calls_made,
+        execution_trace: Some(trace),
     })
 }
 
 /// Human-readable label for the active provider ("openai", "anthropic", etc.
-/// or "id" when no Ego is configured).
+/// or "local" when no Ego is configured). Id is a background subsystem and
+/// should never appear as a conversational actor label.
 pub fn provider_label(router: &IdEgoRouter) -> String {
     if router.has_ego() {
         router
             .ego_provider_name()
             .map(|p| p.to_string())
-            .unwrap_or_else(|| "id".to_string())
+            .unwrap_or_else(|| "local".to_string())
     } else {
-        "id".to_string()
+        "local".to_string()
     }
 }
 
@@ -1094,11 +1106,104 @@ mod tests {
             tier: Some("fast".into()),
             model_used: Some("gpt-4.1-mini".into()),
             complexity_score: Some(25),
+            execution_trace: None,
         };
         assert_eq!(result.content, "done");
         assert_eq!(result.tool_calls_made.len(), 1);
         assert_eq!(result.tier.as_deref(), Some("fast"));
         assert_eq!(result.model_used.as_deref(), Some("gpt-4.1-mini"));
         assert_eq!(result.complexity_score, Some(25));
+        assert!(result.execution_trace.is_none());
+    }
+
+    #[test]
+    fn test_tool_use_result_with_trace() {
+        let mut trace = entity_core::ExecutionTrace::new(
+            "tierbased",
+            Some("openai".into()),
+            Some("gpt-4.1-mini".into()),
+            "ego",
+        );
+        let t0 = chrono::Utc::now();
+        trace.record_success("openai", Some("gpt-4.1-mini".into()), t0);
+
+        let result = ToolUseResult {
+            content: "done".into(),
+            tool_calls_made: vec![],
+            tier: Some("fast".into()),
+            model_used: Some("gpt-4.1-mini".into()),
+            complexity_score: Some(20),
+            execution_trace: Some(trace),
+        };
+        let trace = result.execution_trace.as_ref().unwrap();
+        assert!(!trace.fallback_occurred);
+        assert_eq!(trace.final_provider(), Some("openai"));
+        assert_eq!(trace.final_model(), Some("gpt-4.1-mini"));
+    }
+
+    #[test]
+    fn test_stream_pipeline_result_has_trace_field() {
+        let result = StreamPipelineResult {
+            content: "streamed".into(),
+            tool_calls_made: vec![],
+            execution_trace: None,
+        };
+        assert!(result.execution_trace.is_none());
+    }
+
+    #[test]
+    fn test_runtime_context_includes_self_awareness_instruction() {
+        let ctx = RuntimeContext {
+            provider_name: Some("openai".to_string()),
+            model_id: Some("gpt-4.1".to_string()),
+            routing_mode: None,
+            tier: None,
+            complexity_score: None,
+            entity_name: None,
+            entity_id: None,
+            has_local_llm: false,
+            last_provider_change_at: None,
+        };
+        let prompt = ctx.format_for_prompt();
+        assert!(
+            prompt.contains("report ONLY the provider and model shown above"),
+            "Prompt should contain self-awareness instruction"
+        );
+        assert!(
+            prompt.contains("You are always the Entity"),
+            "Prompt should contain entity-first identity rule"
+        );
+        assert!(
+            prompt.contains("Never refer to yourself as \"Id\""),
+            "Prompt should forbid self-identifying as Id"
+        );
+    }
+
+    #[test]
+    fn test_provider_label_never_returns_id() {
+        use abigail_router::{IdEgoRouter, RoutingMode};
+        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::TierBased);
+        let label = provider_label(&router);
+        assert_eq!(label, "local", "provider_label must never return 'id'");
+    }
+
+    #[test]
+    fn test_runtime_context_empty_no_instruction() {
+        let ctx = RuntimeContext {
+            provider_name: None,
+            model_id: None,
+            routing_mode: None,
+            tier: None,
+            complexity_score: None,
+            entity_name: None,
+            entity_id: None,
+            has_local_llm: false,
+            last_provider_change_at: None,
+        };
+        let prompt = ctx.format_for_prompt();
+        assert!(
+            prompt.is_empty(),
+            "Empty context should produce empty prompt"
+        );
     }
 }

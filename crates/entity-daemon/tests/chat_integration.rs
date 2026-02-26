@@ -136,13 +136,14 @@ async fn chat_handler(
 
     let target = body.target.as_deref().unwrap_or("AUTO");
     let result = if tools.is_empty() || target == "ID" {
-        let res = state.router.route(messages).await;
-        res.map(|r| entity_chat::ToolUseResult {
+        let traced = state.router.route_traced(messages).await;
+        traced.map(|(r, trace)| entity_chat::ToolUseResult {
             content: r.content,
             tool_calls_made: Vec::new(),
             tier: tier.clone(),
             model_used: model_used.clone(),
             complexity_score,
+            execution_trace: Some(trace),
         })
     } else {
         entity_chat::run_tool_use_loop(&state.router, &state.executor, messages, tools).await
@@ -156,6 +157,7 @@ async fn chat_handler(
             tier: tool_result.tier,
             model_used: tool_result.model_used,
             complexity_score: tool_result.complexity_score,
+            execution_trace: tool_result.execution_trace,
         })),
         Err(e) => axum::Json(ApiEnvelope::error(e.to_string())),
     }

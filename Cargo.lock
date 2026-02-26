@@ -242,6 +242,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "entity-core",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -2346,9 +2347,11 @@ dependencies = [
 name = "entity-core"
 version = "0.0.1"
 dependencies = [
+ "chrono",
  "hive-core",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

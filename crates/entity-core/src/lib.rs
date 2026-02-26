@@ -33,20 +33,28 @@ pub struct SessionMessage {
 pub struct ChatResponse {
     pub reply: String,
     /// Which provider handled the request ("id", "ego", provider name).
+    /// Compatibility field — prefer `execution_trace` for authoritative attribution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     /// Tool calls executed during this chat turn (empty if none).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls_made: Vec<ToolCallRecord>,
     /// Model quality tier used: "fast", "standard", or "pro".
+    /// Compatibility field — prefer `execution_trace` for authoritative attribution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tier: Option<String>,
     /// Actual model ID used for this request (e.g. "gpt-4.1", "claude-sonnet-4-6").
+    /// Compatibility field — prefer `execution_trace` for authoritative attribution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_used: Option<String>,
     /// Complexity score (5–95) that determined the tier selection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub complexity_score: Option<u8>,
+    /// Authoritative per-turn execution trace. Single source of truth for
+    /// which provider/model actually generated this response, including
+    /// fallback chain and timing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_trace: Option<ExecutionTrace>,
 }
 
 /// Record of a single tool call made during a chat turn.
@@ -55,6 +63,139 @@ pub struct ToolCallRecord {
     pub skill_id: String,
     pub tool_name: String,
     pub success: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Execution Trace — authoritative per-turn telemetry
+// ---------------------------------------------------------------------------
+
+/// Outcome of a single provider call attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StepResult {
+    Success,
+    Error,
+}
+
+/// One hop in the execution chain (primary attempt or fallback).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionStep {
+    /// Human-readable provider label (e.g. "openai", "anthropic", "id", "candle_stub").
+    pub provider_label: String,
+    /// Model ID sent in the request (may be None for local/stub providers).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_requested: Option<String>,
+    /// Model ID reported by the provider in the response (if available).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_reported: Option<String>,
+    pub result: StepResult,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_summary: Option<String>,
+    pub started_at_utc: String,
+    pub ended_at_utc: String,
+}
+
+/// Full execution trace for a single chat turn. This is the single source of
+/// truth for attribution — UI and prompt self-awareness should derive facts
+/// from this struct, not from legacy compatibility fields.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionTrace {
+    /// Unique identifier for this turn.
+    pub turn_id: String,
+    /// UTC timestamp when routing began.
+    pub timestamp_utc: String,
+    /// Routing mode active for this turn (e.g. "tier_based", "ego_primary").
+    pub routing_mode: String,
+    /// Provider the router was configured to prefer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub configured_provider: Option<String>,
+    /// Model the tier/config system resolved before execution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub configured_model: Option<String>,
+    /// Which target the fast-path classifier selected ("id" or "ego").
+    pub target_selected: String,
+    /// Ordered list of provider call attempts (primary + any fallbacks).
+    pub steps: Vec<ExecutionStep>,
+    /// Index into `steps` of the attempt that produced the final response.
+    pub final_step_index: usize,
+    /// True when the response came from a fallback, not the primary target.
+    pub fallback_occurred: bool,
+}
+
+impl ExecutionTrace {
+    /// Create a new trace with routing intent populated and an empty step list.
+    pub fn new(
+        routing_mode: &str,
+        configured_provider: Option<String>,
+        configured_model: Option<String>,
+        target_selected: &str,
+    ) -> Self {
+        Self {
+            turn_id: uuid::Uuid::new_v4().to_string(),
+            timestamp_utc: chrono::Utc::now().to_rfc3339(),
+            routing_mode: routing_mode.to_string(),
+            configured_provider,
+            configured_model,
+            target_selected: target_selected.to_string(),
+            steps: Vec::new(),
+            final_step_index: 0,
+            fallback_occurred: false,
+        }
+    }
+
+    /// Record a successful provider call.
+    pub fn record_success(
+        &mut self,
+        provider_label: &str,
+        model_requested: Option<String>,
+        started_at: chrono::DateTime<chrono::Utc>,
+    ) {
+        let idx = self.steps.len();
+        self.steps.push(ExecutionStep {
+            provider_label: provider_label.to_string(),
+            model_requested,
+            model_reported: None,
+            result: StepResult::Success,
+            error_summary: None,
+            started_at_utc: started_at.to_rfc3339(),
+            ended_at_utc: chrono::Utc::now().to_rfc3339(),
+        });
+        self.final_step_index = idx;
+        self.fallback_occurred = idx > 0;
+    }
+
+    /// Record a failed provider call (before fallback).
+    pub fn record_error(
+        &mut self,
+        provider_label: &str,
+        model_requested: Option<String>,
+        error: &str,
+        started_at: chrono::DateTime<chrono::Utc>,
+    ) {
+        self.steps.push(ExecutionStep {
+            provider_label: provider_label.to_string(),
+            model_requested,
+            model_reported: None,
+            result: StepResult::Error,
+            error_summary: Some(error.to_string()),
+            started_at_utc: started_at.to_rfc3339(),
+            ended_at_utc: chrono::Utc::now().to_rfc3339(),
+        });
+    }
+
+    /// The provider label of whichever step produced the final response.
+    pub fn final_provider(&self) -> Option<&str> {
+        self.steps
+            .get(self.final_step_index)
+            .map(|s| s.provider_label.as_str())
+    }
+
+    /// The model requested in the final successful step.
+    pub fn final_model(&self) -> Option<&str> {
+        self.steps
+            .get(self.final_step_index)
+            .and_then(|s| s.model_requested.as_deref())
+    }
 }
 
 // ---------------------------------------------------------------------------

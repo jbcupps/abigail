@@ -91,21 +91,20 @@ pub async fn chat(
     // 5. Route — use tool-use loop if tools are available, plain route otherwise
     let target = body.target.as_deref().unwrap_or("AUTO");
     let result = if tools.is_empty() || target == "ID" {
-        // No tools or explicit Id-only: simple route
-        let res = if target == "ID" {
-            state.router.id_only(messages).await
+        let traced = if target == "ID" {
+            state.router.id_only_traced(messages).await
         } else {
-            state.router.route(messages).await
+            state.router.route_traced(messages).await
         };
-        res.map(|r| entity_chat::ToolUseResult {
+        traced.map(|(r, trace)| entity_chat::ToolUseResult {
             content: r.content,
             tool_calls_made: Vec::new(),
             tier: tier.clone(),
             model_used: model_used.clone(),
             complexity_score,
+            execution_trace: Some(trace),
         })
     } else {
-        // Tools available: run the agentic tool-use loop
         entity_chat::run_tool_use_loop(&state.router, &state.executor, messages, tools).await
     };
 
@@ -113,7 +112,6 @@ pub async fn chat(
         Ok(tool_result) => {
             let provider = entity_chat::provider_label(&state.router);
 
-            // 6. Return response with tier metadata
             Json(ApiEnvelope::success(ChatResponse {
                 reply: tool_result.content,
                 provider: Some(provider),
@@ -121,6 +119,7 @@ pub async fn chat(
                 tier: tool_result.tier,
                 model_used: tool_result.model_used,
                 complexity_score: tool_result.complexity_score,
+                execution_trace: tool_result.execution_trace,
             }))
         }
         Err(e) => Json(ApiEnvelope::error(e.to_string())),
@@ -203,6 +202,7 @@ pub async fn chat_stream(
                     tier,
                     model_used,
                     complexity_score,
+                    execution_trace: pipeline.execution_trace,
                 };
                 let _ = sse_tx
                     .send(
