@@ -4,7 +4,9 @@
 //! and the GUI (Tauri desktop app). Changes here automatically affect both
 //! consumers, so testing `cargo test -p entity-chat` validates the shared engine.
 
-use abigail_capabilities::cognitive::{CompletionResponse, Message, ToolCall, ToolDefinition};
+use abigail_capabilities::cognitive::{
+    CompletionResponse, Message, StreamEvent, ToolCall, ToolDefinition,
+};
 use abigail_router::IdEgoRouter;
 use abigail_skills::manifest::SkillId;
 use abigail_skills::skill::ToolParams;
@@ -304,8 +306,9 @@ pub async fn run_tool_use_loop_rounds_only(
                         final_text: Some(response.content),
                     });
                 }
-                // First round with no tool calls — let the caller stream the response
-                // instead so it benefits from token-by-token delivery.
+                // First round produced text with no tool calls. Return it
+                // directly to avoid a redundant LLM roundtrip — the caller
+                // will emit this as the final response without streaming.
                 return Ok(IntermediateToolResult {
                     tool_calls_made: all_records,
                     final_text: Some(response.content),
@@ -335,6 +338,84 @@ pub async fn run_tool_use_loop_rounds_only(
         final_text: None,
     })
 }
+
+// ---------------------------------------------------------------------------
+// Shared streaming chat pipeline
+// ---------------------------------------------------------------------------
+
+/// Result of [`stream_chat_pipeline`]. The caller assembles a `ChatResponse`
+/// by combining this with pre-computed tier metadata and provider info.
+pub struct StreamPipelineResult {
+    pub content: String,
+    pub tool_calls_made: Vec<ToolCallRecord>,
+}
+
+/// Run the full streaming chat pipeline: tool-use rounds (non-streaming) then
+/// stream the final LLM response through `tx`.
+///
+/// When tool rounds produce a final text response directly (LLM didn't invoke
+/// tools), the function returns immediately without sending any `StreamEvent`s
+/// — the caller should emit the result as a single "done" event. When streaming
+/// does occur, `StreamEvent::Token` values are sent through `tx` as they arrive.
+pub async fn stream_chat_pipeline(
+    router: &IdEgoRouter,
+    executor: &SkillExecutor,
+    messages: Vec<Message>,
+    tools: Vec<ToolDefinition>,
+    target_mode: &str,
+    tx: tokio::sync::mpsc::Sender<StreamEvent>,
+) -> anyhow::Result<StreamPipelineResult> {
+    let mut messages = messages;
+    let mut tool_calls_made = Vec::new();
+
+    if !tools.is_empty() && target_mode != "ID" {
+        let intermediate =
+            run_tool_use_loop_rounds_only(router, executor, &mut messages, &tools).await?;
+        tool_calls_made = intermediate.tool_calls_made;
+        if let Some(final_text) = intermediate.final_text {
+            drop(tx);
+            return Ok(StreamPipelineResult {
+                content: final_text,
+                tool_calls_made,
+            });
+        }
+    }
+
+    let stream_result = if target_mode == "ID" {
+        router.id_stream(messages, tx.clone()).await
+    } else if tools.is_empty() {
+        router.route_stream(messages, tx.clone()).await
+    } else {
+        router
+            .route_stream_with_tools(messages, tools, tx.clone())
+            .await
+    };
+
+    drop(tx);
+
+    let final_response = stream_result?;
+    Ok(StreamPipelineResult {
+        content: final_response.content,
+        tool_calls_made,
+    })
+}
+
+/// Human-readable label for the active provider ("openai", "anthropic", etc.
+/// or "id" when no Ego is configured).
+pub fn provider_label(router: &IdEgoRouter) -> String {
+    if router.has_ego() {
+        router
+            .ego_provider_name()
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| "id".to_string())
+    } else {
+        "id".to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
 
 /// Execute a single tool call, returning the JSON result string and a record.
 async fn execute_single_tool_call(
