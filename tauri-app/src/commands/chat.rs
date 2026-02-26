@@ -186,14 +186,7 @@ pub async fn chat(
 
     match result {
         Ok(tool_result) => {
-            let provider = if router.has_ego() {
-                router
-                    .ego_provider_name()
-                    .map(|p| p.to_string())
-                    .unwrap_or_else(|| "id".to_string())
-            } else {
-                "id".to_string()
-            };
+            let provider = entity_chat::provider_label(&router);
 
             // 7. Return JSON-serialized ChatResponse (same DTO as entity-daemon)
             let response = ChatResponse {
@@ -243,91 +236,41 @@ pub async fn chat_stream(
         (router, augmented)
     };
 
-    let mut messages =
+    let messages =
         entity_chat::build_contextual_messages(&system_prompt, session_messages, &message);
     let tools = entity_chat::build_tool_definitions(&state.registry);
     let (tier, model_used, complexity_score) = router.tier_metadata_for_message(&message);
-
     let target_mode = target.as_deref().unwrap_or("AUTO");
 
-    // If tools are available (and not forced to Id), run the non-streaming
-    // tool-use loop for intermediate rounds first.
-    let mut tool_calls_made = Vec::new();
-    if !tools.is_empty() && target_mode != "ID" {
-        match entity_chat::run_tool_use_loop_rounds_only(
-            &router,
-            &state.executor,
-            &mut messages,
-            &tools,
-        )
-        .await
-        {
-            Ok(intermediate) => {
-                tool_calls_made = intermediate.tool_calls_made;
-                if let Some(final_text) = intermediate.final_text {
-                    // Loop completed with a text response (no streaming needed).
-                    let provider = provider_label(&router);
-                    let response = ChatResponse {
-                        reply: final_text,
-                        provider: Some(provider),
-                        tool_calls_made,
-                        tier: tier.clone(),
-                        model_used: model_used.clone(),
-                        complexity_score,
-                    };
-                    let _ = app.emit("chat-done", &response);
-                    return Ok(());
-                }
-                // Otherwise, messages have been updated with tool results and
-                // we fall through to stream the final LLM response.
-            }
-            Err(e) => {
-                let _ = app.emit("chat-error", e.to_string());
-                return Ok(());
-            }
-        }
-    }
-
-    // Stream the final response (or the only response if no tools).
     let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
     let app_clone = app.clone();
-    let tier_clone = tier.clone();
-    let model_clone = model_used.clone();
-
     let stream_task = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
-            match event {
-                StreamEvent::Token(token) => {
-                    let _ = app_clone.emit("chat-token", &token);
-                }
-                StreamEvent::Done(_resp) => {
-                    // Metadata is sent separately via chat-done below.
-                }
+            if let StreamEvent::Token(token) = event {
+                let _ = app_clone.emit("chat-token", &token);
             }
         }
-        (tier_clone, model_clone)
     });
 
-    let stream_result = if target_mode == "ID" {
-        router.id_stream(messages, tx.clone()).await
-    } else if tools.is_empty() {
-        router.route_stream(messages, tx.clone()).await
-    } else {
-        router
-            .route_stream_with_tools(messages, tools, tx.clone())
-            .await
-    };
+    let result = entity_chat::stream_chat_pipeline(
+        &router,
+        &state.executor,
+        messages,
+        tools,
+        target_mode,
+        tx,
+    )
+    .await;
 
-    drop(tx); // Signal receiver that no more events are coming.
     let _ = stream_task.await;
 
-    match stream_result {
-        Ok(final_response) => {
-            let provider = provider_label(&router);
+    match result {
+        Ok(pipeline) => {
+            let provider = entity_chat::provider_label(&router);
             let response = ChatResponse {
-                reply: final_response.content,
+                reply: pipeline.content,
                 provider: Some(provider),
-                tool_calls_made,
+                tool_calls_made: pipeline.tool_calls_made,
                 tier,
                 model_used,
                 complexity_score,
@@ -340,17 +283,6 @@ pub async fn chat_stream(
     }
 
     Ok(())
-}
-
-fn provider_label(router: &abigail_router::IdEgoRouter) -> String {
-    if router.has_ego() {
-        router
-            .ego_provider_name()
-            .map(|p| p.to_string())
-            .unwrap_or_else(|| "id".to_string())
-    } else {
-        "id".to_string()
-    }
 }
 
 // ---------------------------------------------------------------------------

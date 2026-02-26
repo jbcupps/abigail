@@ -648,7 +648,7 @@ impl IdEgoRouter {
             self.ego.is_some()
         );
         let last_msg = messages.last().map_or("", |m| &m.content);
-        let fp = self.fast_path_classify(last_msg);
+        let target = self.target_for_mode(last_msg);
         let model_override = if self.mode == RoutingMode::TierBased {
             self.resolve_model_for_request(last_msg)
         } else {
@@ -659,55 +659,27 @@ impl IdEgoRouter {
             tools: None,
             model_override,
         };
-
-        match self.mode {
-            RoutingMode::EgoPrimary => {
-                if let Some(ref ego) = self.ego {
-                    tracing::debug!("Routing to Ego (EgoPrimary mode)");
-                    match ego.stream(&request, tx.clone()).await {
-                        Ok(response) => return Ok(response),
-                        Err(e) => {
-                            tracing::warn!("Ego stream failed, falling back to Id: {}", e);
-                            return self.id.stream(&request, tx).await;
-                        }
-                    }
-                }
-                tracing::debug!("Routing to Id (EgoPrimary mode but no Ego available)");
-                match self.id.stream(&request, tx.clone()).await {
-                    Ok(response) => Ok(response),
+        if target == FastPathTarget::Ego {
+            if let Some(ref ego) = self.ego {
+                tracing::debug!("Routing stream to Ego (mode/fast-path)");
+                match ego.stream(&request, tx.clone()).await {
+                    Ok(response) => return Ok(response),
                     Err(e) => {
-                        if let Some(ref ego) = self.ego {
-                            tracing::warn!("Id stream failed, falling back to Ego: {}", e);
-                            return ego.stream(&request, tx).await;
-                        }
-                        Err(e)
+                        tracing::warn!("Ego stream failed, falling back to Id: {}", e);
+                        return self.id.stream(&request, tx).await;
                     }
                 }
             }
-            RoutingMode::Council | RoutingMode::TierBased => {
-                if fp.target == FastPathTarget::Ego {
-                    if let Some(ref ego) = self.ego {
-                        tracing::debug!("Routing to Ego (cloud) based on fast path");
-                        match ego.stream(&request, tx.clone()).await {
-                            Ok(response) => return Ok(response),
-                            Err(e) => {
-                                tracing::warn!("Ego stream failed, falling back to Id: {}", e);
-                                return self.id.stream(&request, tx).await;
-                            }
-                        }
-                    }
+        }
+        tracing::debug!("Routing stream to Id (mode/fast-path target: {:?})", target);
+        match self.id.stream(&request, tx.clone()).await {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                if let Some(ref ego) = self.ego {
+                    tracing::warn!("Id stream failed, falling back to Ego: {}", e);
+                    return ego.stream(&request, tx).await;
                 }
-                tracing::debug!("Routing to Id (fast path target was {:?})", fp.target);
-                match self.id.stream(&request, tx.clone()).await {
-                    Ok(response) => Ok(response),
-                    Err(e) => {
-                        if let Some(ref ego) = self.ego {
-                            tracing::warn!("Id stream failed, falling back to Ego: {}", e);
-                            return ego.stream(&request, tx).await;
-                        }
-                        Err(e)
-                    }
-                }
+                Err(e)
             }
         }
     }

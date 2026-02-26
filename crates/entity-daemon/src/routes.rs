@@ -98,15 +98,7 @@ pub async fn chat(
 
     match result {
         Ok(tool_result) => {
-            let provider = if state.router.has_ego() {
-                state
-                    .router
-                    .ego_provider_name()
-                    .map(|p| p.to_string())
-                    .unwrap_or_else(|| "id".to_string())
-            } else {
-                "id".to_string()
-            };
+            let provider = entity_chat::provider_label(&state.router);
 
             // 6. Return response with tier metadata
             Json(ApiEnvelope::success(ChatResponse {
@@ -139,7 +131,7 @@ pub async fn chat_stream(
         &body.message,
     );
 
-    let mut messages = entity_chat::build_contextual_messages(
+    let messages = entity_chat::build_contextual_messages(
         &system_prompt,
         body.session_messages,
         &body.message,
@@ -155,84 +147,31 @@ pub async fn chat_stream(
     let executor = state.executor.clone();
 
     tokio::spawn(async move {
-        // Run non-streaming tool rounds if tools are available.
-        let mut tool_calls_made = Vec::new();
-        if !tools.is_empty() && target != "ID" {
-            match entity_chat::run_tool_use_loop_rounds_only(
-                &router,
-                &executor,
-                &mut messages,
-                &tools,
-            )
-            .await
-            {
-                Ok(intermediate) => {
-                    tool_calls_made = intermediate.tool_calls_made;
-                    if let Some(final_text) = intermediate.final_text {
-                        let provider = provider_label(&router);
-                        let response = ChatResponse {
-                            reply: final_text,
-                            provider: Some(provider),
-                            tool_calls_made,
-                            tier,
-                            model_used,
-                            complexity_score,
-                        };
-                        let _ = sse_tx
-                            .send(
-                                Event::default()
-                                    .event("done")
-                                    .data(serde_json::to_string(&response).unwrap_or_default()),
-                            )
-                            .await;
-                        return;
-                    }
-                }
-                Err(e) => {
-                    let _ = sse_tx
-                        .send(Event::default().event("error").data(e.to_string()))
-                        .await;
-                    return;
-                }
-            }
-        }
-
-        // Stream the final (or only) LLM response.
-        let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
-
-        let router_clone = router.clone();
-        let tools_clone = tools.clone();
-        let messages_clone = messages.clone();
-        let stream_handle = tokio::spawn(async move {
-            if target == "ID" {
-                router_clone.id_stream(messages_clone, stream_tx).await
-            } else if tools_clone.is_empty() {
-                router_clone.route_stream(messages_clone, stream_tx).await
-            } else {
-                router_clone
-                    .route_stream_with_tools(messages_clone, tools_clone, stream_tx)
-                    .await
-            }
-        });
-
-        while let Some(event) = stream_rx.recv().await {
-            match event {
-                StreamEvent::Token(token) => {
-                    let _ = sse_tx
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+        let sse_fwd = sse_tx.clone();
+        let fwd_task = tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                if let StreamEvent::Token(token) = event {
+                    let _ = sse_fwd
                         .send(Event::default().event("token").data(token))
                         .await;
                 }
-                StreamEvent::Done(_) => {}
             }
-        }
+        });
 
-        match stream_handle.await {
-            Ok(Ok(final_response)) => {
-                let provider = provider_label(&router);
+        let result =
+            entity_chat::stream_chat_pipeline(&router, &executor, messages, tools, &target, tx)
+                .await;
+
+        let _ = fwd_task.await;
+
+        match result {
+            Ok(pipeline) => {
+                let provider = entity_chat::provider_label(&router);
                 let response = ChatResponse {
-                    reply: final_response.content,
+                    reply: pipeline.content,
                     provider: Some(provider),
-                    tool_calls_made,
+                    tool_calls_made: pipeline.tool_calls_made,
                     tier,
                     model_used,
                     complexity_score,
@@ -245,11 +184,6 @@ pub async fn chat_stream(
                     )
                     .await;
             }
-            Ok(Err(e)) => {
-                let _ = sse_tx
-                    .send(Event::default().event("error").data(e.to_string()))
-                    .await;
-            }
             Err(e) => {
                 let _ = sse_tx
                     .send(Event::default().event("error").data(e.to_string()))
@@ -260,17 +194,6 @@ pub async fn chat_stream(
 
     let stream = tokio_stream::wrappers::ReceiverStream::new(sse_rx).map(Ok);
     Sse::new(stream).keep_alive(KeepAlive::default())
-}
-
-fn provider_label(router: &abigail_router::IdEgoRouter) -> String {
-    if router.has_ego() {
-        router
-            .ego_provider_name()
-            .map(|p| p.to_string())
-            .unwrap_or_else(|| "id".to_string())
-    } else {
-        "id".to_string()
-    }
 }
 
 // ---------------------------------------------------------------------------
