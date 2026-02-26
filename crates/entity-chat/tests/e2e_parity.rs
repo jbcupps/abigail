@@ -196,7 +196,13 @@ async fn simple_message_no_tools_returns_text() {
     let (router, registry, _executor) = build_test_env(MockProvider::text_only());
     let instr = InstructionRegistry::empty();
 
-    let system = entity_chat::augment_system_prompt("You are a test bot.", &registry, &instr, "hi");
+    let system = entity_chat::augment_system_prompt(
+        "You are a test bot.",
+        &registry,
+        &instr,
+        "hi",
+        &entity_chat::RuntimeContext::default(),
+    );
     let messages = entity_chat::build_contextual_messages(&system, None, "hi");
 
     let response = router.route(messages).await.unwrap();
@@ -209,8 +215,13 @@ async fn tool_use_loop_executes_tool_then_returns_text() {
     let (router, registry, executor) = build_test_env(MockProvider::with_tool_use());
     let instr = InstructionRegistry::empty();
 
-    let system =
-        entity_chat::augment_system_prompt("You are a test bot.", &registry, &instr, "echo hello");
+    let system = entity_chat::augment_system_prompt(
+        "You are a test bot.",
+        &registry,
+        &instr,
+        "echo hello",
+        &entity_chat::RuntimeContext::default(),
+    );
     let messages = entity_chat::build_contextual_messages(&system, None, "echo hello");
     let tools = entity_chat::build_tool_definitions(&registry);
     assert!(!tools.is_empty(), "should have tool definitions");
@@ -246,8 +257,13 @@ async fn session_history_deduplication() {
         },
     ];
 
-    let system =
-        entity_chat::augment_system_prompt("You are a test bot.", &registry, &instr, "hello");
+    let system = entity_chat::augment_system_prompt(
+        "You are a test bot.",
+        &registry,
+        &instr,
+        "hello",
+        &entity_chat::RuntimeContext::default(),
+    );
     let messages = entity_chat::build_contextual_messages(&system, Some(history), "hello");
 
     // System + 2 history (last "hello" deduped) + user = 4
@@ -272,7 +288,13 @@ async fn long_message_is_capped() {
         content: long_msg.clone(),
     }];
 
-    let system = entity_chat::augment_system_prompt("prompt", &registry, &instr, "hi");
+    let system = entity_chat::augment_system_prompt(
+        "prompt",
+        &registry,
+        &instr,
+        "hi",
+        &entity_chat::RuntimeContext::default(),
+    );
     let messages = entity_chat::build_contextual_messages(&system, Some(history), "hi");
 
     // History message should be capped at 4000 chars
@@ -300,7 +322,13 @@ async fn rounds_only_returns_final_text_when_no_tools_called() {
     let (router, registry, executor) = build_test_env(MockProvider::text_only());
     let instr = InstructionRegistry::empty();
 
-    let system = entity_chat::augment_system_prompt("You are a test bot.", &registry, &instr, "hi");
+    let system = entity_chat::augment_system_prompt(
+        "You are a test bot.",
+        &registry,
+        &instr,
+        "hi",
+        &entity_chat::RuntimeContext::default(),
+    );
     let mut messages = entity_chat::build_contextual_messages(&system, None, "hi");
     let tools = entity_chat::build_tool_definitions(&registry);
 

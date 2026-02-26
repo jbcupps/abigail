@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 18;
+pub const CONFIG_SCHEMA_VERSION: u32 = 19;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 ///
@@ -485,6 +485,12 @@ pub struct AppConfig {
     /// Recovery budget for autonomous retries before escalation.
     #[serde(default = "default_skill_recovery_budget")]
     pub skill_recovery_budget: u8,
+
+    // ── v19 fields ─────────────────────────────────────────────────
+    /// ISO 8601 timestamp of the last provider/router rebuild.
+    /// Set by `rebuild_router()` so the entity can see recent provider switches.
+    #[serde(default)]
+    pub last_provider_change_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -544,6 +550,7 @@ impl AppConfig {
             signed_skill_allowlist: Vec::new(),
             known_recipients_by_identity: HashMap::new(),
             skill_recovery_budget: default_skill_recovery_budget(),
+            last_provider_change_at: None,
         }
     }
 
@@ -770,6 +777,14 @@ impl AppConfig {
             tracing::debug!("Migrated config from v17 to v18 (IdPrimary → TierBased)");
         }
 
+        // Migration from v18 to v19
+        if self.schema_version < 19 {
+            // v19 adds: last_provider_change_at (defaults to None via serde).
+            self.schema_version = 19;
+            migrated = true;
+            tracing::debug!("Migrated config from v18 to v19 (last_provider_change_at)");
+        }
+
         migrated
     }
     /// Check if birth was interrupted (birth_stage set but birth_complete is false).
@@ -846,6 +861,7 @@ mod tests {
             signed_skill_allowlist: Vec::new(),
             known_recipients_by_identity: HashMap::new(),
             skill_recovery_budget: 3,
+            last_provider_change_at: None,
         }
     }
 
@@ -1175,6 +1191,29 @@ mod tests {
         // Legacy "id_primary" config values should deserialize as TierBased
         let parsed: RoutingMode = serde_json::from_str("\"id_primary\"").unwrap();
         assert_eq!(parsed, RoutingMode::TierBased);
+    }
+
+    #[test]
+    fn test_migrate_v18_to_v19() {
+        let mut config = AppConfig::default_paths();
+        config.schema_version = 18;
+
+        assert!(config.migrate());
+        assert_eq!(config.schema_version, CONFIG_SCHEMA_VERSION);
+        assert!(config.last_provider_change_at.is_none());
+    }
+
+    #[test]
+    fn test_last_provider_change_at_serde_roundtrip() {
+        let mut config = AppConfig::default_paths();
+        config.last_provider_change_at = Some("2026-02-26T10:00:00Z".to_string());
+
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            parsed.last_provider_change_at,
+            Some("2026-02-26T10:00:00Z".to_string())
+        );
     }
 
     #[test]

@@ -127,6 +127,21 @@ mod tests {
 }
 
 // ---------------------------------------------------------------------------
+// Recent provider change check
+// ---------------------------------------------------------------------------
+
+/// Returns true if the given ISO 8601 timestamp is within the last 10 minutes.
+/// Used to only surface provider switches that are contextually relevant.
+fn is_recent_provider_change(ts: &str) -> bool {
+    chrono::DateTime::parse_from_rfc3339(ts)
+        .map(|dt| {
+            let age = chrono::Utc::now().signed_duration_since(dt);
+            age.num_minutes() < 10
+        })
+        .unwrap_or(false)
+}
+
+// ---------------------------------------------------------------------------
 // POST /chat — Tauri command using shared entity-chat engine
 // ---------------------------------------------------------------------------
 
@@ -140,19 +155,40 @@ pub async fn chat(
     // 1. Auto-detect and store API keys (Tauri-specific pre-hook, GUI only)
     auto_detect_and_store_key_internal(&state, &message).await;
 
-    // 2. Build system prompt + router snapshot, augmented with tool awareness and skill instructions
-    let (router, system_prompt) = {
+    // 2. Build system prompt + router snapshot, augmented with tool awareness, skill instructions, and runtime context
+    let (router, system_prompt, tier, model_used, complexity_score) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
         let base =
             abigail_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
+        let router = state.router.read().map_err(|e| e.to_string())?.clone();
+        let (t, m, c) = router.tier_metadata_for_message(&message);
+        let status = router.status();
+
+        // Build runtime context for self-awareness
+        let runtime_ctx = entity_chat::RuntimeContext {
+            provider_name: status.ego_provider.clone(),
+            model_id: m.clone(),
+            routing_mode: Some(format!("{:?}", status.mode)),
+            tier: t.clone(),
+            complexity_score: c,
+            entity_name: config.agent_name.clone(),
+            entity_id: None,
+            has_local_llm: status.has_local_http,
+            last_provider_change_at: config
+                .last_provider_change_at
+                .as_ref()
+                .filter(|ts| is_recent_provider_change(ts))
+                .cloned(),
+        };
+
         let augmented = entity_chat::augment_system_prompt(
             &base,
             &state.registry,
             &state.instruction_registry,
             &message,
+            &runtime_ctx,
         );
-        let router = state.router.read().map_err(|e| e.to_string())?.clone();
-        (router, augmented)
+        (router, augmented, t, m, c)
     };
 
     // 3. Build contextual messages with sanitization + deduplication (shared engine)
@@ -162,10 +198,7 @@ pub async fn chat(
     // 4. Build tool definitions from registered skills (shared engine)
     let tools = entity_chat::build_tool_definitions(&state.registry);
 
-    // 5. Compute tier metadata from the user's message
-    let (tier, model_used, complexity_score) = router.tier_metadata_for_message(&message);
-
-    // 6. Route — use tool-use loop if tools are available, plain route otherwise
+    // 5. Route — use tool-use loop if tools are available, plain route otherwise
     let target_mode = target.as_deref().unwrap_or("AUTO");
     let result = if tools.is_empty() || target_mode == "ID" {
         let res = if target_mode == "ID" {
@@ -222,24 +255,43 @@ pub async fn chat_stream(
 ) -> Result<(), String> {
     auto_detect_and_store_key_internal(&state, &message).await;
 
-    let (router, system_prompt) = {
+    let (router, system_prompt, tier, model_used, complexity_score) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
         let base =
             abigail_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
+        let router = state.router.read().map_err(|e| e.to_string())?.clone();
+        let (t, m, c) = router.tier_metadata_for_message(&message);
+        let status = router.status();
+
+        let runtime_ctx = entity_chat::RuntimeContext {
+            provider_name: status.ego_provider.clone(),
+            model_id: m.clone(),
+            routing_mode: Some(format!("{:?}", status.mode)),
+            tier: t.clone(),
+            complexity_score: c,
+            entity_name: config.agent_name.clone(),
+            entity_id: None,
+            has_local_llm: status.has_local_http,
+            last_provider_change_at: config
+                .last_provider_change_at
+                .as_ref()
+                .filter(|ts| is_recent_provider_change(ts))
+                .cloned(),
+        };
+
         let augmented = entity_chat::augment_system_prompt(
             &base,
             &state.registry,
             &state.instruction_registry,
             &message,
+            &runtime_ctx,
         );
-        let router = state.router.read().map_err(|e| e.to_string())?.clone();
-        (router, augmented)
+        (router, augmented, t, m, c)
     };
 
     let messages =
         entity_chat::build_contextual_messages(&system_prompt, session_messages, &message);
     let tools = entity_chat::build_tool_definitions(&state.registry);
-    let (tier, model_used, complexity_score) = router.tier_metadata_for_message(&message);
     let target_mode = target.as_deref().unwrap_or("AUTO");
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
