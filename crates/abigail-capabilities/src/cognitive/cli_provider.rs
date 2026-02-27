@@ -258,6 +258,9 @@ pub fn detect_all_cli_providers() -> Vec<CliDetectionResult> {
 pub struct CliLlmProvider {
     variant: CliVariant,
     api_key: String,
+    /// Retained for API compatibility — permission flags are no longer applied
+    /// per-mode; the CLI subprocess always runs with `--dangerously-skip-permissions`.
+    #[allow(dead_code)]
     permission_mode: CliPermissionMode,
     /// Claude Code session ID for multi-turn continuity.
     active_session_id: RwLock<Option<String>>,
@@ -355,28 +358,20 @@ impl CliLlmProvider {
         }
     }
 
-    /// Add permission / tool-allowlist flags for Claude Code.
-    fn apply_permission_flags(
-        &self,
-        cmd: &mut Command,
-        tools: &Option<Vec<crate::cognitive::provider::ToolDefinition>>,
-    ) {
-        match self.permission_mode {
-            CliPermissionMode::DangerousSkipAll => {
-                cmd.arg("--dangerously-skip-permissions");
-            }
-            CliPermissionMode::AllowListOnly | CliPermissionMode::Interactive => {
-                if let Some(ref tool_defs) = tools {
-                    let tool_names: Vec<String> = tool_defs
-                        .iter()
-                        .map(|t| crate::cognitive::provider::sanitize_tool_name(&t.name))
-                        .collect();
-                    for name in &tool_names {
-                        cmd.arg("--allowedTools").arg(name);
-                    }
-                }
-            }
-        }
+    /// Add permission flags for the CLI subprocess.
+    ///
+    /// Entity-level tool permissions are enforced by `SkillSandbox` /
+    /// `SkillExecutor`, not by the CLI tool's permission system.  The CLI
+    /// tool's `--allowedTools` flag expects the CLI's *own* tool names
+    /// (e.g. "Bash", "Read", "Write"), not the entity's qualified skill
+    /// tool names, so passing entity tool names has no effect — and on
+    /// Windows the resulting command-line length overflows the `cmd.exe`
+    /// 8 191-char limit (OS error 206).
+    ///
+    /// We therefore always pass `--dangerously-skip-permissions` to the
+    /// CLI subprocess and rely on the entity's own layered security model.
+    fn apply_permission_flags(&self, cmd: &mut Command) {
+        cmd.arg("--dangerously-skip-permissions");
     }
 
     /// Build the full CLI command with rich flags per variant.
@@ -388,7 +383,6 @@ impl CliLlmProvider {
         &self,
         prompt: &str,
         system_prompt: Option<&str>,
-        tools: &Option<Vec<crate::cognitive::provider::ToolDefinition>>,
     ) -> (Command, Option<String>) {
         let mut cmd = Command::new(self.variant.binary_name());
 
@@ -409,7 +403,7 @@ impl CliLlmProvider {
                     cmd.arg("--print");
                     cmd.arg("--output-format").arg("text");
                     cmd.arg("--max-turns").arg("10");
-                    self.apply_permission_flags(&mut cmd, tools);
+                    self.apply_permission_flags(&mut cmd);
                     cmd.stdin(std::process::Stdio::piped());
                     stdin_content = Some(prompt.to_string());
                 } else {
@@ -417,7 +411,7 @@ impl CliLlmProvider {
                     cmd.arg("--print");
                     cmd.arg("--output-format").arg("text");
                     cmd.arg("--max-turns").arg("10");
-                    self.apply_permission_flags(&mut cmd, tools);
+                    self.apply_permission_flags(&mut cmd);
 
                     let piped = match system_prompt {
                         Some(sp) => format!(
@@ -544,8 +538,7 @@ impl LlmProvider for CliLlmProvider {
             request.tools.is_some(),
         );
 
-        let (cmd, stdin_content) =
-            self.build_command(&prompt, system_prompt.as_deref(), &request.tools);
+        let (cmd, stdin_content) = self.build_command(&prompt, system_prompt.as_deref());
         let content = self.run_and_collect(cmd, 300, stdin_content).await?;
 
         tracing::info!(
@@ -590,13 +583,13 @@ impl LlmProvider for CliLlmProvider {
             cmd.arg("--print");
             cmd.arg("--output-format").arg("stream-json");
             cmd.arg("--max-turns").arg("10");
-            self.apply_permission_flags(&mut cmd, &request.tools);
+            self.apply_permission_flags(&mut cmd);
             piped = prompt.clone();
         } else {
             cmd.arg("--print");
             cmd.arg("--output-format").arg("stream-json");
             cmd.arg("--max-turns").arg("10");
-            self.apply_permission_flags(&mut cmd, &request.tools);
+            self.apply_permission_flags(&mut cmd);
             piped = match system_prompt.as_deref() {
                 Some(sp) => format!(
                     "[System Instructions]\n{}\n\n[User Message]\n{}",

@@ -496,6 +496,7 @@ fn parse_routing_mode(s: &str) -> abigail_core::RoutingMode {
     match s {
         "EgoPrimary" => abigail_core::RoutingMode::EgoPrimary,
         "Council" => abigail_core::RoutingMode::Council,
+        "CliOrchestrator" => abigail_core::RoutingMode::CliOrchestrator,
         // Legacy "IdPrimary" maps to TierBased (local LLM is now failsafe-only)
         "TierBased" | "IdPrimary" => abigail_core::RoutingMode::TierBased,
         _ => abigail_core::RoutingMode::default(),
