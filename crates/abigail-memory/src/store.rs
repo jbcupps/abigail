@@ -1,4 +1,6 @@
-use crate::schema::{CREATE_BIRTH, CREATE_MEMORIES, CREATE_SCHEMA_VERSIONS};
+use crate::schema::{
+    CREATE_BIRTH, CREATE_MEMORIES, CREATE_SCHEMA_VERSIONS, MIGRATION_V2_CONVERSATION_TURNS,
+};
 use abigail_core::AppConfig;
 use chrono::Utc;
 use rusqlite::Connection;
@@ -61,6 +63,61 @@ impl Memory {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ConversationTurn {
+    pub id: String,
+    pub session_id: String,
+    pub turn_number: u32,
+    pub role: String,
+    pub content: String,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub tier: Option<String>,
+    pub complexity_score: Option<u8>,
+    pub token_estimate: Option<u32>,
+    pub created_at: chrono::DateTime<Utc>,
+}
+
+impl ConversationTurn {
+    pub fn new(session_id: &str, role: &str, content: &str) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            session_id: session_id.to_string(),
+            turn_number: 0,
+            role: role.to_string(),
+            content: content.to_string(),
+            provider: None,
+            model: None,
+            tier: None,
+            complexity_score: None,
+            token_estimate: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    pub fn with_metadata(
+        mut self,
+        provider: Option<String>,
+        model: Option<String>,
+        tier: Option<String>,
+        complexity_score: Option<u8>,
+    ) -> Self {
+        self.provider = provider;
+        self.model = model;
+        self.tier = tier;
+        self.complexity_score = complexity_score;
+        self
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SessionSummary {
+    pub session_id: String,
+    pub turn_count: u64,
+    pub first_at: String,
+    pub last_at: String,
+}
+
 #[derive(Error, Debug)]
 pub enum StoreError {
     #[error("SQLite error: {0}")]
@@ -106,9 +163,7 @@ impl MemoryStore {
     /// Run pending schema migrations in order. Each migration is applied once and
     /// recorded in `schema_versions`. Version 1 is the baseline (no SQL changes).
     fn run_migrations(conn: &Connection) -> Result<()> {
-        let migrations: &[(i64, &str)] = &[
-            (1, ""), // Baseline: marks current schema as v1; no SQL changes needed
-        ];
+        let migrations: &[(i64, &str)] = &[(1, ""), (2, MIGRATION_V2_CONVERSATION_TURNS)];
 
         for &(version, sql) in migrations {
             let already_applied: bool = conn.query_row(
@@ -261,6 +316,197 @@ impl MemoryStore {
         }
         Ok(out)
     }
+
+    // ── Conversation Turns ──────────────────────────────────────────
+
+    pub fn insert_turn(&self, turn: &ConversationTurn) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        conn.execute(
+            "INSERT INTO conversation_turns \
+             (id, session_id, turn_number, role, content, provider, model, tier, \
+              complexity_score, token_estimate, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![
+                turn.id,
+                turn.session_id,
+                turn.turn_number,
+                turn.role,
+                turn.content,
+                turn.provider,
+                turn.model,
+                turn.tier,
+                turn.complexity_score.map(|v| v as i64),
+                turn.token_estimate.map(|v| v as i64),
+                turn.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Number of turns recorded for a given session.
+    pub fn session_turn_count(&self, session_id: &str) -> Result<u64> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM conversation_turns WHERE session_id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )?;
+        Ok(count as u64)
+    }
+
+    /// Total turns across all sessions (used for archive scheduling).
+    pub fn total_turn_count(&self) -> Result<u64> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM conversation_turns", [], |row| {
+            row.get(0)
+        })?;
+        Ok(count as u64)
+    }
+
+    /// Recent turns from a specific session, ordered oldest-first.
+    pub fn recent_turns(&self, session_id: &str, limit: usize) -> Result<Vec<ConversationTurn>> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, turn_number, role, content, provider, model, \
+                    tier, complexity_score, token_estimate, created_at \
+             FROM conversation_turns WHERE session_id = ?1 \
+             ORDER BY turn_number DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![session_id, limit as i64], Self::map_turn)?;
+        let mut out: Vec<ConversationTurn> = rows.filter_map(|r| r.ok()).collect();
+        out.reverse();
+        Ok(out)
+    }
+
+    /// Recent turns across all sessions, most-recent first.
+    pub fn recent_turns_all_sessions(&self, limit: usize) -> Result<Vec<ConversationTurn>> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, turn_number, role, content, provider, model, \
+                    tier, complexity_score, token_estimate, created_at \
+             FROM conversation_turns ORDER BY created_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit as i64], Self::map_turn)?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// Full-text search across conversation turns (case-insensitive LIKE).
+    pub fn search_turns(&self, query: &str, limit: usize) -> Result<Vec<ConversationTurn>> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        let pattern = format!("%{}%", query);
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, turn_number, role, content, provider, model, \
+                    tier, complexity_score, token_estimate, created_at \
+             FROM conversation_turns WHERE content LIKE ?1 \
+             ORDER BY created_at DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![pattern, limit as i64], Self::map_turn)?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// List distinct sessions with aggregated metadata.
+    pub fn list_sessions(&self, limit: usize) -> Result<Vec<SessionSummary>> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT session_id, COUNT(*) as cnt, \
+                    MIN(created_at) as first_at, MAX(created_at) as last_at \
+             FROM conversation_turns GROUP BY session_id \
+             ORDER BY last_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit as i64], |row| {
+            Ok(SessionSummary {
+                session_id: row.get(0)?,
+                turn_count: row.get::<_, i64>(1)? as u64,
+                first_at: row.get(2)?,
+                last_at: row.get(3)?,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// Retrieve all turns (for archive export).
+    pub fn all_turns(&self) -> Result<Vec<ConversationTurn>> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, turn_number, role, content, provider, model, \
+                    tier, complexity_score, token_estimate, created_at \
+             FROM conversation_turns ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map([], Self::map_turn)?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// Retrieve all memories (for archive export).
+    pub fn all_memories(&self) -> Result<Vec<Memory>> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT id, content, weight, created_at FROM memories ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let created_at: String = row.get(3)?;
+            let created_at = chrono::DateTime::parse_from_rfc3339(&created_at)
+                .map(|dt| dt.with_timezone(&Utc))
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            let weight_str: String = row.get(2)?;
+            let weight = match weight_str.as_str() {
+                "ephemeral" => MemoryWeight::Ephemeral,
+                "distilled" => MemoryWeight::Distilled,
+                "crystallized" => MemoryWeight::Crystallized,
+                w => {
+                    return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+                        StoreError::InvalidData(format!("unknown weight: {}", w)),
+                    )))
+                }
+            };
+            Ok(Memory {
+                id: row.get(0)?,
+                content: row.get(1)?,
+                weight,
+                created_at,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    fn map_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<ConversationTurn> {
+        let created_at: String = row.get(10)?;
+        let created_at = chrono::DateTime::parse_from_rfc3339(&created_at)
+            .map(|dt| dt.with_timezone(&Utc))
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        Ok(ConversationTurn {
+            id: row.get(0)?,
+            session_id: row.get(1)?,
+            turn_number: row.get::<_, i64>(2)? as u32,
+            role: row.get(3)?,
+            content: row.get(4)?,
+            provider: row.get(5)?,
+            model: row.get(6)?,
+            tier: row.get(7)?,
+            complexity_score: row.get::<_, Option<i64>>(8)?.map(|v| v as u8),
+            token_estimate: row.get::<_, Option<i64>>(9)?.map(|v| v as u32),
+            created_at,
+        })
+    }
+
+    // ── Memories ──────────────────────────────────────────────────
 
     /// Recent memories (MVP: by created_at DESC; sqlite-vec stubbed).
     pub fn recent_memories(&self, limit: usize) -> Result<Vec<Memory>> {

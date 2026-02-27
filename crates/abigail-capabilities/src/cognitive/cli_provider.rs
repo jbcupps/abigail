@@ -8,6 +8,7 @@ use crate::cognitive::provider::{CompletionRequest, CompletionResponse, LlmProvi
 use abigail_core::CliPermissionMode;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::sync::RwLock;
 use std::time::Duration;
 use tokio::process::Command;
 
@@ -249,10 +250,17 @@ pub fn detect_all_cli_providers() -> Vec<CliDetectionResult> {
 }
 
 /// An LLM provider that delegates to an external CLI tool.
+///
+/// For `ClaudeCode`, tracks the active session ID so subsequent messages
+/// in the same conversation can use `--resume` instead of replaying all
+/// history, keeping the command line short and leveraging Claude's built-in
+/// session state.
 pub struct CliLlmProvider {
     variant: CliVariant,
     api_key: String,
     permission_mode: CliPermissionMode,
+    /// Claude Code session ID for multi-turn continuity.
+    active_session_id: RwLock<Option<String>>,
 }
 
 impl CliLlmProvider {
@@ -269,6 +277,7 @@ impl CliLlmProvider {
             variant,
             api_key,
             permission_mode: CliPermissionMode::default(),
+            active_session_id: RwLock::new(None),
         })
     }
 
@@ -288,7 +297,20 @@ impl CliLlmProvider {
             variant,
             api_key,
             permission_mode,
+            active_session_id: RwLock::new(None),
         })
+    }
+
+    /// Clear the active session so the next request starts fresh.
+    pub fn reset_session(&self) {
+        if let Ok(mut guard) = self.active_session_id.write() {
+            *guard = None;
+        }
+    }
+
+    /// Return the current session ID, if any.
+    pub fn session_id(&self) -> Option<String> {
+        self.active_session_id.read().ok()?.clone()
     }
 
     pub fn variant(&self) -> CliVariant {
@@ -333,46 +355,80 @@ impl CliLlmProvider {
         }
     }
 
+    /// Add permission / tool-allowlist flags for Claude Code.
+    fn apply_permission_flags(
+        &self,
+        cmd: &mut Command,
+        tools: &Option<Vec<crate::cognitive::provider::ToolDefinition>>,
+    ) {
+        match self.permission_mode {
+            CliPermissionMode::DangerousSkipAll => {
+                cmd.arg("--dangerously-skip-permissions");
+            }
+            CliPermissionMode::AllowListOnly | CliPermissionMode::Interactive => {
+                if let Some(ref tool_defs) = tools {
+                    let tool_names: Vec<String> = tool_defs
+                        .iter()
+                        .map(|t| crate::cognitive::provider::sanitize_tool_name(&t.name))
+                        .collect();
+                    for name in &tool_names {
+                        cmd.arg("--allowedTools").arg(name);
+                    }
+                }
+            }
+        }
+    }
+
     /// Build the full CLI command with rich flags per variant.
+    ///
+    /// Returns `(Command, Option<stdin_content>)`. When the second value is
+    /// `Some`, the caller must pipe that string into the child's stdin to avoid
+    /// Windows command-line length limits (32 767 chars for `CreateProcess`).
     fn build_command(
         &self,
         prompt: &str,
         system_prompt: Option<&str>,
         tools: &Option<Vec<crate::cognitive::provider::ToolDefinition>>,
-    ) -> Command {
+    ) -> (Command, Option<String>) {
         let mut cmd = Command::new(self.variant.binary_name());
 
         if self.api_key != "system" {
             cmd.env(self.variant.api_key_env_var(), &self.api_key);
         }
 
+        let stdin_content;
+
         match self.variant {
             CliVariant::ClaudeCode => {
-                cmd.arg("--print");
-                cmd.arg("--output-format").arg("text");
-                cmd.arg("--max-turns").arg("10");
-                match self.permission_mode {
-                    CliPermissionMode::DangerousSkipAll => {
-                        cmd.arg("--dangerously-skip-permissions");
-                    }
-                    CliPermissionMode::AllowListOnly | CliPermissionMode::Interactive => {
-                        if let Some(ref tool_defs) = tools {
-                            let tool_names: Vec<String> = tool_defs
-                                .iter()
-                                .map(|t| crate::cognitive::provider::sanitize_tool_name(&t.name))
-                                .collect();
-                            if !tool_names.is_empty() {
-                                for name in &tool_names {
-                                    cmd.arg("--allowedTools").arg(name);
-                                }
-                            }
-                        }
-                    }
+                let has_session = self.active_session_id.read().ok().and_then(|g| g.clone());
+
+                if let Some(ref sid) = has_session {
+                    // Resume existing session — Claude keeps the system
+                    // prompt and conversation state. Only send new input.
+                    cmd.arg("--resume").arg(sid);
+                    cmd.arg("--print");
+                    cmd.arg("--output-format").arg("text");
+                    cmd.arg("--max-turns").arg("10");
+                    self.apply_permission_flags(&mut cmd, tools);
+                    cmd.stdin(std::process::Stdio::piped());
+                    stdin_content = Some(prompt.to_string());
+                } else {
+                    // First message — send system prompt + user prompt.
+                    cmd.arg("--print");
+                    cmd.arg("--output-format").arg("text");
+                    cmd.arg("--max-turns").arg("10");
+                    self.apply_permission_flags(&mut cmd, tools);
+
+                    let piped = match system_prompt {
+                        Some(sp) => format!(
+                            "[System Instructions]\n{}\n\n[User Message]\n{}",
+                            sp, prompt
+                        ),
+                        None => prompt.to_string(),
+                    };
+                    cmd.stdin(std::process::Stdio::piped());
+                    stdin_content = Some(piped);
                 }
-                if let Some(sp) = system_prompt {
-                    cmd.arg("--append-system-prompt").arg(sp);
-                }
-                cmd.arg(prompt);
             }
             CliVariant::GeminiCli => {
                 cmd.arg("--prompt");
@@ -382,6 +438,7 @@ impl CliLlmProvider {
                     cmd.env("GEMINI_SYSTEM_MD", tmp);
                 }
                 cmd.arg(prompt);
+                stdin_content = None;
             }
             CliVariant::OpenAiCodex => {
                 cmd.arg("exec");
@@ -391,7 +448,8 @@ impl CliLlmProvider {
                 } else {
                     prompt.to_string()
                 };
-                cmd.arg(full_prompt);
+                cmd.stdin(std::process::Stdio::piped());
+                stdin_content = Some(full_prompt);
             }
             CliVariant::XaiGrokCli => {
                 let full_prompt = if let Some(sp) = system_prompt {
@@ -399,7 +457,8 @@ impl CliLlmProvider {
                 } else {
                     prompt.to_string()
                 };
-                cmd.arg(full_prompt);
+                cmd.stdin(std::process::Stdio::piped());
+                stdin_content = Some(full_prompt);
             }
         }
 
@@ -407,12 +466,20 @@ impl CliLlmProvider {
         cmd.stderr(std::process::Stdio::piped());
         #[cfg(windows)]
         hide_console_window_async(&mut cmd);
-        cmd
+        (cmd, stdin_content)
     }
 
     /// Spawn the CLI process and wait for completion with timeout.
-    async fn run_and_collect(&self, mut cmd: Command, timeout_secs: u64) -> anyhow::Result<String> {
-        let child = cmd.spawn().map_err(|e| {
+    ///
+    /// When `stdin_content` is `Some`, the string is written to the child's
+    /// stdin before waiting — this avoids the Windows command-line length limit.
+    async fn run_and_collect(
+        &self,
+        mut cmd: Command,
+        timeout_secs: u64,
+        stdin_content: Option<String>,
+    ) -> anyhow::Result<String> {
+        let mut child = cmd.spawn().map_err(|e| {
             anyhow::anyhow!(
                 "Failed to spawn {} CLI (is '{}' on PATH?): {}",
                 self.variant,
@@ -420,6 +487,14 @@ impl CliLlmProvider {
                 e
             )
         })?;
+
+        if let Some(content) = stdin_content {
+            use tokio::io::AsyncWriteExt;
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(content.as_bytes()).await?;
+                drop(stdin);
+            }
+        }
 
         let output =
             tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
@@ -469,8 +544,9 @@ impl LlmProvider for CliLlmProvider {
             request.tools.is_some(),
         );
 
-        let cmd = self.build_command(&prompt, system_prompt.as_deref(), &request.tools);
-        let content = self.run_and_collect(cmd, 300).await?;
+        let (cmd, stdin_content) =
+            self.build_command(&prompt, system_prompt.as_deref(), &request.tools);
+        let content = self.run_and_collect(cmd, 300, stdin_content).await?;
 
         tracing::info!(
             "CLI subprocess completed. Output size: {} bytes",
@@ -501,30 +577,36 @@ impl LlmProvider for CliLlmProvider {
         let system_prompt = Self::extract_system_prompt(&request.messages);
         let prompt = Self::build_prompt(&request.messages);
 
+        let has_session = self.active_session_id.read().ok().and_then(|g| g.clone());
+
         let mut cmd = Command::new(self.variant.binary_name());
         if self.api_key != "system" {
             cmd.env(self.variant.api_key_env_var(), &self.api_key);
         }
-        cmd.arg("--print");
-        cmd.arg("--output-format").arg("stream-json");
-        cmd.arg("--max-turns").arg("10");
-        match self.permission_mode {
-            CliPermissionMode::DangerousSkipAll => {
-                cmd.arg("--dangerously-skip-permissions");
-            }
-            CliPermissionMode::AllowListOnly | CliPermissionMode::Interactive => {
-                if let Some(ref tool_defs) = request.tools {
-                    for td in tool_defs {
-                        let name = crate::cognitive::provider::sanitize_tool_name(&td.name);
-                        cmd.arg("--allowedTools").arg(&name);
-                    }
-                }
-            }
+
+        let piped: String;
+        if let Some(ref sid) = has_session {
+            cmd.arg("--resume").arg(sid);
+            cmd.arg("--print");
+            cmd.arg("--output-format").arg("stream-json");
+            cmd.arg("--max-turns").arg("10");
+            self.apply_permission_flags(&mut cmd, &request.tools);
+            piped = prompt.clone();
+        } else {
+            cmd.arg("--print");
+            cmd.arg("--output-format").arg("stream-json");
+            cmd.arg("--max-turns").arg("10");
+            self.apply_permission_flags(&mut cmd, &request.tools);
+            piped = match system_prompt.as_deref() {
+                Some(sp) => format!(
+                    "[System Instructions]\n{}\n\n[User Message]\n{}",
+                    sp, prompt
+                ),
+                None => prompt.clone(),
+            };
         }
-        if let Some(ref sp) = system_prompt {
-            cmd.arg("--append-system-prompt").arg(sp);
-        }
-        cmd.arg(&prompt);
+
+        cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         #[cfg(windows)]
@@ -534,6 +616,14 @@ impl LlmProvider for CliLlmProvider {
             .spawn()
             .map_err(|e| anyhow::anyhow!("Failed to spawn claude CLI for streaming: {}", e))?;
 
+        {
+            use tokio::io::AsyncWriteExt;
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(piped.as_bytes()).await;
+                drop(stdin);
+            }
+        }
+
         let stdout = child
             .stdout
             .take()
@@ -541,12 +631,24 @@ impl LlmProvider for CliLlmProvider {
 
         let mut reader = tokio::io::BufReader::new(stdout).lines();
         let mut full_content = String::new();
+        let mut captured_session_id: Option<String> = None;
 
         while let Ok(Some(line)) = reader.next_line().await {
             if line.trim().is_empty() {
                 continue;
             }
             if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
+                // Capture session ID from Claude's stream output for reuse.
+                if captured_session_id.is_none() {
+                    if let Some(sid) = event
+                        .get("session_id")
+                        .or_else(|| event.get("sessionId"))
+                        .and_then(|v| v.as_str())
+                    {
+                        captured_session_id = Some(sid.to_string());
+                    }
+                }
+
                 if let Some(delta) = event
                     .get("content_block_delta")
                     .or_else(|| event.get("delta"))
@@ -564,6 +666,13 @@ impl LlmProvider for CliLlmProvider {
         }
 
         let _ = child.wait().await;
+
+        // Store session ID for subsequent --resume calls.
+        if let Some(sid) = captured_session_id {
+            if let Ok(mut guard) = self.active_session_id.write() {
+                *guard = Some(sid);
+            }
+        }
 
         let response = CompletionResponse {
             content: full_content,

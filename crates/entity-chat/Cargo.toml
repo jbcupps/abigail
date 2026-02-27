@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 entity-core = { path = "../entity-core" }
 abigail-core = { path = "../abigail-core" }
+abigail-memory = { path = "../abigail-memory" }
 abigail-capabilities = { path = "../abigail-capabilities" }
 abigail-router = { path = "../abigail-router" }
 abigail-skills = { path = "../abigail-skills" }

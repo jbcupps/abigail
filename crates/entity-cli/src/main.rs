@@ -133,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
                     message,
                     target,
                     session_messages: None,
+                    session_id: None,
                 })
                 .send()
                 .await?

@@ -52,6 +52,16 @@ pub async fn chat(
     Json(body): Json<ChatRequest>,
 ) -> Json<ApiEnvelope<ChatResponse>> {
     let status = state.router.status();
+    let session_id = body
+        .session_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    // Archive the user turn.
+    let user_turn = abigail_memory::ConversationTurn::new(&session_id, "user", &body.message);
+    if let Err(e) = state.memory.insert_turn(&user_turn) {
+        tracing::warn!("Failed to archive user turn: {}", e);
+    }
 
     let system_prompt = if status.mode == abigail_core::RoutingMode::CliOrchestrator {
         entity_chat::build_cli_system_prompt(
@@ -120,6 +130,24 @@ pub async fn chat(
                 .map(|s| s.to_string())
                 .or_else(|| Some(entity_chat::provider_label(&state.router)));
 
+            // Archive the assistant turn.
+            let asst_turn = abigail_memory::ConversationTurn::new(
+                &session_id,
+                "assistant",
+                &tool_result.content,
+            )
+            .with_metadata(
+                provider.clone(),
+                model_used.clone(),
+                tier.clone(),
+                complexity_score,
+            );
+            if let Err(e) = state.memory.insert_turn(&asst_turn) {
+                tracing::warn!("Failed to archive assistant turn: {}", e);
+            }
+
+            state.maybe_auto_archive();
+
             Json(ApiEnvelope::success(ChatResponse {
                 reply: tool_result.content,
                 provider,
@@ -128,6 +156,7 @@ pub async fn chat(
                 model_used,
                 complexity_score,
                 execution_trace: tool_result.execution_trace,
+                session_id: Some(session_id),
             }))
         }
         Err(e) => Json(ApiEnvelope::error(e.to_string())),
@@ -142,6 +171,17 @@ pub async fn chat_stream(
     State(state): State<EntityDaemonState>,
     Json(body): Json<ChatRequest>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let session_id = body
+        .session_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    // Archive user turn.
+    let user_turn = abigail_memory::ConversationTurn::new(&session_id, "user", &body.message);
+    if let Err(e) = state.memory.insert_turn(&user_turn) {
+        tracing::warn!("Failed to archive user turn (stream): {}", e);
+    }
+
     let base_prompt =
         abigail_core::system_prompt::build_system_prompt(&state.docs_dir, &state.config.agent_name);
     let (tier, model_used, complexity_score) =
@@ -180,6 +220,10 @@ pub async fn chat_stream(
 
     let router = state.router.clone();
     let executor = state.executor.clone();
+    let memory = state.memory.clone();
+    let archive_exporter = state.archive_exporter.clone();
+    let turns_since_archive = state.turns_since_archive.clone();
+    let sid = session_id.clone();
 
     tokio::spawn(async move {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
@@ -215,6 +259,37 @@ pub async fn chat_stream(
                     .map(|s| s.to_string())
                     .or_else(|| Some(entity_chat::provider_label(&router)));
 
+                // Archive assistant turn.
+                let asst_turn =
+                    abigail_memory::ConversationTurn::new(&sid, "assistant", &pipeline.content)
+                        .with_metadata(
+                            provider.clone(),
+                            model_used.clone(),
+                            tier.clone(),
+                            complexity_score,
+                        );
+                if let Err(e) = memory.insert_turn(&asst_turn) {
+                    tracing::warn!("Failed to archive assistant turn (stream): {}", e);
+                }
+
+                // Trigger auto-archive if threshold reached.
+                {
+                    use std::sync::atomic::Ordering;
+                    let count = turns_since_archive.fetch_add(1, Ordering::Relaxed) + 1;
+                    if count >= crate::state::ARCHIVE_INTERVAL_TURNS {
+                        turns_since_archive.store(0, Ordering::Relaxed);
+                        if let Some(ref exp) = archive_exporter {
+                            let m = memory.clone();
+                            let e = exp.clone();
+                            tokio::spawn(async move {
+                                if let Err(err) = e.export(&m) {
+                                    tracing::warn!("Auto-archive (stream) failed: {}", err);
+                                }
+                            });
+                        }
+                    }
+                }
+
                 let response = ChatResponse {
                     reply: pipeline.content,
                     provider,
@@ -223,6 +298,7 @@ pub async fn chat_stream(
                     model_used,
                     complexity_score,
                     execution_trace: pipeline.execution_trace,
+                    session_id: Some(sid),
                 };
                 let _ = sse_tx
                     .send(

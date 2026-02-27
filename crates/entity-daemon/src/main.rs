@@ -375,6 +375,17 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    let archive_exporter = {
+        let pk_path = config.data_dir.join("external_pubkey.bin");
+        if pk_path.exists() {
+            abigail_memory::ArchiveExporter::with_defaults(pk_path, config.agent_name.as_deref())
+                .map(Arc::new)
+        } else {
+            tracing::info!("No external_pubkey.bin found — archive export disabled");
+            None
+        }
+    };
+
     let state = EntityDaemonState {
         entity_id: cli.entity_id.clone(),
         config,
@@ -386,6 +397,8 @@ async fn main() -> anyhow::Result<()> {
         memory,
         memory_hook: None,
         instruction_registry,
+        archive_exporter,
+        turns_since_archive: Arc::new(std::sync::atomic::AtomicU32::new(0)),
     };
 
     // Spawn SkillsWatcher for hot-reload of new skills (before state is consumed)
