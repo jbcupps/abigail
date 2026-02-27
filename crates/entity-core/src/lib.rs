@@ -95,6 +95,40 @@ pub struct ExecutionStep {
     pub ended_at_utc: String,
 }
 
+/// Why a particular tier/model was selected for this turn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SelectionReason {
+    /// Complexity score mapped to a tier via thresholds.
+    Complexity,
+    /// Force override pinned a specific tier.
+    PinnedTier,
+    /// Force override pinned a specific model.
+    PinnedModel,
+    /// Setup/credential intent auto-escalated to Pro.
+    SetupIntent,
+    /// Ego-primary mode (no tier logic).
+    EgoPrimary,
+    /// Council mode (multi-provider deliberation).
+    Council,
+    /// Fallback after primary provider failed.
+    Fallback,
+}
+
+impl std::fmt::Display for SelectionReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SelectionReason::Complexity => write!(f, "complexity"),
+            SelectionReason::PinnedTier => write!(f, "pinned_tier"),
+            SelectionReason::PinnedModel => write!(f, "pinned_model"),
+            SelectionReason::SetupIntent => write!(f, "setup_intent"),
+            SelectionReason::EgoPrimary => write!(f, "ego_primary"),
+            SelectionReason::Council => write!(f, "council"),
+            SelectionReason::Fallback => write!(f, "fallback"),
+        }
+    }
+}
+
 /// Full execution trace for a single chat turn. This is the single source of
 /// truth for attribution — UI and prompt self-awareness should derive facts
 /// from this struct, not from legacy compatibility fields.
@@ -112,6 +146,15 @@ pub struct ExecutionTrace {
     /// Model the tier/config system resolved before execution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub configured_model: Option<String>,
+    /// Tier the router intended before execution (e.g. "fast", "standard", "pro").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub configured_tier: Option<String>,
+    /// Complexity score (5-95) used for tier selection (None if not tier-based).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complexity_score: Option<u8>,
+    /// Why this tier/model was selected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection_reason: Option<SelectionReason>,
     /// Which target the fast-path classifier selected ("id" or "ego").
     pub target_selected: String,
     /// Ordered list of provider call attempts (primary + any fallbacks).
@@ -136,6 +179,9 @@ impl ExecutionTrace {
             routing_mode: routing_mode.to_string(),
             configured_provider,
             configured_model,
+            configured_tier: None,
+            complexity_score: None,
+            selection_reason: None,
             target_selected: target_selected.to_string(),
             steps: Vec::new(),
             final_step_index: 0,
@@ -195,6 +241,32 @@ impl ExecutionTrace {
         self.steps
             .get(self.final_step_index)
             .and_then(|s| s.model_requested.as_deref())
+    }
+
+    /// The tier that was actually used — derived from configured_tier unless
+    /// fallback occurred (in which case there's no meaningful tier).
+    pub fn final_tier(&self) -> Option<&str> {
+        if self.fallback_occurred {
+            None
+        } else {
+            self.configured_tier.as_deref()
+        }
+    }
+
+    /// Derive the selection reason as a display string.
+    pub fn selection_reason_str(&self) -> &str {
+        self.selection_reason
+            .as_ref()
+            .map(|r| match r {
+                SelectionReason::Complexity => "complexity",
+                SelectionReason::PinnedTier => "pinned_tier",
+                SelectionReason::PinnedModel => "pinned_model",
+                SelectionReason::SetupIntent => "setup_intent",
+                SelectionReason::EgoPrimary => "ego_primary",
+                SelectionReason::Council => "council",
+                SelectionReason::Fallback => "fallback",
+            })
+            .unwrap_or("unknown")
     }
 }
 

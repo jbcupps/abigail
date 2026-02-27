@@ -210,6 +210,31 @@ export default function ForgePanel() {
         routingMode,
         superegoMode: undefined,
       });
+
+      // Append staged override changes to the preview
+      if (pendingOverride) {
+        const ov = pendingOverride;
+        if (ov.pinned_model !== forceOverride.pinned_model) {
+          next.changes.push(
+            `Force override pinned model: ${forceOverride.pinned_model || "none"} -> ${ov.pinned_model || "none"}`
+          );
+        }
+        if (ov.pinned_tier !== forceOverride.pinned_tier) {
+          next.changes.push(
+            `Force override pinned tier: ${forceOverride.pinned_tier || "none"} -> ${ov.pinned_tier || "none"}`
+          );
+        }
+        if (ov.pinned_provider !== forceOverride.pinned_provider) {
+          next.changes.push(
+            `Force override pinned provider: ${forceOverride.pinned_provider || "none"} -> ${ov.pinned_provider || "none"}`
+          );
+        }
+        if (next.changes.length > 0) {
+          next.risk_level = "high";
+          next.requires_confirmation = true;
+        }
+      }
+
       setPreview(next);
     } catch (e) {
       alert(String(e));
@@ -237,6 +262,13 @@ export default function ForgePanel() {
         routingMode,
         superegoMode: undefined,
       });
+
+      // Apply staged override if present
+      if (pendingOverride) {
+        await invoke("set_force_override", { forceOverride: pendingOverride });
+        setPendingOverride(null);
+      }
+
       await invoke("set_identity_sharing_settings", {
         skillsSharingEnabled: skillsSharing,
       });
@@ -297,19 +329,18 @@ export default function ForgePanel() {
     }
   };
 
-  // --- Force override handlers ---
+  // --- Force override handlers (staged for Preview/Apply) ---
 
-  const handleSetForceOverride = async (override_: ForceOverride) => {
-    try {
-      await invoke("set_force_override", { forceOverride: override_ });
-      setForceOverride(override_);
-    } catch (e) {
-      console.error("Failed to set force override:", e);
-    }
+  const [pendingOverride, setPendingOverride] = useState<ForceOverride | null>(null);
+  const effectiveOverride = pendingOverride ?? forceOverride;
+
+  const stageOverride = (override_: ForceOverride) => {
+    setPendingOverride(override_);
+    setPreview(null);
   };
 
   const handleClearForceOverride = () => {
-    handleSetForceOverride({
+    stageOverride({
       pinned_model: null,
       pinned_tier: null,
       pinned_provider: null,
@@ -343,11 +374,10 @@ export default function ForgePanel() {
     }
   };
 
-  // Determine the override mode for the radio group
   const getOverrideMode = (): string => {
-    if (forceOverride.pinned_model) return "pin_model";
-    if (forceOverride.pinned_tier && forceOverride.pinned_provider) return "pin_provider_tier";
-    if (forceOverride.pinned_tier) return "pin_tier";
+    if (effectiveOverride.pinned_model) return "pin_model";
+    if (effectiveOverride.pinned_tier && effectiveOverride.pinned_provider) return "pin_provider_tier";
+    if (effectiveOverride.pinned_tier) return "pin_tier";
     return "auto";
   };
 
@@ -445,18 +475,29 @@ export default function ForgePanel() {
     );
   };
 
-  /** Force override controls (Advanced Mode). */
+  /** Force override controls — changes staged for Preview/Apply. */
   const renderForceOverride = () => {
     const mode = getOverrideMode();
     const allModels =
       modelRegistry?.models.map((m) => m.model_id) ||
       Object.values(FALLBACK_MODELS).flat();
+    const hasPending = pendingOverride !== null;
 
     return (
       <div className="space-y-3">
-        <label className="text-[10px] text-theme-text-dim uppercase tracking-widest">
-          Force Override
-        </label>
+        <div className="flex items-center justify-between">
+          <label className="text-[10px] text-theme-text-dim uppercase tracking-widest">
+            Pinned Model Override
+          </label>
+          {hasPending && (
+            <span className="text-[9px] text-yellow-400 border border-yellow-700 rounded px-1">
+              STAGED
+            </span>
+          )}
+        </div>
+        <p className="text-[9px] text-theme-text-dim">
+          Pinned override &gt; Pinned tier &gt; Complexity routing. Changes require Preview/Apply.
+        </p>
 
         <div className="grid grid-cols-2 gap-2">
           {[
@@ -483,19 +524,19 @@ export default function ForgePanel() {
                 if (opt.id === "auto") {
                   handleClearForceOverride();
                 } else if (opt.id === "pin_tier") {
-                  handleSetForceOverride({
+                  stageOverride({
                     pinned_model: null,
                     pinned_tier: "standard",
                     pinned_provider: null,
                   });
                 } else if (opt.id === "pin_model") {
-                  handleSetForceOverride({
+                  stageOverride({
                     pinned_model: currentModel || "",
                     pinned_tier: null,
                     pinned_provider: null,
                   });
                 } else if (opt.id === "pin_provider_tier") {
-                  handleSetForceOverride({
+                  stageOverride({
                     pinned_model: null,
                     pinned_tier: "standard",
                     pinned_provider: activeProvider || storedProviders[0] || "",
@@ -514,21 +555,20 @@ export default function ForgePanel() {
           ))}
         </div>
 
-        {/* Conditional inputs based on mode */}
         {mode === "pin_tier" && (
           <div className="flex gap-2">
             {(["fast", "standard", "pro"] as const).map((t) => (
               <button
                 key={t}
                 onClick={() =>
-                  handleSetForceOverride({
-                    ...forceOverride,
+                  stageOverride({
+                    ...effectiveOverride,
                     pinned_tier: t,
                     pinned_model: null,
                   })
                 }
                 className={`flex-1 px-2 py-2 border rounded text-[10px] ${
-                  forceOverride.pinned_tier === t
+                  effectiveOverride.pinned_tier === t
                     ? "border-theme-primary bg-theme-primary-glow text-theme-text-bright"
                     : "border-theme-border-dim text-theme-text-dim hover:border-theme-primary"
                 }`}
@@ -546,10 +586,10 @@ export default function ForgePanel() {
             <input
               type="text"
               list="model-suggestions"
-              value={forceOverride.pinned_model || ""}
+              value={effectiveOverride.pinned_model || ""}
               onChange={(e) =>
-                handleSetForceOverride({
-                  ...forceOverride,
+                stageOverride({
+                  ...effectiveOverride,
                   pinned_model: e.target.value || null,
                 })
               }
@@ -567,10 +607,10 @@ export default function ForgePanel() {
         {mode === "pin_provider_tier" && (
           <div className="flex gap-2">
             <select
-              value={forceOverride.pinned_provider || ""}
+              value={effectiveOverride.pinned_provider || ""}
               onChange={(e) =>
-                handleSetForceOverride({
-                  ...forceOverride,
+                stageOverride({
+                  ...effectiveOverride,
                   pinned_provider: e.target.value || null,
                   pinned_model: null,
                 })
@@ -584,10 +624,10 @@ export default function ForgePanel() {
               ))}
             </select>
             <select
-              value={forceOverride.pinned_tier || "standard"}
+              value={effectiveOverride.pinned_tier || "standard"}
               onChange={(e) =>
-                handleSetForceOverride({
-                  ...forceOverride,
+                stageOverride({
+                  ...effectiveOverride,
                   pinned_tier: e.target.value,
                   pinned_model: null,
                 })
@@ -603,27 +643,27 @@ export default function ForgePanel() {
 
         {mode !== "auto" && (
           <div className="text-[10px] text-theme-text-dim border border-theme-border-dim rounded p-2">
-            Override active:{" "}
+            Override {hasPending ? "(staged)" : "(active)"}:{" "}
             {mode === "pin_tier" && (
               <span className="text-theme-primary">
                 All queries routed to{" "}
-                <strong>{forceOverride.pinned_tier?.toUpperCase()}</strong> tier
+                <strong>{effectiveOverride.pinned_tier?.toUpperCase()}</strong> tier
               </span>
             )}
             {mode === "pin_model" && (
               <span className="text-theme-primary">
                 All queries use model{" "}
-                <strong>{forceOverride.pinned_model}</strong>
+                <strong>{effectiveOverride.pinned_model}</strong>
               </span>
             )}
             {mode === "pin_provider_tier" && (
               <span className="text-theme-primary">
                 All queries use{" "}
                 <strong>
-                  {forceOverride.pinned_provider?.toUpperCase()}
+                  {effectiveOverride.pinned_provider?.toUpperCase()}
                 </strong>{" "}
                 at{" "}
-                <strong>{forceOverride.pinned_tier?.toUpperCase()}</strong>{" "}
+                <strong>{effectiveOverride.pinned_tier?.toUpperCase()}</strong>{" "}
                 tier
               </span>
             )}
@@ -791,11 +831,11 @@ export default function ForgePanel() {
         </div>
       </div>
 
-      {/* Model selection — primary model for the active provider */}
+      {/* Standard tier model for the active provider */}
       {activeProvider && (
         <div className="space-y-3">
           <label className="text-[10px] text-theme-text-dim uppercase tracking-widest">
-            Model for {activeProvider.toUpperCase()}
+            Standard Tier Model ({activeProvider.toUpperCase()})
           </label>
           <div className="flex flex-wrap gap-2">
             {getModelsForProvider(activeProvider).map((m) => (
@@ -815,8 +855,11 @@ export default function ForgePanel() {
 
           <div className="pt-2">
             <label className="text-[10px] text-theme-text-dim uppercase mb-1 block">
-              Custom Model Override
+              Pinned Model Override
             </label>
+            <p className="text-[9px] text-theme-text-dim mb-1">
+              Pinned override &gt; Tier routing. Sets are applied via Preview/Apply.
+            </p>
             <input
               type="text"
               placeholder={currentModel || "Enter model ID..."}

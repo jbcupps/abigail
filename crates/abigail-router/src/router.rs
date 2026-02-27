@@ -14,7 +14,7 @@ use abigail_capabilities::cognitive::{
 };
 use abigail_core::{ForceOverride, ModelTier, TierModels, TierThresholds};
 use abigail_hive::{BuiltProviders, ProviderKind, ProviderRegistry};
-use entity_core::ExecutionTrace;
+use entity_core::{ExecutionTrace, SelectionReason};
 use std::sync::Arc;
 
 use crate::council::CouncilEngine;
@@ -137,6 +137,24 @@ pub struct RouterStatusInfo {
     pub mode: RoutingMode,
     /// Number of providers enrolled in the council (0 if no council attached).
     pub council_provider_count: usize,
+}
+
+/// Read-only diagnosis of what the router would do for a given message,
+/// without actually calling any LLM.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RoutingDiagnosis {
+    pub mode: String,
+    pub target: String,
+    pub selected_tier: Option<String>,
+    pub selected_model: Option<String>,
+    pub complexity_score: Option<u8>,
+    pub selection_reason: String,
+    pub ego_provider: Option<String>,
+    pub has_local_llm: bool,
+    pub council_available: bool,
+    pub council_provider_count: usize,
+    pub force_override_active: bool,
+    pub force_override_detail: Option<String>,
 }
 
 /// Routes user messages: Id (local) classifies; ROUTINE stays local, COMPLEX goes to Ego if configured.
@@ -280,6 +298,75 @@ impl IdEgoRouter {
         }
     }
 
+    /// Diagnose what the router would do for a given message without calling any LLM.
+    pub fn diagnose(&self, user_message: &str) -> RoutingDiagnosis {
+        let target = self.target_for_mode(user_message);
+        let target_str = match target {
+            FastPathTarget::Ego => "ego",
+            FastPathTarget::Id => "id",
+        };
+
+        let (selected_tier, selection_reason, complexity_score) = match self.mode {
+            RoutingMode::TierBased => {
+                if let Some(ref model) = self.force_override.pinned_model {
+                    (
+                        None,
+                        format!("pinned_model({})", model),
+                        Some(self.calculate_id_instinct(user_message)),
+                    )
+                } else {
+                    let (tier, reason, score) = self.select_tier_with_reason(user_message);
+                    let tier_name = match tier {
+                        ModelTier::Fast => "fast",
+                        ModelTier::Standard => "standard",
+                        ModelTier::Pro => "pro",
+                    };
+                    (Some(tier_name.to_string()), reason.to_string(), Some(score))
+                }
+            }
+            RoutingMode::EgoPrimary => (None, "ego_primary".to_string(), None),
+            RoutingMode::Council => (None, "council".to_string(), None),
+        };
+
+        let selected_model =
+            if self.mode == RoutingMode::TierBased || self.mode == RoutingMode::Council {
+                self.resolve_model_for_request(user_message)
+            } else {
+                None
+            };
+
+        let force_active =
+            self.force_override.pinned_model.is_some() || self.force_override.pinned_tier.is_some();
+        let force_detail = if force_active {
+            Some(format!(
+                "model={:?} tier={:?} provider={:?}",
+                self.force_override.pinned_model,
+                self.force_override.pinned_tier,
+                self.force_override.pinned_provider,
+            ))
+        } else {
+            None
+        };
+
+        RoutingDiagnosis {
+            mode: format!("{:?}", self.mode).to_lowercase(),
+            target: target_str.to_string(),
+            selected_tier,
+            selected_model,
+            complexity_score,
+            selection_reason,
+            ego_provider: self.ego_provider.as_ref().map(|p| p.to_string()),
+            has_local_llm: self.local_http.is_some(),
+            council_available: self
+                .council
+                .as_ref()
+                .is_some_and(|c| c.provider_count() >= 2),
+            council_provider_count: self.council.as_ref().map_or(0, |c| c.provider_count()),
+            force_override_active: force_active,
+            force_override_detail: force_detail,
+        }
+    }
+
     // ── Tier selection & model resolution ──────────────────────────
 
     /// Keywords that signal a setup, configuration, or credential-storage intent.
@@ -319,18 +406,24 @@ impl IdEgoRouter {
     /// 2. Setup / credential intent → Pro (auto-escalation)
     /// 3. Complexity score → `tier_thresholds.score_to_tier()`
     pub fn select_tier(&self, user_message: &str) -> ModelTier {
+        self.select_tier_with_reason(user_message).0
+    }
+
+    /// Like `select_tier`, but also returns the reason and complexity score.
+    pub fn select_tier_with_reason(&self, user_message: &str) -> (ModelTier, SelectionReason, u8) {
+        let score = self.calculate_id_instinct(user_message);
+
         if let Some(tier) = self.force_override.pinned_tier {
             tracing::debug!("Tier pinned by force override: {:?}", tier);
-            return tier;
+            return (tier, SelectionReason::PinnedTier, score);
         }
         if Self::detect_setup_intent(user_message) {
             tracing::debug!("Setup/credential intent detected — escalating to Pro tier");
-            return ModelTier::Pro;
+            return (ModelTier::Pro, SelectionReason::SetupIntent, score);
         }
-        let score = self.calculate_id_instinct(user_message);
         let tier = self.tier_thresholds.score_to_tier(score);
         tracing::debug!("Tier selected by complexity score {}: {:?}", score, tier);
-        tier
+        (tier, SelectionReason::Complexity, score)
     }
 
     /// Resolve the model to use for a request.
@@ -771,12 +864,40 @@ impl IdEgoRouter {
             FastPathTarget::Ego => "ego",
             FastPathTarget::Id => "id",
         };
-        ExecutionTrace::new(
+        let mut trace = ExecutionTrace::new(
             &self.routing_mode_str(),
             self.ego_provider.as_ref().map(|p| p.to_string()),
             model_override.clone(),
             target_str,
-        )
+        );
+
+        match self.mode {
+            RoutingMode::TierBased => {
+                if self.force_override.pinned_model.is_some() {
+                    trace.selection_reason = Some(SelectionReason::PinnedModel);
+                    trace.configured_tier = None;
+                    trace.complexity_score = Some(self.calculate_id_instinct(user_message));
+                } else {
+                    let (tier, reason, score) = self.select_tier_with_reason(user_message);
+                    let tier_name = match tier {
+                        ModelTier::Fast => "fast",
+                        ModelTier::Standard => "standard",
+                        ModelTier::Pro => "pro",
+                    };
+                    trace.configured_tier = Some(tier_name.to_string());
+                    trace.complexity_score = Some(score);
+                    trace.selection_reason = Some(reason);
+                }
+            }
+            RoutingMode::EgoPrimary => {
+                trace.selection_reason = Some(SelectionReason::EgoPrimary);
+            }
+            RoutingMode::Council => {
+                trace.selection_reason = Some(SelectionReason::Council);
+            }
+        }
+
+        trace
     }
 
     /// Traced variant of `route_fast` / `route`.
@@ -785,12 +906,31 @@ impl IdEgoRouter {
         messages: Vec<Message>,
     ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
         let last_msg = messages.last().map_or("", |m| &m.content).to_string();
+
+        // Council mode: delegate to the council engine when available with 2+ providers
+        if self.mode == RoutingMode::Council {
+            if let Some(ref council) = self.council {
+                if council.provider_count() >= 2 {
+                    return self
+                        .route_council_traced(messages, &last_msg, council)
+                        .await;
+                }
+                tracing::warn!(
+                    "Council has {} provider(s) — degraded passthrough to single-provider path",
+                    council.provider_count()
+                );
+            } else {
+                tracing::warn!("Council mode active but no CouncilEngine configured — falling back to tier-based");
+            }
+        }
+
         let target = self.target_for_mode(&last_msg);
-        let model_override = if self.mode == RoutingMode::TierBased {
-            self.resolve_model_for_request(&last_msg)
-        } else {
-            None
-        };
+        let model_override =
+            if self.mode == RoutingMode::TierBased || self.mode == RoutingMode::Council {
+                self.resolve_model_for_request(&last_msg)
+            } else {
+                None
+            };
         let mut trace = self.begin_trace(&last_msg, &model_override);
         let request = CompletionRequest {
             messages,
@@ -843,7 +983,58 @@ impl IdEgoRouter {
         }
     }
 
+    /// Council-specific traced execution path.
+    async fn route_council_traced(
+        &self,
+        messages: Vec<Message>,
+        last_msg: &str,
+        council: &CouncilEngine,
+    ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
+        let mut trace = self.begin_trace(last_msg, &None);
+        trace.selection_reason = Some(SelectionReason::Council);
+
+        let t0 = chrono::Utc::now();
+        match council.deliberate(messages, None).await {
+            Ok(result) => {
+                let synthesis_provider = result
+                    .drafts
+                    .first()
+                    .map(|d| d.provider.as_str())
+                    .unwrap_or("council");
+                let provider_label = format!(
+                    "council({} providers, synthesis={})",
+                    result.provider_count, synthesis_provider
+                );
+                trace.record_success(&provider_label, None, t0);
+
+                let response = CompletionResponse {
+                    content: result.synthesis,
+                    tool_calls: None,
+                };
+                Ok((response, trace))
+            }
+            Err(e) => {
+                trace.record_error("council", None, &e.to_string(), t0);
+                tracing::warn!("Council deliberation failed, falling back to ego/id: {}", e);
+
+                if let Some(ref ego) = self.ego {
+                    let t1 = chrono::Utc::now();
+                    let request = CompletionRequest::simple(vec![Message::new("user", last_msg)]);
+                    let resp = ego.complete(&request).await?;
+                    trace.record_success(&self.ego_label(), None, t1);
+                    trace.selection_reason = Some(SelectionReason::Fallback);
+                    return Ok((resp, trace));
+                }
+
+                Err(e)
+            }
+        }
+    }
+
     /// Traced variant of `route_with_tools`.
+    ///
+    /// Council mode does not support tool-use (deliberation is text-only),
+    /// so this falls through to the standard ego/id path with tier selection.
     pub async fn route_with_tools_traced(
         &self,
         messages: Vec<Message>,
@@ -851,11 +1042,12 @@ impl IdEgoRouter {
     ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
         let last_msg = messages.last().map_or("", |m| &m.content).to_string();
         let target = self.target_for_mode(&last_msg);
-        let model_override = if self.mode == RoutingMode::TierBased {
-            self.resolve_model_for_request(&last_msg)
-        } else {
-            None
-        };
+        let model_override =
+            if self.mode == RoutingMode::TierBased || self.mode == RoutingMode::Council {
+                self.resolve_model_for_request(&last_msg)
+            } else {
+                None
+            };
         let mut trace = self.begin_trace(&last_msg, &model_override);
         let request = CompletionRequest {
             messages,
@@ -1491,5 +1683,170 @@ mod tests {
         assert_eq!(trace.target_selected, "id");
         assert!(!trace.fallback_occurred);
         assert!(trace.final_provider().is_some());
+    }
+
+    // ── select_tier_with_reason tests ─────────────────────────────
+
+    #[test]
+    fn test_select_tier_with_reason_complexity() {
+        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::TierBased);
+        let (tier, reason, score) = router.select_tier_with_reason("hi");
+        assert_eq!(tier, ModelTier::Fast);
+        assert_eq!(reason, SelectionReason::Complexity);
+        assert!(score < 35);
+    }
+
+    #[test]
+    fn test_select_tier_with_reason_pinned_tier() {
+        let mut router = IdEgoRouter::new(None, None, None, None, RoutingMode::TierBased);
+        router.force_override.pinned_tier = Some(ModelTier::Pro);
+        let (tier, reason, _) = router.select_tier_with_reason("hi");
+        assert_eq!(tier, ModelTier::Pro);
+        assert_eq!(reason, SelectionReason::PinnedTier);
+    }
+
+    #[test]
+    fn test_select_tier_with_reason_setup_intent() {
+        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::TierBased);
+        let (tier, reason, _) = router.select_tier_with_reason("configure my IMAP credentials");
+        assert_eq!(tier, ModelTier::Pro);
+        assert_eq!(reason, SelectionReason::SetupIntent);
+    }
+
+    // ── begin_trace tier field tests ──────────────────────────────
+
+    #[test]
+    fn test_begin_trace_populates_tier_fields() {
+        let router = IdEgoRouter::new(
+            None,
+            Some("openai"),
+            Some("test-key".to_string()),
+            None,
+            RoutingMode::TierBased,
+        );
+        let trace = router.begin_trace("hi", &None);
+        assert!(trace.configured_tier.is_some());
+        assert_eq!(trace.configured_tier.as_deref(), Some("fast"));
+        assert!(trace.complexity_score.is_some());
+        assert_eq!(trace.selection_reason, Some(SelectionReason::Complexity));
+    }
+
+    #[test]
+    fn test_begin_trace_pinned_model_reason() {
+        let mut router = IdEgoRouter::new(
+            None,
+            Some("openai"),
+            Some("test-key".to_string()),
+            None,
+            RoutingMode::TierBased,
+        );
+        router.force_override.pinned_model = Some("custom-v9".to_string());
+        let trace = router.begin_trace("hi", &Some("custom-v9".to_string()));
+        assert_eq!(trace.selection_reason, Some(SelectionReason::PinnedModel));
+        assert!(trace.configured_tier.is_none());
+    }
+
+    #[test]
+    fn test_begin_trace_ego_primary_reason() {
+        let router = IdEgoRouter::new(
+            None,
+            Some("openai"),
+            Some("test-key".to_string()),
+            None,
+            RoutingMode::EgoPrimary,
+        );
+        let trace = router.begin_trace("hi", &None);
+        assert_eq!(trace.selection_reason, Some(SelectionReason::EgoPrimary));
+    }
+
+    #[test]
+    fn test_begin_trace_council_reason() {
+        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::Council);
+        let trace = router.begin_trace("hi", &None);
+        assert_eq!(trace.selection_reason, Some(SelectionReason::Council));
+    }
+
+    // ── diagnose tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_diagnose_tier_based_simple() {
+        let router = IdEgoRouter::new(
+            None,
+            Some("openai"),
+            Some("test-key".to_string()),
+            None,
+            RoutingMode::TierBased,
+        );
+        let diag = router.diagnose("hi");
+        assert_eq!(diag.mode, "tierbased");
+        assert_eq!(diag.selected_tier.as_deref(), Some("fast"));
+        assert!(diag.complexity_score.is_some());
+        assert_eq!(diag.selection_reason, "complexity");
+        assert!(!diag.force_override_active);
+    }
+
+    #[test]
+    fn test_diagnose_ego_primary() {
+        let router = IdEgoRouter::new(
+            None,
+            Some("openai"),
+            Some("test-key".to_string()),
+            None,
+            RoutingMode::EgoPrimary,
+        );
+        let diag = router.diagnose("hi");
+        assert_eq!(diag.mode, "egoprimary");
+        assert_eq!(diag.target, "ego");
+        assert_eq!(diag.selection_reason, "ego_primary");
+        assert!(diag.selected_tier.is_none());
+    }
+
+    #[test]
+    fn test_diagnose_force_override_active() {
+        let mut router = IdEgoRouter::new(
+            None,
+            Some("openai"),
+            Some("test-key".to_string()),
+            None,
+            RoutingMode::TierBased,
+        );
+        router.force_override.pinned_model = Some("custom-v9".to_string());
+        let diag = router.diagnose("hi");
+        assert!(diag.force_override_active);
+        assert!(diag.force_override_detail.is_some());
+        assert_eq!(diag.selected_model, Some("custom-v9".to_string()));
+    }
+
+    #[test]
+    fn test_diagnose_council_mode() {
+        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::Council);
+        let diag = router.diagnose("hi");
+        assert_eq!(diag.mode, "council");
+        assert_eq!(diag.selection_reason, "council");
+        assert!(!diag.council_available);
+        assert_eq!(diag.council_provider_count, 0);
+    }
+
+    // ── Trace final_tier tests ────────────────────────────────────
+
+    #[test]
+    fn test_trace_final_tier_no_fallback() {
+        let mut trace = ExecutionTrace::new("tierbased", Some("openai".into()), None, "ego");
+        trace.configured_tier = Some("fast".to_string());
+        let t0 = chrono::Utc::now();
+        trace.record_success("openai", Some("gpt-4.1-mini".into()), t0);
+        assert_eq!(trace.final_tier(), Some("fast"));
+    }
+
+    #[test]
+    fn test_trace_final_tier_fallback_clears_tier() {
+        let mut trace = ExecutionTrace::new("tierbased", Some("openai".into()), None, "ego");
+        trace.configured_tier = Some("pro".to_string());
+        let t0 = chrono::Utc::now();
+        trace.record_error("openai", None, "timeout", t0);
+        let t1 = chrono::Utc::now();
+        trace.record_success("id(candle_stub)", None, t1);
+        assert!(trace.fallback_occurred);
+        assert_eq!(trace.final_tier(), None);
     }
 }

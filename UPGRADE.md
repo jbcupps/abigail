@@ -98,3 +98,25 @@ Downgrading is not supported via auto-update. To downgrade manually:
 3. Restore a backup if available
 
 **Warning**: Running an older version against a database with newer schema migrations may cause errors. Back up your data directory before attempting a downgrade.
+
+## API Migration Notes
+
+### Routing Attribution (Execution Trace)
+
+The `ChatResponse` now includes an `execution_trace` field that is the authoritative source for routing attribution. The `tier`, `model_used`, and `complexity_score` top-level fields remain for backward compatibility but are derived from the trace.
+
+**For API consumers:**
+- Prefer reading `execution_trace.configured_tier`, `execution_trace.steps[final_step_index].model_requested`, and `execution_trace.complexity_score` over the top-level compatibility fields.
+- New `selection_reason` field explains why a tier/model was selected: `complexity`, `pinned_tier`, `pinned_model`, `setup_intent`, `ego_primary`, `council`, or `fallback`.
+- When `fallback_occurred` is `true`, the `configured_tier` is not representative of the actual response. Check `steps[final_step_index]` for what actually ran.
+
+**For Rust crate consumers:**
+- `ToolUseResult` no longer has `tier`, `model_used`, `complexity_score` as public fields. Use the accessor methods `.tier()`, `.model_used()`, `.complexity_score()` instead, which derive values from the embedded `execution_trace`.
+
+### New Endpoints
+
+- `GET /v1/routing/diagnose?message=<text>` — returns a `RoutingDiagnosis` showing what the router would do for a given message without calling any LLM. Available on entity-daemon (port 3142) and as a Tauri command (`diagnose_routing`).
+
+### Force Override Workflow
+
+Force override changes (`pinned_model`, `pinned_tier`) in the Forge UI are now staged and applied through the Preview/Apply workflow instead of being saved immediately. This prevents accidental silent configuration changes.

@@ -450,6 +450,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/status", get(routes::get_status))
         .route("/v1/chat", post(routes::chat))
         .route("/v1/chat/stream", post(routes::chat_stream))
+        .route("/v1/routing/diagnose", get(routes::diagnose_routing))
         .route("/v1/skills", get(routes::list_skills))
         .route("/v1/tools/execute", post(routes::execute_tool))
         .route("/v1/memory/stats", get(routes::memory_stats))
