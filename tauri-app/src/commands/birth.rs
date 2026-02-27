@@ -253,12 +253,31 @@ pub fn advance_to_connectivity(state: State<AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn advance_to_crystallization(state: State<AppState>) -> Result<(), String> {
-    let has_provider = {
+    let has_vault_provider = {
         let local = state.secrets.lock().map_err(|e| e.to_string())?;
         let hive = state.hive_secrets.lock().map_err(|e| e.to_string())?;
         !local.list_providers().is_empty() || !hive.list_providers().is_empty()
     };
-    if !has_provider {
+
+    let has_cli_provider = if !has_vault_provider {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let is_cli_pref = config
+            .active_provider_preference
+            .as_deref()
+            .map(|p| matches!(p, "claude-cli" | "gemini-cli" | "codex-cli" | "grok-cli"))
+            .unwrap_or(false);
+        if is_cli_pref {
+            true
+        } else {
+            abigail_hive::detect_cli_providers_full()
+                .iter()
+                .any(|d| d.on_path && d.is_official && d.is_authenticated)
+        }
+    } else {
+        false
+    };
+
+    if !has_vault_provider && !has_cli_provider {
         return Err(
             "At least one provider must be configured before crystallization can begin."
                 .to_string(),

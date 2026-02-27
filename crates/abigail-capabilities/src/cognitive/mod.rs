@@ -13,7 +13,9 @@ pub mod validation;
 
 pub use anthropic::AnthropicProvider;
 pub use candle::CandleProvider;
-pub use cli_provider::{CliLlmProvider, CliVariant};
+pub use cli_provider::{
+    detect_all_cli_providers, CliDetectionResult, CliLlmProvider, CliVariant, ALL_CLI_VARIANTS,
+};
 pub use download::ModelDownloader;
 pub use local_http::{stub_heartbeat, LocalHttpProvider};
 pub use openai::OpenAiProvider;

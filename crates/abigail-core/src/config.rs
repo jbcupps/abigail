@@ -23,6 +23,10 @@ pub enum RoutingMode {
     #[default]
     #[serde(alias = "id_primary")]
     TierBased,
+    /// CLI Orchestrator: all messages go directly to an authenticated CLI tool
+    /// (Claude Code, Gemini CLI, etc.) which acts as the full orchestrator.
+    /// Bypasses tier scoring, model selection, and complexity classification.
+    CliOrchestrator,
 }
 
 fn default_schema_version() -> u32 {

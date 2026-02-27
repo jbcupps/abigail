@@ -54,6 +54,31 @@ pub fn build_system_prompt(docs_dir: &Path, agent_name: &Option<String>) -> Stri
     )
 }
 
+/// Build a condensed system prompt for CLI orchestrator mode.
+///
+/// Unlike `build_system_prompt`, this omits verbose operational instructions
+/// since CLI tools (Claude Code, Gemini CLI, etc.) have their own built-in
+/// capabilities. The result is passed via `--append-system-prompt` so the
+/// CLI's native behaviour is preserved with the Entity's identity overlaid.
+pub fn build_cli_system_prompt(docs_dir: &Path, agent_name: &Option<String>) -> String {
+    let soul = read_or_fallback(docs_dir, "soul.md", templates::SOUL_MD);
+    let ethics = read_or_fallback(docs_dir, "ethics.md", templates::ETHICS_MD);
+    let instincts = read_or_fallback(docs_dir, "instincts.md", templates::INSTINCTS_MD);
+
+    let greeting = match agent_name {
+        Some(name) => format!("You are {}.\n\n", name),
+        None => String::new(),
+    };
+
+    format!(
+        "{greeting}{soul}\n\n{ethics}\n\n{instincts}",
+        greeting = greeting,
+        soul = soul.trim(),
+        ethics = ethics.trim(),
+        instincts = instincts.trim(),
+    )
+}
+
 fn read_or_fallback(docs_dir: &Path, filename: &str, fallback: &str) -> String {
     let path = docs_dir.join(filename);
     std::fs::read_to_string(&path).unwrap_or_else(|_| fallback.to_string())

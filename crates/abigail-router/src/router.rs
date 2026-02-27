@@ -182,7 +182,7 @@ pub struct IdEgoRouter {
 impl IdEgoRouter {
     fn target_for_mode(&self, user_message: &str) -> FastPathTarget {
         match self.mode {
-            RoutingMode::EgoPrimary => {
+            RoutingMode::EgoPrimary | RoutingMode::CliOrchestrator => {
                 if self.ego.is_some() {
                     FastPathTarget::Ego
                 } else {
@@ -326,6 +326,7 @@ impl IdEgoRouter {
             }
             RoutingMode::EgoPrimary => (None, "ego_primary".to_string(), None),
             RoutingMode::Council => (None, "council".to_string(), None),
+            RoutingMode::CliOrchestrator => (None, "cli_orchestrator".to_string(), None),
         };
 
         let selected_model =
@@ -889,7 +890,7 @@ impl IdEgoRouter {
                     trace.selection_reason = Some(reason);
                 }
             }
-            RoutingMode::EgoPrimary => {
+            RoutingMode::EgoPrimary | RoutingMode::CliOrchestrator => {
                 trace.selection_reason = Some(SelectionReason::EgoPrimary);
             }
             RoutingMode::Council => {

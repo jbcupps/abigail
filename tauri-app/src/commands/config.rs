@@ -67,20 +67,26 @@ pub async fn use_stored_provider(
 ) -> Result<(), String> {
     let provider = provider.trim().to_lowercase();
 
+    let is_cli = matches!(
+        provider.as_str(),
+        "claude-cli" | "gemini-cli" | "codex-cli" | "grok-cli"
+    );
+
     let key_str = {
-        // Validate it's in the vault
         let vault = state.secrets.lock().map_err(|e| e.to_string())?;
-        let key = vault
-            .get_secret(&provider)
-            .ok_or_else(|| format!("Provider '{}' not found in vault", provider))?;
-        key.to_string()
+        match vault.get_secret(&provider) {
+            Some(key) => key.to_string(),
+            None if is_cli => "system".to_string(),
+            None => return Err(format!("Provider '{}' not found in vault", provider)),
+        }
     };
 
     {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         let trinity = config.trinity.get_or_insert_with(TrinityConfig::default);
-        trinity.ego_provider = Some(provider);
+        trinity.ego_provider = Some(provider.clone());
         trinity.ego_api_key = Some(key_str);
+        config.active_provider_preference = Some(provider);
         config
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;
@@ -414,11 +420,49 @@ pub fn set_forge_advanced_mode(state: State<AppState>, advanced_mode: bool) -> R
 #[tauri::command]
 pub fn get_stored_providers(state: State<AppState>) -> Result<Vec<String>, String> {
     let secrets = state.secrets.lock().map_err(|e| e.to_string())?;
-    Ok(secrets
+    let mut providers: Vec<String> = secrets
         .list_providers()
         .into_iter()
         .map(|s| s.to_string())
-        .collect())
+        .collect();
+
+    // CLI tools that are installed and authenticated don't need vault secrets.
+    // Include them so the UI shows them as available.
+    let cli_tools: &[(&str, &str)] = &[
+        ("claude-cli", "claude"),
+        ("gemini-cli", "gemini"),
+        ("codex-cli", "codex"),
+        ("grok-cli", "grok"),
+    ];
+    for (provider, binary) in cli_tools {
+        if !providers.contains(&provider.to_string()) && abigail_hive::is_binary_on_path(binary) {
+            providers.push(provider.to_string());
+        }
+    }
+
+    Ok(providers)
+}
+
+/// Detect which CLI tools are installed and reachable on PATH.
+#[tauri::command]
+pub fn detect_cli_providers() -> Vec<String> {
+    let cli_tools: &[(&str, &str)] = &[
+        ("claude-cli", "claude"),
+        ("gemini-cli", "gemini"),
+        ("codex-cli", "codex"),
+        ("grok-cli", "grok"),
+    ];
+    cli_tools
+        .iter()
+        .filter(|(_, binary)| abigail_hive::is_binary_on_path(binary))
+        .map(|(provider, _)| provider.to_string())
+        .collect()
+}
+
+/// Full CLI detection: checks PATH, verifies official binary, and checks auth status.
+#[tauri::command]
+pub fn detect_cli_providers_full() -> Vec<abigail_capabilities::cognitive::CliDetectionResult> {
+    abigail_hive::detect_cli_providers_full()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

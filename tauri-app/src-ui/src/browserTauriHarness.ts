@@ -342,6 +342,10 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
     // Provider/key setup
     case "get_stored_providers":
       return Array.from(state.providers);
+    case "detect_cli_providers":
+      return [];
+    case "detect_cli_providers_full":
+      return [];
     case "store_provider_key": {
       const provider = String(args.provider ?? "");
       if (!provider) return { success: false, provider: "", validated: false, error: "Provider missing" };

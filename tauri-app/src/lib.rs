@@ -656,6 +656,8 @@ pub fn run() {
             get_forge_ui_settings,
             set_forge_advanced_mode,
             get_stored_providers,
+            detect_cli_providers,
+            detect_cli_providers_full,
             set_active_provider,
             get_active_provider,
             set_ego_model,

@@ -57,13 +57,25 @@ pub struct ProviderRegistry;
 
 impl ProviderRegistry {
     /// Build an Ego (cloud) LLM provider from a provider name, API key, and optional model.
+    ///
+    /// CLI providers (`claude-cli`, `gemini-cli`, `codex-cli`, `grok-cli`) do not
+    /// require an API key — they use the CLI tool's own authentication (e.g. OAuth
+    /// via `claude auth login`).  When no key is provided for a CLI variant the
+    /// sentinel value `"system"` is used, which tells `CliLlmProvider` to skip
+    /// injecting an env-var and rely on the tool's built-in auth.
     pub fn build_ego(
         provider_name: Option<&str>,
         api_key: Option<String>,
         ego_model: Option<String>,
     ) -> EgoProviderResult {
+        let is_cli = matches!(
+            provider_name,
+            Some("claude-cli" | "gemini-cli" | "codex-cli" | "grok-cli")
+        );
+
         let key = match api_key.filter(|k| !k.trim().is_empty()) {
             Some(k) => k,
+            None if is_cli => "system".to_string(),
             None => {
                 tracing::debug!("build_ego: no API key provided for {:?}", provider_name);
                 return EgoProviderResult {
