@@ -207,6 +207,46 @@ pub fn augment_system_prompt(
     prompt
 }
 
+/// Build a CLI-optimized system prompt for CliOrchestrator mode.
+///
+/// Uses the condensed constitutional docs (soul + ethics + instincts only),
+/// appends the available tools list, and omits verbose operational instructions
+/// since the CLI tool has its own built-in capabilities.
+pub fn build_cli_system_prompt(
+    docs_dir: &std::path::Path,
+    agent_name: &Option<String>,
+    registry: &SkillRegistry,
+    instruction_registry: &abigail_skills::InstructionRegistry,
+    user_message: &str,
+) -> String {
+    let mut prompt = abigail_core::system_prompt::build_cli_system_prompt(docs_dir, agent_name);
+
+    let mut registered_ids = HashSet::new();
+    if let Ok(manifests) = registry.list() {
+        let mut tool_lines = Vec::new();
+        for m in &manifests {
+            registered_ids.insert(m.id.0.clone());
+            if let Ok((skill, _)) = registry.get_skill(&m.id) {
+                for t in skill.tools() {
+                    tool_lines.push(format!("- `{}::{}`: {}", m.id.0, t.name, t.description));
+                }
+            }
+        }
+        if !tool_lines.is_empty() {
+            prompt.push_str("\n\n## Available Entity Tools\n\n");
+            prompt.push_str(&tool_lines.join("\n"));
+        }
+    }
+
+    let skill_section =
+        instruction_registry.format_for_prompt_filtered(user_message, &registered_ids);
+    if !skill_section.is_empty() {
+        prompt.push_str(&skill_section);
+    }
+
+    prompt
+}
+
 /// Convert all registered skill tools into LLM-native `ToolDefinition`s.
 ///
 /// Tool names are qualified as `{skill_id}::{tool_name}` so the LLM knows

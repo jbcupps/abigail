@@ -262,6 +262,19 @@ export default function ChatInterface({
 
     const checkAndUseStored = async (step: ConfigStep) => {
       if (!step) return false;
+
+      // CLI providers detected on PATH can be activated directly (OAuth auth)
+      if (storedProviders.includes(step as string)) {
+        try {
+          await invoke("use_stored_provider", { provider: step });
+          refreshRouterStatus();
+          return true;
+        } catch (e) {
+          console.error("Failed to use CLI provider:", e);
+        }
+      }
+
+      // Fall back to linked API key (e.g. anthropic key for claude-cli)
       const vaultKey = cliToVault[step];
       if (vaultKey && storedProviders.includes(vaultKey)) {
         try {
@@ -326,14 +339,14 @@ export default function ChatInterface({
         }
         await invoke("set_api_key", { key: configInput.trim() });
       } else if (configStep === "claude-cli" || configStep === "gemini-cli" || configStep === "codex-cli" || configStep === "grok-cli") {
-        if (!configInput.trim()) {
-          setConfigError("API key is required");
-          return;
-        }
-        const res = await invoke<{ success: boolean, error: string }>("store_provider_key", { provider: configStep, key: configInput.trim(), validate: true });
-        if (!res.success) {
-          setConfigError(res.error || "Failed to store key");
-          return;
+        if (configInput.trim()) {
+          const res = await invoke<{ success: boolean, error: string }>("store_provider_key", { provider: configStep, key: configInput.trim(), validate: true });
+          if (!res.success) {
+            setConfigError(res.error || "Failed to store key");
+            return;
+          }
+        } else {
+          await invoke("use_stored_provider", { provider: configStep });
         }
       }
       setConfigInput("");
@@ -524,7 +537,11 @@ export default function ChatInterface({
 
     const councilCount = routerStatus.council_providers || 0;
 
-    if (mode === "tier_based" && hasEgo && hasLocal) {
+    if (mode === "cli_orchestrator" && hasEgo) {
+      const cliLabel = egoName.replace("-cli", "").replace("_cli", "");
+      statusText = `[cli orchestrator] ${cliLabel.charAt(0).toUpperCase() + cliLabel.slice(1)} Code`;
+      statusColor = "text-cyan-400";
+    } else if (mode === "tier_based" && hasEgo && hasLocal) {
       statusText = `[tier] ${egoLabel} + Local`;
       statusColor = "text-theme-text";
     } else if (mode === "tier_based" && hasEgo) {
@@ -661,53 +678,90 @@ export default function ChatInterface({
             </div>
 
             <div className="border-t border-theme-border-dim my-2 pt-2">
-              <p className="text-theme-text-dim text-xs mb-2 uppercase tracking-wider">CLI Providers (via external tools):</p>
+              <p className="text-theme-text-dim text-xs mb-2 uppercase tracking-wider">CLI Providers (auto-detected on PATH):</p>
             </div>
 
             <div className="flex gap-2">
               <button
-                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("anthropic"))}`}
+                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("claude-cli") || storedProviders.includes("anthropic"))}`}
                 onClick={() => handleConfigSelect(4)}
               >
-                <span className="text-theme-text-bright">[4]</span> Claude Code CLI (Anthropic key)
-                {storedProviders.includes("anthropic") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Ready</span>}
+                <span className="text-theme-text-bright">[4]</span> Claude Code CLI
+                {storedProviders.includes("claude-cli") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Detected</span>}
+                {!storedProviders.includes("claude-cli") && storedProviders.includes("anthropic") && <span className="ml-2 text-xs text-green-500">✓ API key</span>}
               </button>
               <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
 
             <div className="flex gap-2">
               <button
-                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("google"))}`}
+                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("gemini-cli") || storedProviders.includes("google"))}`}
                 onClick={() => handleConfigSelect(5)}
               >
-                <span className="text-theme-text-bright">[5]</span> Gemini CLI (Google key)
-                {storedProviders.includes("google") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Ready</span>}
+                <span className="text-theme-text-bright">[5]</span> Gemini CLI
+                {storedProviders.includes("gemini-cli") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Detected</span>}
+                {!storedProviders.includes("gemini-cli") && storedProviders.includes("google") && <span className="ml-2 text-xs text-green-500">✓ API key</span>}
               </button>
               <a href="https://github.com/google-gemini/gemini-cli" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
 
             <div className="flex gap-2">
               <button
-                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("openai"))}`}
+                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("codex-cli") || storedProviders.includes("openai"))}`}
                 onClick={() => handleConfigSelect(6)}
               >
-                <span className="text-theme-text-bright">[6]</span> Codex CLI (OpenAI key)
-                {storedProviders.includes("openai") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Ready</span>}
+                <span className="text-theme-text-bright">[6]</span> Codex CLI
+                {storedProviders.includes("codex-cli") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Detected</span>}
+                {!storedProviders.includes("codex-cli") && storedProviders.includes("openai") && <span className="ml-2 text-xs text-green-500">✓ API key</span>}
               </button>
               <a href="https://github.com/openai/codex" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
 
             <div className="flex gap-2">
               <button
-                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("xai"))}`}
+                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("grok-cli") || storedProviders.includes("xai"))}`}
                 onClick={() => handleConfigSelect(7)}
               >
-                <span className="text-theme-text-bright">[7]</span> Grok CLI (xAI key)
-                {storedProviders.includes("xai") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Ready</span>}
+                <span className="text-theme-text-bright">[7]</span> Grok CLI
+                {storedProviders.includes("grok-cli") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Detected</span>}
+                {!storedProviders.includes("grok-cli") && storedProviders.includes("xai") && <span className="ml-2 text-xs text-green-500">✓ API key</span>}
               </button>
               <a href="https://docs.x.ai/docs/grok-cli" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
           </div>
+          {routerStatus && (
+            <div className="mt-4 pt-3 border-t border-theme-border-dim">
+              <p className="text-[10px] text-theme-text-dim uppercase tracking-wider mb-2">Routing Mode</p>
+              <div className="flex gap-1.5 flex-wrap">
+                {([
+                  ["tier_based", "Tier"],
+                  ["ego_primary", "Ego"],
+                  ["council", "Council"],
+                  ["cli_orchestrator", "CLI Orchestrator"],
+                ] as const).map(([value, label]) => (
+                  <button
+                    key={value}
+                    className={`px-2.5 py-1 text-xs rounded border transition-all ${
+                      routerStatus.routing_mode === value
+                        ? "border-theme-primary text-theme-text bg-theme-primary-glow"
+                        : "border-theme-border-dim text-theme-text-dim hover:border-theme-primary"
+                    }`}
+                    onClick={async () => {
+                      try {
+                        await invoke("set_routing_mode", { mode: value });
+                        const status = await invoke<RouterStatus>("get_router_status");
+                        setRouterStatus(status);
+                      } catch (e) {
+                        setConfigError(String(e));
+                      }
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {routerStatus && (routerStatus.ego_configured || routerStatus.id_provider === "local_http") && (
             <button
               className="mt-3 text-xs text-theme-text-dim hover:text-theme-primary-dim"
@@ -788,47 +842,80 @@ export default function ChatInterface({
     }
 
     if (configStep === "claude-cli" || configStep === "gemini-cli" || configStep === "codex-cli" || configStep === "grok-cli") {
-      const cliLabels: Record<string, { label: string; placeholder: string }> = {
-        "claude-cli": { label: "Claude Code CLI", placeholder: "sk-ant-..." },
-        "gemini-cli": { label: "Gemini CLI", placeholder: "AIza..." },
-        "codex-cli": { label: "Codex CLI", placeholder: "sk-..." },
-        "grok-cli": { label: "Grok CLI", placeholder: "xai-..." },
+      const cliLabels: Record<string, { label: string; placeholder: string; authCmd: string }> = {
+        "claude-cli": { label: "Claude Code CLI", placeholder: "sk-ant-...", authCmd: "claude auth login" },
+        "gemini-cli": { label: "Gemini CLI", placeholder: "AIza...", authCmd: "gemini auth login" },
+        "codex-cli": { label: "Codex CLI", placeholder: "sk-...", authCmd: "codex auth" },
+        "grok-cli": { label: "Grok CLI", placeholder: "xai-...", authCmd: "grok auth login" },
       };
       const cli = cliLabels[configStep];
+      const isDetected = storedProviders.includes(configStep);
       return (
         <div className="p-4 border-b border-theme-border bg-theme-surface">
-          <p className="text-theme-primary-dim mb-2">{cli.label} Configuration:</p>
-          <p className="text-theme-text-dim text-xs mb-2">Uses the same API key as the cloud provider.</p>
-          <div className="flex gap-2">
-            <input
-              type="password"
-              className="flex-1 bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
-              placeholder={cli.placeholder}
-              value={configInput}
-              onChange={(e) => setConfigInput(e.target.value)}
-              onKeyDown={handleConfigKeyDown}
-              autoFocus
-            />
-            <button
-              className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
-              onClick={handleConfigSubmit}
-            >
-              Save
-            </button>
-            <button
-              className="border border-theme-primary-faint px-3 py-2 rounded hover:bg-theme-surface text-theme-text-dim text-xs"
-              onClick={handleUseSystemAuth}
-              title="Use the CLI's internal authentication (OAuth)"
-            >
-              Use OAuth
-            </button>
-            <button
-              className="border border-theme-primary-faint px-3 py-2 rounded hover:bg-theme-surface text-theme-text-dim"
-              onClick={() => setConfigStep("menu")}
-            >
-              Back
-            </button>
-          </div>
+          <p className="text-theme-primary-dim mb-2">{cli.label}</p>
+          {isDetected ? (
+            <div className="space-y-2">
+              <p className="text-green-400 text-xs">Detected on PATH. Already authenticated via <code className="bg-theme-input-bg px-1 rounded">{cli.authCmd}</code>?</p>
+              <div className="flex gap-2">
+                <button
+                  className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
+                  onClick={handleUseSystemAuth}
+                >
+                  Activate
+                </button>
+                <button
+                  className="border border-theme-primary-faint px-3 py-2 rounded hover:bg-theme-surface text-theme-text-dim"
+                  onClick={() => setConfigStep("menu")}
+                >
+                  Back
+                </button>
+              </div>
+              <p className="text-theme-text-dim text-xs mt-1">Or paste an API key instead:</p>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  className="flex-1 bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
+                  placeholder={cli.placeholder}
+                  value={configInput}
+                  onChange={(e) => setConfigInput(e.target.value)}
+                  onKeyDown={handleConfigKeyDown}
+                />
+                <button
+                  className="border border-theme-primary-faint px-4 py-2 rounded hover:bg-theme-surface text-theme-text-dim"
+                  onClick={handleConfigSubmit}
+                >
+                  Save Key
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-yellow-400 text-xs">Not found on PATH. Install it, or paste an API key.</p>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  className="flex-1 bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
+                  placeholder={cli.placeholder}
+                  value={configInput}
+                  onChange={(e) => setConfigInput(e.target.value)}
+                  onKeyDown={handleConfigKeyDown}
+                  autoFocus
+                />
+                <button
+                  className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
+                  onClick={handleConfigSubmit}
+                >
+                  Save Key
+                </button>
+                <button
+                  className="border border-theme-primary-faint px-3 py-2 rounded hover:bg-theme-surface text-theme-text-dim"
+                  onClick={() => setConfigStep("menu")}
+                >
+                  Back
+                </button>
+              </div>
+            </div>
+          )}
           {configError && <p className="text-red-400 mt-2 text-sm">{configError}</p>}
         </div>
       );

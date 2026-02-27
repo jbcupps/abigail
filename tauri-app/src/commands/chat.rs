@@ -158,35 +158,46 @@ pub async fn chat(
     // 2. Build system prompt + router snapshot with runtime context
     let (router, system_prompt) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
-        let base =
-            abigail_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
         let router = state.router.read().map_err(|e| e.to_string())?.clone();
-        let (t, m, c) = router.tier_metadata_for_message(&message);
         let status = router.status();
 
-        let runtime_ctx = entity_chat::RuntimeContext {
-            provider_name: status.ego_provider.clone(),
-            model_id: m,
-            routing_mode: Some(format!("{:?}", status.mode)),
-            tier: t,
-            complexity_score: c,
-            entity_name: config.agent_name.clone(),
-            entity_id: None,
-            has_local_llm: status.has_local_http,
-            last_provider_change_at: config
-                .last_provider_change_at
-                .as_ref()
-                .filter(|ts| is_recent_provider_change(ts))
-                .cloned(),
+        let augmented = if status.mode == abigail_core::RoutingMode::CliOrchestrator {
+            entity_chat::build_cli_system_prompt(
+                &config.docs_dir,
+                &config.agent_name,
+                &state.registry,
+                &state.instruction_registry,
+                &message,
+            )
+        } else {
+            let base = abigail_core::system_prompt::build_system_prompt(
+                &config.docs_dir,
+                &config.agent_name,
+            );
+            let (t, m, c) = router.tier_metadata_for_message(&message);
+            let runtime_ctx = entity_chat::RuntimeContext {
+                provider_name: status.ego_provider.clone(),
+                model_id: m,
+                routing_mode: Some(format!("{:?}", status.mode)),
+                tier: t,
+                complexity_score: c,
+                entity_name: config.agent_name.clone(),
+                entity_id: None,
+                has_local_llm: status.has_local_http,
+                last_provider_change_at: config
+                    .last_provider_change_at
+                    .as_ref()
+                    .filter(|ts| is_recent_provider_change(ts))
+                    .cloned(),
+            };
+            entity_chat::augment_system_prompt(
+                &base,
+                &state.registry,
+                &state.instruction_registry,
+                &message,
+                &runtime_ctx,
+            )
         };
-
-        let augmented = entity_chat::augment_system_prompt(
-            &base,
-            &state.registry,
-            &state.instruction_registry,
-            &message,
-            &runtime_ctx,
-        );
         (router, augmented)
     };
 
@@ -262,35 +273,46 @@ pub async fn chat_stream(
 
     let (router, system_prompt) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
-        let base =
-            abigail_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
         let router = state.router.read().map_err(|e| e.to_string())?.clone();
-        let (t, m, c) = router.tier_metadata_for_message(&message);
         let status = router.status();
 
-        let runtime_ctx = entity_chat::RuntimeContext {
-            provider_name: status.ego_provider.clone(),
-            model_id: m,
-            routing_mode: Some(format!("{:?}", status.mode)),
-            tier: t,
-            complexity_score: c,
-            entity_name: config.agent_name.clone(),
-            entity_id: None,
-            has_local_llm: status.has_local_http,
-            last_provider_change_at: config
-                .last_provider_change_at
-                .as_ref()
-                .filter(|ts| is_recent_provider_change(ts))
-                .cloned(),
+        let augmented = if status.mode == abigail_core::RoutingMode::CliOrchestrator {
+            entity_chat::build_cli_system_prompt(
+                &config.docs_dir,
+                &config.agent_name,
+                &state.registry,
+                &state.instruction_registry,
+                &message,
+            )
+        } else {
+            let base = abigail_core::system_prompt::build_system_prompt(
+                &config.docs_dir,
+                &config.agent_name,
+            );
+            let (t, m, c) = router.tier_metadata_for_message(&message);
+            let runtime_ctx = entity_chat::RuntimeContext {
+                provider_name: status.ego_provider.clone(),
+                model_id: m,
+                routing_mode: Some(format!("{:?}", status.mode)),
+                tier: t,
+                complexity_score: c,
+                entity_name: config.agent_name.clone(),
+                entity_id: None,
+                has_local_llm: status.has_local_http,
+                last_provider_change_at: config
+                    .last_provider_change_at
+                    .as_ref()
+                    .filter(|ts| is_recent_provider_change(ts))
+                    .cloned(),
+            };
+            entity_chat::augment_system_prompt(
+                &base,
+                &state.registry,
+                &state.instruction_registry,
+                &message,
+                &runtime_ctx,
+            )
         };
-
-        let augmented = entity_chat::augment_system_prompt(
-            &base,
-            &state.registry,
-            &state.instruction_registry,
-            &message,
-            &runtime_ctx,
-        );
         (router, augmented)
     };
 

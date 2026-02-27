@@ -6,6 +6,7 @@
 
 use crate::cognitive::provider::{CompletionRequest, CompletionResponse, LlmProvider};
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::process::Command;
 
@@ -66,6 +67,164 @@ impl std::fmt::Display for CliVariant {
     }
 }
 
+/// All known CLI variants for iteration.
+pub const ALL_CLI_VARIANTS: &[CliVariant] = &[
+    CliVariant::ClaudeCode,
+    CliVariant::GeminiCli,
+    CliVariant::OpenAiCodex,
+    CliVariant::XaiGrokCli,
+];
+
+/// Result of detecting and verifying a CLI tool on the system.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CliDetectionResult {
+    pub provider_name: String,
+    pub binary: String,
+    pub on_path: bool,
+    pub is_official: bool,
+    pub is_authenticated: bool,
+    pub version: Option<String>,
+    /// Human-readable hint when not authenticated.
+    pub auth_hint: Option<String>,
+}
+
+impl CliVariant {
+    /// Expected substring in `--version` output that confirms the binary is official.
+    fn official_version_marker(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude",
+            Self::GeminiCli => "gemini",
+            Self::OpenAiCodex => "codex",
+            Self::XaiGrokCli => "grok",
+        }
+    }
+
+    /// Auth command and expected behaviour:
+    ///   - Claude / Gemini: `<binary> auth status` (exit 0 = OK, exit 1 = not authed)
+    ///   - Codex / Grok:    rely on env-var presence (no `auth status` subcommand)
+    fn auth_strategy(self) -> CliAuthStrategy {
+        match self {
+            Self::ClaudeCode => CliAuthStrategy::SubCommand("auth", "status"),
+            Self::GeminiCli => CliAuthStrategy::SubCommand("auth", "status"),
+            Self::OpenAiCodex => CliAuthStrategy::EnvVar("OPENAI_API_KEY"),
+            Self::XaiGrokCli => CliAuthStrategy::EnvVar("GROK_API_KEY"),
+        }
+    }
+
+    fn auth_hint(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "Run `claude auth login` to authenticate",
+            Self::GeminiCli => "Run `gemini auth login` to authenticate",
+            Self::OpenAiCodex => "Set OPENAI_API_KEY or store a key in the vault",
+            Self::XaiGrokCli => "Set GROK_API_KEY or store a key in the vault",
+        }
+    }
+
+    /// Detect whether this CLI tool is present, official, and authenticated.
+    pub fn detect(self) -> CliDetectionResult {
+        let binary = self.binary_name();
+        let on_path = binary_on_path(binary);
+
+        if !on_path {
+            return CliDetectionResult {
+                provider_name: self.to_string(),
+                binary: binary.to_string(),
+                on_path: false,
+                is_official: false,
+                is_authenticated: false,
+                version: None,
+                auth_hint: None,
+            };
+        }
+
+        let (is_official, version) = check_version_official(binary, self.official_version_marker());
+        let is_authenticated = check_auth(binary, self.auth_strategy());
+
+        CliDetectionResult {
+            provider_name: self.to_string(),
+            binary: binary.to_string(),
+            on_path: true,
+            is_official,
+            is_authenticated,
+            version,
+            auth_hint: if !is_authenticated {
+                Some(self.auth_hint().to_string())
+            } else {
+                None
+            },
+        }
+    }
+}
+
+enum CliAuthStrategy {
+    SubCommand(&'static str, &'static str),
+    EnvVar(&'static str),
+}
+
+fn binary_on_path(name: &str) -> bool {
+    #[cfg(windows)]
+    let check = std::process::Command::new("where")
+        .arg(name)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    #[cfg(not(windows))]
+    let check = std::process::Command::new("which")
+        .arg(name)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    check.map(|s| s.success()).unwrap_or(false)
+}
+
+/// Run `<binary> --version`, capture stdout, verify it contains the expected marker.
+fn check_version_official(binary: &str, marker: &str) -> (bool, Option<String>) {
+    let output = std::process::Command::new(binary)
+        .arg("--version")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let ver_str = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            let stderr_str = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            let combined = format!("{} {}", ver_str, stderr_str).to_lowercase();
+            let is_official = combined.contains(&marker.to_lowercase());
+            let version = if ver_str.is_empty() {
+                None
+            } else {
+                Some(ver_str)
+            };
+            (is_official, version)
+        }
+        _ => (false, None),
+    }
+}
+
+/// Check whether the CLI is authenticated using the variant's strategy.
+fn check_auth(binary: &str, strategy: CliAuthStrategy) -> bool {
+    match strategy {
+        CliAuthStrategy::SubCommand(arg1, arg2) => std::process::Command::new(binary)
+            .args([arg1, arg2])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false),
+        CliAuthStrategy::EnvVar(var) => std::env::var(var)
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .is_some(),
+    }
+}
+
+/// Detect all CLI tools in a single pass.
+pub fn detect_all_cli_providers() -> Vec<CliDetectionResult> {
+    ALL_CLI_VARIANTS.iter().map(|v| v.detect()).collect()
+}
+
 /// An LLM provider that delegates to an external CLI tool.
 pub struct CliLlmProvider {
     variant: CliVariant,
@@ -85,6 +244,10 @@ impl CliLlmProvider {
         Ok(Self { variant, api_key })
     }
 
+    pub fn variant(&self) -> CliVariant {
+        self.variant
+    }
+
     /// Check whether the CLI binary is available on PATH (synchronous).
     pub fn is_available(&self) -> bool {
         std::process::Command::new(self.variant.binary_name())
@@ -96,12 +259,12 @@ impl CliLlmProvider {
             .unwrap_or(false)
     }
 
-    /// Build a single prompt string from the message list.
+    /// Build a single prompt string from the non-system messages.
     pub fn build_prompt(messages: &[crate::cognitive::provider::Message]) -> String {
         let mut parts = Vec::new();
         for msg in messages {
             match msg.role.as_str() {
-                "system" => parts.push(format!("[System]\n{}", msg.content)),
+                "system" => {} // system messages handled separately via flags
                 "assistant" => parts.push(format!("[Assistant]\n{}", msg.content)),
                 _ => parts.push(msg.content.clone()),
             }
@@ -109,22 +272,122 @@ impl CliLlmProvider {
         parts.join("\n\n")
     }
 
-    /// Configure the CLI command with variant-specific flags.
-    fn configure_command(&self, cmd: &mut Command, prompt: &str) {
+    /// Extract the combined system prompt from messages.
+    fn extract_system_prompt(messages: &[crate::cognitive::provider::Message]) -> Option<String> {
+        let parts: Vec<&str> = messages
+            .iter()
+            .filter(|m| m.role == "system")
+            .map(|m| m.content.as_str())
+            .collect();
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join("\n\n"))
+        }
+    }
+
+    /// Build the full CLI command with rich flags per variant.
+    fn build_command(
+        &self,
+        prompt: &str,
+        system_prompt: Option<&str>,
+        tools: &Option<Vec<crate::cognitive::provider::ToolDefinition>>,
+    ) -> Command {
+        let mut cmd = Command::new(self.variant.binary_name());
+
+        if self.api_key != "system" {
+            cmd.env(self.variant.api_key_env_var(), &self.api_key);
+        }
+
         match self.variant {
             CliVariant::ClaudeCode => {
-                cmd.arg("--print").arg(prompt);
+                cmd.arg("--print");
+                cmd.arg("--output-format").arg("text");
+                cmd.arg("--max-turns").arg("10");
+                cmd.arg("--dangerously-skip-permissions");
+                if let Some(sp) = system_prompt {
+                    cmd.arg("--append-system-prompt").arg(sp);
+                }
+                if let Some(ref tool_defs) = tools {
+                    let tool_names: Vec<String> = tool_defs
+                        .iter()
+                        .map(|t| crate::cognitive::provider::sanitize_tool_name(&t.name))
+                        .collect();
+                    if !tool_names.is_empty() {
+                        for name in &tool_names {
+                            cmd.arg("--allowedTools").arg(name);
+                        }
+                    }
+                }
+                cmd.arg(prompt);
             }
             CliVariant::GeminiCli => {
+                cmd.arg("--prompt");
+                if let Some(sp) = system_prompt {
+                    let tmp = std::env::temp_dir().join("abigail_gemini_system.md");
+                    let _ = std::fs::write(&tmp, sp);
+                    cmd.env("GEMINI_SYSTEM_MD", tmp);
+                }
                 cmd.arg(prompt);
             }
             CliVariant::OpenAiCodex => {
-                cmd.arg("--quiet").arg(prompt);
+                cmd.arg("exec");
+                cmd.arg("--full-auto");
+                let full_prompt = if let Some(sp) = system_prompt {
+                    format!("[System Instructions]\n{}\n\n{}", sp, prompt)
+                } else {
+                    prompt.to_string()
+                };
+                cmd.arg(full_prompt);
             }
             CliVariant::XaiGrokCli => {
-                cmd.arg(prompt);
+                let full_prompt = if let Some(sp) = system_prompt {
+                    format!("[System Instructions]\n{}\n\n{}", sp, prompt)
+                } else {
+                    prompt.to_string()
+                };
+                cmd.arg(full_prompt);
             }
         }
+
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        cmd
+    }
+
+    /// Spawn the CLI process and wait for completion with timeout.
+    async fn run_and_collect(&self, mut cmd: Command, timeout_secs: u64) -> anyhow::Result<String> {
+        let child = cmd.spawn().map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to spawn {} CLI (is '{}' on PATH?): {}",
+                self.variant,
+                self.variant.binary_name(),
+                e
+            )
+        })?;
+
+        let output =
+            tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
+                .await
+                .map_err(|_| {
+                    anyhow::anyhow!(
+                        "{} CLI timed out after {} seconds",
+                        self.variant,
+                        timeout_secs
+                    )
+                })??;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow::anyhow!(
+                "{} CLI exited with {}: {}",
+                self.variant,
+                output.status,
+                stderr.trim()
+            ));
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 }
 
@@ -139,67 +402,25 @@ impl LlmProvider for CliLlmProvider {
             );
         }
 
+        let system_prompt = Self::extract_system_prompt(&request.messages);
         let prompt = Self::build_prompt(&request.messages);
 
         tracing::info!(
-            "CliLlmProvider::complete variant={}, binary={}, prompt_len={}",
+            "CliLlmProvider::complete variant={}, binary={}, prompt_len={}, has_system_prompt={}, has_tools={}",
             self.variant,
             self.variant.binary_name(),
             prompt.len(),
+            system_prompt.is_some(),
+            request.tools.is_some(),
         );
 
-        let mut cmd = Command::new(self.variant.binary_name());
-        if self.api_key != "system" {
-            tracing::debug!("Setting env var {} for CLI", self.variant.api_key_env_var());
-            cmd.env(self.variant.api_key_env_var(), &self.api_key);
-        } else {
-            tracing::info!("Using system/OAuth auth for CLI (no env key set)");
-        }
-        self.configure_command(&mut cmd, &prompt);
-
-        // Capture stdout, discard stderr
-        cmd.stdout(std::process::Stdio::piped());
-        cmd.stderr(std::process::Stdio::piped());
-
-        let child = cmd.spawn().map_err(|e| {
-            tracing::error!("Failed to spawn {} CLI: {}", self.variant, e);
-            anyhow::anyhow!(
-                "Failed to spawn {} CLI (is '{}' on PATH?): {}",
-                self.variant,
-                self.variant.binary_name(),
-                e
-            )
-        })?;
-
-        tracing::info!("CLI subprocess spawned, waiting for output...");
-        let output = tokio::time::timeout(Duration::from_secs(120), child.wait_with_output())
-            .await
-            .map_err(|_| {
-                tracing::error!("{} CLI timed out", self.variant);
-                anyhow::anyhow!("{} CLI timed out after 120 seconds", self.variant)
-            })??;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            tracing::error!(
-                "{} CLI failed with status {}: {}",
-                self.variant,
-                output.status,
-                stderr
-            );
-            return Err(anyhow::anyhow!(
-                "{} CLI exited with {}: {}",
-                self.variant,
-                output.status,
-                stderr.trim()
-            ));
-        }
+        let cmd = self.build_command(&prompt, system_prompt.as_deref(), &request.tools);
+        let content = self.run_and_collect(cmd, 300).await?;
 
         tracing::info!(
-            "CLI subprocess completed successfully. Output size: {} bytes",
-            output.stdout.len()
+            "CLI subprocess completed. Output size: {} bytes",
+            content.len()
         );
-        let content = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
         Ok(CompletionResponse {
             content,
@@ -207,7 +428,81 @@ impl LlmProvider for CliLlmProvider {
         })
     }
 
-    // stream() uses the default trait fallback (complete → single Token event).
+    async fn stream(
+        &self,
+        request: &CompletionRequest,
+        tx: tokio::sync::mpsc::Sender<crate::cognitive::provider::StreamEvent>,
+    ) -> anyhow::Result<CompletionResponse> {
+        use crate::cognitive::provider::StreamEvent;
+        use tokio::io::AsyncBufReadExt;
+
+        if self.variant != CliVariant::ClaudeCode {
+            return self.complete(request).await.inspect(|resp| {
+                let _ = tx.try_send(StreamEvent::Token(resp.content.clone()));
+                let _ = tx.try_send(StreamEvent::Done(resp.clone()));
+            });
+        }
+
+        let system_prompt = Self::extract_system_prompt(&request.messages);
+        let prompt = Self::build_prompt(&request.messages);
+
+        let mut cmd = Command::new(self.variant.binary_name());
+        if self.api_key != "system" {
+            cmd.env(self.variant.api_key_env_var(), &self.api_key);
+        }
+        cmd.arg("--print");
+        cmd.arg("--output-format").arg("stream-json");
+        cmd.arg("--max-turns").arg("10");
+        cmd.arg("--dangerously-skip-permissions");
+        if let Some(ref sp) = system_prompt {
+            cmd.arg("--append-system-prompt").arg(sp);
+        }
+        cmd.arg(&prompt);
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("Failed to spawn claude CLI for streaming: {}", e))?;
+
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout from claude CLI"))?;
+
+        let mut reader = tokio::io::BufReader::new(stdout).lines();
+        let mut full_content = String::new();
+
+        while let Ok(Some(line)) = reader.next_line().await {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
+                if let Some(delta) = event
+                    .get("content_block_delta")
+                    .or_else(|| event.get("delta"))
+                    .and_then(|d| d.get("text"))
+                    .and_then(|t| t.as_str())
+                {
+                    full_content.push_str(delta);
+                    let _ = tx.send(StreamEvent::Token(delta.to_string())).await;
+                } else if let Some(result) = event.get("result").and_then(|r| r.as_str()) {
+                    if full_content.is_empty() {
+                        full_content = result.to_string();
+                    }
+                }
+            }
+        }
+
+        let _ = child.wait().await;
+
+        let response = CompletionResponse {
+            content: full_content,
+            tool_calls: None,
+        };
+        let _ = tx.send(StreamEvent::Done(response.clone())).await;
+        Ok(response)
+    }
 }
 
 #[cfg(test)]
@@ -300,7 +595,26 @@ mod tests {
             Message::new("system", "You are helpful."),
             Message::new("user", "Hello"),
         ];
+        // System messages are now handled via CLI flags (--append-system-prompt),
+        // so build_prompt excludes them from the prompt string.
         let prompt = CliLlmProvider::build_prompt(&messages);
-        assert_eq!(prompt, "[System]\nYou are helpful.\n\nHello");
+        assert_eq!(prompt, "Hello");
+    }
+
+    #[test]
+    fn test_extract_system_prompt() {
+        let messages = vec![
+            Message::new("system", "You are helpful."),
+            Message::new("user", "Hello"),
+        ];
+        let sys = CliLlmProvider::extract_system_prompt(&messages);
+        assert_eq!(sys, Some("You are helpful.".to_string()));
+    }
+
+    #[test]
+    fn test_extract_system_prompt_none() {
+        let messages = vec![Message::new("user", "Hello")];
+        let sys = CliLlmProvider::extract_system_prompt(&messages);
+        assert!(sys.is_none());
     }
 }

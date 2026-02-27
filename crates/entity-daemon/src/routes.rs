@@ -51,31 +51,42 @@ pub async fn chat(
     State(state): State<EntityDaemonState>,
     Json(body): Json<ChatRequest>,
 ) -> Json<ApiEnvelope<ChatResponse>> {
-    let base_prompt =
-        abigail_core::system_prompt::build_system_prompt(&state.docs_dir, &state.config.agent_name);
-    let (tier, model_used, complexity_score) =
-        state.router.tier_metadata_for_message(&body.message);
     let status = state.router.status();
 
-    let runtime_ctx = entity_chat::RuntimeContext {
-        provider_name: status.ego_provider.clone(),
-        model_id: model_used,
-        routing_mode: Some(format!("{:?}", status.mode)),
-        tier,
-        complexity_score,
-        entity_name: state.config.agent_name.clone(),
-        entity_id: Some(state.entity_id.clone()),
-        has_local_llm: status.has_local_http,
-        last_provider_change_at: None,
+    let system_prompt = if status.mode == abigail_core::RoutingMode::CliOrchestrator {
+        entity_chat::build_cli_system_prompt(
+            &state.docs_dir,
+            &state.config.agent_name,
+            &state.registry,
+            &state.instruction_registry,
+            &body.message,
+        )
+    } else {
+        let base_prompt = abigail_core::system_prompt::build_system_prompt(
+            &state.docs_dir,
+            &state.config.agent_name,
+        );
+        let (tier, model_used, complexity_score) =
+            state.router.tier_metadata_for_message(&body.message);
+        let runtime_ctx = entity_chat::RuntimeContext {
+            provider_name: status.ego_provider.clone(),
+            model_id: model_used,
+            routing_mode: Some(format!("{:?}", status.mode)),
+            tier,
+            complexity_score,
+            entity_name: state.config.agent_name.clone(),
+            entity_id: Some(state.entity_id.clone()),
+            has_local_llm: status.has_local_http,
+            last_provider_change_at: None,
+        };
+        entity_chat::augment_system_prompt(
+            &base_prompt,
+            &state.registry,
+            &state.instruction_registry,
+            &body.message,
+            &runtime_ctx,
+        )
     };
-
-    let system_prompt = entity_chat::augment_system_prompt(
-        &base_prompt,
-        &state.registry,
-        &state.instruction_registry,
-        &body.message,
-        &runtime_ctx,
-    );
 
     let messages = entity_chat::build_contextual_messages(
         &system_prompt,

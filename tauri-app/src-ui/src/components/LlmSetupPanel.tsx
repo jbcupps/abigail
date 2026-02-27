@@ -39,6 +39,16 @@ interface OllamaModelProgress {
   status: string;
 }
 
+interface CliDetection {
+  provider_name: string;
+  binary: string;
+  on_path: boolean;
+  is_official: boolean;
+  is_authenticated: boolean;
+  version: string | null;
+  auth_hint: string | null;
+}
+
 interface LlmSetupPanelProps {
   onConnected: (url: string) => void;
   onSkip?: () => void;
@@ -46,7 +56,7 @@ interface LlmSetupPanelProps {
 }
 
 export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }: LlmSetupPanelProps) {
-  const [mode, setMode] = useState<"ollama" | "lmstudio">("ollama");
+  const [mode, setMode] = useState<"ollama" | "lmstudio" | "cli">("ollama");
   const [probing, setProbing] = useState(false);
   const [detected, setDetected] = useState<DetectedLlm[]>([]);
   const [ollama, setOllama] = useState<OllamaDetection | null>(null);
@@ -61,6 +71,9 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
   const [showProceedAnyway, setShowProceedAnyway] = useState(false);
   const [installProgress, setInstallProgress] = useState<OllamaInstallProgress | null>(null);
   const [modelProgress, setModelProgress] = useState<OllamaModelProgress | null>(null);
+  const [cliDetections, setCliDetections] = useState<CliDetection[]>([]);
+  const [cliProbing, setCliProbing] = useState(false);
+  const [activatingCli, setActivatingCli] = useState(false);
 
   useEffect(() => {
     let unlistenInstall: (() => void) | null = null;
@@ -93,9 +106,11 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
   useEffect(() => {
     if (mode === "ollama") {
       probeOllama();
-    } else {
+    } else if (mode === "lmstudio") {
       if (!manualUrl) setManualUrl("http://localhost:1234");
       probeLmStudio();
+    } else {
+      probeCli();
     }
   }, [mode]);
 
@@ -143,6 +158,32 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
       setError(String(e));
     } finally {
       setProbing(false);
+    }
+  };
+
+  const probeCli = async () => {
+    setCliProbing(true);
+    setError("");
+    try {
+      const results = await invoke<CliDetection[]>("detect_cli_providers_full");
+      setCliDetections(results);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setCliProbing(false);
+    }
+  };
+
+  const activateCliProvider = async (providerName: string) => {
+    setActivatingCli(true);
+    setError("");
+    try {
+      await invoke("use_stored_provider", { provider: providerName });
+      onConnected("cli:" + providerName);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setActivatingCli(false);
     }
   };
 
@@ -240,7 +281,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
             ? "border-theme-primary text-theme-text"
             : "border-theme-border-dim text-theme-text-dim hover:border-theme-primary"}`}
           onClick={() => setMode("ollama")}
-          disabled={installing || pullingModel || connecting}
+          disabled={installing || pullingModel || connecting || activatingCli}
         >
           Ollama (guided)
         </button>
@@ -249,9 +290,18 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
             ? "border-theme-primary text-theme-text"
             : "border-theme-border-dim text-theme-text-dim hover:border-theme-primary"}`}
           onClick={() => setMode("lmstudio")}
-          disabled={installing || pullingModel || connecting}
+          disabled={installing || pullingModel || connecting || activatingCli}
         >
           LM Studio / Custom URL
+        </button>
+        <button
+          className={`px-3 py-2 rounded border text-sm ${mode === "cli"
+            ? "border-theme-primary text-theme-text"
+            : "border-theme-border-dim text-theme-text-dim hover:border-theme-primary"}`}
+          onClick={() => setMode("cli")}
+          disabled={installing || pullingModel || connecting || activatingCli}
+        >
+          CLI Quick-Start
         </button>
       </div>
 
@@ -461,6 +511,85 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
         </div>
       )}
 
+      {mode === "cli" && cliProbing && (
+        <div className="mb-4">
+          <p className="text-theme-text">Detecting CLI tools...</p>
+          <div className="animate-pulse mt-1">...</div>
+        </div>
+      )}
+
+      {mode === "cli" && !cliProbing && (
+        <div className="mb-6 space-y-4">
+          {cliDetections.filter(d => d.on_path).length === 0 ? (
+            <div className="border border-yellow-700 bg-yellow-900/20 p-4 rounded">
+              <p className="text-yellow-500 text-sm">No CLI tools detected on PATH.</p>
+              <p className="text-yellow-400/80 text-xs mt-2">
+                Install one of the supported CLI tools below, then click Re-scan.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {cliDetections.filter(d => d.on_path).map((d) => {
+                const ready = d.is_official && d.is_authenticated;
+                return (
+                  <div
+                    key={d.provider_name}
+                    className={`px-4 py-3 border rounded ${
+                      ready
+                        ? "border-green-600 bg-green-950/20"
+                        : "border-theme-border-dim bg-theme-bg-inset"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-theme-text-bright font-bold text-sm uppercase">
+                          {d.provider_name.replace("-cli", "")}
+                        </span>
+                        {d.version && (
+                          <span className="text-theme-text-dim text-xs ml-2">{d.version}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {d.is_official ? (
+                          <span className="text-green-500 text-[10px] uppercase">Official</span>
+                        ) : (
+                          <span className="text-yellow-500 text-[10px] uppercase">Unverified</span>
+                        )}
+                        {d.is_authenticated ? (
+                          <span className="text-green-500 text-[10px] uppercase">Authed</span>
+                        ) : (
+                          <span className="text-yellow-500 text-[10px] uppercase">Not Authed</span>
+                        )}
+                      </div>
+                    </div>
+                    {ready ? (
+                      <button
+                        className="mt-2 px-4 py-1.5 border border-green-600 text-green-500 rounded text-xs hover:bg-green-950/40 disabled:opacity-50"
+                        onClick={() => activateCliProvider(d.provider_name)}
+                        disabled={activatingCli}
+                      >
+                        {activatingCli ? "Activating..." : "Activate as Primary"}
+                      </button>
+                    ) : (
+                      <p className="text-yellow-400/80 text-xs mt-2">
+                        {d.auth_hint || "CLI tool needs authentication."}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <button
+            className="text-xs text-theme-text-dim hover:text-theme-primary underline"
+            onClick={probeCli}
+            disabled={cliProbing}
+          >
+            Re-scan
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="mt-2">
           <p className="text-red-400 text-sm">{error}</p>
@@ -475,47 +604,20 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
         </div>
       )}
 
-      {/* CLI Tools download links */}
-      <div className="mt-6 pt-4 border-t border-theme-border-dim">
-        <p className="text-theme-primary-dim text-sm mb-2">CLI Tools (optional)</p>
-        <p className="text-theme-text-dim text-xs mb-3">
-          CLI tools are configured in the next step (Connectivity) with the same API keys.
-        </p>
-        <div className="grid grid-cols-2 gap-2">
-          <a
-            className="block text-theme-text-dim text-xs hover:text-theme-primary-dim"
-            href="https://docs.anthropic.com/en/docs/claude-code"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Claude Code
-          </a>
-          <a
-            className="block text-theme-text-dim text-xs hover:text-theme-primary-dim"
-            href="https://github.com/google-gemini/gemini-cli"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Gemini CLI
-          </a>
-          <a
-            className="block text-theme-text-dim text-xs hover:text-theme-primary-dim"
-            href="https://github.com/openai/codex"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Codex CLI
-          </a>
-          <a
-            className="block text-theme-text-dim text-xs hover:text-theme-primary-dim"
-            href="https://docs.x.ai/docs/grok-cli"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Grok CLI
-          </a>
+      {mode !== "cli" && (
+        <div className="mt-6 pt-4 border-t border-theme-border-dim">
+          <p className="text-theme-primary-dim text-sm mb-2">CLI Tools (optional)</p>
+          <p className="text-theme-text-dim text-xs mb-3">
+            Have an authenticated CLI? Use the CLI Quick-Start tab above.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <a className="block text-theme-text-dim text-xs hover:text-theme-primary-dim" href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noreferrer">Claude Code</a>
+            <a className="block text-theme-text-dim text-xs hover:text-theme-primary-dim" href="https://github.com/google-gemini/gemini-cli" target="_blank" rel="noreferrer">Gemini CLI</a>
+            <a className="block text-theme-text-dim text-xs hover:text-theme-primary-dim" href="https://github.com/openai/codex" target="_blank" rel="noreferrer">Codex CLI</a>
+            <a className="block text-theme-text-dim text-xs hover:text-theme-primary-dim" href="https://docs.x.ai/docs/grok-cli" target="_blank" rel="noreferrer">Grok CLI</a>
+          </div>
         </div>
-      </div>
+      )}
 
       {showSkip && onSkip && (
         <div className="mt-8 pt-4 border-t border-theme-border-dim">

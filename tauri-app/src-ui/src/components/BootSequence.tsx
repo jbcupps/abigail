@@ -84,6 +84,11 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [crystalAvatarUrl, setCrystalAvatarUrl] = useState("");
   const [genesisPath, setGenesisPath] = useState<string | null>(null);
   const [visualizing, setVisualizing] = useState(false);
+  const [cliDetections, setCliDetections] = useState<Array<{
+    provider_name: string; binary: string; on_path: boolean;
+    is_official: boolean; is_authenticated: boolean;
+    version: string | null; auth_hint: string | null;
+  }>>([]);
 
   // Ref to BirthChat for injecting key confirmations
   const birthChatRef = useRef<BirthChatHandle>(null);
@@ -288,11 +293,14 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   };
 
   const handleLlmConnected = async (_url: string) => {
-    // Fetch existing stored providers when entering Connectivity
     try {
       await invoke("advance_to_connectivity");
-      const providers = await invoke<string[]>("get_stored_providers");
+      const [providers, cliResults] = await Promise.all([
+        invoke<string[]>("get_stored_providers"),
+        invoke<typeof cliDetections>("detect_cli_providers_full"),
+      ]);
       setStoredProviders(providers);
+      setCliDetections(cliResults);
     } catch (e) {
       console.error("Failed to advance to connectivity or fetch providers:", e);
     }
@@ -337,7 +345,8 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   };
 
   const handleConnectivityAdvance = async () => {
-    if (storedProviders.length === 0) {
+    const hasAuthedCli = cliDetections.some(d => d.on_path && d.is_official && d.is_authenticated);
+    if (storedProviders.length === 0 && !hasAuthedCli) {
       setError("At least one provider must be configured before crystallization can begin.");
       return;
     }
@@ -692,29 +701,45 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 <div className="space-y-3">
                   <h3 className="text-[10px] text-theme-text-dim font-bold uppercase tracking-widest border-b border-theme-border-dim pb-1">External CLI Tools</h3>
                   <div className="grid grid-cols-2 gap-2">
-                    {["claude-cli", "gemini-cli", "codex-cli", "grok-cli"].map((p) => (
-                      <button
-                        key={p}
-                        className={`text-left px-3 py-2 rounded border transition-all ${
-                          storedProviders.includes(p)
-                            ? "border-green-600 bg-green-950/20 text-green-500"
-                            : "border-theme-border-dim bg-theme-bg-inset text-theme-text-dim hover:border-theme-primary hover:text-theme-text"
-                        }`}
-                        onClick={() => {
-                          setError("");
-                          setActiveApiKeyProvider(p);
-                        }}
-                        disabled={storedProviders.includes(p)}
-                      >
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs font-bold uppercase">{p.replace("-cli", "")}</span>
-                          {storedProviders.includes(p) && <span className="text-[10px]">✓</span>}
-                        </div>
-                        <div className="mt-1.5 w-full h-1 bg-black/20 rounded-full overflow-hidden">
-                          <div className={`h-full transition-all duration-500 ${storedProviders.includes(p) ? "bg-green-500 w-full" : "bg-theme-primary-faint w-0"}`} />
-                        </div>
-                      </button>
-                    ))}
+                    {["claude-cli", "gemini-cli", "codex-cli", "grok-cli"].map((p) => {
+                      const det = cliDetections.find(d => d.provider_name === p);
+                      const active = storedProviders.includes(p);
+                      const authed = det?.on_path && det?.is_official && det?.is_authenticated;
+                      const detected = det?.on_path ?? false;
+                      return (
+                        <button
+                          key={p}
+                          className={`text-left px-3 py-2 rounded border transition-all ${
+                            active
+                              ? "border-green-600 bg-green-950/20 text-green-500"
+                              : authed
+                                ? "border-green-700/50 bg-green-950/10 text-green-400 hover:border-green-600"
+                                : "border-theme-border-dim bg-theme-bg-inset text-theme-text-dim hover:border-theme-primary hover:text-theme-text"
+                          }`}
+                          onClick={() => {
+                            setError("");
+                            if (authed && !active) {
+                              invoke("use_stored_provider", { provider: p }).then(() => {
+                                setStoredProviders(prev => prev.includes(p) ? prev : [...prev, p]);
+                              }).catch(e => setError(String(e)));
+                            } else {
+                              setActiveApiKeyProvider(p);
+                            }
+                          }}
+                          disabled={active}
+                        >
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs font-bold uppercase">{p.replace("-cli", "")}</span>
+                            <span className="text-[10px]">
+                              {active ? "✓" : authed ? "Authed" : detected ? "No Auth" : ""}
+                            </span>
+                          </div>
+                          <div className="mt-1.5 w-full h-1 bg-black/20 rounded-full overflow-hidden">
+                            <div className={`h-full transition-all duration-500 ${active ? "bg-green-500 w-full" : authed ? "bg-green-700 w-3/4" : "bg-theme-primary-faint w-0"}`} />
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
