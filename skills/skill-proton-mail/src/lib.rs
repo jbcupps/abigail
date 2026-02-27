@@ -85,12 +85,14 @@ impl ProtonMailSkill {
     fn tool_fetch_emails() -> ToolDescriptor {
         ToolDescriptor {
             name: "fetch_emails".to_string(),
-            description: "Fetch unread emails from INBOX.".to_string(),
+            description:
+                "Fetch emails from INBOX. Set unread_only to false for all mail (read + unread)."
+                    .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "limit": { "type": "integer", "description": "Max emails to fetch", "default": 50 },
-                    "unread_only": { "type": "boolean", "default": true }
+                    "unread_only": { "type": "boolean", "description": "If true, only unread; if false, all mail in INBOX", "default": true }
                 }
             }),
             returns: serde_json::json!({ "type": "array", "items": { "type": "object" } }),

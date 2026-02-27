@@ -3,6 +3,7 @@
 pub mod commands;
 pub mod hive_ops;
 pub mod identity_manager;
+pub mod log_capture;
 pub mod ollama_manager;
 pub mod rate_limit;
 pub mod state;
@@ -19,6 +20,7 @@ use crate::commands::cli::*;
 use crate::commands::config::*;
 use crate::commands::forge::*;
 use crate::commands::identity::*;
+use crate::commands::logging::*;
 use crate::commands::memory::*;
 use crate::commands::ollama::*;
 use crate::commands::sensory::*;
@@ -72,6 +74,98 @@ pub fn skill_audit_log(data_dir: &Path, action: &str, detail: &str) {
         .append(true)
         .open(&log_path)
         .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
+}
+
+/// Build and optionally initialize the Proton Mail skill from current vault.
+/// Used at startup and after storing IMAP-related secrets so the skill picks up new credentials.
+/// Returns the skill (initialized or not) for the caller to register.
+pub fn create_proton_mail_skill_for_registry(state: &AppState) -> Result<Arc<dyn Skill>, String> {
+    use skill_proton_mail::ProtonMailSkill;
+    let manifest = ProtonMailSkill::default_manifest();
+    let mut skill = ProtonMailSkill::new(manifest);
+
+    let has_creds = state
+        .skills_secrets
+        .lock()
+        .map_err(|e| e.to_string())?
+        .get_secret("imap_password")
+        .is_some();
+
+    if has_creds {
+        let (imap_user, imap_password, imap_host, imap_port) = {
+            let v = state.skills_secrets.lock().map_err(|e| e.to_string())?;
+            (
+                v.get_secret("imap_user").unwrap_or("").to_string(),
+                v.get_secret("imap_password").unwrap_or("").to_string(),
+                v.get_secret("imap_host")
+                    .unwrap_or("mail.proton.me")
+                    .to_string(),
+                v.get_secret("imap_port").unwrap_or("993").to_string(),
+            )
+        };
+        let imap_tls_mode = {
+            let v = state.skills_secrets.lock().map_err(|e| e.to_string())?;
+            v.get_secret("imap_tls_mode")
+                .unwrap_or("IMPLICIT")
+                .to_string()
+        };
+
+        let mut values = HashMap::new();
+        values.insert(
+            "imap_host".to_string(),
+            serde_json::Value::String(imap_host),
+        );
+        values.insert(
+            "imap_port".to_string(),
+            serde_json::json!(imap_port.parse::<u64>().unwrap_or(993)),
+        );
+        values.insert(
+            "imap_user".to_string(),
+            serde_json::Value::String(imap_user),
+        );
+        values.insert(
+            "imap_tls_mode".to_string(),
+            serde_json::Value::String(imap_tls_mode),
+        );
+
+        let mut secrets = HashMap::new();
+        secrets.insert("imap_password".to_string(), imap_password);
+
+        let skill_config = SkillConfig {
+            values,
+            secrets,
+            limits: ResourceLimits::default(),
+            permissions: vec![],
+            event_sender: Some(Arc::new(state.event_bus.sender())),
+        };
+
+        match tauri::async_runtime::block_on(async {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                skill.initialize(skill_config),
+            )
+            .await
+        }) {
+            Ok(Ok(())) => {
+                tracing::info!("Proton Mail skill initialized successfully");
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    "Proton Mail skill init failed (registered uninitialized): {}",
+                    e
+                );
+            }
+            Err(_) => {
+                tracing::warn!(
+                    "Proton Mail skill init timed out after 15s (IMAP bridge unreachable?)"
+                );
+            }
+        }
+    } else {
+        tracing::info!("Proton Mail skill created without credentials (no imap_password in vault)");
+    }
+
+    Ok(Arc::new(skill))
 }
 
 fn get_config() -> AppConfig {
@@ -172,6 +266,9 @@ pub fn run() {
         probe::run_and_exit();
     }
 
+    let log_buffer = log_capture::new_log_buffer();
+    log_capture::init_tracing(log_buffer.clone());
+
     let config = get_config();
     let data_dir = config.data_dir.clone();
     let secrets = Arc::new(Mutex::new(
@@ -268,6 +365,7 @@ pub fn run() {
         chat_cooldown: CooldownGuard::new(std::time::Duration::from_millis(500)),
         birth_cooldown: CooldownGuard::new(std::time::Duration::from_millis(500)),
         cli_server: Arc::new(tokio::sync::Mutex::new(None)),
+        log_buffer: log_buffer.clone(),
     };
 
     tauri::Builder::default()
@@ -348,97 +446,18 @@ pub fn run() {
             // declares imap_*/smtp_* secrets for namespace validation), and
             // initializes the IMAP transport only when credentials are present.
             {
-                let manifest = skill_proton_mail::ProtonMailSkill::default_manifest();
-                let skill_id = manifest.id.clone();
-                let mut skill = skill_proton_mail::ProtonMailSkill::new(manifest);
-
-                let has_creds = state
-                    .skills_secrets
-                    .lock()
-                    .map(|v| v.get_secret("imap_password").is_some())
-                    .unwrap_or(false);
-
-                if has_creds {
-                    let (imap_user, imap_password, imap_host, imap_port) = {
-                        let v = state.skills_secrets.lock().unwrap();
-                        (
-                            v.get_secret("imap_user").unwrap_or("").to_string(),
-                            v.get_secret("imap_password").unwrap_or("").to_string(),
-                            v.get_secret("imap_host")
-                                .unwrap_or("mail.proton.me")
-                                .to_string(),
-                            v.get_secret("imap_port").unwrap_or("993").to_string(),
-                        )
-                    };
-                    let imap_tls_mode = {
-                        let v = state.skills_secrets.lock().unwrap();
-                        v.get_secret("imap_tls_mode")
-                            .unwrap_or("IMPLICIT")
-                            .to_string()
-                    };
-
-                    let mut values = HashMap::new();
-                    values.insert(
-                        "imap_host".to_string(),
-                        serde_json::Value::String(imap_host),
-                    );
-                    values.insert(
-                        "imap_port".to_string(),
-                        serde_json::json!(imap_port.parse::<u64>().unwrap_or(993)),
-                    );
-                    values.insert(
-                        "imap_user".to_string(),
-                        serde_json::Value::String(imap_user),
-                    );
-                    values.insert(
-                        "imap_tls_mode".to_string(),
-                        serde_json::Value::String(imap_tls_mode),
-                    );
-
-                    let mut secrets = HashMap::new();
-                    secrets.insert("imap_password".to_string(), imap_password);
-
-                    let skill_config = SkillConfig {
-                        values,
-                        secrets,
-                        limits: ResourceLimits::default(),
-                        permissions: vec![],
-                        event_sender: Some(Arc::new(state.event_bus.sender())),
-                    };
-
-                    match tauri::async_runtime::block_on(async {
-                        tokio::time::timeout(
-                            std::time::Duration::from_secs(15),
-                            skill.initialize(skill_config),
-                        )
-                        .await
-                    }) {
-                        Ok(Ok(())) => {
-                            tracing::info!("Proton Mail skill initialized successfully");
-                        }
-                        Ok(Err(e)) => {
-                            tracing::warn!(
-                                "Proton Mail skill init failed (registered uninitialized): {}",
-                                e
-                            );
-                        }
-                        Err(_) => {
-                            tracing::warn!(
-                                "Proton Mail skill init timed out after 15s (IMAP bridge unreachable?)"
-                            );
+                let skill_id = skill_proton_mail::ProtonMailSkill::default_manifest()
+                    .id
+                    .clone();
+                match create_proton_mail_skill_for_registry(&state) {
+                    Ok(skill) => {
+                        if let Err(e) = state.registry.register(skill_id, skill) {
+                            tracing::warn!("Failed to register Proton Mail skill: {}", e);
                         }
                     }
-                } else {
-                    tracing::info!(
-                        "Proton Mail skill registered without credentials (no imap_password in vault)"
-                    );
-                }
-
-                if let Err(e) = state
-                    .registry
-                    .register(skill_id.clone(), Arc::new(skill))
-                {
-                    tracing::warn!("Failed to register Proton Mail skill: {}", e);
+                    Err(e) => {
+                        tracing::warn!("Proton Mail skill creation failed: {}", e);
+                    }
                 }
             }
 
@@ -486,6 +505,7 @@ pub fn run() {
             Ok(())
         })
         .manage(state)
+        .manage(log_buffer)
         .invoke_handler(tauri::generate_handler![
             run_startup_checks,
             check_hive_status,
@@ -522,6 +542,7 @@ pub fn run() {
             list_skills,
             list_discovered_skills,
             list_missing_skill_secrets,
+            list_skills_vault_entries,
             store_secret,
             list_tools,
             execute_tool,
@@ -590,6 +611,12 @@ pub fn run() {
             chat,
             chat_stream,
             get_system_diagnostics,
+            get_log_level,
+            set_log_level,
+            get_captured_logs,
+            clear_captured_logs,
+            export_logs,
+            save_logs_to_file,
             propose_entity_visuals,
             start_crystallization,
             extract_crystallization_identity,

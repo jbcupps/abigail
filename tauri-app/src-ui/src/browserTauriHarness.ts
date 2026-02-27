@@ -424,7 +424,21 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
     case "stop_cli_server":
       state.cliServer = { running: false };
       return null;
+    case "get_log_level":
+      return "info";
+    case "set_log_level":
+      return null;
+    case "get_captured_logs":
+      return { entries: [], next_index: 0 };
+    case "clear_captured_logs":
+      return null;
+    case "export_logs":
+      return "";
+    case "save_logs_to_file":
+      return null;
     case "list_missing_skill_secrets":
+      return [];
+    case "list_skills_vault_entries":
       return [];
     case "get_memory_disclosure_settings":
       return { enabled: state.memoryDisclosureEnabled };

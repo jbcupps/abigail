@@ -5,6 +5,13 @@ import LlmSetupPanel from "./LlmSetupPanel";
 import ApiKeyModal from "./ApiKeyModal";
 import DataSourcesPanel from "./DataSourcesPanel";
 
+interface SkillsVaultEntry {
+  secret_name: string;
+  skill_names: string[];
+  description: string | null;
+  is_set: boolean;
+}
+
 type Tab = "identity" | "keys" | "llm" | "data" | "repair";
 
 interface RouterStatus {
@@ -30,6 +37,12 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
   const [activeApiKeyProvider, setActiveApiKeyProvider] = useState<string | null>(null);
   const [storedProviders, setStoredProviders] = useState<string[]>([]);
 
+  // Skills Vault tab
+  const [skillsVaultEntries, setSkillsVaultEntries] = useState<SkillsVaultEntry[]>([]);
+  const [skillsVaultEditing, setSkillsVaultEditing] = useState<string | null>(null);
+  const [skillsVaultValue, setSkillsVaultValue] = useState("");
+  const [skillsVaultError, setSkillsVaultError] = useState("");
+
   // Identity tab
   const [editName, setEditName] = useState(agentName || "");
   const [editPurpose, setEditPurpose] = useState("");
@@ -45,6 +58,10 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
   useEffect(() => {
     if (initialTab) setTab(initialTab);
   }, [initialTab]);
+
+  useEffect(() => {
+    if (tab === "keys") refreshSkillsVault();
+  }, [tab]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -74,9 +91,31 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
     }
   };
 
+  const refreshSkillsVault = async () => {
+    try {
+      const entries = await invoke<SkillsVaultEntry[]>("list_skills_vault_entries");
+      if (mountedRef.current) setSkillsVaultEntries(entries);
+    } catch (e) {
+      console.warn("[IdentityPanel] list_skills_vault_entries failed:", e);
+    }
+  };
+
   const handleApiKeySaved = () => {
     setActiveApiKeyProvider(null);
     refreshStatus();
+  };
+
+  const handleSaveSkillSecret = async () => {
+    if (!skillsVaultEditing || !skillsVaultValue.trim()) return;
+    setSkillsVaultError("");
+    try {
+      await invoke("store_secret", { key: skillsVaultEditing, value: skillsVaultValue.trim() });
+      setSkillsVaultEditing(null);
+      setSkillsVaultValue("");
+      refreshSkillsVault();
+    } catch (e) {
+      setSkillsVaultError(String(e));
+    }
   };
 
   const handleRecrystallize = async () => {
@@ -262,9 +301,9 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
           />
         )}
 
-        {/* ── SECRETS (API KEYS) ── */}
+        {/* ── SECRETS (API KEYS + SKILLS VAULT) ── */}
         {tab === "keys" && (
-          <div className="p-6 space-y-6">
+          <div className="p-6 space-y-8">
             <div>
               <h2 className="text-theme-primary-dim text-lg font-bold uppercase tracking-widest mb-2">Hive Secrets</h2>
               <p className="text-theme-text-dim text-[10px] uppercase tracking-tighter mb-6">
@@ -296,6 +335,84 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
                 onSaved={handleApiKeySaved}
                 onCancel={() => setActiveApiKeyProvider(null)}
               />
+            )}
+
+            {/* Skills Vault: skill passwords (IMAP, Jira, GitHub, etc.) */}
+            <div className="border-t border-theme-border pt-6">
+              <h2 className="text-theme-primary-dim text-lg font-bold uppercase tracking-widest mb-2">Skills Vault</h2>
+              <p className="text-theme-text-dim text-[10px] uppercase tracking-tighter mb-4">
+                Passwords and API keys for skills (e.g. mail, Jira, GitHub). Encrypted on device.
+              </p>
+              {skillsVaultEntries.length === 0 ? (
+                <p className="text-theme-text-dim text-xs italic">No skill secrets declared. Install skills that require credentials (e.g. Proton Mail) to see entries here.</p>
+              ) : (
+                <div className="space-y-2">
+                  {skillsVaultEntries.map((e) => (
+                    <div key={e.secret_name} className="flex items-center justify-between px-4 py-3 border border-theme-border rounded bg-theme-bg-inset">
+                      <div>
+                        <span className="text-theme-text-bright font-mono text-[10px] tracking-wider">{e.secret_name}</span>
+                        {e.is_set && (
+                          <span className="text-theme-primary text-[10px] ml-2 font-bold">[SET]</span>
+                        )}
+                        {e.skill_names.length > 0 && (
+                          <p className="text-theme-text-dim text-[9px] mt-0.5">{e.skill_names.join(", ")}</p>
+                        )}
+                        {e.description && (
+                          <p className="text-theme-primary-faint text-[9px] mt-0.5">{e.description}</p>
+                        )}
+                      </div>
+                      <button
+                        className="text-[10px] border border-theme-primary px-3 py-1 rounded hover:bg-theme-primary-glow uppercase tracking-widest"
+                        onClick={() => {
+                          setSkillsVaultEditing(e.secret_name);
+                          setSkillsVaultValue("");
+                          setSkillsVaultError("");
+                        }}
+                      >
+                        {e.is_set ? "Update" : "Add"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Modal: set skill secret value */}
+            {skillsVaultEditing && (
+              <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-label="Set skill secret">
+                <div className="bg-theme-bg-elevated border border-theme-primary rounded-lg p-6 max-w-md w-full mx-4">
+                  <h3 className="text-theme-primary-dim text-sm font-bold uppercase tracking-widest mb-2">{skillsVaultEditing}</h3>
+                  <p className="text-theme-text-dim text-[10px] mb-4">Value is stored encrypted. You cannot read it back here.</p>
+                  <input
+                    type="password"
+                    autoFocus
+                    placeholder="Enter value..."
+                    className="w-full bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:outline-none text-sm mb-4"
+                    value={skillsVaultValue}
+                    onChange={(e) => setSkillsVaultValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleSaveSkillSecret();
+                      if (e.key === "Escape") setSkillsVaultEditing(null);
+                    }}
+                  />
+                  {skillsVaultError && <p className="text-red-400 text-xs mb-3">{skillsVaultError}</p>}
+                  <div className="flex gap-3 justify-end">
+                    <button
+                      className="border border-theme-border-dim text-theme-text-dim px-4 py-2 rounded text-xs uppercase tracking-widest hover:bg-theme-bg-inset"
+                      onClick={() => setSkillsVaultEditing(null)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="border border-theme-primary text-theme-primary px-4 py-2 rounded text-xs uppercase tracking-widest hover:bg-theme-primary-glow disabled:opacity-50"
+                      onClick={handleSaveSkillSecret}
+                      disabled={!skillsVaultValue.trim()}
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         )}
