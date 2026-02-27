@@ -262,15 +262,29 @@ pub struct ToolUseResult {
     pub content: String,
     /// All tool calls executed during the loop.
     pub tool_calls_made: Vec<ToolCallRecord>,
-    /// Model quality tier used: "fast", "standard", or "pro".
-    pub tier: Option<String>,
-    /// Actual model ID used for this request.
-    pub model_used: Option<String>,
-    /// Complexity score (5–95) that determined tier selection.
-    pub complexity_score: Option<u8>,
     /// Authoritative execution trace from the final LLM call that produced
     /// the text response (captures fallback chain and timing).
+    /// All attribution (tier, model, provider, complexity) is derived from this.
     pub execution_trace: Option<entity_core::ExecutionTrace>,
+}
+
+impl ToolUseResult {
+    /// Derive the tier from the authoritative execution trace.
+    pub fn tier(&self) -> Option<&str> {
+        self.execution_trace.as_ref().and_then(|t| t.final_tier())
+    }
+
+    /// Derive the model from the authoritative execution trace.
+    pub fn model_used(&self) -> Option<&str> {
+        self.execution_trace.as_ref().and_then(|t| t.final_model())
+    }
+
+    /// Derive the complexity score from the authoritative execution trace.
+    pub fn complexity_score(&self) -> Option<u8> {
+        self.execution_trace
+            .as_ref()
+            .and_then(|t| t.complexity_score)
+    }
 }
 
 /// Run the full tool-use loop:
@@ -287,15 +301,6 @@ pub async fn run_tool_use_loop(
     tools: Vec<ToolDefinition>,
 ) -> anyhow::Result<ToolUseResult> {
     let mut all_records = Vec::new();
-
-    let user_msg = messages
-        .iter()
-        .rev()
-        .find(|m| m.role == "user")
-        .map(|m| m.content.as_str())
-        .unwrap_or("");
-    let (tier, model_used, complexity_score) = router.tier_metadata_for_message(user_msg);
-
     let mut last_trace: Option<entity_core::ExecutionTrace> = None;
 
     for round in 0..MAX_TOOL_ROUNDS {
@@ -312,9 +317,6 @@ pub async fn run_tool_use_loop(
                 return Ok(ToolUseResult {
                     content: response.content,
                     tool_calls_made: all_records,
-                    tier: tier.clone(),
-                    model_used: model_used.clone(),
-                    complexity_score,
                     execution_trace: last_trace,
                 });
             }
@@ -341,9 +343,6 @@ pub async fn run_tool_use_loop(
     Ok(ToolUseResult {
         content: "I attempted several tool calls but hit the maximum number of rounds. Here's what I have so far.".to_string(),
         tool_calls_made: all_records,
-        tier,
-        model_used,
-        complexity_score,
         execution_trace: last_trace,
     })
 }
@@ -1096,6 +1095,16 @@ mod tests {
 
     #[test]
     fn test_tool_use_result_fields() {
+        let mut trace = entity_core::ExecutionTrace::new(
+            "tierbased",
+            Some("openai".into()),
+            Some("gpt-4.1-mini".into()),
+            "ego",
+        );
+        trace.configured_tier = Some("fast".into());
+        trace.complexity_score = Some(25);
+        trace.record_success("openai", Some("gpt-4.1-mini".into()), chrono::Utc::now());
+
         let result = ToolUseResult {
             content: "done".into(),
             tool_calls_made: vec![ToolCallRecord {
@@ -1103,17 +1112,14 @@ mod tests {
                 tool_name: "b".into(),
                 success: true,
             }],
-            tier: Some("fast".into()),
-            model_used: Some("gpt-4.1-mini".into()),
-            complexity_score: Some(25),
-            execution_trace: None,
+            execution_trace: Some(trace),
         };
         assert_eq!(result.content, "done");
         assert_eq!(result.tool_calls_made.len(), 1);
-        assert_eq!(result.tier.as_deref(), Some("fast"));
-        assert_eq!(result.model_used.as_deref(), Some("gpt-4.1-mini"));
-        assert_eq!(result.complexity_score, Some(25));
-        assert!(result.execution_trace.is_none());
+        assert_eq!(result.tier(), Some("fast"));
+        assert_eq!(result.model_used(), Some("gpt-4.1-mini"));
+        assert_eq!(result.complexity_score(), Some(25));
+        assert!(result.execution_trace.is_some());
     }
 
     #[test]
@@ -1124,21 +1130,22 @@ mod tests {
             Some("gpt-4.1-mini".into()),
             "ego",
         );
+        trace.configured_tier = Some("fast".into());
+        trace.complexity_score = Some(20);
         let t0 = chrono::Utc::now();
         trace.record_success("openai", Some("gpt-4.1-mini".into()), t0);
 
         let result = ToolUseResult {
             content: "done".into(),
             tool_calls_made: vec![],
-            tier: Some("fast".into()),
-            model_used: Some("gpt-4.1-mini".into()),
-            complexity_score: Some(20),
             execution_trace: Some(trace),
         };
-        let trace = result.execution_trace.as_ref().unwrap();
-        assert!(!trace.fallback_occurred);
-        assert_eq!(trace.final_provider(), Some("openai"));
-        assert_eq!(trace.final_model(), Some("gpt-4.1-mini"));
+        let trace_ref = result.execution_trace.as_ref().unwrap();
+        assert!(!trace_ref.fallback_occurred);
+        assert_eq!(trace_ref.final_provider(), Some("openai"));
+        assert_eq!(trace_ref.final_model(), Some("gpt-4.1-mini"));
+        assert_eq!(result.tier(), Some("fast"));
+        assert_eq!(result.model_used(), Some("gpt-4.1-mini"));
     }
 
     #[test]

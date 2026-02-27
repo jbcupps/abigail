@@ -51,7 +51,6 @@ pub async fn chat(
     State(state): State<EntityDaemonState>,
     Json(body): Json<ChatRequest>,
 ) -> Json<ApiEnvelope<ChatResponse>> {
-    // 1. Build system prompt from constitutional documents, augmented with tool + skill instructions + runtime context
     let base_prompt =
         abigail_core::system_prompt::build_system_prompt(&state.docs_dir, &state.config.agent_name);
     let (tier, model_used, complexity_score) =
@@ -60,9 +59,9 @@ pub async fn chat(
 
     let runtime_ctx = entity_chat::RuntimeContext {
         provider_name: status.ego_provider.clone(),
-        model_id: model_used.clone(),
+        model_id: model_used,
         routing_mode: Some(format!("{:?}", status.mode)),
-        tier: tier.clone(),
+        tier,
         complexity_score,
         entity_name: state.config.agent_name.clone(),
         entity_id: Some(state.entity_id.clone()),
@@ -78,17 +77,14 @@ pub async fn chat(
         &runtime_ctx,
     );
 
-    // 2. Build contextual messages with sanitization + deduplication
     let messages = entity_chat::build_contextual_messages(
         &system_prompt,
         body.session_messages,
         &body.message,
     );
 
-    // 3. Build tool definitions from registered skills
     let tools = entity_chat::build_tool_definitions(&state.registry);
 
-    // 5. Route — use tool-use loop if tools are available, plain route otherwise
     let target = body.target.as_deref().unwrap_or("AUTO");
     let result = if tools.is_empty() || target == "ID" {
         let traced = if target == "ID" {
@@ -99,9 +95,6 @@ pub async fn chat(
         traced.map(|(r, trace)| entity_chat::ToolUseResult {
             content: r.content,
             tool_calls_made: Vec::new(),
-            tier: tier.clone(),
-            model_used: model_used.clone(),
-            complexity_score,
             execution_trace: Some(trace),
         })
     } else {
@@ -110,15 +103,23 @@ pub async fn chat(
 
     match result {
         Ok(tool_result) => {
-            let provider = entity_chat::provider_label(&state.router);
+            let tier = tool_result.tier().map(|s| s.to_string());
+            let model_used = tool_result.model_used().map(|s| s.to_string());
+            let complexity_score = tool_result.complexity_score();
+            let provider = tool_result
+                .execution_trace
+                .as_ref()
+                .and_then(|t| t.final_provider())
+                .map(|s| s.to_string())
+                .or_else(|| Some(entity_chat::provider_label(&state.router)));
 
             Json(ApiEnvelope::success(ChatResponse {
                 reply: tool_result.content,
-                provider: Some(provider),
+                provider,
                 tool_calls_made: tool_result.tool_calls_made,
-                tier: tool_result.tier,
-                model_used: tool_result.model_used,
-                complexity_score: tool_result.complexity_score,
+                tier,
+                model_used,
+                complexity_score,
                 execution_trace: tool_result.execution_trace,
             }))
         }
@@ -142,9 +143,9 @@ pub async fn chat_stream(
 
     let runtime_ctx = entity_chat::RuntimeContext {
         provider_name: router_status.ego_provider.clone(),
-        model_id: model_used.clone(),
+        model_id: model_used,
         routing_mode: Some(format!("{:?}", router_status.mode)),
-        tier: tier.clone(),
+        tier,
         complexity_score,
         entity_name: state.config.agent_name.clone(),
         entity_id: Some(state.entity_id.clone()),
@@ -194,10 +195,22 @@ pub async fn chat_stream(
 
         match result {
             Ok(pipeline) => {
-                let provider = entity_chat::provider_label(&router);
+                let trace_ref = pipeline.execution_trace.as_ref();
+                let tier = trace_ref
+                    .and_then(|t| t.final_tier())
+                    .map(|s| s.to_string());
+                let model_used = trace_ref
+                    .and_then(|t| t.final_model())
+                    .map(|s| s.to_string());
+                let complexity_score = trace_ref.and_then(|t| t.complexity_score);
+                let provider = trace_ref
+                    .and_then(|t| t.final_provider())
+                    .map(|s| s.to_string())
+                    .or_else(|| Some(entity_chat::provider_label(&router)));
+
                 let response = ChatResponse {
                     reply: pipeline.content,
-                    provider: Some(provider),
+                    provider,
                     tool_calls_made: pipeline.tool_calls_made,
                     tier,
                     model_used,
@@ -222,6 +235,28 @@ pub async fn chat_stream(
 
     let stream = tokio_stream::wrappers::ReceiverStream::new(sse_rx).map(Ok);
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/routing/diagnose
+// ---------------------------------------------------------------------------
+
+#[derive(serde::Deserialize)]
+pub struct DiagnoseQuery {
+    #[serde(default = "default_diagnose_message")]
+    pub message: String,
+}
+
+fn default_diagnose_message() -> String {
+    "hello".to_string()
+}
+
+pub async fn diagnose_routing(
+    State(state): State<EntityDaemonState>,
+    Query(query): Query<DiagnoseQuery>,
+) -> Json<ApiEnvelope<abigail_router::RoutingDiagnosis>> {
+    let diagnosis = state.router.diagnose(&query.message);
+    Json(ApiEnvelope::success(diagnosis))
 }
 
 // ---------------------------------------------------------------------------

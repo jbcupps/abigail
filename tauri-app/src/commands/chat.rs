@@ -155,8 +155,8 @@ pub async fn chat(
     // 1. Auto-detect and store API keys (Tauri-specific pre-hook, GUI only)
     auto_detect_and_store_key_internal(&state, &message).await;
 
-    // 2. Build system prompt + router snapshot, augmented with tool awareness, skill instructions, and runtime context
-    let (router, system_prompt, tier, model_used, complexity_score) = {
+    // 2. Build system prompt + router snapshot with runtime context
+    let (router, system_prompt) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
         let base =
             abigail_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
@@ -164,12 +164,11 @@ pub async fn chat(
         let (t, m, c) = router.tier_metadata_for_message(&message);
         let status = router.status();
 
-        // Build runtime context for self-awareness
         let runtime_ctx = entity_chat::RuntimeContext {
             provider_name: status.ego_provider.clone(),
-            model_id: m.clone(),
+            model_id: m,
             routing_mode: Some(format!("{:?}", status.mode)),
-            tier: t.clone(),
+            tier: t,
             complexity_score: c,
             entity_name: config.agent_name.clone(),
             entity_id: None,
@@ -188,7 +187,7 @@ pub async fn chat(
             &message,
             &runtime_ctx,
         );
-        (router, augmented, t, m, c)
+        (router, augmented)
     };
 
     // 3. Build contextual messages with sanitization + deduplication (shared engine)
@@ -209,9 +208,6 @@ pub async fn chat(
         traced.map(|(r, trace)| entity_chat::ToolUseResult {
             content: r.content,
             tool_calls_made: Vec::new(),
-            tier: tier.clone(),
-            model_used: model_used.clone(),
-            complexity_score,
             execution_trace: Some(trace),
         })
     } else {
@@ -220,15 +216,23 @@ pub async fn chat(
 
     match result {
         Ok(tool_result) => {
-            let provider = entity_chat::provider_label(&router);
+            let tier = tool_result.tier().map(|s| s.to_string());
+            let model_used = tool_result.model_used().map(|s| s.to_string());
+            let complexity_score = tool_result.complexity_score();
+            let provider = tool_result
+                .execution_trace
+                .as_ref()
+                .and_then(|t| t.final_provider())
+                .map(|s| s.to_string())
+                .or_else(|| Some(entity_chat::provider_label(&router)));
 
             let response = ChatResponse {
                 reply: tool_result.content,
-                provider: Some(provider),
+                provider,
                 tool_calls_made: tool_result.tool_calls_made,
-                tier: tool_result.tier,
-                model_used: tool_result.model_used,
-                complexity_score: tool_result.complexity_score,
+                tier,
+                model_used,
+                complexity_score,
                 execution_trace: tool_result.execution_trace,
             };
             serde_json::to_string(&response).map_err(|e| e.to_string())
@@ -256,7 +260,7 @@ pub async fn chat_stream(
 ) -> Result<(), String> {
     auto_detect_and_store_key_internal(&state, &message).await;
 
-    let (router, system_prompt, tier, model_used, complexity_score) = {
+    let (router, system_prompt) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
         let base =
             abigail_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
@@ -266,9 +270,9 @@ pub async fn chat_stream(
 
         let runtime_ctx = entity_chat::RuntimeContext {
             provider_name: status.ego_provider.clone(),
-            model_id: m.clone(),
+            model_id: m,
             routing_mode: Some(format!("{:?}", status.mode)),
-            tier: t.clone(),
+            tier: t,
             complexity_score: c,
             entity_name: config.agent_name.clone(),
             entity_id: None,
@@ -287,7 +291,7 @@ pub async fn chat_stream(
             &message,
             &runtime_ctx,
         );
-        (router, augmented, t, m, c)
+        (router, augmented)
     };
 
     let messages =
@@ -319,10 +323,22 @@ pub async fn chat_stream(
 
     match result {
         Ok(pipeline) => {
-            let provider = entity_chat::provider_label(&router);
+            let trace_ref = pipeline.execution_trace.as_ref();
+            let tier = trace_ref
+                .and_then(|t| t.final_tier())
+                .map(|s| s.to_string());
+            let model_used = trace_ref
+                .and_then(|t| t.final_model())
+                .map(|s| s.to_string());
+            let complexity_score = trace_ref.and_then(|t| t.complexity_score);
+            let provider = trace_ref
+                .and_then(|t| t.final_provider())
+                .map(|s| s.to_string())
+                .or_else(|| Some(entity_chat::provider_label(&router)));
+
             let response = ChatResponse {
                 reply: pipeline.content,
-                provider: Some(provider),
+                provider,
                 tool_calls_made: pipeline.tool_calls_made,
                 tier,
                 model_used,

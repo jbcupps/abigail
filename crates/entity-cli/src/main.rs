@@ -63,6 +63,12 @@ enum Commands {
         #[command(subcommand)]
         action: MemoryAction,
     },
+    /// Diagnose routing decision for a test message (no LLM call)
+    Diagnose {
+        /// Test message to diagnose routing for
+        #[arg(default_value = "hello")]
+        message: String,
+    },
     /// Scaffold a new skill directory with template files
     Scaffold {
         /// Skill name (e.g., "my-weather-api")
@@ -137,6 +143,14 @@ async fn main() -> anyhow::Result<()> {
             } else if let Some(err) = &resp.error {
                 eprintln!("Error: {}", err);
             }
+        }
+        Commands::Diagnose { message } => {
+            let url = reqwest::Url::parse_with_params(
+                &format!("{}/v1/routing/diagnose", base),
+                &[("message", message.as_str())],
+            )?;
+            let resp: ApiEnvelope<serde_json::Value> = client.get(url).send().await?.json().await?;
+            println!("{}", serde_json::to_string_pretty(&resp)?);
         }
         Commands::Skills => {
             let resp: ApiEnvelope<Vec<SkillInfo>> = client

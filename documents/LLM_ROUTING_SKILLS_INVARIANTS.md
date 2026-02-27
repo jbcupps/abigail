@@ -10,8 +10,21 @@ execution correctness across chat, birth, forge, CLI, and skills commands.
 - Router rebuilds after config changes must update both:
   - active router state, and
   - subagent manager router reference.
-- `ChatResponse` must include `tier`, `model_used`, and `complexity_score`
-  metadata from the routing decision.
+- `ChatResponse` must include `execution_trace` as the authoritative source
+  of routing attribution. The `tier`, `model_used`, and `complexity_score`
+  compatibility fields are derived from the trace, not computed independently.
+
+## Attribution Invariants
+
+- `ExecutionTrace` is the single source of truth for what provider, model,
+  tier, and selection reason were used for each turn.
+- `ToolUseResult` exposes `.tier()`, `.model_used()`, `.complexity_score()`
+  accessor methods that derive values from the embedded `execution_trace`.
+- Response construction (in Tauri commands and daemon routes) must extract
+  attribution from `execution_trace` accessors before moving the trace into
+  `ChatResponse`.
+- `last_provider_change_at` is updated only when the ego provider actually
+  changes, not on every router rebuild.
 
 ## Routing Invariants
 
@@ -19,11 +32,16 @@ execution correctness across chat, birth, forge, CLI, and skills commands.
   tier via `TierThresholds` (default: <35 → Fast, 35–69 → Standard, ≥70 → Pro).
 - `ego_primary` targets Ego only when Ego client is actually available; otherwise
   it must fallback to Id (local LLM). Uses the Standard tier model.
-- `council` uses multi-provider consensus for high-stakes decisions.
+- `council` is an explicit execution path that delegates to `CouncilEngine`
+  when 2+ providers are enrolled; degrades to single-provider passthrough
+  otherwise. Council failures fall back to ego/id with `SelectionReason::Fallback`.
 - Local LLM (Id) is failsafe only — all primary routing goes to cloud (Ego).
   Id activates only when the Ego provider returns an error.
 - Provider status reporting must never claim an Ego provider when the client
   failed construction.
+- Each routing decision records a `SelectionReason` enum: `Complexity`,
+  `PinnedTier`, `PinnedModel`, `SetupIntent`, `EgoPrimary`, `Council`, or
+  `Fallback`.
 
 ## Force Override Invariants
 

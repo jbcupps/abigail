@@ -125,6 +125,17 @@ pub fn get_router_status(state: State<AppState>) -> Result<RouterStatus, String>
     })
 }
 
+/// Read-only routing diagnosis: shows what the router would do for a given
+/// message without calling any LLM. Useful for operator debugging.
+#[tauri::command]
+pub fn diagnose_routing(
+    state: State<AppState>,
+    message: String,
+) -> Result<abigail_router::RoutingDiagnosis, String> {
+    let router = state.router.read().map_err(|e| e.to_string())?;
+    Ok(router.diagnose(&message))
+}
+
 #[tauri::command]
 pub async fn set_active_provider(
     state: State<'_, AppState>,

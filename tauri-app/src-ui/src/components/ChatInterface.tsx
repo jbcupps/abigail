@@ -23,6 +23,9 @@ interface ExecutionTrace {
   routing_mode: string;
   configured_provider?: string;
   configured_model?: string;
+  configured_tier?: string;
+  complexity_score?: number;
+  selection_reason?: string;
   target_selected: string;
   steps: ExecutionStep[];
   final_step_index: number;
@@ -914,22 +917,40 @@ export default function ChatInterface({
                     {showRoutingDetails && msg.executionTrace ? (() => {
                       const trace = msg.executionTrace!;
                       const finalStep = trace.steps[trace.final_step_index];
-                      const cfgLabel = normalizeProviderLabel(trace.configured_provider ?? "local");
                       const ranLabel = normalizeProviderLabel(finalStep?.provider_label ?? msg.provider ?? "unknown");
-                      const showBoth = cfgLabel !== ranLabel;
+                      const tierLabel = trace.fallback_occurred ? null : (trace.configured_tier ?? msg.tier);
+                      const modelLabel = finalStep?.model_requested ?? msg.modelUsed;
                       const ts = new Date(trace.timestamp_utc).toLocaleTimeString();
+                      const reason = trace.selection_reason;
+                      const isPinned = reason === "pinned_model" || reason === "pinned_tier";
                       return (
                         <>
                           <span className="ml-2 opacity-50 font-normal">
-                            {showBoth ? (
-                              <>cfg: {cfgLabel} | ran: {ranLabel}</>
-                            ) : (
-                              <>via {ranLabel}</>
-                            )}
+                            via {ranLabel}
                           </span>
-                          {finalStep?.model_requested && (
+                          {modelLabel && (
                             <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-theme-input-bg text-theme-text-dim font-mono">
-                              {msg.tier ? `${msg.tier.charAt(0).toUpperCase()}${msg.tier.slice(1)} · ` : ""}{finalStep.model_requested}
+                              {tierLabel ? `${tierLabel.charAt(0).toUpperCase()}${tierLabel.slice(1)} · ` : ""}{modelLabel}
+                            </span>
+                          )}
+                          {isPinned && (
+                            <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-purple-900/30 text-purple-400 font-mono">
+                              pinned
+                            </span>
+                          )}
+                          {reason === "setup_intent" && (
+                            <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-blue-900/30 text-blue-400 font-mono">
+                              setup
+                            </span>
+                          )}
+                          {reason === "council" && (
+                            <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-cyan-900/30 text-cyan-400 font-mono">
+                              council
+                            </span>
+                          )}
+                          {trace.complexity_score != null && tierLabel && (
+                            <span className="ml-1 text-[10px] opacity-40">
+                              score:{trace.complexity_score}
                             </span>
                           )}
                           <span className="ml-2 text-[10px] opacity-40">{ts}</span>

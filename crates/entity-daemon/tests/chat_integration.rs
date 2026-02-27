@@ -131,18 +131,12 @@ async fn chat_handler(
         &body.message,
     );
     let tools = entity_chat::build_tool_definitions(&state.registry);
-    let (tier, model_used, complexity_score) =
-        state.router.tier_metadata_for_message(&body.message);
-
     let target = body.target.as_deref().unwrap_or("AUTO");
     let result = if tools.is_empty() || target == "ID" {
         let traced = state.router.route_traced(messages).await;
         traced.map(|(r, trace)| entity_chat::ToolUseResult {
             content: r.content,
             tool_calls_made: Vec::new(),
-            tier: tier.clone(),
-            model_used: model_used.clone(),
-            complexity_score,
             execution_trace: Some(trace),
         })
     } else {
@@ -150,15 +144,20 @@ async fn chat_handler(
     };
 
     match result {
-        Ok(tool_result) => axum::Json(ApiEnvelope::success(ChatResponse {
-            reply: tool_result.content,
-            provider: Some("id".to_string()),
-            tool_calls_made: tool_result.tool_calls_made,
-            tier: tool_result.tier,
-            model_used: tool_result.model_used,
-            complexity_score: tool_result.complexity_score,
-            execution_trace: tool_result.execution_trace,
-        })),
+        Ok(tool_result) => {
+            let tier = tool_result.tier().map(|s| s.to_string());
+            let model_used = tool_result.model_used().map(|s| s.to_string());
+            let complexity_score = tool_result.complexity_score();
+            axum::Json(ApiEnvelope::success(ChatResponse {
+                reply: tool_result.content,
+                provider: Some("id".to_string()),
+                tool_calls_made: tool_result.tool_calls_made,
+                tier,
+                model_used,
+                complexity_score,
+                execution_trace: tool_result.execution_trace,
+            }))
+        }
         Err(e) => axum::Json(ApiEnvelope::error(e.to_string())),
     }
 }
