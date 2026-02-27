@@ -89,6 +89,9 @@ pub struct ProviderConfig {
     /// JSON-serialized ForceOverride (pinned model/tier/provider).
     #[serde(default)]
     pub force_override_json: Option<String>,
+    /// CLI permission mode string (e.g. "allowlist_only", "interactive", "dangerous_skip_all").
+    #[serde(default)]
+    pub cli_permission_mode: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

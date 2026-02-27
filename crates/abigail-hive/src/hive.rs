@@ -9,18 +9,24 @@ use abigail_capabilities::cognitive::{
     detect_all_cli_providers, CliDetectionResult, LlmProvider, LocalHttpProvider,
 };
 use abigail_core::{
-    AppConfig, ForceOverride, RoutingMode, SecretsVault, TierModels, TierThresholds,
+    AppConfig, CliPermissionMode, ForceOverride, RoutingMode, SecretsVault, TierModels,
+    TierThresholds,
 };
 use std::sync::{Arc, Mutex};
 
 /// Check whether a binary is reachable on the system PATH.
 pub fn is_binary_on_path(name: &str) -> bool {
     #[cfg(windows)]
-    let check = std::process::Command::new("where")
-        .arg(name)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+    let check = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mut cmd = std::process::Command::new("where");
+        cmd.arg(name)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW);
+        cmd.status()
+    };
     #[cfg(not(windows))]
     let check = std::process::Command::new("which")
         .arg(name)
@@ -50,6 +56,8 @@ pub struct HiveConfig {
     pub tier_thresholds: TierThresholds,
     /// Force override for model selection.
     pub force_override: ForceOverride,
+    /// Permission mode for CLI tool invocations.
+    pub cli_permission_mode: CliPermissionMode,
 }
 
 /// All providers built and ready to be injected into a router.
@@ -244,15 +252,17 @@ impl Hive {
             tier_models,
             tier_thresholds: config.tier_thresholds,
             force_override: config.force_override.clone(),
+            cli_permission_mode: config.cli_permission_mode,
         })
     }
 
     /// Build all providers from a resolved HiveConfig (no locking).
     pub async fn build_providers(hive_config: &HiveConfig) -> BuiltProviders {
-        let ego_result = ProviderRegistry::build_ego(
+        let ego_result = ProviderRegistry::build_ego_with_cli_mode(
             hive_config.ego_provider_name.as_deref(),
             hive_config.ego_api_key.clone(),
             hive_config.ego_model.clone(),
+            hive_config.cli_permission_mode,
         );
 
         let id_result =

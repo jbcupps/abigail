@@ -96,13 +96,9 @@ pub async fn chat(
 
     let tools = entity_chat::build_tool_definitions(&state.registry);
 
-    let target = body.target.as_deref().unwrap_or("AUTO");
-    let result = if tools.is_empty() || target == "ID" {
-        let traced = if target == "ID" {
-            state.router.id_only_traced(messages).await
-        } else {
-            state.router.route_traced(messages).await
-        };
+    // Chat never uses Id; Id is for background tasks only. Always route (Ego when available).
+    let result = if tools.is_empty() {
+        let traced = state.router.route_traced(messages).await;
         traced.map(|(r, trace)| entity_chat::ToolUseResult {
             content: r.content,
             tool_calls_made: Vec::new(),

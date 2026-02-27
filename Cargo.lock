@@ -163,6 +163,7 @@ dependencies = [
  "directories",
  "ed25519-dalek",
  "rand 0.8.5",
+ "regex",
  "reqwest 0.13.2",
  "serde",
  "serde_json",

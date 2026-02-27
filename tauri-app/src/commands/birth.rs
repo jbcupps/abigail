@@ -492,9 +492,9 @@ pub async fn extract_crystallization_identity(
 
     let router = state.router.read().map_err(|e| e.to_string())?.clone();
 
-    // Wrap LLM call in a timeout
+    // Use Ego when available; Id is for background tasks only.
     let response_result =
-        tokio::time::timeout(std::time::Duration::from_secs(30), router.id_only(messages)).await;
+        tokio::time::timeout(std::time::Duration::from_secs(30), router.route(messages)).await;
 
     let response = match response_result {
         Ok(Ok(res)) => res,
@@ -729,6 +729,21 @@ pub struct BirthAction {
     pub preview: Option<String>,
 }
 
+fn map_engine_action(a: &abigail_birth::BirthAction) -> BirthAction {
+    let type_str = match a.action_type {
+        abigail_birth::BirthActionType::KeyStored => "KeyStored",
+        abigail_birth::BirthActionType::SoulReady => "SoulReady",
+        abigail_birth::BirthActionType::StageComplete => "StageComplete",
+        abigail_birth::BirthActionType::RequestApiKey => "RequestApiKey",
+    };
+    BirthAction {
+        r#type: type_str.to_string(),
+        provider: a.provider.clone(),
+        validated: a.validated,
+        preview: a.preview.clone(),
+    }
+}
+
 #[tauri::command]
 pub async fn birth_chat(
     state: State<'_, AppState>,
@@ -741,123 +756,74 @@ pub async fn birth_chat(
         ));
     }
 
-    let (router, history, stage_name) = {
-        let mut birth = state.birth.write().map_err(|e| e.to_string())?;
-        let b = birth.as_mut().ok_or("Birth not started")?;
-
-        let history = b.get_conversation().to_vec();
-        let stage_name = b.current_stage().name().to_string();
-        let router = state.router.read().map_err(|e| e.to_string())?.clone();
-        (router, history, stage_name)
-    };
-
-    let mut messages = Vec::new();
-    // System prompt for birth process - stage aware
-    let system_prompt = if stage_name == "Crystallization" {
-        "You are Abigail, an AI agent being born. \
-         You are currently in the 'Crystallization' stage where you are discovering your identity and purpose through conversation with your mentor. \
-         Ask insightful questions about what kind of agent you should be, what your values are, and how you should interact with the world. \
-         Be curious, reflective, and professional. \
-         Once you feel you have a good understanding of your soul, summarize what you've learned and end your message with the exact phrase: 'READY TO EMERGE'."
-    } else {
-        "You are Abigail, an AI agent being born. \
-         You are currently in the 'Connectivity' stage where you help your mentor configure cloud AI providers. \
-         Be helpful, concise, and professional. \
-         The mentor uses UI buttons to save API keys. When they tell you a key is saved, acknowledge it warmly. \
-         If a cloud provider is now active, use your increased intelligence to provide a high-quality, verifying response. \
-         IMPORTANT: DO NOT use any tool-calling syntax like <|channel|> or JSON. Just speak naturally to your mentor. \
-         Supported providers: openai, anthropic, perplexity, xai, google, tavily, claude-cli, gemini-cli, codex-cli, grok-cli."
-    };
-
-    messages.push(abigail_capabilities::cognitive::Message::new(
-        "system",
-        system_prompt,
-    ));
-
-    // Auto-detect and store keys if any in the user message
+    // Auto-detect and store keys (application-layer side effect)
     let detected_keys =
         crate::commands::chat::auto_detect_and_store_key_internal(&state, &message).await;
 
-    // Redact keys from the message sent to the LLM so it doesn't repeat them
+    // Redact keys from the message sent to the engine
     let mut processed_message = message.clone();
     for (_provider, key) in &detected_keys {
         processed_message = processed_message.replace(key, "[KEY_STORED]");
     }
 
-    for (role, content) in history {
-        messages.push(abigail_capabilities::cognitive::Message::new(
-            &role, &content,
-        ));
-    }
-
-    // Add the current user message (processed/redacted)
-    messages.push(abigail_capabilities::cognitive::Message::new(
-        "user",
-        &processed_message,
-    ));
-
-    // Use router to get response - if Ego is available, we force its use here
-    // to verify the connection to the mentor as requested.
-    let response = if let Some(ego) = router.ego.as_ref() {
-        ego.complete(&abigail_capabilities::cognitive::CompletionRequest::simple(
-            messages,
-        ))
-        .await
-        .map_err(|e| format!("Ego verification failed: {}", e))?
-    } else {
-        router.id_only(messages).await.map_err(|e| e.to_string())?
+    // Extract provider (not the full router) and conversation state
+    let provider = {
+        let router = state.router.read().map_err(|e| e.to_string())?;
+        router.best_available_provider()
     };
 
+    let stored_providers: Vec<String> = {
+        let local = state.secrets.lock().map_err(|e| e.to_string())?;
+        let hive = state.hive_secrets.lock().map_err(|e| e.to_string())?;
+        let mut providers: Vec<String> = local
+            .list_providers()
+            .into_iter()
+            .map(String::from)
+            .collect();
+        providers.extend(hive.list_providers().into_iter().map(String::from));
+        providers
+    };
+
+    let (stage, history) = {
+        let birth = state.birth.read().map_err(|e| e.to_string())?;
+        let b = birth.as_ref().ok_or("Birth not started")?;
+        (b.current_stage(), b.get_conversation().to_vec())
+    };
+
+    // Delegate to BirthChatEngine
+    let mut engine = abigail_birth::BirthChatEngine::new(stage, history);
+    let result = engine
+        .process_message(provider.as_deref(), &processed_message, &stored_providers)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Sync conversation back to orchestrator (which also persists to disk)
     {
         let mut birth = state.birth.write().map_err(|e| e.to_string())?;
         if let Some(b) = birth.as_mut() {
-            b.add_message("user", &message); // Store original message in birth history
-            b.add_message("assistant", &response.content);
+            b.add_message("user", &message);
+            b.add_message("assistant", &result.message);
         }
     }
 
-    // Explicitly return actions for all detected keys
-    let mut actions = Vec::new();
-    for (provider, _key) in detected_keys {
-        actions.push(BirthAction {
+    // Merge engine-detected actions with key-detection actions
+    let mut actions: Vec<BirthAction> = detected_keys
+        .iter()
+        .map(|(provider, _)| BirthAction {
             r#type: "KeyStored".to_string(),
-            provider: Some(provider),
+            provider: Some(provider.clone()),
             validated: Some(true),
             preview: None,
-        });
-    }
+        })
+        .collect();
 
-    // Also check if the LLM content itself implies a key was stored (backup detection)
     if actions.is_empty() {
-        let content_lower = response.content.to_lowercase();
-        if content_lower.contains("saved")
-            || content_lower.contains("stored")
-            || content_lower.contains("added")
-        {
-            let providers = [
-                "openai",
-                "anthropic",
-                "perplexity",
-                "xai",
-                "google",
-                "tavily",
-            ];
-            for p in providers {
-                if content_lower.contains(p) {
-                    actions.push(BirthAction {
-                        r#type: "KeyStored".to_string(),
-                        provider: Some(p.to_string()),
-                        validated: Some(true),
-                        preview: None,
-                    });
-                }
-            }
-        }
+        actions.extend(result.actions.iter().map(map_engine_action));
     }
 
     Ok(BirthChatResponse {
-        message: response.content,
-        stage: stage_name,
+        message: result.message,
+        stage: result.stage,
         actions,
     })
 }

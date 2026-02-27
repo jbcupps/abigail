@@ -11,6 +11,7 @@ pub mod provider;
 pub mod types;
 pub mod validation;
 
+pub use abigail_core::CliPermissionMode;
 pub use anthropic::AnthropicProvider;
 pub use candle::CandleProvider;
 pub use cli_provider::{

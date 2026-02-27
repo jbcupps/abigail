@@ -93,13 +93,20 @@ impl BirthOrchestrator {
         if store.has_birth()? {
             return Err(BirthError::AlreadyBorn.into());
         }
+
+        // Restore conversation from a previous interrupted birth, if any.
+        let conversation_history = match crate::persistence::load_conversation(&config.data_dir) {
+            Ok(Some((_stage, messages))) => messages,
+            _ => Vec::new(),
+        };
+
         Ok(Self {
             config,
             store,
             stage: BirthStage::Darkness,
             signing_key: None,
             private_key_base64: None,
-            conversation_history: Vec::new(),
+            conversation_history,
             crystallization_engine: None,
         })
     }
@@ -194,10 +201,15 @@ impl BirthOrchestrator {
         Ok(())
     }
 
-    /// Add a message to the birth conversation history.
+    /// Add a message to the birth conversation history and persist to disk.
     pub fn add_message(&mut self, role: &str, content: &str) {
         self.conversation_history
             .push((role.to_string(), content.to_string()));
+        let _ = crate::persistence::save_conversation(
+            &self.config.data_dir,
+            self.stage.name(),
+            &self.conversation_history,
+        );
     }
 
     /// Get the conversation history.
@@ -265,6 +277,9 @@ impl BirthOrchestrator {
         let memory = Memory::crystallized(content);
         self.store.record_birth(&memory)?;
 
+        // Clean up persisted birth conversation
+        let _ = crate::persistence::clear_conversation(&self.config.data_dir);
+
         // Save config - mark birth complete and clear stage
         self.config.birth_complete = true;
         self.config.clear_birth_stage();
@@ -315,6 +330,9 @@ impl BirthOrchestrator {
         );
         let memory = Memory::crystallized(content);
         self.store.record_birth(&memory)?;
+
+        let _ = crate::persistence::clear_conversation(&self.config.data_dir);
+
         self.config.birth_complete = true;
         self.config.clear_birth_stage();
         self.config.save(&self.config.config_path())?;
@@ -402,6 +420,7 @@ mod tests {
             known_recipients_by_identity: Default::default(),
             skill_recovery_budget: 3,
             last_provider_change_at: None,
+            cli_permission_mode: Default::default(),
         }
     }
 
