@@ -24,3 +24,21 @@ CREATE TABLE IF NOT EXISTS schema_versions (
     applied_at TEXT NOT NULL
 );
 "#;
+
+pub const MIGRATION_V2_CONVERSATION_TURNS: &str = r#"
+CREATE TABLE IF NOT EXISTS conversation_turns (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    turn_number INTEGER NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    content TEXT NOT NULL,
+    provider TEXT,
+    model TEXT,
+    tier TEXT,
+    complexity_score INTEGER,
+    token_estimate INTEGER,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_turns_session ON conversation_turns(session_id, turn_number);
+CREATE INDEX IF NOT EXISTS idx_turns_time ON conversation_turns(created_at DESC);
+"#;

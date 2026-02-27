@@ -157,6 +157,7 @@ pub async fn chat(
                 model_used,
                 complexity_score,
                 execution_trace: tool_result.execution_trace,
+                session_id: None,
             };
             serde_json::to_string(&response).map_err(|e| e.to_string())
         }
@@ -180,7 +181,9 @@ pub async fn chat_stream(
     message: String,
     target: Option<String>,
     session_messages: Option<Vec<SessionMessage>>,
+    session_id: Option<String>,
 ) -> Result<(), String> {
+    let _ = session_id; // Passed from frontend for future session-scoped memory/logging
     auto_detect_and_store_key_internal(&state, &message).await;
 
     let (router, system_prompt) = {
@@ -278,6 +281,7 @@ pub async fn chat_stream(
                 model_used,
                 complexity_score,
                 execution_trace: pipeline.execution_trace,
+                session_id: None,
             };
             let _ = app.emit("chat-done", &response);
         }

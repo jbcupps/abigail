@@ -101,6 +101,8 @@ pub struct ChatRequest {
     pub target: Option<String>,
     /// Optional prior messages for multi-turn context.
     pub session_messages: Option<Vec<entity_core::SessionMessage>>,
+    /// Conversation session ID (matches entity-core).
+    pub session_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -518,6 +520,7 @@ async fn chat_with_pipeline(
                 model_used,
                 complexity_score,
                 execution_trace: tool_result.execution_trace,
+                session_id: body.session_id.clone(),
             }))
         }
         Err(e) => {
@@ -552,6 +555,7 @@ async fn chat_bare(
         model_used: None,
         complexity_score: None,
         execution_trace: None,
+        session_id: None,
     }))
 }
 

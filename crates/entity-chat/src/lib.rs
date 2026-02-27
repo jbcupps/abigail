@@ -152,6 +152,75 @@ pub fn build_contextual_messages(
 }
 
 // ---------------------------------------------------------------------------
+// Memory context (ContextBudget + build_memory_context)
+// ---------------------------------------------------------------------------
+
+/// Budget controlling how much memory context is injected into prompts.
+pub struct ContextBudget {
+    pub recent_turns_limit: usize,
+    pub memory_search_limit: usize,
+    pub max_total_chars: usize,
+}
+
+impl Default for ContextBudget {
+    fn default() -> Self {
+        Self {
+            recent_turns_limit: 5,
+            memory_search_limit: 3,
+            max_total_chars: 8000,
+        }
+    }
+}
+
+/// Build a context window from the memory store instead of replaying
+/// the full session_messages array.
+///
+/// Returns a Vec<Message> with recent turns from the current session
+/// plus keyword-matched memories from older sessions.
+pub fn build_memory_context(
+    store: &abigail_memory::MemoryStore,
+    session_id: &str,
+    user_message: &str,
+    budget: &ContextBudget,
+) -> Vec<Message> {
+    let mut context = Vec::new();
+    let mut total_chars = 0usize;
+
+    // Layer 1: Recent turns from the current session.
+    if let Ok(recent) = store.recent_turns(session_id, budget.recent_turns_limit) {
+        for turn in &recent {
+            let len = turn.content.len();
+            if total_chars + len > budget.max_total_chars {
+                break;
+            }
+            context.push(Message::new(&turn.role, &turn.content));
+            total_chars += len;
+        }
+    }
+
+    // Layer 2: Keyword search across all memories.
+    if total_chars < budget.max_total_chars {
+        if let Ok(memories) = store.search_memories(user_message, budget.memory_search_limit) {
+            let mut mem_lines = Vec::new();
+            for m in &memories {
+                let line = format!("[{}] {}", m.created_at.format("%Y-%m-%d"), m.content);
+                if total_chars + line.len() > budget.max_total_chars {
+                    break;
+                }
+                total_chars += line.len();
+                mem_lines.push(line);
+            }
+            if !mem_lines.is_empty() {
+                let section = format!("## Recalled Memories\n\n{}", mem_lines.join("\n"));
+                context.insert(0, Message::new("system", &section));
+            }
+        }
+    }
+
+    context
+}
+
+// ---------------------------------------------------------------------------
 // Tool definitions: SkillRegistry → ToolDefinition[]
 // ---------------------------------------------------------------------------
 

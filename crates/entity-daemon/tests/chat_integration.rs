@@ -81,6 +81,8 @@ fn build_daemon_state() -> entity_daemon_test_state::EntityDaemonState {
         memory,
         memory_hook: None,
         instruction_registry,
+        archive_exporter: None,
+        turns_since_archive: Arc::new(std::sync::atomic::AtomicU32::new(0)),
     }
 }
 
@@ -108,6 +110,8 @@ mod entity_daemon_test_state {
         pub memory: Arc<MemoryStore>,
         pub memory_hook: Option<Arc<dyn ChatMemoryHook>>,
         pub instruction_registry: Arc<InstructionRegistry>,
+        pub archive_exporter: Option<Arc<abigail_memory::ArchiveExporter>>,
+        pub turns_since_archive: Arc<std::sync::atomic::AtomicU32>,
     }
 }
 
@@ -156,6 +160,7 @@ async fn chat_handler(
                 model_used,
                 complexity_score,
                 execution_trace: tool_result.execution_trace,
+                session_id: None,
             }))
         }
         Err(e) => axum::Json(ApiEnvelope::error(e.to_string())),
@@ -186,6 +191,7 @@ async fn chat_endpoint_returns_valid_response() {
             message: "hello".into(),
             target: None,
             session_messages: None,
+            session_id: None,
         })
         .send()
         .await
@@ -227,6 +233,7 @@ async fn chat_endpoint_with_session_history() {
                     content: "hello!".into(),
                 },
             ]),
+            session_id: None,
         })
         .send()
         .await

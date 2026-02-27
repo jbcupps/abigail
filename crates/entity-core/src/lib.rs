@@ -19,6 +19,10 @@ pub struct ChatRequest {
     /// Optional prior messages for multi-turn context.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_messages: Option<Vec<SessionMessage>>,
+    /// Conversation session ID. The frontend generates a UUID per conversation;
+    /// the backend uses it to archive turns and retrieve context from memory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// A single message in a chat session (for multi-turn context).
@@ -55,6 +59,9 @@ pub struct ChatResponse {
     /// fallback chain and timing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution_trace: Option<ExecutionTrace>,
+    /// Session ID echoed back so the frontend can track it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Record of a single tool call made during a chat turn.

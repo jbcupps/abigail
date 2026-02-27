@@ -58,6 +58,7 @@ interface Message {
 export interface ChatSessionSnapshot {
   messages: Message[];
   input: string;
+  sessionId: string;
 }
 
 interface RouterStatus {
@@ -105,6 +106,7 @@ export default function ChatInterface({
   const { agentName } = useTheme();
   const [messages, setMessages] = useState<Message[]>(() => initialSession?.messages ?? []);
   const [input, setInput] = useState(() => initialSession?.input ?? "");
+  const [sessionId, setSessionId] = useState<string>(() => initialSession?.sessionId ?? crypto.randomUUID());
   const [loading, setLoading] = useState(false);
   const [routerStatus, setRouterStatus] = useState<RouterStatus | null>(null);
   const [configStep, setConfigStep] = useState<ConfigStep>(null);
@@ -126,6 +128,7 @@ export default function ChatInterface({
   const mountedRef = useRef(true);
   const messagesRef = useRef<Message[]>(messages);
   const inputRef = useRef(input);
+  const sessionIdRef = useRef(sessionId);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -137,8 +140,13 @@ export default function ChatInterface({
   }, [input]);
 
   useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  useEffect(() => {
     setMessages(initialSession?.messages ?? []);
     setInput(initialSession?.input ?? "");
+    setSessionId(initialSession?.sessionId ?? crypto.randomUUID());
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
@@ -243,6 +251,7 @@ export default function ChatInterface({
         onSessionSnapshot({
           messages: messagesRef.current,
           input: inputRef.current,
+          sessionId: sessionIdRef.current,
         });
       }
       mountedRef.current = false;
@@ -500,6 +509,7 @@ export default function ChatInterface({
         message: userMessage.content,
         target,
         sessionMessages: sessionBeforeTurn,
+        sessionId,
       });
     } catch (e) {
       if (!mountedRef.current) return;

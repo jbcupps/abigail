@@ -239,13 +239,37 @@ impl IdEgoRouter {
 
     /// Create a router from pre-built providers (constructed by the Hive).
     pub fn from_built_providers(providers: BuiltProviders) -> Self {
+        let ego_provider = providers.ego_kind.map(EgoProvider::from);
+
+        // Auto-upgrade to CliOrchestrator when the ego is a CLI variant.
+        // Tier-based scoring and model override are meaningless for CLI
+        // providers since they manage their own model selection.
+        let mode = match (&ego_provider, providers.routing_mode) {
+            (
+                Some(
+                    EgoProvider::ClaudeCli
+                    | EgoProvider::GeminiCli
+                    | EgoProvider::CodexCli
+                    | EgoProvider::GrokCli,
+                ),
+                RoutingMode::TierBased | RoutingMode::EgoPrimary,
+            ) => {
+                tracing::info!(
+                    "Auto-upgrading routing mode to CliOrchestrator (ego provider is {:?})",
+                    ego_provider
+                );
+                RoutingMode::CliOrchestrator
+            }
+            (_, mode) => mode,
+        };
+
         Self {
             id: providers.id,
             ego: providers.ego,
-            ego_provider: providers.ego_kind.map(EgoProvider::from),
+            ego_provider,
             council: None,
             local_http: providers.local_http,
-            mode: providers.routing_mode,
+            mode,
             tier_models: providers.tier_models,
             tier_thresholds: providers.tier_thresholds,
             force_override: providers.force_override,
