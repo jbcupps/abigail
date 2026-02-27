@@ -43,23 +43,29 @@ pub async fn start_cli_server(
     let auth = AuthState::new();
     let token: String = auth.token.read().await.clone();
 
+    let (config_path, data_dir, agent_name, docs_dir) = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        (
+            config.config_path(),
+            config.data_dir.clone(),
+            config.agent_name.clone(),
+            config.data_dir.join("docs"),
+        )
+    };
+
     let server_state = AppServerState {
         auth: auth.clone(),
-        config_path: state
-            .config
-            .read()
-            .map_err(|e| e.to_string())?
-            .config_path(),
-        data_dir: state
-            .config
-            .read()
-            .map_err(|e| e.to_string())?
-            .data_dir
-            .clone(),
+        config_path,
+        data_dir,
         vault: state.secrets.clone(),
         router: Some(Arc::new(tokio::sync::RwLock::new(
             state.router.read().map_err(|e| e.to_string())?.clone(),
         ))),
+        registry: Some(state.registry.clone()),
+        executor: Some(state.executor.clone()),
+        instruction_registry: Some(state.instruction_registry.clone()),
+        docs_dir: Some(docs_dir),
+        agent_name,
     };
 
     let app = build_router(server_state);

@@ -461,6 +461,81 @@ pub fn run() {
                 }
             }
 
+            // Register native Rust skills (compiled into the binary).
+            {
+                let data_dir = {
+                    let cfg = state.config.read().map_err(|e| e.to_string())?;
+                    cfg.data_dir.clone()
+                };
+                let skills_secrets = state.skills_secrets.clone();
+                let allowed_roots = vec![data_dir.clone()];
+
+                macro_rules! register_skill {
+                    ($skill:expr) => {{
+                        let s = $skill;
+                        let id = s.manifest().id.clone();
+                        if let Err(e) = state.registry.register(id.clone(), Arc::new(s)) {
+                            tracing::warn!("Failed to register {}: {}", id.0, e);
+                        }
+                    }};
+                }
+
+                register_skill!(skill_clipboard::ClipboardSkill::new(
+                    skill_clipboard::ClipboardSkill::default_manifest()
+                ));
+                register_skill!(skill_shell::ShellSkill::new(
+                    skill_shell::ShellSkill::default_manifest()
+                ));
+                register_skill!(skill_git::GitSkill::new(
+                    skill_git::GitSkill::default_manifest()
+                ));
+                register_skill!(skill_notification::NotificationSkill::new(
+                    skill_notification::NotificationSkill::default_manifest()
+                ));
+                register_skill!(skill_system_monitor::SystemMonitorSkill::new(
+                    skill_system_monitor::SystemMonitorSkill::default_manifest()
+                ));
+                register_skill!(skill_http::HttpSkill::new(
+                    skill_http::HttpSkill::default_manifest()
+                ));
+                register_skill!(skill_calendar::CalendarSkill::new(
+                    skill_calendar::CalendarSkill::default_manifest(),
+                    data_dir.clone()
+                ));
+                register_skill!(skill_knowledge_base::KnowledgeBaseSkill::new(
+                    skill_knowledge_base::KnowledgeBaseSkill::default_manifest(),
+                    data_dir.clone()
+                ));
+                register_skill!(skill_filesystem::FilesystemSkill::new(
+                    skill_filesystem::FilesystemSkill::default_manifest(),
+                    allowed_roots.clone()
+                ));
+                register_skill!(skill_database::DatabaseSkill::new(
+                    skill_database::DatabaseSkill::default_manifest(),
+                    allowed_roots.clone()
+                ));
+                register_skill!(skill_code_analysis::CodeAnalysisSkill::new(
+                    skill_code_analysis::CodeAnalysisSkill::default_manifest(),
+                    allowed_roots.clone()
+                ));
+                register_skill!(skill_document::DocumentSkill::new(
+                    skill_document::DocumentSkill::default_manifest(),
+                    allowed_roots.clone()
+                ));
+                register_skill!(skill_image::ImageSkill::new(
+                    skill_image::ImageSkill::default_manifest(),
+                    allowed_roots.clone()
+                ));
+                register_skill!(skill_web_search::WebSearchSkill::with_secrets(
+                    skill_web_search::WebSearchSkill::default_manifest(),
+                    skills_secrets.clone()
+                ));
+                register_skill!(skill_perplexity_search::PerplexitySearchSkill::with_secrets(
+                    skill_perplexity_search::PerplexitySearchSkill::default_manifest(),
+                    skills_secrets.clone()
+                ));
+            }
+
             // Register configured MCP servers as skills (HTTP transport).
             {
                 let servers = {

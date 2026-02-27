@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-27 03:50 EST: Enrich CLI REST server chat pipeline — system prompt, tool wiring, tool-use loop, full metadata; fix status to read live router state; register all 15 native Rust skills at Tauri startup
 - 2026-02-26 22:20 EST: Add Insights troubleshooting panel — CLI REST server toggle with connection info, in-memory log ring buffer with reloadable tracing filter, live log viewer with stream/pause/clear/export, save-to-file via dialog
 - 2026-02-26 20:15 EST: Routing simplification — make ExecutionTrace authoritative source of truth, add SelectionReason enum, implement explicit Council execution path, staged force overrides in Forge, diagnose_routing endpoint/command, operator runbook and migration docs
 - 2026-02-26 16:30 EST: Entity-First Attribution — normalize chat-facing labels so Id never appears as conversational actor, map id(...) to "local" in UI and provider_label(), add entity-identity self-report rule to runtime prompt
