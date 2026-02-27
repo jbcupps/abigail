@@ -402,7 +402,7 @@ impl CliLlmProvider {
                     cmd.arg("--resume").arg(sid);
                     cmd.arg("--print");
                     cmd.arg("--output-format").arg("text");
-                    cmd.arg("--max-turns").arg("10");
+                    cmd.arg("--max-turns").arg("5");
                     self.apply_permission_flags(&mut cmd);
                     cmd.stdin(std::process::Stdio::piped());
                     stdin_content = Some(prompt.to_string());
@@ -410,7 +410,7 @@ impl CliLlmProvider {
                     // First message — send system prompt + user prompt.
                     cmd.arg("--print");
                     cmd.arg("--output-format").arg("text");
-                    cmd.arg("--max-turns").arg("10");
+                    cmd.arg("--max-turns").arg("5");
                     self.apply_permission_flags(&mut cmd);
 
                     let piped = match system_prompt {
@@ -539,6 +539,14 @@ impl LlmProvider for CliLlmProvider {
         );
 
         let (cmd, stdin_content) = self.build_command(&prompt, system_prompt.as_deref());
+
+        tracing::info!(
+            "CLI stdin payload: system_prompt={} bytes, user_prompt={} bytes, total_stdin={} bytes",
+            system_prompt.as_ref().map(|s| s.len()).unwrap_or(0),
+            prompt.len(),
+            stdin_content.as_ref().map(|s| s.len()).unwrap_or(0),
+        );
+
         let content = self.run_and_collect(cmd, 300, stdin_content).await?;
 
         tracing::info!(
@@ -582,13 +590,13 @@ impl LlmProvider for CliLlmProvider {
             cmd.arg("--resume").arg(sid);
             cmd.arg("--print");
             cmd.arg("--output-format").arg("stream-json");
-            cmd.arg("--max-turns").arg("10");
+            cmd.arg("--max-turns").arg("5");
             self.apply_permission_flags(&mut cmd);
             piped = prompt.clone();
         } else {
             cmd.arg("--print");
             cmd.arg("--output-format").arg("stream-json");
-            cmd.arg("--max-turns").arg("10");
+            cmd.arg("--max-turns").arg("5");
             self.apply_permission_flags(&mut cmd);
             piped = match system_prompt.as_deref() {
                 Some(sp) => format!(

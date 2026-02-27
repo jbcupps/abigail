@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-28 00:30 EST: Compress CLI system prompt (~15-41KB → ~1.5KB) with temp file spillover, budgeted instruction injection (max 1 / 2048 bytes for CLI), compact grouped tool list, and reduced max-turns to 5
 - 2026-02-27 23:15 EST: Update docs for CliOrchestrator auto-detection, remove stale --allowedTools refs, mark completed Phase 2a/2c roadmap items, fix CliPermissionMode doc comments
 - 2026-02-27 22:30 EST: Fix intermittent CLI spawn OS error 206 on Windows — replace broken --allowedTools args (entity tool names, not CLI tool names) with --dangerously-skip-permissions, auto-detect CliOrchestrator routing mode for CLI providers to skip meaningless tier scoring/complexity classification
 - 2026-02-27 19:15 EST: CLI session management, memory auto-archive, and encrypted portable archives — pipe Claude CLI prompt via stdin to fix Windows 32K limit, add --resume/session_id for multi-turn, conversation_turns table and auto-archive in entity-daemon/Tauri, build_memory_context and prompt memory awareness, X25519+AES-256-GCM .abigail export to Documents/Abigail/archives/, restore via recovery key, auto-export every 50 turns

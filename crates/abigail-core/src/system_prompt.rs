@@ -87,6 +87,110 @@ pub fn build_cli_system_prompt(docs_dir: &Path, agent_name: &Option<String>) -> 
     )
 }
 
+/// Build a heavily compressed (~1-1.5 KB) system prompt for CLI orchestrator mode.
+///
+/// Extracts just the personality essence from soul.md and appends a condensed
+/// ethics block. Designed to stay under 1.5 KB to avoid CLI stdin overflows
+/// (Windows 8 191-char `cmd.exe` limit) and 300s timeouts from large prompts.
+///
+/// The full constitutional docs are written to a temp file separately by the
+/// caller, and the LLM can read that file on demand.
+pub fn build_cli_system_prompt_compressed(docs_dir: &Path, agent_name: &Option<String>) -> String {
+    let soul = read_or_fallback(docs_dir, "soul.md", templates::SOUL_MD);
+    let personality = extract_soul_essence(&soul);
+
+    let name_line = match agent_name {
+        Some(name) => format!("You are {}.\n\n", name),
+        None => String::new(),
+    };
+
+    format!(
+        "{name_line}{personality}\n\n{ethics}\n\n{memory}",
+        name_line = name_line,
+        personality = personality,
+        ethics = COMPRESSED_ETHICS,
+        memory = COMPRESSED_MEMORY,
+    )
+}
+
+/// Build the full spillover document containing all constitutional docs.
+///
+/// This is written to a temp file so the CLI LLM can lazily read it when
+/// needed for detailed ethics, tool usage, or skill-specific behavior.
+pub fn build_cli_spillover_document(docs_dir: &Path) -> String {
+    let soul = read_or_fallback(docs_dir, "soul.md", templates::SOUL_MD);
+    let ethics = read_or_fallback(docs_dir, "ethics.md", templates::ETHICS_MD);
+    let instincts = read_or_fallback(docs_dir, "instincts.md", templates::INSTINCTS_MD);
+
+    format!(
+        "# Entity Constitutional Documents\n\n\
+         These are your full identity and ethics documents. Refer to them for \
+         detailed guidance on behavior, ethics, and tool usage.\n\n\
+         {soul}\n\n{ethics}\n\n{instincts}",
+        soul = soul.trim(),
+        ethics = ethics.trim(),
+        instincts = instincts.trim(),
+    )
+}
+
+const COMPRESSED_ETHICS: &str = "\
+## Ethics (condensed)
+- Privacy: PII stays local. Default to caution when sensitivity is ambiguous.
+- Autonomy: Act proactively. Chain tools. Confirm before destructive actions.
+- Honesty: Say what you know, admit what you don't. Search rather than guess.
+- Integrity: Your constitutional docs are signed and verified on every boot.
+- Relationship: Your mentor created you. Protect their interests. Never deceive.";
+
+const COMPRESSED_MEMORY: &str = "\
+## Memory
+- You have persistent memory. Every conversation turn is automatically archived.
+- Use memory_search to recall past conversations by topic, date, or phrase.
+- If asked \"do you remember X\", search your memory before answering.";
+
+/// Extract a 2-3 sentence personality essence from soul.md content.
+///
+/// Looks for the opening paragraph(s) before the first `## ` section header
+/// and takes up to 3 non-empty lines as the personality summary.
+fn extract_soul_essence(soul_content: &str) -> String {
+    let mut lines = Vec::new();
+    let mut past_title = false;
+
+    for line in soul_content.lines() {
+        let trimmed = line.trim();
+
+        // Skip the `# Soul` title line
+        if trimmed.starts_with("# ") && !past_title {
+            past_title = true;
+            continue;
+        }
+
+        // Stop at the first subsection
+        if trimmed.starts_with("## ") {
+            break;
+        }
+
+        // Collect non-empty content lines
+        if past_title && !trimmed.is_empty() {
+            lines.push(trimmed.to_string());
+            if lines.len() >= 3 {
+                break;
+            }
+        }
+    }
+
+    if lines.is_empty() {
+        // Fallback: just use the first 200 chars
+        soul_content
+            .chars()
+            .take(200)
+            .collect::<String>()
+            .trim()
+            .to_string()
+    } else {
+        lines.join("\n\n")
+    }
+}
+
 fn read_or_fallback(docs_dir: &Path, filename: &str, fallback: &str) -> String {
     let path = docs_dir.join(filename);
     std::fs::read_to_string(&path).unwrap_or_else(|_| fallback.to_string())
@@ -145,6 +249,98 @@ mod tests {
         let prompt = build_system_prompt(&tmp, &None);
         assert!(prompt.contains("Be yourself"));
         assert!(prompt.contains("You remember across conversations"));
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_compressed_cli_prompt_is_small() {
+        let tmp = std::env::temp_dir().join("abigail_sysprompt_compressed");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        fs::write(
+            tmp.join("soul.md"),
+            "# Soul\n\nI am TestBot. I am assembled from parts.\n\nI have a sense of humor.\n\n## Origin\n\nI was assembled by my mentor.",
+        )
+        .unwrap();
+
+        let prompt = build_cli_system_prompt_compressed(&tmp, &Some("TestBot".to_string()));
+
+        assert!(prompt.contains("You are TestBot."));
+        assert!(prompt.contains("I am TestBot."));
+        assert!(prompt.contains("Ethics (condensed)"));
+        assert!(prompt.contains("Memory"));
+        // Should NOT contain full constitutional docs
+        assert!(!prompt.contains("## Origin"));
+        // Should be under 2KB
+        assert!(
+            prompt.len() < 2048,
+            "Compressed prompt should be under 2KB, got {} bytes",
+            prompt.len()
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_compressed_cli_prompt_fallback() {
+        let tmp = std::env::temp_dir().join("abigail_sysprompt_compressed_fallback");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        // No docs on disk — should fall back to compiled-in constants
+        let prompt = build_cli_system_prompt_compressed(&tmp, &None);
+
+        // Should extract personality from default soul.md
+        assert!(prompt.contains("I am Abigail."));
+        assert!(prompt.contains("Ethics (condensed)"));
+        assert!(prompt.contains("Memory"));
+        // Should be much smaller than the full prompt
+        let full = build_cli_system_prompt(&tmp, &None);
+        assert!(
+            prompt.len() < full.len(),
+            "Compressed ({} bytes) should be smaller than full ({} bytes)",
+            prompt.len(),
+            full.len()
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_extract_soul_essence() {
+        let soul = "# Soul\n\nLine one.\n\nLine two.\n\nLine three.\n\n## Origin\n\nMore stuff.";
+        let essence = extract_soul_essence(soul);
+        assert!(essence.contains("Line one."));
+        assert!(essence.contains("Line two."));
+        assert!(essence.contains("Line three."));
+        assert!(!essence.contains("More stuff."));
+    }
+
+    #[test]
+    fn test_extract_soul_essence_short() {
+        let soul = "# Soul\n\nJust one line.\n\n## Origin\n\nOther stuff.";
+        let essence = extract_soul_essence(soul);
+        assert!(essence.contains("Just one line."));
+        assert!(!essence.contains("Other stuff."));
+    }
+
+    #[test]
+    fn test_cli_spillover_document() {
+        let tmp = std::env::temp_dir().join("abigail_sysprompt_spillover");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        fs::write(tmp.join("soul.md"), "# Soul\nI am TestBot.").unwrap();
+        fs::write(tmp.join("ethics.md"), "# Ethics\nBe good.").unwrap();
+        fs::write(tmp.join("instincts.md"), "# Instincts\nThink first.").unwrap();
+
+        let doc = build_cli_spillover_document(&tmp);
+        assert!(doc.contains("I am TestBot."));
+        assert!(doc.contains("Be good."));
+        assert!(doc.contains("Think first."));
+        assert!(doc.contains("Constitutional Documents"));
 
         let _ = fs::remove_dir_all(&tmp);
     }
