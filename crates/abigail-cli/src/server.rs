@@ -6,6 +6,7 @@
 use crate::auth::{auth_middleware, AuthState};
 use abigail_core::{AppConfig, SecretsVault};
 use abigail_router::IdEgoRouter;
+use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use axum::{
     extract::Path,
     extract::State,
@@ -14,7 +15,9 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
+use entity_core::ChatResponse;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tower_http::cors::{Any, CorsLayer};
 
@@ -23,11 +26,20 @@ use tower_http::cors::{Any, CorsLayer};
 pub struct AppServerState {
     pub auth: AuthState,
     pub config_path: std::path::PathBuf,
-    #[allow(dead_code)]
     pub data_dir: std::path::PathBuf,
     pub vault: Arc<Mutex<SecretsVault>>,
     /// Router for handling chat requests (optional, provided when run from Tauri)
     pub router: Option<Arc<tokio::sync::RwLock<IdEgoRouter>>>,
+    /// Skill registry (optional, provided when run from Tauri)
+    pub registry: Option<Arc<SkillRegistry>>,
+    /// Skill executor (optional, provided when run from Tauri)
+    pub executor: Option<Arc<SkillExecutor>>,
+    /// Skill instruction registry (optional, provided when run from Tauri)
+    pub instruction_registry: Option<Arc<InstructionRegistry>>,
+    /// Path to constitutional documents directory
+    pub docs_dir: Option<PathBuf>,
+    /// Agent name for system prompt
+    pub agent_name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -38,10 +50,12 @@ pub struct StatusResponse {
     pub local_llm_url: Option<String>,
     pub ego_provider: Option<String>,
     pub ego_key_set: bool,
+    pub has_ego: bool,
     pub email_configured: bool,
     pub email_accounts: usize,
     pub mcp_servers: usize,
     pub secrets_count: usize,
+    pub skills_count: usize,
 }
 
 #[derive(Serialize)]
@@ -59,6 +73,8 @@ pub struct RouterStatusResponse {
     pub id_url: Option<String>,
     pub ego_provider: Option<String>,
     pub ego_key_set: bool,
+    pub has_ego: bool,
+    pub has_local_llm: bool,
 }
 
 #[derive(Deserialize)]
@@ -80,13 +96,10 @@ pub struct ConfigureEmailRequest {
 #[derive(Deserialize)]
 pub struct ChatRequest {
     pub message: String,
-    /// Optional target: "EGO" (default) or "ID"
+    /// Optional target: "EGO" (default), "ID", or "AUTO"
     pub target: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct ChatResponse {
-    pub reply: String,
+    /// Optional prior messages for multi-turn context.
+    pub session_messages: Option<Vec<entity_core::SessionMessage>>,
 }
 
 #[derive(Serialize)]
@@ -126,6 +139,11 @@ pub async fn serve(port: u16) -> anyhow::Result<()> {
         data_dir,
         vault: Arc::new(Mutex::new(vault)),
         router: None,
+        registry: None,
+        executor: None,
+        instruction_registry: None,
+        docs_dir: None,
+        agent_name: None,
     };
 
     let app = build_router(state);
@@ -185,11 +203,24 @@ async fn get_status(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let secrets_count = vault.list_providers().len();
 
-    let (ego_provider, ego_key_set) = config
-        .trinity
+    // Prefer live router state over stale config.trinity
+    let (ego_provider, ego_key_set, has_ego) = if let Some(ref router_lock) = state.router {
+        if let Ok(router) = router_lock.try_read() {
+            let rs = router.status();
+            (rs.ego_provider, rs.has_ego, rs.has_ego)
+        } else {
+            provider_from_config(&config)
+        }
+    } else {
+        provider_from_config(&config)
+    };
+
+    let skills_count = state
+        .registry
         .as_ref()
-        .map(|t| (t.ego_provider.clone(), t.ego_api_key.is_some()))
-        .unwrap_or((None, false));
+        .and_then(|r| r.list().ok())
+        .map(|s| s.len())
+        .unwrap_or(0);
 
     Ok(Json(StatusResponse {
         birth_complete: config.birth_complete,
@@ -198,11 +229,25 @@ async fn get_status(
         local_llm_url: config.local_llm_base_url,
         ego_provider,
         ego_key_set,
+        has_ego,
         email_configured: config.email.is_some(),
         email_accounts: config.email_accounts.len(),
         mcp_servers: config.mcp_servers.len(),
         secrets_count,
+        skills_count,
     }))
+}
+
+/// Extract provider info from config.trinity (fallback when router is unavailable).
+fn provider_from_config(config: &AppConfig) -> (Option<String>, bool, bool) {
+    config
+        .trinity
+        .as_ref()
+        .map(|t| {
+            let has = t.ego_api_key.is_some();
+            (t.ego_provider.clone(), has, has)
+        })
+        .unwrap_or((None, false, false))
 }
 
 async fn check_secret(
@@ -334,8 +379,22 @@ async fn configure_email_endpoint(
 async fn get_router_status(
     State(state): State<AppServerState>,
 ) -> Result<Json<RouterStatusResponse>, StatusCode> {
-    let config = load_config(&state).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Prefer live router state over stale config.trinity
+    if let Some(ref router_lock) = state.router {
+        if let Ok(router) = router_lock.try_read() {
+            let rs = router.status();
+            return Ok(Json(RouterStatusResponse {
+                routing_mode: format!("{:?}", rs.mode),
+                id_url: None, // local HTTP URL not exposed via status()
+                ego_provider: rs.ego_provider,
+                ego_key_set: rs.has_ego,
+                has_ego: rs.has_ego,
+                has_local_llm: rs.has_local_http,
+            }));
+        }
+    }
 
+    let config = load_config(&state).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let (id_url, ego_provider, ego_key_set) = config
         .trinity
         .as_ref()
@@ -353,6 +412,8 @@ async fn get_router_status(
         id_url,
         ego_provider,
         ego_key_set,
+        has_ego: ego_key_set,
+        has_local_llm: config.local_llm_base_url.is_some(),
     }))
 }
 
@@ -363,6 +424,118 @@ async fn chat_endpoint(
     let router_lock = state.router.as_ref().ok_or(StatusCode::NOT_IMPLEMENTED)?;
     let router = router_lock.read().await.clone();
 
+    let has_pipeline = state.registry.is_some()
+        && state.executor.is_some()
+        && state.instruction_registry.is_some();
+
+    if has_pipeline {
+        chat_with_pipeline(&state, &router, body).await
+    } else {
+        chat_bare(&router, body).await
+    }
+}
+
+/// Full chat pipeline: system prompt, tools, tool-use loop, metadata.
+/// Mirrors entity-daemon's /v1/chat handler.
+async fn chat_with_pipeline(
+    state: &AppServerState,
+    router: &IdEgoRouter,
+    body: ChatRequest,
+) -> Result<Json<ChatResponse>, StatusCode> {
+    let registry = state.registry.as_ref().unwrap();
+    let executor = state.executor.as_ref().unwrap();
+    let instruction_registry = state.instruction_registry.as_ref().unwrap();
+
+    let docs_dir = state
+        .docs_dir
+        .clone()
+        .unwrap_or_else(|| state.data_dir.join("docs"));
+
+    let base_prompt =
+        abigail_core::system_prompt::build_system_prompt(&docs_dir, &state.agent_name);
+
+    let (tier, model_used, complexity_score) = router.tier_metadata_for_message(&body.message);
+    let status = router.status();
+
+    let runtime_ctx = entity_chat::RuntimeContext {
+        provider_name: status.ego_provider.clone(),
+        model_id: model_used,
+        routing_mode: Some(format!("{:?}", status.mode)),
+        tier,
+        complexity_score,
+        entity_name: state.agent_name.clone(),
+        entity_id: None,
+        has_local_llm: status.has_local_http,
+        last_provider_change_at: None,
+    };
+
+    let system_prompt = entity_chat::augment_system_prompt(
+        &base_prompt,
+        registry,
+        instruction_registry,
+        &body.message,
+        &runtime_ctx,
+    );
+
+    let messages = entity_chat::build_contextual_messages(
+        &system_prompt,
+        body.session_messages,
+        &body.message,
+    );
+
+    let tools = entity_chat::build_tool_definitions(registry);
+
+    let target = body.target.as_deref().unwrap_or("EGO");
+    let result = if tools.is_empty() || target == "ID" {
+        let traced = if target == "ID" {
+            router.id_only_traced(messages).await
+        } else {
+            router.route_traced(messages).await
+        };
+        traced.map(|(r, trace)| entity_chat::ToolUseResult {
+            content: r.content,
+            tool_calls_made: Vec::new(),
+            execution_trace: Some(trace),
+        })
+    } else {
+        entity_chat::run_tool_use_loop(router, executor, messages, tools).await
+    };
+
+    match result {
+        Ok(tool_result) => {
+            let tier = tool_result.tier().map(|s| s.to_string());
+            let model_used = tool_result.model_used().map(|s| s.to_string());
+            let complexity_score = tool_result.complexity_score();
+            let provider = tool_result
+                .execution_trace
+                .as_ref()
+                .and_then(|t| t.final_provider())
+                .map(|s| s.to_string())
+                .or_else(|| Some(entity_chat::provider_label(router)));
+
+            Ok(Json(ChatResponse {
+                reply: tool_result.content,
+                provider,
+                tool_calls_made: tool_result.tool_calls_made,
+                tier,
+                model_used,
+                complexity_score,
+                execution_trace: tool_result.execution_trace,
+            }))
+        }
+        Err(e) => {
+            tracing::error!("Chat pipeline error: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// Legacy bare chat: no system prompt, no tools, no metadata.
+/// Used when the server runs standalone without Tauri state.
+async fn chat_bare(
+    router: &IdEgoRouter,
+    body: ChatRequest,
+) -> Result<Json<ChatResponse>, StatusCode> {
     let target_mode = body.target.as_deref().unwrap_or("EGO");
     let messages = vec![abigail_capabilities::cognitive::Message::new(
         "user",
@@ -383,6 +556,12 @@ async fn chat_endpoint(
 
     Ok(Json(ChatResponse {
         reply: response.content,
+        provider: None,
+        tool_calls_made: Vec::new(),
+        tier: None,
+        model_used: None,
+        complexity_score: None,
+        execution_trace: None,
     }))
 }
 
