@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-27 21:00 EST: Birth/Entity chat pipeline separation — extract BirthChatEngine to abigail-birth crate with scripted no-LLM fallback, move key detection to abigail-core, add birth conversation persistence, slim Tauri commands to thin wrappers, add best_available_provider() to router
 - 2026-02-27 15:30 EST: Full agentic CLI integration — CLI auth verification (official binary + auth status), CliOrchestrator routing mode, CLI Quick-Start in Ignition stage, rich command flags (--append-system-prompt, --output-format, --allowedTools, streaming), CLI-optimized system prompt builder, routing mode selector in ChatInterface
 - 2026-02-27 04:10 EST: Apply cargo fmt for CI lint gate
 - 2026-02-27 03:50 EST: Enrich CLI REST server chat pipeline — system prompt, tool wiring, tool-use loop, full metadata; fix status to read live router state; register all 15 native Rust skills at Tauri startup

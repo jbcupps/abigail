@@ -108,7 +108,7 @@ impl SubagentManager {
                     .route_with_tools(request.messages, request.tools.unwrap_or_default())
                     .await
             }
-            SubagentProvider::SameAsId => self.router.id_only(messages).await,
+            SubagentProvider::SameAsId => self.router.route(messages).await,
             SubagentProvider::Custom(_provider_name, _api_key) => {
                 // Custom provider delegation — future phase.
                 // For now, fall back to the main router's Ego.

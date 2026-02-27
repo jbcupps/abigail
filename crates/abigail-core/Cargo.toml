@@ -13,6 +13,7 @@ thiserror.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 chrono.workspace = true
+regex = "1"
 tokio.workspace = true
 directories = "6.0"
 url = "2.5"

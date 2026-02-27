@@ -485,13 +485,9 @@ async fn chat_with_pipeline(
 
     let tools = entity_chat::build_tool_definitions(registry);
 
-    let target = body.target.as_deref().unwrap_or("EGO");
-    let result = if tools.is_empty() || target == "ID" {
-        let traced = if target == "ID" {
-            router.id_only_traced(messages).await
-        } else {
-            router.route_traced(messages).await
-        };
+    // Chat never uses Id; always route (Ego when available).
+    let result = if tools.is_empty() {
+        let traced = router.route_traced(messages).await;
         traced.map(|(r, trace)| entity_chat::ToolUseResult {
             content: r.content,
             tool_calls_made: Vec::new(),
@@ -536,23 +532,16 @@ async fn chat_bare(
     router: &IdEgoRouter,
     body: ChatRequest,
 ) -> Result<Json<ChatResponse>, StatusCode> {
-    let target_mode = body.target.as_deref().unwrap_or("EGO");
     let messages = vec![abigail_capabilities::cognitive::Message::new(
         "user",
         &body.message,
     )];
 
-    let response = if target_mode == "ID" {
-        router
-            .id_only(messages)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    } else {
-        router
-            .route(messages)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    };
+    // Chat never uses Id; always route (Ego when available).
+    let response = router
+        .route(messages)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(ChatResponse {
         reply: response.content,

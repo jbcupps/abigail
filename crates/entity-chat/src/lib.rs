@@ -489,13 +489,14 @@ pub async fn stream_chat_pipeline(
     executor: &SkillExecutor,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
-    target_mode: &str,
+    _target_mode: &str, // Reserved; chat always uses Ego path
     tx: tokio::sync::mpsc::Sender<StreamEvent>,
 ) -> anyhow::Result<StreamPipelineResult> {
     let mut messages = messages;
     let mut tool_calls_made = Vec::new();
 
-    if !tools.is_empty() && target_mode != "ID" {
+    // Chat never uses Id; always Ego path. Tool-use loop when tools present.
+    if !tools.is_empty() {
         let intermediate =
             run_tool_use_loop_rounds_only(router, executor, &mut messages, &tools).await?;
         tool_calls_made = intermediate.tool_calls_made;
@@ -509,9 +510,7 @@ pub async fn stream_chat_pipeline(
         }
     }
 
-    let (final_response, trace) = if target_mode == "ID" {
-        router.id_stream_traced(messages, tx.clone()).await?
-    } else if tools.is_empty() {
+    let (final_response, trace) = if tools.is_empty() {
         router.route_stream_traced(messages, tx.clone()).await?
     } else {
         router

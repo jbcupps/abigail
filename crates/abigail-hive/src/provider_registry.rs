@@ -5,8 +5,8 @@
 //! API keys.
 
 use abigail_capabilities::cognitive::{
-    AnthropicProvider, CandleProvider, CliLlmProvider, CliVariant, CompatibleProvider, LlmProvider,
-    LocalHttpProvider, OpenAiCompatibleProvider, OpenAiProvider,
+    AnthropicProvider, CandleProvider, CliLlmProvider, CliPermissionMode, CliVariant,
+    CompatibleProvider, LlmProvider, LocalHttpProvider, OpenAiCompatibleProvider, OpenAiProvider,
 };
 use std::sync::Arc;
 
@@ -67,6 +67,15 @@ impl ProviderRegistry {
         provider_name: Option<&str>,
         api_key: Option<String>,
         ego_model: Option<String>,
+    ) -> EgoProviderResult {
+        Self::build_ego_with_cli_mode(provider_name, api_key, ego_model, CliPermissionMode::default())
+    }
+
+    pub fn build_ego_with_cli_mode(
+        provider_name: Option<&str>,
+        api_key: Option<String>,
+        ego_model: Option<String>,
+        cli_permission_mode: CliPermissionMode,
     ) -> EgoProviderResult {
         let is_cli = matches!(
             provider_name,
@@ -168,7 +177,7 @@ impl ProviderRegistry {
                 }
             }
             Some("claude-cli") => {
-                let built = CliLlmProvider::new(CliVariant::ClaudeCode, key)
+                let built = CliLlmProvider::with_permission_mode(CliVariant::ClaudeCode, key, cli_permission_mode)
                     .inspect_err(|e| tracing::error!("Failed to build Claude CLI provider: {}", e))
                     .ok()
                     .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
@@ -178,7 +187,7 @@ impl ProviderRegistry {
                 }
             }
             Some("gemini-cli") => {
-                let built = CliLlmProvider::new(CliVariant::GeminiCli, key)
+                let built = CliLlmProvider::with_permission_mode(CliVariant::GeminiCli, key, cli_permission_mode)
                     .inspect_err(|e| tracing::error!("Failed to build Gemini CLI provider: {}", e))
                     .ok()
                     .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
@@ -188,7 +197,7 @@ impl ProviderRegistry {
                 }
             }
             Some("codex-cli") => {
-                let built = CliLlmProvider::new(CliVariant::OpenAiCodex, key)
+                let built = CliLlmProvider::with_permission_mode(CliVariant::OpenAiCodex, key, cli_permission_mode)
                     .inspect_err(|e| tracing::error!("Failed to build Codex CLI provider: {}", e))
                     .ok()
                     .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);
@@ -198,7 +207,7 @@ impl ProviderRegistry {
                 }
             }
             Some("grok-cli") => {
-                let built = CliLlmProvider::new(CliVariant::XaiGrokCli, key)
+                let built = CliLlmProvider::with_permission_mode(CliVariant::XaiGrokCli, key, cli_permission_mode)
                     .inspect_err(|e| tracing::error!("Failed to build Grok CLI provider: {}", e))
                     .ok()
                     .map(|p| Arc::new(p) as Arc<dyn LlmProvider>);

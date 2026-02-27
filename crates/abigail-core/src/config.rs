@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 19;
+pub const CONFIG_SCHEMA_VERSION: u32 = 20;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 ///
@@ -27,6 +27,22 @@ pub enum RoutingMode {
     /// (Claude Code, Gemini CLI, etc.) which acts as the full orchestrator.
     /// Bypasses tier scoring, model selection, and complexity classification.
     CliOrchestrator,
+}
+
+/// Controls how CLI tools handle permission requests for sensitive actions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CliPermissionMode {
+    /// Only allow Entity-registered tools (default, ToS-compliant).
+    /// Passes `--allowedTools` with the Entity's tool list.
+    #[default]
+    AllowListOnly,
+    /// Prompt the user via GUI for each sensitive action
+    /// (future: relays CLI permission prompts to the chat UI).
+    Interactive,
+    /// Skip all permission checks — user must opt in explicitly.
+    /// Passes `--dangerously-skip-permissions` to Claude Code.
+    DangerousSkipAll,
 }
 
 fn default_schema_version() -> u32 {
@@ -495,6 +511,11 @@ pub struct AppConfig {
     /// Set by `rebuild_router()` so the entity can see recent provider switches.
     #[serde(default)]
     pub last_provider_change_at: Option<String>,
+
+    // ── v20 fields ─────────────────────────────────────────────────
+    /// Permission mode for CLI tool invocations (allowlist_only, interactive, dangerous_skip_all).
+    #[serde(default)]
+    pub cli_permission_mode: CliPermissionMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -555,6 +576,7 @@ impl AppConfig {
             known_recipients_by_identity: HashMap::new(),
             skill_recovery_budget: default_skill_recovery_budget(),
             last_provider_change_at: None,
+            cli_permission_mode: CliPermissionMode::default(),
         }
     }
 
@@ -866,6 +888,7 @@ mod tests {
             known_recipients_by_identity: HashMap::new(),
             skill_recovery_budget: 3,
             last_provider_change_at: None,
+            cli_permission_mode: CliPermissionMode::default(),
         }
     }
 

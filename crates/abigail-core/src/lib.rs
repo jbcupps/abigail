@@ -5,6 +5,7 @@ pub mod dpapi;
 pub mod encrypted_storage;
 pub mod error;
 pub mod global_config;
+pub mod key_detection;
 pub mod keyring;
 pub mod local_llm_url;
 pub mod ops;
@@ -20,9 +21,9 @@ pub use capability_envelope::{
     evaluate_gate, CapabilityEnvelope, CapabilityGateResult, RequestedCapability,
 };
 pub use config::{
-    AppConfig, EmailAccountConfig, EmailConfig, ForceOverride, McpServerDefinition, McpTrustPolicy,
-    ModelTier, ProviderCatalogEntry, RoutingMode, TierModels, TierThresholds, TrinityConfig,
-    CONFIG_SCHEMA_VERSION,
+    AppConfig, CliPermissionMode, EmailAccountConfig, EmailConfig, ForceOverride,
+    McpServerDefinition, McpTrustPolicy, ModelTier, ProviderCatalogEntry, RoutingMode, TierModels,
+    TierThresholds, TrinityConfig, CONFIG_SCHEMA_VERSION,
 };
 pub use document::{CoreDocument, DocumentTier};
 pub use error::{CoreError, Result};

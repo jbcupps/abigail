@@ -4,11 +4,27 @@
 //! as a subprocess and captures its stdout as the completion response. This lets users route
 //! Ego queries through any installed CLI tool using their existing API keys.
 
+use abigail_core::CliPermissionMode;
 use crate::cognitive::provider::{CompletionRequest, CompletionResponse, LlmProvider};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::process::Command;
+
+/// Suppress the transient console window that `Command::new()` opens on Windows.
+#[cfg(windows)]
+fn hide_console_window(cmd: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+
+/// Suppress the transient console window for async `tokio::process::Command` on Windows.
+#[cfg(windows)]
+fn hide_console_window_async(cmd: &mut Command) {
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
 
 /// Which CLI tool to invoke.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,11 +179,14 @@ enum CliAuthStrategy {
 
 fn binary_on_path(name: &str) -> bool {
     #[cfg(windows)]
-    let check = std::process::Command::new("where")
-        .arg(name)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+    let check = {
+        let mut cmd = std::process::Command::new("where");
+        cmd.arg(name)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        hide_console_window(&mut cmd);
+        cmd.status()
+    };
     #[cfg(not(windows))]
     let check = std::process::Command::new("which")
         .arg(name)
@@ -180,11 +199,13 @@ fn binary_on_path(name: &str) -> bool {
 
 /// Run `<binary> --version`, capture stdout, verify it contains the expected marker.
 fn check_version_official(binary: &str, marker: &str) -> (bool, Option<String>) {
-    let output = std::process::Command::new(binary)
-        .arg("--version")
+    let mut cmd = std::process::Command::new(binary);
+    cmd.arg("--version")
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output();
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    hide_console_window(&mut cmd);
+    let output = cmd.output();
 
     match output {
         Ok(o) if o.status.success() => {
@@ -206,13 +227,15 @@ fn check_version_official(binary: &str, marker: &str) -> (bool, Option<String>) 
 /// Check whether the CLI is authenticated using the variant's strategy.
 fn check_auth(binary: &str, strategy: CliAuthStrategy) -> bool {
     match strategy {
-        CliAuthStrategy::SubCommand(arg1, arg2) => std::process::Command::new(binary)
-            .args([arg1, arg2])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false),
+        CliAuthStrategy::SubCommand(arg1, arg2) => {
+            let mut cmd = std::process::Command::new(binary);
+            cmd.args([arg1, arg2])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            #[cfg(windows)]
+            hide_console_window(&mut cmd);
+            cmd.status().map(|s| s.success()).unwrap_or(false)
+        }
         CliAuthStrategy::EnvVar(var) => std::env::var(var)
             .ok()
             .filter(|v| !v.trim().is_empty())
@@ -229,6 +252,7 @@ pub fn detect_all_cli_providers() -> Vec<CliDetectionResult> {
 pub struct CliLlmProvider {
     variant: CliVariant,
     api_key: String,
+    permission_mode: CliPermissionMode,
 }
 
 impl CliLlmProvider {
@@ -241,7 +265,30 @@ impl CliLlmProvider {
                 variant
             ));
         }
-        Ok(Self { variant, api_key })
+        Ok(Self {
+            variant,
+            api_key,
+            permission_mode: CliPermissionMode::default(),
+        })
+    }
+
+    /// Create a CLI provider with a specific permission mode.
+    pub fn with_permission_mode(
+        variant: CliVariant,
+        api_key: String,
+        permission_mode: CliPermissionMode,
+    ) -> anyhow::Result<Self> {
+        if api_key.trim().is_empty() {
+            return Err(anyhow::anyhow!(
+                "API key for {} CLI provider must not be empty",
+                variant
+            ));
+        }
+        Ok(Self {
+            variant,
+            api_key,
+            permission_mode,
+        })
     }
 
     pub fn variant(&self) -> CliVariant {
@@ -250,13 +297,13 @@ impl CliLlmProvider {
 
     /// Check whether the CLI binary is available on PATH (synchronous).
     pub fn is_available(&self) -> bool {
-        std::process::Command::new(self.variant.binary_name())
-            .arg("--version")
+        let mut cmd = std::process::Command::new(self.variant.binary_name());
+        cmd.arg("--version")
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+            .stderr(std::process::Stdio::null());
+        #[cfg(windows)]
+        hide_console_window(&mut cmd);
+        cmd.status().map(|s| s.success()).unwrap_or(false)
     }
 
     /// Build a single prompt string from the non-system messages.
@@ -304,20 +351,26 @@ impl CliLlmProvider {
                 cmd.arg("--print");
                 cmd.arg("--output-format").arg("text");
                 cmd.arg("--max-turns").arg("10");
-                cmd.arg("--dangerously-skip-permissions");
-                if let Some(sp) = system_prompt {
-                    cmd.arg("--append-system-prompt").arg(sp);
-                }
-                if let Some(ref tool_defs) = tools {
-                    let tool_names: Vec<String> = tool_defs
-                        .iter()
-                        .map(|t| crate::cognitive::provider::sanitize_tool_name(&t.name))
-                        .collect();
-                    if !tool_names.is_empty() {
-                        for name in &tool_names {
-                            cmd.arg("--allowedTools").arg(name);
+                match self.permission_mode {
+                    CliPermissionMode::DangerousSkipAll => {
+                        cmd.arg("--dangerously-skip-permissions");
+                    }
+                    CliPermissionMode::AllowListOnly | CliPermissionMode::Interactive => {
+                        if let Some(ref tool_defs) = tools {
+                            let tool_names: Vec<String> = tool_defs
+                                .iter()
+                                .map(|t| crate::cognitive::provider::sanitize_tool_name(&t.name))
+                                .collect();
+                            if !tool_names.is_empty() {
+                                for name in &tool_names {
+                                    cmd.arg("--allowedTools").arg(name);
+                                }
+                            }
                         }
                     }
+                }
+                if let Some(sp) = system_prompt {
+                    cmd.arg("--append-system-prompt").arg(sp);
                 }
                 cmd.arg(prompt);
             }
@@ -352,6 +405,8 @@ impl CliLlmProvider {
 
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
+        #[cfg(windows)]
+        hide_console_window_async(&mut cmd);
         cmd
     }
 
@@ -453,13 +508,27 @@ impl LlmProvider for CliLlmProvider {
         cmd.arg("--print");
         cmd.arg("--output-format").arg("stream-json");
         cmd.arg("--max-turns").arg("10");
-        cmd.arg("--dangerously-skip-permissions");
+        match self.permission_mode {
+            CliPermissionMode::DangerousSkipAll => {
+                cmd.arg("--dangerously-skip-permissions");
+            }
+            CliPermissionMode::AllowListOnly | CliPermissionMode::Interactive => {
+                if let Some(ref tool_defs) = request.tools {
+                    for td in tool_defs {
+                        let name = crate::cognitive::provider::sanitize_tool_name(&td.name);
+                        cmd.arg("--allowedTools").arg(&name);
+                    }
+                }
+            }
+        }
         if let Some(ref sp) = system_prompt {
             cmd.arg("--append-system-prompt").arg(sp);
         }
         cmd.arg(&prompt);
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
+        #[cfg(windows)]
+        hide_console_window_async(&mut cmd);
 
         let mut child = cmd
             .spawn()

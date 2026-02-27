@@ -7,45 +7,13 @@
 
 use crate::state::AppState;
 use abigail_capabilities::cognitive::StreamEvent;
+use abigail_core::key_detection::{detect_api_keys, CLI_ALIASES};
 use entity_core::{ChatResponse, SessionMessage};
 use tauri::{Emitter, State};
 
 // ---------------------------------------------------------------------------
-// API key auto-detection (Tauri-specific)
+// API key auto-detection (Tauri-specific side-effect wrapper)
 // ---------------------------------------------------------------------------
-
-/// Regex patterns for API key detection. Each entry: (pattern, provider_name).
-pub const KEY_PATTERNS: &[(&str, &str)] = &[
-    (r"sk-ant-[a-zA-Z0-9_-]{20,}", "anthropic"),
-    (r"sk-[a-zA-Z0-9]{20,}", "openai"),
-    (r"xai-[a-zA-Z0-9_-]{20,}", "xai"),
-    (r"pplx-[a-zA-Z0-9_-]{20,}", "perplexity"),
-    (r"AIza[a-zA-Z0-9_-]{35}", "google"),
-    (r"tvly-[a-zA-Z0-9_-]{20,}", "tavily"),
-];
-
-/// Alias mapping: when a key is detected for a provider, also store it under these names.
-const CLI_ALIASES: &[(&str, &str)] = &[
-    ("openai", "codex-cli"),
-    ("anthropic", "claude-cli"),
-    ("google", "gemini-cli"),
-    ("xai", "grok-cli"),
-];
-
-/// Pure detection function: scans a message for API key patterns.
-/// Returns a vec of (provider_name, key_string) tuples.
-/// No side effects — can be tested independently.
-pub fn detect_api_keys(message: &str) -> Vec<(String, String)> {
-    let mut detected = Vec::new();
-    for (pattern, provider) in KEY_PATTERNS {
-        if let Ok(re) = regex::Regex::new(pattern) {
-            for mat in re.find_iter(message) {
-                detected.push((provider.to_string(), mat.as_str().to_string()));
-            }
-        }
-    }
-    detected
-}
 
 /// Check if a message contains recognizable API keys, store them, and rebuild the router.
 pub async fn auto_detect_and_store_key_internal(
@@ -72,58 +40,6 @@ pub async fn auto_detect_and_store_key_internal(
     }
 
     detected
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn detects_openai_key() {
-        let msg = "Here is my key: sk-abcdefghijklmnopqrstuvwxyz";
-        let keys = detect_api_keys(msg);
-        assert_eq!(keys.len(), 1);
-        assert_eq!(keys[0].0, "openai");
-    }
-
-    #[test]
-    fn detects_anthropic_key() {
-        let msg = "Use sk-ant-abc123def456ghi789jklmno";
-        let keys = detect_api_keys(msg);
-        assert_eq!(keys.len(), 1);
-        assert_eq!(keys[0].0, "anthropic");
-    }
-
-    #[test]
-    fn detects_google_key() {
-        let msg = "AIzaSyAbCdEfGhIjKlMnOpQrStUvWxYz12345678901";
-        let keys = detect_api_keys(msg);
-        assert_eq!(keys.len(), 1);
-        assert_eq!(keys[0].0, "google");
-    }
-
-    #[test]
-    fn detects_xai_key() {
-        let msg = "xai-abcdefghijklmnopqrstuvwxyz";
-        let keys = detect_api_keys(msg);
-        assert_eq!(keys.len(), 1);
-        assert_eq!(keys[0].0, "xai");
-    }
-
-    #[test]
-    fn no_false_positives_on_normal_message() {
-        let msg = "Hello, how are you? I want to build a project with React and Rust.";
-        let keys = detect_api_keys(msg);
-        assert!(keys.is_empty());
-    }
-
-    #[test]
-    fn detects_multiple_keys() {
-        let msg =
-            "OpenAI: sk-abcdefghijklmnopqrstuvwxyz and Anthropic: sk-ant-abc123def456ghi789jklmno";
-        let keys = detect_api_keys(msg);
-        assert_eq!(keys.len(), 2);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -208,14 +124,10 @@ pub async fn chat(
     // 4. Build tool definitions from registered skills (shared engine)
     let tools = entity_chat::build_tool_definitions(&state.registry);
 
-    // 5. Route — use tool-use loop if tools are available, plain route otherwise
-    let target_mode = target.as_deref().unwrap_or("AUTO");
-    let result = if tools.is_empty() || target_mode == "ID" {
-        let traced = if target_mode == "ID" {
-            router.id_only_traced(messages).await
-        } else {
-            router.route_traced(messages).await
-        };
+    // 5. Route — use tool-use loop if tools are available, plain route otherwise.
+    // Chat never uses Id; Id is for background tasks only. Treat ID as AUTO (Ego when available).
+    let result = if tools.is_empty() {
+        let traced = router.route_traced(messages).await;
         traced.map(|(r, trace)| entity_chat::ToolUseResult {
             content: r.content,
             tool_calls_made: Vec::new(),

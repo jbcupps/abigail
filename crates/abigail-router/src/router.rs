@@ -180,19 +180,14 @@ pub struct IdEgoRouter {
 }
 
 impl IdEgoRouter {
-    fn target_for_mode(&self, user_message: &str) -> FastPathTarget {
-        match self.mode {
-            RoutingMode::EgoPrimary | RoutingMode::CliOrchestrator => {
-                if self.ego.is_some() {
-                    FastPathTarget::Ego
-                } else {
-                    FastPathTarget::Id
-                }
-            }
-            RoutingMode::Council | RoutingMode::TierBased => {
-                self.fast_path_classify(user_message).target
-            }
+    /// Chooses Id vs Ego for the main routing path. Chat and direct user prompts
+    /// always use Ego when available; Id is reserved for background tasks
+    /// (memory, cron) invoked explicitly via `id_only()`.
+    fn target_for_mode(&self, _user_message: &str) -> FastPathTarget {
+        if self.ego.is_some() {
+            return FastPathTarget::Ego;
         }
+        FastPathTarget::Id
     }
     /// Create a new router with optional local LLM URL and Ego cloud provider.
     pub fn new(
@@ -285,6 +280,21 @@ impl IdEgoRouter {
     /// Return true if the Id provider is an external HTTP server.
     pub fn is_using_http_provider(&self) -> bool {
         self.local_http.is_some()
+    }
+
+    /// Get the best available provider for simple completion (no routing).
+    ///
+    /// Returns Ego if available, then local HTTP, then `None`. This is used
+    /// by the birth pipeline which needs a single provider reference rather
+    /// than the full routing surface.
+    pub fn best_available_provider(&self) -> Option<Arc<dyn LlmProvider>> {
+        if let Some(ref ego) = self.ego {
+            Some(ego.clone())
+        } else {
+            self.local_http
+                .as_ref()
+                .map(|lh| lh.clone() as Arc<dyn LlmProvider>)
+        }
     }
 
     /// Return a status snapshot for diagnostics.
@@ -511,14 +521,17 @@ impl IdEgoRouter {
     pub fn fast_path_classify(&self, user_message: &str) -> FastPathResult {
         let id_instinct = self.calculate_id_instinct(user_message);
         let context_aligned = self.has_external_context_signal(user_message);
-        let ego_feasible = self.ego.is_some() && (id_instinct >= 45 || context_aligned);
+        let no_real_local = self.local_http.is_none();
+        let ego_feasible =
+            self.ego.is_some() && (no_real_local || id_instinct >= 45 || context_aligned);
 
-        let target =
-            if ego_feasible && (id_instinct >= 60 || (context_aligned && id_instinct >= 20)) {
-                FastPathTarget::Ego
-            } else {
-                FastPathTarget::Id
-            };
+        let target = if ego_feasible
+            && (no_real_local || id_instinct >= 60 || (context_aligned && id_instinct >= 20))
+        {
+            FastPathTarget::Ego
+        } else {
+            FastPathTarget::Id
+        };
 
         FastPathResult {
             target,
@@ -1387,7 +1400,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fast_path_classify_keeps_short_local_message_on_id() {
+    async fn test_fast_path_classify_routes_to_ego_when_no_local_llm() {
+        // When no real local LLM is configured, even short messages must
+        // go to Ego — the CandleProvider stub cannot serve real responses.
         let router = IdEgoRouter::new(
             None,
             Some("openai"),
@@ -1396,7 +1411,7 @@ mod tests {
             RoutingMode::TierBased,
         );
         let fp = router.fast_path_classify("hi");
-        assert_eq!(fp.target, FastPathTarget::Id);
+        assert_eq!(fp.target, FastPathTarget::Ego);
     }
 
     #[tokio::test]

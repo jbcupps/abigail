@@ -47,14 +47,16 @@ pub async fn delegate_to_subagent(
         "user", &message,
     )];
 
+    // Chat and subagent prompts use Ego when available; Id is for background tasks only.
     let response = match &def.provider {
         abigail_router::SubagentProvider::SameAsEgo => router
             .route_with_tools(messages, vec![])
             .await
             .map_err(|e| e.to_string())?,
-        abigail_router::SubagentProvider::SameAsId => {
-            router.id_only(messages).await.map_err(|e| e.to_string())?
-        }
+        abigail_router::SubagentProvider::SameAsId => router
+            .route(messages)
+            .await
+            .map_err(|e| e.to_string())?,
         abigail_router::SubagentProvider::Custom(_, _) => router
             .route_with_tools(messages, vec![])
             .await
