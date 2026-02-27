@@ -37,11 +37,16 @@ impl ProtonMailTransport {
             .imap
             .as_ref()
             .ok_or_else(|| SkillError::InitFailed("IMAP not configured".to_string()))?;
-        let summaries = imap
-            .fetch_unread()
-            .await
-            .map_err(|e| SkillError::ToolFailed(e.to_string()))?;
         let limit = options.limit.unwrap_or(50);
+        let summaries = if options.unread_only {
+            imap.fetch_unread()
+                .await
+                .map_err(|e| SkillError::ToolFailed(e.to_string()))?
+        } else {
+            imap.fetch_all(limit)
+                .await
+                .map_err(|e| SkillError::ToolFailed(e.to_string()))?
+        };
         let emails: Vec<Email> = summaries
             .into_iter()
             .take(limit as usize)

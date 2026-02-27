@@ -60,6 +60,53 @@ pub fn list_discovered_skills(state: State<AppState>) -> Result<Vec<SkillManifes
     Ok(abigail_skills::SkillRegistry::discover(&paths))
 }
 
+/// One row for the Skills Vault UI: a secret key declared by some skill(s), and whether it is set.
+#[derive(serde::Serialize)]
+pub struct SkillsVaultEntry {
+    pub secret_name: String,
+    pub skill_names: Vec<String>,
+    pub description: Option<String>,
+    pub is_set: bool,
+}
+
+#[tauri::command]
+pub fn list_skills_vault_entries(state: State<AppState>) -> Result<Vec<SkillsVaultEntry>, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    let skills_dir = config.data_dir.join("skills");
+    let paths = vec![skills_dir.clone()];
+
+    let registered = state.registry.list().map_err(|e| e.to_string())?;
+    let discovered = abigail_skills::SkillRegistry::discover(&paths);
+    let mut by_name: std::collections::HashMap<String, (Vec<String>, Option<String>)> =
+        std::collections::HashMap::new();
+
+    for m in registered.iter().chain(discovered.iter()) {
+        for s in &m.secrets {
+            by_name
+                .entry(s.name.clone())
+                .or_insert_with(|| (Vec::new(), Some(s.description.clone())))
+                .0
+                .push(m.name.clone());
+        }
+    }
+    let vault = state.skills_secrets.lock().map_err(|e| e.to_string())?;
+    let entries: Vec<SkillsVaultEntry> = by_name
+        .into_iter()
+        .map(|(secret_name, (mut skill_names, description))| {
+            skill_names.sort();
+            skill_names.dedup();
+            let is_set = vault.exists(&secret_name);
+            SkillsVaultEntry {
+                secret_name,
+                skill_names,
+                description,
+                is_set,
+            }
+        })
+        .collect();
+    Ok(entries)
+}
+
 #[tauri::command]
 pub fn list_missing_skill_secrets(
     state: State<AppState>,
@@ -109,6 +156,16 @@ fn validate_secret_namespace(state: &State<AppState>, key: &str) -> Result<(), S
     validate_secret_namespace_with(&state.registry, &config.data_dir, key)
 }
 
+/// Keys that, when stored, should trigger re-initialization of the Proton Mail skill
+/// so it picks up new credentials without an app restart.
+const IMAP_SECRET_KEYS: &[&str] = &[
+    "imap_password",
+    "imap_user",
+    "imap_host",
+    "imap_port",
+    "imap_tls_mode",
+];
+
 #[tauri::command]
 pub fn store_secret(state: State<AppState>, key: String, value: String) -> Result<(), String> {
     let key = key.trim().to_string();
@@ -122,7 +179,30 @@ pub fn store_secret(state: State<AppState>, key: String, value: String) -> Resul
     validate_secret_namespace(&state, &key)?;
     let mut vault = state.skills_secrets.lock().map_err(|e| e.to_string())?;
     vault.set_secret(&key, &value);
-    vault.save().map_err(|e| e.to_string())
+    vault.save().map_err(|e| e.to_string())?;
+
+    // Re-initialize Proton Mail when IMAP-related secrets change so the skill
+    // picks up new credentials without requiring an app restart.
+    if IMAP_SECRET_KEYS.contains(&key.as_str()) {
+        match crate::create_proton_mail_skill_for_registry(&state) {
+            Ok(skill) => {
+                let skill_id = skill_proton_mail::ProtonMailSkill::default_manifest()
+                    .id
+                    .clone();
+                let _ = state.registry.unregister(&skill_id);
+                if let Err(e) = state.registry.register(skill_id, skill) {
+                    tracing::warn!("Proton Mail re-register after secret store failed: {}", e);
+                } else {
+                    tracing::info!("Proton Mail skill re-initialized after secret update");
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Proton Mail reinit after secret store failed: {}", e);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]

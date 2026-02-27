@@ -1,4 +1,5 @@
 use crate::identity_manager::IdentityManager;
+use crate::log_capture::LogBuffer;
 use crate::ollama_manager::OllamaManager;
 use crate::rate_limit::CooldownGuard;
 use abigail_auth::AuthManager;
@@ -74,6 +75,8 @@ pub struct AppState {
     pub birth_cooldown: CooldownGuard,
     /// Handle to the CLI REST server (if running)
     pub cli_server: Arc<tokio::sync::Mutex<Option<CliServerHandle>>>,
+    /// In-memory ring buffer for captured log entries
+    pub log_buffer: LogBuffer,
 }
 
 pub struct CliServerHandle {
