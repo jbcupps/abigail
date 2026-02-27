@@ -530,10 +530,12 @@ pub fn run() {
                     skill_web_search::WebSearchSkill::default_manifest(),
                     skills_secrets.clone()
                 ));
-                register_skill!(skill_perplexity_search::PerplexitySearchSkill::with_secrets(
-                    skill_perplexity_search::PerplexitySearchSkill::default_manifest(),
-                    skills_secrets.clone()
-                ));
+                register_skill!(
+                    skill_perplexity_search::PerplexitySearchSkill::with_secrets(
+                        skill_perplexity_search::PerplexitySearchSkill::default_manifest(),
+                        skills_secrets.clone()
+                    )
+                );
             }
 
             // Register configured MCP servers as skills (HTTP transport).

@@ -204,17 +204,16 @@ async fn get_status(
     let secrets_count = vault.list_providers().len();
 
     // Prefer live router state over stale config.trinity
-    let (ego_provider, ego_key_set, has_ego) =
-        if let Some(ref router_lock) = state.router {
-            if let Ok(router) = router_lock.try_read() {
-                let rs = router.status();
-                (rs.ego_provider, rs.has_ego, rs.has_ego)
-            } else {
-                provider_from_config(&config)
-            }
+    let (ego_provider, ego_key_set, has_ego) = if let Some(ref router_lock) = state.router {
+        if let Ok(router) = router_lock.try_read() {
+            let rs = router.status();
+            (rs.ego_provider, rs.has_ego, rs.has_ego)
         } else {
             provider_from_config(&config)
-        };
+        }
+    } else {
+        provider_from_config(&config)
+    };
 
     let skills_count = state
         .registry
