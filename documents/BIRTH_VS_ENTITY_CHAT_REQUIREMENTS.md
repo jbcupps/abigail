@@ -21,7 +21,7 @@ This document captures the requirements for resolving these differences and ensu
 | **Purpose** | One-time onboarding wizard: provider setup + identity creation | Open-ended operational agent conversation |
 | **System Prompts** | Hardcoded per-stage (`CONNECTIVITY_SYSTEM_PROMPT`, `CRYSTALLIZATION_SYSTEM_PROMPT`) in `crates/abigail-birth/src/prompts.rs` | Dynamic constitutional prompt assembled from signed `soul.md` + `ethics.md` + `instincts.md` + skill instructions |
 | **Tool System** | Text-based pseudo-tools (LLM emits `` ```tool_request `` blocks); parsed client-side | Full `SkillRegistry` + `SkillExecutor` with native function-calling format; up to 8 rounds of tool-use loop |
-| **Routing** | Binary: Ego if available, else `id_only()` → CandleProvider stub | Full tier-based routing with complexity scoring, force overrides, model selection, provider fallback chain |
+| **Routing** | Binary: Ego if available, else `id_only()` → CandleProvider stub | Tier-based routing with complexity scoring, force overrides, model selection, provider fallback chain; auto-upgrades to CliOrchestrator (bypasses tier scoring) when a CLI provider is active |
 | **Streaming** | None — single blocking `invoke("birth_chat")` call | Full streaming via Tauri events (`chat-token`, `chat-done`) or SSE from entity-daemon |
 | **Conversation State** | In-memory on `BirthOrchestrator`; lost on crash | Stateless server-side; UI manages session history and sends full context per request |
 | **Side Effects** | Writes secrets, generates Ed25519 keys, signs constitutional documents, writes `soul_profile.json`, modifies `AppConfig` | Executes sandboxed skill tools; no identity/config mutations |
@@ -192,7 +192,7 @@ Entity chat assumes at least one working LLM provider. This is enforced by the b
 
 ### REQ-EC-002: Graceful Degradation Chain
 
-The tier-based routing system (Pro → Standard → Fast → CandleProvider stub) provides graceful degradation. If the active provider fails, the router falls through to lower tiers and eventually to the stub. This chain is well-tested.
+The tier-based routing system (Pro → Standard → Fast → CandleProvider stub) provides graceful degradation. If the active provider fails, the router falls through to lower tiers and eventually to the stub. When a CLI provider is active, the router auto-detects this and uses CliOrchestrator mode, which bypasses tier scoring entirely. This chain is well-tested.
 
 ### REQ-EC-003: Streaming by Default
 

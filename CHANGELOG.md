@@ -8,10 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-27 23:15 EST: Update docs for CliOrchestrator auto-detection, remove stale --allowedTools refs, mark completed Phase 2a/2c roadmap items, fix CliPermissionMode doc comments
 - 2026-02-27 22:30 EST: Fix intermittent CLI spawn OS error 206 on Windows — replace broken --allowedTools args (entity tool names, not CLI tool names) with --dangerously-skip-permissions, auto-detect CliOrchestrator routing mode for CLI providers to skip meaningless tier scoring/complexity classification
 - 2026-02-27 19:15 EST: CLI session management, memory auto-archive, and encrypted portable archives — pipe Claude CLI prompt via stdin to fix Windows 32K limit, add --resume/session_id for multi-turn, conversation_turns table and auto-archive in entity-daemon/Tauri, build_memory_context and prompt memory awareness, X25519+AES-256-GCM .abigail export to Documents/Abigail/archives/, restore via recovery key, auto-export every 50 turns
 - 2026-02-27 21:00 EST: Birth/Entity chat pipeline separation — extract BirthChatEngine to abigail-birth crate with scripted no-LLM fallback, move key detection to abigail-core, add birth conversation persistence, slim Tauri commands to thin wrappers, add best_available_provider() to router
-- 2026-02-27 15:30 EST: Full agentic CLI integration — CLI auth verification (official binary + auth status), CliOrchestrator routing mode, CLI Quick-Start in Ignition stage, rich command flags (--append-system-prompt, --output-format, --allowedTools, streaming), CLI-optimized system prompt builder, routing mode selector in ChatInterface
+- 2026-02-27 15:30 EST: Full agentic CLI integration — CLI auth verification (official binary + auth status), CliOrchestrator routing mode, CLI Quick-Start in Ignition stage, rich command flags (--append-system-prompt, --output-format, streaming), CLI-optimized system prompt builder, routing mode selector in ChatInterface
 - 2026-02-27 04:10 EST: Apply cargo fmt for CI lint gate
 - 2026-02-27 03:50 EST: Enrich CLI REST server chat pipeline — system prompt, tool wiring, tool-use loop, full metadata; fix status to read live router state; register all 15 native Rust skills at Tauri startup
 - 2026-02-26 22:20 EST: Add Insights troubleshooting panel — CLI REST server toggle with connection info, in-memory log ring buffer with reloadable tracing filter, live log viewer with stream/pause/clear/export, save-to-file via dialog

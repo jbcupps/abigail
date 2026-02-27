@@ -173,6 +173,7 @@ The router (`abigail-router`) implements a **tier-based dual-LLM pattern** with 
 - `RoutingMode::TierBased` — classifies message complexity (score 5–95), maps to tier via `TierThresholds` (default: <35 → Fast, 35–69 → Standard, ≥70 → Pro)
 - `RoutingMode::EgoPrimary` — all queries to cloud (uses Standard tier model)
 - `RoutingMode::Council` — multi-provider consensus
+- `RoutingMode::CliOrchestrator` — all messages routed directly to an authenticated CLI tool (Claude Code, Gemini CLI, etc.). Bypasses tier scoring, complexity classification, setup-intent detection, and model override. **Auto-detected:** `from_built_providers()` upgrades TierBased/EgoPrimary to CliOrchestrator when the ego provider is a CLI variant.
 
 **Force override (3 levels, highest priority first):**
 1. `ForceOverride.pinned_model` — exact model ID, bypasses all tier logic
@@ -189,8 +190,9 @@ The router (`abigail-router`) implements a **tier-based dual-LLM pattern** with 
 
 **Wiring:**
 - In Tauri: router is rebuilt via `set_api_key`/`set_local_llm_url`/`set_force_override`/`set_tier_thresholds` commands when config changes
-- In entity-daemon: router is built once at startup from `ProviderConfig` fetched from Hive
+- In entity-daemon: router is built once at startup from `ProviderConfig` fetched from Hive; CLI providers are auto-detected and routing mode is upgraded to CliOrchestrator
 - `ChatResponse` includes `tier`, `model_used`, and `complexity_score` metadata
+- CLI providers always use `--dangerously-skip-permissions`; entity-level tool permissions are enforced by `SkillSandbox`/`SkillExecutor`, not by the CLI tool's own permission system
 
 ### Constitutional Documents
 
@@ -249,7 +251,7 @@ required = true
 - Chat pipeline: `build_tool_awareness_section()` generates markdown listing all registered tools for the LLM system prompt
 - Tauri app: full command surface (list, discover, execute, approve, MCP integration)
 
-**Key gap:** No LLM tool-use loop yet — the LLM sees tools in the system prompt but there's no code to parse tool calls from LLM output, execute them via `SkillExecutor`, and feed results back into the conversation.
+**Tool-use loop:** `entity-chat::run_tool_use_loop()` parses tool-call blocks from LLM responses, executes them via `SkillExecutor`, injects results back, and re-prompts for up to 8 rounds. `build_tool_definitions()` converts registered `ToolDescriptor`s into the provider's native function-calling format.
 
 ## Key Patterns
 
@@ -339,10 +341,10 @@ cargo run -p entity-cli -- --url http://127.0.0.1:3142 chat "hello"
 
 Current priorities, in order:
 
-### Phase 2a: Skills Use (P1)
-1. **LLM tool-use loop** — Parse tool-call blocks from LLM responses (OpenAI function-calling format), execute via `SkillExecutor`, inject results back, re-prompt until the LLM produces a final text response. Implement in `entity-daemon/src/chat_pipeline.rs`.
-2. **Auto-load skills from disk** — On entity-daemon startup, scan `skills/` for `*/skill.toml`, register discovered skills in the `SkillRegistry` alongside the built-in `HiveManagementSkill`.
-3. **Wire tools into LLM requests** — Convert registered `ToolDescriptor`s into the `tools` array for the OpenAI-compatible chat completion request so the LLM can invoke them natively.
+### Phase 2a: Skills Use — DONE
+1. ~~**LLM tool-use loop**~~ — Implemented in `entity-chat::run_tool_use_loop()` (up to 8 rounds).
+2. ~~**Auto-load skills from disk**~~ — All 15 native skills registered at Tauri/daemon startup.
+3. ~~**Wire tools into LLM requests**~~ — `build_tool_definitions()` converts `ToolDescriptor`s to provider-native format.
 
 ### Phase 2b: Skill Creation (P2)
 4. **Scaffolding CLI** — `entity-cli new-skill <name>` generates a skill directory with `skill.toml` template, boilerplate Rust or JSON config, and an instruction markdown file.
@@ -350,14 +352,14 @@ Current priorities, in order:
 6. **Skill hot-reload** — File-watcher on `skills/` directory to re-discover and register new/updated skills without daemon restart.
 
 ### Phase 2c: Memory & Integration (P3)
-7. **Memory persistence** — Wire `abigail-memory` SQLite into entity-daemon for conversation history, recall tool, and memory weight tiers.
+7. ~~**Memory persistence**~~ — Done: `abigail-memory` wired into entity-daemon with REST endpoints, chat persistence, and memory CLI commands.
 8. **End-to-end daemon testing** — Automated integration tests: hive-daemon + entity-daemon + skill execution + memory round-trip.
 9. **Tauri app → daemon delegation** — Desktop app calls daemons via HTTP instead of running everything in-process.
 
 ## Known Issues
 
-### Tier-Based Router
-The router uses tier-based routing with complexity classification. Debug with `RUST_LOG=abigail_router=debug`. Key diagnostics:
+### Router
+The router uses tier-based routing with complexity classification (or CliOrchestrator mode for CLI providers). Debug with `RUST_LOG=abigail_router=debug`. Key diagnostics:
 - `get_router_status` Tauri command returns current Id/Ego/Superego state
 - If Ego shows as unconfigured after birth, check TrinityConfig in config.json
 - CandleProvider stub returns a helpful message instead of erroring when no local LLM exists
@@ -365,6 +367,8 @@ The router uses tier-based routing with complexity classification. Debug with `R
 - `ChatResponse` now includes `tier`, `model_used`, and `complexity_score` — check these to verify tier routing is working
 - Force overrides (`ForceOverride`) bypass complexity scoring — if routing seems stuck on one tier, check `config.json` `force_override`
 - Model registry discovery runs in background at startup — check logs for `ModelRegistry:` messages
+- CLI providers auto-upgrade to CliOrchestrator mode — look for `Auto-upgrading routing mode to CliOrchestrator` in logs
+- `CliPermissionMode` in config is retained for serialization but has no runtime effect — all CLI subprocesses use `--dangerously-skip-permissions`
 
 ### Anthropic Tool-Name Sanitization
 The Anthropic API requires tool names to match `^[a-zA-Z0-9_-]{1,64}$`. The `entity-chat` engine uses qualified names like `builtin.hive_management::store_secret` internally. The `AnthropicProvider` in `abigail-capabilities` automatically sanitizes these (replacing `::` with `__` and `.` with `_`) and reverse-maps them in responses. If adding a new provider, check its tool-name constraints and add similar sanitization if needed.

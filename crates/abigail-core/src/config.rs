@@ -30,18 +30,24 @@ pub enum RoutingMode {
 }
 
 /// Controls how CLI tools handle permission requests for sensitive actions.
+///
+/// **Note:** This enum is retained for config serialization compatibility, but
+/// the runtime always passes `--dangerously-skip-permissions` to CLI subprocesses
+/// regardless of the configured mode.  Entity-level tool permissions are enforced
+/// by `SkillSandbox` / `SkillExecutor`, not by the CLI tool's permission system.
+/// The `--allowedTools` flag was removed because it expects the CLI's *own* tool
+/// names (e.g. "Bash", "Read"), not entity skill names, and the resulting
+/// command-line length overflowed the Windows `cmd.exe` 8 191-char limit (OS error 206).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum CliPermissionMode {
-    /// Only allow Entity-registered tools (default, ToS-compliant).
-    /// Passes `--allowedTools` with the Entity's tool list.
+    /// Default variant. Previously passed `--allowedTools`; now a no-op at runtime.
     #[default]
     AllowListOnly,
-    /// Prompt the user via GUI for each sensitive action
-    /// (future: relays CLI permission prompts to the chat UI).
+    /// Reserved for future GUI-relayed permission prompts.
     Interactive,
-    /// Skip all permission checks — user must opt in explicitly.
-    /// Passes `--dangerously-skip-permissions` to Claude Code.
+    /// Previously the only mode that passed `--dangerously-skip-permissions`;
+    /// now all modes behave identically (always skip).
     DangerousSkipAll,
 }
 

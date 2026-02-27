@@ -35,6 +35,12 @@ execution correctness across chat, birth, forge, CLI, and skills commands.
 - `council` is an explicit execution path that delegates to `CouncilEngine`
   when 2+ providers are enrolled; degrades to single-provider passthrough
   otherwise. Council failures fall back to ego/id with `SelectionReason::Fallback`.
+- `cli_orchestrator` routes all messages directly to an authenticated CLI tool.
+  Bypasses tier scoring, complexity classification, setup-intent detection, and
+  model override.  Auto-detected by `from_built_providers()` when the ego
+  provider is a CLI variant (ClaudeCli, GeminiCli, CodexCli, GrokCli); upgrades
+  TierBased or EgoPrimary to CliOrchestrator.  Uses a condensed CLI-optimized
+  system prompt via `build_cli_system_prompt()`.
 - Local LLM (Id) is failsafe only — all primary routing goes to cloud (Ego).
   Id activates only when the Ego provider returns an error.
 - Provider status reporting must never claim an Ego provider when the client
