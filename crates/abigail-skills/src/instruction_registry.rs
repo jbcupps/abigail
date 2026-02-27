@@ -152,6 +152,78 @@ impl InstructionRegistry {
         section
     }
 
+    /// Like [`format_for_prompt_filtered`], but with budget limits to cap
+    /// the total injection size. Intended for CLI orchestrator mode where
+    /// prompt size must stay small.
+    ///
+    /// - `max_instructions`: maximum number of instruction files to inject
+    /// - `max_bytes`: cumulative byte cap for all injected instruction content
+    ///
+    /// Matched instructions are sorted by keyword specificity: entries whose
+    /// matching keyword has more words rank higher (multi-word keywords are
+    /// more specific than single-word ones).
+    pub fn format_for_prompt_budgeted(
+        &self,
+        user_message: &str,
+        registered_skill_ids: &HashSet<String>,
+        max_instructions: usize,
+        max_bytes: usize,
+    ) -> String {
+        if max_instructions == 0 || max_bytes == 0 {
+            return String::new();
+        }
+
+        let msg_lower = user_message.to_lowercase();
+        let mut scored: Vec<(&str, &str, usize)> = Vec::new();
+
+        for (id, (entry, content)) in &self.entries {
+            if !registered_skill_ids.contains(id.as_str()) {
+                continue;
+            }
+            // Find the best (most specific) matching keyword
+            let best_specificity = entry
+                .keywords
+                .iter()
+                .filter(|kw| msg_lower.contains(&kw.to_lowercase()))
+                .map(|kw| kw.split_whitespace().count())
+                .max();
+
+            if let Some(specificity) = best_specificity {
+                scored.push((id.as_str(), content.as_str(), specificity));
+            }
+        }
+
+        if scored.is_empty() {
+            return String::new();
+        }
+
+        // Sort by specificity descending (more words = more specific = higher priority)
+        scored.sort_by(|a, b| b.2.cmp(&a.2));
+
+        let mut section = String::from("\n\n## Skill-Specific Instructions\n\n");
+        let header_len = section.len();
+        let mut total_bytes = 0usize;
+
+        for (count, (id, content, _)) in scored.iter().enumerate() {
+            if count >= max_instructions {
+                break;
+            }
+            let entry_text = format!("<!-- skill: {} -->\n{}\n\n", id, content);
+            if total_bytes + entry_text.len() > max_bytes {
+                break;
+            }
+            section.push_str(&entry_text);
+            total_bytes += entry_text.len();
+        }
+
+        // If no entries fit within budget, return empty
+        if section.len() == header_len {
+            return String::new();
+        }
+
+        section
+    }
+
     /// List all loaded entries (for diagnostics).
     pub fn list_entries(&self) -> Vec<&SkillInstructionEntry> {
         self.entries.values().map(|(entry, _)| entry).collect()
@@ -324,6 +396,145 @@ enabled = true
         let registered = HashSet::new();
         let prompt = reg.format_for_prompt_filtered("check email", &registered);
         assert!(prompt.is_empty());
+    }
+
+    #[test]
+    fn test_format_for_prompt_budgeted_limits_count() {
+        let toml = r#"
+[[skill]]
+id = "test.email"
+instruction_file = "email.md"
+keywords = ["email"]
+enabled = true
+
+[[skill]]
+id = "test.calendar"
+instruction_file = "calendar.md"
+keywords = ["email"]
+enabled = true
+
+[[skill]]
+id = "test.search"
+instruction_file = "search.md"
+keywords = ["email"]
+enabled = true
+"#;
+        let (_dir, reg) = setup_registry(
+            "budgeted_limits_count",
+            toml,
+            &[
+                ("email.md", "# Email\nUse fetch_emails."),
+                ("calendar.md", "# Calendar\nUse list_events."),
+                ("search.md", "# Search\nUse web_search."),
+            ],
+        );
+
+        let mut registered = HashSet::new();
+        registered.insert("test.email".to_string());
+        registered.insert("test.calendar".to_string());
+        registered.insert("test.search".to_string());
+
+        // All 3 match on "email", but budget limits to 1
+        let prompt = reg.format_for_prompt_budgeted("check email", &registered, 1, 8192);
+        assert!(prompt.contains("## Skill-Specific Instructions"));
+        // Should contain exactly 1 skill
+        let skill_count = prompt.matches("<!-- skill:").count();
+        assert_eq!(skill_count, 1, "Expected 1 skill, got {}", skill_count);
+    }
+
+    #[test]
+    fn test_format_for_prompt_budgeted_limits_bytes() {
+        let toml = r#"
+[[skill]]
+id = "test.big"
+instruction_file = "big.md"
+keywords = ["data"]
+enabled = true
+
+[[skill]]
+id = "test.small"
+instruction_file = "small.md"
+keywords = ["data"]
+enabled = true
+"#;
+        // big.md is 200 bytes, small.md is tiny
+        let big_content = "x".repeat(200);
+        let (_dir, reg) = setup_registry(
+            "budgeted_limits_bytes",
+            toml,
+            &[("big.md", &big_content), ("small.md", "tiny")],
+        );
+
+        let mut registered = HashSet::new();
+        registered.insert("test.big".to_string());
+        registered.insert("test.small".to_string());
+
+        // Set byte cap to 100 — big.md won't fit but small.md will
+        let prompt = reg.format_for_prompt_budgeted("data query", &registered, 10, 100);
+        let skill_count = prompt.matches("<!-- skill:").count();
+        assert!(
+            skill_count <= 1,
+            "Expected at most 1 skill within byte budget"
+        );
+    }
+
+    #[test]
+    fn test_format_for_prompt_budgeted_specificity_ordering() {
+        let toml = r#"
+[[skill]]
+id = "test.generic"
+instruction_file = "generic.md"
+keywords = ["email"]
+enabled = true
+
+[[skill]]
+id = "test.specific"
+instruction_file = "specific.md"
+keywords = ["check email inbox"]
+enabled = true
+"#;
+        let (_dir, reg) = setup_registry(
+            "budgeted_specificity",
+            toml,
+            &[
+                ("generic.md", "# Generic\nGeneric handler."),
+                ("specific.md", "# Specific\nSpecific handler."),
+            ],
+        );
+
+        let mut registered = HashSet::new();
+        registered.insert("test.generic".to_string());
+        registered.insert("test.specific".to_string());
+
+        // Both match, but limit to 1 — the multi-word keyword should win
+        let prompt = reg.format_for_prompt_budgeted("check email inbox", &registered, 1, 8192);
+        assert!(
+            prompt.contains("test.specific"),
+            "Multi-word keyword should rank higher"
+        );
+    }
+
+    #[test]
+    fn test_format_for_prompt_budgeted_zero_limits() {
+        let toml = r#"
+[[skill]]
+id = "test.email"
+instruction_file = "email.md"
+keywords = ["email"]
+enabled = true
+"#;
+        let (_dir, reg) =
+            setup_registry("budgeted_zero", toml, &[("email.md", "# Email\nContent.")]);
+
+        let mut registered = HashSet::new();
+        registered.insert("test.email".to_string());
+
+        assert!(reg
+            .format_for_prompt_budgeted("email", &registered, 0, 8192)
+            .is_empty());
+        assert!(reg
+            .format_for_prompt_budgeted("email", &registered, 10, 0)
+            .is_empty());
     }
 
     #[test]

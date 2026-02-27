@@ -9,6 +9,7 @@ Operator reference for Abigail's LLM routing system: diagnostics, telemetry inte
 | `tier_based` | Scores message complexity (5–95), maps to Fast/Standard/Pro tier via thresholds | Default; balances cost and quality automatically |
 | `ego_primary` | All queries to the cloud provider using the Standard tier model | Testing a single provider, or when complexity scoring adds no value |
 | `council` | Multi-provider deliberation (draft → critique → synthesis) | High-stakes decisions requiring diverse model perspectives |
+| `cli_orchestrator` | All messages routed to an authenticated CLI tool (Claude Code, Gemini CLI, etc.). Bypasses tier scoring, complexity classification, and model override. | **Auto-detected** when the ego provider is a CLI variant; can also be set explicitly via `--routing-mode CliOrchestrator` |
 
 ## Selection Reasons
 
@@ -22,6 +23,7 @@ Every routing decision records a `selection_reason` explaining why a particular 
 | `setup_intent` | Message matched setup/credential keywords; auto-escalated to Pro |
 | `ego_primary` | EgoPrimary mode; no tier selection applies |
 | `council` | Council mode; multi-provider deliberation |
+| `cli_orchestrator` | CliOrchestrator mode; CLI tool manages model selection |
 | `fallback` | Primary provider failed; response came from fallback provider |
 
 **Override precedence** (highest to lowest):
@@ -39,7 +41,7 @@ The `ExecutionTrace` is the single source of truth for what actually happened du
 | Field | Type | Description |
 |-------|------|-------------|
 | `turn_id` | UUID | Unique identifier for this conversation turn |
-| `routing_mode` | string | Active mode: `tier_based`, `ego_primary`, `council` |
+| `routing_mode` | string | Active mode: `tier_based`, `ego_primary`, `council`, `cli_orchestrator` |
 | `configured_provider` | string? | Provider the router was configured to prefer |
 | `configured_model` | string? | Model resolved by tier/config before execution |
 | `configured_tier` | string? | Tier selected before execution (`fast`/`standard`/`pro`) |
@@ -101,6 +103,30 @@ Example trace with fallback:
 ```
 
 When `fallback_occurred` is true, the configured tier is not meaningful since the response came from a different provider. The UI will not display a tier badge in this case.
+
+Example trace from a CLI orchestrator request:
+```json
+{
+  "routing_mode": "cli_orchestrator",
+  "configured_provider": "claude_cli",
+  "configured_model": null,
+  "configured_tier": null,
+  "complexity_score": null,
+  "selection_reason": "ego_primary",
+  "target_selected": "ego",
+  "steps": [
+    {
+      "provider_label": "claude_cli",
+      "model_requested": null,
+      "result": "success"
+    }
+  ],
+  "final_step_index": 0,
+  "fallback_occurred": false
+}
+```
+
+In CliOrchestrator mode, `configured_tier`, `configured_model`, and `complexity_score` are all `null` because the CLI tool manages its own model selection. The `selection_reason` is `ego_primary` (the CLI tool is treated as the ego provider).
 
 ## Diagnostics
 
@@ -211,6 +237,13 @@ Default thresholds (configurable in `config.json`):
 2. Verify multiple API keys are configured in the Hive
 3. Look for `degraded passthrough` warnings in logs
 4. Council falls back to single-provider ego/id path when insufficient providers
+
+### "CLI provider is using tier-based routing instead of CliOrchestrator"
+
+1. Check logs for `Auto-upgrading routing mode to CliOrchestrator` — this should appear at startup
+2. Verify the ego provider is a CLI variant (`claude_cli`, `gemini_cli`, `codex_cli`, `grok_cli`)
+3. Auto-upgrade only happens for `TierBased` and `EgoPrimary` modes — if `Council` is set, CliOrchestrator is not applied
+4. You can force CliOrchestrator via `--routing-mode CliOrchestrator` on the entity-daemon command line
 
 ### "Provider shows as unconfigured after restart"
 

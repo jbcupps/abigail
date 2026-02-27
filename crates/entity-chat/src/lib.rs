@@ -278,9 +278,14 @@ pub fn augment_system_prompt(
 
 /// Build a CLI-optimized system prompt for CliOrchestrator mode.
 ///
-/// Uses the condensed constitutional docs (soul + ethics + instincts only),
-/// appends the available tools list, and omits verbose operational instructions
-/// since the CLI tool has its own built-in capabilities.
+/// Uses a heavily compressed inline prompt (~1.5 KB) with:
+/// - Extracted personality essence from soul.md
+/// - Condensed ethics block
+/// - Compact tool list (grouped by skill, names only)
+/// - Budgeted instruction injection (max 1 instruction, 2048 bytes)
+///
+/// Full constitutional docs + all matched skill instructions are written to
+/// a temp file so the CLI LLM can lazily read them when needed.
 pub fn build_cli_system_prompt(
     docs_dir: &std::path::Path,
     agent_name: &Option<String>,
@@ -288,32 +293,105 @@ pub fn build_cli_system_prompt(
     instruction_registry: &abigail_skills::InstructionRegistry,
     user_message: &str,
 ) -> String {
-    let mut prompt = abigail_core::system_prompt::build_cli_system_prompt(docs_dir, agent_name);
+    let mut prompt =
+        abigail_core::system_prompt::build_cli_system_prompt_compressed(docs_dir, agent_name);
 
+    // Build compact grouped tool list and collect registered IDs
     let mut registered_ids = HashSet::new();
+    let mut skill_tools: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+
     if let Ok(manifests) = registry.list() {
-        let mut tool_lines = Vec::new();
         for m in &manifests {
             registered_ids.insert(m.id.0.clone());
             if let Ok((skill, _)) = registry.get_skill(&m.id) {
-                for t in skill.tools() {
-                    tool_lines.push(format!("- `{}::{}`: {}", m.id.0, t.name, t.description));
+                let tool_names: Vec<String> =
+                    skill.tools().iter().map(|t| t.name.clone()).collect();
+                if !tool_names.is_empty() {
+                    // Use short skill name (last segment after dots)
+                    let short_name = m.id.0.rsplit('.').next().unwrap_or(&m.id.0).to_string();
+                    skill_tools
+                        .entry(short_name)
+                        .or_default()
+                        .extend(tool_names);
                 }
             }
         }
-        if !tool_lines.is_empty() {
-            prompt.push_str("\n\n## Available Entity Tools\n\n");
-            prompt.push_str(&tool_lines.join("\n"));
+    }
+
+    if !skill_tools.is_empty() {
+        prompt.push_str("\n\n## Entity Tools\n");
+        let mut entries: Vec<_> = skill_tools.into_iter().collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        for (skill_name, tools) in &entries {
+            prompt.push_str(&format!("{}: {}\n", skill_name, tools.join(", ")));
         }
     }
 
-    let skill_section =
-        instruction_registry.format_for_prompt_filtered(user_message, &registered_ids);
+    // Budgeted instruction injection: max 1 instruction, 2048 bytes for CLI mode
+    let skill_section = instruction_registry.format_for_prompt_budgeted(
+        user_message,
+        &registered_ids,
+        1,    // max_instructions
+        2048, // max_bytes
+    );
     if !skill_section.is_empty() {
         prompt.push_str(&skill_section);
     }
 
+    // Write full constitutional docs + all instructions to temp file for lazy loading
+    let spillover = build_cli_spillover_file(
+        docs_dir,
+        instruction_registry,
+        user_message,
+        &registered_ids,
+    );
+    if let Some(path) = spillover {
+        prompt.push_str(&format!(
+            "\n\nDetailed entity instructions are at: {}. Read this file if you need guidance on ethics, tool usage, or skill-specific behavior.\n",
+            path
+        ));
+    }
+
+    tracing::info!("CLI system prompt: {} bytes (compressed)", prompt.len());
+
     prompt
+}
+
+/// Write the full constitutional docs and all matched skill instructions to
+/// a temp file for lazy loading by the CLI LLM.
+///
+/// Returns the file path if successful, or `None` on failure.
+fn build_cli_spillover_file(
+    docs_dir: &std::path::Path,
+    instruction_registry: &abigail_skills::InstructionRegistry,
+    user_message: &str,
+    registered_ids: &HashSet<String>,
+) -> Option<String> {
+    let mut doc = abigail_core::system_prompt::build_cli_spillover_document(docs_dir);
+
+    // Append all matched instructions (unbudgeted — this is the full reference)
+    let all_instructions =
+        instruction_registry.format_for_prompt_filtered(user_message, registered_ids);
+    if !all_instructions.is_empty() {
+        doc.push_str(&all_instructions);
+    }
+
+    let path = std::env::temp_dir().join("abigail_entity_context.md");
+    match std::fs::write(&path, &doc) {
+        Ok(()) => {
+            tracing::debug!(
+                "Wrote CLI spillover file: {} ({} bytes)",
+                path.display(),
+                doc.len()
+            );
+            Some(path.to_string_lossy().to_string())
+        }
+        Err(e) => {
+            tracing::warn!("Failed to write CLI spillover file: {}", e);
+            None
+        }
+    }
 }
 
 /// Convert all registered skill tools into LLM-native `ToolDefinition`s.
