@@ -97,6 +97,7 @@ pub struct ConfigureEmailRequest {
 pub struct ChatRequest {
     pub message: String,
     /// Optional target: "EGO" (default), "ID", or "AUTO"
+    #[allow(dead_code)]
     pub target: Option<String>,
     /// Optional prior messages for multi-turn context.
     pub session_messages: Option<Vec<entity_core::SessionMessage>>,

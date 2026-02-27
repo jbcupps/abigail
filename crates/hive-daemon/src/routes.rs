@@ -143,7 +143,7 @@ pub async fn get_provider_config(
             tier_threshold_fast_ceiling: Some(hive_config.tier_thresholds.fast_ceiling),
             tier_threshold_pro_floor: Some(hive_config.tier_thresholds.pro_floor),
             force_override_json: serde_json::to_string(&hive_config.force_override).ok(),
-            cli_permission_mode: serde_json::to_value(&hive_config.cli_permission_mode)
+            cli_permission_mode: serde_json::to_value(hive_config.cli_permission_mode)
                 .ok()
                 .and_then(|v| v.as_str().map(String::from)),
         })),
