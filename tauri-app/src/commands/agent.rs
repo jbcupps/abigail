@@ -53,10 +53,9 @@ pub async fn delegate_to_subagent(
             .route_with_tools(messages, vec![])
             .await
             .map_err(|e| e.to_string())?,
-        abigail_router::SubagentProvider::SameAsId => router
-            .route(messages)
-            .await
-            .map_err(|e| e.to_string())?,
+        abigail_router::SubagentProvider::SameAsId => {
+            router.route(messages).await.map_err(|e| e.to_string())?
+        }
         abigail_router::SubagentProvider::Custom(_, _) => router
             .route_with_tools(messages, vec![])
             .await

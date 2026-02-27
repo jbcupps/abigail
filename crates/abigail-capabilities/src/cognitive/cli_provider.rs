@@ -4,8 +4,8 @@
 //! as a subprocess and captures its stdout as the completion response. This lets users route
 //! Ego queries through any installed CLI tool using their existing API keys.
 
-use abigail_core::CliPermissionMode;
 use crate::cognitive::provider::{CompletionRequest, CompletionResponse, LlmProvider};
+use abigail_core::CliPermissionMode;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;

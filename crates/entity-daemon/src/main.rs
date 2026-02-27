@@ -99,7 +99,9 @@ async fn main() -> anyhow::Result<()> {
     let cli_permission_mode = provider_config
         .cli_permission_mode
         .as_deref()
-        .and_then(|s| serde_json::from_str::<abigail_core::CliPermissionMode>(&format!("\"{s}\"")).ok())
+        .and_then(|s| {
+            serde_json::from_str::<abigail_core::CliPermissionMode>(&format!("\"{s}\"")).ok()
+        })
         .unwrap_or_default();
 
     let hive_config = abigail_hive::HiveConfig {

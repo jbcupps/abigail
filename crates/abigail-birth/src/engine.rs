@@ -137,8 +137,7 @@ impl BirthChatEngine {
         provider: Option<&dyn LlmProvider>,
         message: &str,
     ) -> anyhow::Result<BirthChatResult> {
-        let availability =
-            Self::classify_availability(provider, &[]);
+        let availability = Self::classify_availability(provider, &[]);
 
         let Some(provider) = provider else {
             let result = BirthChatResult {
@@ -271,10 +270,7 @@ impl BirthChatEngine {
         let mut actions = Vec::new();
         let lower = content.to_lowercase();
 
-        if lower.contains("saved")
-            || lower.contains("stored")
-            || lower.contains("added")
-        {
+        if lower.contains("saved") || lower.contains("stored") || lower.contains("added") {
             let providers = [
                 "openai",
                 "anthropic",
@@ -340,9 +336,8 @@ mod tests {
 
     #[test]
     fn test_detect_actions_key_stored() {
-        let actions = BirthChatEngine::detect_actions(
-            "Your OpenAI key has been saved successfully!",
-        );
+        let actions =
+            BirthChatEngine::detect_actions("Your OpenAI key has been saved successfully!");
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].action_type, BirthActionType::KeyStored);
         assert_eq!(actions[0].provider, Some("openai".to_string()));
@@ -365,10 +360,7 @@ mod tests {
     #[tokio::test]
     async fn test_process_message_no_provider() {
         let mut engine = BirthChatEngine::new(BirthStage::Connectivity, vec![]);
-        let result = engine
-            .process_message(None, "hello", &[])
-            .await
-            .unwrap();
+        let result = engine.process_message(None, "hello", &[]).await.unwrap();
         assert_eq!(result.llm_availability, LlmAvailability::None);
         assert!(!result.message.is_empty());
         assert_eq!(engine.conversation().len(), 2);
@@ -377,10 +369,7 @@ mod tests {
     #[tokio::test]
     async fn test_genesis_no_provider() {
         let mut engine = BirthChatEngine::new(BirthStage::Crystallization, vec![]);
-        let result = engine
-            .process_genesis_message(None, "hello")
-            .await
-            .unwrap();
+        let result = engine.process_genesis_message(None, "hello").await.unwrap();
         assert_eq!(result.llm_availability, LlmAvailability::None);
         assert!(result.message.contains("cloud provider"));
     }

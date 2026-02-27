@@ -11,12 +11,12 @@ pub mod provider;
 pub mod types;
 pub mod validation;
 
+pub use abigail_core::CliPermissionMode;
 pub use anthropic::AnthropicProvider;
 pub use candle::CandleProvider;
 pub use cli_provider::{
     detect_all_cli_providers, CliDetectionResult, CliLlmProvider, CliVariant, ALL_CLI_VARIANTS,
 };
-pub use abigail_core::CliPermissionMode;
 pub use download::ModelDownloader;
 pub use local_http::{stub_heartbeat, LocalHttpProvider};
 pub use openai::OpenAiProvider;

@@ -811,6 +811,14 @@ impl AppConfig {
             tracing::debug!("Migrated config from v18 to v19 (last_provider_change_at)");
         }
 
+        // Migration from v19 to v20
+        if self.schema_version < 20 {
+            // v20 adds: cli_permission_mode (defaults via serde).
+            self.schema_version = 20;
+            migrated = true;
+            tracing::debug!("Migrated config from v19 to v20 (cli_permission_mode)");
+        }
+
         migrated
     }
     /// Check if birth was interrupted (birth_stage set but birth_complete is false).
@@ -1228,6 +1236,16 @@ mod tests {
         assert!(config.migrate());
         assert_eq!(config.schema_version, CONFIG_SCHEMA_VERSION);
         assert!(config.last_provider_change_at.is_none());
+    }
+
+    #[test]
+    fn test_migrate_v19_to_v20() {
+        let mut config = AppConfig::default_paths();
+        config.schema_version = 19;
+
+        assert!(config.migrate());
+        assert_eq!(config.schema_version, CONFIG_SCHEMA_VERSION);
+        assert_eq!(config.cli_permission_mode, CliPermissionMode::default());
     }
 
     #[test]

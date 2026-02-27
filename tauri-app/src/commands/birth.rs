@@ -775,8 +775,11 @@ pub async fn birth_chat(
     let stored_providers: Vec<String> = {
         let local = state.secrets.lock().map_err(|e| e.to_string())?;
         let hive = state.hive_secrets.lock().map_err(|e| e.to_string())?;
-        let mut providers: Vec<String> =
-            local.list_providers().into_iter().map(String::from).collect();
+        let mut providers: Vec<String> = local
+            .list_providers()
+            .into_iter()
+            .map(String::from)
+            .collect();
         providers.extend(hive.list_providers().into_iter().map(String::from));
         providers
     };
@@ -790,11 +793,7 @@ pub async fn birth_chat(
     // Delegate to BirthChatEngine
     let mut engine = abigail_birth::BirthChatEngine::new(stage, history);
     let result = engine
-        .process_message(
-            provider.as_deref(),
-            &processed_message,
-            &stored_providers,
-        )
+        .process_message(provider.as_deref(), &processed_message, &stored_providers)
         .await
         .map_err(|e| e.to_string())?;
 

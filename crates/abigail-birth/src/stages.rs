@@ -95,11 +95,10 @@ impl BirthOrchestrator {
         }
 
         // Restore conversation from a previous interrupted birth, if any.
-        let conversation_history =
-            match crate::persistence::load_conversation(&config.data_dir) {
-                Ok(Some((_stage, messages))) => messages,
-                _ => Vec::new(),
-            };
+        let conversation_history = match crate::persistence::load_conversation(&config.data_dir) {
+            Ok(Some((_stage, messages))) => messages,
+            _ => Vec::new(),
+        };
 
         Ok(Self {
             config,
