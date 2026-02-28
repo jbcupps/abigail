@@ -426,17 +426,12 @@ pub fn get_stored_providers(state: State<AppState>) -> Result<Vec<String>, Strin
         .map(|s| s.to_string())
         .collect();
 
-    // CLI tools that are installed and authenticated don't need vault secrets.
-    // Include them so the UI shows them as available.
-    let cli_tools: &[(&str, &str)] = &[
-        ("claude-cli", "claude"),
-        ("gemini-cli", "gemini"),
-        ("codex-cli", "codex"),
-        ("grok-cli", "grok"),
-    ];
-    for (provider, binary) in cli_tools {
-        if !providers.contains(&provider.to_string()) && abigail_hive::is_binary_on_path(binary) {
-            providers.push(provider.to_string());
+    // Include the explicitly-activated provider (e.g. a CLI tool selected by the
+    // user) so it appears in the stored-providers list even without a vault secret.
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    if let Some(ref active) = config.active_provider_preference {
+        if !providers.contains(active) {
+            providers.push(active.clone());
         }
     }
 

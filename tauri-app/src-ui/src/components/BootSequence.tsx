@@ -318,23 +318,9 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     setError("");
     setActiveApiKeyProvider(null);
     if (result && result.success) {
-      setStoredProviders((prev) => {
-        const next = [...prev];
-        if (!next.includes(result.provider)) {
-          next.push(result.provider);
-        }
-        
-        // Auto-add linked providers
-        const mapping: Record<string, string> = {
-          "openai": "codex-cli", "anthropic": "claude-cli", "google": "gemini-cli", "xai": "grok-cli",
-          "codex-cli": "openai", "claude-cli": "anthropic", "gemini-cli": "google", "grok-cli": "xai"
-        };
-        const linked = mapping[result.provider];
-        if (linked && !next.includes(linked)) {
-          next.push(linked);
-        }
-        return next;
-      });
+      setStoredProviders((prev) =>
+        prev.includes(result.provider) ? prev : [...prev, result.provider]
+      );
       
       // Inject message into BirthChat with safety check
       if (birthChatRef.current) {
