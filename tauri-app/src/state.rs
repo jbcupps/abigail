@@ -6,6 +6,7 @@ use abigail_auth::AuthManager;
 use abigail_birth::BirthOrchestrator;
 use abigail_core::{AppConfig, SecretsVault};
 use abigail_hive::{Hive, ModelRegistry};
+use abigail_memory::MemoryStore;
 use abigail_router::{IdEgoRouter, SubagentManager};
 use abigail_skills::channel::EventBus;
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
@@ -53,6 +54,8 @@ pub struct AppState {
     pub auth_manager: Arc<AuthManager>,
     /// Identity manager for the Hive multi-agent system
     pub identity_manager: Arc<IdentityManager>,
+    /// Shared SQLite memory store for chat persistence and memory queries
+    pub memory: Arc<MemoryStore>,
     /// Currently active agent UUID (None if no agent loaded)
     pub active_agent_id: RwLock<Option<String>>,
     /// Subagent manager for delegating tasks to specialized subagents

@@ -717,9 +717,41 @@ async fn execute_single_tool_call(
             for (k, v) in obj {
                 tp.values.insert(k, v);
             }
+            tracing::debug!(
+                "Parsed tool params for {}::{}: keys={:?}",
+                skill_id_str,
+                tool_name,
+                tp.values.keys().collect::<Vec<_>>()
+            );
             tp
         }
-        _ => ToolParams::new(),
+        Ok(other) => {
+            tracing::warn!(
+                "Tool {}::{} arguments parsed as non-object JSON (type: {}), using empty params. Raw: {}",
+                skill_id_str,
+                tool_name,
+                match &other {
+                    serde_json::Value::Null => "null",
+                    serde_json::Value::Bool(_) => "bool",
+                    serde_json::Value::Number(_) => "number",
+                    serde_json::Value::String(_) => "string",
+                    serde_json::Value::Array(_) => "array",
+                    _ => "unknown",
+                },
+                &tc.arguments.chars().take(200).collect::<String>()
+            );
+            ToolParams::new()
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Tool {}::{} arguments JSON parse failed: {}. Raw (first 200 chars): {}",
+                skill_id_str,
+                tool_name,
+                e,
+                &tc.arguments.chars().take(200).collect::<String>()
+            );
+            ToolParams::new()
+        }
     };
 
     tracing::info!("Executing tool: {}::{}", skill_id_str, tool_name);

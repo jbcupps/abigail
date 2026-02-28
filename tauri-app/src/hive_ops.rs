@@ -125,9 +125,42 @@ impl HiveOperations for TauriHiveOps {
         };
         crate::commands::skills::validate_secret_namespace_with(&state.registry, &data_dir, key)?;
 
-        let mut vault = state.skills_secrets.lock().map_err(|e| e.to_string())?;
-        vault.set_secret(key, value);
-        vault.save().map_err(|e| e.to_string())
+        {
+            let mut vault = state.skills_secrets.lock().map_err(|e| e.to_string())?;
+            vault.set_secret(key, value);
+            vault.save().map_err(|e| e.to_string())?;
+        }
+
+        // Re-initialize Proton Mail skill when IMAP-related secrets change,
+        // matching the same logic in the Tauri `store_secret` command.
+        const IMAP_SECRET_KEYS: &[&str] = &[
+            "imap_password",
+            "imap_user",
+            "imap_host",
+            "imap_port",
+            "imap_tls_mode",
+        ];
+
+        if IMAP_SECRET_KEYS.contains(&key) {
+            match crate::create_proton_mail_skill_for_registry(&state) {
+                Ok(skill) => {
+                    let skill_id = skill_proton_mail::ProtonMailSkill::default_manifest()
+                        .id
+                        .clone();
+                    let _ = state.registry.unregister(&skill_id);
+                    if let Err(e) = state.registry.register(skill_id, skill) {
+                        tracing::warn!("Proton Mail re-register after secret store failed: {}", e);
+                    } else {
+                        tracing::info!("Proton Mail skill re-initialized after secret update");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Proton Mail reinit after secret store failed: {}", e);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     async fn get_skill_secret_names(&self) -> Result<Vec<String>, String> {

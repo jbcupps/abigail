@@ -464,7 +464,8 @@ impl Skill for FilesystemSkill {
                 let path: String = params.get("path").ok_or_else(|| {
                     SkillError::ToolFailed("Missing required parameter: path".to_string())
                 })?;
-                let content: String = params.get("content").ok_or_else(|| {
+                // Use lenient getter — LLMs sometimes send content as non-string JSON
+                let content: String = params.get_string("content").ok_or_else(|| {
                     SkillError::ToolFailed("Missing required parameter: content".to_string())
                 })?;
                 self.write_file(&path, &content)

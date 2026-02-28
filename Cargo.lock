@@ -198,6 +198,7 @@ dependencies = [
  "chrono",
  "ed25519-dalek",
  "serde",
+ "serde_json",
  "tracing",
  "uuid",
 ]

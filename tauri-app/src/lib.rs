@@ -30,6 +30,7 @@ use crate::state::AppState;
 use abigail_auth::AuthManager;
 use abigail_core::{validate_local_llm_url, AppConfig, SecretsVault};
 use abigail_hive::{Hive, ModelRegistry};
+use abigail_memory::MemoryStore;
 use abigail_router::{IdEgoRouter, SubagentManager};
 use abigail_skills::channel::EventBus;
 use abigail_skills::protocol::mcp::McpSkillRuntime;
@@ -330,6 +331,10 @@ pub fn run() {
         .expect("Failed to init HttpClientCapability"),
     ));
 
+    // Open shared MemoryStore for chat persistence and memory queries.
+    let memory =
+        Arc::new(MemoryStore::open_with_config(&config).expect("Failed to open MemoryStore"));
+
     // Seed skill instructions into data_dir when absent (first run / clean install).
     skill_instructions::bootstrap_if_needed(&data_dir);
 
@@ -346,6 +351,7 @@ pub fn run() {
         hive,
         auth_manager,
         identity_manager,
+        memory,
         active_agent_id: RwLock::new(None),
         subagent_manager,
         browser,
@@ -593,6 +599,10 @@ pub fn run() {
             reset_birth,
             delete_agent_identity,
             archive_agent_identity,
+            backup_agent_identity,
+            list_backups,
+            restore_from_backup,
+            delete_backup,
             disconnect_agent,
             suspend_agent,
             save_recovery_key,

@@ -90,9 +90,41 @@ impl ToolParams {
     }
 
     pub fn get<T: for<'de> Deserialize<'de>>(&self, key: &str) -> Option<T> {
-        self.values
-            .get(key)
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
+        self.values.get(key).and_then(|v| {
+            serde_json::from_value(v.clone())
+                .map_err(|e| {
+                    tracing::warn!(
+                        "ToolParams::get(\"{}\") deserialization failed: {} (value type: {})",
+                        key,
+                        e,
+                        match v {
+                            serde_json::Value::Null => "null",
+                            serde_json::Value::Bool(_) => "bool",
+                            serde_json::Value::Number(_) => "number",
+                            serde_json::Value::String(_) => "string",
+                            serde_json::Value::Array(_) => "array",
+                            serde_json::Value::Object(_) => "object",
+                        }
+                    );
+                    e
+                })
+                .ok()
+        })
+    }
+
+    /// Leniently extract a string value, converting non-string JSON types:
+    /// - `String` → returned as-is
+    /// - `Number` / `Bool` → `.to_string()`
+    /// - `Object` / `Array` → JSON-serialized string
+    /// - `Null` → `None`
+    pub fn get_string(&self, key: &str) -> Option<String> {
+        self.values.get(key).and_then(|v| match v {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Null => None,
+            serde_json::Value::Number(n) => Some(n.to_string()),
+            serde_json::Value::Bool(b) => Some(b.to_string()),
+            other => Some(other.to_string()),
+        })
     }
 }
 
