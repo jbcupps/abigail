@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-28 01:00 EST: Ignition page auto-detects all providers on mount, highlights available tabs with green indicators, auto-focuses sole available option, remove redundant CLI Tools footer
 - 2026-02-28 00:30 EST: Compress CLI system prompt (~15-41KB → ~1.5KB) with temp file spillover, budgeted instruction injection (max 1 / 2048 bytes for CLI), compact grouped tool list, and reduced max-turns to 5
 - 2026-02-27 23:15 EST: Update docs for CliOrchestrator auto-detection, remove stale --allowedTools refs, mark completed Phase 2a/2c roadmap items, fix CliPermissionMode doc comments
 - 2026-02-27 22:30 EST: Fix intermittent CLI spawn OS error 206 on Windows — replace broken --allowedTools args (entity tool names, not CLI tool names) with --dangerously-skip-permissions, auto-detect CliOrchestrator routing mode for CLI providers to skip meaningless tier scoring/complexity classification

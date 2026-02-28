@@ -74,6 +74,12 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
   const [cliDetections, setCliDetections] = useState<CliDetection[]>([]);
   const [cliProbing, setCliProbing] = useState(false);
   const [activatingCli, setActivatingCli] = useState(false);
+  const [initialProbeComplete, setInitialProbeComplete] = useState(false);
+
+  // Which sources have something available
+  const ollamaAvailable = ollama !== null && ollama.status !== "not_found";
+  const lmStudioAvailable = detected.some(d => d.reachable);
+  const cliAvailable = cliDetections.some(d => d.on_path);
 
   useEffect(() => {
     let unlistenInstall: (() => void) | null = null;
@@ -103,16 +109,74 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
     };
   }, []);
 
+  // Probe all three sources on mount, then auto-select the best available tab
   useEffect(() => {
-    if (mode === "ollama") {
-      probeOllama();
-    } else if (mode === "lmstudio") {
-      if (!manualUrl) setManualUrl("http://localhost:1234");
-      probeLmStudio();
-    } else {
-      probeCli();
-    }
-  }, [mode]);
+    let cancelled = false;
+    const probeAll = async () => {
+      setProbing(true);
+      setCliProbing(true);
+
+      const [ollamaResult, lmResult, cliResult] = await Promise.allSettled([
+        Promise.all([
+          invoke<OllamaDetection>("detect_ollama"),
+          invoke<RecommendedModel[]>("list_recommended_models"),
+        ]),
+        invoke<ProbeResult>("probe_local_llm"),
+        invoke<CliDetection[]>("detect_cli_providers_full"),
+      ]);
+
+      if (cancelled) return;
+
+      // Apply ollama results
+      if (ollamaResult.status === "fulfilled") {
+        const [detection, models] = ollamaResult.value;
+        setOllama(detection);
+        setRecommendedModels(models);
+        const defaultModel = models.find((m) => m.recommended)?.name ?? models[0]?.name ?? "";
+        setSelectedModel(defaultModel);
+      }
+
+      // Apply LM Studio results
+      if (lmResult.status === "fulfilled") {
+        setDetected(lmResult.value.detected);
+        if (lmResult.value.detected.length > 0) {
+          setManualUrl(lmResult.value.detected[0].url);
+        } else {
+          setManualUrl("http://localhost:1234");
+        }
+      }
+
+      // Apply CLI results
+      if (cliResult.status === "fulfilled") {
+        setCliDetections(cliResult.value);
+      }
+
+      setProbing(false);
+      setCliProbing(false);
+
+      // Auto-select the best available tab
+      const hasOllama = ollamaResult.status === "fulfilled" && ollamaResult.value[0].status !== "not_found";
+      const hasLm = lmResult.status === "fulfilled" && lmResult.value.detected.some(d => d.reachable);
+      const hasCli = cliResult.status === "fulfilled" && cliResult.value.some(d => d.on_path);
+
+      const available: ("ollama" | "lmstudio" | "cli")[] = [];
+      if (hasOllama) available.push("ollama");
+      if (hasLm) available.push("lmstudio");
+      if (hasCli) available.push("cli");
+
+      if (available.length === 1) {
+        setMode(available[0]);
+      } else if (available.length > 0) {
+        setMode(available[0]);
+      }
+      // If nothing detected, stay on "ollama" (the default)
+
+      setInitialProbeComplete(true);
+    };
+
+    probeAll();
+    return () => { cancelled = true; };
+  }, []);
 
   const formatBytes = (value?: number) => {
     if (!value || value <= 0) return "0 B";
@@ -276,33 +340,29 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
       </p>
 
       <div className="flex gap-2 mb-6">
-        <button
-          className={`px-3 py-2 rounded border text-sm ${mode === "ollama"
-            ? "border-theme-primary text-theme-text"
-            : "border-theme-border-dim text-theme-text-dim hover:border-theme-primary"}`}
-          onClick={() => setMode("ollama")}
-          disabled={installing || pullingModel || connecting || activatingCli}
-        >
-          Ollama (guided)
-        </button>
-        <button
-          className={`px-3 py-2 rounded border text-sm ${mode === "lmstudio"
-            ? "border-theme-primary text-theme-text"
-            : "border-theme-border-dim text-theme-text-dim hover:border-theme-primary"}`}
-          onClick={() => setMode("lmstudio")}
-          disabled={installing || pullingModel || connecting || activatingCli}
-        >
-          LM Studio / Custom URL
-        </button>
-        <button
-          className={`px-3 py-2 rounded border text-sm ${mode === "cli"
-            ? "border-theme-primary text-theme-text"
-            : "border-theme-border-dim text-theme-text-dim hover:border-theme-primary"}`}
-          onClick={() => setMode("cli")}
-          disabled={installing || pullingModel || connecting || activatingCli}
-        >
-          CLI Quick-Start
-        </button>
+        {([
+          { key: "ollama" as const, label: "Ollama (guided)", available: ollamaAvailable },
+          { key: "lmstudio" as const, label: "LM Studio / Custom URL", available: lmStudioAvailable },
+          { key: "cli" as const, label: "CLI Quick-Start", available: cliAvailable },
+        ]).map(({ key, label, available }) => (
+          <button
+            key={key}
+            className={`px-3 py-2 rounded border text-sm transition-all ${
+              mode === key
+                ? "border-theme-primary text-theme-text"
+                : initialProbeComplete && available
+                  ? "border-green-600 text-theme-text hover:border-theme-primary bg-green-950/10"
+                  : "border-theme-border-dim text-theme-text-dim hover:border-theme-primary"
+            }`}
+            onClick={() => setMode(key)}
+            disabled={installing || pullingModel || connecting || activatingCli}
+          >
+            {label}
+            {initialProbeComplete && available && mode !== key && (
+              <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-green-500" />
+            )}
+          </button>
+        ))}
       </div>
 
       {mode === "ollama" && probing && (
@@ -601,21 +661,6 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
               The server is running, proceed anyway
             </button>
           )}
-        </div>
-      )}
-
-      {mode !== "cli" && (
-        <div className="mt-6 pt-4 border-t border-theme-border-dim">
-          <p className="text-theme-primary-dim text-sm mb-2">CLI Tools (optional)</p>
-          <p className="text-theme-text-dim text-xs mb-3">
-            Have an authenticated CLI? Use the CLI Quick-Start tab above.
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            <a className="block text-theme-text-dim text-xs hover:text-theme-primary-dim" href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noreferrer">Claude Code</a>
-            <a className="block text-theme-text-dim text-xs hover:text-theme-primary-dim" href="https://github.com/google-gemini/gemini-cli" target="_blank" rel="noreferrer">Gemini CLI</a>
-            <a className="block text-theme-text-dim text-xs hover:text-theme-primary-dim" href="https://github.com/openai/codex" target="_blank" rel="noreferrer">Codex CLI</a>
-            <a className="block text-theme-text-dim text-xs hover:text-theme-primary-dim" href="https://docs.x.ai/docs/grok-cli" target="_blank" rel="noreferrer">Grok CLI</a>
-          </div>
         </div>
       )}
 
