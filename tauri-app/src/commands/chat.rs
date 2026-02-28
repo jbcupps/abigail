@@ -8,6 +8,7 @@
 use crate::state::AppState;
 use abigail_capabilities::cognitive::StreamEvent;
 use abigail_core::key_detection::{detect_api_keys, CLI_ALIASES};
+use abigail_memory::ConversationTurn;
 use entity_core::{ChatResponse, SessionMessage};
 use tauri::{Emitter, State};
 
@@ -67,9 +68,18 @@ pub async fn chat(
     message: String,
     target: Option<String>,
     session_messages: Option<Vec<SessionMessage>>,
+    session_id: Option<String>,
 ) -> Result<String, String> {
+    let session_id = session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
     // 1. Auto-detect and store API keys (Tauri-specific pre-hook, GUI only)
     auto_detect_and_store_key_internal(&state, &message).await;
+
+    // 1b. Archive user turn (non-fatal)
+    let user_turn = ConversationTurn::new(&session_id, "user", &message);
+    if let Err(e) = state.memory.insert_turn(&user_turn) {
+        tracing::warn!("Failed to archive user turn: {}", e);
+    }
 
     // 2. Build system prompt + router snapshot with runtime context
     let (router, system_prompt) = {
@@ -149,6 +159,18 @@ pub async fn chat(
                 .map(|s| s.to_string())
                 .or_else(|| Some(entity_chat::provider_label(&router)));
 
+            // Archive assistant turn (non-fatal)
+            let asst_turn = ConversationTurn::new(&session_id, "assistant", &tool_result.content)
+                .with_metadata(
+                    provider.clone(),
+                    model_used.clone(),
+                    tier.clone(),
+                    complexity_score,
+                );
+            if let Err(e) = state.memory.insert_turn(&asst_turn) {
+                tracing::warn!("Failed to archive assistant turn: {}", e);
+            }
+
             let response = ChatResponse {
                 reply: tool_result.content,
                 provider,
@@ -157,7 +179,7 @@ pub async fn chat(
                 model_used,
                 complexity_score,
                 execution_trace: tool_result.execution_trace,
-                session_id: None,
+                session_id: Some(session_id),
             };
             serde_json::to_string(&response).map_err(|e| e.to_string())
         }
@@ -183,8 +205,15 @@ pub async fn chat_stream(
     session_messages: Option<Vec<SessionMessage>>,
     session_id: Option<String>,
 ) -> Result<(), String> {
-    let _ = session_id; // Passed from frontend for future session-scoped memory/logging
+    let session_id = session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
     auto_detect_and_store_key_internal(&state, &message).await;
+
+    // Archive user turn (non-fatal)
+    let user_turn = ConversationTurn::new(&session_id, "user", &message);
+    if let Err(e) = state.memory.insert_turn(&user_turn) {
+        tracing::warn!("Failed to archive user turn: {}", e);
+    }
 
     let (router, system_prompt) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
@@ -273,6 +302,18 @@ pub async fn chat_stream(
                 .map(|s| s.to_string())
                 .or_else(|| Some(entity_chat::provider_label(&router)));
 
+            // Archive assistant turn (non-fatal)
+            let asst_turn = ConversationTurn::new(&session_id, "assistant", &pipeline.content)
+                .with_metadata(
+                    provider.clone(),
+                    model_used.clone(),
+                    tier.clone(),
+                    complexity_score,
+                );
+            if let Err(e) = state.memory.insert_turn(&asst_turn) {
+                tracing::warn!("Failed to archive assistant turn: {}", e);
+            }
+
             let response = ChatResponse {
                 reply: pipeline.content,
                 provider,
@@ -281,7 +322,7 @@ pub async fn chat_stream(
                 model_used,
                 complexity_score,
                 execution_trace: pipeline.execution_trace,
-                session_id: None,
+                session_id: Some(session_id),
             };
             let _ = app.emit("chat-done", &response);
         }

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
+import ConfirmationModal from "./ConfirmationModal";
 
 interface SoulIdentityInfo {
   id: string;
@@ -10,6 +11,23 @@ interface SoulIdentityInfo {
   primary_color?: string | null;
   avatar_url?: string | null;
 }
+
+interface BackupInfo {
+  directory_name: string;
+  directory_path: string;
+  agent_name: string;
+  backup_type: string;
+  created_at: string;
+  birth_complete: boolean;
+  birth_date: string | null;
+  has_memories: boolean;
+  has_signatures: boolean;
+}
+
+type ConfirmAction =
+  | { type: "delete"; soul: SoulIdentityInfo }
+  | { type: "archive"; soul: SoulIdentityInfo }
+  | { type: "delete_backup"; backup: BackupInfo };
 
 interface SoulRegistryProps {
   onSoulSelected: (soulId: string) => void;
@@ -26,6 +44,11 @@ export default function SoulRegistry({
   const [birthing, setBirthing] = useState(false);
   const [newSoulName, setNewSoulName] = useState("");
   const [migrating, setMigrating] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [backups, setBackups] = useState<BackupInfo[]>([]);
+  const [showRecoverPanel, setShowRecoverPanel] = useState(false);
+  const [restoring, setRestoring] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   const fetchSouls = async () => {
@@ -43,6 +66,17 @@ export default function SoulRegistry({
     }
   };
 
+  const fetchBackups = async () => {
+    try {
+      const list = await invoke<BackupInfo[]>("list_backups");
+      if (!mountedRef.current) return;
+      setBackups(list);
+    } catch (e) {
+      if (!mountedRef.current) return;
+      setError(String(e));
+    }
+  };
+
   useEffect(() => {
     mountedRef.current = true;
     fetchSouls();
@@ -50,6 +84,10 @@ export default function SoulRegistry({
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (showRecoverPanel) fetchBackups();
+  }, [showRecoverPanel]);
 
   const handleBirthSoul = async () => {
     if (!newSoulName.trim()) return;
@@ -62,7 +100,6 @@ export default function SoulRegistry({
       if (!mountedRef.current) return;
       setNewSoulName("");
       setBirthing(false);
-      // Load the new entity and go to birth ceremony
       await invoke("load_agent", { agentId: uuid });
       if (!mountedRef.current) return;
       onNewSoul(uuid);
@@ -84,30 +121,52 @@ export default function SoulRegistry({
     }
   };
 
-  const handleDeleteSoul = async (e: React.MouseEvent, soul: SoulIdentityInfo) => {
+  const handleBackupSoul = async (e: React.MouseEvent, soul: SoulIdentityInfo) => {
     e.stopPropagation();
-    if (!confirm(`Are you sure you want to delete "${soul.name}"? This action cannot be undone.`)) {
-      return;
-    }
-
     try {
-      await invoke("delete_agent_identity", { agentId: soul.id });
-      await fetchSouls();
+      await invoke<string>("backup_agent_identity", { agentId: soul.id });
+      if (!mountedRef.current) return;
+      setError(null);
     } catch (e) {
+      if (!mountedRef.current) return;
       setError(String(e));
     }
   };
 
-  const handleArchiveSoul = async (e: React.MouseEvent, soul: SoulIdentityInfo) => {
-    e.stopPropagation();
-    if (!confirm(`Archive "${soul.name}" to backups? You can restore manually later.`)) {
-      return;
-    }
+  const handleConfirm = async () => {
+    if (!confirmAction) return;
+    setConfirmLoading(true);
     try {
-      await invoke("archive_agent_identity", { agentId: soul.id });
-      await fetchSouls();
+      if (confirmAction.type === "delete") {
+        await invoke("delete_agent_identity", { agentId: confirmAction.soul.id });
+        await fetchSouls();
+      } else if (confirmAction.type === "archive") {
+        await invoke("archive_agent_identity", { agentId: confirmAction.soul.id });
+        await fetchSouls();
+      } else if (confirmAction.type === "delete_backup") {
+        await invoke("delete_backup", { backupDirName: confirmAction.backup.directory_name });
+        await fetchBackups();
+      }
     } catch (e) {
       setError(String(e));
+    } finally {
+      setConfirmLoading(false);
+      setConfirmAction(null);
+    }
+  };
+
+  const handleRestoreBackup = async (backup: BackupInfo) => {
+    setRestoring(backup.directory_name);
+    try {
+      await invoke<string>("restore_from_backup", { backupDirName: backup.directory_name });
+      if (!mountedRef.current) return;
+      await fetchSouls();
+      await fetchBackups();
+    } catch (e) {
+      if (!mountedRef.current) return;
+      setError(String(e));
+    } finally {
+      if (mountedRef.current) setRestoring(null);
     }
   };
 
@@ -126,6 +185,21 @@ export default function SoulRegistry({
     }
   };
 
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return "Unknown";
+    try {
+      return new Date(dateStr).toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-theme-bg text-theme-text-dim font-mono flex items-center justify-center">
@@ -133,6 +207,44 @@ export default function SoulRegistry({
       </div>
     );
   }
+
+  // Confirmation modal
+  const confirmModal = confirmAction && (
+    <ConfirmationModal
+      title={
+        confirmAction.type === "delete"
+          ? `Delete "${confirmAction.soul.name}"?`
+          : confirmAction.type === "archive"
+            ? `Archive "${confirmAction.soul.name}"?`
+            : `Delete backup "${confirmAction.backup.agent_name}"?`
+      }
+      message={
+        confirmAction.type === "delete"
+          ? "This will permanently destroy all data, memories, keys, and constitutional documents. This cannot be undone."
+          : confirmAction.type === "archive"
+            ? "This entity will be moved to backups and removed from the active registry. You can restore it later from the recovery panel."
+            : "This backup will be permanently deleted. This cannot be undone."
+      }
+      detail={
+        confirmAction.type === "delete"
+          ? "Use Archive instead to preserve the data."
+          : undefined
+      }
+      confirmLabel={
+        confirmAction.type === "delete" || confirmAction.type === "delete_backup"
+          ? "Delete permanently"
+          : "Archive"
+      }
+      variant={
+        confirmAction.type === "delete" || confirmAction.type === "delete_backup"
+          ? "danger"
+          : "warning"
+      }
+      onConfirm={handleConfirm}
+      onCancel={() => setConfirmAction(null)}
+      loading={confirmLoading}
+    />
+  );
 
   // Error banner (shared between both states)
   const errorBanner = error && (
@@ -151,6 +263,8 @@ export default function SoulRegistry({
   if (souls.length === 0) {
     return (
       <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col items-center justify-center p-8">
+        {confirmModal}
+
         {/* Welcome header */}
         <div className="text-center mb-10">
           <h1 className="text-theme-primary text-4xl font-bold tracking-widest mb-2">
@@ -191,17 +305,85 @@ export default function SoulRegistry({
           </div>
         </div>
 
-        {/* Migration link */}
+        {/* Migration & Recovery links */}
         <div className="text-center">
           <div className="text-theme-border text-xs mb-3">or</div>
-          <button
-            className="text-theme-text-dim hover:text-theme-text text-xs underline"
-            onClick={handleMigrateLegacy}
-            disabled={migrating}
-          >
-            {migrating ? "Checking..." : "Recall legacy identity from previous Hive"}
-          </button>
+          <div className="flex flex-col gap-2 items-center">
+            <button
+              className="text-theme-text-dim hover:text-theme-text text-xs underline"
+              onClick={handleMigrateLegacy}
+              disabled={migrating}
+            >
+              {migrating ? "Checking..." : "Recall legacy identity from previous Hive"}
+            </button>
+            <button
+              className="text-theme-text-dim hover:text-theme-text text-xs underline"
+              onClick={() => setShowRecoverPanel(!showRecoverPanel)}
+            >
+              Recover entity from backup
+            </button>
+          </div>
         </div>
+
+        {/* Recover panel (empty state) */}
+        {showRecoverPanel && (
+          <div className="w-full max-w-lg mt-6 border border-theme-border-dim rounded-lg p-4 bg-theme-bg-inset">
+            <h3 className="text-theme-text text-sm font-bold mb-3 uppercase tracking-widest">
+              Available Backups
+            </h3>
+            {backups.length === 0 ? (
+              <p className="text-theme-text-dim text-xs">No backups found.</p>
+            ) : (
+              <div className="max-h-60 overflow-y-auto space-y-2">
+                {backups.map((backup) => (
+                  <div
+                    key={backup.directory_name}
+                    className="border border-theme-border-dim rounded p-3 flex items-center justify-between"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-theme-text-bright text-sm font-bold truncate">
+                          {backup.agent_name}
+                        </span>
+                        <span
+                          className={`text-[9px] uppercase px-1 py-0.5 rounded border ${
+                            backup.backup_type === "archive"
+                              ? "border-amber-900 text-amber-500 bg-amber-950/20"
+                              : "border-green-900 text-green-500 bg-green-950/20"
+                          }`}
+                        >
+                          {backup.backup_type === "archive" ? "Archived" : "Backup"}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-theme-text-dim mt-1">
+                        {formatDate(backup.created_at)}
+                        {backup.has_memories && " \u00B7 Has memories"}
+                        {backup.has_signatures && " \u00B7 Signed"}
+                      </div>
+                    </div>
+                    <div className="flex gap-2 ml-2">
+                      <button
+                        className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-primary hover:text-theme-primary disabled:opacity-50"
+                        onClick={() => handleRestoreBackup(backup)}
+                        disabled={restoring === backup.directory_name}
+                      >
+                        {restoring === backup.directory_name ? "..." : "Restore"}
+                      </button>
+                      <button
+                        className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-red-700 hover:text-red-500"
+                        onClick={() =>
+                          setConfirmAction({ type: "delete_backup", backup })
+                        }
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -209,6 +391,8 @@ export default function SoulRegistry({
   // Populated state: Soul selector
   return (
     <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col items-center justify-center p-8">
+      {confirmModal}
+
       {/* Header */}
       <div className="text-center mb-8">
         <h1 className="text-2xl text-theme-primary font-bold tracking-widest">SOUL REGISTRY</h1>
@@ -226,14 +410,14 @@ export default function SoulRegistry({
             onClick={() => handleWakeSoul(soul.id)}
           >
             {/* Visual accent color strip */}
-            <div 
+            <div
               className="absolute top-0 left-0 w-1 h-full bg-theme-primary-dim group-hover:bg-theme-primary"
               style={soul.primary_color ? { backgroundColor: soul.primary_color } : {}}
             />
-            
+
             <div className="flex items-center gap-4">
               {/* Avatar placeholder or real avatar */}
-              <div 
+              <div
                 className="w-12 h-12 rounded-full border border-theme-border-dim flex items-center justify-center bg-theme-bg-inset text-lg"
                 style={soul.primary_color ? { borderColor: soul.primary_color, color: soul.primary_color } : {}}
               >
@@ -243,7 +427,7 @@ export default function SoulRegistry({
                   soul.name.substring(0, 1).toUpperCase()
                 )}
               </div>
-              
+
               <div className="flex-1">
                 <div className="flex justify-between items-start">
                   <h2 className="text-theme-text-bright font-bold text-lg group-hover:text-theme-primary">
@@ -251,14 +435,27 @@ export default function SoulRegistry({
                   </h2>
                   <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
-                      onClick={(e) => handleArchiveSoul(e, soul)}
+                      onClick={(e) => handleBackupSoul(e, soul)}
+                      className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-green-700 hover:text-green-500"
+                      title="Create Backup"
+                    >
+                      Backup
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConfirmAction({ type: "archive", soul });
+                      }}
                       className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-primary hover:text-theme-text"
                       title="Archive Entity"
                     >
                       Archive
                     </button>
                     <button
-                      onClick={(e) => handleDeleteSoul(e, soul)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConfirmAction({ type: "delete", soul });
+                      }}
                       className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-red-700 hover:text-red-500"
                       title="Delete Entity"
                     >
@@ -276,7 +473,7 @@ export default function SoulRegistry({
                 </div>
               </div>
             </div>
-            
+
             {soul.birth_date && (
               <div className="mt-4 pt-3 border-t border-theme-border-dim flex justify-between items-center text-[10px] text-theme-text-dim uppercase tracking-tighter">
                 <span>Birthed</span>
@@ -313,6 +510,75 @@ export default function SoulRegistry({
           </button>
         </div>
       </div>
+
+      {/* Recover from backup */}
+      <div className="w-full max-w-lg mt-4 text-center">
+        <button
+          className="text-theme-text-dim hover:text-theme-text text-xs underline"
+          onClick={() => setShowRecoverPanel(!showRecoverPanel)}
+        >
+          {showRecoverPanel ? "Hide recovery panel" : "Recover entity from backup"}
+        </button>
+      </div>
+
+      {showRecoverPanel && (
+        <div className="w-full max-w-lg mt-4 border border-theme-border-dim rounded-lg p-4 bg-theme-bg-inset">
+          <h3 className="text-theme-text text-sm font-bold mb-3 uppercase tracking-widest">
+            Available Backups
+          </h3>
+          {backups.length === 0 ? (
+            <p className="text-theme-text-dim text-xs">No backups found.</p>
+          ) : (
+            <div className="max-h-60 overflow-y-auto space-y-2">
+              {backups.map((backup) => (
+                <div
+                  key={backup.directory_name}
+                  className="border border-theme-border-dim rounded p-3 flex items-center justify-between"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-theme-text-bright text-sm font-bold truncate">
+                        {backup.agent_name}
+                      </span>
+                      <span
+                        className={`text-[9px] uppercase px-1 py-0.5 rounded border ${
+                          backup.backup_type === "archive"
+                            ? "border-amber-900 text-amber-500 bg-amber-950/20"
+                            : "border-green-900 text-green-500 bg-green-950/20"
+                        }`}
+                      >
+                        {backup.backup_type === "archive" ? "Archived" : "Backup"}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-theme-text-dim mt-1">
+                      {formatDate(backup.created_at)}
+                      {backup.has_memories && " \u00B7 Has memories"}
+                      {backup.has_signatures && " \u00B7 Signed"}
+                    </div>
+                  </div>
+                  <div className="flex gap-2 ml-2">
+                    <button
+                      className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-primary hover:text-theme-primary disabled:opacity-50"
+                      onClick={() => handleRestoreBackup(backup)}
+                      disabled={restoring === backup.directory_name}
+                    >
+                      {restoring === backup.directory_name ? "..." : "Restore"}
+                    </button>
+                    <button
+                      className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-red-700 hover:text-red-500"
+                      onClick={() =>
+                        setConfirmAction({ type: "delete_backup", backup })
+                      }
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

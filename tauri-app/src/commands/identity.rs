@@ -1,4 +1,4 @@
-use crate::identity_manager::{AgentIdentityInfo, IdentitySummary};
+use crate::identity_manager::{AgentIdentityInfo, BackupInfo, IdentitySummary};
 use crate::state::AppState;
 use abigail_core::SecretsVault;
 use serde::{Deserialize, Serialize};
@@ -164,6 +164,29 @@ pub fn archive_agent_identity(state: State<AppState>, agent_id: String) -> Resul
     }
 
     state.identity_manager.archive_agent(&agent_id)
+}
+
+#[tauri::command]
+pub fn backup_agent_identity(state: State<AppState>, agent_id: String) -> Result<String, String> {
+    state.identity_manager.backup_agent(&agent_id)
+}
+
+#[tauri::command]
+pub fn list_backups(state: State<AppState>) -> Result<Vec<BackupInfo>, String> {
+    state.identity_manager.list_backups()
+}
+
+#[tauri::command]
+pub fn restore_from_backup(
+    state: State<AppState>,
+    backup_dir_name: String,
+) -> Result<String, String> {
+    state.identity_manager.restore_backup(&backup_dir_name)
+}
+
+#[tauri::command]
+pub fn delete_backup(state: State<AppState>, backup_dir_name: String) -> Result<(), String> {
+    state.identity_manager.delete_backup(&backup_dir_name)
 }
 
 #[tauri::command]

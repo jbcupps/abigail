@@ -1,5 +1,4 @@
 use crate::state::AppState;
-use abigail_memory::MemoryStore;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -22,12 +21,12 @@ pub struct MemoryInfo {
 pub fn get_sqlite_stats(state: State<AppState>) -> Result<SqliteStats, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let db_path = config.db_path.clone();
+    drop(config);
 
     let size_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
 
-    let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
-    let memory_count = store.count_memories().map_err(|e| e.to_string())?;
-    let has_birth = store.has_birth().map_err(|e| e.to_string())?;
+    let memory_count = state.memory.count_memories().map_err(|e| e.to_string())?;
+    let has_birth = state.memory.has_birth().map_err(|e| e.to_string())?;
 
     Ok(SqliteStats {
         size_bytes,
@@ -40,13 +39,11 @@ pub fn get_sqlite_stats(state: State<AppState>) -> Result<SqliteStats, String> {
 pub fn optimize_sqlite(state: State<AppState>) -> Result<i64, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let db_path = config.db_path.clone();
+    drop(config);
 
     let size_before = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
 
-    let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
-    store.vacuum().map_err(|e| e.to_string())?;
-
-    drop(store);
+    state.memory.vacuum().map_err(|e| e.to_string())?;
 
     let size_after = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
 
@@ -57,9 +54,7 @@ pub fn optimize_sqlite(state: State<AppState>) -> Result<i64, String> {
 
 #[tauri::command]
 pub fn reset_memories(state: State<AppState>) -> Result<u64, String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
-    let deleted = store.clear_memories().map_err(|e| e.to_string())?;
+    let deleted = state.memory.clear_memories().map_err(|e| e.to_string())?;
     tracing::warn!("Reset memories: {} memories deleted", deleted);
     Ok(deleted)
 }
@@ -70,9 +65,8 @@ pub fn search_memories(
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<MemoryInfo>, String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    let store = MemoryStore::open_with_config(&*config).map_err(|e| e.to_string())?;
-    let results = store
+    let results = state
+        .memory
         .search_memories(&query, limit.unwrap_or(10))
         .map_err(|e| e.to_string())?;
 

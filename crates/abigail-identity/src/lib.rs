@@ -33,6 +33,30 @@ pub struct IdentitySummary {
     pub has_signatures: bool,
 }
 
+/// Metadata written into each backup directory as `backup_metadata.json`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupMetadata {
+    pub agent_id: String,
+    pub agent_name: String,
+    pub backup_type: String, // "manual_backup" | "archive"
+    pub created_at: String,
+    pub source_directory: String,
+}
+
+/// Information about a backup, returned to the frontend for listing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupInfo {
+    pub directory_name: String,
+    pub directory_path: String,
+    pub agent_name: String,
+    pub backup_type: String,
+    pub created_at: String,
+    pub birth_complete: bool,
+    pub birth_date: Option<String>,
+    pub has_memories: bool,
+    pub has_signatures: bool,
+}
+
 /// The loaded context for a specific agent.
 pub struct AgentContext {
     pub id: String,
@@ -630,7 +654,264 @@ impl IdentityManager {
         std::fs::rename(&agent_dir, &backup_path)
             .map_err(|e| format!("Failed to archive agent directory: {}", e))?;
 
+        // Best-effort: write backup metadata into the archive
+        let metadata = BackupMetadata {
+            agent_id: agent_id.to_string(),
+            agent_name: agent_name.clone(),
+            backup_type: "archive".to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            source_directory: agent_dir.to_string_lossy().to_string(),
+        };
+        let metadata_path = backup_path.join("backup_metadata.json");
+        if let Ok(json) = serde_json::to_string_pretty(&metadata) {
+            let _ = std::fs::write(&metadata_path, json);
+        }
+
         Ok(backup_path.to_string_lossy().to_string())
+    }
+
+    /// Create a non-destructive backup of an agent's data directory.
+    /// The agent stays active — this copies (not moves) the data.
+    pub fn backup_agent(&self, agent_id: &str) -> Result<String, String> {
+        let (agent_name, agent_dir) = {
+            let gc = self.global_config.read().map_err(|e| e.to_string())?;
+            let entry = gc
+                .find_agent(agent_id)
+                .ok_or_else(|| format!("Agent {} not registered", agent_id))?
+                .clone();
+
+            let dir = if entry.directory.is_absolute() {
+                entry.directory.clone()
+            } else {
+                self.data_root.join(&entry.directory)
+            };
+            (entry.name, dir)
+        };
+
+        if !agent_dir.exists() {
+            return Err(format!(
+                "Agent directory not found: {}",
+                agent_dir.display()
+            ));
+        }
+
+        let backups_dir = self.data_root.join("backups");
+        std::fs::create_dir_all(&backups_dir)
+            .map_err(|e| format!("Failed to create backups directory: {}", e))?;
+
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+        let safe_name =
+            agent_name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
+        let backup_name = format!("{}_{}_backup", timestamp, safe_name);
+        let backup_path = backups_dir.join(&backup_name);
+
+        copy_dir_recursive(&agent_dir, &backup_path)
+            .map_err(|e| format!("Failed to copy agent directory: {}", e))?;
+
+        // Write backup metadata
+        let metadata = BackupMetadata {
+            agent_id: agent_id.to_string(),
+            agent_name: agent_name.clone(),
+            backup_type: "manual_backup".to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            source_directory: agent_dir.to_string_lossy().to_string(),
+        };
+        let metadata_path = backup_path.join("backup_metadata.json");
+        if let Ok(json) = serde_json::to_string_pretty(&metadata) {
+            let _ = std::fs::write(&metadata_path, json);
+        }
+
+        tracing::info!("Backed up agent {} to {}", agent_id, backup_path.display());
+        Ok(backup_path.to_string_lossy().to_string())
+    }
+
+    /// List all backups in `{data_root}/backups/`.
+    pub fn list_backups(&self) -> Result<Vec<BackupInfo>, String> {
+        let backups_dir = self.data_root.join("backups");
+        if !backups_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut backups = Vec::new();
+        let entries = std::fs::read_dir(&backups_dir)
+            .map_err(|e| format!("Failed to read backups: {}", e))?;
+
+        for entry in entries {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let dir_name = entry.file_name().to_string_lossy().to_string();
+
+            // Try reading backup_metadata.json first
+            let metadata_path = path.join("backup_metadata.json");
+            let (agent_name, backup_type, created_at) = if metadata_path.exists() {
+                match std::fs::read_to_string(&metadata_path) {
+                    Ok(json) => match serde_json::from_str::<BackupMetadata>(&json) {
+                        Ok(m) => (m.agent_name, m.backup_type, m.created_at),
+                        Err(_) => parse_backup_dir_name(&dir_name),
+                    },
+                    Err(_) => parse_backup_dir_name(&dir_name),
+                }
+            } else {
+                parse_backup_dir_name(&dir_name)
+            };
+
+            // Read config.json for birth status
+            let config_path = path.join("config.json");
+            let (birth_complete, birth_date) = if config_path.exists() {
+                match AppConfig::load(&config_path) {
+                    Ok(config) => (config.birth_complete, config.birth_timestamp.clone()),
+                    Err(_) => (false, None),
+                }
+            } else {
+                (false, None)
+            };
+
+            // Check for memory databases (both naming conventions)
+            let has_memories =
+                path.join("abigail_seed.db").exists() || path.join("abigail_memory.db").exists();
+
+            // Check for signatures
+            let has_signatures = path.join("docs").join("soul.md.sig").exists();
+
+            backups.push(BackupInfo {
+                directory_name: dir_name,
+                directory_path: path.to_string_lossy().to_string(),
+                agent_name,
+                backup_type,
+                created_at,
+                birth_complete,
+                birth_date,
+                has_memories,
+                has_signatures,
+            });
+        }
+
+        // Sort newest first
+        backups.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(backups)
+    }
+
+    /// Restore an entity from a backup directory.
+    /// Creates a new UUID, moves the backup into identities/, updates paths,
+    /// re-signs with the current master key, and registers in GlobalConfig.
+    pub fn restore_backup(&self, backup_dir_name: &str) -> Result<String, String> {
+        let backups_dir = self.data_root.join("backups");
+        let backup_path = backups_dir.join(backup_dir_name);
+
+        if !backup_path.exists() {
+            return Err(format!("Backup not found: {}", backup_dir_name));
+        }
+
+        // Read config to get agent name
+        let config_path = backup_path.join("config.json");
+        let agent_name = if config_path.exists() {
+            match AppConfig::load(&config_path) {
+                Ok(config) => config
+                    .agent_name
+                    .unwrap_or_else(|| "Restored Entity".to_string()),
+                Err(_) => "Restored Entity".to_string(),
+            }
+        } else {
+            "Restored Entity".to_string()
+        };
+
+        // Generate new UUID to avoid conflicts
+        let new_uuid = Uuid::new_v4().to_string();
+        let agent_dir = self.identities_dir().join(&new_uuid);
+
+        // Move backup to identities dir (with copy+delete fallback for cross-device)
+        if std::fs::rename(&backup_path, &agent_dir).is_err() {
+            copy_dir_recursive(&backup_path, &agent_dir)
+                .map_err(|e| format!("Failed to copy backup to identities: {}", e))?;
+            std::fs::remove_dir_all(&backup_path)
+                .map_err(|e| format!("Backup copied but failed to remove original: {}", e))?;
+        }
+
+        // Update config.json paths
+        let new_config_path = agent_dir.join("config.json");
+        if new_config_path.exists() {
+            match AppConfig::load(&new_config_path) {
+                Ok(mut config) => {
+                    config.data_dir = agent_dir.clone();
+                    config.models_dir = agent_dir.join("models");
+                    config.docs_dir = agent_dir.join("docs");
+                    config.db_path = if agent_dir.join("abigail_memory.db").exists() {
+                        agent_dir.join("abigail_memory.db")
+                    } else {
+                        agent_dir.join("abigail_seed.db")
+                    };
+                    if agent_dir.join("external_pubkey.bin").exists() {
+                        config.external_pubkey_path = Some(agent_dir.join("external_pubkey.bin"));
+                    }
+                    let _ = config.save(&new_config_path);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to update restored config: {}", e);
+                }
+            }
+        }
+
+        // Re-sign agent public key with current Hive master key
+        let agent_pubkey_path = agent_dir.join("external_pubkey.bin");
+        if agent_pubkey_path.exists() {
+            let pubkey_bytes = std::fs::read(&agent_pubkey_path).map_err(|e| e.to_string())?;
+            if pubkey_bytes.len() == 32 {
+                let pubkey_array: [u8; 32] = pubkey_bytes.as_slice().try_into().unwrap();
+                if let Ok(agent_pubkey) = VerifyingKey::from_bytes(&pubkey_array) {
+                    let signature = sign_agent_key(&self.master_key, &agent_pubkey);
+                    let sig_path = agent_dir.join("signature.sig");
+                    std::fs::write(&sig_path, &signature).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+
+        // Remove leftover backup_metadata.json
+        let _ = std::fs::remove_file(agent_dir.join("backup_metadata.json"));
+
+        // Register in GlobalConfig
+        {
+            let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
+            gc.register_agent(AgentEntry {
+                id: new_uuid.clone(),
+                name: agent_name.clone(),
+                directory: PathBuf::from(format!("identities/{}", new_uuid)),
+            })
+            .map_err(|e| e.to_string())?;
+            gc.save(&self.data_root).map_err(|e| e.to_string())?;
+        }
+
+        // Create Documents folder
+        let _ = self.create_documents_folder(&new_uuid);
+
+        tracing::info!(
+            "Restored backup '{}' as agent {} ({})",
+            backup_dir_name,
+            agent_name,
+            new_uuid
+        );
+        Ok(new_uuid)
+    }
+
+    /// Delete a backup directory.
+    pub fn delete_backup(&self, backup_dir_name: &str) -> Result<(), String> {
+        let backups_dir = self.data_root.join("backups");
+        let backup_path = backups_dir.join(backup_dir_name);
+
+        if !backup_path.exists() {
+            return Err(format!("Backup not found: {}", backup_dir_name));
+        }
+
+        std::fs::remove_dir_all(&backup_path)
+            .map_err(|e| format!("Failed to delete backup: {}", e))?;
+
+        tracing::info!("Deleted backup: {}", backup_dir_name);
+        Ok(())
     }
 }
 
@@ -649,4 +930,43 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Parse a backup directory name into (agent_name, backup_type, created_at).
+/// Expected formats: `YYYYMMDD_HHMMSS_Name` (archive) or `YYYYMMDD_HHMMSS_Name_backup` (backup).
+fn parse_backup_dir_name(dir_name: &str) -> (String, String, String) {
+    let parts: Vec<&str> = dir_name.splitn(3, '_').collect();
+    if parts.len() >= 3 {
+        let date_part = parts[0]; // YYYYMMDD
+        let time_part = parts[1]; // HHMMSS
+        let rest = parts[2];
+
+        // Build an approximate ISO timestamp
+        let created_at = if date_part.len() == 8 && time_part.len() == 6 {
+            format!(
+                "{}-{}-{}T{}:{}:{}Z",
+                &date_part[..4],
+                &date_part[4..6],
+                &date_part[6..8],
+                &time_part[..2],
+                &time_part[2..4],
+                &time_part[4..6]
+            )
+        } else {
+            String::new()
+        };
+
+        let (name, backup_type) = if rest.ends_with("_backup") {
+            (
+                rest.trim_end_matches("_backup").to_string(),
+                "manual_backup".to_string(),
+            )
+        } else {
+            (rest.to_string(), "archive".to_string())
+        };
+
+        (name, backup_type, created_at)
+    } else {
+        (dir_name.to_string(), "unknown".to_string(), String::new())
+    }
 }
