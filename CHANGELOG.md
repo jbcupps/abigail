@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-28 12:30 EST: Fix birth cycle CLI indicators all turning green when one is enabled — only show active for explicitly activated providers
+- 2026-02-28 04:55 EST: Add macOS Developer ID code signing to release workflow — import certificate into CI keychain, pass signing identity to Tauri build, clean up keychain after build
 - 2026-02-28 02:00 EST: Agent backup/restore system, shared MemoryStore, chat turn persistence, confirmation modals, lenient tool param parsing, and Proton Mail skill auto-reinit on secret change
 - 2026-02-28 01:00 EST: Ignition page auto-detects all providers on mount, highlights available tabs with green indicators, auto-focuses sole available option, remove redundant CLI Tools footer
 - 2026-02-28 00:30 EST: Compress CLI system prompt (~15-41KB → ~1.5KB) with temp file spillover, budgeted instruction injection (max 1 / 2048 bytes for CLI), compact grouped tool list, and reduced max-turns to 5
