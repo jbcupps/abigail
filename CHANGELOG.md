@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-28 21:55 EST: Fix macOS notarization — codesign bundled abigail-keygen binary, add missing notarization env vars, fix keychain partition list and search list commands
 - 2026-02-28 12:30 EST: Fix birth cycle CLI indicators all turning green when one is enabled — only show active for explicitly activated providers
 - 2026-02-28 04:55 EST: Add macOS Developer ID code signing to release workflow — import certificate into CI keychain, pass signing identity to Tauri build, clean up keychain after build
 - 2026-02-28 02:00 EST: Agent backup/restore system, shared MemoryStore, chat turn persistence, confirmation modals, lenient tool param parsing, and Proton Mail skill auto-reinit on secret change

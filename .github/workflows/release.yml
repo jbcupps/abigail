@@ -204,6 +204,57 @@ jobs:
             cp target/release/${{ matrix.keygen_bin }} tauri-app/${{ matrix.resource_name }}
           fi
 
+      - name: Import Apple Developer ID certificate (macOS)
+        if: matrix.platform == 'macos-latest'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/build_certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode -o "$CERTIFICATE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERTIFICATE_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" \
+            $(security list-keychains -d user | tr -d '"')
+
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
+          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> $GITHUB_ENV
+
+      - name: Codesign bundled binaries (macOS)
+        if: matrix.platform == 'macos-latest'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          if [[ -z "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+            echo "APPLE_SIGNING_IDENTITY not set — skipping codesign of bundled binaries"
+            exit 0
+          fi
+          # Sign abigail-keygen with hardened runtime + secure timestamp
+          # (required for Apple notarization of all binaries inside the .app bundle)
+          KEYGEN_BIN="tauri-app/${{ matrix.resource_name }}"
+          if [[ -f "$KEYGEN_BIN" ]]; then
+            echo "Codesigning $KEYGEN_BIN with identity: $APPLE_SIGNING_IDENTITY"
+            codesign --force --options runtime --timestamp \
+              --sign "$APPLE_SIGNING_IDENTITY" "$KEYGEN_BIN"
+            echo "Verifying signature..."
+            codesign --verify --verbose "$KEYGEN_BIN"
+          else
+            echo "WARNING: $KEYGEN_BIN not found — skipping codesign"
+          fi
+
       - name: Validate updater signing key preflight
         shell: bash
         env:
@@ -215,10 +266,16 @@ jobs:
       - name: Build Tauri app
         shell: bash
         env:
-          # TAURI_SIGNING_PRIVATE_KEY is set via GITHUB_ENV by the validation step above.
-          # Only fall back to secrets if the validation step didn't run or didn't export.
           TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS code signing (Tauri reads these automatically)
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # macOS notarization (Tauri reads these automatically)
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           cd tauri-app
 
@@ -228,6 +285,13 @@ jobs:
           else
             echo "WARNING: TAURI_SIGNING_PRIVATE_KEY is not configured; building unsigned artifacts"
             TAURI_SKIP_SIGNING=true tauri build ${{ matrix.args }}
+          fi
+
+      - name: Clean up Apple keychain (macOS)
+        if: matrix.platform == 'macos-latest' && always()
+        run: |
+          if [[ -n "${KEYCHAIN_PATH:-}" ]]; then
+            security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
           fi
 
       - name: Upload installers (Artifacts)
@@ -387,7 +451,7 @@ jobs:
 
             ### Platform Notes
 
-            - **macOS**: The app is not notarized. Right-click then Open on first launch to bypass Gatekeeper.
+            - **macOS**: The app is signed with a Developer ID certificate but not yet notarized. Right-click then Open on first launch to bypass Gatekeeper.
             - **Linux**: Requires `libwebkit2gtk-4.1-0` and `libayatana-appindicator3-1`. Ubuntu 22.04+ recommended.
 
             See [SECURITY_NOTES.md](https://github.com/${{ github.repository }}/blob/main/documents/SECURITY_NOTES.md) for details.
