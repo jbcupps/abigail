@@ -120,12 +120,7 @@ impl StreamBroker for MemoryBroker {
                 Ok(msg) => messages.push(msg),
                 Err(broadcast::error::TryRecvError::Empty) => break,
                 Err(broadcast::error::TryRecvError::Lagged(n)) => {
-                    tracing::warn!(
-                        "Consumer lagged by {} messages on {}/{}",
-                        n,
-                        stream,
-                        topic
-                    );
+                    tracing::warn!("Consumer lagged by {} messages on {}/{}", n, stream, topic);
                     break;
                 }
                 Err(broadcast::error::TryRecvError::Closed) => break,
@@ -311,14 +306,8 @@ mod tests {
     async fn test_ensure_consumer_group_idempotent() {
         let broker = MemoryBroker::new(64);
 
-        broker
-            .ensure_consumer_group("s", "t", "g1")
-            .await
-            .unwrap();
-        broker
-            .ensure_consumer_group("s", "t", "g1")
-            .await
-            .unwrap();
+        broker.ensure_consumer_group("s", "t", "g1").await.unwrap();
+        broker.ensure_consumer_group("s", "t", "g1").await.unwrap();
 
         let groups = broker.consumer_groups.read().await;
         assert_eq!(groups.len(), 1);

@@ -221,10 +221,7 @@ impl JobQueue {
                 rusqlite::params![job_id, completed_at],
             )?;
             if updated == 0 {
-                anyhow::bail!(
-                    "Job '{}' not found or already in terminal state",
-                    job_id
-                );
+                anyhow::bail!("Job '{}' not found or already in terminal state", job_id);
             }
             topic = conn.query_row(
                 "SELECT topic FROM job_queue WHERE id = ?1",
@@ -297,11 +294,7 @@ impl JobQueue {
     }
 
     /// List jobs filtered by status, ordered by priority (desc) then created_at (asc).
-    pub fn list_jobs(
-        &self,
-        status: Option<&str>,
-        limit: usize,
-    ) -> anyhow::Result<Vec<JobRecord>> {
+    pub fn list_jobs(&self, status: Option<&str>, limit: usize) -> anyhow::Result<Vec<JobRecord>> {
         let conn = self.lock_db()?;
         let (sql, params): (&str, Vec<Box<dyn rusqlite::types::ToSql>>) = match status {
             Some(s) => (
@@ -328,7 +321,8 @@ impl JobQueue {
         };
 
         let mut stmt = conn.prepare(sql)?;
-        let params_ref: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
         let rows = stmt
             .query_map(params_ref.as_slice(), Self::map_job_record)?
             .filter_map(|r| r.ok())
@@ -398,8 +392,7 @@ impl JobQueue {
     /// Count jobs by status.
     pub fn queue_stats(&self) -> anyhow::Result<HashMap<String, u64>> {
         let conn = self.lock_db()?;
-        let mut stmt =
-            conn.prepare("SELECT status, COUNT(*) FROM job_queue GROUP BY status")?;
+        let mut stmt = conn.prepare("SELECT status, COUNT(*) FROM job_queue GROUP BY status")?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
         })?;
@@ -433,10 +426,7 @@ impl JobQueue {
             rusqlite::params![reason, completed_at],
         )?;
         if updated > 0 {
-            tracing::warn!(
-                "Crash recovery: marked {} running jobs as failed",
-                updated
-            );
+            tracing::warn!("Crash recovery: marked {} running jobs as failed", updated);
         }
         Ok(updated)
     }
@@ -631,10 +621,7 @@ mod tests {
             .mark_running(&job_id, "agent-1", "gpt-4.1", "openai")
             .await
             .unwrap();
-        queue
-            .mark_completed(&job_id, "done", 1)
-            .await
-            .unwrap();
+        queue.mark_completed(&job_id, "done", 1).await.unwrap();
 
         let result = queue.cancel_job(&job_id).await;
         assert!(result.is_err());
@@ -666,23 +653,11 @@ mod tests {
         let id1 = queue.submit_job(test_spec("research")).await.unwrap();
         let id2 = queue.submit_job(test_spec("research")).await.unwrap();
 
-        queue
-            .mark_running(&id1, "a1", "m1", "p1")
-            .await
-            .unwrap();
-        queue
-            .mark_completed(&id1, "result-1", 2)
-            .await
-            .unwrap();
+        queue.mark_running(&id1, "a1", "m1", "p1").await.unwrap();
+        queue.mark_completed(&id1, "result-1", 2).await.unwrap();
 
-        queue
-            .mark_running(&id2, "a2", "m2", "p2")
-            .await
-            .unwrap();
-        queue
-            .mark_completed(&id2, "result-2", 3)
-            .await
-            .unwrap();
+        queue.mark_running(&id2, "a2", "m2", "p2").await.unwrap();
+        queue.mark_completed(&id2, "result-2", 3).await.unwrap();
 
         let results = queue.topic_results("research", 10).unwrap();
         assert_eq!(results.len(), 2);
@@ -714,10 +689,7 @@ mod tests {
         let queue = setup_test_queue();
         let id1 = queue.submit_job(test_spec("stats")).await.unwrap();
         queue.submit_job(test_spec("stats")).await.unwrap();
-        queue
-            .mark_running(&id1, "a", "m", "p")
-            .await
-            .unwrap();
+        queue.mark_running(&id1, "a", "m", "p").await.unwrap();
 
         let stats = queue.queue_stats().unwrap();
         assert_eq!(*stats.get("queued").unwrap_or(&0), 1);
@@ -732,14 +704,8 @@ mod tests {
 
         assert!(!queue.topic_all_terminal("done-check").unwrap());
 
-        queue
-            .mark_running(&id1, "a", "m", "p")
-            .await
-            .unwrap();
-        queue
-            .mark_completed(&id1, "ok", 1)
-            .await
-            .unwrap();
+        queue.mark_running(&id1, "a", "m", "p").await.unwrap();
+        queue.mark_completed(&id1, "ok", 1).await.unwrap();
 
         assert!(!queue.topic_all_terminal("done-check").unwrap());
 
@@ -753,14 +719,8 @@ mod tests {
         let queue = setup_test_queue();
         let id1 = queue.submit_job(test_spec("crash")).await.unwrap();
         let id2 = queue.submit_job(test_spec("crash")).await.unwrap();
-        queue
-            .mark_running(&id1, "a", "m", "p")
-            .await
-            .unwrap();
-        queue
-            .mark_running(&id2, "a", "m", "p")
-            .await
-            .unwrap();
+        queue.mark_running(&id1, "a", "m", "p").await.unwrap();
+        queue.mark_running(&id2, "a", "m", "p").await.unwrap();
 
         let recovered = queue.recover_running_jobs("daemon restarted").unwrap();
         assert_eq!(recovered, 2);
@@ -819,14 +779,8 @@ mod tests {
         assert_eq!(next.id, parent_id);
 
         // Complete the parent
-        queue
-            .mark_running(&parent_id, "a", "m", "p")
-            .await
-            .unwrap();
-        queue
-            .mark_completed(&parent_id, "done", 1)
-            .await
-            .unwrap();
+        queue.mark_running(&parent_id, "a", "m", "p").await.unwrap();
+        queue.mark_completed(&parent_id, "done", 1).await.unwrap();
 
         // Now child should be eligible
         let next = queue.next_queued_job().unwrap().unwrap();

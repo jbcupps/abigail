@@ -5,9 +5,8 @@ use std::future::Future;
 use std::pin::Pin;
 
 /// Callback type for stream subscriptions.
-pub type MessageHandler = Box<
-    dyn Fn(StreamMessage) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
->;
+pub type MessageHandler =
+    Box<dyn Fn(StreamMessage) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 /// Trait abstracting over streaming message brokers.
 ///
