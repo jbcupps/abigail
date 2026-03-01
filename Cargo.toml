@@ -58,7 +58,7 @@ aes-gcm = "0.10"
 rand = "0.8"
 base64 = "0.22"
 sha2 = "0.10"
-directories = "5"
+directories = "6"
 rusqlite = { version = "0.32", features = ["bundled", "blob"] }
 thiserror = "1.0"
 anyhow = "1.0"
