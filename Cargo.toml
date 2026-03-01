@@ -69,7 +69,7 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 tokio-util = { version = "0.7", features = ["io", "compat"] }
 reqwest = { version = "0.13", features = ["json", "stream"] }
 abigail-auth = { path = "crates/abigail-auth" }
-axum = "0.7"
+axum = "0.8"
 clap = { version = "4", features = ["derive"] }
 tower-http = { version = "0.6", features = ["cors"] }
 hive-core = { path = "crates/hive-core" }
