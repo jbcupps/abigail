@@ -119,7 +119,7 @@ The crates form a layered architecture with clear security boundaries:
 | Crate | Role |
 |-------|------|
 | `entity-core` | Pure DTO crate: `ChatRequest/Response`, `EntityStatus`, `ToolExecRequest/Response` |
-| `abigail-router` | Id/Ego routing — classifies messages as Routine (local LLM) or Complex (cloud) |
+| `abigail-router` | Tier-based routing + CLI orchestrator mode with execution tracing and fallback handling |
 | `abigail-capabilities` | **High-trust** functions: cognitive (LLM providers), sensory, memory, agent control |
 | `abigail-skills` | **Lower-trust** plugin system: manifest-based skills with sandbox, registry, executor, event bus |
 | `entity-chat` | Shared chat engine library: tool-use loop, tool definitions builder, system prompt construction, tool awareness |
@@ -222,7 +222,7 @@ Skills are the primary way the Entity gains capabilities beyond conversation. Th
 - `Skill` trait — contract all skills implement: `manifest()`, `tools()`, `execute_tool()`, `initialize()`, `shutdown()`
 - `SkillManifest` — parsed from `skill.toml`: id, permissions, secrets, runtime config
 - `SkillRegistry` — thread-safe registry with discovery (scans dirs for `*/skill.toml`), registration, secret validation
-- `SkillExecutor` — execution engine with concurrency semaphore, per-tool timeouts, sandbox permission checks, capability envelope (SuperegoL2Mode)
+- `SkillExecutor` — execution engine with concurrency semaphore, per-tool timeouts, and sandbox permission checks
 - `SkillSandbox` — validates audit actions (network, file read/write, shell) against declared permissions
 - `EventBus` — broadcast channel for inter-skill communication, relayed to UI via Tauri events
 
@@ -256,7 +256,7 @@ required = true
 **Trust model (layered):**
 1. Registry-level: manifests loaded from disk
 2. Permission-level: sandbox enforces declared permissions
-3. Capability-level: SuperegoL2Mode gates high-risk actions
+3. Capability-level: legacy capability envelope metadata exists, but entity-side Superego gating is not active
 4. Approval-level: `approved_skill_ids` + `signed_skill_allowlist` in Tauri app
 5. Execution-level: timeout + concurrency limits
 
@@ -394,7 +394,7 @@ Current priorities, in order:
 
 ### Router
 The router uses tier-based routing with complexity classification (or CliOrchestrator mode for CLI providers). Debug with `RUST_LOG=abigail_router=debug`. Key diagnostics:
-- `get_router_status` Tauri command returns current Id/Ego/Superego state
+- `get_router_status` Tauri command returns current routing/provider state (tier mode, provider selection, local/cloud readiness)
 - If Ego shows as unconfigured after birth, check TrinityConfig in config.json
 - CandleProvider stub returns a helpful message instead of erroring when no local LLM exists
 - The `chat_stream` Ego path streams from the start

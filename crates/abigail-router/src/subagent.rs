@@ -42,6 +42,7 @@ pub struct SubagentDefinition {
 /// Follows the supervisor pattern: the main agent can delegate tasks
 /// to registered subagents. Each subagent has declared capabilities
 /// and uses a provider resolved through the main router.
+#[derive(Clone)]
 pub struct SubagentManager {
     definitions: Vec<SubagentDefinition>,
     router: Arc<IdEgoRouter>,
@@ -89,6 +90,8 @@ impl SubagentManager {
             .find(|d| d.id == subagent_id)
             .ok_or_else(|| anyhow::anyhow!("Subagent '{}' not found", subagent_id))?;
 
+        Self::validate_delegation_policy(def, &messages)?;
+
         tracing::info!(
             "Delegating to subagent '{}' ({}), {} messages, {} tools",
             def.name,
@@ -123,6 +126,50 @@ impl SubagentManager {
                     .await
             }
         }
+    }
+
+    fn validate_delegation_policy(
+        def: &SubagentDefinition,
+        messages: &[Message],
+    ) -> anyhow::Result<()> {
+        if def.capabilities.is_empty() {
+            anyhow::bail!(
+                "Delegation policy denied for '{}': no declared capabilities.",
+                def.id
+            );
+        }
+
+        let user_prompt = messages
+            .iter()
+            .rev()
+            .find(|m| m.role == "user")
+            .map(|m| m.content.to_lowercase())
+            .unwrap_or_default();
+
+        if user_prompt.trim().is_empty() {
+            anyhow::bail!(
+                "Delegation policy denied for '{}': empty user message.",
+                def.id
+            );
+        }
+
+        // Guard destructive intents unless the subagent explicitly declares the capability.
+        let destructive_intent = ["delete", "wipe", "destroy", "drop table", "format disk"]
+            .iter()
+            .any(|needle| user_prompt.contains(needle));
+        let allows_destructive = def
+            .capabilities
+            .iter()
+            .any(|cap| cap.eq_ignore_ascii_case("destructive_ops"));
+
+        if destructive_intent && !allows_destructive {
+            anyhow::bail!(
+                "Delegation policy denied for '{}': destructive intent requires 'destructive_ops' capability.",
+                def.id
+            );
+        }
+
+        Ok(())
     }
 }
 
@@ -195,5 +242,27 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_delegate_policy_denies_empty_capabilities() {
+        let router = make_router();
+        let mut mgr = SubagentManager::new(router);
+        mgr.register(SubagentDefinition {
+            id: "empty".into(),
+            name: "Empty".into(),
+            description: "No capabilities".into(),
+            capabilities: vec![],
+            provider: SubagentProvider::SameAsEgo,
+        });
+
+        let result = mgr
+            .delegate("empty", vec![Message::new("user", "hello")], vec![])
+            .await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("no declared capabilities"));
     }
 }

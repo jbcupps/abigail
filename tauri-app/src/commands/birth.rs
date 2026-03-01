@@ -1,5 +1,6 @@
 use crate::state::AppState;
 use crate::templates;
+use crate::{chat_coordinator, rate_limit::format_cooldown_error};
 use abigail_birth::BirthOrchestrator;
 use abigail_core::{
     generate_external_keypair, sign_constitutional_documents, CoreError, ExternalVault,
@@ -755,15 +756,12 @@ pub async fn birth_chat(
     message: String,
 ) -> Result<BirthChatResponse, String> {
     if let Err(remaining) = state.birth_cooldown.check().await {
-        return Err(format!(
-            "Rate limited — please wait {}ms",
-            remaining.as_millis()
-        ));
+        return Err(format_cooldown_error(remaining));
     }
 
     // Auto-detect and store keys (application-layer side effect)
     let detected_keys =
-        crate::commands::chat::auto_detect_and_store_key_internal(&state, &message).await;
+        chat_coordinator::auto_detect_and_store_key_internal(&state, &message).await;
 
     // Redact keys from the message sent to the engine
     let mut processed_message = message.clone();

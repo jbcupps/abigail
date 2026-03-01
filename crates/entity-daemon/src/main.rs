@@ -497,7 +497,8 @@ fn parse_routing_mode(s: &str) -> abigail_core::RoutingMode {
         "EgoPrimary" => abigail_core::RoutingMode::EgoPrimary,
         "Council" => abigail_core::RoutingMode::Council,
         "CliOrchestrator" => abigail_core::RoutingMode::CliOrchestrator,
-        // Legacy "IdPrimary" maps to TierBased (local LLM is now failsafe-only)
+        // Legacy compatibility shim: "IdPrimary" maps to TierBased.
+        // Planned removal window: after 2026-03-31 cleanup review.
         "TierBased" | "IdPrimary" => abigail_core::RoutingMode::TierBased,
         _ => abigail_core::RoutingMode::default(),
     }

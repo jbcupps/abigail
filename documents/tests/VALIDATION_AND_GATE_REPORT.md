@@ -88,3 +88,63 @@ Scope: `S2-01..S2-05` Chat Gateway Abstraction execution and required gate comma
 - `Gate-STAB-B` (adapter parity tests for functional + telemetry output) -> **PASS**
 - `Gate-STAB-C` (interrupt/cancel lifecycle parity) -> **PASS**
 - `Gate-STAB-D` (required validation command set) -> **PASS**
+
+---
+
+## Sprint 3 Validation Evidence (2026-03-01)
+
+Scope: `S3-01..S3-04` Internal Message Boundary in Desktop Runtime.
+
+### Required Commands Executed
+
+1. `cd tauri-app/src-ui && npm run check:command-contract` -> **PASS**
+   - Output:
+     - `[PASS] Command surface check: frontend invokes and harness mocks are aligned with native command registry.`
+     - `Frontend commands checked: 99`
+     - `Native commands registered: 137`
+     - `Harness command cases checked: 70`
+2. `cd tauri-app/src-ui && npm test` -> **PASS**
+   - Output:
+     - `Test Files  9 passed (9)`
+     - `Tests  28 passed (28)`
+3. `cd /Users/jamescupps/Repo/abigail/abigail && cargo check -p abigail-app` -> **PASS**
+   - Output:
+     - `Finished 'dev' profile ...`
+
+### Sprint 3 Gate Status
+
+- `Gate-STAB-S3-A` (internal envelope + coordinator boundary in desktop runtime) -> **PASS**
+- `Gate-STAB-S3-B` (target policy explicitly resolved and enforced internally) -> **PASS**
+- `Gate-STAB-S3-C` (chat/birth chat cooldown policy explicit + consistent) -> **PASS**
+- `Gate-STAB-S3-D` (required validation command set) -> **PASS**
+
+---
+
+## Sprint 4 Validation Evidence (2026-03-01)
+
+Scope: `S4-01..S4-06` Entity-Initiated Agents.
+
+### Required Commands Executed
+
+1. `cd tauri-app/src-ui && npm run check:command-contract` -> **PASS**
+   - Output:
+     - `[PASS] Command surface check: frontend invokes and harness mocks are aligned with native command registry.`
+     - `Frontend commands checked: 104`
+     - `Native commands registered: 147`
+     - `Harness command cases checked: 86`
+2. `cd tauri-app/src-ui && npm test` -> **PASS**
+   - Output:
+     - `Test Files  9 passed (9)`
+     - `Tests  28 passed (28)`
+3. `cd /Users/jamescupps/Repo/abigail/abigail && cargo check -p abigail-app` -> **PASS**
+   - Output:
+     - `Finished 'dev' profile ...`
+
+### Sprint 4 Gate Status
+
+- `Gate-STAB-S4-A` (agentic commands wired to real runtime + persistence/recovery) -> **PASS**
+- `Gate-STAB-S4-B` (mentor ask/confirm/cancel bridge with deterministic transitions) -> **PASS**
+- `Gate-STAB-S4-C` (runtime subagent registration + delegation policy enforcement) -> **PASS**
+- `Gate-STAB-S4-D` (entity-initiated non-GUI run entrypoint available) -> **PASS**
+- `Gate-STAB-S4-E` (orchestration/jobs UI re-enabled only when backend healthy) -> **PASS**
+- `Gate-STAB-S4-F` (required validation command set) -> **PASS**

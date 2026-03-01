@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/jbcupps/abigail/actions/workflows/ci.yml/badge.svg)](https://github.com/jbcupps/abigail/actions/workflows/ci.yml)
 [![Release](https://github.com/jbcupps/abigail/actions/workflows/release.yml/badge.svg)](https://github.com/jbcupps/abigail/actions/workflows/release.yml)
+[![Release Fast](https://github.com/jbcupps/abigail/actions/workflows/release-fast.yml/badge.svg)](https://github.com/jbcupps/abigail/actions/workflows/release-fast.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 > "A system is a promise you keep at scale."
@@ -48,6 +49,10 @@ Every running agent instance carries the same archetype:
 ---
 
 ## Current Status: v0.0.1 (with active in-flight development)
+
+Project maturity:
+- Abigail is in **early alpha testing**.
+- Target: a **working beta by March 31, 2026**.
 
 Abigail is a working, modular platform. Recent updates include:
 
@@ -287,7 +292,7 @@ For detailed architecture reference (crate responsibilities, security boundaries
 
 ### Phase 1: Foundation (Complete)
 
-Anthropic Claude provider, Superego wiring, core skills (filesystem, shell, HTTP), skills watcher, Hive/Entity daemon separation, CLI interfaces.
+Anthropic Claude provider, core skills (filesystem, shell, HTTP), skills watcher, Hive/Entity daemon separation, CLI interfaces.
 
 ### Phase 2a: Skills Use (Complete)
 
@@ -398,11 +403,13 @@ powershell -File scripts/build-installer.ps1 # Windows
 - [Security Notes](documents/SECURITY_NOTES.md)
 - [Threat Model](documents/THREAT_MODEL.md)
 - [Release Process](documents/RELEASE.md)
+- [Release Fast Workflow](.github/workflows/release-fast.yml) (Windows + Linux iterative validation)
 - [Feature Gap Analysis](documents/Feature_Gap_Analysis.md)
 - [User Experience Guide](documents/USER_EXPERIENCE.md)
 - [Upgrade Guide](UPGRADE.md)
 - [Environment Updates](documents/ENVIRONMENT_UPDATES.md)
 - [GitHub Settings Checklist](documents/GITHUB_SETTINGS.md)
+- [Archived Cleanup Docs (2026-03)](documents/archive/2026-03-cleanup/README.md)
 
 ## Contributing
 

@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+pub mod agentic_runtime;
+pub mod chat_coordinator;
 pub mod commands;
 pub mod hive_ops;
 pub mod identity_manager;
@@ -22,6 +24,7 @@ use crate::commands::forge::*;
 use crate::commands::identity::*;
 use crate::commands::logging::*;
 use crate::commands::memory::*;
+use crate::commands::orchestration::*;
 use crate::commands::ollama::*;
 use crate::commands::sensory::*;
 use crate::commands::skills::*;
@@ -31,7 +34,7 @@ use abigail_auth::AuthManager;
 use abigail_core::{validate_local_llm_url, AppConfig, SecretsVault};
 use abigail_hive::{Hive, ModelRegistry};
 use abigail_memory::MemoryStore;
-use abigail_router::{IdEgoRouter, SubagentManager};
+use abigail_router::{IdEgoRouter, OrchestrationScheduler, SubagentDefinition, SubagentManager, SubagentProvider};
 use abigail_skills::channel::EventBus;
 use abigail_skills::protocol::mcp::McpSkillRuntime;
 use abigail_skills::{
@@ -193,6 +196,48 @@ fn get_config() -> AppConfig {
     config
 }
 
+fn register_runtime_subagents(state: &AppState) -> Result<(), String> {
+    let mut manager = state.subagent_manager.write().map_err(|e| e.to_string())?;
+
+    manager.register(SubagentDefinition {
+        id: "research_specialist".to_string(),
+        name: "Research Specialist".to_string(),
+        description: "Handles research synthesis and documentation-heavy investigative tasks."
+            .to_string(),
+        capabilities: vec![
+            "web_search".to_string(),
+            "knowledge_base".to_string(),
+            "document".to_string(),
+        ],
+        provider: SubagentProvider::SameAsEgo,
+    });
+
+    manager.register(SubagentDefinition {
+        id: "code_operations".to_string(),
+        name: "Code Operations".to_string(),
+        description: "Focused on repository analysis, shell tasks, and code-level implementation work."
+            .to_string(),
+        capabilities: vec![
+            "code_analysis".to_string(),
+            "filesystem".to_string(),
+            "git".to_string(),
+            "shell".to_string(),
+        ],
+        provider: SubagentProvider::SameAsEgo,
+    });
+
+    manager.register(SubagentDefinition {
+        id: "local_guardian".to_string(),
+        name: "Local Guardian".to_string(),
+        description: "Runs local safety and diagnostics checks that should stay on the local provider."
+            .to_string(),
+        capabilities: vec!["diagnostics".to_string(), "system_monitor".to_string()],
+        provider: SubagentProvider::SameAsId,
+    });
+
+    Ok(())
+}
+
 pub async fn rebuild_router(state: &AppState) -> Result<(), String> {
     // Capture the previous provider before rebuilding.
     let prev_provider = {
@@ -334,6 +379,8 @@ pub fn run() {
     // Open shared MemoryStore for chat persistence and memory queries.
     let memory =
         Arc::new(MemoryStore::open_with_config(&config).expect("Failed to open MemoryStore"));
+    let agentic_runtime = Arc::new(agentic_runtime::AgenticRuntime::new(&data_dir));
+    let orchestration_scheduler = Arc::new(OrchestrationScheduler::new(data_dir.clone()));
 
     // Seed skill instructions into data_dir when absent (first run / clean install).
     skill_instructions::bootstrap_if_needed(&data_dir);
@@ -354,6 +401,8 @@ pub fn run() {
         memory,
         active_agent_id: RwLock::new(None),
         subagent_manager,
+        agentic_runtime,
+        orchestration_scheduler,
         browser,
         http_client,
         ollama: Arc::new(tokio::sync::Mutex::new(None)),
@@ -382,6 +431,16 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle();
             let state = handle.state::<AppState>();
+
+            tauri::async_runtime::block_on(async {
+                state
+                    .agentic_runtime
+                    .initialize_recovery()
+                    .await
+                    .map_err(|e| e.to_string())
+            })?;
+
+            register_runtime_subagents(&state)?;
 
             // Register Hive Management Skill
             let hive_ops = Arc::new(crate::hive_ops::TauriHiveOps::new(handle.clone()));
@@ -682,11 +741,21 @@ pub fn run() {
             reset_memories,
             search_memories,
             start_agentic_run,
+            start_entity_initiated_agentic_run,
             get_agentic_run_status,
             respond_to_mentor_ask,
+            respond_agentic_mentor,
             confirm_tool_execution,
+            confirm_agentic_action,
             cancel_agentic_run,
             list_agentic_runs,
+            get_agentic_runtime_status,
+            get_orchestration_backend_status,
+            list_orchestration_jobs,
+            set_orchestration_job_enabled,
+            delete_orchestration_job,
+            run_orchestration_job_now,
+            list_orchestration_job_logs,
             list_subagents,
             delegate_to_subagent,
             get_governor_status,

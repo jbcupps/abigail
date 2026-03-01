@@ -1,5 +1,11 @@
 # Release process
 
+## Project stage and release posture
+
+- Abigail is currently in **early alpha testing**.
+- Current milestone target is a **working beta by March 31, 2026**.
+- Until beta, prefer fast iterative validation cycles and use full multi-platform notarized releases only when promoting candidate builds.
+
 ## Version scheme
 
 - **Current:** `0.0.x` (first release is **0.0.1**).
@@ -21,6 +27,19 @@ All workspace crates use `version.workspace = true`, so they follow the root.
 
 - Go to **Actions** → **Release** → **Run workflow**.
 - Optionally set **Release version** (e.g. `0.0.1`). If set, the workflow builds installers and publishes a release with that version (tag `v0.0.1`). If left empty, version is auto-incremented from the latest `v*` tag.
+
+## Which workflow to run
+
+Use the workflow based on intent:
+
+1. **Release Fast (Windows + Linux)** (`.github/workflows/release-fast.yml`)
+   - Trigger: manual only (`workflow_dispatch`)
+   - Purpose: quick iterative validation without macOS code-signing/notarization latency
+   - Outputs: Windows + Linux artifacts; optional GitHub pre-release when `create_github_release=true`
+2. **Release** (`.github/workflows/release.yml`)
+   - Trigger: tag push `v*` or manual
+   - Purpose: full go-live candidate release (Windows + Linux + macOS with signing/notarization + npm publish)
+   - Use this when promoting beyond iterative alpha validation
 
 ## How to publish a release (tag-based)
 

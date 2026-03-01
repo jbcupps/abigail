@@ -97,6 +97,9 @@ Notes:
 - `documents/tests/SPRINT_1_GUI_ENTITY_STABILITY_REPORT.md`
 - `documents/tests/SPRINT_2_CHAT_GATEWAY_KICKOFF_CHECKLIST.md`
 - `documents/tests/SPRINT_2_CHAT_GATEWAY_REPORT.md`
+- `documents/tests/SPRINT_3_INTERNAL_MESSAGE_BOUNDARY_REPORT.md`
+- `documents/tests/SPRINT_4_ENTITY_INITIATED_AGENTS_KICKOFF_CHECKLIST.md`
+- `documents/tests/SPRINT_4_ENTITY_INITIATED_AGENTS_REPORT.md` (to be added at Sprint 4 completion)
 
 ## Integration Test Guides
 

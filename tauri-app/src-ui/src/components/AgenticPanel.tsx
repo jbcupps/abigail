@@ -31,6 +31,21 @@ export default function AgenticPanel() {
 
       // Update status from events
       const ev = event.payload;
+      if (ev.type === "turn_started") {
+        setActiveRun((prev) => prev ? { ...prev, current_turn: Number((ev as any).turn_number ?? prev.current_turn) } : null);
+      }
+      if (ev.type === "mentor_ask") {
+        setActiveRun((prev) => prev ? { ...prev, status: "waiting_for_input" } : null);
+      }
+      if (ev.type === "tool_confirmation") {
+        setActiveRun((prev) => prev ? { ...prev, status: "waiting_for_confirmation" } : null);
+      }
+      if (ev.type === "mentor_response_received" || ev.type === "mentor_confirmation_received") {
+        setActiveRun((prev) => prev ? { ...prev, status: "running" } : null);
+      }
+      if (ev.type === "run_started") {
+        setActiveRun((prev) => prev ? { ...prev, status: "running" } : null);
+      }
       if (ev.type === "run_completed" || ev.type === "run_failed" || ev.type === "run_cancelled") {
         setActiveRun((prev) => prev ? { ...prev, status: ev.type.replace("run_", "") } : null);
       }
