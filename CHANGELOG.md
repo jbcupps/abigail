@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-03-01 01:00 EST: Fix model loading screen progress (serde event format mismatch) and auto-skip Ignition stage when managed Ollama is running with model ready
 - 2026-02-28 23:30 EST: Bundle Ollama with ABNORMAL BRAIN loading screen — auto-start managed Ollama, pull Llama 3.2 3B on first launch with typewriter-flicker loading animation, graceful shutdown on exit, release workflow downloads and codesigns Ollama per-platform
 - 2026-02-28 21:55 EST: Fix macOS notarization — codesign bundled abigail-keygen binary with hardened runtime and secure timestamp before Tauri build
 - 2026-02-28 16:00 EST: Add sub-agent job queue Phase 1 — abigail-streaming crate (StreamBroker trait + MemoryBroker), abigail-queue crate (JobQueue with SQLite + dual-layer event publishing), V3 migration for job_queue table

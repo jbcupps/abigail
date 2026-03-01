@@ -288,7 +288,33 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const handleContinueFromKeyPresentation = async () => {
     setPrivateKey(""); // Clear from memory
     await invoke("advance_past_darkness");
-    // Always enter Ignition. The setup wizard decides whether to fast-path.
+
+    // If managed Ollama is running with model ready, skip Ignition entirely —
+    // the LLM provider picker is redundant when Ollama is pre-configured.
+    try {
+      const status = await invoke<{ managed: boolean; running: boolean; port: number; model_ready: boolean }>(
+        "get_ollama_status"
+      );
+      if (status.running && status.model_ready) {
+        // Skip Ignition → advance directly to Connectivity
+        try {
+          await invoke("advance_to_connectivity");
+          const [providers, cliResults] = await Promise.all([
+            invoke<string[]>("get_stored_providers"),
+            invoke<typeof cliDetections>("detect_cli_providers_full"),
+          ]);
+          setStoredProviders(providers);
+          setCliDetections(cliResults);
+        } catch (e) {
+          console.error("Failed to advance to connectivity after Ollama skip:", e);
+        }
+        setStage("Connectivity");
+        return;
+      }
+    } catch {
+      // get_ollama_status failed — fall through to normal Ignition
+    }
+
     setStage("Ignition");
   };
 

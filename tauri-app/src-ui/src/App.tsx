@@ -128,11 +128,12 @@ function AppInner() {
   useEffect(() => {
     const unlisteners: (() => void)[] = [];
 
-    listen<{ progress_pct?: number } | string>("ollama-lifecycle", (event) => {
+    listen<Record<string, unknown> | string>("ollama-lifecycle", (event) => {
       const payload = event.payload;
-      if (typeof payload === "object" && payload !== null && "progress_pct" in payload) {
-        // PullingModel variant
-        setOllamaProgress(payload.progress_pct ?? 0);
+      if (typeof payload === "object" && payload !== null && "pulling_model" in payload) {
+        // PullingModel { progress_pct } — serde serializes to {"pulling_model": {"progress_pct": N}}
+        const inner = (payload as { pulling_model: { progress_pct?: number } }).pulling_model;
+        setOllamaProgress(inner?.progress_pct ?? 0);
       } else if (payload === "model_ready") {
         setOllamaProgress(100);
         // onReady in AbnormalBrainScreen will handle transition after brief pause

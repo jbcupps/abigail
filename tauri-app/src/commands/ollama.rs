@@ -322,7 +322,7 @@ pub async fn start_managed_ollama(
                 tracing::warn!("Failed to rebuild router after Ollama start: {}", e);
             }
 
-            let _ = app_bg.emit("ollama-lifecycle", "model_ready");
+            let _ = app_bg.emit("ollama-lifecycle", OllamaLifecycleState::ModelReady);
         });
 
         // Return immediately — frontend shows loading screen
