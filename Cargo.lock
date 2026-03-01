@@ -244,6 +244,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "abigail-queue"
+version = "0.0.1"
+dependencies = [
+ "abigail-core",
+ "abigail-streaming",
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "abigail-router"
 version = "0.0.1"
 dependencies = [
@@ -305,6 +322,21 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tracing",
+]
+
+[[package]]
+name = "abigail-streaming"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

@@ -12,6 +12,9 @@
 
 name: Release
 
+env:
+  OLLAMA_VERSION: "v0.5.13"
+
 on:
   push:
     tags:
@@ -42,6 +45,7 @@ jobs:
             asset_glob: "*.exe"
             keygen_bin: abigail-keygen.exe
             resource_name: abigail-keygen.exe
+            ollama_bin: ollama.exe
 
           - platform: ubuntu-22.04
             args: ""
@@ -51,6 +55,7 @@ jobs:
             asset_glob: "*.deb"
             keygen_bin: abigail-keygen
             resource_name: abigail-keygen
+            ollama_bin: ollama
 
           - platform: macos-latest
             args: "--target universal-apple-darwin"
@@ -60,6 +65,7 @@ jobs:
             asset_glob: "*.dmg"
             keygen_bin: abigail-keygen
             resource_name: abigail-keygen
+            ollama_bin: ollama
 
     runs-on: ${{ matrix.platform }}
 
@@ -159,7 +165,7 @@ jobs:
             const path = 'tauri-app/tauri.conf.json';
             const data = JSON.parse(fs.readFileSync(path, 'utf8'));
             data.bundle = data.bundle || {};
-            data.bundle.resources = ['${{ matrix.resource_name }}'];
+            data.bundle.resources = ['${{ matrix.resource_name }}', '${{ matrix.ollama_bin }}'];
             fs.writeFileSync(path, JSON.stringify(data, null, 2) + '\n');
           "
 
@@ -203,6 +209,21 @@ jobs:
             cargo build --release -p abigail-keygen
             cp target/release/${{ matrix.keygen_bin }} tauri-app/${{ matrix.resource_name }}
           fi
+
+      - name: Download bundled Ollama binary
+        shell: bash
+        run: |
+          OLLAMA_BASE="https://github.com/ollama/ollama/releases/download/${{ env.OLLAMA_VERSION }}"
+          if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
+            curl -L -o "tauri-app/${{ matrix.ollama_bin }}" "${OLLAMA_BASE}/ollama-windows-amd64.exe"
+          elif [[ "${{ matrix.platform }}" == "ubuntu-22.04" ]]; then
+            curl -L -o "tauri-app/${{ matrix.ollama_bin }}" "${OLLAMA_BASE}/ollama-linux-amd64"
+            chmod +x "tauri-app/${{ matrix.ollama_bin }}"
+          elif [[ "${{ matrix.platform }}" == "macos-latest" ]]; then
+            curl -L -o "tauri-app/${{ matrix.ollama_bin }}" "${OLLAMA_BASE}/ollama-darwin"
+            chmod +x "tauri-app/${{ matrix.ollama_bin }}"
+          fi
+          ls -la "tauri-app/${{ matrix.ollama_bin }}"
 
       - name: Import Apple Developer ID certificate (macOS)
         if: matrix.platform == 'macos-latest'
@@ -257,18 +278,20 @@ jobs:
             echo "APPLE_SIGNING_IDENTITY not set — skipping codesign of bundled binaries"
             exit 0
           fi
-          # Sign abigail-keygen with hardened runtime + secure timestamp
+          # Sign all bundled binaries with hardened runtime + secure timestamp
           # (required for Apple notarization of all binaries inside the .app bundle)
-          KEYGEN_BIN="tauri-app/${{ matrix.resource_name }}"
-          if [[ -f "$KEYGEN_BIN" ]]; then
-            echo "Codesigning $KEYGEN_BIN with identity: $APPLE_SIGNING_IDENTITY"
-            codesign --force --options runtime --timestamp \
-              --sign "$APPLE_SIGNING_IDENTITY" "$KEYGEN_BIN"
-            echo "Verifying signature..."
-            codesign --verify --verbose "$KEYGEN_BIN"
-          else
-            echo "WARNING: $KEYGEN_BIN not found — skipping codesign"
-          fi
+          for BIN_NAME in "${{ matrix.resource_name }}" "${{ matrix.ollama_bin }}"; do
+            BIN_PATH="tauri-app/${BIN_NAME}"
+            if [[ -f "$BIN_PATH" ]]; then
+              echo "Codesigning $BIN_PATH with identity: $APPLE_SIGNING_IDENTITY"
+              codesign --force --options runtime --timestamp \
+                --sign "$APPLE_SIGNING_IDENTITY" "$BIN_PATH"
+              echo "Verifying signature..."
+              codesign --verify --verbose "$BIN_PATH"
+            else
+              echo "WARNING: $BIN_PATH not found — skipping codesign"
+            fi
+          done
 
       - name: Validate updater signing key preflight
         shell: bash

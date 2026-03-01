@@ -59,6 +59,28 @@ pub struct OllamaModelProgress {
     pub status: String,
 }
 
+/// Lifecycle state of the managed Ollama instance, streamed to the frontend
+/// via Tauri events so the loading screen can track progress.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OllamaLifecycleState {
+    /// Ollama management is disabled or not started.
+    NotStarted,
+    /// Ollama binary discovered, process starting.
+    Starting,
+    /// Ollama server is responding to health checks.
+    Running,
+    /// Model download in progress.
+    PullingModel {
+        /// Download progress as a percentage (0.0–100.0).
+        progress_pct: f32,
+    },
+    /// Target model is available and ready for inference.
+    ModelReady,
+    /// Something went wrong.
+    Error(String),
+}
+
 /// Manages a local Ollama process.
 pub struct OllamaManager {
     /// Child process handle (Some if we spawned it)
@@ -91,6 +113,72 @@ impl OllamaManager {
         };
         mgr.start().await?;
         Ok(mgr)
+    }
+
+    /// Start Ollama using a bundled binary (preferred) or system binary (fallback).
+    ///
+    /// `bundled_bin` is the path to an Ollama binary embedded in the Tauri resource
+    /// directory.  When present and valid it takes priority over system installs.
+    pub async fn discover_and_start_bundled(
+        data_dir: &Path,
+        bundled_bin: Option<PathBuf>,
+    ) -> Result<Self, String> {
+        let models_dir = data_dir.join("ollama_models");
+
+        let ollama_exe = if let Some(ref bin) = bundled_bin {
+            if bin.exists() {
+                #[cfg(unix)]
+                Self::ensure_executable(bin)?;
+                tracing::info!("Using bundled Ollama at {}", bin.display());
+                bin.clone()
+            } else {
+                tracing::warn!(
+                    "Bundled Ollama not found at {}, falling back to system",
+                    bin.display()
+                );
+                Self::find_ollama_binary()
+                    .ok_or_else(|| "Neither bundled nor system Ollama binary found".to_string())?
+            }
+        } else {
+            Self::find_ollama_binary().ok_or_else(|| {
+                "Ollama binary not found (not installed and not in PATH)".to_string()
+            })?
+        };
+
+        tracing::info!("Found Ollama at {}", ollama_exe.display());
+        let mut mgr = Self {
+            child: None,
+            port: 11434,
+            ollama_exe,
+            models_dir,
+            model_ready: false,
+        };
+        mgr.start().await?;
+        Ok(mgr)
+    }
+
+    /// Returns the expected path of the bundled Ollama binary inside a Tauri
+    /// resource directory.
+    pub fn bundled_binary_path(resource_dir: &Path) -> PathBuf {
+        if cfg!(windows) {
+            resource_dir.join("ollama.exe")
+        } else {
+            resource_dir.join("ollama")
+        }
+    }
+
+    /// On unix, ensure the binary has the executable bit set.
+    #[cfg(unix)]
+    fn ensure_executable(path: &Path) -> Result<(), String> {
+        use std::os::unix::fs::PermissionsExt;
+        let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+        let mut perms = metadata.permissions();
+        if perms.mode() & 0o111 == 0 {
+            perms.set_mode(perms.mode() | 0o755);
+            std::fs::set_permissions(path, perms).map_err(|e| e.to_string())?;
+            tracing::info!("Set executable permission on {}", path.display());
+        }
+        Ok(())
     }
 
     /// Detect whether Ollama is running, installed, or missing.
