@@ -11,6 +11,9 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tokio_util::sync::CancellationToken;
 
+/// Type alias for consumer group tracking: maps (stream, topic, group) to presence flag.
+type ConsumerGroupMap = HashMap<(String, String, String), bool>;
+
 /// Key for a topic within a stream.
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 struct TopicKey {
@@ -33,7 +36,7 @@ struct TopicState {
 pub struct MemoryBroker {
     topics: Arc<RwLock<HashMap<TopicKey, TopicState>>>,
     /// Consumer group tracking: maps (stream, topic, group) -> receiver exists.
-    consumer_groups: Arc<RwLock<HashMap<(String, String, String), bool>>>,
+    consumer_groups: Arc<RwLock<ConsumerGroupMap>>,
     /// Default channel capacity for new topics.
     channel_capacity: usize,
 }
@@ -194,16 +197,14 @@ impl StreamBroker for MemoryBroker {
         };
 
         let mut topics = self.topics.write().await;
-        if !topics.contains_key(&key) {
-            let (sender, _) = broadcast::channel(self.channel_capacity);
-            topics.insert(
-                key,
-                TopicState {
-                    sender,
-                    _config: config,
-                },
-            );
-        }
+        let capacity = self.channel_capacity;
+        topics.entry(key).or_insert_with(|| {
+            let (sender, _) = broadcast::channel(capacity);
+            TopicState {
+                sender,
+                _config: config,
+            }
+        });
         Ok(())
     }
 

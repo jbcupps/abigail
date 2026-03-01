@@ -49,7 +49,7 @@ impl JobQueue {
         let input_data_json = spec
             .input_data
             .as_ref()
-            .map(|v| serde_json::to_string(v))
+            .map(serde_json::to_string)
             .transpose()?;
         let capability_str = spec.capability.as_str().to_string();
         let priority_i32 = spec.priority.as_i32();
