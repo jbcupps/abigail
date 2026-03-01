@@ -276,7 +276,9 @@ fn ensure_legacy_identity_action_safe(state: &State<'_, AppState>) -> Result<(),
     Ok(())
 }
 
-async fn reset_runtime_after_legacy_identity_action(state: &State<'_, AppState>) -> Result<(), String> {
+async fn reset_runtime_after_legacy_identity_action(
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
     {
         let mut active = state.active_agent_id.write().map_err(|e| e.to_string())?;
         *active = None;
