@@ -11,6 +11,7 @@ use abigail_router::{IdEgoRouter, SubagentManager};
 use abigail_skills::channel::EventBus;
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use std::sync::{Arc, Mutex, RwLock};
+use tokio_util::sync::CancellationToken;
 
 /// Shared application state holding all subsystem handles.
 ///
@@ -80,6 +81,8 @@ pub struct AppState {
     pub cli_server: Arc<tokio::sync::Mutex<Option<CliServerHandle>>>,
     /// In-memory ring buffer for captured log entries
     pub log_buffer: LogBuffer,
+    /// Cancellation token for the active streaming chat request (if any)
+    pub active_chat_cancel: Arc<tokio::sync::Mutex<Option<CancellationToken>>>,
 }
 
 pub struct CliServerHandle {

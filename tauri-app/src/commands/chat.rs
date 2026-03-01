@@ -11,6 +11,7 @@ use abigail_core::key_detection::{detect_api_keys, CLI_ALIASES};
 use abigail_memory::ConversationTurn;
 use entity_core::{ChatResponse, SessionMessage};
 use tauri::{Emitter, State};
+use tokio_util::sync::CancellationToken;
 
 // ---------------------------------------------------------------------------
 // API key auto-detection (Tauri-specific side-effect wrapper)
@@ -191,6 +192,16 @@ pub async fn chat(
 // POST /chat_stream — streaming variant using Tauri events
 // ---------------------------------------------------------------------------
 
+#[tauri::command]
+pub async fn cancel_chat_stream(state: State<'_, AppState>) -> Result<bool, String> {
+    let mut active = state.active_chat_cancel.lock().await;
+    if let Some(token) = active.take() {
+        token.cancel();
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 /// Streaming chat command. Runs the tool-use loop non-streaming for
 /// intermediate rounds, then streams the final text response via Tauri events:
 ///   - `chat-token`  — each text delta as it arrives
@@ -264,6 +275,15 @@ pub async fn chat_stream(
         entity_chat::build_contextual_messages(&system_prompt, session_messages, &message);
     let tools = entity_chat::build_tool_definitions(&state.registry);
     let target_mode = target.as_deref().unwrap_or("AUTO");
+    let cancel_token = CancellationToken::new();
+
+    {
+        let mut active = state.active_chat_cancel.lock().await;
+        if let Some(prev) = active.replace(cancel_token.clone()) {
+            // Ensure a stale in-flight stream does not continue if a new one starts.
+            prev.cancel();
+        }
+    }
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
     let app_clone = app.clone();
@@ -275,15 +295,25 @@ pub async fn chat_stream(
         }
     });
 
-    let result = entity_chat::stream_chat_pipeline(
+    let pipeline_fut = entity_chat::stream_chat_pipeline(
         &router,
         &state.executor,
         messages,
         tools,
         target_mode,
         tx,
-    )
-    .await;
+    );
+    tokio::pin!(pipeline_fut);
+
+    let result = tokio::select! {
+        res = &mut pipeline_fut => res,
+        _ = cancel_token.cancelled() => Err(anyhow::anyhow!("Interrupted by user")),
+    };
+
+    {
+        let mut active = state.active_chat_cancel.lock().await;
+        *active = None;
+    }
 
     let _ = stream_task.await;
 

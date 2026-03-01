@@ -372,6 +372,7 @@ pub fn run() {
         birth_cooldown: CooldownGuard::new(std::time::Duration::from_millis(500)),
         cli_server: Arc::new(tokio::sync::Mutex::new(None)),
         log_buffer: log_buffer.clone(),
+        active_chat_cancel: Arc::new(tokio::sync::Mutex::new(None)),
     };
 
     tauri::Builder::default()
@@ -607,6 +608,9 @@ pub fn run() {
             suspend_agent,
             save_recovery_key,
             migrate_legacy_identity,
+            check_existing_identity,
+            archive_identity,
+            wipe_identity,
             get_birth_complete,
             get_agent_name,
             get_docs_path,
@@ -699,6 +703,7 @@ pub fn run() {
             genesis_chat,
             chat,
             chat_stream,
+            cancel_chat_stream,
             get_system_diagnostics,
             get_log_level,
             set_log_level,

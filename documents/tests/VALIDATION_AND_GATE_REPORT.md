@@ -3,6 +3,12 @@
 Date: 2026-02-21  
 Scope: Five UI suite program implementation status, automated execution evidence, and gate readiness.
 
+> Note (2026-03-01): The program now includes a sixth suite, **Message Flow Stability**.
+> This report predates STAB execution and should be read together with:
+> - `documents/tests/MESSAGE_FLOW_STABILITY_TEST_PLAN.md`
+> - `documents/GUI_ENTITY_STABILITY_ROADMAP.md`
+> - `documents/GUI_ENTITY_CODE_REVIEW_REPORT.md`
+
 ## Commands Executed
 
 - `npm run build` -> **PASS**
@@ -52,3 +58,33 @@ Reason:
 - Automated harness coverage and stability checks are passing.
 - Mandatory native parity evidence is not yet collected for all manual/hybrid cases.
 
+---
+
+## Sprint 2 Validation Evidence (2026-03-01)
+
+Scope: `S2-01..S2-05` Chat Gateway Abstraction execution and required gate commands from `documents/tests/SPRINT_2_CHAT_GATEWAY_KICKOFF_CHECKLIST.md`.
+
+### Required Commands Executed
+
+1. `cd tauri-app/src-ui && npm run check:command-contract` -> **PASS**
+   - Output:
+     - `Command surface check: frontend invokes and harness mocks are aligned with native command registry.`
+     - `Frontend commands checked: 99`
+     - `Native commands registered: 137`
+     - `Harness command cases checked: 70`
+2. `cd tauri-app/src-ui && npm test` -> **PASS**
+   - Output:
+     - `Test Files  9 passed (9)`
+     - `Tests  28 passed (28)`
+     - Includes new parity suite: `src/chat/__tests__/ChatGateway.parity.test.ts (4 tests)`
+3. `cd /Users/jamescupps/Repo/abigail/abigail && cargo check -p abigail-app` -> **PASS**
+   - Output:
+     - `Finished 'dev' profile ...`
+     - Existing Rust warnings remain in pre-existing files (`tauri-app/src/ollama_manager.rs`, `tauri-app/src/commands/chat.rs`, `tauri-app/src/commands/forge.rs`).
+
+### Sprint 2 Gate Status
+
+- `Gate-STAB-A` (chat transport abstraction implemented) -> **PASS**
+- `Gate-STAB-B` (adapter parity tests for functional + telemetry output) -> **PASS**
+- `Gate-STAB-C` (interrupt/cancel lifecycle parity) -> **PASS**
+- `Gate-STAB-D` (required validation command set) -> **PASS**

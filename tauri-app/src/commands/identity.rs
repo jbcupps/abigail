@@ -265,15 +265,46 @@ pub fn check_existing_identity(state: State<AppState>) -> Result<Option<Identity
     }))
 }
 
+fn ensure_legacy_identity_action_safe(state: &State<'_, AppState>) -> Result<(), String> {
+    let active = state.active_agent_id.read().map_err(|e| e.to_string())?;
+    if active.is_some() {
+        return Err(
+            "Cannot run legacy identity archive/wipe while an agent is active. Suspend the active agent and use Soul Registry actions."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+async fn reset_runtime_after_legacy_identity_action(
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
+    {
+        let mut active = state.active_agent_id.write().map_err(|e| e.to_string())?;
+        *active = None;
+    }
+    {
+        let mut birth = state.birth.write().map_err(|e| e.to_string())?;
+        *birth = None;
+    }
+    crate::rebuild_router(state).await?;
+    Ok(())
+}
+
 #[tauri::command]
-pub fn archive_identity(state: State<AppState>) -> Result<String, String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    let data_dir = config.data_dir.clone();
-    let agent_name = config
-        .agent_name
-        .clone()
-        .unwrap_or_else(|| "agent".to_string());
-    drop(config);
+pub async fn archive_identity(state: State<'_, AppState>) -> Result<String, String> {
+    ensure_legacy_identity_action_safe(&state)?;
+
+    let (data_dir, agent_name) = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        (
+            config.data_dir.clone(),
+            config
+                .agent_name
+                .clone()
+                .unwrap_or_else(|| "agent".to_string()),
+        )
+    };
 
     let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
     let safe_name = agent_name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
@@ -311,6 +342,9 @@ pub fn archive_identity(state: State<AppState>) -> Result<String, String> {
     {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         *config = abigail_core::AppConfig::default_paths();
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
     }
 
     {
@@ -318,15 +352,20 @@ pub fn archive_identity(state: State<AppState>) -> Result<String, String> {
         *vault = abigail_core::SecretsVault::new(data_dir.clone());
     }
 
+    reset_runtime_after_legacy_identity_action(&state).await?;
+
     tracing::info!("Identity archived");
     Ok(backup_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
-pub fn wipe_identity(state: State<AppState>) -> Result<(), String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    let data_dir = config.data_dir.clone();
-    drop(config);
+pub async fn wipe_identity(state: State<'_, AppState>) -> Result<(), String> {
+    ensure_legacy_identity_action_safe(&state)?;
+
+    let data_dir = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        config.data_dir.clone()
+    };
 
     let files_to_delete = [
         "config.json",
@@ -353,12 +392,17 @@ pub fn wipe_identity(state: State<AppState>) -> Result<(), String> {
     {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         *config = abigail_core::AppConfig::default_paths();
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
     }
 
     {
         let mut vault = state.secrets.lock().map_err(|e| e.to_string())?;
         *vault = abigail_core::SecretsVault::new(data_dir);
     }
+
+    reset_runtime_after_legacy_identity_action(&state).await?;
 
     tracing::warn!("Identity wiped - all data deleted");
     Ok(())

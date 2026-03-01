@@ -2,15 +2,18 @@
 
 ## Scope
 
-This program defines five executable UI test suites:
+This program defines six executable UI test suites:
 - Birth
 - Crystallization
 - Operational Hive Interface
 - Skills
 - Agent Spawning
+- Message Flow Stability
 
 Primary references:
 - `documents/BROWSER_HARNESS_QA_PROTOCOL.md`
+- `documents/GUI_ENTITY_STABILITY_ROADMAP.md`
+- `documents/GUI_ENTITY_CODE_REVIEW_REPORT.md`
 - `tauri-app/src-ui/src/__tests__/App.browserFlow.test.tsx`
 - `tauri-app/src-ui/src/__tests__/HarnessDebug.test.tsx`
 
@@ -36,6 +39,7 @@ Every test case in all suite documents must use this structure:
 - `OPER-001..099`
 - `SKILL-001..099`
 - `SPAWN-001..099`
+- `STAB-001..099`
 
 ## Severity / Triage
 
@@ -51,7 +55,8 @@ Every test case in all suite documents must use this structure:
 3. Operational Suite
 4. Skills Suite
 5. Agent Spawning Suite
-6. Regression + Native parity gates
+6. Message Flow Stability Suite
+7. Regression + Native parity gates
 
 ## Automation Matrix (Program-Level)
 
@@ -62,6 +67,7 @@ Every test case in all suite documents must use this structure:
 | Operational | Yes | Yes | Yes |
 | Skills | Partial | Yes | Yes |
 | Agent Spawning | Partial | Yes | Yes |
+| Message Flow Stability | Yes | Yes | Yes |
 
 Notes:
 - Skills creation and deep spawning lifecycle may require harness extensions for full automation parity.
@@ -82,11 +88,17 @@ Notes:
 - `documents/tests/OPERATIONAL_HIVE_UI_TEST_PLAN.md`
 - `documents/tests/SKILLS_TEST_PLAN.md`
 - `documents/tests/AGENT_SPAWNING_TEST_PLAN.md`
+- `documents/tests/MESSAGE_FLOW_STABILITY_TEST_PLAN.md`
 - `documents/tests/AUTOMATION_MATRIX.md`
 - `documents/tests/VALIDATION_AND_GATE_REPORT.md`
+
+## Sprint Execution Documents
+
+- `documents/tests/SPRINT_1_GUI_ENTITY_STABILITY_REPORT.md`
+- `documents/tests/SPRINT_2_CHAT_GATEWAY_KICKOFF_CHECKLIST.md`
+- `documents/tests/SPRINT_2_CHAT_GATEWAY_REPORT.md`
 
 ## Integration Test Guides
 
 - `documents/tests/EMAIL_INTEGRATION_TEST_GUIDE.md` — Step-by-step instructions for running the live email E2E tests (`entity-chat` crate, env-gated)
 - `documents/tests/EMAIL_INTEGRATION_REPORT.md` — Detailed report of email integration test results, bugs found, and fixes applied
-

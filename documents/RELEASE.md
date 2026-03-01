@@ -119,6 +119,21 @@ These are not yet included in the automated release pipeline. Future releases wi
 | 3 | `git tag v0.0.x` and `git push origin v0.0.x`. |
 | 4 | Wait for **Release** workflow to finish — release is published automatically. |
 
+## Stability gates for GUI/Entity message-flow program
+
+For releases in the current stabilization window, also require the gates in:
+
+- `documents/GUI_ENTITY_STABILITY_ROADMAP.md`
+- `documents/GUI_ENTITY_CODE_REVIEW_REPORT.md`
+
+Minimum required before release `Go`:
+
+1. Command Surface Gate: frontend command usage matches registered Tauri handlers.
+2. Chat Parity Gate: transport adapters produce equivalent chat/session/trace behavior.
+3. Agent Lifecycle Gate: run lifecycle (start/ask/confirm/cancel/complete/recover) is green.
+4. Policy Gate: required trust/policy checks are runtime-enforced and tested.
+5. No open P0 defects in GUI chat/entity-agent stability scope.
+
 ## npm publishing
 
 The `abigail-desktop` npm package is published automatically by the **Release** workflow (Stage 2):

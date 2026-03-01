@@ -277,9 +277,14 @@ pub fn advance_to_crystallization(state: State<AppState>) -> Result<(), String> 
         false
     };
 
-    if !has_vault_provider && !has_cli_provider {
+    let has_local_llm = {
+        let router = state.router.read().map_err(|e| e.to_string())?;
+        router.status().has_local_http
+    };
+
+    if !has_vault_provider && !has_cli_provider && !has_local_llm {
         return Err(
-            "At least one provider must be configured before crystallization can begin."
+            "A local LLM or at least one provider must be configured before crystallization can begin."
                 .to_string(),
         );
     }

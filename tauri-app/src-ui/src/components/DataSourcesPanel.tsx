@@ -62,16 +62,10 @@ export default function DataSourcesPanel() {
       filters: [{ name: "Database", extensions: ["db"] }],
     });
     if (path == null) return;
-    setActionInProgress("backup");
-    setMessage(null);
-    try {
-      await invoke("backup_sqlite", { destPath: path });
-      setMessage({ type: "success", text: `Backup saved.` });
-    } catch (e) {
-      setMessage({ type: "error", text: `Backup failed: ${e}` });
-    } finally {
-      setActionInProgress(null);
-    }
+    setMessage({
+      type: "error",
+      text: `Backup export is temporarily unavailable in this build. Requested path: ${path}`,
+    });
   };
 
   const handleReset = async () => {

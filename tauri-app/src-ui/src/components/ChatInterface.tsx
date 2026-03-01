@@ -1,36 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import McpAppFrame from "./McpAppFrame";
 import ThinkingIndicator from "./ThinkingIndicator";
 import VaultModal, { type MissingSkillSecret } from "./VaultModal";
 import { isBrowserHarnessRuntime, isHarnessDebugEnabled } from "../runtimeMode";
-
-interface ExecutionStep {
-  provider_label: string;
-  model_requested?: string;
-  model_reported?: string;
-  result: "success" | "error";
-  error_summary?: string;
-  started_at_utc: string;
-  ended_at_utc: string;
-}
-
-interface ExecutionTrace {
-  turn_id: string;
-  timestamp_utc: string;
-  routing_mode: string;
-  configured_provider?: string;
-  configured_model?: string;
-  configured_tier?: string;
-  complexity_score?: number;
-  selection_reason?: string;
-  target_selected: string;
-  steps: ExecutionStep[];
-  final_step_index: number;
-  fallback_occurred: boolean;
-}
+import { createChatGateway } from "../chat/createChatGateway";
+import {
+  isInterruptedByUserMessage,
+  type ChatGatewayStream,
+  type ExecutionTrace,
+} from "../chat/chatGateway";
 
 /** Normalize raw trace/provider labels for chat-facing display.
  *  Id is a background system function, never a conversational actor. */
@@ -108,6 +88,7 @@ export default function ChatInterface({
   const [input, setInput] = useState(() => initialSession?.input ?? "");
   const [sessionId, setSessionId] = useState<string>(() => initialSession?.sessionId ?? crypto.randomUUID());
   const [loading, setLoading] = useState(false);
+  const [interrupting, setInterrupting] = useState(false);
   const [routerStatus, setRouterStatus] = useState<RouterStatus | null>(null);
   const [configStep, setConfigStep] = useState<ConfigStep>(null);
   const [configInput, setConfigInput] = useState("");
@@ -123,13 +104,16 @@ export default function ChatInterface({
   const [showRoutingDetails, setShowRoutingDetails] = useState(false);
   const [memoryDisclosureEnabled, setMemoryDisclosureEnabled] = useState(true);
   const showDebugTelemetry = isBrowserHarnessRuntime() && isHarnessDebugEnabled();
+  const chatGateway = useMemo(() => createChatGateway(), []);
 
   const assistantLabel = agentName || "Abigail";
   const mountedRef = useRef(true);
   const messagesRef = useRef<Message[]>(messages);
   const inputRef = useRef(input);
   const sessionIdRef = useRef(sessionId);
+  const activeChatRef = useRef<ChatGatewayStream | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const autoLocalBootstrapRef = useRef(false);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -177,9 +161,28 @@ export default function ChatInterface({
       });
     // Also fetch Ollama status
     invoke<OllamaStatus>("get_ollama_status")
-      .then((status) => {
+      .then(async (status) => {
         if (!mountedRef.current) return;
         setOllamaStatus(status);
+        if (!status.running || autoLocalBootstrapRef.current) return;
+
+        // Bundled/local Ollama is up: automatically wire local URL when no provider is configured.
+        const current = await invoke<RouterStatus>("get_router_status").catch(() => null);
+        if (!current) return;
+        if (current.ego_configured || current.id_provider !== "candle_stub") return;
+
+        autoLocalBootstrapRef.current = true;
+        try {
+          await invoke("set_local_llm_url", { url: "http://localhost:11434" });
+          const next = await invoke<RouterStatus>("get_router_status");
+          if (!mountedRef.current) return;
+          setRouterStatus(next);
+          if (next.id_provider === "local_http") {
+            setConfigStep(null);
+          }
+        } catch (e) {
+          console.warn("[ChatInterface] auto local bootstrap failed:", e);
+        }
       })
       .catch(() => {
         if (!mountedRef.current) return;
@@ -247,6 +250,11 @@ export default function ChatInterface({
         setMemoryDisclosureEnabled(true);
       });
     return () => {
+      const activeChat = activeChatRef.current;
+      activeChatRef.current = null;
+      if (activeChat) {
+        void activeChat.dispose();
+      }
       if (onSessionSnapshot) {
         onSessionSnapshot({
           messages: messagesRef.current,
@@ -393,6 +401,81 @@ export default function ChatInterface({
     }
   };
 
+  const applyChatError = (errorMsg: string) => {
+    const interrupted = isInterruptedByUserMessage(errorMsg);
+    if (interrupted) {
+      setMessages((m) => {
+        const updated = [...m];
+        const last = updated[updated.length - 1];
+        if (last && last.role === "assistant") {
+          const hasPartial = last.content.trim().length > 0;
+          updated[updated.length - 1] = {
+            ...last,
+            content: hasPartial ? `${last.content}\n\n[Interrupted]` : "[Interrupted]",
+            isError: false,
+          };
+        }
+        return updated;
+      });
+      setLoading(false);
+      setChatStatus("Interrupted");
+      return;
+    }
+
+    let content = errorMsg;
+    if (errorMsg.includes("No local LLM configured")) {
+      content =
+        "No LLM available. The bundled Ollama may still be starting.\n" +
+        "Please wait a moment, or configure a provider:\n" +
+        "1. Set OPENAI_API_KEY environment variable, or\n" +
+        "2. Install Ollama and set LOCAL_LLM_BASE_URL=http://localhost:11434";
+    } else if (
+      errorMsg.includes("No models loaded") ||
+      errorMsg.includes("no model loaded") ||
+      errorMsg.includes("model not found")
+    ) {
+      content =
+        "Your local LLM server is running but has no model loaded.\n" +
+        "Please load a model in LM Studio or run `lms load <model>`, then try again.";
+    } else if (
+      errorMsg.includes("Connection refused") ||
+      errorMsg.includes("connection refused") ||
+      errorMsg.includes("error sending request")
+    ) {
+      content =
+        "Cannot reach the local LLM server.\n" +
+        "Make sure LM Studio or Ollama is running, or configure a cloud provider in Settings.";
+    }
+
+    setMessages((m) => {
+      const updated = [...m];
+      const last = updated[updated.length - 1];
+      if (last && last.role === "assistant") {
+        updated[updated.length - 1] = { ...last, content, isError: true };
+      } else {
+        updated.push({ role: "assistant", content, isError: true });
+      }
+      return updated;
+    });
+    setShowRoutingDetails(true);
+    setLoading(false);
+    setChatStatus(null);
+  };
+
+  const interruptCurrentResponse = async () => {
+    if (!loading || interrupting) return;
+    const activeChat = activeChatRef.current;
+    if (!activeChat) return;
+    setInterrupting(true);
+    try {
+      await activeChat.cancel();
+    } catch (e) {
+      console.warn("[ChatInterface] chat cancel failed:", e);
+    } finally {
+      setInterrupting(false);
+    }
+  };
+
   const send = async () => {
     if (!input.trim() || loading) return;
     const userMessage: Message = { role: "user", content: input.trim() };
@@ -400,135 +483,80 @@ export default function ChatInterface({
       .filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim().length > 0)
       .map((m) => ({ role: m.role, content: m.content }));
 
-    setMessages((m) => [...m, userMessage]);
+    const staleChat = activeChatRef.current;
+    if (staleChat) {
+      activeChatRef.current = null;
+      await staleChat.dispose();
+    }
+
+    setMessages((m) => [...m, userMessage, { role: "assistant", content: "" }]);
     setInput("");
     setLoading(true);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
 
-    const unlisteners: UnlistenFn[] = [];
-
     try {
-      // Add a placeholder assistant message for streaming tokens.
-      setMessages((m) => [...m, { role: "assistant", content: "" }]);
-
-      // Register event listeners for streaming tokens.
-      unlisteners.push(
-        await listen<string>("chat-token", (event) => {
-          if (!mountedRef.current) return;
-          setMessages((m) => {
-            const updated = [...m];
-            const last = updated[updated.length - 1];
-            if (last && last.role === "assistant") {
-              updated[updated.length - 1] = { ...last, content: last.content + event.payload };
+      const stream = await chatGateway.send(
+        {
+          message: userMessage.content,
+          target,
+          sessionMessages: sessionBeforeTurn,
+          sessionId,
+        },
+        {
+          onToken: (token) => {
+            if (!mountedRef.current) return;
+            setMessages((m) => {
+              const updated = [...m];
+              const last = updated[updated.length - 1];
+              if (last && last.role === "assistant") {
+                updated[updated.length - 1] = { ...last, content: last.content + token };
+              }
+              return updated;
+            });
+          },
+          onDone: (resp) => {
+            if (!mountedRef.current) return;
+            activeChatRef.current = null;
+            setMessages((m) => {
+              const updated = [...m];
+              const last = updated[updated.length - 1];
+              if (last && last.role === "assistant") {
+                updated[updated.length - 1] = {
+                  ...last,
+                  content: last.content || resp.reply,
+                  provider: resp.provider,
+                  tier: resp.tier,
+                  modelUsed: resp.model_used,
+                  executionTrace: resp.execution_trace as ExecutionTrace | undefined,
+                };
+              }
+              return updated;
+            });
+            if (resp.session_id && resp.session_id !== sessionIdRef.current) {
+              setSessionId(resp.session_id);
             }
-            return updated;
-          });
-        }),
+            setLoading(false);
+            setChatStatus(null);
+          },
+          onError: (error) => {
+            if (!mountedRef.current) return;
+            activeChatRef.current = null;
+            applyChatError(error.message);
+          },
+        },
       );
 
-      unlisteners.push(
-        await listen<{
-          reply: string;
-          provider?: string;
-          tool_calls_made?: Array<{ skill_id: string; tool_name: string; success: boolean }>;
-          tier?: string;
-          model_used?: string;
-          complexity_score?: number;
-          execution_trace?: ExecutionTrace;
-        }>("chat-done", (event) => {
-          if (!mountedRef.current) return;
-          const resp = event.payload;
-          setMessages((m) => {
-            const updated = [...m];
-            const last = updated[updated.length - 1];
-            if (last && last.role === "assistant") {
-              updated[updated.length - 1] = {
-                ...last,
-                content: last.content || resp.reply,
-                provider: resp.provider,
-                tier: resp.tier,
-                modelUsed: resp.model_used,
-                executionTrace: resp.execution_trace,
-              };
-            }
-            return updated;
-          });
-          setLoading(false);
-          setChatStatus(null);
-          unlisteners.forEach((u) => u());
-        }),
-      );
-
-      unlisteners.push(
-        await listen<string>("chat-error", (event) => {
-          if (!mountedRef.current) return;
-          const errorMsg = event.payload;
-          let content = errorMsg;
-          if (errorMsg.includes("No local LLM configured")) {
-            content =
-              "No LLM available. The bundled Ollama may still be starting.\n" +
-              "Please wait a moment, or configure a provider:\n" +
-              "1. Set OPENAI_API_KEY environment variable, or\n" +
-              "2. Install Ollama and set LOCAL_LLM_BASE_URL=http://localhost:11434";
-          } else if (
-            errorMsg.includes("No models loaded") ||
-            errorMsg.includes("no model loaded") ||
-            errorMsg.includes("model not found")
-          ) {
-            content =
-              "Your local LLM server is running but has no model loaded.\n" +
-              "Please load a model in LM Studio or run `lms load <model>`, then try again.";
-          } else if (
-            errorMsg.includes("Connection refused") ||
-            errorMsg.includes("connection refused") ||
-            errorMsg.includes("error sending request")
-          ) {
-            content =
-              "Cannot reach the local LLM server.\n" +
-              "Make sure LM Studio or Ollama is running, or configure a cloud provider in Settings.";
-          }
-          setMessages((m) => {
-            const updated = [...m];
-            const last = updated[updated.length - 1];
-            if (last && last.role === "assistant") {
-              updated[updated.length - 1] = { ...last, content, isError: true };
-            }
-            return updated;
-          });
-          setShowRoutingDetails(true);
-          setLoading(false);
-          setChatStatus(null);
-          unlisteners.forEach((u) => u());
-        }),
-      );
-
-      // Fire the streaming chat command (does not return the response itself).
-      await invoke("chat_stream", {
-        message: userMessage.content,
-        target,
-        sessionMessages: sessionBeforeTurn,
-        sessionId,
-      });
+      if (!mountedRef.current) {
+        await stream.dispose();
+        return;
+      }
+      activeChatRef.current = stream;
     } catch (e) {
       if (!mountedRef.current) return;
-      // Invocation-level error (command not found, state lock failure, etc.)
-      const errorMsg = String(e);
-      setMessages((m) => {
-        const updated = [...m];
-        const last = updated[updated.length - 1];
-        if (last && last.role === "assistant" && !last.content) {
-          updated[updated.length - 1] = { ...last, content: errorMsg, isError: true };
-        } else {
-          updated.push({ role: "assistant", content: errorMsg, isError: true });
-        }
-        return updated;
-      });
-      setShowRoutingDetails(true);
-      setLoading(false);
-      setChatStatus(null);
-      unlisteners.forEach((u) => u());
+      activeChatRef.current = null;
+      applyChatError(String(e));
     }
   };
 
@@ -1135,9 +1163,20 @@ export default function ChatInterface({
           aria-label="Send message"
           className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
           onClick={send}
+          disabled={loading}
         >
           Send
         </button>
+        {loading && (
+          <button
+            aria-label="Stop response"
+            className="border border-theme-danger text-theme-danger px-4 py-2 rounded hover:bg-theme-danger-dim disabled:opacity-50"
+            onClick={interruptCurrentResponse}
+            disabled={interrupting}
+          >
+            {interrupting ? "Stopping..." : "Stop"}
+          </button>
+        )}
       </div>
     </div>
   );

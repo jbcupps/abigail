@@ -2,6 +2,10 @@
 
 Operator reference for Abigail's LLM routing system: diagnostics, telemetry interpretation, configuration, and troubleshooting.
 
+For the current GUI/Entity decoupling and stabilization phase, also track:
+- `documents/GUI_ENTITY_STABILITY_ROADMAP.md`
+- `documents/GUI_ENTITY_CODE_REVIEW_REPORT.md`
+
 ## Routing Modes
 
 | Mode | Behavior | When to use |
@@ -10,6 +14,10 @@ Operator reference for Abigail's LLM routing system: diagnostics, telemetry inte
 | `ego_primary` | All queries to the cloud provider using the Standard tier model | Testing a single provider, or when complexity scoring adds no value |
 | `council` | Multi-provider deliberation (draft → critique → synthesis) | High-stakes decisions requiring diverse model perspectives |
 | `cli_orchestrator` | All messages routed to an authenticated CLI tool (Claude Code, Gemini CLI, etc.). Bypasses tier scoring, complexity classification, and model override. | **Auto-detected** when the ego provider is a CLI variant; can also be set explicitly via `--routing-mode CliOrchestrator` |
+
+### Transitional Note (Message-Flow Program)
+
+During the stabilization program, API consumers should treat `ExecutionTrace` as the source of truth for attribution and routing outcome fields. The near-term roadmap includes contract consolidation work around request `target` semantics so transport adapters and runtimes behave consistently.
 
 ## Selection Reasons
 

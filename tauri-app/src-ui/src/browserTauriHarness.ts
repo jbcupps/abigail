@@ -60,6 +60,7 @@ let traceLog: HarnessTraceEntry[] = [];
 let faultMode: HarnessFaultMode = "none";
 let agentSeq = 1;
 const providerValidationResults = new Map<string, string>();
+let activeChatTimer: ReturnType<typeof setTimeout> | null = null;
 const harnessConfig = {
   strict: false,
   trace: true,
@@ -74,7 +75,7 @@ const defaultState = (): HarnessState => ({
   providers: new Set<string>(),
   activeProviderPreference: null,
   memoryDisclosureEnabled: true,
-  localLlmUrl: "http://localhost:11434",
+  localLlmUrl: null,
   cliServer: { running: false },
   genesisTurns: 0,
 });
@@ -333,10 +334,16 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
     case "probe_local_llm":
       return { detected: [{ name: "LM Studio", url: "http://localhost:1234", reachable: true }] };
     case "set_local_llm_during_birth":
-      state.localLlmUrl = String(args.url ?? state.localLlmUrl ?? "http://localhost:11434");
+      {
+        const raw = String(args.url ?? "").trim();
+        state.localLlmUrl = raw.length > 0 ? raw : null;
+      }
       return true;
     case "set_local_llm_url":
-      state.localLlmUrl = String(args.url ?? state.localLlmUrl ?? "http://localhost:11434");
+      {
+        const raw = String(args.url ?? "").trim();
+        state.localLlmUrl = raw.length > 0 ? raw : null;
+      }
       return true;
 
     // Provider/key setup
@@ -408,16 +415,18 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
       };
 
     // Chat screen status
-    case "get_router_status":
+    case "get_router_status": {
+      const hasLocalHttp = typeof state.localLlmUrl === "string" && state.localLlmUrl.trim().length > 0;
       return {
-        id_provider: "local_http",
-        id_url: state.localLlmUrl,
+        id_provider: hasLocalHttp ? "local_http" : "candle_stub",
+        id_url: hasLocalHttp ? state.localLlmUrl : null,
         ego_configured: state.providers.size > 0,
-        ego_provider: preferredProvider(),
+        ego_provider: state.providers.size > 0 ? preferredProvider() : null,
         superego_configured: false,
         routing_mode: "tier_based",
         council_providers: 0,
       };
+    }
     case "get_ollama_status":
       return { managed: true, running: true, port: 11434, model_ready: true };
     case "get_cli_server_status":
@@ -451,6 +460,14 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
       return null;
 
     // Streaming chat — emits chat-token and chat-done events.
+    case "cancel_chat_stream":
+      if (activeChatTimer) {
+        clearTimeout(activeChatTimer);
+        activeChatTimer = null;
+        emitEvent("chat-error", "Interrupted by user");
+        return true;
+      }
+      return false;
     case "chat_stream": {
       if (faultMode === "chat_timeout") {
         trace("fault", "chat_timeout");
@@ -493,9 +510,14 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
       }
 
       // Simulate async streaming: token then done.
-      setTimeout(() => {
+      if (activeChatTimer) {
+        clearTimeout(activeChatTimer);
+        activeChatTimer = null;
+      }
+      activeChatTimer = setTimeout(() => {
         emitEvent("chat-token", response.reply);
         emitEvent("chat-done", response);
+        activeChatTimer = null;
       }, 5);
       return null;
     }
@@ -544,6 +566,10 @@ function resetHarnessState(): void {
   eventListenerCounter = 1;
   faultMode = "none";
   agentSeq = 1;
+  if (activeChatTimer) {
+    clearTimeout(activeChatTimer);
+    activeChatTimer = null;
+  }
   providerValidationResults.clear();
   traceLog = [];
 }
@@ -625,4 +651,3 @@ export function installBrowserTauriHarness(options: HarnessOptions = {}): void {
   harnessWindow.__ABIGAIL_BROWSER_HARNESS__ = { installed: true };
   trace("invoke", "harness_installed", { strict: harnessConfig.strict, trace: harnessConfig.trace, seed: harnessConfig.seed });
 }
-
