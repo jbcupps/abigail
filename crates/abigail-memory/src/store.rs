@@ -1,5 +1,6 @@
 use crate::schema::{
     CREATE_BIRTH, CREATE_MEMORIES, CREATE_SCHEMA_VERSIONS, MIGRATION_V2_CONVERSATION_TURNS,
+    MIGRATION_V3_JOB_QUEUE,
 };
 use abigail_core::AppConfig;
 use chrono::Utc;
@@ -163,7 +164,11 @@ impl MemoryStore {
     /// Run pending schema migrations in order. Each migration is applied once and
     /// recorded in `schema_versions`. Version 1 is the baseline (no SQL changes).
     fn run_migrations(conn: &Connection) -> Result<()> {
-        let migrations: &[(i64, &str)] = &[(1, ""), (2, MIGRATION_V2_CONVERSATION_TURNS)];
+        let migrations: &[(i64, &str)] = &[
+            (1, ""),
+            (2, MIGRATION_V2_CONVERSATION_TURNS),
+            (3, MIGRATION_V3_JOB_QUEUE),
+        ];
 
         for &(version, sql) in migrations {
             let already_applied: bool = conn.query_row(

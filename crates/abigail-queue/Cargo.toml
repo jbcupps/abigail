@@ -1,0 +1,17 @@
+[package]
+name = "abigail-queue"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+abigail-streaming = { path = "../abigail-streaming" }
+abigail-core = { path = "../abigail-core" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+async-trait.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+rusqlite.workspace = true
