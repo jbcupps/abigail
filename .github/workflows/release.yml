@@ -204,6 +204,50 @@ jobs:
             cp target/release/${{ matrix.keygen_bin }} tauri-app/${{ matrix.resource_name }}
           fi
 
+      - name: Import Apple Developer ID certificate (macOS)
+        if: matrix.platform == 'macos-latest'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [[ -z "${APPLE_CERTIFICATE:-}" ]]; then
+            echo "APPLE_CERTIFICATE not configured — skipping macOS code signing setup"
+            exit 0
+          fi
+
+          # Decode the .p12 from base64
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+
+          # Create a temporary keychain
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import the certificate
+          security import "$CERT_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          # Allow codesign to access the keychain without UI prompt
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Add temporary keychain to the search list (prepend so it's found first)
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+
+          # Verify the identity is available
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
+          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> $GITHUB_ENV
+          echo "Apple Developer ID certificate imported successfully"
+
       - name: Validate updater signing key preflight
         shell: bash
         env:
@@ -219,16 +263,32 @@ jobs:
           # Only fall back to secrets if the validation step didn't run or didn't export.
           TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS code signing (Tauri picks these up automatically)
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # macOS notarization
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           cd tauri-app
 
           if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
             echo "Signing key detected: building signed artifacts"
+            if [[ "${{ matrix.platform }}" == "macos-latest" && -n "${APPLE_CERTIFICATE:-}" ]]; then
+              echo "Apple Developer ID certificate detected: code signing + notarization enabled"
+            fi
             tauri build ${{ matrix.args }}
           else
             echo "WARNING: TAURI_SIGNING_PRIVATE_KEY is not configured; building unsigned artifacts"
             TAURI_SKIP_SIGNING=true tauri build ${{ matrix.args }}
           fi
+
+      - name: Cleanup Apple keychain (macOS)
+        if: always() && matrix.platform == 'macos-latest' && env.KEYCHAIN_PATH != ''
+        run: |
+          security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
 
       - name: Upload installers (Artifacts)
         uses: actions/upload-artifact@47309c993abb98030a35d55ef7ff34b7fa1074b5 # v4
@@ -387,7 +447,7 @@ jobs:
 
             ### Platform Notes
 
-            - **macOS**: The app is not notarized. Right-click then Open on first launch to bypass Gatekeeper.
+            - **macOS**: The app is signed and notarized with a Developer ID certificate. If Gatekeeper still prompts, right-click → Open on first launch.
             - **Linux**: Requires `libwebkit2gtk-4.1-0` and `libayatana-appindicator3-1`. Ubuntu 22.04+ recommended.
 
             See [SECURITY_NOTES.md](https://github.com/${{ github.repository }}/blob/main/documents/SECURITY_NOTES.md) for details.
