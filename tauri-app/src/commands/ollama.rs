@@ -255,31 +255,81 @@ pub async fn start_managed_ollama(
     let needs_pull = !model_exists;
 
     if needs_pull {
-        // 8. Pull model with streaming progress events
-        let app_clone = app.clone();
-        let model_clone = model_name.clone();
-        OllamaManager::pull_model_streaming(&base_url, &model_name, move |progress| {
-            let pct = match (progress.completed, progress.total) {
-                (Some(c), Some(t)) if t > 0 => (c as f32 / t as f32) * 100.0,
-                _ => 0.0,
-            };
-            let _ = app_clone.emit(
-                "ollama-lifecycle",
-                OllamaLifecycleState::PullingModel { progress_pct: pct },
-            );
-            let _ = app_clone.emit(
-                "ollama-model-progress",
-                OllamaModelProgress {
-                    model: model_clone.clone(),
-                    completed: progress.completed,
-                    total: progress.total,
-                    status: progress.status.clone(),
-                },
-            );
-        })
-        .await?;
+        // 8. Return immediately so the frontend can show the loading screen,
+        //    then pull the model in a background task that emits progress events.
+        let app_bg = app.clone();
+        tokio::spawn(async move {
+            let state_ref = app_bg.state::<AppState>();
+
+            // Pull model with streaming progress
+            let pull_result =
+                OllamaManager::pull_model_streaming(&base_url, &model_name, |progress| {
+                    let pct = match (progress.completed, progress.total) {
+                        (Some(c), Some(t)) if t > 0 => (c as f32 / t as f32) * 100.0,
+                        _ => 0.0,
+                    };
+                    let _ = app_bg.emit(
+                        "ollama-lifecycle",
+                        OllamaLifecycleState::PullingModel { progress_pct: pct },
+                    );
+                    let _ = app_bg.emit(
+                        "ollama-model-progress",
+                        OllamaModelProgress {
+                            model: model_name.clone(),
+                            completed: progress.completed,
+                            total: progress.total,
+                            status: progress.status.clone(),
+                        },
+                    );
+                })
+                .await;
+
+            if let Err(e) = pull_result {
+                tracing::error!("Background model pull failed: {}", e);
+                let _ = app_bg.emit(
+                    "ollama-lifecycle",
+                    OllamaLifecycleState::Error(e.to_string()),
+                );
+                return;
+            }
+
+            // Mark model ready
+            {
+                let mut guard = state_ref.ollama.lock().await;
+                if let Some(ref mut mgr) = *guard {
+                    mgr.mark_model_ready();
+                }
+            }
+
+            // Auto-configure local_llm_base_url
+            if let Ok(mut config) = state_ref.config.write() {
+                let should_set = config.local_llm_base_url.is_none()
+                    || config
+                        .local_llm_base_url
+                        .as_deref()
+                        .map_or(true, |u| u.is_empty());
+                if should_set {
+                    config.local_llm_base_url = Some(base_url.clone());
+                }
+                if !first_pull_done {
+                    config.first_model_pull_complete = true;
+                }
+                let _ = config.save(&config.config_path());
+            }
+
+            // Rebuild router
+            if let Err(e) = crate::rebuild_router_from_handle(&app_bg).await {
+                tracing::warn!("Failed to rebuild router after Ollama start: {}", e);
+            }
+
+            let _ = app_bg.emit("ollama-lifecycle", "model_ready");
+        });
+
+        // Return immediately — frontend shows loading screen
+        return Ok(true);
     }
 
+    // Model already exists — finalize synchronously
     // 9. Mark model ready
     {
         let mut guard = state.ollama.lock().await;
@@ -313,5 +363,5 @@ pub async fn start_managed_ollama(
     }
 
     let _ = app.emit("ollama-lifecycle", OllamaLifecycleState::ModelReady);
-    Ok(needs_pull)
+    Ok(false)
 }
