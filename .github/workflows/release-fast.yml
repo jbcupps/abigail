@@ -192,7 +192,7 @@ jobs:
           fi
 
       - name: Upload installers (Artifacts)
-        uses: actions/upload-artifact@47309c993abb98030a35d55ef7ff34b7fa1074b5 # v4
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v4
         with:
           name: abigail-fast-installer-${{ matrix.platform }}
           path: ${{ matrix.installer_path }}
@@ -200,7 +200,7 @@ jobs:
 
       - name: Upload MSI installer (Windows)
         if: matrix.platform == 'windows-latest'
-        uses: actions/upload-artifact@47309c993abb98030a35d55ef7ff34b7fa1074b5 # v4
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v4
         with:
           name: abigail-fast-msi-windows-latest
           path: target/release/bundle/msi/*.msi
