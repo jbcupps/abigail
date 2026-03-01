@@ -289,26 +289,25 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     setPrivateKey(""); // Clear from memory
     await invoke("advance_past_darkness");
 
-    // If managed Ollama is running with model ready, skip Ignition entirely —
-    // the LLM provider picker is redundant when Ollama is pre-configured.
+    // If managed Ollama is running with model ready, skip Ignition AND
+    // Connectivity — the LLM provider picker and cloud-provider setup are
+    // redundant when Ollama is pre-configured.  The user can add cloud
+    // providers later from the Settings drawer.
     try {
       const status = await invoke<{ managed: boolean; running: boolean; port: number; model_ready: boolean }>(
         "get_ollama_status"
       );
       if (status.running && status.model_ready) {
-        // Skip Ignition → advance directly to Connectivity
         try {
           await invoke("advance_to_connectivity");
-          const [providers, cliResults] = await Promise.all([
-            invoke<string[]>("get_stored_providers"),
-            invoke<typeof cliDetections>("detect_cli_providers_full"),
-          ]);
-          setStoredProviders(providers);
-          setCliDetections(cliResults);
+          await invoke("advance_to_crystallization");
         } catch (e) {
-          console.error("Failed to advance to connectivity after Ollama skip:", e);
+          console.error("Failed to advance past Ignition/Connectivity after Ollama skip:", e);
+          // Fall through to Ignition on error
+          setStage("Ignition");
+          return;
         }
-        setStage("Connectivity");
+        setStage("Genesis");
         return;
       }
     } catch {

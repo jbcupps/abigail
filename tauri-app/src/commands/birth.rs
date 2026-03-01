@@ -259,7 +259,16 @@ pub fn advance_to_crystallization(state: State<AppState>) -> Result<(), String> 
         !local.list_providers().is_empty() || !hive.list_providers().is_empty()
     };
 
-    let has_cli_provider = if !has_vault_provider {
+    // A configured local LLM (e.g. managed Ollama) counts as a valid provider
+    let has_local_llm = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        config
+            .local_llm_base_url
+            .as_deref()
+            .map_or(false, |u| !u.is_empty())
+    };
+
+    let has_cli_provider = if !has_vault_provider && !has_local_llm {
         let config = state.config.read().map_err(|e| e.to_string())?;
         let is_cli_pref = config
             .active_provider_preference
@@ -277,7 +286,7 @@ pub fn advance_to_crystallization(state: State<AppState>) -> Result<(), String> 
         false
     };
 
-    if !has_vault_provider && !has_cli_provider {
+    if !has_vault_provider && !has_local_llm && !has_cli_provider {
         return Err(
             "At least one provider must be configured before crystallization can begin."
                 .to_string(),
