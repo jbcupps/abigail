@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-02-28 21:55 EST: Fix macOS notarization — codesign bundled abigail-keygen binary with hardened runtime and secure timestamp before Tauri build
 - 2026-02-28 16:00 EST: Add sub-agent job queue Phase 1 — abigail-streaming crate (StreamBroker trait + MemoryBroker), abigail-queue crate (JobQueue with SQLite + dual-layer event publishing), V3 migration for job_queue table
 - 2026-02-28 14:30 EST: Add Apple notarization to macOS release workflow and update CLAUDE.md with 5 missing crates, soul crystallization, agent backup/restore, and 12 frontend components
 - 2026-02-28 12:30 EST: Fix birth cycle CLI indicators all turning green when one is enabled — only show active for explicitly activated providers

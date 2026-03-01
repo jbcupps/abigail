@@ -248,6 +248,28 @@ jobs:
           echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> $GITHUB_ENV
           echo "Apple Developer ID certificate imported successfully"
 
+      - name: Codesign bundled binaries (macOS)
+        if: matrix.platform == 'macos-latest'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          if [[ -z "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+            echo "APPLE_SIGNING_IDENTITY not set — skipping codesign of bundled binaries"
+            exit 0
+          fi
+          # Sign abigail-keygen with hardened runtime + secure timestamp
+          # (required for Apple notarization of all binaries inside the .app bundle)
+          KEYGEN_BIN="tauri-app/${{ matrix.resource_name }}"
+          if [[ -f "$KEYGEN_BIN" ]]; then
+            echo "Codesigning $KEYGEN_BIN with identity: $APPLE_SIGNING_IDENTITY"
+            codesign --force --options runtime --timestamp \
+              --sign "$APPLE_SIGNING_IDENTITY" "$KEYGEN_BIN"
+            echo "Verifying signature..."
+            codesign --verify --verbose "$KEYGEN_BIN"
+          else
+            echo "WARNING: $KEYGEN_BIN not found — skipping codesign"
+          fi
+
       - name: Validate updater signing key preflight
         shell: bash
         env:
