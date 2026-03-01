@@ -122,6 +122,7 @@ The crates form a layered architecture with clear security boundaries:
 | `abigail-router` | Id/Ego routing — classifies messages as Routine (local LLM) or Complex (cloud) |
 | `abigail-capabilities` | **High-trust** functions: cognitive (LLM providers), sensory, memory, agent control |
 | `abigail-skills` | **Lower-trust** plugin system: manifest-based skills with sandbox, registry, executor, event bus |
+| `entity-chat` | Shared chat engine library: tool-use loop, tool definitions builder, system prompt construction, tool awareness |
 | `entity-daemon` | Axum HTTP server wrapping router + skills + executor (port 3142) |
 | `entity-cli` | CLI client for entity-daemon (chat, skills, tool execution, memory, scaffolding) |
 
@@ -130,8 +131,12 @@ The crates form a layered architecture with clear security boundaries:
 | Crate | Role |
 |-------|------|
 | `abigail-core` | Foundation: AppConfig, Ed25519 crypto, keyring, vault, DPAPI secrets, document verification |
-| `abigail-memory` | SQLite persistence with MemoryWeight tiers (Ephemeral/Distilled/Crystallized) |
-| `abigail-birth` | First-run orchestrator: staged sequence (init → keypair → sign → verify → heartbeat → discover) |
+| `abigail-memory` | SQLite persistence with MemoryWeight tiers (Ephemeral/Distilled/Crystallized), chat turn persistence, auto-archive |
+| `abigail-birth` | First-run orchestrator: staged sequence (init → keypair → sign → verify → heartbeat → discover), BirthChatEngine |
+| `abigail-auth` | Authentication provider framework: `AuthProvider` trait, `AuthManager`, static-token and basic-auth providers |
+| `abigail-cli` | Standalone CLI tool: status, secrets, email config, integration status, router diagnostics, REST troubleshooting API |
+| `abigail-soul-crystallization` | Soul crystallization engine: guided multi-phase personality discovery (MentorProfile, CrystallizationPhase, DepthLevel) |
+| `soul-forge` | Scenario-based personality forge: dilemma scenarios with triangle weights (Ego/Superego/Id) producing SoulOutput |
 | `abigail-keygen` | Standalone egui utility for Ed25519 keypair generation |
 
 **Security boundary**: Hive controls secrets and identity (high trust). Entity executes skills in a sandboxed plugin system with declared permissions.
@@ -143,7 +148,7 @@ The desktop app wraps the Hive/Entity architecture for end users:
 - `src/lib.rs` — All `#[tauri::command]` handlers; manages `AppState` with `RwLock<AppConfig>`, `RwLock<IdEgoRouter>`, `Arc<SkillRegistry>`, `Arc<SkillExecutor>`, `Arc<EventBus>`
 - `src/identity_manager.rs` — Re-exports from `abigail-identity` crate
 - `src/templates.rs` — Embedded constitutional document text (soul.md, ethics.md, instincts.md)
-- `src-ui/` — React frontend (Vite + Tailwind)
+- `src-ui/` — React frontend (Vite + Tailwind), 30+ components
 
 ### Frontend State Machine (src-ui/src/App.tsx)
 
@@ -154,8 +159,19 @@ splash → loading → management → boot → chat
                  → startup_failed
 ```
 
+**Key components:**
+- `SoulRegistry.tsx` — Entity/mentor selection screen (entry point after splash)
 - `BootSequence.tsx` — First-run UI: intro → init soul → generate keypair → key presentation → verify → complete
+- `GenesisChat.tsx` / `GenesisPathSelector.tsx` — New genesis birth flow with path selection
+- `SoulCrystallization.tsx` / `CrystallizationPath*.tsx` — Multi-path personality crystallization UI
+- `ForgePanel.tsx` / `ForgeScenario.tsx` — Scenario-based soul forge dilemmas
 - `ChatInterface.tsx` — Main chat: sends messages through `classify()` → `complete()` Tauri commands
+- `SanctumDrawer.tsx` — Settings/management drawer (contains LlmSetupPanel, TierModelPanel, IdentityPanel, etc.)
+- `TierModelPanel.tsx` — Tier-based model routing configuration UI
+- `DiagnosticsPanel.tsx` — Runtime diagnostics and debug info
+- `McpAppFrame.tsx` — MCP server integration UI
+- `AgenticPanel.tsx` / `OrchestrationPanel.tsx` — Agentic workflow and orchestration controls
+- `HarnessDebugPanel.tsx` — Browser harness debug mode (for development without Tauri)
 
 ### Tier-Based Model Routing
 
@@ -244,7 +260,7 @@ required = true
 4. Approval-level: `approved_skill_ids` + `signed_skill_allowlist` in Tauri app
 5. Execution-level: timeout + concurrency limits
 
-**On-disk layout:** `skills/` directory contains 18+ skill subdirectories, `registry.toml` (maps skill IDs to LLM instruction files + keywords), and `instructions/` (markdown files injected into system prompt when keywords match)
+**On-disk layout:** `skills/` directory contains 16 skill subdirectories (web-search, filesystem, shell, http, perplexity-search, knowledge-base, git, code-analysis, database, calendar, document, notification, image, clipboard, system-monitor, proton-mail), `registry.toml` (maps skill IDs to LLM instruction files + keywords), and `instructions/` (markdown files injected into system prompt when keywords match)
 
 **Current wiring:**
 - Entity-daemon: `SkillRegistry` + `SkillExecutor` created at startup, `HiveManagementSkill` auto-registered, routes at `GET /v1/skills` and `POST /v1/tools/execute`
@@ -252,6 +268,24 @@ required = true
 - Tauri app: full command surface (list, discover, execute, approve, MCP integration)
 
 **Tool-use loop:** `entity-chat::run_tool_use_loop()` parses tool-call blocks from LLM responses, executes them via `SkillExecutor`, injects results back, and re-prompts for up to 8 rounds. `build_tool_definitions()` converts registered `ToolDescriptor`s into the provider's native function-calling format.
+
+### Soul Crystallization & Forge
+
+Two complementary systems for shaping an entity's personality:
+
+- **Soul Crystallization** (`abigail-soul-crystallization`) — Guided multi-phase personality discovery. A `CrystallizationEngine` walks the user through phases (Introduction → Values → Personality → Integration → Complete) at configurable depth levels (Quick/Standard/Deep). Produces a `MentorProfile` capturing communication style, values, and personality traits. Frontend: `SoulCrystallization.tsx`, `CrystallizationPath*.tsx` components.
+- **Soul Forge** (`soul-forge`) — Scenario-based dilemma system. Presents moral/practical dilemmas with choices that shift triangle weights (Ego/Superego/Id). After all scenarios, produces a `SoulOutput` with a personality label and weighted profile. Frontend: `ForgePanel.tsx`, `ForgeScenario.tsx`.
+
+### Agent Backup & Memory Archive
+
+- **Agent backup/restore** — Encrypted archives using X25519 key agreement + AES-256-GCM. Portable `.abigail` archive files stored in `Documents/Abigail/archives/`. Includes recovery key for offline restoration.
+- **Memory auto-archive** — Triggers automatically every 50 conversation turns. Produces encrypted portable exports of the memory database.
+- **Chat turn persistence** — `conversation_turns` table in SQLite schema tracks full conversation history with session IDs, enabling multi-turn resume via `entity-cli --resume`/`--session-id`.
+- **Shared MemoryStore** — Thread-safe memory store shared across sessions for cross-session context.
+
+### RuntimeContext
+
+Entity runtime injects self-awareness metadata into the LLM system prompt via `RuntimeContext`. Includes: active provider name, current model, tier, entity name, and routing mode. Enables the LLM to reason about its own capabilities contextually.
 
 ## Key Patterns
 
@@ -343,11 +377,11 @@ Current priorities, in order:
 
 ### Phase 2a: Skills Use — DONE
 1. ~~**LLM tool-use loop**~~ — Implemented in `entity-chat::run_tool_use_loop()` (up to 8 rounds).
-2. ~~**Auto-load skills from disk**~~ — All 15 native skills registered at Tauri/daemon startup.
+2. ~~**Auto-load skills from disk**~~ — All 16 native skills registered at Tauri/daemon startup.
 3. ~~**Wire tools into LLM requests**~~ — `build_tool_definitions()` converts `ToolDescriptor`s to provider-native format.
 
 ### Phase 2b: Skill Creation (P2)
-4. **Scaffolding CLI** — `entity-cli new-skill <name>` generates a skill directory with `skill.toml` template, boilerplate Rust or JSON config, and an instruction markdown file.
+4. ~~**Scaffolding CLI**~~ — `entity-cli scaffold <name>` generates a skill directory with `skill.toml` template, boilerplate Rust (`native`) or JSON (`dynamic`) config, and an instruction markdown file.
 5. **Dynamic API skill authoring docs** — Document the JSON config format with examples for common patterns (REST CRUD, OAuth, webhook).
 6. **Skill hot-reload** — File-watcher on `skills/` directory to re-discover and register new/updated skills without daemon restart.
 
