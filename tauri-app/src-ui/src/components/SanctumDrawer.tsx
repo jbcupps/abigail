@@ -4,6 +4,7 @@ import AgenticPanel from "./AgenticPanel";
 import OrchestrationPanel from "./OrchestrationPanel";
 import DiagnosticsPanel from "./DiagnosticsPanel";
 import ForgePanel from "./ForgePanel";
+import { isExperimentalUiEnabled } from "../runtimeMode";
 
 type SanctumTab =
   | "conscience"
@@ -37,6 +38,7 @@ const TABS: { id: SanctumTab; label: string }[] = [
 ];
 
 export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDrawerProps) {
+  const experimentalUiEnabled = isExperimentalUiEnabled();
   const [activeTab, setActiveTab] = useState<SanctumTab>("conscience");
 
   // IdentityPanel mapping
@@ -48,6 +50,10 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
       setActiveTab(tab as SanctumTab);
     }
   };
+
+  const visibleTabs = TABS.filter((tab) =>
+    experimentalUiEnabled ? true : tab.id !== "staff" && tab.id !== "jobs"
+  );
 
   return (
     <>
@@ -86,7 +92,7 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
           role="tablist"
           aria-label="Sanctum navigation"
         >
-          {TABS.map((t) => (
+          {visibleTabs.map((t) => (
             <button
               key={t.id}
               role="tab"
@@ -121,9 +127,9 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
           
           {activeTab === "forge" && <ForgePanel />}
           
-          {activeTab === "staff" && <AgenticPanel />}
-          
-          {activeTab === "jobs" && <OrchestrationPanel />}
+          {experimentalUiEnabled && activeTab === "staff" && <AgenticPanel />}
+
+          {experimentalUiEnabled && activeTab === "jobs" && <OrchestrationPanel />}
 
           {isIdentityPanelTab && (
             <IdentityPanel

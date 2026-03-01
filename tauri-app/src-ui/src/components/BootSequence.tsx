@@ -13,6 +13,7 @@ import CrystallizationPathDialog from "./CrystallizationPathDialog";
 import CrystallizationPathImage from "./CrystallizationPathImage";
 import CrystallizationPathPsychQuestions from "./CrystallizationPathPsychQuestions";
 import CrystallizationPathTemplateEdit from "./CrystallizationPathTemplateEdit";
+import { isBrowserHarnessRuntime } from "../runtimeMode";
 
 type Stage =
   | "Darkness"
@@ -75,6 +76,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [repairKey, setRepairKey] = useState("");
   const [activeApiKeyProvider, setActiveApiKeyProvider] = useState<string | null>(null);
   const [storedProviders, setStoredProviders] = useState<string[]>([]);
+  const [localLlmReady, setLocalLlmReady] = useState(false);
   const [soulPreview, setSoulPreview] = useState("");
   const [crystalName, setCrystalName] = useState("");
   const [crystalPurpose, setCrystalPurpose] = useState("");
@@ -194,7 +196,6 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         // Already started, that's fine
       }
 
-      await invoke("skip_to_life_for_mvp");
       await invoke("complete_birth");
 
       setStage("Life");
@@ -295,12 +296,32 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const handleLlmConnected = async (_url: string) => {
     try {
       await invoke("advance_to_connectivity");
-      const [providers, cliResults] = await Promise.all([
+      const [providers, cliResults, routerStatus] = await Promise.all([
         invoke<string[]>("get_stored_providers"),
         invoke<typeof cliDetections>("detect_cli_providers_full"),
+        invoke<{
+          id_provider: string;
+          id_url: string | null;
+          ego_configured: boolean;
+          ego_provider: string | null;
+          superego_configured: boolean;
+          routing_mode: string;
+        }>("get_router_status"),
       ]);
       setStoredProviders(providers);
       setCliDetections(cliResults);
+      const hasLocal = routerStatus.id_provider === "local_http";
+      setLocalLlmReady(hasLocal);
+
+      const hasAuthedCli = cliResults.some(d => d.on_path && d.is_official && d.is_authenticated);
+      const localOnlyBootstrap =
+        !isBrowserHarnessRuntime() && hasLocal && providers.length === 0 && !hasAuthedCli;
+      if (localOnlyBootstrap) {
+        // Local runtime is already online; skip extra provider ceremony.
+        await invoke("advance_to_crystallization");
+        setStage("Genesis");
+        return;
+      }
     } catch (e) {
       console.error("Failed to advance to connectivity or fetch providers:", e);
     }
@@ -331,9 +352,22 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   };
 
   const handleConnectivityAdvance = async () => {
+    const hasLocalLlm = await invoke<{
+      id_provider: string;
+      id_url: string | null;
+      ego_configured: boolean;
+      ego_provider: string | null;
+      superego_configured: boolean;
+      routing_mode: string;
+    }>("get_router_status")
+      .then((s) => s.id_provider === "local_http")
+      .catch(() => false);
+
     const hasAuthedCli = cliDetections.some(d => d.on_path && d.is_official && d.is_authenticated);
-    if (storedProviders.length === 0 && !hasAuthedCli) {
-      setError("At least one provider must be configured before crystallization can begin.");
+    if (storedProviders.length === 0 && !hasAuthedCli && !hasLocalLlm) {
+      setError(
+        "At least one provider must be configured before crystallization can begin (or a local LLM must be available)."
+      );
       return;
     }
     try {
@@ -730,7 +764,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 </div>
               </div>
               
-              {storedProviders.length > 0 && (
+              {(storedProviders.length > 0 || localLlmReady || cliDetections.some(d => d.on_path && d.is_official && d.is_authenticated)) && (
                 <div className="mt-6 flex justify-center">
                   <button
                     className="px-8 py-2 bg-theme-primary text-theme-bg font-bold rounded-full hover:bg-theme-text transition-colors flex items-center gap-2 text-sm"

@@ -25,8 +25,9 @@ const TIER_NAMES = ["fast", "standard", "pro"] as const;
 
 export default function TierModelPanel() {
   const [tierModels, setTierModels] = useState<TierModels | null>(null);
+  const [originalTierModels, setOriginalTierModels] = useState<TierModels | null>(null);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
-  const [issues, setIssues] = useState<Record<string, ValidationIssue[]>>({});
+  const [issues] = useState<Record<string, ValidationIssue[]>>({});
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activeProvider, setActiveProvider] = useState<string>("");
@@ -38,34 +39,23 @@ export default function TierModelPanel() {
         invoke<string | null>("get_active_provider").catch(() => null),
       ]);
       setTierModels(models);
+      setOriginalTierModels(models);
       if (provider) setActiveProvider(provider);
     } catch (e) {
       console.error("Failed to load tier models:", e);
     }
   };
 
-  const validate = async () => {
-    try {
-      const result = await invoke<Record<string, ValidationIssue[]>>("validate_tier_models");
-      setIssues(result);
-    } catch (e) {
-      console.error("Failed to validate:", e);
-    }
-  };
-
   useEffect(() => {
     load();
-    validate();
   }, []);
 
   const handleRefreshCatalog = async () => {
     setRefreshing(true);
     try {
-      const entries = await invoke<CatalogEntry[]>("refresh_provider_catalog");
-      setCatalog(entries);
-      await validate();
-    } catch (e) {
-      console.error("Failed to refresh catalog:", e);
+      setCatalog([]);
+    } catch {
+      // no-op
     } finally {
       setRefreshing(false);
     }
@@ -86,8 +76,15 @@ export default function TierModelPanel() {
     if (!tierModels) return;
     setSaving(true);
     try {
-      await invoke("set_tier_models", { tierModels });
-      await validate();
+      for (const tier of TIER_NAMES) {
+        for (const provider of PROVIDERS) {
+          const model = tierModels[tier][provider];
+          const original = originalTierModels?.[tier][provider] ?? "";
+          if (!model || model === original) continue;
+          await invoke("set_tier_model", { tier, provider, model });
+        }
+      }
+      setOriginalTierModels(tierModels);
     } catch (e) {
       console.error("Failed to save tier models:", e);
     } finally {
@@ -99,7 +96,6 @@ export default function TierModelPanel() {
     try {
       await invoke("reset_tier_models");
       await load();
-      await validate();
     } catch (e) {
       console.error("Failed to reset:", e);
     }

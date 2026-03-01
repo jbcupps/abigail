@@ -63,6 +63,18 @@ Abigail is a working, modular platform. Recent updates include:
 - **Constitutional Signing**: Entities sign their own `soul.md` and `ethics.md` at birth.
 - **CLI Access**: `hive-cli` and `entity-cli` for headless operation alongside the Tauri desktop app.
 
+### Stabilization Program (Current Priority)
+
+The active near-term engineering priority is **GUI/Entity stability and message-flow decoupling**:
+
+- Move GUI chat to a transport abstraction (`ChatGateway`) rather than direct command coupling
+- Stabilize command surface parity between frontend and Tauri handler registration
+- Wire entity-initiated agent lifecycle paths (agentic runs and subagent delegation)
+- Enforce release gates for command contract, chat parity, and policy/runtime checks
+
+See: [GUI/Entity Stability Roadmap](documents/GUI_ENTITY_STABILITY_ROADMAP.md)
+See: [GUI/Entity Code Review Report](documents/GUI_ENTITY_CODE_REVIEW_REPORT.md)
+
 ---
 
 ## Theoretical Foundation

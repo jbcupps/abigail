@@ -12,6 +12,16 @@ Abigail and OpenClaw are both AI agent/assistant platforms, but they target diff
 
 This report identifies **37 feature gaps** across 12 categories, estimates effort for each, and provides a phased implementation plan to bring Abigail to feature parity.
 
+### Addendum (2026-03-01)
+
+This document remains the long-horizon parity analysis.  
+The active near-term execution plan for stability and architecture cutover is:
+
+- `documents/GUI_ENTITY_STABILITY_ROADMAP.md`
+- `documents/GUI_ENTITY_CODE_REVIEW_REPORT.md`
+
+That roadmap prioritizes command-surface reliability, GUI/Entity chat decoupling, and entity-initiated agent lifecycle stability before broader parity expansion.
+
 ---
 
 ## Table of Contents

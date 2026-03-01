@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useState, useEffect } from "react";
+import { isBrowserHarnessRuntime } from "../runtimeMode";
 
 interface DetectedLlm {
   name: string;
@@ -75,6 +76,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
   const [cliProbing, setCliProbing] = useState(false);
   const [activatingCli, setActivatingCli] = useState(false);
   const [initialProbeComplete, setInitialProbeComplete] = useState(false);
+  const [autoConnectedBundled, setAutoConnectedBundled] = useState(false);
 
   // Which sources have something available
   const ollamaAvailable = ollama !== null && ollama.status !== "not_found";
@@ -177,6 +179,27 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
     probeAll();
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (isBrowserHarnessRuntime()) return;
+    if (!initialProbeComplete) return;
+    if (autoConnectedBundled) return;
+    if (mode !== "ollama") return;
+    if (connecting || pullingModel || installing) return;
+    if (ollama?.status !== "running") return;
+
+    // Bundled/runtime Ollama is already up: skip unnecessary interactive steps.
+    setAutoConnectedBundled(true);
+    connectTo("http://localhost:11434", true);
+  }, [
+    initialProbeComplete,
+    autoConnectedBundled,
+    mode,
+    connecting,
+    pullingModel,
+    installing,
+    ollama?.status,
+  ]);
 
   const formatBytes = (value?: number) => {
     if (!value || value <= 0) return "0 B";
