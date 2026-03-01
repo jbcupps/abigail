@@ -12,7 +12,11 @@ pub struct SubagentInfo {
 
 #[tauri::command]
 pub fn list_subagents(state: State<AppState>) -> Result<Vec<SubagentInfo>, String> {
-    let mgr = state.subagent_manager.read().map_err(|e| e.to_string())?;
+    let mgr = state
+        .subagent_manager
+        .read()
+        .map_err(|e| e.to_string())?
+        .clone();
     Ok(mgr
         .list()
         .iter()
@@ -31,36 +35,28 @@ pub async fn delegate_to_subagent(
     id: String,
     message: String,
 ) -> Result<String, String> {
-    let (router, def) = {
+    let def = {
         let mgr = state.subagent_manager.read().map_err(|e| e.to_string())?;
-        let def = mgr
+        mgr
             .list()
             .iter()
             .find(|d| d.id == id)
             .cloned()
-            .ok_or_else(|| format!("Subagent '{}' not found", id))?;
-        let router = state.router.read().map_err(|e| e.to_string())?.clone();
-        (router, def)
+            .ok_or_else(|| format!("Subagent '{}' not found", id))?
     };
 
-    let messages = vec![abigail_capabilities::cognitive::Message::new(
-        "user", &message,
-    )];
+    let messages = vec![abigail_capabilities::cognitive::Message::new("user", &message)];
+    let tools = entity_chat::build_tool_definitions(&state.registry);
 
-    // Chat and subagent prompts use Ego when available; Id is for background tasks only.
-    let response = match &def.provider {
-        abigail_router::SubagentProvider::SameAsEgo => router
-            .route_with_tools(messages, vec![])
-            .await
-            .map_err(|e| e.to_string())?,
-        abigail_router::SubagentProvider::SameAsId => {
-            router.route(messages).await.map_err(|e| e.to_string())?
-        }
-        abigail_router::SubagentProvider::Custom(_, _) => router
-            .route_with_tools(messages, vec![])
-            .await
-            .map_err(|e| e.to_string())?,
-    };
+    let mgr = state
+        .subagent_manager
+        .read()
+        .map_err(|e| e.to_string())?
+        .clone();
+    let response = mgr
+        .delegate(&def.id, messages, tools)
+        .await
+        .map_err(|e| e.to_string())?;
 
     Ok(response.content)
 }

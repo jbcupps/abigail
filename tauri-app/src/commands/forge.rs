@@ -100,6 +100,9 @@ pub fn preview_forge_primary_intelligence(
     routing_mode: String,
     superego_mode: Option<String>,
 ) -> Result<ForgeChangePreview, String> {
+    // Legacy/transitional field: accepted for compatibility with existing clients.
+    // Planned removal window: after 2026-03-31 cleanup review.
+    let _ = superego_mode.as_deref();
     let config = state.config.read().map_err(|e| e.to_string())?;
     let mut changes = Vec::new();
 
@@ -159,6 +162,9 @@ pub async fn apply_forge_primary_intelligence(
     routing_mode: String,
     superego_mode: Option<String>,
 ) -> Result<ForgeApplyResult, String> {
+    // Legacy/transitional field: accepted for compatibility with existing clients.
+    // Planned removal window: after 2026-03-31 cleanup review.
+    let _ = superego_mode.as_deref();
     let mut changes_applied = Vec::new();
     let parsed_mode: abigail_core::RoutingMode =
         serde_json::from_str(&format!("\"{}\"", routing_mode)).map_err(|e| e.to_string())?;

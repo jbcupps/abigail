@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+#[cfg(windows)]
 use tokio::io::AsyncWriteExt;
 
 /// Status of the managed Ollama instance, returned to the frontend.
@@ -116,7 +117,7 @@ impl OllamaManager {
     }
 
     /// Download and silently run the official Ollama installer.
-    pub async fn download_and_install<F>(mut on_progress: F) -> Result<(), String>
+    pub async fn download_and_install<F>(on_progress: F) -> Result<(), String>
     where
         F: FnMut(OllamaInstallProgress),
     {
@@ -130,6 +131,7 @@ impl OllamaManager {
 
         #[cfg(windows)]
         {
+            let mut on_progress = on_progress;
             let installer_url = "https://ollama.com/download/OllamaSetup.exe";
             let installer_path = std::env::temp_dir().join("OllamaSetup.exe");
 

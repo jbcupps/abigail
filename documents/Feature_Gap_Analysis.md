@@ -22,6 +22,8 @@ The active near-term execution plan for stability and architecture cutover is:
 
 That roadmap prioritizes command-surface reliability, GUI/Entity chat decoupling, and entity-initiated agent lifecycle stability before broader parity expansion.
 
+> **Historical Reference Notice (2026-03-01):** Most detailed "current state" snapshots in this document were captured on 2026-02-06 and are preserved for parity context. For implementation truth, prefer `README.md`, `CLAUDE.md`, and the GUI/Entity stability roadmap.
+
 ---
 
 ## Table of Contents
@@ -101,7 +103,7 @@ That roadmap prioritizes command-surface reliability, GUI/Entity chat decoupling
 | 29 | File system operations skill | P2 | S | Skills | Done |
 | 30 | Shell command execution skill | P2 | S | Skills | Done |
 | 31 | Per-channel memory isolation | P2 | M | Memory | Pending |
-| 32 | 3-way Superego routing | P2 | M | LLM | Done |
+| 32 | Legacy 3-way Superego routing track (obsolete) | P2 | M | LLM | Archived (superseded by tier-based routing + Hive-side policy hook) |
 | 33 | Community skill marketplace/registry | P3 | L | Skills | Pending |
 | 34 | Onboarding daemon (background service) | P3 | M | Architecture | Done (Hive/Entity daemons) |
 | 35 | Telemetry and analytics (opt-in) | P3 | M | Operations | Pending |
@@ -166,14 +168,14 @@ That roadmap prioritizes command-surface reliability, GUI/Entity chat decoupling
 
 **OpenClaw's capability:** Supports Anthropic Claude (recommended), OpenAI, local models via Ollama, and Chinese models (Moonshot AI Kimi, MiniMax). Users bring their own API keys. Streaming responses are standard.
 
-**Abigail's current state:** Two providers: `OpenAiProvider` (cloud) and `LocalHttpProvider` (Ollama/LM Studio). Infrastructure for a third `Superego` provider exists in `TrinityConfig` but is not wired. No streaming (responses returned as complete strings). API key validation exists for OpenAI, Anthropic, XAI, Google, and Tavily but only OpenAI is implemented as an actual provider.
+**Abigail's current state (updated 2026-03-01):** Tier-based routing (Fast/Standard/Pro) is active, streaming is implemented across Tauri/daemon paths, and OpenAI-compatible provider support includes Anthropic/xAI/Google integrations via current router/provider wiring. Entity-side 3-way Superego routing is no longer the active direction; policy extension is via Hive-side hooks.
 
 **What's needed:**
 - `AnthropicProvider` implementation (using anthropic-sdk or direct HTTP)
 - `XaiProvider`, `GoogleProvider` (Gemini API) implementations
 - Streaming response support (SSE or chunked transfer → Tauri events)
 - MCP (Model Context Protocol) client for tool-use standardization
-- Wire the existing Superego routing infrastructure (3-way: Superego/Ego/Id)
+- Continue hardening provider fallback/diagnostics and align policy enforcement with Hive-side integration points
 - Provider health checks and automatic fallback chain
 
 ---

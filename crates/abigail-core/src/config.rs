@@ -804,6 +804,7 @@ impl AppConfig {
             // v18: Remove IdPrimary routing mode. Existing "id_primary" configs are
             // migrated to "tier_based" via the serde alias on TierBased. This migration
             // step ensures the schema version is bumped so the alias is applied on save.
+            // Legacy compatibility shim removal target: after 2026-03-31 cleanup review.
             self.schema_version = 18;
             migrated = true;
             tracing::debug!("Migrated config from v17 to v18 (IdPrimary → TierBased)");

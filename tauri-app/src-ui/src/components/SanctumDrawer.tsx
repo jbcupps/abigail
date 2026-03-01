@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import IdentityPanel from "./IdentityPanel";
 import AgenticPanel from "./AgenticPanel";
 import OrchestrationPanel from "./OrchestrationPanel";
 import DiagnosticsPanel from "./DiagnosticsPanel";
 import ForgePanel from "./ForgePanel";
 import { isExperimentalUiEnabled } from "../runtimeMode";
+import { invoke } from "@tauri-apps/api/core";
 
 type SanctumTab =
   | "conscience"
@@ -39,6 +40,7 @@ const TABS: { id: SanctumTab; label: string }[] = [
 
 export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDrawerProps) {
   const experimentalUiEnabled = isExperimentalUiEnabled();
+  const [backendReady, setBackendReady] = useState(false);
   const [activeTab, setActiveTab] = useState<SanctumTab>("conscience");
 
   // IdentityPanel mapping
@@ -51,9 +53,33 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
     }
   };
 
+  const staffJobsEnabled = backendReady || experimentalUiEnabled;
   const visibleTabs = TABS.filter((tab) =>
-    experimentalUiEnabled ? true : tab.id !== "staff" && tab.id !== "jobs"
+    staffJobsEnabled ? true : tab.id !== "staff" && tab.id !== "jobs"
   );
+
+  useEffect(() => {
+    let mounted = true;
+    const checkBackendReadiness = async () => {
+      try {
+        const status = await invoke<{ healthy: boolean }>("get_orchestration_backend_status");
+        if (mounted) {
+          setBackendReady(Boolean(status?.healthy));
+        }
+      } catch {
+        if (mounted) {
+          setBackendReady(false);
+        }
+      }
+    };
+
+    void checkBackendReadiness();
+    const timer = setInterval(checkBackendReadiness, 10_000);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, []);
 
   return (
     <>
@@ -127,9 +153,9 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
           
           {activeTab === "forge" && <ForgePanel />}
           
-          {experimentalUiEnabled && activeTab === "staff" && <AgenticPanel />}
+          {staffJobsEnabled && activeTab === "staff" && <AgenticPanel />}
 
-          {experimentalUiEnabled && activeTab === "jobs" && <OrchestrationPanel />}
+          {staffJobsEnabled && activeTab === "jobs" && <OrchestrationPanel />}
 
           {isIdentityPanelTab && (
             <IdentityPanel

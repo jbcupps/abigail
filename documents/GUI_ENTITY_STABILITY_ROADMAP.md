@@ -90,6 +90,9 @@ Verify parity of provider/model/tier/execution-trace/session semantics across ad
 - GUI chat runs through gateway abstraction only.
 - Both adapters pass parity tests for functional and telemetry output.
 
+**Sprint 2 Status (2026-03-01):** Completed.  
+Execution report: `documents/tests/SPRINT_2_CHAT_GATEWAY_REPORT.md`
+
 ---
 
 ### Sprint 3 - Internal Message Boundary in Desktop Runtime
@@ -181,3 +184,4 @@ Remove remaining direct GUI command/event chat plumbing.
 
 - This roadmap complements (does not replace) broader feature-parity and vision documents.
 - Until Sprint 4 completion, agentic/orchestration surfaces should be treated as experimental.
+- Legacy compatibility shims (`target`, `superego_mode`, `IdPrimary` aliases) remain temporarily for client/config compatibility and are targeted for removal after the 2026-03-31 cleanup review.

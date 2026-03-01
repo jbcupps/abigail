@@ -27,6 +27,21 @@ interface HarnessState {
   localLlmUrl: string | null;
   cliServer: { running: boolean; port?: number; token?: string };
   genesisTurns: number;
+  agenticRuns: Array<{
+    task_id: string;
+    status: string;
+    current_turn: number;
+    config: { goal: string; max_turns: number; require_confirmation: boolean };
+    events: Array<Record<string, unknown>>;
+    created_at: string;
+    completed_at: string | null;
+    attribution: {
+      origin: string;
+      entity_id: string | null;
+      session_id: string | null;
+      correlation_id: string | null;
+    };
+  }>;
 }
 
 type HarnessFaultMode = "none" | "chat_timeout" | "chat_error" | "provider_validation_error";
@@ -78,6 +93,7 @@ const defaultState = (): HarnessState => ({
   localLlmUrl: null,
   cliServer: { running: false },
   genesisTurns: 0,
+  agenticRuns: [],
 });
 
 let state: HarnessState = defaultState();
@@ -413,6 +429,100 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
         primary_color: "#00c2a8",
         avatar_url: "",
       };
+
+    // Agentic runtime
+    case "get_agentic_runtime_status":
+      return {
+        healthy: true,
+        storage_path: "E:/Agents/abigail/data/agentic_runs.json",
+        loaded_runs: state.agenticRuns.length,
+        active_runs: state.agenticRuns.filter((run) => !["completed", "failed", "cancelled"].includes(run.status)).length,
+        recovered_runs: 0,
+      };
+    case "start_agentic_run":
+    case "start_entity_initiated_agentic_run": {
+      const taskId = `task-${Date.now()}-${Math.floor(Math.random() * 999)}`;
+      const goal = String(args.goal ?? "");
+      const maxTurns = Number(args.maxTurns ?? args.max_turns ?? 10);
+      const requireConfirmation = Boolean(args.requireConfirmation ?? args.require_confirmation ?? false);
+      const origin = cmd === "start_entity_initiated_agentic_run" ? "entity_pipeline" : "gui";
+      const run = {
+        task_id: taskId,
+        status: "running",
+        current_turn: 1,
+        config: { goal, max_turns: maxTurns, require_confirmation: requireConfirmation },
+        events: [{ type: "run_started", task_id: taskId, goal }],
+        created_at: new Date().toISOString(),
+        completed_at: null,
+        attribution: {
+          origin,
+          entity_id: args.entityId ? String(args.entityId) : null,
+          session_id: args.sessionId ? String(args.sessionId) : null,
+          correlation_id: args.correlationId ? String(args.correlationId) : null,
+        },
+      };
+      state.agenticRuns.unshift(run);
+      emitEvent("agentic-event", { type: "run_started", task_id: taskId, goal });
+      return taskId;
+    }
+    case "get_agentic_run_status": {
+      const taskId = String(args.taskId ?? args.task_id ?? "");
+      const run = state.agenticRuns.find((r) => r.task_id === taskId);
+      if (!run) throw new Error(`Run '${taskId}' not found`);
+      return { run, attribution: run.attribution };
+    }
+    case "list_agentic_runs":
+      return state.agenticRuns.map((run) => ({ run, attribution: run.attribution }));
+    case "respond_to_mentor_ask":
+    case "respond_agentic_mentor": {
+      const taskId = String(args.taskId ?? args.task_id ?? "");
+      const run = state.agenticRuns.find((r) => r.task_id === taskId);
+      if (!run) throw new Error(`Run '${taskId}' not found`);
+      run.status = "running";
+      emitEvent("agentic-event", { type: "mentor_response_received", task_id: taskId });
+      return null;
+    }
+    case "confirm_tool_execution":
+    case "confirm_agentic_action": {
+      const taskId = String(args.taskId ?? args.task_id ?? "");
+      const run = state.agenticRuns.find((r) => r.task_id === taskId);
+      if (!run) throw new Error(`Run '${taskId}' not found`);
+      run.status = "running";
+      emitEvent("agentic-event", {
+        type: "mentor_confirmation_received",
+        task_id: taskId,
+        approved: Boolean(args.approved),
+      });
+      return null;
+    }
+    case "cancel_agentic_run": {
+      const taskId = String(args.taskId ?? args.task_id ?? "");
+      const run = state.agenticRuns.find((r) => r.task_id === taskId);
+      if (!run) throw new Error(`Run '${taskId}' not found`);
+      run.status = "cancelled";
+      run.completed_at = new Date().toISOString();
+      emitEvent("agentic-event", { type: "run_cancelled", task_id: taskId });
+      return null;
+    }
+
+    // Orchestration backend
+    case "get_orchestration_backend_status":
+      return {
+        healthy: true,
+        jobs_loaded: 0,
+        runtime_loaded_runs: state.agenticRuns.length,
+        runtime_active_runs: state.agenticRuns.filter((run) => !["completed", "failed", "cancelled"].includes(run.status)).length,
+      };
+    case "list_orchestration_jobs":
+      return [];
+    case "set_orchestration_job_enabled":
+      return null;
+    case "delete_orchestration_job":
+      return null;
+    case "run_orchestration_job_now":
+      return { run_id: `orch-${Date.now()}`, mode: "id_check", result_summary: "Harness orchestration run complete." };
+    case "list_orchestration_job_logs":
+      return [];
 
     // Chat screen status
     case "get_router_status": {

@@ -2,12 +2,13 @@ use crate::identity_manager::IdentityManager;
 use crate::log_capture::LogBuffer;
 use crate::ollama_manager::OllamaManager;
 use crate::rate_limit::CooldownGuard;
+use crate::agentic_runtime::AgenticRuntime;
 use abigail_auth::AuthManager;
 use abigail_birth::BirthOrchestrator;
 use abigail_core::{AppConfig, SecretsVault};
 use abigail_hive::{Hive, ModelRegistry};
 use abigail_memory::MemoryStore;
-use abigail_router::{IdEgoRouter, SubagentManager};
+use abigail_router::{IdEgoRouter, OrchestrationScheduler, SubagentManager};
 use abigail_skills::channel::EventBus;
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use std::sync::{Arc, Mutex, RwLock};
@@ -61,6 +62,10 @@ pub struct AppState {
     pub active_agent_id: RwLock<Option<String>>,
     /// Subagent manager for delegating tasks to specialized subagents
     pub subagent_manager: RwLock<SubagentManager>,
+    /// Agentic runtime service handling run lifecycle, persistence, and event bridging.
+    pub agentic_runtime: Arc<AgenticRuntime>,
+    /// Orchestration scheduler for persisted jobs and run logs.
+    pub orchestration_scheduler: Arc<OrchestrationScheduler>,
     /// Browser automation capability (lazy-init, async-safe)
     pub browser:
         Arc<tokio::sync::RwLock<abigail_capabilities::sensory::browser::BrowserCapability>>,

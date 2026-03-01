@@ -35,6 +35,11 @@ impl CooldownGuard {
     }
 }
 
+/// Shared human-readable cooldown error format for command responses.
+pub fn format_cooldown_error(remaining: Duration) -> String {
+    format!("Rate limited — please wait {}ms", remaining.as_millis())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,5 +66,11 @@ mod tests {
         guard.check().await.unwrap();
         tokio::time::sleep(Duration::from_millis(60)).await;
         assert!(guard.check().await.is_ok());
+    }
+
+    #[test]
+    fn formats_cooldown_error_consistently() {
+        let msg = format_cooldown_error(Duration::from_millis(123));
+        assert_eq!(msg, "Rate limited — please wait 123ms");
     }
 }
