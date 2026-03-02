@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-03-02 23:20 EST: Fix startup flow — bundle Ollama in release-fast workflow, fix pull button parameter mismatch, show loading screen instead of skipping when Ollama unavailable
 - 2026-03-02 21:40 EST: Fix release workflow version auto-increment failing on suffixed tags (e.g. v0.0.65-fast.4) — filter to clean semver tags only
 - 2026-03-02 20:30 EST: Fix Ollama auto-connect skipping model download — add list_ollama_models backend command, guard auto-connect on installed models, replace button list with dropdown model picker (installed/recommended/custom)
 - 2026-03-02 16:00 EST: Topic-based decomposition — kill EventBus for StreamBroker, async memory consumer, cron scheduling in JobQueue, lean orchestrator prompt, instruction topic-affinity, unified router method, async tool-use delegation with depends_on job chains, AgenticEngine StreamBroker events, conscience monitor topic consumer, council job fan-out

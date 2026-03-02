@@ -1,5 +1,8 @@
 name: Release Fast (Windows + Linux)
 
+env:
+  OLLAMA_VERSION: "v0.5.13"
+
 on:
   workflow_dispatch:
     inputs:
@@ -29,6 +32,7 @@ jobs:
             asset_glob: "*.exe"
             keygen_bin: abigail-keygen.exe
             resource_name: abigail-keygen.exe
+            ollama_bin: ollama.exe
 
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
@@ -37,6 +41,7 @@ jobs:
             asset_glob: "*.deb"
             keygen_bin: abigail-keygen
             resource_name: abigail-keygen
+            ollama_bin: ollama
 
     runs-on: ${{ matrix.platform }}
 
@@ -132,7 +137,7 @@ jobs:
             const path = 'tauri-app/tauri.conf.json';
             const data = JSON.parse(fs.readFileSync(path, 'utf8'));
             data.bundle = data.bundle || {};
-            data.bundle.resources = ['${{ matrix.resource_name }}'];
+            data.bundle.resources = ['${{ matrix.resource_name }}', '${{ matrix.ollama_bin }}'];
             fs.writeFileSync(path, JSON.stringify(data, null, 2) + '\n');
           "
 
@@ -167,6 +172,18 @@ jobs:
         run: |
           cargo build --release -p abigail-keygen
           cp target/release/${{ matrix.keygen_bin }} tauri-app/${{ matrix.resource_name }}
+
+      - name: Download bundled Ollama binary
+        shell: bash
+        run: |
+          OLLAMA_BASE="https://github.com/ollama/ollama/releases/download/${{ env.OLLAMA_VERSION }}"
+          if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
+            curl -L -o "tauri-app/${{ matrix.ollama_bin }}" "${OLLAMA_BASE}/ollama-windows-amd64.exe"
+          elif [[ "${{ matrix.platform }}" == "ubuntu-22.04" ]]; then
+            curl -L -o "tauri-app/${{ matrix.ollama_bin }}" "${OLLAMA_BASE}/ollama-linux-amd64"
+            chmod +x "tauri-app/${{ matrix.ollama_bin }}"
+          fi
+          ls -la "tauri-app/${{ matrix.ollama_bin }}"
 
       - name: Validate updater signing key preflight
         shell: bash
