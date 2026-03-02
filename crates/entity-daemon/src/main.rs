@@ -10,10 +10,12 @@ mod state;
 use abigail_core::{AppConfig, SecretsVault};
 use abigail_hive::Hive;
 use abigail_memory::MemoryStore;
+use abigail_queue::JobQueue;
 use abigail_router::IdEgoRouter;
 use abigail_skills::channel::EventBus;
 use abigail_skills::skill::SkillConfig;
 use abigail_skills::{Skill, SkillExecutionPolicy, SkillExecutor, SkillRegistry};
+use abigail_streaming::{IggyBroker, StreamBroker, TopicConfig};
 use axum::routing::{get, post};
 use axum::Router;
 use clap::Parser;
@@ -42,6 +44,10 @@ struct Cli {
     /// Must match the Hive's --data-dir for shared identity resolution.
     #[arg(long)]
     data_dir: Option<String>,
+
+    /// Iggy connection string used for persistent event streaming.
+    #[arg(long, default_value = "iggy://iggy:iggy@127.0.0.1:8090")]
+    iggy_connection: String,
 }
 
 #[tokio::main]
@@ -400,6 +406,45 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    // 10. Initialize persistent event streaming (Iggy) and job queue.
+    let stream_broker: Arc<dyn StreamBroker> = Arc::new(
+        IggyBroker::new(cli.iggy_connection.clone())
+            .map_err(|e| anyhow::anyhow!("Failed to configure Iggy broker: {}", e))?,
+    );
+    stream_broker
+        .ensure_topic("abigail", "job-events", TopicConfig::default())
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to ensure Iggy topic abigail/job-events: {}", e))?;
+    stream_broker
+        .ensure_consumer_group("abigail", "job-events", "entity-daemon")
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!("Failed to ensure Iggy consumer group entity-daemon: {}", e)
+        })?;
+    tracing::info!("Connected to Iggy at {}", cli.iggy_connection);
+
+    let queue_conn = rusqlite::Connection::open(&config.db_path).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to open queue SQLite DB {}: {}",
+            config.db_path.display(),
+            e
+        )
+    })?;
+    queue_conn
+        .execute_batch("PRAGMA journal_mode=WAL;")
+        .map_err(|e| anyhow::anyhow!("Failed to configure queue SQLite WAL mode: {}", e))?;
+    queue_conn
+        .execute_batch(abigail_queue::MIGRATION_V3_JOB_QUEUE)
+        .map_err(|e| anyhow::anyhow!("Failed to apply queue migration: {}", e))?;
+    let job_queue = Arc::new(JobQueue::new(
+        Arc::new(Mutex::new(queue_conn)),
+        stream_broker.clone(),
+    ));
+    let recovered = job_queue.recover_running_jobs("entity-daemon restarted")?;
+    if recovered > 0 {
+        tracing::warn!("Recovered {} running jobs at startup", recovered);
+    }
+
     let state = EntityDaemonState {
         entity_id: cli.entity_id.clone(),
         config,
@@ -409,6 +454,8 @@ async fn main() -> anyhow::Result<()> {
         event_bus,
         docs_dir,
         memory,
+        job_queue,
+        stream_broker,
         memory_hook: None,
         instruction_registry,
         archive_exporter,
