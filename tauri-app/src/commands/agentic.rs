@@ -16,7 +16,9 @@ fn validate_run_inputs(goal: &str, max_turns: u32) -> Result<(), String> {
     Ok(())
 }
 
-fn resolve_agentic_provider(state: &State<'_, AppState>) -> Result<std::sync::Arc<dyn abigail_capabilities::cognitive::provider::LlmProvider>, String> {
+fn resolve_agentic_provider(
+    state: &State<'_, AppState>,
+) -> Result<std::sync::Arc<dyn abigail_capabilities::cognitive::provider::LlmProvider>, String> {
     let router = state.router.read().map_err(|e| e.to_string())?.clone();
     router
         .best_available_provider()
@@ -158,10 +160,7 @@ pub async fn confirm_agentic_action(
 }
 
 #[tauri::command]
-pub async fn cancel_agentic_run(
-    state: State<'_, AppState>,
-    task_id: String,
-) -> Result<(), String> {
+pub async fn cancel_agentic_run(state: State<'_, AppState>, task_id: String) -> Result<(), String> {
     state
         .agentic_runtime
         .cancel_run(&task_id)

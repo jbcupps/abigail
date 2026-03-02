@@ -107,10 +107,9 @@ pub async fn run_orchestration_job_now(
                     entity_chat::build_tool_definitions(&state.registry),
                     state.executor.clone(),
                     abigail_router::RunConfig {
-                        goal: job
-                            .goal_template
-                            .clone()
-                            .unwrap_or_else(|| format!("Execute orchestration job '{}'.", job.name)),
+                        goal: job.goal_template.clone().unwrap_or_else(|| {
+                            format!("Execute orchestration job '{}'.", job.name)
+                        }),
                         max_turns: 8,
                         require_confirmation: false,
                         system_context: Some(format!(
@@ -129,7 +128,10 @@ pub async fn run_orchestration_job_now(
                 .map_err(|e| e.to_string())?;
 
             (
-                format!("Spawned agentic run {} from orchestration job {}", task_id, job.job_id),
+                format!(
+                    "Spawned agentic run {} from orchestration job {}",
+                    task_id, job.job_id
+                ),
                 task_id,
             )
         }
