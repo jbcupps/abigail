@@ -49,6 +49,10 @@ beforeEach(() => {
         });
       case "list_missing_skill_secrets":
         return Promise.resolve([]);
+      case "get_force_override":
+        return Promise.resolve({ pinned_model: null, pinned_tier: null, pinned_provider: null });
+      case "get_model_registry":
+        return Promise.resolve({ providers: [], total_models: 0, models: [] });
       case "chat_stream":
         setTimeout(() => {
           if (listeners["chat-internal-envelope"]) {
@@ -155,6 +159,10 @@ describe("ChatInterface", () => {
           return Promise.resolve({ managed: false, running: false, port: 11434, model_ready: false });
         case "list_missing_skill_secrets":
           return Promise.resolve([]);
+        case "get_force_override":
+          return Promise.resolve({ pinned_model: null, pinned_tier: null, pinned_provider: null });
+        case "get_model_registry":
+          return Promise.resolve({ providers: [], total_models: 0, models: [] });
         case "chat_stream":
           setTimeout(() => {
             if (listeners["chat-internal-envelope"]) {
@@ -255,6 +263,10 @@ describe("ChatInterface", () => {
           return Promise.resolve({ managed: false, running: false, port: 11434, model_ready: false });
         case "list_missing_skill_secrets":
           return Promise.resolve([]);
+        case "get_force_override":
+          return Promise.resolve({ pinned_model: null, pinned_tier: null, pinned_provider: null });
+        case "get_model_registry":
+          return Promise.resolve({ providers: [], total_models: 0, models: [] });
         case "chat_stream":
           setTimeout(() => {
             if (listeners["chat-internal-envelope"]) {
