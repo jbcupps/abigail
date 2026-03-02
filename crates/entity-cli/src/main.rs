@@ -11,8 +11,9 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 use entity_core::{
-    ApiEnvelope, ChatRequest, ChatResponse, EntityStatus, MemoryEntry, MemorySearchRequest,
-    MemoryStats, SkillInfo, ToolExecRequest, ToolExecResponse,
+    ApiEnvelope, CancelJobResponse, ChatRequest, ChatResponse, EntityStatus, JobStatusResponse,
+    ListJobsResponse, MemoryEntry, MemorySearchRequest, MemoryStats, SkillInfo, SubmitJobRequest,
+    SubmitJobResponse, ToolExecRequest, ToolExecResponse, TopicResultsResponse,
 };
 use std::path::PathBuf;
 
@@ -69,6 +70,16 @@ enum Commands {
         #[arg(default_value = "hello")]
         message: String,
     },
+    /// Manage queued async jobs
+    Jobs {
+        #[command(subcommand)]
+        action: JobAction,
+    },
+    /// Topic-level queue operations
+    Topics {
+        #[command(subcommand)]
+        action: TopicAction,
+    },
     /// Scaffold a new skill directory with template files
     Scaffold {
         /// Skill name (e.g., "my-weather-api")
@@ -107,6 +118,47 @@ enum MemoryAction {
         /// Weight tier: ephemeral, distilled, crystallized
         #[arg(long, default_value = "ephemeral")]
         weight: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum JobAction {
+    /// Submit a new queued job
+    Submit {
+        goal: String,
+        #[arg(long)]
+        topic: String,
+        #[arg(long)]
+        capability: Option<String>,
+        #[arg(long)]
+        priority: Option<String>,
+        #[arg(long)]
+        time_budget_ms: Option<u64>,
+        #[arg(long)]
+        max_turns: Option<u32>,
+        #[arg(long)]
+        ttl_seconds: Option<u64>,
+    },
+    /// Get status for a specific job
+    Status { job_id: String },
+    /// List jobs, optionally filtered by status
+    List {
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long, default_value = "50")]
+        limit: usize,
+    },
+    /// Cancel a queued/running job
+    Cancel { job_id: String },
+}
+
+#[derive(Subcommand)]
+enum TopicAction {
+    /// Get completed results for a topic
+    Results {
+        topic: String,
+        #[arg(long, default_value = "50")]
+        limit: usize,
     },
 }
 
@@ -153,6 +205,79 @@ async fn main() -> anyhow::Result<()> {
             let resp: ApiEnvelope<serde_json::Value> = client.get(url).send().await?.json().await?;
             println!("{}", serde_json::to_string_pretty(&resp)?);
         }
+        Commands::Jobs { action } => match action {
+            JobAction::Submit {
+                goal,
+                topic,
+                capability,
+                priority,
+                time_budget_ms,
+                max_turns,
+                ttl_seconds,
+            } => {
+                let resp: ApiEnvelope<SubmitJobResponse> = client
+                    .post(format!("{}/v1/jobs/submit", base))
+                    .json(&SubmitJobRequest {
+                        goal,
+                        topic,
+                        capability,
+                        priority,
+                        time_budget_ms,
+                        max_turns,
+                        system_context: None,
+                        allowed_skill_ids: None,
+                        ttl_seconds,
+                        input_data: None,
+                        parent_job_id: None,
+                    })
+                    .send()
+                    .await?
+                    .json()
+                    .await?;
+                println!("{}", serde_json::to_string_pretty(&resp)?);
+            }
+            JobAction::Status { job_id } => {
+                let resp: ApiEnvelope<JobStatusResponse> = client
+                    .get(format!("{}/v1/jobs/{}", base, job_id))
+                    .send()
+                    .await?
+                    .json()
+                    .await?;
+                println!("{}", serde_json::to_string_pretty(&resp)?);
+            }
+            JobAction::List { status, limit } => {
+                let mut url = format!("{}/v1/jobs?limit={}", base, limit);
+                if let Some(status) = status {
+                    url.push_str(&format!("&status={}", status));
+                }
+                let resp: ApiEnvelope<ListJobsResponse> =
+                    client.get(url).send().await?.json().await?;
+                println!("{}", serde_json::to_string_pretty(&resp)?);
+            }
+            JobAction::Cancel { job_id } => {
+                let resp: ApiEnvelope<CancelJobResponse> = client
+                    .post(format!("{}/v1/jobs/{}/cancel", base, job_id))
+                    .send()
+                    .await?
+                    .json()
+                    .await?;
+                println!("{}", serde_json::to_string_pretty(&resp)?);
+            }
+        },
+        Commands::Topics { action } => match action {
+            TopicAction::Results { topic, limit } => {
+                let resp: ApiEnvelope<TopicResultsResponse> = client
+                    .get(format!(
+                        "{}/v1/topics/{}/results?limit={}",
+                        base, topic, limit
+                    ))
+                    .send()
+                    .await?
+                    .json()
+                    .await?;
+                println!("{}", serde_json::to_string_pretty(&resp)?);
+            }
+        },
         Commands::Skills => {
             let resp: ApiEnvelope<Vec<SkillInfo>> = client
                 .get(format!("{}/v1/skills", base))

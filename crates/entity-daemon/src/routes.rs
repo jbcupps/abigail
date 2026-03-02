@@ -2,12 +2,15 @@
 
 use crate::state::EntityDaemonState;
 use abigail_capabilities::cognitive::StreamEvent;
-use axum::extract::{Query, State};
+use abigail_queue::{JobPriority, JobRecord, JobSpec, RequiredCapability};
+use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::Json;
 use entity_core::{
-    ApiEnvelope, ChatRequest, ChatResponse, EntityStatus, MemoryEntry, MemoryInsertRequest,
-    MemorySearchRequest, MemoryStats, SkillInfo, ToolExecRequest, ToolExecResponse, ToolInfo,
+    ApiEnvelope, CancelJobResponse, ChatRequest, ChatResponse, EntityStatus, JobStatusResponse,
+    ListJobsResponse, MemoryEntry, MemoryInsertRequest, MemorySearchRequest, MemoryStats,
+    QueueJobRecord, SkillInfo, SubmitJobRequest, SubmitJobResponse, ToolExecRequest,
+    ToolExecResponse, ToolInfo, TopicResultsResponse,
 };
 use futures_util::{Stream, StreamExt};
 use std::convert::Infallible;
@@ -546,5 +549,406 @@ pub async fn memory_insert(
             Json(ApiEnvelope::success(entry))
         }
         Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Queue API
+// ---------------------------------------------------------------------------
+
+/// POST /v1/jobs/submit
+pub async fn submit_job(
+    State(state): State<EntityDaemonState>,
+    Json(body): Json<SubmitJobRequest>,
+) -> Json<ApiEnvelope<SubmitJobResponse>> {
+    let spec = JobSpec {
+        goal: body.goal,
+        topic: body.topic.clone(),
+        capability: parse_capability(body.capability.as_deref()),
+        priority: parse_priority(body.priority.as_deref()),
+        time_budget_ms: body.time_budget_ms.unwrap_or(120_000),
+        max_turns: body.max_turns.unwrap_or(10),
+        system_context: body.system_context,
+        allowed_skill_ids: body.allowed_skill_ids.unwrap_or_default(),
+        ttl_seconds: body.ttl_seconds.unwrap_or(3600),
+        input_data: body.input_data,
+        parent_job_id: body.parent_job_id,
+    };
+
+    match state.job_queue.submit_job(spec).await {
+        Ok(job_id) => Json(ApiEnvelope::success(SubmitJobResponse {
+            job_id,
+            topic: body.topic,
+            status: "queued".to_string(),
+        })),
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+/// GET /v1/jobs/:job_id
+pub async fn get_job_status(
+    State(state): State<EntityDaemonState>,
+    Path(job_id): Path<String>,
+) -> Json<ApiEnvelope<JobStatusResponse>> {
+    match state.job_queue.get_job(&job_id) {
+        Ok(Some(job)) => Json(ApiEnvelope::success(JobStatusResponse {
+            job: queue_job_record(job),
+        })),
+        Ok(None) => Json(ApiEnvelope::error(format!("Job '{}' not found", job_id))),
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ListJobsQuery {
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default = "default_jobs_limit")]
+    pub limit: usize,
+}
+
+fn default_jobs_limit() -> usize {
+    50
+}
+
+/// GET /v1/jobs?status=queued&limit=50
+pub async fn list_jobs(
+    State(state): State<EntityDaemonState>,
+    Query(query): Query<ListJobsQuery>,
+) -> Json<ApiEnvelope<ListJobsResponse>> {
+    match state
+        .job_queue
+        .list_jobs(query.status.as_deref(), query.limit)
+    {
+        Ok(jobs) => Json(ApiEnvelope::success(ListJobsResponse {
+            jobs: jobs.into_iter().map(queue_job_record).collect(),
+        })),
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+/// POST /v1/jobs/:job_id/cancel
+pub async fn cancel_job(
+    State(state): State<EntityDaemonState>,
+    Path(job_id): Path<String>,
+) -> Json<ApiEnvelope<CancelJobResponse>> {
+    match state.job_queue.cancel_job(&job_id).await {
+        Ok(()) => Json(ApiEnvelope::success(CancelJobResponse {
+            job_id,
+            status: "cancelled".to_string(),
+        })),
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct TopicQuery {
+    #[serde(default = "default_topic_limit")]
+    pub limit: usize,
+}
+
+fn default_topic_limit() -> usize {
+    50
+}
+
+/// GET /v1/topics/:topic/results?limit=50
+pub async fn topic_results(
+    State(state): State<EntityDaemonState>,
+    Path(topic): Path<String>,
+    Query(query): Query<TopicQuery>,
+) -> Json<ApiEnvelope<TopicResultsResponse>> {
+    let jobs = match state.job_queue.topic_results(&topic, query.limit) {
+        Ok(records) => records,
+        Err(e) => return Json(ApiEnvelope::error(e.to_string())),
+    };
+    let all_terminal = match state.job_queue.topic_all_terminal(&topic) {
+        Ok(v) => v,
+        Err(e) => return Json(ApiEnvelope::error(e.to_string())),
+    };
+
+    Json(ApiEnvelope::success(TopicResultsResponse {
+        topic,
+        all_terminal,
+        jobs: jobs.into_iter().map(queue_job_record).collect(),
+    }))
+}
+
+/// GET /v1/topics/:topic/watch
+pub async fn watch_topic(
+    State(state): State<EntityDaemonState>,
+    Path(topic): Path<String>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Event>(64);
+    let broker = state.stream_broker.clone();
+    let group_name = format!("topic-watch-{}-{}", topic, uuid::Uuid::new_v4());
+    let topic_filter = topic.clone();
+
+    tokio::spawn(async move {
+        let tx_for_handler = tx.clone();
+        let handler: abigail_streaming::broker::MessageHandler = Box::new(move |msg| {
+            let topic_filter = topic_filter.clone();
+            let tx_for_handler = tx_for_handler.clone();
+            Box::pin(async move {
+                if msg.headers.get("topic") != Some(&topic_filter) {
+                    return;
+                }
+                let payload = match serde_json::from_slice::<serde_json::Value>(&msg.payload) {
+                    Ok(v) => v,
+                    Err(_) => serde_json::json!({
+                        "raw": String::from_utf8_lossy(&msg.payload).to_string()
+                    }),
+                };
+                let _ = tx_for_handler
+                    .send(
+                        Event::default()
+                            .event("job_event")
+                            .data(payload.to_string()),
+                    )
+                    .await;
+            })
+        });
+
+        match broker
+            .subscribe("abigail", "job-events", &group_name, handler)
+            .await
+        {
+            Ok(handle) => {
+                tx.closed().await;
+                handle.cancel();
+            }
+            Err(e) => {
+                let _ = tx
+                    .send(Event::default().event("error").data(e.to_string()))
+                    .await;
+            }
+        }
+    });
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok);
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+fn parse_capability(value: Option<&str>) -> RequiredCapability {
+    value
+        .map(RequiredCapability::from_str_lossy)
+        .unwrap_or(RequiredCapability::General)
+}
+
+fn parse_priority(value: Option<&str>) -> JobPriority {
+    match value.unwrap_or("normal").to_ascii_lowercase().as_str() {
+        "low" => JobPriority::Low,
+        "high" => JobPriority::High,
+        "critical" => JobPriority::Critical,
+        _ => JobPriority::Normal,
+    }
+}
+
+fn queue_job_record(job: JobRecord) -> QueueJobRecord {
+    QueueJobRecord {
+        id: job.id,
+        topic: job.topic,
+        goal: job.goal,
+        capability: job.capability.as_str().to_string(),
+        priority: match job.priority {
+            JobPriority::Low => "low".to_string(),
+            JobPriority::Normal => "normal".to_string(),
+            JobPriority::High => "high".to_string(),
+            JobPriority::Critical => "critical".to_string(),
+        },
+        status: job.status.as_str().to_string(),
+        time_budget_ms: job.time_budget_ms,
+        max_turns: job.max_turns,
+        system_context: job.system_context,
+        allowed_skill_ids: job.allowed_skill_ids,
+        input_data: job.input_data,
+        parent_job_id: job.parent_job_id,
+        agent_id: job.agent_id,
+        model_used: job.model_used,
+        provider_used: job.provider_used,
+        result: job.result,
+        error: job.error,
+        turns_consumed: job.turns_consumed,
+        ttl_seconds: job.ttl_seconds,
+        created_at: job.created_at,
+        started_at: job.started_at,
+        completed_at: job.completed_at,
+        expires_at: job.expires_at,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use abigail_capabilities::cognitive::{CompletionRequest, CompletionResponse, LlmProvider};
+    use abigail_core::{AppConfig, ForceOverride, RoutingMode, TierModels, TierThresholds};
+    use abigail_memory::MemoryStore;
+    use abigail_queue::MIGRATION_V3_JOB_QUEUE;
+    use abigail_router::IdEgoRouter;
+    use abigail_skills::channel::EventBus;
+    use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
+    use abigail_streaming::MemoryBroker;
+    use async_trait::async_trait;
+    use axum::extract::{Path, Query, State};
+    use axum::Json;
+    use std::sync::Arc;
+
+    struct MockProvider;
+
+    #[async_trait]
+    impl LlmProvider for MockProvider {
+        async fn complete(
+            &self,
+            _request: &CompletionRequest,
+        ) -> anyhow::Result<CompletionResponse> {
+            Ok(CompletionResponse {
+                content: "ok".to_string(),
+                tool_calls: None,
+            })
+        }
+    }
+
+    fn build_state() -> EntityDaemonState {
+        let router = IdEgoRouter {
+            id: Arc::new(MockProvider),
+            ego: None,
+            ego_provider: None,
+            council: None,
+            local_http: None,
+            mode: RoutingMode::TierBased,
+            tier_models: TierModels::default(),
+            tier_thresholds: TierThresholds::default(),
+            force_override: ForceOverride::default(),
+        };
+
+        let registry = Arc::new(SkillRegistry::new());
+        let executor = Arc::new(SkillExecutor::new(registry.clone()));
+        let memory = Arc::new(MemoryStore::open_in_memory().unwrap());
+        let docs_dir = std::env::temp_dir().join("abigail_routes_test_docs");
+        let _ = std::fs::create_dir_all(&docs_dir);
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+        conn.execute_batch(MIGRATION_V3_JOB_QUEUE).unwrap();
+        let stream_broker: Arc<dyn abigail_streaming::StreamBroker> =
+            Arc::new(MemoryBroker::new(128));
+        let job_queue = Arc::new(abigail_queue::JobQueue::new(
+            Arc::new(std::sync::Mutex::new(conn)),
+            stream_broker.clone(),
+        ));
+
+        EntityDaemonState {
+            entity_id: "test-entity".to_string(),
+            config: AppConfig::default_paths(),
+            router: Arc::new(router),
+            registry,
+            executor,
+            event_bus: Arc::new(EventBus::new(16)),
+            docs_dir,
+            memory,
+            job_queue,
+            stream_broker,
+            memory_hook: None,
+            instruction_registry: Arc::new(InstructionRegistry::empty()),
+            archive_exporter: None,
+            turns_since_archive: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        }
+    }
+
+    #[tokio::test]
+    async fn submit_and_get_job_status() {
+        let state = build_state();
+        let submit = SubmitJobRequest {
+            goal: "Summarize docs".to_string(),
+            topic: "research-1".to_string(),
+            capability: Some("reasoning".to_string()),
+            priority: Some("high".to_string()),
+            time_budget_ms: Some(30_000),
+            max_turns: Some(5),
+            system_context: None,
+            allowed_skill_ids: None,
+            ttl_seconds: Some(600),
+            input_data: None,
+            parent_job_id: None,
+        };
+
+        let resp = submit_job(State(state.clone()), Json(submit)).await.0;
+        assert!(resp.ok);
+        let job_id = resp.data.unwrap().job_id;
+
+        let status = get_job_status(State(state), Path(job_id)).await.0;
+        assert!(status.ok);
+        let status = status.data.unwrap();
+        assert_eq!(status.job.topic, "research-1");
+        assert_eq!(status.job.status, "queued");
+        assert_eq!(status.job.capability, "reasoning");
+    }
+
+    #[tokio::test]
+    async fn cancel_and_topic_results() {
+        let state = build_state();
+        let first = state
+            .job_queue
+            .submit_job(JobSpec {
+                goal: "Task one".to_string(),
+                topic: "batch-a".to_string(),
+                capability: RequiredCapability::General,
+                priority: JobPriority::Normal,
+                time_budget_ms: 10_000,
+                max_turns: 3,
+                system_context: None,
+                allowed_skill_ids: vec![],
+                ttl_seconds: 3600,
+                input_data: None,
+                parent_job_id: None,
+            })
+            .await
+            .unwrap();
+        state
+            .job_queue
+            .mark_running(&first, "agent-1", "model", "provider")
+            .await
+            .unwrap();
+        state
+            .job_queue
+            .mark_completed(&first, "done", 1)
+            .await
+            .unwrap();
+
+        let second = state
+            .job_queue
+            .submit_job(JobSpec {
+                goal: "Task two".to_string(),
+                topic: "batch-a".to_string(),
+                capability: RequiredCapability::General,
+                priority: JobPriority::Normal,
+                time_budget_ms: 10_000,
+                max_turns: 3,
+                system_context: None,
+                allowed_skill_ids: vec![],
+                ttl_seconds: 3600,
+                input_data: None,
+                parent_job_id: None,
+            })
+            .await
+            .unwrap();
+
+        let cancel = cancel_job(State(state.clone()), Path(second.clone()))
+            .await
+            .0;
+        assert!(cancel.ok);
+        assert_eq!(cancel.data.unwrap().status, "cancelled");
+
+        let topic = topic_results(
+            State(state),
+            Path("batch-a".to_string()),
+            Query(TopicQuery { limit: 20 }),
+        )
+        .await
+        .0;
+        assert!(topic.ok);
+        let topic = topic.data.unwrap();
+        assert!(topic.all_terminal);
+        assert_eq!(topic.jobs.len(), 1);
+        assert_eq!(topic.jobs[0].status, "completed");
     }
 }

@@ -6,6 +6,7 @@
 mod capability_matcher;
 mod hive_client;
 mod job_scheduler;
+mod queue_ops;
 mod routes;
 mod state;
 mod subagent_runner;
@@ -25,6 +26,7 @@ use capability_matcher::CapabilityMatcher;
 use clap::Parser;
 use hive_client::HiveClient;
 use job_scheduler::JobScheduler;
+use queue_ops::LocalQueueOperations;
 use state::EntityDaemonState;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -451,6 +453,16 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("Recovered {} running jobs at startup", recovered);
     }
 
+    // 11. Register QueueManagementSkill (queue submit/status/list/cancel tools).
+    {
+        let queue_ops = Arc::new(LocalQueueOperations::new(job_queue.clone()));
+        let queue_skill = abigail_skills::QueueManagementSkill::new(queue_ops);
+        let _ = registry.register(
+            abigail_skills::manifest::SkillId("builtin.queue_management".to_string()),
+            Arc::new(queue_skill),
+        );
+    }
+
     let state = EntityDaemonState {
         entity_id: cli.entity_id.clone(),
         config,
@@ -557,6 +569,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/status", get(routes::get_status))
         .route("/v1/chat", post(routes::chat))
         .route("/v1/chat/stream", post(routes::chat_stream))
+        .route("/v1/jobs/submit", post(routes::submit_job))
+        .route("/v1/jobs", get(routes::list_jobs))
+        .route("/v1/jobs/:job_id", get(routes::get_job_status))
+        .route("/v1/jobs/:job_id/cancel", post(routes::cancel_job))
+        .route("/v1/topics/:topic/results", get(routes::topic_results))
+        .route("/v1/topics/:topic/watch", get(routes::watch_topic))
         .route("/v1/routing/diagnose", get(routes::diagnose_routing))
         .route("/v1/skills", get(routes::list_skills))
         .route("/v1/tools/execute", post(routes::execute_tool))

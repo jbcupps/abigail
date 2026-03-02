@@ -11,6 +11,7 @@ pub mod policy;
 pub mod preloaded;
 pub mod prelude;
 pub mod protocol;
+pub mod queue;
 pub mod registry;
 pub mod runtime;
 pub mod sandbox;
@@ -35,6 +36,7 @@ pub use preloaded::{
 };
 pub use prelude::*;
 pub use protocol::*;
+pub use queue::{QueueManagementSkill, QueueOperations};
 pub use registry::{MissingSkillSecret, RegisteredSkill, SkillRegistry};
 pub use sandbox::*;
 pub use skill::*;
