@@ -178,9 +178,11 @@ jobs:
         run: |
           OLLAMA_BASE="https://github.com/ollama/ollama/releases/download/${{ env.OLLAMA_VERSION }}"
           if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
-            curl -fL -o "tauri-app/${{ matrix.ollama_bin }}" "${OLLAMA_BASE}/ollama-windows-amd64.exe"
+            curl -fL -o /tmp/ollama.zip "${OLLAMA_BASE}/ollama-windows-amd64.zip"
+            unzip -o -j /tmp/ollama.zip "ollama.exe" -d tauri-app/
           elif [[ "${{ matrix.platform }}" == "ubuntu-22.04" ]]; then
-            curl -fL -o "tauri-app/${{ matrix.ollama_bin }}" "${OLLAMA_BASE}/ollama-linux-amd64"
+            curl -fL -o /tmp/ollama.tgz "${OLLAMA_BASE}/ollama-linux-amd64.tgz"
+            tar xzf /tmp/ollama.tgz -C tauri-app/ --strip-components=1 bin/ollama
             chmod +x "tauri-app/${{ matrix.ollama_bin }}"
           fi
           ls -la "tauri-app/${{ matrix.ollama_bin }}"
