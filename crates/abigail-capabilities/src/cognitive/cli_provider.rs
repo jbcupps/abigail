@@ -8,6 +8,7 @@ use crate::cognitive::provider::{CompletionRequest, CompletionResponse, LlmProvi
 use abigail_core::CliPermissionMode;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 use std::time::Duration;
 use tokio::process::Command;
@@ -266,6 +267,8 @@ pub struct CliLlmProvider {
     active_session_id: RwLock<Option<String>>,
 }
 
+static CLI_PERMISSION_MODE_WARNED: AtomicBool = AtomicBool::new(false);
+
 impl CliLlmProvider {
     /// Create a new CLI provider. Returns an error if the API key is empty.
     /// Use "system" as the key to rely on the CLI's internal auth (e.g. OAuth).
@@ -320,6 +323,29 @@ impl CliLlmProvider {
         self.variant
     }
 
+    fn runtime_permission_posture(&self) -> &'static str {
+        match self.variant {
+            CliVariant::ClaudeCode => "claude:--dangerously-skip-permissions",
+            CliVariant::OpenAiCodex => "codex:--full-auto",
+            CliVariant::GeminiCli => "gemini:no-runtime-permission-flag",
+            CliVariant::XaiGrokCli => "grok:no-runtime-permission-flag",
+        }
+    }
+
+    fn warn_if_permission_mode_not_effective(&self) {
+        if self.permission_mode == CliPermissionMode::DangerousSkipAll {
+            return;
+        }
+        if !CLI_PERMISSION_MODE_WARNED.swap(true, Ordering::Relaxed) {
+            tracing::warn!(
+                configured_mode = ?self.permission_mode,
+                variant = %self.variant,
+                runtime_posture = %self.runtime_permission_posture(),
+                "cli_permission_mode is config-only in this build; runtime uses fixed variant-specific posture"
+            );
+        }
+    }
+
     /// Check whether the CLI binary is available on PATH (synchronous).
     pub fn is_available(&self) -> bool {
         let mut cmd = std::process::Command::new(self.variant.binary_name());
@@ -358,7 +384,7 @@ impl CliLlmProvider {
         }
     }
 
-    /// Add permission flags for the CLI subprocess.
+    /// Add permission flags for the Claude CLI subprocess.
     ///
     /// Entity-level tool permissions are enforced by `SkillSandbox` /
     /// `SkillExecutor`, not by the CLI tool's permission system.  The CLI
@@ -368,8 +394,8 @@ impl CliLlmProvider {
     /// Windows the resulting command-line length overflows the `cmd.exe`
     /// 8 191-char limit (OS error 206).
     ///
-    /// We therefore always pass `--dangerously-skip-permissions` to the
-    /// CLI subprocess and rely on the entity's own layered security model.
+    /// For Claude CLI we pass `--dangerously-skip-permissions` and rely on
+    /// the entity's own layered security model.
     fn apply_permission_flags(&self, cmd: &mut Command) {
         cmd.arg("--dangerously-skip-permissions");
     }
@@ -385,6 +411,8 @@ impl CliLlmProvider {
         system_prompt: Option<&str>,
     ) -> (Command, Option<String>) {
         let mut cmd = Command::new(self.variant.binary_name());
+
+        self.warn_if_permission_mode_not_effective();
 
         if self.api_key != "system" {
             cmd.env(self.variant.api_key_env_var(), &self.api_key);
@@ -530,12 +558,14 @@ impl LlmProvider for CliLlmProvider {
         let prompt = Self::build_prompt(&request.messages);
 
         tracing::info!(
-            "CliLlmProvider::complete variant={}, binary={}, prompt_len={}, has_system_prompt={}, has_tools={}",
+            "CliLlmProvider::complete variant={}, binary={}, prompt_len={}, has_system_prompt={}, has_tools={}, configured_permission_mode={:?}, runtime_permission_posture={}",
             self.variant,
             self.variant.binary_name(),
             prompt.len(),
             system_prompt.is_some(),
             request.tools.is_some(),
+            self.permission_mode,
+            self.runtime_permission_posture(),
         );
 
         let (cmd, stdin_content) = self.build_command(&prompt, system_prompt.as_deref());
@@ -581,6 +611,7 @@ impl LlmProvider for CliLlmProvider {
         let has_session = self.active_session_id.read().ok().and_then(|g| g.clone());
 
         let mut cmd = Command::new(self.variant.binary_name());
+        self.warn_if_permission_mode_not_effective();
         if self.api_key != "system" {
             cmd.env(self.variant.api_key_env_var(), &self.api_key);
         }

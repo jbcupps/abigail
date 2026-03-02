@@ -6,14 +6,21 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 // Mock @tauri-apps/api/event
-// The listen mock captures callbacks and auto-fires a { done: true } event
-// for "chat-token" listeners so streaming-based tests complete promptly.
+// The listen mock captures callbacks and auto-fires a terminal internal chat
+// envelope so streaming-based tests complete promptly.
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockImplementation((eventName: string, callback: (event: { payload: unknown }) => void) => {
-    if (eventName === "chat-token") {
-      // Simulate the backend emitting { done: true } after a microtask delay.
+    if (eventName === "chat-internal-envelope") {
+      // Simulate the backend emitting a terminal done envelope after a microtask delay.
       Promise.resolve().then(() => {
-        callback({ payload: { done: true } });
+        callback({
+          payload: {
+            kind: "done",
+            correlation_id: "test-correlation",
+            session_id: "test-session",
+            done: { reply: "mock reply" },
+          },
+        });
       });
     }
     return Promise.resolve(() => {});

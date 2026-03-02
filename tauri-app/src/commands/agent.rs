@@ -37,15 +37,16 @@ pub async fn delegate_to_subagent(
 ) -> Result<String, String> {
     let def = {
         let mgr = state.subagent_manager.read().map_err(|e| e.to_string())?;
-        mgr
-            .list()
+        mgr.list()
             .iter()
             .find(|d| d.id == id)
             .cloned()
             .ok_or_else(|| format!("Subagent '{}' not found", id))?
     };
 
-    let messages = vec![abigail_capabilities::cognitive::Message::new("user", &message)];
+    let messages = vec![abigail_capabilities::cognitive::Message::new(
+        "user", &message,
+    )];
     let tools = entity_chat::build_tool_definitions(&state.registry);
 
     let mgr = state

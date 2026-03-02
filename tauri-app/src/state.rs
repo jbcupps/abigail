@@ -1,8 +1,8 @@
+use crate::agentic_runtime::AgenticRuntime;
 use crate::identity_manager::IdentityManager;
 use crate::log_capture::LogBuffer;
 use crate::ollama_manager::OllamaManager;
 use crate::rate_limit::CooldownGuard;
-use crate::agentic_runtime::AgenticRuntime;
 use abigail_auth::AuthManager;
 use abigail_birth::BirthOrchestrator;
 use abigail_core::{AppConfig, SecretsVault};

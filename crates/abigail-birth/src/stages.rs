@@ -408,6 +408,7 @@ mod tests {
             email_accounts: Default::default(),
             bundled_ollama: false,
             bundled_model: None,
+            first_model_pull_complete: false,
             preloaded_skills_version: 0,
             primary_color: None,
             avatar_url: None,

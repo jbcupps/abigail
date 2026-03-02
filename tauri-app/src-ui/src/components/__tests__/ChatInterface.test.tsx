@@ -51,15 +51,28 @@ beforeEach(() => {
         return Promise.resolve([]);
       case "chat_stream":
         setTimeout(() => {
-          if (listeners["chat-token"]) {
-            listeners["chat-token"]({ payload: "assistant fallback reply" });
-          }
-          if (listeners["chat-done"]) {
-            listeners["chat-done"]({
+          if (listeners["chat-internal-envelope"]) {
+            listeners["chat-internal-envelope"]({
+              payload: { kind: "request", correlation_id: "corr-1", session_id: "session-1" },
+            });
+            listeners["chat-internal-envelope"]({
               payload: {
-                reply: "assistant fallback reply",
-                provider: "id",
-                tool_calls_made: [],
+                kind: "token",
+                correlation_id: "corr-1",
+                session_id: "session-1",
+                token: "assistant fallback reply",
+              },
+            });
+            listeners["chat-internal-envelope"]({
+              payload: {
+                kind: "done",
+                correlation_id: "corr-1",
+                session_id: "session-1",
+                done: {
+                  reply: "assistant fallback reply",
+                  provider: "id",
+                  tool_calls_made: [],
+                },
               },
             });
           }
@@ -144,17 +157,30 @@ describe("ChatInterface", () => {
           return Promise.resolve([]);
         case "chat_stream":
           setTimeout(() => {
-            if (listeners["chat-token"]) {
-              listeners["chat-token"]({ payload: "traced reply" });
-            }
-            if (listeners["chat-done"]) {
-              listeners["chat-done"]({
+            if (listeners["chat-internal-envelope"]) {
+              listeners["chat-internal-envelope"]({
+                payload: { kind: "request", correlation_id: "corr-2", session_id: "session-2" },
+              });
+              listeners["chat-internal-envelope"]({
                 payload: {
-                  reply: "traced reply",
-                  provider: "openai",
-                  tier: "fast",
-                  model_used: "gpt-4.1-mini",
-                  execution_trace: tracePayload,
+                  kind: "token",
+                  correlation_id: "corr-2",
+                  session_id: "session-2",
+                  token: "traced reply",
+                },
+              });
+              listeners["chat-internal-envelope"]({
+                payload: {
+                  kind: "done",
+                  correlation_id: "corr-2",
+                  session_id: "session-2",
+                  done: {
+                    reply: "traced reply",
+                    provider: "openai",
+                    tier: "fast",
+                    model_used: "gpt-4.1-mini",
+                    execution_trace: tracePayload,
+                  },
                 },
               });
             }
@@ -231,14 +257,22 @@ describe("ChatInterface", () => {
           return Promise.resolve([]);
         case "chat_stream":
           setTimeout(() => {
-            if (listeners["chat-done"]) {
-              listeners["chat-done"]({
+            if (listeners["chat-internal-envelope"]) {
+              listeners["chat-internal-envelope"]({
+                payload: { kind: "request", correlation_id: "corr-3", session_id: "session-3" },
+              });
+              listeners["chat-internal-envelope"]({
                 payload: {
-                  reply: "timestamp reply",
-                  provider: "anthropic",
-                  tier: "standard",
-                  model_used: "claude-sonnet-4-6",
-                  execution_trace: tracePayload,
+                  kind: "done",
+                  correlation_id: "corr-3",
+                  session_id: "session-3",
+                  done: {
+                    reply: "timestamp reply",
+                    provider: "anthropic",
+                    tier: "standard",
+                    model_used: "claude-sonnet-4-6",
+                    execution_trace: tracePayload,
+                  },
                 },
               });
             }

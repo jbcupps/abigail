@@ -192,9 +192,29 @@ describe("Chat gateway parity", () => {
     tauriHarness.invokeFn = async (command: string): Promise<unknown> => {
       if (command === "chat_stream") {
         queueMicrotask(() => {
-          tauriHarness.emit("chat-token", "Hello ");
-          tauriHarness.emit("chat-token", "world");
-          tauriHarness.emit("chat-done", responseFixture);
+          tauriHarness.emit("chat-internal-envelope", {
+            kind: "request",
+            correlation_id: "corr-parity-1",
+            session_id: "session-123",
+          });
+          tauriHarness.emit("chat-internal-envelope", {
+            kind: "token",
+            correlation_id: "corr-parity-1",
+            session_id: "session-123",
+            token: "Hello ",
+          });
+          tauriHarness.emit("chat-internal-envelope", {
+            kind: "token",
+            correlation_id: "corr-parity-1",
+            session_id: "session-123",
+            token: "world",
+          });
+          tauriHarness.emit("chat-internal-envelope", {
+            kind: "done",
+            correlation_id: "corr-parity-1",
+            session_id: "session-123",
+            done: responseFixture,
+          });
         });
         return null;
       }
@@ -232,7 +252,7 @@ describe("Chat gateway parity", () => {
     expect(entityRun.error).toBeUndefined();
     expect(entityRun.done).toEqual(responseFixture);
     expect(tauriHarness.activeListeners.size).toBe(0);
-    expect(tauriHarness.unlistenCalls.sort()).toEqual(["chat-done", "chat-error", "chat-token"]);
+    expect(tauriHarness.unlistenCalls.sort()).toEqual(["chat-internal-envelope"]);
   });
 
   it("returns equivalent interruption semantics across adapters on cancel", async () => {
@@ -325,8 +345,23 @@ describe("Chat gateway parity", () => {
     tauriHarness.invokeFn = async (command: string): Promise<unknown> => {
       if (command === "chat_stream") {
         queueMicrotask(() => {
-          tauriHarness.emit("chat-done", responseFixture);
-          tauriHarness.emit("chat-error", "late error should be ignored");
+          tauriHarness.emit("chat-internal-envelope", {
+            kind: "request",
+            correlation_id: "corr-parity-2",
+            session_id: "session-123",
+          });
+          tauriHarness.emit("chat-internal-envelope", {
+            kind: "done",
+            correlation_id: "corr-parity-2",
+            session_id: "session-123",
+            done: responseFixture,
+          });
+          tauriHarness.emit("chat-internal-envelope", {
+            kind: "error",
+            correlation_id: "corr-parity-2",
+            session_id: "session-123",
+            error: "late error should be ignored",
+          });
         });
       }
       return null;
@@ -344,6 +379,6 @@ describe("Chat gateway parity", () => {
     expect(run.errorCalls).toBe(0);
     expect(run.done).toEqual(responseFixture);
     expect(tauriHarness.activeListeners.size).toBe(0);
-    expect(tauriHarness.unlistenCalls.sort()).toEqual(["chat-done", "chat-error", "chat-token"]);
+    expect(tauriHarness.unlistenCalls.sort()).toEqual(["chat-internal-envelope"]);
   });
 });

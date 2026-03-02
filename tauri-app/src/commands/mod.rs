@@ -8,7 +8,7 @@ pub mod forge;
 pub mod identity;
 pub mod logging;
 pub mod memory;
-pub mod orchestration;
 pub mod ollama;
+pub mod orchestration;
 pub mod sensory;
 pub mod skills;

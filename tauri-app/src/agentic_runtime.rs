@@ -1,7 +1,5 @@
 use abigail_capabilities::cognitive::provider::{LlmProvider, ToolCall, ToolDefinition};
-use abigail_router::{
-    AgenticEngine, AgenticEvent, AgenticRun, RunConfig, RunStatus, ToolExecutor,
-};
+use abigail_router::{AgenticEngine, AgenticEvent, AgenticRun, RunConfig, RunStatus, ToolExecutor};
 use abigail_skills::{manifest::SkillId, SkillExecutor, ToolParams};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -15,7 +13,8 @@ use tokio_util::sync::CancellationToken;
 const AGENTIC_EVENT_NAME: &str = "agentic-event";
 const RUN_STORE_FILE: &str = "agentic_runs.json";
 const STORE_SCHEMA_VERSION: u32 = 2;
-const RECOVERY_FAILURE_REASON: &str = "Run marked failed during startup recovery after process restart";
+const RECOVERY_FAILURE_REASON: &str =
+    "Run marked failed during startup recovery after process restart";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunAttribution {
@@ -90,14 +89,24 @@ struct RuntimeToolExecutor {
 #[async_trait::async_trait]
 impl ToolExecutor for RuntimeToolExecutor {
     async fn execute(&self, tool_call: &ToolCall) -> anyhow::Result<String> {
-        let (skill_id, tool_name) = split_qualified_tool_name(&tool_call.name)
-            .ok_or_else(|| anyhow::anyhow!("Invalid tool name '{}'. Expected skill_id::tool_name", tool_call.name))?;
+        let (skill_id, tool_name) =
+            split_qualified_tool_name(&tool_call.name).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Invalid tool name '{}'. Expected skill_id::tool_name",
+                    tool_call.name
+                )
+            })?;
 
         let values = if tool_call.arguments.trim().is_empty() {
             HashMap::new()
         } else {
             serde_json::from_str::<HashMap<String, serde_json::Value>>(&tool_call.arguments)
-                .with_context(|| format!("Invalid tool arguments JSON for '{}': {}", tool_call.name, tool_call.arguments))?
+                .with_context(|| {
+                    format!(
+                        "Invalid tool arguments JSON for '{}': {}",
+                        tool_call.name, tool_call.arguments
+                    )
+                })?
         };
 
         let output = self
@@ -229,14 +238,19 @@ impl AgenticRuntime {
 
         self.persist_all().await?;
 
-        let engine = AgenticEngine::new(provider, tools, Arc::new(RuntimeToolExecutor { executor }));
+        let engine =
+            AgenticEngine::new(provider, tools, Arc::new(RuntimeToolExecutor { executor }));
         let runtime = self.clone();
         let task_id_for_forward = task_id.clone();
         let app_handle_for_events = app_handle.clone();
         tokio::spawn(async move {
             while let Some(event) = event_rx.recv().await {
                 runtime
-                    .handle_engine_event(&task_id_for_forward, event, app_handle_for_events.as_ref())
+                    .handle_engine_event(
+                        &task_id_for_forward,
+                        event,
+                        app_handle_for_events.as_ref(),
+                    )
                     .await;
             }
         });
@@ -259,7 +273,11 @@ impl AgenticRuntime {
                     .await;
             }
 
-            runtime.controls.write().await.remove(&task_id_for_completion);
+            runtime
+                .controls
+                .write()
+                .await
+                .remove(&task_id_for_completion);
             let _ = runtime.persist_all().await;
         });
 
@@ -436,7 +454,12 @@ impl AgenticRuntime {
         }
     }
 
-    async fn handle_engine_event(&self, task_id: &str, event: AgenticEvent, app_handle: Option<&AppHandle>) {
+    async fn handle_engine_event(
+        &self,
+        task_id: &str,
+        event: AgenticEvent,
+        app_handle: Option<&AppHandle>,
+    ) {
         if let Some(run_arc) = self.runs.read().await.get(task_id).cloned() {
             let mut run = run_arc.write().await;
             enforce_status_transition(&mut run, &event);
@@ -449,7 +472,12 @@ impl AgenticRuntime {
         let _ = self.persist_all().await;
     }
 
-    async fn mark_failed_if_needed(&self, task_id: &str, error: &str, app_handle: Option<&AppHandle>) {
+    async fn mark_failed_if_needed(
+        &self,
+        task_id: &str,
+        error: &str,
+        app_handle: Option<&AppHandle>,
+    ) {
         if let Some(run_arc) = self.runs.read().await.get(task_id).cloned() {
             let mut run = run_arc.write().await;
             if !is_terminal_status(&run.status) {
@@ -535,7 +563,10 @@ fn emit_bridge_event(app_handle: Option<&AppHandle>, payload: serde_json::Value)
 }
 
 fn is_terminal_status(status: &RunStatus) -> bool {
-    matches!(status, RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled)
+    matches!(
+        status,
+        RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled
+    )
 }
 
 fn enforce_status_transition(run: &mut AgenticRun, event: &AgenticEvent) {

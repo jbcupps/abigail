@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio_util::sync::CancellationToken;
 
-const INTERNAL_EVENT_NAME: &str = "chat-internal-envelope";
+pub const INTERNAL_EVENT_NAME: &str = "chat-internal-envelope";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -196,7 +196,6 @@ impl<'a> ChatCoordinator<'a> {
         let stream_task = tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
                 if let StreamEvent::Token(token) = event {
-                    let _ = app_clone.emit("chat-token", &token);
                     let _ = app_clone.emit(
                         INTERNAL_EVENT_NAME,
                         &InternalChatEnvelope {
@@ -249,7 +248,6 @@ impl<'a> ChatCoordinator<'a> {
                         },
                     )
                     .await;
-                let _ = app.emit("chat-done", &response);
                 self.emit_internal(
                     &app,
                     InternalChatEnvelope {
@@ -266,7 +264,6 @@ impl<'a> ChatCoordinator<'a> {
             }
             Err(e) => {
                 let msg = e.to_string();
-                let _ = app.emit("chat-error", msg.clone());
                 self.emit_internal(
                     &app,
                     InternalChatEnvelope {

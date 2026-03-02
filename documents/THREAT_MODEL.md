@@ -19,13 +19,13 @@ A user installs a skill package that is malicious or compromised (e.g. exfiltrat
 |--------|--------|
 | **Approval gating** | Implemented. If `approved_skill_ids` is set, only listed skills can run. Install adds the skill id to the list; uninstall removes it. |
 | **Audit trail** | Implemented. Install, uninstall, and approve are logged to `{data_dir}/skill_audit.log` with timestamp and `skill_id`. |
-| **Signed packages** | Planned. Config has `trusted_skill_signers`; format and verification (e.g. Ed25519-signed manifest + checksums) not yet implemented. |
+| **Signed allowlist verification** | Implemented. Active `signed_skill_allowlist` entries are verified with Ed25519 using `trusted_skill_signers`; invalid/untrusted signatures are denied at activation/execution (fail closed). |
 | **Permission review** | Manifest declares permissions; UI can show them before install/approve. Execution checks sandbox before network (and optionally file/memory) access. |
 
 ### Abuse cases
 
 - **Malicious skill runs without user consent:** Mitigated by approval list; unknown skills are not in the list and are rejected at execution.
-- **Trojanized skill update:** Mitigated when signing is in place (reject if signature invalid or signer not trusted). Until then, users should re-approve only after reviewing source.
+- **Trojanized skill update:** Mitigated by signed allowlist verification (reject on invalid signature or untrusted signer).
 - **Privilege creep:** Sandbox and resource limits (timeout, concurrency) bound what a skill can do; capability layers must route I/O through the sandbox.
 
 ## 2. MCP server trust
@@ -39,7 +39,7 @@ An MCP server (stdio or HTTP) is malicious or compromised, or the client talks t
 | Control | Status |
 |--------|--------|
 | **Explicit server list** | Implemented. Only servers in `AppConfig.mcp_servers` are used. |
-| **Trust policy** | Implemented. `mcp_trust_policy` (e.g. `allowed_http_hosts`) restricts which HTTP hosts are allowed. |
+| **Trust policy** | Implemented. `mcp_trust_policy` (`allow_list_only`, `allowed_http_hosts`) is enforced during registration, list-tools resolution, and per-request execution. |
 | **Tool confirmation** | UI responsibility. Tools with `requires_confirmation` should prompt the user before invocation. |
 | **No secrets to MCP by default** | MCP server env and URLs are configured explicitly; secrets are not automatically passed unless the user configures them. |
 

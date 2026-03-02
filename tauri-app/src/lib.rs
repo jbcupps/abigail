@@ -24,8 +24,8 @@ use crate::commands::forge::*;
 use crate::commands::identity::*;
 use crate::commands::logging::*;
 use crate::commands::memory::*;
-use crate::commands::orchestration::*;
 use crate::commands::ollama::*;
+use crate::commands::orchestration::*;
 use crate::commands::sensory::*;
 use crate::commands::skills::*;
 use crate::state::AppState;
@@ -34,12 +34,14 @@ use abigail_auth::AuthManager;
 use abigail_core::{validate_local_llm_url, AppConfig, SecretsVault};
 use abigail_hive::{Hive, ModelRegistry};
 use abigail_memory::MemoryStore;
-use abigail_router::{IdEgoRouter, OrchestrationScheduler, SubagentDefinition, SubagentManager, SubagentProvider};
+use abigail_router::{
+    IdEgoRouter, OrchestrationScheduler, SubagentDefinition, SubagentManager, SubagentProvider,
+};
 use abigail_skills::channel::EventBus;
 use abigail_skills::protocol::mcp::McpSkillRuntime;
 use abigail_skills::{
     build_preloaded_skills, DynamicApiSkill, InstructionRegistry, ResourceLimits, Skill,
-    SkillConfig, SkillExecutor, SkillRegistry, PRELOADED_SKILLS_VERSION,
+    SkillConfig, SkillExecutionPolicy, SkillExecutor, SkillRegistry, PRELOADED_SKILLS_VERSION,
 };
 use identity_manager::IdentityManager;
 use rate_limit::CooldownGuard;
@@ -215,8 +217,9 @@ fn register_runtime_subagents(state: &AppState) -> Result<(), String> {
     manager.register(SubagentDefinition {
         id: "code_operations".to_string(),
         name: "Code Operations".to_string(),
-        description: "Focused on repository analysis, shell tasks, and code-level implementation work."
-            .to_string(),
+        description:
+            "Focused on repository analysis, shell tasks, and code-level implementation work."
+                .to_string(),
         capabilities: vec![
             "code_analysis".to_string(),
             "filesystem".to_string(),
@@ -229,8 +232,9 @@ fn register_runtime_subagents(state: &AppState) -> Result<(), String> {
     manager.register(SubagentDefinition {
         id: "local_guardian".to_string(),
         name: "Local Guardian".to_string(),
-        description: "Runs local safety and diagnostics checks that should stay on the local provider."
-            .to_string(),
+        description:
+            "Runs local safety and diagnostics checks that should stay on the local provider."
+                .to_string(),
         capabilities: vec!["diagnostics".to_string(), "system_monitor".to_string()],
         provider: SubagentProvider::SameAsId,
     });
@@ -327,6 +331,9 @@ pub fn run() {
             .unwrap_or_else(|_| SecretsVault::new_custom(data_dir.clone(), "skills.bin")),
     ));
     let registry = Arc::new(SkillRegistry::with_secrets(skills_secrets.clone()));
+    if let Err(e) = registry.set_execution_policy(SkillExecutionPolicy::from_app_config(&config)) {
+        tracing::error!("Failed to apply initial skill execution policy: {}", e);
+    }
     let executor = Arc::new(SkillExecutor::new(registry.clone()));
     let event_bus = Arc::new(EventBus::new(100));
 
@@ -606,18 +613,35 @@ pub fn run() {
 
             // Register configured MCP servers as skills (HTTP transport).
             {
-                let servers = {
+                let (servers, trust_policy, data_dir) = {
                     let cfg = state.config.read().map_err(|e| e.to_string())?;
-                    cfg.mcp_servers.clone()
+                    (
+                        cfg.mcp_servers.clone(),
+                        cfg.mcp_trust_policy.clone(),
+                        cfg.data_dir.clone(),
+                    )
                 };
                 for server in servers
                     .into_iter()
                     .filter(|s| s.transport.eq_ignore_ascii_case("http"))
                 {
+                    if let Err(policy_err) =
+                        trust_policy.validate_http_server_url(&server.id, &server.command_or_url)
+                    {
+                        tracing::warn!("{}", policy_err);
+                        skill_audit_log(
+                            &data_dir,
+                            "mcp_trust_deny",
+                            &format!("server_id={} reason={}", server.id, policy_err),
+                        );
+                        continue;
+                    }
+
                     let mut runtime = McpSkillRuntime::new(
                         format!("mcp.{}", server.id),
                         format!("MCP {}", server.name),
                         server.command_or_url.clone(),
+                        Some(trust_policy.clone()),
                     );
                     let init = tauri::async_runtime::block_on(async {
                         runtime
@@ -718,6 +742,7 @@ pub fn run() {
             get_ollama_status,
             probe_local_llm,
             set_local_llm_during_birth,
+            start_managed_ollama,
             use_stored_provider,
             get_entity_theme,
             get_identity_sharing_settings,
@@ -798,6 +823,20 @@ pub fn run() {
             set_tier_model,
             reset_tier_models
         ])
-        .run(tauri::generate_context!())
-        .expect("error running tauri app");
+        .build(tauri::generate_context!())
+        .expect("error building tauri app")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Gracefully shut down managed Ollama process
+                let state = app_handle.state::<crate::state::AppState>();
+                let ollama = state.ollama.clone();
+                tauri::async_runtime::block_on(async {
+                    let mut guard = ollama.lock().await;
+                    if let Some(ref mut mgr) = *guard {
+                        tracing::info!("App exiting: shutting down managed Ollama");
+                        mgr.shutdown();
+                    }
+                });
+            }
+        });
 }
