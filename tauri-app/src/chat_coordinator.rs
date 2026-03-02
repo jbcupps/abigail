@@ -106,11 +106,14 @@ impl<'a> ChatCoordinator<'a> {
             .await?;
 
         let result = if prepared.tools.is_empty() {
-            let traced = prepared.router.route_traced(prepared.messages).await;
-            traced.map(|(r, trace)| ChatPipelineResult {
-                content: r.content,
+            let resp = prepared
+                .router
+                .route_unified(abigail_router::RoutingRequest::simple(prepared.messages))
+                .await;
+            resp.map(|r| ChatPipelineResult {
+                content: r.completion.content,
                 tool_calls_made: Vec::new(),
-                execution_trace: Some(trace),
+                execution_trace: r.trace,
             })
         } else {
             entity_chat::run_tool_use_loop(
@@ -456,6 +459,7 @@ fn build_router_and_prompt(
             &state.instruction_registry,
             message,
             &runtime_ctx,
+            entity_chat::PromptMode::Full,
         )
     };
 

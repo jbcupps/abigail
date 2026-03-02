@@ -60,11 +60,9 @@ pub async fn chat(
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    // Archive the user turn.
+    // Archive the user turn (async, fire-and-forget via StreamBroker).
     let user_turn = abigail_memory::ConversationTurn::new(&session_id, "user", &body.message);
-    if let Err(e) = state.memory.insert_turn(&user_turn) {
-        tracing::warn!("Failed to archive user turn: {}", e);
-    }
+    crate::memory_consumer::publish_turn(state.stream_broker.clone(), user_turn);
 
     let system_prompt = if status.mode == abigail_core::RoutingMode::CliOrchestrator {
         entity_chat::build_cli_system_prompt(
@@ -98,6 +96,7 @@ pub async fn chat(
             &state.instruction_registry,
             &body.message,
             &runtime_ctx,
+            entity_chat::PromptMode::Full,
         )
     };
 
@@ -111,11 +110,14 @@ pub async fn chat(
 
     // Chat never uses Id; Id is for background tasks only. Always route (Ego when available).
     let result = if tools.is_empty() {
-        let traced = state.router.route_traced(messages).await;
-        traced.map(|(r, trace)| entity_chat::ToolUseResult {
-            content: r.content,
+        let resp = state
+            .router
+            .route_unified(abigail_router::RoutingRequest::simple(messages))
+            .await;
+        resp.map(|r| entity_chat::ToolUseResult {
+            content: r.completion.content,
             tool_calls_made: Vec::new(),
-            execution_trace: Some(trace),
+            execution_trace: r.trace,
         })
     } else {
         entity_chat::run_tool_use_loop(&state.router, &state.executor, messages, tools).await
@@ -133,7 +135,7 @@ pub async fn chat(
                 .map(|s| s.to_string())
                 .or_else(|| Some(entity_chat::provider_label(&state.router)));
 
-            // Archive the assistant turn.
+            // Archive the assistant turn (async, fire-and-forget via StreamBroker).
             let asst_turn = abigail_memory::ConversationTurn::new(
                 &session_id,
                 "assistant",
@@ -145,9 +147,7 @@ pub async fn chat(
                 tier.clone(),
                 complexity_score,
             );
-            if let Err(e) = state.memory.insert_turn(&asst_turn) {
-                tracing::warn!("Failed to archive assistant turn: {}", e);
-            }
+            crate::memory_consumer::publish_turn(state.stream_broker.clone(), asst_turn);
 
             state.maybe_auto_archive();
 
@@ -179,11 +179,9 @@ pub async fn chat_stream(
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    // Archive user turn.
+    // Archive user turn (async, fire-and-forget via StreamBroker).
     let user_turn = abigail_memory::ConversationTurn::new(&session_id, "user", &body.message);
-    if let Err(e) = state.memory.insert_turn(&user_turn) {
-        tracing::warn!("Failed to archive user turn (stream): {}", e);
-    }
+    crate::memory_consumer::publish_turn(state.stream_broker.clone(), user_turn);
 
     let base_prompt =
         abigail_core::system_prompt::build_system_prompt(&state.docs_dir, &state.config.agent_name);
@@ -209,6 +207,7 @@ pub async fn chat_stream(
         &state.instruction_registry,
         &body.message,
         &runtime_ctx,
+        entity_chat::PromptMode::Full,
     );
 
     let messages = entity_chat::build_contextual_messages(
@@ -224,6 +223,7 @@ pub async fn chat_stream(
     let router = state.router.clone();
     let executor = state.executor.clone();
     let memory = state.memory.clone();
+    let broker_for_stream = state.stream_broker.clone();
     let archive_exporter = state.archive_exporter.clone();
     let turns_since_archive = state.turns_since_archive.clone();
     let sid = session_id.clone();
@@ -262,7 +262,7 @@ pub async fn chat_stream(
                     .map(|s| s.to_string())
                     .or_else(|| Some(entity_chat::provider_label(&router)));
 
-                // Archive assistant turn.
+                // Archive assistant turn (async, fire-and-forget via StreamBroker).
                 let asst_turn =
                     abigail_memory::ConversationTurn::new(&sid, "assistant", &pipeline.content)
                         .with_metadata(
@@ -271,9 +271,7 @@ pub async fn chat_stream(
                             tier.clone(),
                             complexity_score,
                         );
-                if let Err(e) = memory.insert_turn(&asst_turn) {
-                    tracing::warn!("Failed to archive assistant turn (stream): {}", e);
-                }
+                crate::memory_consumer::publish_turn(broker_for_stream, asst_turn);
 
                 // Trigger auto-archive if threshold reached.
                 {
@@ -573,6 +571,13 @@ pub async fn submit_job(
         ttl_seconds: body.ttl_seconds.unwrap_or(3600),
         input_data: body.input_data,
         parent_job_id: body.parent_job_id,
+        cron_expression: None,
+        is_recurring: false,
+        significance_keywords: vec![],
+        significance_threshold: 0.5,
+        job_mode: "agentic_run".into(),
+        goal_template: None,
+        depends_on: vec![],
     };
 
     match state.job_queue.submit_job(spec).await {
@@ -782,9 +787,10 @@ mod tests {
     use abigail_capabilities::cognitive::{CompletionRequest, CompletionResponse, LlmProvider};
     use abigail_core::{AppConfig, ForceOverride, RoutingMode, TierModels, TierThresholds};
     use abigail_memory::MemoryStore;
-    use abigail_queue::MIGRATION_V3_JOB_QUEUE;
+    use abigail_queue::{
+        MIGRATION_V3_JOB_QUEUE, MIGRATION_V4_ORCHESTRATION, MIGRATION_V5_DEPENDS_ON,
+    };
     use abigail_router::IdEgoRouter;
-    use abigail_skills::channel::EventBus;
     use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
     use abigail_streaming::MemoryBroker;
     use async_trait::async_trait;
@@ -829,6 +835,18 @@ mod tests {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
         conn.execute_batch(MIGRATION_V3_JOB_QUEUE).unwrap();
+        for stmt in MIGRATION_V4_ORCHESTRATION.split(';') {
+            let trimmed = stmt.trim();
+            if !trimmed.is_empty() {
+                conn.execute_batch(trimmed).unwrap_or_else(|_| {});
+            }
+        }
+        for stmt in MIGRATION_V5_DEPENDS_ON.split(';') {
+            let trimmed = stmt.trim();
+            if !trimmed.is_empty() {
+                conn.execute_batch(trimmed).unwrap_or_else(|_| {});
+            }
+        }
         let stream_broker: Arc<dyn abigail_streaming::StreamBroker> =
             Arc::new(MemoryBroker::new(128));
         let job_queue = Arc::new(abigail_queue::JobQueue::new(
@@ -842,7 +860,6 @@ mod tests {
             router: Arc::new(router),
             registry,
             executor,
-            event_bus: Arc::new(EventBus::new(16)),
             docs_dir,
             memory,
             job_queue,
@@ -900,6 +917,13 @@ mod tests {
                 ttl_seconds: 3600,
                 input_data: None,
                 parent_job_id: None,
+                cron_expression: None,
+                is_recurring: false,
+                significance_keywords: vec![],
+                significance_threshold: 0.5,
+                job_mode: "agentic_run".into(),
+                goal_template: None,
+                depends_on: vec![],
             })
             .await
             .unwrap();
@@ -928,6 +952,13 @@ mod tests {
                 ttl_seconds: 3600,
                 input_data: None,
                 parent_job_id: None,
+                cron_expression: None,
+                is_recurring: false,
+                significance_keywords: vec![],
+                significance_threshold: 0.5,
+                job_mode: "agentic_run".into(),
+                goal_template: None,
+                depends_on: vec![],
             })
             .await
             .unwrap();

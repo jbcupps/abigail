@@ -4,7 +4,8 @@ use crate::capability_matcher::{CapabilityMatcher, CapabilitySelection};
 use abigail_capabilities::cognitive::Message;
 use abigail_queue::{JobQueue, JobRecord};
 use abigail_router::IdEgoRouter;
-use abigail_skills::{SkillExecutor, SkillRegistry};
+use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::time::{timeout, Duration};
 
@@ -17,6 +18,8 @@ pub struct SubagentRunner {
     executor: Arc<SkillExecutor>,
     matcher: CapabilityMatcher,
     entity_name: Option<String>,
+    docs_dir: std::path::PathBuf,
+    instruction_registry: Arc<InstructionRegistry>,
 }
 
 impl SubagentRunner {
@@ -35,7 +38,21 @@ impl SubagentRunner {
             executor,
             matcher,
             entity_name,
+            docs_dir: std::path::PathBuf::new(),
+            instruction_registry: Arc::new(InstructionRegistry::empty()),
         }
+    }
+
+    /// Set the docs directory for building sub-agent constitutional context.
+    pub fn with_docs_dir(mut self, docs_dir: std::path::PathBuf) -> Self {
+        self.docs_dir = docs_dir;
+        self
+    }
+
+    /// Set the instruction registry for topic-affinity instruction delegation.
+    pub fn with_instruction_registry(mut self, ir: Arc<InstructionRegistry>) -> Self {
+        self.instruction_registry = ir;
+        self
     }
 
     /// Claim and execute a job. Returns `Ok(())` when finished (including claim races).
@@ -59,7 +76,14 @@ impl SubagentRunner {
             return Err(err);
         }
 
-        let messages = build_job_messages(&job, &selection, self.entity_name.as_deref());
+        let messages = build_job_messages(
+            &job,
+            &selection,
+            self.entity_name.as_deref(),
+            &self.docs_dir,
+            &self.instruction_registry,
+            &self.registry,
+        );
         let tools = filter_tools_for_job(entity_chat::build_tool_definitions(&self.registry), &job);
 
         let timeout_ms = job.time_budget_ms.max(1_000);
@@ -112,6 +136,9 @@ fn build_job_messages(
     job: &JobRecord,
     selection: &CapabilitySelection,
     entity_name: Option<&str>,
+    docs_dir: &std::path::Path,
+    instruction_registry: &InstructionRegistry,
+    skill_registry: &SkillRegistry,
 ) -> Vec<Message> {
     let mut system = String::new();
     system.push_str("You are a delegated sub-agent task runner for Abigail.\n");
@@ -127,16 +154,41 @@ fn build_job_messages(
     if let Some(ref model) = selection.model_hint {
         system.push_str(&format!("Preferred model: {}.\n", model));
     }
+
+    // Inject constitutional context: use job-supplied context if set,
+    // otherwise build the full constitutional docs from disk.
     if let Some(ref ctx) = job.system_context {
-        system.push_str("\nAdditional constraints:\n");
+        system.push('\n');
         system.push_str(ctx);
         system.push('\n');
+    } else if docs_dir.exists() {
+        let constitutional = abigail_core::system_prompt::build_subagent_system_context(docs_dir);
+        if !constitutional.is_empty() {
+            system.push('\n');
+            system.push_str(&constitutional);
+            system.push('\n');
+        }
     }
+
     if !job.allowed_skill_ids.is_empty() {
         system.push_str(&format!(
             "Allowed skills: {}.\n",
             job.allowed_skill_ids.join(", ")
         ));
+    }
+
+    // Topic-affinity instruction delegation: inject skill-specific instructions
+    // matched against the job goal so sub-agents know how to use relevant tools.
+    let registered_ids: HashSet<String> = skill_registry
+        .list()
+        .unwrap_or_default()
+        .iter()
+        .map(|m| m.id.0.clone())
+        .collect();
+    let delegation_instructions =
+        instruction_registry.format_for_delegation(&job.goal, &registered_ids);
+    if !delegation_instructions.is_empty() {
+        system.push_str(&delegation_instructions);
     }
 
     let mut user = format!("Task goal:\n{}\n", job.goal);

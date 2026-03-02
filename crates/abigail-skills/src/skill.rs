@@ -26,16 +26,27 @@ pub enum SkillError {
     MissingSecret(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SkillConfig {
     pub values: HashMap<String, serde_json::Value>,
     pub secrets: HashMap<String, String>,
     pub limits: ResourceLimits,
     pub permissions: Vec<crate::manifest::Permission>,
-    /// Optional event bus sender so the skill can publish events (e.g. email_received).
+    /// Optional stream broker so the skill can publish events (e.g. email_received).
     #[serde(skip, default)]
-    pub event_sender:
-        Option<std::sync::Arc<tokio::sync::broadcast::Sender<crate::channel::SkillEvent>>>,
+    pub stream_broker: Option<std::sync::Arc<dyn abigail_streaming::StreamBroker>>,
+}
+
+impl std::fmt::Debug for SkillConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SkillConfig")
+            .field("values", &self.values)
+            .field("secrets", &format!("[{} keys]", self.secrets.len()))
+            .field("limits", &self.limits)
+            .field("permissions", &self.permissions)
+            .field("stream_broker", &self.stream_broker.is_some())
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -40,6 +40,7 @@ skill-image = { path = "../skills/skill-image" }
 skill-clipboard = { path = "../skills/skill-clipboard" }
 skill-system-monitor = { path = "../skills/skill-system-monitor" }
 skill-email = { path = "../skills/skill-email" }
+abigail-streaming = { path = "../crates/abigail-streaming" }
 tauri = { version = "2.0", features = ["tray-icon"] }
 tauri-plugin-dialog = "2.0"
 tauri-plugin-updater = "2"

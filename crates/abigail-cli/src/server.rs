@@ -478,6 +478,7 @@ async fn chat_with_pipeline(
         instruction_registry,
         &body.message,
         &runtime_ctx,
+        entity_chat::PromptMode::Full,
     );
 
     let messages = entity_chat::build_contextual_messages(
@@ -490,11 +491,13 @@ async fn chat_with_pipeline(
 
     // Chat never uses Id; always route (Ego when available).
     let result = if tools.is_empty() {
-        let traced = router.route_traced(messages).await;
-        traced.map(|(r, trace)| entity_chat::ToolUseResult {
-            content: r.content,
+        let resp = router
+            .route_unified(abigail_router::RoutingRequest::simple(messages))
+            .await;
+        resp.map(|r| entity_chat::ToolUseResult {
+            content: r.completion.content,
             tool_calls_made: Vec::new(),
-            execution_trace: Some(trace),
+            execution_trace: r.trace,
         })
     } else {
         entity_chat::run_tool_use_loop(router, executor, messages, tools).await
@@ -543,8 +546,9 @@ async fn chat_bare(
 
     // Chat never uses Id; always route (Ego when available).
     let response = router
-        .route(messages)
+        .route_unified(abigail_router::RoutingRequest::simple(messages))
         .await
+        .map(|r| r.completion)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(ChatResponse {

@@ -13,10 +13,12 @@
 
 pub mod queue;
 pub mod schema;
+pub mod significance;
 pub mod types;
 
 pub use queue::JobQueue;
-pub use schema::MIGRATION_V3_JOB_QUEUE;
+pub use schema::{MIGRATION_V3_JOB_QUEUE, MIGRATION_V4_ORCHESTRATION, MIGRATION_V5_DEPENDS_ON};
+pub use significance::{score_significance, SignificanceDecision};
 pub use types::{
     JobEvent, JobId, JobPriority, JobRecord, JobSpec, JobStatus, RequiredCapability, TopicId,
 };

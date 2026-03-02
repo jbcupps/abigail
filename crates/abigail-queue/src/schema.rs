@@ -1,4 +1,4 @@
-//! SQLite migration V3: job queue table.
+//! SQLite migrations for the job queue.
 
 pub const MIGRATION_V3_JOB_QUEUE: &str = r#"
 CREATE TABLE IF NOT EXISTS job_queue (
@@ -43,4 +43,25 @@ CREATE INDEX IF NOT EXISTS idx_job_queue_expires
 CREATE INDEX IF NOT EXISTS idx_job_queue_running
     ON job_queue(status)
     WHERE status = 'running';
+"#;
+
+/// V4 migration: adds columns for recurring/cron jobs and significance scoring.
+/// Safe to apply to existing V3 tables — uses ALTER TABLE ADD COLUMN (no-op if exists).
+pub const MIGRATION_V4_ORCHESTRATION: &str = r#"
+ALTER TABLE job_queue ADD COLUMN cron_expression TEXT;
+ALTER TABLE job_queue ADD COLUMN is_recurring INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE job_queue ADD COLUMN significance_keywords TEXT;
+ALTER TABLE job_queue ADD COLUMN significance_threshold REAL NOT NULL DEFAULT 0.5;
+ALTER TABLE job_queue ADD COLUMN job_mode TEXT NOT NULL DEFAULT 'agentic_run';
+ALTER TABLE job_queue ADD COLUMN goal_template TEXT;
+ALTER TABLE job_queue ADD COLUMN last_scheduled_at TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_job_queue_cron
+    ON job_queue(is_recurring, cron_expression)
+    WHERE is_recurring = 1;
+"#;
+
+/// V5 migration: adds depends_on column for job dependency chains.
+pub const MIGRATION_V5_DEPENDS_ON: &str = r#"
+ALTER TABLE job_queue ADD COLUMN depends_on TEXT;
 "#;

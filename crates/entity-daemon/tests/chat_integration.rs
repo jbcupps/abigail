@@ -7,7 +7,6 @@ use abigail_capabilities::cognitive::{CompletionRequest, CompletionResponse, Llm
 use abigail_core::{AppConfig, ForceOverride, RoutingMode, TierModels, TierThresholds};
 use abigail_memory::MemoryStore;
 use abigail_router::IdEgoRouter;
-use abigail_skills::channel::EventBus;
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use async_trait::async_trait;
 use axum::routing::{get, post};
@@ -62,7 +61,6 @@ fn build_daemon_state() -> entity_daemon_test_state::EntityDaemonState {
 
     let registry = Arc::new(SkillRegistry::new());
     let executor = Arc::new(SkillExecutor::new(registry.clone()));
-    let event_bus = Arc::new(EventBus::new(16));
     let memory = Arc::new(MemoryStore::open_in_memory().unwrap());
     let instruction_registry = Arc::new(InstructionRegistry::empty());
 
@@ -76,7 +74,6 @@ fn build_daemon_state() -> entity_daemon_test_state::EntityDaemonState {
         router: Arc::new(router),
         registry,
         executor,
-        event_bus,
         docs_dir,
         memory,
         memory_hook: None,
@@ -92,7 +89,6 @@ mod entity_daemon_test_state {
     use abigail_core::AppConfig;
     use abigail_memory::MemoryStore;
     use abigail_router::IdEgoRouter;
-    use abigail_skills::channel::EventBus;
     use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
     use entity_core::ChatMemoryHook;
     use std::path::PathBuf;
@@ -105,7 +101,6 @@ mod entity_daemon_test_state {
         pub router: Arc<IdEgoRouter>,
         pub registry: Arc<SkillRegistry>,
         pub executor: Arc<SkillExecutor>,
-        pub event_bus: Arc<EventBus>,
         pub docs_dir: PathBuf,
         pub memory: Arc<MemoryStore>,
         pub memory_hook: Option<Arc<dyn ChatMemoryHook>>,
@@ -128,6 +123,7 @@ async fn chat_handler(
         &state.instruction_registry,
         &body.message,
         &entity_chat::RuntimeContext::default(),
+        entity_chat::PromptMode::Full,
     );
     let messages = entity_chat::build_contextual_messages(
         &system_prompt,

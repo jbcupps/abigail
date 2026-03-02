@@ -7,6 +7,7 @@ edition.workspace = true
 abigail-core = { path = "../abigail-core" }
 abigail-auth = { path = "../abigail-auth" }
 abigail-queue = { path = "../abigail-queue" }
+abigail-streaming = { path = "../abigail-streaming" }
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -78,6 +78,7 @@ impl SubagentManager {
     ///
     /// Resolves the subagent's provider, builds a completion request with the
     /// given messages and tools, and returns the response.
+    #[allow(deprecated)]
     pub async fn delegate(
         &self,
         subagent_id: &str,

@@ -8,9 +8,10 @@ use abigail_birth::BirthOrchestrator;
 use abigail_core::{AppConfig, SecretsVault};
 use abigail_hive::{Hive, ModelRegistry};
 use abigail_memory::MemoryStore;
+#[allow(deprecated)]
 use abigail_router::{IdEgoRouter, OrchestrationScheduler, SubagentManager};
-use abigail_skills::channel::EventBus;
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
+use abigail_streaming::StreamBroker;
 use std::sync::{Arc, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
@@ -44,7 +45,8 @@ pub struct AppState {
     pub router: RwLock<IdEgoRouter>,
     pub registry: Arc<SkillRegistry>,
     pub executor: Arc<SkillExecutor>,
-    pub event_bus: Arc<EventBus>,
+    /// Stream broker for topic-based event publishing (replaces EventBus).
+    pub stream_broker: Arc<dyn StreamBroker>,
     pub secrets: Arc<Mutex<SecretsVault>>,
     /// Operational secrets for Ego/Skills (IMAP, Jira, etc.)
     pub skills_secrets: Arc<Mutex<SecretsVault>>,
@@ -65,6 +67,8 @@ pub struct AppState {
     /// Agentic runtime service handling run lifecycle, persistence, and event bridging.
     pub agentic_runtime: Arc<AgenticRuntime>,
     /// Orchestration scheduler for persisted jobs and run logs.
+    /// Deprecated: being replaced by JobQueue recurring jobs.
+    #[allow(deprecated)]
     pub orchestration_scheduler: Arc<OrchestrationScheduler>,
     /// Browser automation capability (lazy-init, async-safe)
     pub browser:

@@ -6,7 +6,9 @@
 use abigail_capabilities::cognitive::provider::{
     CompletionRequest, LlmProvider, Message, ToolCall, ToolDefinition,
 };
+use abigail_streaming::StreamBroker;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
@@ -165,6 +167,8 @@ pub struct AgenticEngine {
     provider: Arc<dyn LlmProvider>,
     tools: Vec<ToolDefinition>,
     tool_executor: Arc<dyn ToolExecutor>,
+    /// Optional StreamBroker for cross-run event visibility and persistence.
+    broker: Option<Arc<dyn StreamBroker>>,
 }
 
 /// Trait for executing tool calls (implemented by the Tauri app layer).
@@ -184,6 +188,51 @@ impl AgenticEngine {
             provider,
             tools,
             tool_executor,
+            broker: None,
+        }
+    }
+
+    /// Set a StreamBroker for publishing agentic events to cross-run topics.
+    pub fn with_broker(mut self, broker: Arc<dyn StreamBroker>) -> Self {
+        self.broker = Some(broker);
+        self
+    }
+
+    /// Publish an event to the StreamBroker topic `entity/agentic:{task_id}`.
+    async fn publish_to_broker(&self, task_id: &str, event: &AgenticEvent) {
+        let Some(ref broker) = self.broker else {
+            return;
+        };
+        let payload = match serde_json::to_vec(event) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::error!("Failed to serialize AgenticEvent for broker: {}", e);
+                return;
+            }
+        };
+        let topic = format!("agentic:{}", task_id);
+        let mut headers = HashMap::new();
+        headers.insert(
+            "event_type".to_string(),
+            match event {
+                AgenticEvent::RunStarted { .. } => "run_started",
+                AgenticEvent::TurnStarted { .. } => "turn_started",
+                AgenticEvent::LlmResponse { .. } => "llm_response",
+                AgenticEvent::ToolExecuted { .. } => "tool_executed",
+                AgenticEvent::MentorAsk { .. } => "mentor_ask",
+                AgenticEvent::ToolConfirmation { .. } => "tool_confirmation",
+                AgenticEvent::TurnCompleted { .. } => "turn_completed",
+                AgenticEvent::RunCompleted { .. } => "run_completed",
+                AgenticEvent::RunFailed { .. } => "run_failed",
+                AgenticEvent::RunCancelled { .. } => "run_cancelled",
+            }
+            .to_string(),
+        );
+        headers.insert("task_id".to_string(), task_id.to_string());
+
+        let msg = abigail_streaming::StreamMessage::with_headers(payload, headers);
+        if let Err(e) = broker.publish("entity", &topic, msg).await {
+            tracing::debug!("Failed to publish AgenticEvent to broker: {}", e);
         }
     }
 
@@ -217,7 +266,8 @@ impl AgenticEngine {
             r.status = RunStatus::Running;
             r.events.push(start_event.clone());
         }
-        let _ = event_tx.send(start_event).await;
+        let _ = event_tx.send(start_event.clone()).await;
+        self.publish_to_broker(&task_id, &start_event).await;
 
         // Build initial messages
         let mut messages = Vec::new();
@@ -247,7 +297,8 @@ impl AgenticEngine {
                     r.events.push(cancel_event.clone());
                     r.completed_at = Some(chrono::Utc::now().to_rfc3339());
                 }
-                let _ = event_tx.send(cancel_event).await;
+                let _ = event_tx.send(cancel_event.clone()).await;
+                self.publish_to_broker(&task_id, &cancel_event).await;
                 return Ok(());
             }
 
@@ -261,7 +312,8 @@ impl AgenticEngine {
                 r.current_turn = turn;
                 r.events.push(turn_start.clone());
             }
-            let _ = event_tx.send(turn_start).await;
+            let _ = event_tx.send(turn_start.clone()).await;
+            self.publish_to_broker(&task_id, &turn_start).await;
 
             // Call LLM
             let request = CompletionRequest {
@@ -287,7 +339,8 @@ impl AgenticEngine {
                         r.events.push(fail_event.clone());
                         r.completed_at = Some(chrono::Utc::now().to_rfc3339());
                     }
-                    let _ = event_tx.send(fail_event).await;
+                    let _ = event_tx.send(fail_event.clone()).await;
+                    self.publish_to_broker(&task_id, &fail_event).await;
                     return Err(e);
                 }
             };
@@ -308,7 +361,8 @@ impl AgenticEngine {
                 let mut r = run.write().await;
                 r.events.push(llm_event.clone());
             }
-            let _ = event_tx.send(llm_event).await;
+            let _ = event_tx.send(llm_event.clone()).await;
+            self.publish_to_broker(&task_id, &llm_event).await;
 
             // Add assistant message to conversation
             messages.push(Message::new("assistant", &response.content));
@@ -328,7 +382,8 @@ impl AgenticEngine {
                             r.status = RunStatus::WaitingForConfirmation;
                             r.events.push(confirm_event.clone());
                         }
-                        let _ = event_tx.send(confirm_event).await;
+                        let _ = event_tx.send(confirm_event.clone()).await;
+                        self.publish_to_broker(&task_id, &confirm_event).await;
 
                         // Wait for confirmation
                         tokio::select! {
@@ -361,7 +416,8 @@ impl AgenticEngine {
                                     r.events.push(cancel_event.clone());
                                     r.completed_at = Some(chrono::Utc::now().to_rfc3339());
                                 }
-                                let _ = event_tx.send(cancel_event).await;
+                                let _ = event_tx.send(cancel_event.clone()).await;
+                                self.publish_to_broker(&task_id, &cancel_event).await;
                                 return Ok(());
                             }
                         }
@@ -386,7 +442,8 @@ impl AgenticEngine {
                         let mut r = run.write().await;
                         r.events.push(tool_event.clone());
                     }
-                    let _ = event_tx.send(tool_event).await;
+                    let _ = event_tx.send(tool_event.clone()).await;
+                    self.publish_to_broker(&task_id, &tool_event).await;
 
                     // Add tool result to conversation
                     messages.push(Message::new(
@@ -411,7 +468,8 @@ impl AgenticEngine {
                         r.status = RunStatus::WaitingForInput;
                         r.events.push(ask_event.clone());
                     }
-                    let _ = event_tx.send(ask_event).await;
+                    let _ = event_tx.send(ask_event.clone()).await;
+                    self.publish_to_broker(&task_id, &ask_event).await;
 
                     // Wait for mentor response
                     tokio::select! {
@@ -437,7 +495,8 @@ impl AgenticEngine {
                                 r.events.push(cancel_event.clone());
                                 r.completed_at = Some(chrono::Utc::now().to_rfc3339());
                             }
-                            let _ = event_tx.send(cancel_event).await;
+                            let _ = event_tx.send(cancel_event.clone()).await;
+                            self.publish_to_broker(&task_id, &cancel_event).await;
                             return Ok(());
                         }
                     }
@@ -463,7 +522,8 @@ impl AgenticEngine {
                 let mut r = run.write().await;
                 r.events.push(turn_end.clone());
             }
-            let _ = event_tx.send(turn_end).await;
+            let _ = event_tx.send(turn_end.clone()).await;
+            self.publish_to_broker(&task_id, &turn_end).await;
         }
 
         // Store final messages
@@ -487,7 +547,8 @@ impl AgenticEngine {
             r.events.push(complete_event.clone());
             r.completed_at = Some(chrono::Utc::now().to_rfc3339());
         }
-        let _ = event_tx.send(complete_event).await;
+        let _ = event_tx.send(complete_event.clone()).await;
+        self.publish_to_broker(&task_id, &complete_event).await;
 
         Ok(())
     }

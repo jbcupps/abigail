@@ -1,11 +1,12 @@
 //! Entity daemon — agent runtime HTTP server for Abigail.
 //!
-//! Wraps `IdEgoRouter`, `SkillRegistry`, `SkillExecutor`, and `EventBus` behind
+//! Wraps `IdEgoRouter`, `SkillRegistry`, `SkillExecutor`, and `StreamBroker` behind
 //! an Axum REST API. Fetches provider configuration from hive-daemon on startup.
 
 mod capability_matcher;
 mod hive_client;
 mod job_scheduler;
+mod memory_consumer;
 mod queue_ops;
 mod routes;
 mod state;
@@ -16,7 +17,6 @@ use abigail_hive::Hive;
 use abigail_memory::MemoryStore;
 use abigail_queue::JobQueue;
 use abigail_router::IdEgoRouter;
-use abigail_skills::channel::EventBus;
 use abigail_skills::skill::SkillConfig;
 use abigail_skills::{Skill, SkillExecutionPolicy, SkillExecutor, SkillRegistry};
 use abigail_streaming::{IggyBroker, MemoryBroker, StreamBroker, TopicConfig};
@@ -209,7 +209,6 @@ async fn main() -> anyhow::Result<()> {
         tracing::error!("Failed to apply entity skill execution policy: {}", e);
     }
     let executor = Arc::new(SkillExecutor::new(registry.clone()));
-    let event_bus = Arc::new(EventBus::new(256));
 
     // 6. Register HiveManagementSkill (built-in)
     let http_hive_ops = Arc::new(hive_client::HttpHiveOps::new(&cli.hive_url));
@@ -290,101 +289,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // 10. Register and initialize Email (IMAP/SMTP) skill if credentials are available
-    {
-        let manifest = skill_email::EmailSkill::default_manifest();
-        let skill_id = manifest.id.clone();
-        let mut skill = skill_email::EmailSkill::new(manifest);
-
-        let has_creds = skill_vault
-            .lock()
-            .map(|v| v.get_secret("imap_password").is_some())
-            .unwrap_or(false);
-
-        if has_creds {
-            let (imap_user, imap_password, imap_host, imap_port) = {
-                let v = skill_vault.lock().unwrap();
-                (
-                    v.get_secret("imap_user").unwrap_or("").to_string(),
-                    v.get_secret("imap_password").unwrap_or("").to_string(),
-                    v.get_secret("imap_host").unwrap_or("").to_string(),
-                    v.get_secret("imap_port").unwrap_or("993").to_string(),
-                )
-            };
-
-            let imap_tls_mode = {
-                let v = skill_vault.lock().unwrap();
-                v.get_secret("imap_tls_mode")
-                    .unwrap_or("IMPLICIT")
-                    .to_string()
-            };
-
-            let mut values = HashMap::new();
-            values.insert(
-                "imap_host".to_string(),
-                serde_json::Value::String(imap_host),
-            );
-            values.insert(
-                "imap_port".to_string(),
-                serde_json::json!(imap_port.parse::<u64>().unwrap_or(993)),
-            );
-            values.insert(
-                "imap_user".to_string(),
-                serde_json::Value::String(imap_user),
-            );
-            values.insert(
-                "imap_tls_mode".to_string(),
-                serde_json::Value::String(imap_tls_mode),
-            );
-
-            let mut secrets = HashMap::new();
-            secrets.insert("imap_password".to_string(), imap_password);
-
-            let skill_config = SkillConfig {
-                values,
-                secrets,
-                limits: abigail_skills::sandbox::ResourceLimits::default(),
-                permissions: vec![],
-                event_sender: Some(Arc::new(event_bus.sender())),
-            };
-
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(15),
-                skill.initialize(skill_config),
-            )
-            .await
-            {
-                Ok(Ok(())) => {
-                    tracing::info!("Email skill initialized successfully");
-                }
-                Ok(Err(e)) => {
-                    tracing::warn!(
-                        "Email skill init failed (will register uninitialized): {}",
-                        e
-                    );
-                }
-                Err(_) => {
-                    tracing::warn!(
-                        "Email skill init timed out after 15s (IMAP server unreachable?)"
-                    );
-                }
-            }
-        } else {
-            tracing::info!(
-                "Email skill registered without credentials (no imap_password in vault)"
-            );
-        }
-
-        if let Err(e) = registry.register(skill_id.clone(), Arc::new(skill)) {
-            tracing::warn!("Failed to register Email skill: {}", e);
-        }
-    }
-
-    // Log total skills loaded
-    let total_skills = registry.list().map(|s| s.len()).unwrap_or(0);
-    tracing::info!("Total skills registered: {}", total_skills);
-
-    // 9. Open memory store (SQLite, auto-creates schema)
+    // 9b. Open memory store (SQLite, auto-creates schema)
     let memory = Arc::new(
         MemoryStore::open_with_config(&config)
             .expect("Failed to open memory store — check db_path permissions"),
@@ -450,7 +355,31 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to configure queue SQLite WAL mode: {}", e))?;
     queue_conn
         .execute_batch(abigail_queue::MIGRATION_V3_JOB_QUEUE)
-        .map_err(|e| anyhow::anyhow!("Failed to apply queue migration: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to apply queue V3 migration: {}", e))?;
+    // V4 orchestration columns (cron, significance, etc.) — idempotent ALTER TABLE ADD COLUMN.
+    for stmt in abigail_queue::MIGRATION_V4_ORCHESTRATION.split(';') {
+        let trimmed = stmt.trim();
+        if !trimmed.is_empty() {
+            queue_conn.execute_batch(trimmed).unwrap_or_else(|e| {
+                tracing::debug!(
+                    "V4 migration statement skipped (likely already applied): {}",
+                    e
+                );
+            });
+        }
+    }
+    // V5 depends_on column for job dependency chains — idempotent ALTER TABLE ADD COLUMN.
+    for stmt in abigail_queue::MIGRATION_V5_DEPENDS_ON.split(';') {
+        let trimmed = stmt.trim();
+        if !trimmed.is_empty() {
+            queue_conn.execute_batch(trimmed).unwrap_or_else(|e| {
+                tracing::debug!(
+                    "V5 migration statement skipped (likely already applied): {}",
+                    e
+                );
+            });
+        }
+    }
     let job_queue = Arc::new(JobQueue::new(
         Arc::new(Mutex::new(queue_conn)),
         stream_broker.clone(),
@@ -470,13 +399,107 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    // 12. Register and initialize Email (IMAP/SMTP) skill if credentials are available.
+    //     Must come after stream_broker creation so the skill can publish events.
+    {
+        let manifest = skill_email::EmailSkill::default_manifest();
+        let skill_id = manifest.id.clone();
+        let mut skill = skill_email::EmailSkill::new(manifest);
+
+        let has_creds = skill_vault
+            .lock()
+            .map(|v| v.get_secret("imap_password").is_some())
+            .unwrap_or(false);
+
+        if has_creds {
+            let (imap_user, imap_password, imap_host, imap_port) = {
+                let v = skill_vault.lock().unwrap();
+                (
+                    v.get_secret("imap_user").unwrap_or("").to_string(),
+                    v.get_secret("imap_password").unwrap_or("").to_string(),
+                    v.get_secret("imap_host").unwrap_or("").to_string(),
+                    v.get_secret("imap_port").unwrap_or("993").to_string(),
+                )
+            };
+
+            let imap_tls_mode = {
+                let v = skill_vault.lock().unwrap();
+                v.get_secret("imap_tls_mode")
+                    .unwrap_or("IMPLICIT")
+                    .to_string()
+            };
+
+            let mut values = HashMap::new();
+            values.insert(
+                "imap_host".to_string(),
+                serde_json::Value::String(imap_host),
+            );
+            values.insert(
+                "imap_port".to_string(),
+                serde_json::json!(imap_port.parse::<u64>().unwrap_or(993)),
+            );
+            values.insert(
+                "imap_user".to_string(),
+                serde_json::Value::String(imap_user),
+            );
+            values.insert(
+                "imap_tls_mode".to_string(),
+                serde_json::Value::String(imap_tls_mode),
+            );
+
+            let mut secrets = HashMap::new();
+            secrets.insert("imap_password".to_string(), imap_password);
+
+            let skill_config = SkillConfig {
+                values,
+                secrets,
+                limits: abigail_skills::sandbox::ResourceLimits::default(),
+                permissions: vec![],
+                stream_broker: Some(stream_broker.clone()),
+            };
+
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                skill.initialize(skill_config),
+            )
+            .await
+            {
+                Ok(Ok(())) => {
+                    tracing::info!("Email skill initialized successfully");
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!(
+                        "Email skill init failed (will register uninitialized): {}",
+                        e
+                    );
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "Email skill init timed out after 15s (IMAP server unreachable?)"
+                    );
+                }
+            }
+        } else {
+            tracing::info!(
+                "Email skill registered without credentials (no imap_password in vault)"
+            );
+        }
+
+        if let Err(e) = registry.register(skill_id.clone(), Arc::new(skill)) {
+            tracing::warn!("Failed to register Email skill: {}", e);
+        }
+    }
+
+    // Log total skills loaded
+    let total_skills = registry.list().map(|s| s.len()).unwrap_or(0);
+    tracing::info!("Total skills registered: {}", total_skills);
+
     let state = EntityDaemonState {
         entity_id: cli.entity_id.clone(),
         config,
         router,
         registry,
         executor,
-        event_bus,
         docs_dir,
         memory,
         job_queue,
@@ -489,14 +512,18 @@ async fn main() -> anyhow::Result<()> {
 
     // Start background queue scheduler (Phase 1 async sub-agent execution).
     let capability_matcher = CapabilityMatcher::from_router(state.router.clone());
-    let subagent_runner = Arc::new(SubagentRunner::new(
-        state.job_queue.clone(),
-        state.router.clone(),
-        state.registry.clone(),
-        state.executor.clone(),
-        capability_matcher,
-        state.config.agent_name.clone(),
-    ));
+    let subagent_runner = Arc::new(
+        SubagentRunner::new(
+            state.job_queue.clone(),
+            state.router.clone(),
+            state.registry.clone(),
+            state.executor.clone(),
+            capability_matcher,
+            state.config.agent_name.clone(),
+        )
+        .with_docs_dir(state.docs_dir.clone())
+        .with_instruction_registry(state.instruction_registry.clone()),
+    );
     let scheduler = Arc::new(
         JobScheduler::new(state.job_queue.clone(), subagent_runner)
             .with_max_concurrency(2)
@@ -504,6 +531,20 @@ async fn main() -> anyhow::Result<()> {
     );
     scheduler.spawn();
     tracing::info!("Job scheduler started (max_concurrency=2)");
+
+    // Spawn memory consumer — persists conversation turns from StreamBroker topic.
+    let _memory_consumer_handle =
+        memory_consumer::spawn_memory_consumer(state.stream_broker.clone(), state.memory.clone())
+            .await
+            .map_err(|e| tracing::warn!("Failed to start memory consumer: {}", e))
+            .ok();
+
+    // Spawn conscience consumer — async ethical evaluation via StreamBroker.
+    let _conscience_handle = abigail_router::ConscienceConsumer::new(state.stream_broker.clone())
+        .spawn()
+        .await
+        .map_err(|e| tracing::warn!("Failed to start conscience consumer: {}", e))
+        .ok();
 
     // Spawn SkillsWatcher for hot-reload of new skills (before state is consumed)
     let _watcher = {

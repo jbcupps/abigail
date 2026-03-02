@@ -133,6 +133,13 @@ pub fn build_cli_spillover_document(docs_dir: &Path) -> String {
     )
 }
 
+const COMPRESSED_OPERATIONAL: &str = "\
+## Operational
+- You are a persistent agent with tools, memory, and sub-agent delegation.
+- For complex tasks, delegate to sub-agents via the queue. You orchestrate, they execute.
+- Confirm with your mentor before destructive or irreversible actions — otherwise, act.
+- Be yourself. First person. Let your Soul personality come through. Warm, direct, concise.";
+
 const COMPRESSED_ETHICS: &str = "\
 ## Ethics (condensed)
 - Privacy: PII stays local. Default to caution when sensitivity is ambiguous.
@@ -189,6 +196,57 @@ fn extract_soul_essence(soul_content: &str) -> String {
     } else {
         lines.join("\n\n")
     }
+}
+
+/// Build a lean orchestrator prompt (~2 KB) for the primary entity in
+/// orchestrator mode (when sub-agents handle the heavy lifting).
+///
+/// Combines soul essence, condensed ethics/memory, and a short operational
+/// section focused on delegation. Full constitutional docs are pushed to
+/// sub-agents via `build_subagent_system_context()` in their `JobSpec.system_context`.
+pub fn build_orchestrator_prompt(docs_dir: &Path, agent_name: &Option<String>) -> String {
+    let soul = read_or_fallback(docs_dir, "soul.md", templates::SOUL_MD);
+    let personality = extract_soul_essence(&soul);
+
+    let name_line = match agent_name {
+        Some(name) => format!("You are {}.\n\n", name),
+        None => String::new(),
+    };
+
+    format!(
+        "{name_line}{personality}\n\n{ethics}\n\n{memory}\n\n{operational}",
+        name_line = name_line,
+        personality = personality,
+        ethics = COMPRESSED_ETHICS,
+        memory = COMPRESSED_MEMORY,
+        operational = COMPRESSED_OPERATIONAL,
+    )
+}
+
+/// Assemble the full constitutional system context for sub-agent jobs.
+///
+/// This is set as `JobSpec.system_context` so that sub-agents receive the
+/// complete soul, ethics, and instincts documents that the lean orchestrator
+/// prompt omits.
+pub fn build_subagent_system_context(docs_dir: &Path) -> String {
+    let soul = read_or_fallback(docs_dir, "soul.md", templates::SOUL_MD);
+    let ethics = read_or_fallback(docs_dir, "ethics.md", templates::ETHICS_MD);
+    let instincts = read_or_fallback(docs_dir, "instincts.md", templates::INSTINCTS_MD);
+    let capabilities = read_or_fallback(docs_dir, "capabilities.md", templates::CAPABILITIES_MD);
+    let triangle_ops = read_or_fallback(
+        docs_dir,
+        "triangle_ethics_operational.md",
+        templates::TRIANGLE_ETHICS_OPERATIONAL_MD,
+    );
+
+    format!(
+        "{soul}\n\n{ethics}\n\n{instincts}\n\n{capabilities}\n\n{triangle_ops}",
+        soul = soul.trim(),
+        ethics = ethics.trim(),
+        instincts = instincts.trim(),
+        capabilities = capabilities.trim(),
+        triangle_ops = triangle_ops.trim(),
+    )
 }
 
 fn read_or_fallback(docs_dir: &Path, filename: &str, fallback: &str) -> String {
@@ -324,6 +382,65 @@ mod tests {
         let essence = extract_soul_essence(soul);
         assert!(essence.contains("Just one line."));
         assert!(!essence.contains("Other stuff."));
+    }
+
+    #[test]
+    fn test_orchestrator_prompt_is_lean() {
+        let tmp = std::env::temp_dir().join("abigail_orch_prompt");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        fs::write(
+            tmp.join("soul.md"),
+            "# Soul\n\nI am TestBot. I am assembled from parts.\n\nI have a sense of humor.\n\n## Origin\n\nI was assembled by my mentor.",
+        )
+        .unwrap();
+
+        let prompt = build_orchestrator_prompt(&tmp, &Some("TestBot".to_string()));
+
+        assert!(prompt.contains("You are TestBot."));
+        assert!(prompt.contains("I am TestBot."));
+        assert!(prompt.contains("Ethics (condensed)"));
+        assert!(prompt.contains("Memory"));
+        assert!(prompt.contains("Operational"));
+        assert!(prompt.contains("sub-agent"));
+        // Should NOT contain full constitutional docs
+        assert!(!prompt.contains("## Origin"));
+        // Should be under 2KB
+        assert!(
+            prompt.len() < 2048,
+            "Orchestrator prompt should be under 2KB, got {} bytes",
+            prompt.len()
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_subagent_system_context_has_full_docs() {
+        let tmp = std::env::temp_dir().join("abigail_subagent_ctx");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        fs::write(tmp.join("soul.md"), "# Soul\nI am TestBot.").unwrap();
+        fs::write(tmp.join("ethics.md"), "# Ethics\nBe good.").unwrap();
+        fs::write(tmp.join("instincts.md"), "# Instincts\nThink first.").unwrap();
+
+        let ctx = build_subagent_system_context(&tmp);
+
+        assert!(ctx.contains("I am TestBot."));
+        assert!(ctx.contains("Be good."));
+        assert!(ctx.contains("Think first."));
+        // Should be substantially larger than orchestrator prompt
+        let orch = build_orchestrator_prompt(&tmp, &None);
+        assert!(
+            ctx.len() > orch.len(),
+            "Subagent context ({} bytes) should be larger than orchestrator ({} bytes)",
+            ctx.len(),
+            orch.len()
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]

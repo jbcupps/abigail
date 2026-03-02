@@ -1,3 +1,5 @@
+#![allow(deprecated)] // OrchestrationScheduler is deprecated; Tauri still uses it until migration.
+
 use crate::agentic_runtime::RunAttribution;
 use crate::state::AppState;
 use abigail_capabilities::cognitive::provider::Message;
@@ -143,10 +145,16 @@ pub async fn run_orchestration_job_now(
                     job.name
                 )
             });
-            let response = router
-                .id_only(vec![Message::new("user", &prompt)])
-                .await
-                .map_err(|e| e.to_string())?;
+            let response = {
+                let mut req =
+                    abigail_router::RoutingRequest::simple(vec![Message::new("user", &prompt)]);
+                req.force_id_only = true;
+                router
+                    .route_unified(req)
+                    .await
+                    .map(|r| r.completion)
+                    .map_err(|e| e.to_string())?
+            };
             let run_id = uuid::Uuid::new_v4().to_string();
             (response.content, run_id)
         }

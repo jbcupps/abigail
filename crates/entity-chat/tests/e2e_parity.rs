@@ -192,6 +192,7 @@ fn build_test_env(
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
+#[allow(deprecated)]
 async fn simple_message_no_tools_returns_text() {
     let (router, registry, _executor) = build_test_env(MockProvider::text_only());
     let instr = InstructionRegistry::empty();
@@ -202,6 +203,7 @@ async fn simple_message_no_tools_returns_text() {
         &instr,
         "hi",
         &entity_chat::RuntimeContext::default(),
+        entity_chat::PromptMode::Full,
     );
     let messages = entity_chat::build_contextual_messages(&system, None, "hi");
 
@@ -221,6 +223,7 @@ async fn tool_use_loop_executes_tool_then_returns_text() {
         &instr,
         "echo hello",
         &entity_chat::RuntimeContext::default(),
+        entity_chat::PromptMode::Full,
     );
     let messages = entity_chat::build_contextual_messages(&system, None, "echo hello");
     let tools = entity_chat::build_tool_definitions(&registry);
@@ -238,6 +241,7 @@ async fn tool_use_loop_executes_tool_then_returns_text() {
 }
 
 #[tokio::test]
+#[allow(deprecated)]
 async fn session_history_deduplication() {
     let (router, registry, _executor) = build_test_env(MockProvider::text_only());
     let instr = InstructionRegistry::empty();
@@ -263,6 +267,7 @@ async fn session_history_deduplication() {
         &instr,
         "hello",
         &entity_chat::RuntimeContext::default(),
+        entity_chat::PromptMode::Full,
     );
     let messages = entity_chat::build_contextual_messages(&system, Some(history), "hello");
 
@@ -278,6 +283,7 @@ async fn session_history_deduplication() {
 }
 
 #[tokio::test]
+#[allow(deprecated)]
 async fn long_message_is_capped() {
     let (router, registry, _) = build_test_env(MockProvider::text_only());
     let instr = InstructionRegistry::empty();
@@ -294,6 +300,7 @@ async fn long_message_is_capped() {
         &instr,
         "hi",
         &entity_chat::RuntimeContext::default(),
+        entity_chat::PromptMode::Full,
     );
     let messages = entity_chat::build_contextual_messages(&system, Some(history), "hi");
 
@@ -328,6 +335,7 @@ async fn rounds_only_returns_final_text_when_no_tools_called() {
         &instr,
         "hi",
         &entity_chat::RuntimeContext::default(),
+        entity_chat::PromptMode::Full,
     );
     let mut messages = entity_chat::build_contextual_messages(&system, None, "hi");
     let tools = entity_chat::build_tool_definitions(&registry);

@@ -18,3 +18,5 @@ serde_json.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 tokio-util.workspace = true
+abigail-streaming = { path = "../abigail-streaming" }
+abigail-queue = { path = "../abigail-queue" }
