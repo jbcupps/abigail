@@ -219,8 +219,8 @@ mod tests {
             "embedded registry.toml should not be empty"
         );
         assert!(
-            REGISTRY_TOML.contains("com.abigail.skills.proton-mail"),
-            "embedded registry.toml should contain proton-mail skill"
+            REGISTRY_TOML.contains("com.abigail.skills.email"),
+            "embedded registry.toml should contain email skill"
         );
     }
 }

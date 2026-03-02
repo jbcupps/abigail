@@ -85,7 +85,7 @@ pub fn run_and_exit() -> ! {
         );
     }
 
-    // 3. Build skill registry with ProtonMailSkill registered
+    // 3. Build skill registry with EmailSkill registered
     let vault = Arc::new(Mutex::new(SecretsVault::new_custom(
         tmp.clone(),
         "skills.bin",
@@ -98,16 +98,16 @@ pub fn run_and_exit() -> ! {
         Arc::new(hive_skill),
     );
 
-    let proton_manifest = skill_proton_mail::ProtonMailSkill::default_manifest();
-    let proton_id = proton_manifest.id.clone();
-    let proton_skill = skill_proton_mail::ProtonMailSkill::new(proton_manifest);
-    let _ = registry.register(proton_id.clone(), Arc::new(proton_skill));
+    let email_manifest = skill_email::EmailSkill::default_manifest();
+    let email_id = email_manifest.id.clone();
+    let email_skill = skill_email::EmailSkill::new(email_manifest);
+    let _ = registry.register(email_id.clone(), Arc::new(email_skill));
 
     let skills = registry.list().unwrap_or_default();
-    if skills.iter().any(|m| m.id == proton_id) {
-        result.pass("proton_skill_registered");
+    if skills.iter().any(|m| m.id == email_id) {
+        result.pass("email_skill_registered");
     } else {
-        result.fail("proton_skill_registered", "ProtonMailSkill not in registry");
+        result.fail("email_skill_registered", "EmailSkill not in registry");
     }
 
     // 4. Secret namespace validation
@@ -213,7 +213,7 @@ fn probe_live_imap(result: &mut ProbeResult, vault: &Arc<Mutex<SecretsVault>>) {
         return;
     }
 
-    // Populate vault so ProtonMailSkill can init
+    // Populate vault so EmailSkill can init
     {
         let mut v = vault.lock().unwrap();
         v.set_secret("imap_host", &host);
@@ -223,9 +223,7 @@ fn probe_live_imap(result: &mut ProbeResult, vault: &Arc<Mutex<SecretsVault>>) {
         v.set_secret("imap_tls_mode", &tls);
     }
 
-    let mut skill = skill_proton_mail::ProtonMailSkill::new(
-        skill_proton_mail::ProtonMailSkill::default_manifest(),
-    );
+    let mut skill = skill_email::EmailSkill::new(skill_email::EmailSkill::default_manifest());
 
     let mut values = HashMap::new();
     values.insert("imap_host".to_string(), serde_json::Value::String(host));

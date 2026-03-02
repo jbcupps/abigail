@@ -267,7 +267,7 @@ required = true
 - Chat pipeline: `build_tool_awareness_section()` generates markdown listing all registered tools for the LLM system prompt
 - Tauri app: full command surface (list, discover, execute, approve, MCP integration)
 
-**Tool-use loop:** `entity-chat::run_tool_use_loop()` parses tool-call blocks from LLM responses, executes them via `SkillExecutor`, injects results back, and re-prompts for up to 8 rounds. `build_tool_definitions()` converts registered `ToolDescriptor`s into the provider's native function-calling format.
+**Tool-use loop:** `entity-chat::run_tool_use_loop()` parses tool-call blocks from LLM responses, executes them via `SkillExecutor`, injects results back, and re-prompts for up to 35 rounds. `build_tool_definitions()` converts registered `ToolDescriptor`s into the provider's native function-calling format.
 
 ### Soul Crystallization & Forge
 
@@ -376,7 +376,7 @@ cargo run -p entity-cli -- --url http://127.0.0.1:3142 chat "hello"
 Current priorities, in order:
 
 ### Phase 2a: Skills Use — DONE
-1. ~~**LLM tool-use loop**~~ — Implemented in `entity-chat::run_tool_use_loop()` (up to 8 rounds).
+1. ~~**LLM tool-use loop**~~ — Implemented in `entity-chat::run_tool_use_loop()` (up to 35 rounds).
 2. ~~**Auto-load skills from disk**~~ — All 16 native skills registered at Tauri/daemon startup.
 3. ~~**Wire tools into LLM requests**~~ — `build_tool_definitions()` converts `ToolDescriptor`s to provider-native format.
 

@@ -50,6 +50,7 @@ dependencies = [
  "skill-code-analysis",
  "skill-database",
  "skill-document",
+ "skill-email",
  "skill-filesystem",
  "skill-git",
  "skill-http",
@@ -57,7 +58,6 @@ dependencies = [
  "skill-knowledge-base",
  "skill-notification",
  "skill-perplexity-search",
- "skill-proton-mail",
  "skill-shell",
  "skill-system-monitor",
  "skill-web-search",
@@ -2660,7 +2660,7 @@ dependencies = [
  "chrono",
  "entity-core",
  "serde_json",
- "skill-proton-mail",
+ "skill-email",
  "tokio",
  "tracing",
 ]
@@ -2715,7 +2715,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "skill-proton-mail",
+ "skill-email",
  "tokio",
  "tokio-stream",
  "tower-http",
@@ -7710,6 +7710,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "skill-email"
+version = "0.0.1"
+dependencies = [
+ "abigail-core",
+ "abigail-skills",
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "skill-filesystem"
 version = "0.0.1"
 dependencies = [
@@ -7812,21 +7827,6 @@ dependencies = [
  "reqwest 0.13.2",
  "serde",
  "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "skill-proton-mail"
-version = "0.0.1"
-dependencies = [
- "abigail-core",
- "abigail-skills",
- "async-trait",
- "chrono",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]

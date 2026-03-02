@@ -168,7 +168,7 @@ fn validate_secret_namespace(state: &State<AppState>, key: &str) -> Result<(), S
     validate_secret_namespace_with(&state.registry, &config.data_dir, key)
 }
 
-/// Keys that, when stored, should trigger re-initialization of the Proton Mail skill
+/// Keys that, when stored, should trigger re-initialization of the Email skill
 /// so it picks up new credentials without an app restart.
 const IMAP_SECRET_KEYS: &[&str] = &[
     "imap_password",
@@ -193,23 +193,21 @@ pub fn store_secret(state: State<AppState>, key: String, value: String) -> Resul
     vault.set_secret(&key, &value);
     vault.save().map_err(|e| e.to_string())?;
 
-    // Re-initialize Proton Mail when IMAP-related secrets change so the skill
+    // Re-initialize Email skill when IMAP-related secrets change so the skill
     // picks up new credentials without requiring an app restart.
     if IMAP_SECRET_KEYS.contains(&key.as_str()) {
-        match crate::create_proton_mail_skill_for_registry(&state) {
+        match crate::create_email_skill_for_registry(&state) {
             Ok(skill) => {
-                let skill_id = skill_proton_mail::ProtonMailSkill::default_manifest()
-                    .id
-                    .clone();
+                let skill_id = skill_email::EmailSkill::default_manifest().id.clone();
                 let _ = state.registry.unregister(&skill_id);
                 if let Err(e) = state.registry.register(skill_id, skill) {
-                    tracing::warn!("Proton Mail re-register after secret store failed: {}", e);
+                    tracing::warn!("Email skill re-register after secret store failed: {}", e);
                 } else {
-                    tracing::info!("Proton Mail skill re-initialized after secret update");
+                    tracing::info!("Email skill re-initialized after secret update");
                 }
             }
             Err(e) => {
-                tracing::warn!("Proton Mail reinit after secret store failed: {}", e);
+                tracing::warn!("Email skill reinit after secret store failed: {}", e);
             }
         }
     }
@@ -411,11 +409,11 @@ mod tests {
     }
 
     #[test]
-    fn imap_keys_accepted_when_proton_skill_registered() {
+    fn imap_keys_accepted_when_email_skill_registered() {
         let tmp = tmp_dir("imap");
         let registry = SkillRegistry::new();
-        let manifest = skill_proton_mail::ProtonMailSkill::default_manifest();
-        let skill = skill_proton_mail::ProtonMailSkill::new(manifest.clone());
+        let manifest = skill_email::EmailSkill::default_manifest();
+        let skill = skill_email::EmailSkill::new(manifest.clone());
         registry
             .register(manifest.id.clone(), Arc::new(skill))
             .unwrap();
@@ -431,7 +429,7 @@ mod tests {
         ] {
             assert!(
                 validate_secret_namespace_with(&registry, &tmp, key).is_ok(),
-                "IMAP key '{}' should be accepted with ProtonMailSkill registered",
+                "IMAP key '{}' should be accepted with EmailSkill registered",
                 key
             );
         }
@@ -439,20 +437,20 @@ mod tests {
     }
 
     #[test]
-    fn imap_keys_rejected_without_proton_skill() {
-        let tmp = tmp_dir("no_proton");
+    fn imap_keys_rejected_without_email_skill() {
+        let tmp = tmp_dir("no_email");
         let registry = SkillRegistry::new();
         let result = validate_secret_namespace_with(&registry, &tmp, "imap_password");
         assert!(
             result.is_err(),
-            "imap_password should be rejected when ProtonMailSkill is NOT registered"
+            "imap_password should be rejected when EmailSkill is NOT registered"
         );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
-    fn proton_manifest_declares_expected_secrets() {
-        let manifest = skill_proton_mail::ProtonMailSkill::default_manifest();
+    fn email_manifest_declares_expected_secrets() {
+        let manifest = skill_email::EmailSkill::default_manifest();
         let names: Vec<&str> = manifest.secrets.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"imap_password"), "missing imap_password");
         assert!(names.contains(&"imap_user"), "missing imap_user");

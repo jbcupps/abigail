@@ -82,13 +82,13 @@ pub fn skill_audit_log(data_dir: &Path, action: &str, detail: &str) {
         .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
 }
 
-/// Build and optionally initialize the Proton Mail skill from current vault.
+/// Build and optionally initialize the Email skill from current vault.
 /// Used at startup and after storing IMAP-related secrets so the skill picks up new credentials.
 /// Returns the skill (initialized or not) for the caller to register.
-pub fn create_proton_mail_skill_for_registry(state: &AppState) -> Result<Arc<dyn Skill>, String> {
-    use skill_proton_mail::ProtonMailSkill;
-    let manifest = ProtonMailSkill::default_manifest();
-    let mut skill = ProtonMailSkill::new(manifest);
+pub fn create_email_skill_for_registry(state: &AppState) -> Result<Arc<dyn Skill>, String> {
+    use skill_email::EmailSkill;
+    let manifest = EmailSkill::default_manifest();
+    let mut skill = EmailSkill::new(manifest);
 
     let has_creds = state
         .skills_secrets
@@ -103,9 +103,7 @@ pub fn create_proton_mail_skill_for_registry(state: &AppState) -> Result<Arc<dyn
             (
                 v.get_secret("imap_user").unwrap_or("").to_string(),
                 v.get_secret("imap_password").unwrap_or("").to_string(),
-                v.get_secret("imap_host")
-                    .unwrap_or("mail.proton.me")
-                    .to_string(),
+                v.get_secret("imap_host").unwrap_or("").to_string(),
                 v.get_secret("imap_port").unwrap_or("993").to_string(),
             )
         };
@@ -153,22 +151,17 @@ pub fn create_proton_mail_skill_for_registry(state: &AppState) -> Result<Arc<dyn
             .await
         }) {
             Ok(Ok(())) => {
-                tracing::info!("Proton Mail skill initialized successfully");
+                tracing::info!("Email skill initialized successfully");
             }
             Ok(Err(e)) => {
-                tracing::warn!(
-                    "Proton Mail skill init failed (registered uninitialized): {}",
-                    e
-                );
+                tracing::warn!("Email skill init failed (registered uninitialized): {}", e);
             }
             Err(_) => {
-                tracing::warn!(
-                    "Proton Mail skill init timed out after 15s (IMAP bridge unreachable?)"
-                );
+                tracing::warn!("Email skill init timed out after 15s (IMAP server unreachable?)");
             }
         }
     } else {
-        tracing::info!("Proton Mail skill created without credentials (no imap_password in vault)");
+        tracing::info!("Email skill created without credentials (no imap_password in vault)");
     }
 
     Ok(Arc::new(skill))
@@ -514,22 +507,20 @@ pub fn run() {
                 }
             }
 
-            // Register and initialize Proton Mail (IMAP) skill.
+            // Register and initialize Email (IMAP/SMTP) skill.
             // Mirrors entity-daemon: always registers the skill (so its manifest
             // declares imap_*/smtp_* secrets for namespace validation), and
             // initializes the IMAP transport only when credentials are present.
             {
-                let skill_id = skill_proton_mail::ProtonMailSkill::default_manifest()
-                    .id
-                    .clone();
-                match create_proton_mail_skill_for_registry(&state) {
+                let skill_id = skill_email::EmailSkill::default_manifest().id.clone();
+                match create_email_skill_for_registry(&state) {
                     Ok(skill) => {
                         if let Err(e) = state.registry.register(skill_id, skill) {
-                            tracing::warn!("Failed to register Proton Mail skill: {}", e);
+                            tracing::warn!("Failed to register Email skill: {}", e);
                         }
                     }
                     Err(e) => {
-                        tracing::warn!("Proton Mail skill creation failed: {}", e);
+                        tracing::warn!("Email skill creation failed: {}", e);
                     }
                 }
             }
@@ -743,6 +734,9 @@ pub fn run() {
             probe_local_llm,
             set_local_llm_during_birth,
             start_managed_ollama,
+            warmup_ollama_model,
+            get_config_snapshot,
+            set_bundled_model,
             use_stored_provider,
             get_entity_theme,
             get_identity_sharing_settings,

@@ -1,4 +1,4 @@
-//! Proton Mail–style skill: implements Skill and EmailTransportCapability, wrapping abigail-senses IMAP/SMTP.
+//! Generic IMAP/SMTP email skill: implements Skill and EmailTransportCapability, wrapping abigail-skills transport layer.
 
 mod transport;
 
@@ -21,19 +21,19 @@ use abigail_skills::transport::imap::ImapTlsMode;
 use abigail_skills::transport::smtp::SmtpTlsMode;
 use abigail_skills::transport::{ImapClient, SmtpClient};
 
-use crate::transport::ProtonMailTransport;
+use crate::transport::EmailTransport;
 
-/// Default skill ID for Proton Mail.
-pub const PROTON_MAIL_SKILL_ID: &str = "com.abigail.skills.proton-mail";
+/// Default skill ID for the generic email skill.
+pub const EMAIL_SKILL_ID: &str = "com.abigail.skills.email";
 
-/// Proton Mail skill: Skill + EmailTransportCapability.
-pub struct ProtonMailSkill {
+/// Generic email skill: Skill + EmailTransportCapability.
+pub struct EmailSkill {
     manifest: SkillManifest,
-    transport: Option<Arc<RwLock<ProtonMailTransport>>>,
+    transport: Option<Arc<RwLock<EmailTransport>>>,
     event_sender: Option<std::sync::Arc<tokio::sync::broadcast::Sender<SkillEvent>>>,
 }
 
-impl ProtonMailSkill {
+impl EmailSkill {
     /// Build manifest from embedded skill.toml or default in code.
     pub fn default_manifest() -> SkillManifest {
         SkillManifest::parse(include_str!("../skill.toml"))
@@ -42,18 +42,13 @@ impl ProtonMailSkill {
 
     fn fallback_manifest() -> SkillManifest {
         SkillManifest {
-            id: SkillId(PROTON_MAIL_SKILL_ID.to_string()),
-            name: "Proton Mail".to_string(),
+            id: SkillId(EMAIL_SKILL_ID.to_string()),
+            name: "Email".to_string(),
             version: "0.1.0".to_string(),
-            description: "Proton Mail–style email via IMAP/SMTP.".to_string(),
+            description: "Email via IMAP/SMTP with any compatible server.".to_string(),
             license: None,
             category: "Communication".to_string(),
-            keywords: vec![
-                "email".into(),
-                "proton".into(),
-                "imap".into(),
-                "smtp".into(),
-            ],
+            keywords: vec!["email".into(), "imap".into(), "smtp".into(), "inbox".into()],
             runtime: "Native".to_string(),
             min_abigail_version: "0.1.0".to_string(),
             platforms: vec!["Windows".into(), "macOS".into(), "Linux".into()],
@@ -61,10 +56,7 @@ impl ProtonMailSkill {
                 capability_type: "email_transport".to_string(),
                 version: "1.0".to_string(),
             }],
-            permissions: vec![Permission::Network(NetworkPermission::Domains(vec![
-                "mail.proton.me".into(),
-                "smtp.proton.me".into(),
-            ]))],
+            permissions: vec![Permission::Network(NetworkPermission::Full)],
             secrets: vec![abigail_skills::SecretDescriptor {
                 name: "imap_password".to_string(),
                 description: "App password for IMAP".to_string(),
@@ -101,9 +93,7 @@ impl ProtonMailSkill {
                 network_bound: true,
                 token_cost: None,
             },
-            required_permissions: vec![Permission::Network(NetworkPermission::Domains(vec![
-                "mail.proton.me".into(),
-            ]))],
+            required_permissions: vec![Permission::Network(NetworkPermission::Full)],
             autonomous: true,
             requires_confirmation: false,
         }
@@ -124,9 +114,7 @@ impl ProtonMailSkill {
             }),
             returns: serde_json::json!({ "type": "object" }),
             cost_estimate: CostEstimate::default(),
-            required_permissions: vec![Permission::Network(NetworkPermission::Domains(vec![
-                "smtp.proton.me".into(),
-            ]))],
+            required_permissions: vec![Permission::Network(NetworkPermission::Full)],
             autonomous: false,
             requires_confirmation: true,
         }
@@ -169,7 +157,7 @@ impl ProtonMailSkill {
 }
 
 #[async_trait::async_trait]
-impl Skill for ProtonMailSkill {
+impl Skill for EmailSkill {
     fn manifest(&self) -> &SkillManifest {
         &self.manifest
     }
@@ -181,7 +169,10 @@ impl Skill for ProtonMailSkill {
             .get("imap_host")
             .and_then(|v| v.as_str())
             .map(String::from)
-            .unwrap_or_else(|| "mail.proton.me".to_string());
+            .or_else(|| config.secrets.get("imap_host").cloned())
+            .ok_or_else(|| {
+                SkillError::InitFailed("imap_host is required (no default)".to_string())
+            })?;
         let port = config
             .values
             .get("imap_port")
@@ -227,7 +218,9 @@ impl Skill for ProtonMailSkill {
             .and_then(|v| v.as_str())
             .map(String::from)
             .or_else(|| config.secrets.get("smtp_host").cloned())
-            .unwrap_or_else(|| "smtp.proton.me".to_string());
+            .ok_or_else(|| {
+                SkillError::InitFailed("smtp_host is required (no default)".to_string())
+            })?;
         let smtp_port = config
             .values
             .get("smtp_port")
@@ -248,7 +241,7 @@ impl Skill for ProtonMailSkill {
         let smtp =
             SmtpClient::new(&smtp_host, smtp_port, &user, &password).with_tls_mode(smtp_tls_mode);
 
-        let transport = ProtonMailTransport::new(Some(imap), Some(smtp), &user);
+        let transport = EmailTransport::new(Some(imap), Some(smtp), &user);
         self.transport = Some(Arc::new(RwLock::new(transport)));
         Ok(())
     }
@@ -414,10 +407,10 @@ impl Skill for ProtonMailSkill {
 }
 
 #[async_trait::async_trait]
-impl EmailTransportCapability for ProtonMailSkill {
+impl EmailTransportCapability for EmailSkill {
     fn info(&self) -> EmailTransportInfo {
         EmailTransportInfo {
-            id: PROTON_MAIL_SKILL_ID.to_string(),
+            id: EMAIL_SKILL_ID.to_string(),
             name: self.manifest.name.clone(),
         }
     }

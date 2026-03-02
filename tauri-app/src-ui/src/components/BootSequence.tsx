@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useState, useEffect, useRef } from "react";
-import LlmSetupPanel from "./LlmSetupPanel";
 import BirthChat, { BirthChatHandle } from "./BirthChat";
 import ApiKeyModal from "./ApiKeyModal";
 import SoulCrystallization from "./SoulCrystallization";
@@ -13,13 +12,11 @@ import CrystallizationPathDialog from "./CrystallizationPathDialog";
 import CrystallizationPathImage from "./CrystallizationPathImage";
 import CrystallizationPathPsychQuestions from "./CrystallizationPathPsychQuestions";
 import CrystallizationPathTemplateEdit from "./CrystallizationPathTemplateEdit";
-import { isBrowserHarnessRuntime } from "../runtimeMode";
 
 type Stage =
   | "Darkness"
   | "KeyPresentation"
-  | "Ignition"
-  | "Connectivity"
+  | "Connectivity"  // legacy — only reachable via interrupted-birth recovery
   | "Genesis"
   | "GenesisChat"
   | "GenesisForge"
@@ -76,7 +73,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [repairKey, setRepairKey] = useState("");
   const [activeApiKeyProvider, setActiveApiKeyProvider] = useState<string | null>(null);
   const [storedProviders, setStoredProviders] = useState<string[]>([]);
-  const [localLlmReady, setLocalLlmReady] = useState(false);
+  const [localLlmReady, _setLocalLlmReady] = useState(false);
   const [soulPreview, setSoulPreview] = useState("");
   const [crystalName, setCrystalName] = useState("");
   const [crystalPurpose, setCrystalPurpose] = useState("");
@@ -86,7 +83,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [crystalAvatarUrl, setCrystalAvatarUrl] = useState("");
   const [genesisPath, setGenesisPath] = useState<string | null>(null);
   const [visualizing, setVisualizing] = useState(false);
-  const [cliDetections, setCliDetections] = useState<Array<{
+  const [cliDetections, _setCliDetections] = useState<Array<{
     provider_name: string; binary: string; on_path: boolean;
     is_official: boolean; is_authenticated: boolean;
     version: string | null; auth_hint: string | null;
@@ -179,13 +176,6 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
   const handleSkipInteractive = async () => {
     try {
-      if (stage === "Ignition") {
-        // Cloud-First path: jump to Connectivity to enter keys
-        await invoke("advance_to_connectivity");
-        setStage("Connectivity");
-        return;
-      }
-
       setMessage("Completing default birth...");
       setStage("Emergence");
 
@@ -290,67 +280,17 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     setPrivateKey(""); // Clear from memory
     await invoke("advance_past_darkness");
 
-    // If managed Ollama is running with model ready, skip Ignition AND
-    // Connectivity — the LLM provider picker and cloud-provider setup are
-    // redundant when Ollama is pre-configured.  The user can add cloud
-    // providers later from the Settings drawer.
-    try {
-      const status = await invoke<{ managed: boolean; running: boolean; port: number; model_ready: boolean }>(
-        "get_ollama_status"
-      );
-      if (status.running && status.model_ready) {
-        try {
-          await invoke("advance_to_connectivity");
-          await invoke("advance_to_crystallization");
-        } catch (e) {
-          console.error("Failed to advance past Ignition/Connectivity after Ollama skip:", e);
-          // Fall through to Ignition on error
-          setStage("Ignition");
-          return;
-        }
-        setStage("Genesis");
-        return;
-      }
-    } catch {
-      // get_ollama_status failed — fall through to normal Ignition
-    }
-
-    setStage("Ignition");
-  };
-
-  const handleLlmConnected = async (_url: string) => {
+    // Skip Ignition and Connectivity entirely — the bundled Ollama serves as
+    // the Hive agent (already warmed up before reaching boot).  Cloud model
+    // acquisition for the Entity happens as a birth step, not a separate
+    // configuration screen.
     try {
       await invoke("advance_to_connectivity");
-      const [providers, cliResults, routerStatus] = await Promise.all([
-        invoke<string[]>("get_stored_providers"),
-        invoke<typeof cliDetections>("detect_cli_providers_full"),
-        invoke<{
-          id_provider: string;
-          id_url: string | null;
-          ego_configured: boolean;
-          ego_provider: string | null;
-          superego_configured: boolean;
-          routing_mode: string;
-        }>("get_router_status"),
-      ]);
-      setStoredProviders(providers);
-      setCliDetections(cliResults);
-      const hasLocal = routerStatus.id_provider === "local_http";
-      setLocalLlmReady(hasLocal);
-
-      const hasAuthedCli = cliResults.some(d => d.on_path && d.is_official && d.is_authenticated);
-      const localOnlyBootstrap =
-        !isBrowserHarnessRuntime() && hasLocal && providers.length === 0 && !hasAuthedCli;
-      if (localOnlyBootstrap) {
-        // Local runtime is already online; skip extra provider ceremony.
-        await invoke("advance_to_crystallization");
-        setStage("Genesis");
-        return;
-      }
+      await invoke("advance_to_crystallization");
     } catch (e) {
-      console.error("Failed to advance to connectivity or fetch providers:", e);
+      console.error("Failed to advance birth stages:", e);
     }
-    setStage("Connectivity");
+    setStage("Genesis");
   };
 
   interface StoreKeyResult {
@@ -681,16 +621,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
           </div>
         )}
 
-        {/* ── IGNITION ── */}
-        {stage === "Ignition" && (
-          <LlmSetupPanel
-            onConnected={handleLlmConnected}
-            onSkip={handleSkipInteractive}
-            showSkip={true}
-          />
-        )}
-
-        {/* ── CONNECTIVITY ── */}
+        {/* ── CONNECTIVITY (legacy — kept for interrupted-birth recovery) ── */}
         {stage === "Connectivity" && (
           <div className="flex flex-col h-full bg-theme-bg" style={{ minHeight: "80vh" }}>
             {/* Command Center Dashboard */}

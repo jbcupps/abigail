@@ -1,4 +1,4 @@
-//! Thin wrapper over abigail-senses ImapClient/SmtpClient for email operations.
+//! Thin wrapper over abigail-skills ImapClient/SmtpClient for email operations.
 
 use abigail_skills::capability::email::{
     Email, EmailAddress, FetchOptions, OutgoingEmail, SendResult,
@@ -7,13 +7,13 @@ use abigail_skills::transport::{ImapClient, SmtpClient};
 use abigail_skills::{SkillError, SkillResult};
 
 /// Transport state: IMAP and optional SMTP. Sessions are not persisted; each fetch connects fresh.
-pub struct ProtonMailTransport {
+pub struct EmailTransport {
     pub imap: Option<ImapClient>,
     pub smtp: Option<SmtpClient>,
     pub from_address: String,
 }
 
-impl ProtonMailTransport {
+impl EmailTransport {
     pub fn new(imap: Option<ImapClient>, smtp: Option<SmtpClient>, from_address: &str) -> Self {
         Self {
             imap,

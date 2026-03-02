@@ -7,65 +7,14 @@
 ; ============================================================================
 ; VARIABLES
 ; ============================================================================
-Var OllamaStatus         ; "running", "installed", "not_found"
-Var LmStudioStatus       ; "installed", "not_found"
 Var UpgradeDetected      ; "1" if existing install found, "0" otherwise
 Var PreserveData         ; "1" to preserve, "0" for fresh install
 Var ExistingVersion      ; Version string of existing install
 Var TempResult           ; Temp variable for function results
 
 ; ============================================================================
-; LLM DETECTION FUNCTIONS
+; (LLM detection removed — Ollama is bundled with the app)
 ; ============================================================================
-
-; Detect Ollama via HTTP probe (running), file check (installed), registry
-Function DetectOllama
-  ; Method 1: HTTP probe - check if Ollama is running
-  nsExec::ExecToStack 'powershell -ExecutionPolicy Bypass -Command "try { $$r = Invoke-WebRequest -Uri http://localhost:11434/api/tags -TimeoutSec 3 -ErrorAction Stop; if ($$r.StatusCode -eq 200) { Write-Output RUNNING } } catch { Write-Output NOT_RUNNING }"'
-  Pop $0  ; exit code
-  Pop $1  ; output
-
-  ${If} $1 == "RUNNING"
-    StrCpy $OllamaStatus "running"
-    Return
-  ${EndIf}
-
-  ; Method 2: File check - common installation paths
-  IfFileExists "$LOCALAPPDATA\Programs\Ollama\ollama.exe" OllamaFileFound 0
-  IfFileExists "$PROGRAMFILES\Ollama\ollama.exe" OllamaFileFound 0
-  IfFileExists "$PROGRAMFILES64\Ollama\ollama.exe" OllamaFileFound OllamaCheckRegistry
-
-OllamaFileFound:
-  StrCpy $OllamaStatus "installed"
-  Return
-
-OllamaCheckRegistry:
-  ; Method 3: Registry check
-  ReadRegStr $0 HKCU "SOFTWARE\Ollama" ""
-  StrCmp $0 "" OllamaNotFound OllamaRegFound
-
-OllamaRegFound:
-  StrCpy $OllamaStatus "installed"
-  Return
-
-OllamaNotFound:
-  StrCpy $OllamaStatus "not_found"
-FunctionEnd
-
-; Detect LM Studio via file check
-Function DetectLmStudio
-  ; Check common installation paths
-  IfFileExists "$LOCALAPPDATA\Programs\LM Studio\LM Studio.exe" LmStudioFound 0
-  IfFileExists "$PROGRAMFILES\LM Studio\LM Studio.exe" LmStudioFound 0
-  IfFileExists "$LOCALAPPDATA\LM-Studio\LM Studio.exe" LmStudioFound LmStudioNotFound
-
-LmStudioFound:
-  StrCpy $LmStudioStatus "installed"
-  Return
-
-LmStudioNotFound:
-  StrCpy $LmStudioStatus "not_found"
-FunctionEnd
 
 ; ============================================================================
 ; UPGRADE DETECTION
@@ -143,37 +92,8 @@ Function WriteVersionToRegistry
 FunctionEnd
 
 ; ============================================================================
-; LLM SETUP DIALOG (uses MessageBox since nsDialogs pages not supported in hooks)
+; (LLM setup dialog removed — Ollama is bundled; no user action needed)
 ; ============================================================================
-
-Function ShowLlmSetupDialog
-  ; Run detection
-  Call DetectOllama
-  Call DetectLmStudio
-
-  ; Build status message
-  StrCpy $TempResult ""
-
-  ; Ollama status
-  ${If} $OllamaStatus == "running"
-    StrCpy $TempResult "Ollama: Running on port 11434$\n"
-  ${ElseIf} $OllamaStatus == "installed"
-    StrCpy $TempResult "Ollama: Installed (not running)$\n"
-  ${Else}
-    StrCpy $TempResult "Ollama: Not detected$\n"
-  ${EndIf}
-
-  ; LM Studio status
-  ${If} $LmStudioStatus == "installed"
-    StrCpy $TempResult "$TempResult$LM Studio: Installed$\n"
-  ${Else}
-    StrCpy $TempResult "$TempResult$LM Studio: Not detected$\n"
-  ${EndIf}
-
-  MessageBox MB_OK|MB_ICONINFORMATION "Local LLM Status:$\n$\n$TempResult$\nAbigail will guide you through Ollama or LM Studio setup on first launch."
-
-LlmSetupDone:
-FunctionEnd
 
 ; ============================================================================
 ; UPGRADE DIALOG
@@ -236,9 +156,6 @@ FunctionEnd
 
   ; Step 2: Write version to registry
   Call WriteVersionToRegistry
-
-  ; Step 3: LLM setup information (in-app wizard handles install/config)
-  Call ShowLlmSetupDialog
 
 PostInstallDone:
 !macroend

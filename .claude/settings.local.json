@@ -213,7 +213,10 @@
       "WebFetch(domain:openrouter.ai)",
       "Bash(\"C:\\\\Program Files \\(x86\\)\\\\Microsoft Visual Studio\\\\2022\\\\BuildTools\\\\VC\\\\Auxiliary\\\\Build\\\\vcvarsall.bat\" x64)",
       "Bash(E:)",
-      "Bash(LIB=\"C:/Program Files \\(x86\\)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files \\(x86\\)/Windows Kits/10/Lib/10.0.26100.0/um/x64;C:/Program Files \\(x86\\)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/lib/x64\" cargo check:*)"
+      "Bash(LIB=\"C:/Program Files \\(x86\\)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64;C:/Program Files \\(x86\\)/Windows Kits/10/Lib/10.0.26100.0/um/x64;C:/Program Files \\(x86\\)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/lib/x64\" cargo check:*)",
+      "mcp__filesystem__read_multiple_files",
+      "Bash(git mv:*)",
+      "Bash(git ls-tree:*)"
     ]
   }
 }

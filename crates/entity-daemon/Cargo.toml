@@ -19,7 +19,7 @@ abigail-skills = { path = "../abigail-skills" }
 abigail-memory = { path = "../abigail-memory" }
 abigail-queue = { path = "../abigail-queue" }
 abigail-streaming = { path = "../abigail-streaming" }
-skill-proton-mail = { path = "../../skills/skill-proton-mail" }
+skill-email = { path = "../../skills/skill-email" }
 axum.workspace = true
 tower-http.workspace = true
 tokio.workspace = true

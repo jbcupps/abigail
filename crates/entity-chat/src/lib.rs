@@ -441,7 +441,7 @@ fn split_qualified_tool_name(qualified: &str) -> Option<(String, String)> {
 // ---------------------------------------------------------------------------
 
 /// Maximum number of tool-use round-trips before forcing a text response.
-const MAX_TOOL_ROUNDS: usize = 8;
+const MAX_TOOL_ROUNDS: usize = 35;
 
 /// Outcome of the tool-use loop.
 pub struct ToolUseResult {

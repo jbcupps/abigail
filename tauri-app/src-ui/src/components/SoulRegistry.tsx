@@ -2,6 +2,214 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import ConfirmationModal from "./ConfirmationModal";
 
+interface OllamaStatusInfo {
+  managed: boolean;
+  running: boolean;
+  port: number;
+  model_ready: boolean;
+}
+
+interface OllamaModelTag {
+  name: string;
+  size: number;
+  modified_at: string;
+}
+
+/** Hive Agent status panel — shows the local Ollama LLM powering the Hive control plane. */
+function HiveAgentPanel() {
+  const [status, setStatus] = useState<OllamaStatusInfo | null>(null);
+  const [models, setModels] = useState<OllamaModelTag[]>([]);
+  const [activeModel, setActiveModel] = useState("");
+  const [expanded, setExpanded] = useState(false);
+  const [pullModel, setPullModel] = useState("");
+  const [pulling, setPulling] = useState(false);
+  const [pullStatus, setPullStatus] = useState("");
+
+  useEffect(() => {
+    refreshStatus();
+  }, []);
+
+  const refreshStatus = async () => {
+    try {
+      const s = await invoke<OllamaStatusInfo>("get_ollama_status");
+      setStatus(s);
+
+      // Fetch model list from Ollama API
+      const config = await invoke<{ local_llm_base_url?: string; bundled_model?: string }>("get_config_snapshot");
+      const baseUrl = config.local_llm_base_url || `http://127.0.0.1:${s.port}`;
+      setActiveModel(config.bundled_model || "llama3.2:3b");
+
+      if (s.running) {
+        try {
+          const resp = await fetch(`${baseUrl}/api/tags`);
+          if (resp.ok) {
+            const data = await resp.json();
+            setModels(
+              (data.models || []).map((m: Record<string, unknown>) => ({
+                name: String(m.name || ""),
+                size: Number(m.size || 0),
+                modified_at: String(m.modified_at || ""),
+              }))
+            );
+          }
+        } catch {
+          // Ollama API not reachable
+        }
+      }
+    } catch {
+      // get_ollama_status not available
+    }
+  };
+
+  const handlePullModel = async () => {
+    if (!pullModel.trim()) return;
+    setPulling(true);
+    setPullStatus("Starting pull...");
+    try {
+      await invoke("pull_ollama_model", { modelName: pullModel.trim() });
+      setPullStatus("Complete");
+      setPullModel("");
+      await refreshStatus();
+    } catch (e) {
+      setPullStatus(`Error: ${e}`);
+    } finally {
+      setPulling(false);
+    }
+  };
+
+  const handleSwitchModel = async (modelName: string) => {
+    try {
+      // Update config with new bundled_model
+      await invoke("set_bundled_model", { modelName });
+      setActiveModel(modelName);
+    } catch {
+      // set_bundled_model may not exist yet — that's fine
+    }
+  };
+
+  const formatSize = (bytes: number) => {
+    if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+    if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`;
+    return `${bytes} B`;
+  };
+
+  if (!status) return null;
+
+  return (
+    <div className="w-full max-w-4xl mb-6">
+      <div className="border border-theme-border-dim rounded-lg bg-theme-bg-elevated overflow-hidden">
+        {/* Header — always visible */}
+        <button
+          className="w-full px-4 py-3 flex items-center justify-between hover:bg-theme-bg-inset transition-colors"
+          onClick={() => setExpanded(!expanded)}
+        >
+          <div className="flex items-center gap-3">
+            <div
+              className={`w-2 h-2 rounded-full ${
+                status.running && status.model_ready
+                  ? "bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]"
+                  : status.running
+                    ? "bg-yellow-500"
+                    : "bg-red-500"
+              }`}
+            />
+            <span className="text-[10px] uppercase tracking-widest text-theme-text-dim font-bold">
+              Hive Agent
+            </span>
+            <span className="text-xs text-theme-text-bright font-mono">
+              {activeModel}
+            </span>
+            {status.running && status.model_ready && (
+              <span className="text-[9px] text-green-500 uppercase">Online</span>
+            )}
+            {status.running && !status.model_ready && (
+              <span className="text-[9px] text-yellow-500 uppercase">Loading</span>
+            )}
+            {!status.running && (
+              <span className="text-[9px] text-red-500 uppercase">Offline</span>
+            )}
+          </div>
+          <span className="text-theme-text-dim text-xs">{expanded ? "\u25B2" : "\u25BC"}</span>
+        </button>
+
+        {/* Expanded panel */}
+        {expanded && (
+          <div className="border-t border-theme-border-dim p-4 space-y-4">
+            {/* Installed models */}
+            <div>
+              <h4 className="text-[10px] uppercase tracking-widest text-theme-text-dim font-bold mb-2">
+                Installed Models
+              </h4>
+              {models.length === 0 ? (
+                <p className="text-theme-text-dim text-xs">No models found.</p>
+              ) : (
+                <div className="space-y-1">
+                  {models.map((m) => (
+                    <div
+                      key={m.name}
+                      className={`flex items-center justify-between px-3 py-2 rounded border text-xs ${
+                        m.name === activeModel || m.name.startsWith(activeModel + ":")
+                          ? "border-green-800 bg-green-950/20 text-green-400"
+                          : "border-theme-border-dim text-theme-text-dim"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono">{m.name}</span>
+                        <span className="text-[10px] text-theme-text-dim">{formatSize(m.size)}</span>
+                      </div>
+                      {m.name !== activeModel && !m.name.startsWith(activeModel + ":") && (
+                        <button
+                          className="text-[10px] px-2 py-0.5 border border-theme-border-dim rounded hover:border-theme-primary hover:text-theme-primary"
+                          onClick={() => handleSwitchModel(m.name)}
+                        >
+                          Use
+                        </button>
+                      )}
+                      {(m.name === activeModel || m.name.startsWith(activeModel + ":")) && (
+                        <span className="text-[10px] text-green-500">Active</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Pull new model */}
+            <div>
+              <h4 className="text-[10px] uppercase tracking-widest text-theme-text-dim font-bold mb-2">
+                Download Model
+              </h4>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={pullModel}
+                  onChange={(e) => setPullModel(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handlePullModel(); }}
+                  placeholder="e.g. llama3.2:3b, mistral, phi3..."
+                  className="flex-1 bg-theme-bg border border-theme-border-dim rounded px-3 py-1.5 text-xs text-theme-text placeholder:text-theme-text-dim focus:border-theme-primary focus:outline-none font-mono"
+                  disabled={pulling}
+                />
+                <button
+                  className="border border-theme-primary-faint text-theme-primary px-4 py-1.5 rounded text-xs hover:bg-theme-primary-glow disabled:opacity-50"
+                  onClick={handlePullModel}
+                  disabled={pulling || !pullModel.trim()}
+                >
+                  {pulling ? "..." : "Pull"}
+                </button>
+              </div>
+              {pullStatus && (
+                <p className={`text-[10px] mt-1 ${pullStatus.startsWith("Error") ? "text-red-400" : "text-theme-text-dim"}`}>
+                  {pullStatus}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 interface SoulIdentityInfo {
   id: string;
   name: string;
@@ -277,6 +485,8 @@ export default function SoulRegistry({
 
         {errorBanner}
 
+        <HiveAgentPanel />
+
         {/* Create soul card */}
         <div className="w-full max-w-md border-2 border-theme-primary rounded-lg p-6 mb-6 bg-theme-bg-elevated">
           <p className="text-theme-text-bright text-sm mb-4">
@@ -400,6 +610,8 @@ export default function SoulRegistry({
       </div>
 
       {errorBanner}
+
+      <HiveAgentPanel />
 
       {/* Soul cards grid */}
       <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">

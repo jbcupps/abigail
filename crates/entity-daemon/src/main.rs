@@ -19,7 +19,7 @@ use abigail_router::IdEgoRouter;
 use abigail_skills::channel::EventBus;
 use abigail_skills::skill::SkillConfig;
 use abigail_skills::{Skill, SkillExecutionPolicy, SkillExecutor, SkillRegistry};
-use abigail_streaming::{IggyBroker, StreamBroker, TopicConfig};
+use abigail_streaming::{IggyBroker, MemoryBroker, StreamBroker, TopicConfig};
 use axum::routing::{get, post};
 use axum::Router;
 use capability_matcher::CapabilityMatcher;
@@ -53,9 +53,10 @@ struct Cli {
     #[arg(long)]
     data_dir: Option<String>,
 
-    /// Iggy connection string used for persistent event streaming.
-    #[arg(long, default_value = "iggy://iggy:iggy@127.0.0.1:8090")]
-    iggy_connection: String,
+    /// Iggy connection string for persistent event streaming.
+    /// When omitted, uses an in-process MemoryBroker (no external deps).
+    #[arg(long)]
+    iggy_connection: Option<String>,
 }
 
 #[tokio::main]
@@ -289,11 +290,11 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // 10. Register and initialize Proton Mail (IMAP) skill if credentials are available
+    // 10. Register and initialize Email (IMAP/SMTP) skill if credentials are available
     {
-        let manifest = skill_proton_mail::ProtonMailSkill::default_manifest();
+        let manifest = skill_email::EmailSkill::default_manifest();
         let skill_id = manifest.id.clone();
-        let mut skill = skill_proton_mail::ProtonMailSkill::new(manifest);
+        let mut skill = skill_email::EmailSkill::new(manifest);
 
         let has_creds = skill_vault
             .lock()
@@ -306,9 +307,7 @@ async fn main() -> anyhow::Result<()> {
                 (
                     v.get_secret("imap_user").unwrap_or("").to_string(),
                     v.get_secret("imap_password").unwrap_or("").to_string(),
-                    v.get_secret("imap_host")
-                        .unwrap_or("mail.proton.me")
-                        .to_string(),
+                    v.get_secret("imap_host").unwrap_or("").to_string(),
                     v.get_secret("imap_port").unwrap_or("993").to_string(),
                 )
             };
@@ -356,28 +355,28 @@ async fn main() -> anyhow::Result<()> {
             .await
             {
                 Ok(Ok(())) => {
-                    tracing::info!("Proton Mail skill initialized successfully");
+                    tracing::info!("Email skill initialized successfully");
                 }
                 Ok(Err(e)) => {
                     tracing::warn!(
-                        "Proton Mail skill init failed (will register uninitialized): {}",
+                        "Email skill init failed (will register uninitialized): {}",
                         e
                     );
                 }
                 Err(_) => {
                     tracing::warn!(
-                        "Proton Mail skill init timed out after 15s (IMAP bridge unreachable?)"
+                        "Email skill init timed out after 15s (IMAP server unreachable?)"
                     );
                 }
             }
         } else {
             tracing::info!(
-                "Proton Mail skill registered without credentials (no imap_password in vault)"
+                "Email skill registered without credentials (no imap_password in vault)"
             );
         }
 
         if let Err(e) = registry.register(skill_id.clone(), Arc::new(skill)) {
-            tracing::warn!("Failed to register Proton Mail skill: {}", e);
+            tracing::warn!("Failed to register Email skill: {}", e);
         }
     }
 
@@ -414,22 +413,30 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // 10. Initialize persistent event streaming (Iggy) and job queue.
-    let stream_broker: Arc<dyn StreamBroker> = Arc::new(
-        IggyBroker::new(cli.iggy_connection.clone())
-            .map_err(|e| anyhow::anyhow!("Failed to configure Iggy broker: {}", e))?,
-    );
-    stream_broker
-        .ensure_topic("abigail", "job-events", TopicConfig::default())
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to ensure Iggy topic abigail/job-events: {}", e))?;
-    stream_broker
-        .ensure_consumer_group("abigail", "job-events", "entity-daemon")
-        .await
-        .map_err(|e| {
-            anyhow::anyhow!("Failed to ensure Iggy consumer group entity-daemon: {}", e)
-        })?;
-    tracing::info!("Connected to Iggy at {}", cli.iggy_connection);
+    // 10. Initialize event streaming (Iggy if configured, otherwise in-process MemoryBroker) and job queue.
+    let stream_broker: Arc<dyn StreamBroker> = if let Some(ref conn) = cli.iggy_connection {
+        let broker = Arc::new(
+            IggyBroker::new(conn.clone())
+                .map_err(|e| anyhow::anyhow!("Failed to configure Iggy broker: {}", e))?,
+        );
+        broker
+            .ensure_topic("abigail", "job-events", TopicConfig::default())
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to ensure Iggy topic abigail/job-events: {}", e)
+            })?;
+        broker
+            .ensure_consumer_group("abigail", "job-events", "entity-daemon")
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to ensure Iggy consumer group entity-daemon: {}", e)
+            })?;
+        tracing::info!("Connected to Iggy at {}", conn);
+        broker
+    } else {
+        tracing::info!("Using in-process MemoryBroker (no --iggy-connection provided)");
+        Arc::new(MemoryBroker::default())
+    };
 
     let queue_conn = rusqlite::Connection::open(&config.db_path).map_err(|e| {
         anyhow::anyhow!(

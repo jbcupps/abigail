@@ -421,6 +421,9 @@ pub fn complete_birth(state: State<AppState>) -> Result<(), String> {
     b.complete_birth().map_err(|e| e.to_string())?;
     let mut config = state.config.write().map_err(|e| e.to_string())?;
     config.birth_complete = true;
+    if config.birth_timestamp.is_none() {
+        config.birth_timestamp = Some(chrono::Utc::now().to_rfc3339());
+    }
     config
         .save(&config.config_path())
         .map_err(|e| e.to_string())?;
@@ -635,6 +638,17 @@ pub fn complete_emergence(state: State<AppState>) -> Result<(), String> {
         let mut birth = state.birth.write().map_err(|e| e.to_string())?;
         let b = birth.as_mut().ok_or("Birth not started")?;
         b.complete_emergence().map_err(|e| e.to_string())?;
+    }
+
+    // Propagate birth_complete to AppState config so that any later saves
+    // (e.g. store_provider_key) don't overwrite it with false.
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.birth_complete = true;
+        config.birth_timestamp = Some(chrono::Utc::now().to_rfc3339());
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
     }
 
     {

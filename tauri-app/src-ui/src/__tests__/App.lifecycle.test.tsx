@@ -1,54 +1,8 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, beforeEach, expect } from "vitest";
-import { invoke } from "@tauri-apps/api/core";
 import App from "../App";
 import { installBrowserTauriHarness } from "../browserTauriHarness";
-
-interface Snapshot {
-  state: {
-    providers: string[];
-  };
-}
-
-function getTestKey(envName: string, fallback: string): string {
-  const value = (
-    (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[
-      envName
-    ] || ""
-  ).trim();
-  return value.length > 0 ? value : fallback;
-}
-
-async function advanceFromConnectivity(user: ReturnType<typeof userEvent.setup>) {
-  const continueBtn =
-    screen.queryByRole("button", { name: /continue to crystallization/i }) ??
-    screen.queryByRole("button", { name: /establish linkage/i });
-  if (!continueBtn) {
-    throw new Error("Could not find connectivity advance button");
-  }
-  await user.click(continueBtn);
-}
-
-async function maybeEnterConnectivityAndAdvance(
-  user: ReturnType<typeof userEvent.setup>
-): Promise<"connectivity" | "genesis"> {
-  const continueWithoutModel = screen.queryByRole("button", { name: /continue without model/i });
-  if (continueWithoutModel) {
-    await user.click(continueWithoutModel);
-  }
-
-  const connectivityHeading = await screen
-    .findByText(/connectivity command center/i, { exact: false }, { timeout: 1000 })
-    .catch(() => null);
-
-  if (connectivityHeading) {
-    return "connectivity";
-  }
-
-  await screen.findByRole("heading", { name: /choose your path/i });
-  return "genesis";
-}
 
 describe("App full lifecycle flow", () => {
   beforeEach(() => {
@@ -59,25 +13,22 @@ describe("App full lifecycle flow", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    // Birth first identity to chat-ready.
+    // Splash → may briefly show model_loading → management
     await user.click(await screen.findByRole("button", { name: /\[skip\]/i }));
-    await user.type(screen.getByPlaceholderText(/entity name/i), "Lifecycle Prime");
+
+    // Wait for management screen (entity name input)
+    const entityInput = await waitFor(
+      () => screen.getByPlaceholderText(/entity name/i),
+      { timeout: 5000 }
+    );
+    await user.type(entityInput, "Lifecycle Prime");
     await user.click(screen.getByRole("button", { name: /^birth$/i }));
 
+    // Key presentation
     await user.click(await screen.findByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: /continue/i }));
-    const stage = await maybeEnterConnectivityAndAdvance(user);
-    if (stage === "connectivity") {
-      await user.click(screen.getByRole("button", { name: /^openai$/i }));
-      const dialog = await screen.findByRole("dialog");
-      await user.type(within(dialog).getByLabelText(/openai api key/i), "sk-test-openai-lifecycle");
-      await user.click(within(dialog).getByRole("button", { name: /save & validate/i }));
-      await waitFor(() => {
-        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-      });
 
-      await advanceFromConnectivity(user);
-    }
+    // Now goes directly to Genesis (Ignition/Connectivity removed)
     await user.click(await screen.findByRole("button", { name: /fast template/i }));
     await user.click(screen.getByRole("button", { name: /begin/i }));
     await user.click(await screen.findByRole("button", { name: /use template/i }));
@@ -112,49 +63,23 @@ describe("App full lifecycle flow", () => {
     });
   }, 30000);
 
-  it("creates a test entity, completes birth, and connects 2+ providers including search", async () => {
+  it("creates a test entity, completes birth, and reaches chat", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: /\[skip\]/i }));
-    await user.type(screen.getByPlaceholderText(/entity name/i), "Provider Validation Entity");
+
+    const entityInput = await waitFor(
+      () => screen.getByPlaceholderText(/entity name/i),
+      { timeout: 5000 }
+    );
+    await user.type(entityInput, "Provider Validation Entity");
     await user.click(screen.getByRole("button", { name: /^birth$/i }));
 
     await user.click(await screen.findByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: /continue/i }));
-    const stage = await maybeEnterConnectivityAndAdvance(user);
 
-    if (stage === "connectivity") {
-      const saveProvider = async (providerName: RegExp, keyLabel: RegExp, keyValue: string) => {
-        await user.click(screen.getByRole("button", { name: providerName }));
-        const dialog = await screen.findByRole("dialog");
-        await user.type(within(dialog).getByLabelText(keyLabel), keyValue);
-        await user.click(within(dialog).getByRole("button", { name: /save & validate/i }));
-        await waitFor(() => {
-          expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-        });
-      };
-
-      await saveProvider(
-        /^openai$/i,
-        /openai api key/i,
-        getTestKey("OPENAI_API_KEY", "sk-test-openai-provider-validation")
-      );
-      await saveProvider(
-        /^perplexity$/i,
-        /perplexity api key/i,
-        getTestKey("PERPLEXITY_API_KEY", "pplx-test-provider-validation")
-      );
-    }
-
-    const snapshot = await invoke<Snapshot>("harness_debug_snapshot");
-    const providers = snapshot.state.providers;
-    if (stage === "connectivity") {
-      const nonCliProviders = providers.filter((provider) => !provider.endsWith("-cli"));
-      expect(new Set(nonCliProviders).size).toBeGreaterThanOrEqual(2);
-      expect(providers).toContain("perplexity");
-      await advanceFromConnectivity(user);
-    }
+    // Goes directly to Genesis now (no Connectivity)
     await user.click(await screen.findByRole("button", { name: /fast template/i }));
     await user.click(screen.getByRole("button", { name: /begin/i }));
     await user.click(await screen.findByRole("button", { name: /use template/i }));

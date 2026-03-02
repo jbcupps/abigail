@@ -365,3 +365,76 @@ pub async fn start_managed_ollama(
     let _ = app.emit("ollama-lifecycle", OllamaLifecycleState::ModelReady);
     Ok(false)
 }
+
+/// Send a lightweight generate request to Ollama so the model loads into memory.
+/// This avoids a cold-start delay on the first real chat request.
+#[tauri::command]
+pub async fn warmup_ollama_model(state: State<'_, AppState>) -> Result<(), String> {
+    let base_url = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        config
+            .local_llm_base_url
+            .clone()
+            .unwrap_or_else(|| "http://127.0.0.1:11434".to_string())
+    };
+    let model_name = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        config
+            .bundled_model
+            .clone()
+            .unwrap_or_else(|| "llama3.2:3b".to_string())
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // Use /api/generate with a trivial prompt and num_predict=1 to load the model
+    // into memory without generating a full response.
+    let resp = client
+        .post(format!("{}/api/generate", base_url))
+        .json(&serde_json::json!({
+            "model": model_name,
+            "prompt": "hi",
+            "stream": false,
+            "options": { "num_predict": 1 }
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Warmup request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Warmup returned status {}", resp.status()));
+    }
+
+    tracing::info!("Ollama model {} warmed up successfully", model_name);
+    Ok(())
+}
+
+/// Return a snapshot of local_llm_base_url and bundled_model for the Hive agent panel.
+#[tauri::command]
+pub fn get_config_snapshot(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "local_llm_base_url": config.local_llm_base_url,
+        "bundled_model": config.bundled_model,
+    }))
+}
+
+/// Switch the active bundled model used by the Hive agent.
+#[tauri::command]
+pub async fn set_bundled_model(
+    model_name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    {
+        let mut config = state.config.write().map_err(|e| e.to_string())?;
+        config.bundled_model = Some(model_name.clone());
+        config
+            .save(&config.config_path())
+            .map_err(|e| e.to_string())?;
+    }
+    tracing::info!("Hive agent model set to {}", model_name);
+    Ok(())
+}
