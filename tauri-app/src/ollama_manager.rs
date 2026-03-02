@@ -130,6 +130,8 @@ impl OllamaManager {
     ///
     /// `bundled_bin` is the path to an Ollama binary embedded in the Tauri resource
     /// directory.  When present and valid it takes priority over system installs.
+    /// On Windows, the bundled binary is only used if it is a 64-bit PE; otherwise
+    /// falls back to system Ollama to avoid "Unsupported 16-Bit Application" errors.
     pub async fn discover_and_start_bundled(
         data_dir: &Path,
         bundled_bin: Option<PathBuf>,
@@ -137,14 +139,32 @@ impl OllamaManager {
         let models_dir = data_dir.join("ollama_models");
 
         let ollama_exe = if let Some(ref bin) = bundled_bin {
-            if bin.exists() {
+            let use_bundled = bin.exists()
+                && {
+                    #[cfg(windows)]
+                    {
+                        let ok = Self::is_pe64(bin);
+                        if !ok {
+                            tracing::warn!(
+                                "Bundled Ollama at {} is not a 64-bit executable, falling back to system",
+                                bin.display()
+                            );
+                        }
+                        ok
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        true
+                    }
+                };
+            if use_bundled {
                 #[cfg(unix)]
                 Self::ensure_executable(bin)?;
                 tracing::info!("Using bundled Ollama at {}", bin.display());
                 bin.clone()
             } else {
                 tracing::warn!(
-                    "Bundled Ollama not found at {}, falling back to system",
+                    "Bundled Ollama not found or invalid at {}, falling back to system",
                     bin.display()
                 );
                 Self::find_ollama_binary()
@@ -176,6 +196,36 @@ impl OllamaManager {
         } else {
             resource_dir.join("ollama")
         }
+    }
+
+    /// On Windows, returns true if the file is a 64-bit PE executable (AMD64).
+    /// Used to reject 16-bit or 32-bit binaries that would fail on 64-bit Windows.
+    #[cfg(windows)]
+    fn is_pe64(path: &Path) -> bool {
+        use std::io::{Read, Seek};
+        let mut f = match std::fs::File::open(path) {
+            Ok(f) => f,
+            Err(_) => return false,
+        };
+        let mut buf = [0u8; 64];
+        if f.read_exact(&mut buf[..64]).is_err() {
+            return false;
+        }
+        if &buf[0..2] != b"MZ" {
+            return false;
+        }
+        let e_lfanew = u32::from_le_bytes([buf[0x3C], buf[0x3D], buf[0x3E], buf[0x3F]]) as u64;
+        if f.seek(std::io::SeekFrom::Start(e_lfanew)).is_err() {
+            return false;
+        }
+        if f.read_exact(&mut buf[..6]).is_err() {
+            return false;
+        }
+        if &buf[0..4] != b"PE\0\0" {
+            return false;
+        }
+        let machine = u16::from_le_bytes([buf[4], buf[5]]);
+        machine == 0x8664 // IMAGE_FILE_MACHINE_AMD64
     }
 
     /// On unix, ensure the binary has the executable bit set.
