@@ -51,6 +51,16 @@ pub struct RecommendedModel {
     pub recommended: bool,
 }
 
+/// A model already installed in Ollama (from `GET /api/tags`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstalledModel {
+    pub name: String,
+    /// Size in bytes on disk.
+    pub size: u64,
+    /// ISO-8601 timestamp of the last modification.
+    pub modified_at: String,
+}
+
 /// Progress payload from streaming `/api/pull`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OllamaModelProgress {
@@ -358,6 +368,55 @@ impl OllamaManager {
                 recommended: false,
             },
         ]
+    }
+
+    /// Query a running Ollama instance for its installed models.
+    pub async fn list_installed_models(base_url: &str) -> Result<Vec<InstalledModel>, String> {
+        let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
+
+        let resp = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to query Ollama models: {e}"))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("Ollama returned HTTP {}", resp.status()));
+        }
+
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse Ollama response: {e}"))?;
+
+        let models = body
+            .get("models")
+            .and_then(|m| m.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|m| {
+                        let name = m.get("name")?.as_str()?.to_string();
+                        let size = m.get("size").and_then(|s| s.as_u64()).unwrap_or(0);
+                        let modified_at = m
+                            .get("modified_at")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        Some(InstalledModel {
+                            name,
+                            size,
+                            modified_at,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(models)
     }
 
     /// Pull a model and emit incremental progress updates.

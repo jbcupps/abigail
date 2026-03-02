@@ -1,5 +1,5 @@
 use crate::ollama_manager::{
-    OllamaDetection, OllamaInstallProgress, OllamaLifecycleState, OllamaManager,
+    InstalledModel, OllamaDetection, OllamaInstallProgress, OllamaLifecycleState, OllamaManager,
     OllamaModelProgress, OllamaStatus, RecommendedModel,
 };
 use crate::state::AppState;
@@ -13,6 +13,12 @@ pub async fn detect_ollama() -> OllamaDetection {
 #[tauri::command]
 pub fn list_recommended_models() -> Vec<RecommendedModel> {
     OllamaManager::list_recommended_models()
+}
+
+#[tauri::command]
+pub async fn list_ollama_models(base_url: Option<String>) -> Result<Vec<InstalledModel>, String> {
+    let url = base_url.unwrap_or_else(|| "http://localhost:11434".to_string());
+    OllamaManager::list_installed_models(&url).await
 }
 
 #[tauri::command]
@@ -31,14 +37,12 @@ pub async fn pull_ollama_model(
     app: tauri::AppHandle,
     _state: State<'_, AppState>,
     model: String,
+    base_url: Option<String>,
 ) -> Result<(), String> {
-    OllamaManager::pull_model_streaming(
-        "http://localhost:11434",
-        &model,
-        |progress: OllamaModelProgress| {
-            let _ = app.emit("ollama-model-progress", progress);
-        },
-    )
+    let url = base_url.unwrap_or_else(|| "http://localhost:11434".to_string());
+    OllamaManager::pull_model_streaming(&url, &model, |progress: OllamaModelProgress| {
+        let _ = app.emit("ollama-model-progress", progress);
+    })
     .await
 }
 

@@ -40,6 +40,12 @@ interface OllamaModelProgress {
   status: string;
 }
 
+interface InstalledModel {
+  name: string;
+  size: number;
+  modified_at: string;
+}
+
 interface CliDetection {
   provider_name: string;
   binary: string;
@@ -77,6 +83,10 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
   const [activatingCli, setActivatingCli] = useState(false);
   const [initialProbeComplete, setInitialProbeComplete] = useState(false);
   const [autoConnectedBundled, setAutoConnectedBundled] = useState(false);
+  const [installedModels, setInstalledModels] = useState<string[]>([]);
+  const [ollamaHasModels, setOllamaHasModels] = useState<boolean | null>(null);
+  const [customModelMode, setCustomModelMode] = useState(false);
+  const [customModelName, setCustomModelName] = useState("");
 
   // Which sources have something available
   const ollamaAvailable = ollama !== null && ollama.status !== "not_found";
@@ -136,6 +146,25 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
         setRecommendedModels(models);
         const defaultModel = models.find((m) => m.recommended)?.name ?? models[0]?.name ?? "";
         setSelectedModel(defaultModel);
+
+        // If Ollama is running, fetch installed models
+        if (detection.status === "running") {
+          try {
+            const installed = await invoke<InstalledModel[]>("list_ollama_models", {});
+            const names = installed.map((m) => m.name);
+            setInstalledModels(names);
+            setOllamaHasModels(names.length > 0);
+            // If an installed model exists, pre-select it
+            if (names.length > 0) {
+              setSelectedModel(names[0]);
+            }
+          } catch {
+            setInstalledModels([]);
+            setOllamaHasModels(false);
+          }
+        } else {
+          setOllamaHasModels(false);
+        }
       }
 
       // Apply LM Studio results
@@ -187,8 +216,12 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
     if (mode !== "ollama") return;
     if (connecting || pullingModel || installing) return;
     if (ollama?.status !== "running") return;
+    // Wait until we've checked whether Ollama has models
+    if (ollamaHasModels === null) return;
+    // Don't auto-connect if Ollama has no models — let the user pick one
+    if (!ollamaHasModels) return;
 
-    // Bundled/runtime Ollama is already up: skip unnecessary interactive steps.
+    // Bundled/runtime Ollama is already up with models: skip interactive steps.
     setAutoConnectedBundled(true);
     connectTo("http://localhost:11434", true);
   }, [
@@ -199,6 +232,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
     pullingModel,
     installing,
     ollama?.status,
+    ollamaHasModels,
   ]);
 
   const formatBytes = (value?: number) => {
@@ -225,6 +259,25 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
       setRecommendedModels(models);
       const defaultModel = models.find((m) => m.recommended)?.name ?? models[0]?.name ?? "";
       setSelectedModel(defaultModel);
+
+      // Refresh installed models when Ollama is running
+      if (detection.status === "running") {
+        try {
+          const installed = await invoke<InstalledModel[]>("list_ollama_models", {});
+          const names = installed.map((m) => m.name);
+          setInstalledModels(names);
+          setOllamaHasModels(names.length > 0);
+          if (names.length > 0) {
+            setSelectedModel(names[0]);
+          }
+        } catch {
+          setInstalledModels([]);
+          setOllamaHasModels(false);
+        }
+      } else {
+        setInstalledModels([]);
+        setOllamaHasModels(false);
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -309,15 +362,30 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
   };
 
   const pullAndConnect = async () => {
-    if (!selectedModel) {
+    const modelToUse = customModelMode ? customModelName.trim() : selectedModel;
+    if (!modelToUse) {
       setError("Choose a model first.");
       return;
     }
-    setPullingModel(true);
-    setModelProgress({ model: selectedModel, status: "starting" });
+    const alreadyInstalled = installedModels.includes(modelToUse);
+    setPullingModel(!alreadyInstalled);
+    if (!alreadyInstalled) {
+      setModelProgress({ model: modelToUse, status: "starting" });
+    }
     setError("");
     try {
-      await invoke("pull_ollama_model", { model: selectedModel });
+      if (!alreadyInstalled) {
+        await invoke("pull_ollama_model", { model: modelToUse });
+        // Refresh installed models after successful pull
+        try {
+          const installed = await invoke<InstalledModel[]>("list_ollama_models", {});
+          const names = installed.map((m) => m.name);
+          setInstalledModels(names);
+          setOllamaHasModels(names.length > 0);
+        } catch {
+          // Non-critical — continue connecting
+        }
+      }
       await connectTo("http://localhost:11434", false);
     } catch (e) {
       setError(String(e));
@@ -346,6 +414,12 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
     const fullUrl = url.startsWith("http") ? url : `http://${url}`;
     connectTo(fullUrl);
   };
+
+  const effectiveModel = customModelMode ? customModelName.trim() : selectedModel;
+  const isModelInstalled = effectiveModel ? installedModels.includes(effectiveModel) : false;
+  const selectedRecommended = recommendedModels.find((m) => m.name === selectedModel);
+  // Recommended models that aren't already installed
+  const uninstalledRecommended = recommendedModels.filter((m) => !installedModels.includes(m.name));
 
   const reachable = detected.filter(d => d.reachable);
   const installPercent = installProgress?.written && installProgress?.total
@@ -445,29 +519,57 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
             </div>
           )}
 
-          {ollama.status !== "not_found" && recommendedModels.length > 0 && (
+          {ollama.status !== "not_found" && (recommendedModels.length > 0 || installedModels.length > 0) && (
             <div>
               <p className="text-theme-primary-dim mb-2">Choose a local model</p>
-              <div className="space-y-2">
-                {recommendedModels.map((model) => (
-                  <button
-                    key={model.name}
-                    className={`block w-full text-left px-4 py-3 border rounded ${selectedModel === model.name
-                      ? "border-theme-primary bg-theme-primary-glow"
-                      : "border-theme-border-dim hover:border-theme-primary"}`}
-                    onClick={() => setSelectedModel(model.name)}
-                    disabled={pullingModel || connecting}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-theme-text-bright font-bold">
-                        {model.label} - {model.name}
-                      </span>
-                      <span className="text-theme-text-dim text-xs">{formatBytes(model.size_bytes)}</span>
-                    </div>
-                    <p className="text-theme-text-dim text-xs mt-1">{model.description}</p>
-                  </button>
-                ))}
-              </div>
+              <select
+                className="w-full bg-black border border-theme-primary text-theme-text px-3 py-2 rounded text-sm"
+                value={customModelMode ? "__custom__" : selectedModel}
+                onChange={(e) => {
+                  if (e.target.value === "__custom__") {
+                    setCustomModelMode(true);
+                  } else {
+                    setCustomModelMode(false);
+                    setSelectedModel(e.target.value);
+                  }
+                }}
+                disabled={pullingModel || connecting}
+              >
+                <option value="" disabled>Select a model...</option>
+                {installedModels.length > 0 && (
+                  <optgroup label="Installed">
+                    {installedModels.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {uninstalledRecommended.length > 0 && (
+                  <optgroup label="Recommended (download required)">
+                    {uninstalledRecommended.map((model) => (
+                      <option key={model.name} value={model.name}>
+                        {model.label} — {model.name} ({formatBytes(model.size_bytes)})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <option value="__custom__">Custom model name...</option>
+              </select>
+
+              {customModelMode && (
+                <input
+                  type="text"
+                  className="mt-2 w-full bg-black border border-theme-primary text-theme-text px-3 py-2 rounded text-sm"
+                  placeholder="e.g. llama3:70b, deepseek-coder:6.7b"
+                  value={customModelName}
+                  onChange={(e) => setCustomModelName(e.target.value)}
+                  disabled={pullingModel || connecting}
+                  autoFocus
+                />
+              )}
+
+              {!customModelMode && selectedRecommended && (
+                <p className="text-theme-text-dim text-xs mt-2">{selectedRecommended.description}</p>
+              )}
             </div>
           )}
 
@@ -475,10 +577,14 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
             <div className="flex gap-2">
               <button
                 className="px-4 py-2 border border-theme-primary rounded hover:bg-theme-primary-glow disabled:opacity-50"
-                disabled={pullingModel || connecting}
+                disabled={pullingModel || connecting || (!effectiveModel)}
                 onClick={pullAndConnect}
               >
-                {pullingModel ? "Downloading model..." : "Download model and continue"}
+                {pullingModel
+                  ? "Downloading model..."
+                  : isModelInstalled
+                    ? "Connect with selected model"
+                    : "Download model and continue"}
               </button>
               <button
                 className="px-4 py-2 border border-theme-border-dim rounded hover:border-theme-primary text-theme-text-dim disabled:opacity-50"
