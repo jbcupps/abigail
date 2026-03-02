@@ -94,7 +94,11 @@ function AppInner() {
         // Fall through to identity checks below
       } catch (e) {
         console.warn("[App] start_managed_ollama failed; continuing without bundled Ollama:", e);
-        // Non-fatal — user may have their own LLM or cloud-only setup
+        // Non-fatal — show brief message on loading screen, then advance via onReady
+        setIsFirstPull(false);
+        setOllamaStatus("No local LLM found — continuing with cloud providers");
+        setOllamaProgress(100);
+        return; // Let AbnormalBrainScreen's onReady handle the transition
       }
 
       // Check if Hive has any agents

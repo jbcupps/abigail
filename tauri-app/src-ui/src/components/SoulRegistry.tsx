@@ -66,7 +66,7 @@ function HiveAgentPanel() {
     setPulling(true);
     setPullStatus("Starting pull...");
     try {
-      await invoke("pull_ollama_model", { modelName: pullModel.trim() });
+      await invoke("pull_ollama_model", { model: pullModel.trim() });
       setPullStatus("Complete");
       setPullModel("");
       await refreshStatus();
