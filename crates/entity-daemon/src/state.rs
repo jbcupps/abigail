@@ -3,13 +3,15 @@
 use abigail_core::AppConfig;
 use abigail_memory::{ArchiveExporter, MemoryStore};
 use abigail_queue::JobQueue;
-use abigail_router::IdEgoRouter;
+use abigail_router::{ConstraintStore, IdEgoRouter};
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use abigail_streaming::StreamBroker;
 use entity_core::ChatMemoryHook;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 
 /// Shared state for all entity-daemon route handlers.
 #[derive(Clone)]
@@ -35,6 +37,10 @@ pub struct EntityDaemonState {
     pub archive_exporter: Option<Arc<ArchiveExporter>>,
     /// Turns since last archive export; triggers export at threshold.
     pub turns_since_archive: Arc<AtomicU32>,
+    /// Cancellation token for the active streaming chat (if any).
+    pub active_stream_cancel: Arc<tokio::sync::Mutex<Option<CancellationToken>>>,
+    /// Persistent constraint store for learned execution constraints.
+    pub constraints: Arc<RwLock<ConstraintStore>>,
 }
 
 /// Default number of turns between automatic archive exports.

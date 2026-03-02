@@ -8,8 +8,9 @@ use abigail_birth::BirthOrchestrator;
 use abigail_core::{AppConfig, SecretsVault};
 use abigail_hive::{Hive, ModelRegistry};
 use abigail_memory::MemoryStore;
+use abigail_queue::JobQueue;
 #[allow(deprecated)]
-use abigail_router::{IdEgoRouter, OrchestrationScheduler, SubagentManager};
+use abigail_router::{ConstraintStore, IdEgoRouter, OrchestrationScheduler, SubagentManager};
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use abigail_streaming::StreamBroker;
 use std::sync::{Arc, Mutex, RwLock};
@@ -92,6 +93,10 @@ pub struct AppState {
     pub log_buffer: LogBuffer,
     /// Cancellation token for the active streaming chat request (if any)
     pub active_chat_cancel: Arc<tokio::sync::Mutex<Option<CancellationToken>>>,
+    /// Persistent constraint store for learned execution constraints.
+    pub constraints: Arc<std::sync::RwLock<ConstraintStore>>,
+    /// Async job queue for delegated tasks and recurring jobs.
+    pub job_queue: Arc<JobQueue>,
 }
 
 pub struct CliServerHandle {

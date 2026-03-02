@@ -887,7 +887,6 @@ pub async fn stream_chat_pipeline(
     executor: &SkillExecutor,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
-    _target_mode: &str, // Reserved; chat always uses Ego path
     tx: tokio::sync::mpsc::Sender<StreamEvent>,
 ) -> anyhow::Result<StreamPipelineResult> {
     let mut messages = messages;

@@ -13,7 +13,9 @@ pub use hive_core::ApiEnvelope;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatRequest {
     pub message: String,
-    /// Optional target: "EGO", "ID", or None (router decides).
+    /// **Deprecated**: Target routing is handled by the router. This field is
+    /// accepted but ignored. It remains in the DTO for backwards compatibility
+    /// with existing CLI clients — removal is planned for a future version.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
     /// Optional prior messages for multi-turn context.
@@ -460,6 +462,12 @@ pub struct ListJobsResponse {
 pub struct CancelJobResponse {
     pub job_id: String,
     pub status: String,
+}
+
+/// Response for cancelling the active streaming chat.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CancelChatStreamResponse {
+    pub cancelled: bool,
 }
 
 /// Response for topic result retrieval.

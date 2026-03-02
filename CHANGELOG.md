@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-03-03 15:30 EST: Address 6 residual risks — wire server-side cancel for SSE streams (daemon + Tauri), expose governance constraints via routes and Tauri commands, remove legacy blocking chat command, deprecate target field across full stack, expose job scheduler via Tauri commands, add entity-cli skill-sign subcommand for signed allowlist entry generation
 - 2026-03-03 13:40 EST: Fix Ollama startup lifecycle — resolve premature model_loading state, progress bar visibility for non-typewriter paths, double identity-check, pull button port mismatch, CI curl hardening, and fix download URLs to extract from archives (zip/tgz) instead of non-existent standalone binaries
 - 2026-03-02 12:15 EST: Fix "Unsupported 16-Bit Application" error — validate bundled Ollama is a 64-bit PE before spawning, fall back to system Ollama when invalid
 - 2026-03-02 23:20 EST: Fix startup flow — bundle Ollama in release-fast workflow, fix pull button parameter mismatch, show loading screen instead of skipping when Ollama unavailable

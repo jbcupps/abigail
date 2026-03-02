@@ -91,6 +91,21 @@ enum Commands {
         #[arg(long)]
         output: Option<PathBuf>,
     },
+    /// Sign a skill allowlist entry (produces JSON for config)
+    SkillSign {
+        /// Skill ID to sign (e.g., "dynamic.github_api")
+        #[arg(long)]
+        skill_id: String,
+        /// Signer identifier (base64-encoded Ed25519 public key)
+        #[arg(long)]
+        signer: String,
+        /// Source label (e.g., "operator", "ci-pipeline")
+        #[arg(long)]
+        source: String,
+        /// Path to Ed25519 private key file (raw 32 bytes or 64-byte keypair)
+        #[arg(long)]
+        private_key: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -391,6 +406,74 @@ async fn main() -> anyhow::Result<()> {
         } => {
             scaffold_skill(&name, &r#type, output.as_deref())?;
         }
+        Commands::SkillSign {
+            skill_id,
+            signer,
+            source,
+            private_key,
+        } => {
+            sign_skill_allowlist_entry(&skill_id, &signer, &source, &private_key)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn sign_skill_allowlist_entry(
+    skill_id: &str,
+    signer: &str,
+    source: &str,
+    private_key_path: &std::path::Path,
+) -> anyhow::Result<()> {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    use ed25519_dalek::{Signer, SigningKey};
+
+    let key_bytes = std::fs::read(private_key_path)?;
+    let signing_key = match key_bytes.len() {
+        32 => {
+            let bytes: [u8; 32] = key_bytes
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("Invalid key length"))?;
+            SigningKey::from_bytes(&bytes)
+        }
+        64 => {
+            // Ed25519 keypair: first 32 bytes are the secret scalar
+            let mut bytes = [0u8; 32];
+            bytes.copy_from_slice(&key_bytes[..32]);
+            SigningKey::from_bytes(&bytes)
+        }
+        other => {
+            anyhow::bail!(
+                "Expected 32-byte or 64-byte Ed25519 key file, got {} bytes",
+                other
+            );
+        }
+    };
+
+    let payload = abigail_skills::build_allowlist_payload(skill_id, signer, source, true);
+    let signature = signing_key.sign(payload.as_bytes());
+    let sig_b64 = BASE64.encode(signature.to_bytes());
+
+    let entry = serde_json::json!({
+        "skill_id": skill_id,
+        "signer": signer,
+        "signature": sig_b64,
+        "source": source,
+        "added_at": chrono::Utc::now().to_rfc3339(),
+        "active": true,
+    });
+
+    println!("{}", serde_json::to_string_pretty(&entry)?);
+
+    // Verification sanity check
+    let verifying_key = signing_key.verifying_key();
+    let expected_signer = BASE64.encode(verifying_key.to_bytes());
+    if expected_signer != signer {
+        eprintln!("Warning: --signer does not match the public key derived from --private-key.");
+        eprintln!("  Expected: {}", expected_signer);
+        eprintln!("  Got:      {}", signer);
+        eprintln!("The signature is valid for the private key but will fail verification");
+        eprintln!("unless the matching public key is in trusted_skill_signers.");
     }
 
     Ok(())

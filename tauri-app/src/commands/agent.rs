@@ -63,17 +63,24 @@ pub async fn delegate_to_subagent(
 }
 
 #[tauri::command]
-pub fn get_governor_status(_state: State<AppState>) -> Result<serde_json::Value, String> {
-    // Phase 2 logic - stub for now
-    Ok(serde_json::json!({ "status": "active" }))
+pub fn get_governor_status(state: State<AppState>) -> Result<serde_json::Value, String> {
+    let store = state.constraints.read().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "constraints_count": store.len(),
+        "governor": "ephemeral (created per-task)",
+    }))
 }
 
 #[tauri::command]
-pub fn get_constraint_store(_state: State<AppState>) -> Result<serde_json::Value, String> {
-    Ok(serde_json::json!({ "constraints": [] }))
+pub fn get_constraint_store(state: State<AppState>) -> Result<serde_json::Value, String> {
+    let store = state.constraints.read().map_err(|e| e.to_string())?;
+    Ok(serde_json::to_value(store.all()).map_err(|e| e.to_string())?)
 }
 
 #[tauri::command]
-pub fn clear_constraints(_state: State<AppState>) -> Result<(), String> {
+pub fn clear_constraints(state: State<AppState>) -> Result<(), String> {
+    let mut store = state.constraints.write().map_err(|e| e.to_string())?;
+    store.clear();
+    store.save().map_err(|e| e.to_string())?;
     Ok(())
 }
