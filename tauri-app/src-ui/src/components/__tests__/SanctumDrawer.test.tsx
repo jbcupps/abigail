@@ -20,11 +20,11 @@ describe("SanctumDrawer", () => {
   it("falls back to Conscience when staff tab becomes unavailable", async () => {
     const user = userEvent.setup();
     const pollers: Array<() => Promise<void>> = [];
-    vi.spyOn(global, "setInterval").mockImplementation((fn: TimerHandler) => {
+    vi.spyOn(globalThis, "setInterval").mockImplementation((fn: TimerHandler) => {
       pollers.push(fn as () => Promise<void>);
       return 1 as unknown as ReturnType<typeof setInterval>;
     });
-    vi.spyOn(global, "clearInterval").mockImplementation(() => {});
+    vi.spyOn(globalThis, "clearInterval").mockImplementation(() => {});
 
     let backendHealthy = true;
     mockInvoke.mockImplementation((cmd: string) => {

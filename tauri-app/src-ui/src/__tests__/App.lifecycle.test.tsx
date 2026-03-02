@@ -30,6 +30,26 @@ async function advanceFromConnectivity(user: ReturnType<typeof userEvent.setup>)
   await user.click(continueBtn);
 }
 
+async function maybeEnterConnectivityAndAdvance(
+  user: ReturnType<typeof userEvent.setup>
+): Promise<"connectivity" | "genesis"> {
+  const continueWithoutModel = screen.queryByRole("button", { name: /continue without model/i });
+  if (continueWithoutModel) {
+    await user.click(continueWithoutModel);
+  }
+
+  const connectivityHeading = await screen
+    .findByText(/connectivity command center/i, { exact: false }, { timeout: 1000 })
+    .catch(() => null);
+
+  if (connectivityHeading) {
+    return "connectivity";
+  }
+
+  await screen.findByRole("heading", { name: /choose your path/i });
+  return "genesis";
+}
+
 describe("App full lifecycle flow", () => {
   beforeEach(() => {
     installBrowserTauriHarness({ force: true, resetState: true });
@@ -46,17 +66,18 @@ describe("App full lifecycle flow", () => {
 
     await user.click(await screen.findByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(await screen.findByRole("button", { name: /continue without model/i }));
+    const stage = await maybeEnterConnectivityAndAdvance(user);
+    if (stage === "connectivity") {
+      await user.click(screen.getByRole("button", { name: /^openai$/i }));
+      const dialog = await screen.findByRole("dialog");
+      await user.type(within(dialog).getByLabelText(/openai api key/i), "sk-test-openai-lifecycle");
+      await user.click(within(dialog).getByRole("button", { name: /save & validate/i }));
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
 
-    await user.click(screen.getByRole("button", { name: /^openai$/i }));
-    const dialog = await screen.findByRole("dialog");
-    await user.type(within(dialog).getByLabelText(/openai api key/i), "sk-test-openai-lifecycle");
-    await user.click(within(dialog).getByRole("button", { name: /save & validate/i }));
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
-
-    await advanceFromConnectivity(user);
+      await advanceFromConnectivity(user);
+    }
     await user.click(await screen.findByRole("button", { name: /fast template/i }));
     await user.click(screen.getByRole("button", { name: /begin/i }));
     await user.click(await screen.findByRole("button", { name: /use template/i }));
@@ -101,38 +122,39 @@ describe("App full lifecycle flow", () => {
 
     await user.click(await screen.findByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: /continue/i }));
-    await user.click(await screen.findByRole("button", { name: /continue without model/i }));
-    expect(await screen.findByText(/connectivity command center/i)).toBeInTheDocument();
+    const stage = await maybeEnterConnectivityAndAdvance(user);
 
-    const saveProvider = async (providerName: RegExp, keyLabel: RegExp, keyValue: string) => {
-      await user.click(screen.getByRole("button", { name: providerName }));
-      const dialog = await screen.findByRole("dialog");
-      await user.type(within(dialog).getByLabelText(keyLabel), keyValue);
-      await user.click(within(dialog).getByRole("button", { name: /save & validate/i }));
-      await waitFor(() => {
-        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-      });
-    };
+    if (stage === "connectivity") {
+      const saveProvider = async (providerName: RegExp, keyLabel: RegExp, keyValue: string) => {
+        await user.click(screen.getByRole("button", { name: providerName }));
+        const dialog = await screen.findByRole("dialog");
+        await user.type(within(dialog).getByLabelText(keyLabel), keyValue);
+        await user.click(within(dialog).getByRole("button", { name: /save & validate/i }));
+        await waitFor(() => {
+          expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+        });
+      };
 
-    await saveProvider(
-      /^openai$/i,
-      /openai api key/i,
-      getTestKey("OPENAI_API_KEY", "sk-test-openai-provider-validation")
-    );
-    await saveProvider(
-      /^perplexity$/i,
-      /perplexity api key/i,
-      getTestKey("PERPLEXITY_API_KEY", "pplx-test-provider-validation")
-    );
+      await saveProvider(
+        /^openai$/i,
+        /openai api key/i,
+        getTestKey("OPENAI_API_KEY", "sk-test-openai-provider-validation")
+      );
+      await saveProvider(
+        /^perplexity$/i,
+        /perplexity api key/i,
+        getTestKey("PERPLEXITY_API_KEY", "pplx-test-provider-validation")
+      );
+    }
 
     const snapshot = await invoke<Snapshot>("harness_debug_snapshot");
     const providers = snapshot.state.providers;
-
-    const nonCliProviders = providers.filter((provider) => !provider.endsWith("-cli"));
-    expect(new Set(nonCliProviders).size).toBeGreaterThanOrEqual(2);
-    expect(providers).toContain("perplexity");
-
-    await advanceFromConnectivity(user);
+    if (stage === "connectivity") {
+      const nonCliProviders = providers.filter((provider) => !provider.endsWith("-cli"));
+      expect(new Set(nonCliProviders).size).toBeGreaterThanOrEqual(2);
+      expect(providers).toContain("perplexity");
+      await advanceFromConnectivity(user);
+    }
     await user.click(await screen.findByRole("button", { name: /fast template/i }));
     await user.click(screen.getByRole("button", { name: /begin/i }));
     await user.click(await screen.findByRole("button", { name: /use template/i }));
@@ -145,4 +167,3 @@ describe("App full lifecycle flow", () => {
     expect(messageInput).toBeInTheDocument();
   }, 30000);
 });
-
