@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 20;
+pub const CONFIG_SCHEMA_VERSION: u32 = 21;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 ///
@@ -387,11 +387,11 @@ fn default_skill_recovery_budget() -> u8 {
 }
 
 fn default_bundled_ollama() -> bool {
-    cfg!(windows)
+    true
 }
 
 fn default_bundled_model() -> Option<String> {
-    Some("qwen2.5:0.5b".to_string())
+    Some("llama3.2:3b".to_string())
 }
 
 /// Trinity configuration: Ego/Id provider mapping (Superego removed; future policy at Hive via chat-memory hook).
@@ -542,6 +542,11 @@ pub struct AppConfig {
     #[serde(default = "default_bundled_model")]
     pub bundled_model: Option<String>,
 
+    // ── v21 fields ─────────────────────────────────────────────────
+    /// Whether the first bundled model pull has completed (controls loading screen style).
+    #[serde(default)]
+    pub first_model_pull_complete: bool,
+
     // ── v12 fields ─────────────────────────────────────────────────
     /// Version of preloaded integration skills that have been bootstrapped.
     /// Compared against the embedded version at startup to trigger re-bootstrap.
@@ -648,6 +653,7 @@ impl AppConfig {
             email_accounts: Vec::new(),
             bundled_ollama: default_bundled_ollama(),
             bundled_model: default_bundled_model(),
+            first_model_pull_complete: false,
             preloaded_skills_version: 0,
             primary_color: None,
             avatar_url: None,
@@ -904,6 +910,21 @@ impl AppConfig {
             tracing::debug!("Migrated config from v19 to v20 (cli_permission_mode)");
         }
 
+        // Migration from v20 to v21
+        if self.schema_version < 21 {
+            // v21: Bundle Ollama on all platforms (was Windows-only), upgrade default
+            // model from qwen2.5:0.5b to llama3.2:3b, add first_model_pull_complete.
+            self.bundled_ollama = true;
+            if self.bundled_model.as_deref() == Some("qwen2.5:0.5b") {
+                self.bundled_model = Some("llama3.2:3b".to_string());
+            }
+            self.schema_version = 21;
+            migrated = true;
+            tracing::debug!(
+                "Migrated config from v20 to v21 (bundled Ollama all platforms, llama3.2:3b)"
+            );
+        }
+
         migrated
     }
     /// Check if birth was interrupted (birth_stage set but birth_complete is false).
@@ -969,6 +990,7 @@ mod tests {
             email_accounts: Vec::new(),
             bundled_ollama: false,
             bundled_model: None,
+            first_model_pull_complete: false,
             preloaded_skills_version: 0,
             primary_color: None,
             avatar_url: None,

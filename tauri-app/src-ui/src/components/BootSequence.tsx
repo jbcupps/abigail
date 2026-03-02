@@ -289,7 +289,32 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const handleContinueFromKeyPresentation = async () => {
     setPrivateKey(""); // Clear from memory
     await invoke("advance_past_darkness");
-    // Always enter Ignition. The setup wizard decides whether to fast-path.
+
+    // If managed Ollama is running with model ready, skip Ignition AND
+    // Connectivity — the LLM provider picker and cloud-provider setup are
+    // redundant when Ollama is pre-configured.  The user can add cloud
+    // providers later from the Settings drawer.
+    try {
+      const status = await invoke<{ managed: boolean; running: boolean; port: number; model_ready: boolean }>(
+        "get_ollama_status"
+      );
+      if (status.running && status.model_ready) {
+        try {
+          await invoke("advance_to_connectivity");
+          await invoke("advance_to_crystallization");
+        } catch (e) {
+          console.error("Failed to advance past Ignition/Connectivity after Ollama skip:", e);
+          // Fall through to Ignition on error
+          setStage("Ignition");
+          return;
+        }
+        setStage("Genesis");
+        return;
+      }
+    } catch {
+      // get_ollama_status failed — fall through to normal Ignition
+    }
+
     setStage("Ignition");
   };
 

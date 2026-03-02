@@ -742,6 +742,7 @@ pub fn run() {
             get_ollama_status,
             probe_local_llm,
             set_local_llm_during_birth,
+            start_managed_ollama,
             use_stored_provider,
             get_entity_theme,
             get_identity_sharing_settings,
@@ -822,6 +823,20 @@ pub fn run() {
             set_tier_model,
             reset_tier_models
         ])
-        .run(tauri::generate_context!())
-        .expect("error running tauri app");
+        .build(tauri::generate_context!())
+        .expect("error building tauri app")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Gracefully shut down managed Ollama process
+                let state = app_handle.state::<crate::state::AppState>();
+                let ollama = state.ollama.clone();
+                tauri::async_runtime::block_on(async {
+                    let mut guard = ollama.lock().await;
+                    if let Some(ref mut mgr) = *guard {
+                        tracing::info!("App exiting: shutting down managed Ollama");
+                        mgr.shutdown();
+                    }
+                });
+            }
+        });
 }
