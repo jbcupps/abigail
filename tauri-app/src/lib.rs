@@ -732,6 +732,7 @@ pub fn run() {
             list_recommended_models,
             install_ollama,
             pull_ollama_model,
+            list_ollama_models,
             get_ollama_status,
             probe_local_llm,
             set_local_llm_during_birth,
