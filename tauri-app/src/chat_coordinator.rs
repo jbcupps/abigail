@@ -63,14 +63,12 @@ pub struct ChatCommandRequest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatExecutionMode {
-    Blocking,
     Streaming,
 }
 
 impl ChatExecutionMode {
     fn as_str(self) -> &'static str {
         match self {
-            Self::Blocking => "blocking",
             Self::Streaming => "streaming",
         }
     }
@@ -98,43 +96,6 @@ pub struct ChatCoordinator<'a> {
 impl<'a> ChatCoordinator<'a> {
     pub fn new(state: &'a AppState) -> Self {
         Self { state }
-    }
-
-    pub async fn execute_chat(&self, request: ChatCommandRequest) -> Result<String, String> {
-        let prepared = self
-            .prepare_request(request, ChatExecutionMode::Blocking)
-            .await?;
-
-        let result = if prepared.tools.is_empty() {
-            let resp = prepared
-                .router
-                .route_unified(abigail_router::RoutingRequest::simple(prepared.messages))
-                .await;
-            resp.map(|r| ChatPipelineResult {
-                content: r.completion.content,
-                tool_calls_made: Vec::new(),
-                execution_trace: r.trace,
-            })
-        } else {
-            entity_chat::run_tool_use_loop(
-                &prepared.router,
-                &self.state.executor,
-                prepared.messages,
-                prepared.tools,
-            )
-            .await
-            .map(ChatPipelineResult::from_tool_use)
-        };
-
-        match result {
-            Ok(pipeline) => {
-                let response = self
-                    .build_response(&prepared.session_id, &prepared.router, pipeline)
-                    .await;
-                serde_json::to_string(&response).map_err(|e| e.to_string())
-            }
-            Err(e) => Err(e.to_string()),
-        }
     }
 
     pub async fn execute_chat_stream(
@@ -221,7 +182,6 @@ impl<'a> ChatCoordinator<'a> {
             &self.state.executor,
             prepared.messages,
             prepared.tools,
-            prepared.target_resolution.effective,
             tx,
         );
         tokio::pin!(pipeline_fut);
@@ -383,16 +343,6 @@ struct ChatPipelineResult {
     content: String,
     tool_calls_made: Vec<ToolCallRecord>,
     execution_trace: Option<entity_core::ExecutionTrace>,
-}
-
-impl ChatPipelineResult {
-    fn from_tool_use(result: entity_chat::ToolUseResult) -> Self {
-        Self {
-            content: result.content,
-            tool_calls_made: result.tool_calls_made,
-            execution_trace: result.execution_trace,
-        }
-    }
 }
 
 struct ArchiveMetadata {

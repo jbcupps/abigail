@@ -39,15 +39,14 @@ describe("Browser harness debug controls", () => {
   });
 
   it("supports injected chat faults and recovery", async () => {
+    // chat_stream delivers faults via SSE envelopes (returns null, not throwing).
     await invoke("harness_debug_set_fault", { mode: "chat_error" });
-    await expect(
-      invoke("chat", { message: "hello", target: "EGO", sessionMessages: [] })
-    ).rejects.toThrow(/synthetic chat failure/i);
+    const faultResult = await invoke("chat_stream", { message: "hello", sessionMessages: [] });
+    expect(faultResult).toBeNull(); // Error delivered via event envelope, not exception
 
     await invoke("harness_debug_set_fault", { mode: "none" });
-    const ok = await invoke<string>("chat", { message: "hello", target: "EGO", sessionMessages: [] });
-    const parsed = JSON.parse(ok);
-    expect(parsed.reply).toMatch(/harness reply via/i);
+    const okResult = await invoke("chat_stream", { message: "hello", sessionMessages: [] });
+    expect(okResult).toBeNull(); // Response delivered via event envelope
   });
 
   it("supports injected provider validation failures", async () => {

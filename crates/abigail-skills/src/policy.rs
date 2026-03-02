@@ -158,12 +158,20 @@ fn decode_signer_key(raw: &str) -> Result<VerifyingKey, String> {
     VerifyingKey::from_bytes(&bytes).map_err(|e| e.to_string())
 }
 
-fn signed_allowlist_payload(entry: &SignedSkillAllowlistEntry) -> String {
-    // Canonical payload format for signed allowlist entries.
+/// Build the canonical payload string for a signed skill allowlist entry.
+///
+/// This is the exact format that must be Ed25519-signed to create a valid
+/// `SignedSkillAllowlistEntry`. Both the runtime verifier and the
+/// `entity-cli skill-sign` command share this function.
+pub fn build_allowlist_payload(skill_id: &str, signer: &str, source: &str, active: bool) -> String {
     format!(
         "abigail-signed-skill-allowlist-v1\nskill_id={}\nsigner={}\nsource={}\nactive={}",
-        entry.skill_id, entry.signer, entry.source, entry.active
+        skill_id, signer, source, active
     )
+}
+
+fn signed_allowlist_payload(entry: &SignedSkillAllowlistEntry) -> String {
+    build_allowlist_payload(&entry.skill_id, &entry.signer, &entry.source, entry.active)
 }
 
 fn is_external_skill(skill_id: &str) -> bool {

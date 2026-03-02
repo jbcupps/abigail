@@ -6,6 +6,7 @@ pub mod cli;
 pub mod config;
 pub mod forge;
 pub mod identity;
+pub mod jobs;
 pub mod logging;
 pub mod memory;
 pub mod ollama;

@@ -61,7 +61,6 @@ interface OllamaStatus {
 type ConfigStep = "menu" | "ollama" | "lmstudio" | "openai" | "claude-cli" | "gemini-cli" | "codex-cli" | "grok-cli" | null;
 
 interface ChatInterfaceProps {
-  target?: "ID" | "EGO";
   initialSession?: ChatSessionSnapshot | null;
   onSessionSnapshot?: (snapshot: ChatSessionSnapshot) => void;
 }
@@ -79,7 +78,6 @@ function redactApiKeys(text: string): string {
 }
 
 export default function ChatInterface({
-  target = "EGO",
   initialSession = null,
   onSessionSnapshot,
 }: ChatInterfaceProps) {
@@ -500,7 +498,6 @@ export default function ChatInterface({
       const stream = await chatGateway.send(
         {
           message: userMessage.content,
-          target,
           sessionMessages: sessionBeforeTurn,
           sessionId,
         },

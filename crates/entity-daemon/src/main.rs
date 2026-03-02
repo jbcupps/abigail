@@ -508,6 +508,10 @@ async fn main() -> anyhow::Result<()> {
         instruction_registry,
         archive_exporter,
         turns_since_archive: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        active_stream_cancel: Arc::new(tokio::sync::Mutex::new(None)),
+        constraints: Arc::new(tokio::sync::RwLock::new(
+            abigail_router::ConstraintStore::with_data_dir(entity_dir.clone()),
+        )),
     };
 
     // Start background queue scheduler (Phase 1 async sub-agent execution).
@@ -617,6 +621,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/status", get(routes::get_status))
         .route("/v1/chat", post(routes::chat))
         .route("/v1/chat/stream", post(routes::chat_stream))
+        .route("/v1/chat/cancel", post(routes::cancel_chat_stream))
+        .route(
+            "/v1/governance/constraints",
+            get(routes::get_constraints).delete(routes::clear_constraints),
+        )
+        .route("/v1/governance/status", get(routes::get_governance_status))
         .route("/v1/jobs/submit", post(routes::submit_job))
         .route("/v1/jobs", get(routes::list_jobs))
         .route("/v1/jobs/:job_id", get(routes::get_job_status))

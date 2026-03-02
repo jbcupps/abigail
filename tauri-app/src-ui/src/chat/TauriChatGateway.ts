@@ -136,7 +136,6 @@ export class TauriChatGateway implements ChatGateway {
 
       void this.invokeFn("chat_stream", {
         message: request.message,
-        target: request.target,
         sessionMessages: request.sessionMessages,
         sessionId: request.sessionId,
       }).catch((error) => {

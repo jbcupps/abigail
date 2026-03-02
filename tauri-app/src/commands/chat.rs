@@ -6,25 +6,6 @@ use entity_core::SessionMessage;
 use tauri::State;
 
 #[tauri::command]
-pub async fn chat(
-    state: State<'_, AppState>,
-    message: String,
-    target: Option<String>,
-    session_messages: Option<Vec<SessionMessage>>,
-    session_id: Option<String>,
-) -> Result<String, String> {
-    let coordinator = ChatCoordinator::new(&state);
-    coordinator
-        .execute_chat(ChatCommandRequest {
-            message,
-            target,
-            session_messages,
-            session_id,
-        })
-        .await
-}
-
-#[tauri::command]
 pub async fn cancel_chat_stream(state: State<'_, AppState>) -> Result<bool, String> {
     let mut active = state.active_chat_cancel.lock().await;
     if let Some(token) = active.take() {
@@ -39,7 +20,6 @@ pub async fn chat_stream(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     message: String,
-    target: Option<String>,
     session_messages: Option<Vec<SessionMessage>>,
     session_id: Option<String>,
 ) -> Result<(), String> {
@@ -49,7 +29,7 @@ pub async fn chat_stream(
             app,
             ChatCommandRequest {
                 message,
-                target,
+                target: None,
                 session_messages,
                 session_id,
             },

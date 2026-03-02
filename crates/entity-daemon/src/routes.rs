@@ -7,13 +7,14 @@ use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::Json;
 use entity_core::{
-    ApiEnvelope, CancelJobResponse, ChatRequest, ChatResponse, EntityStatus, JobStatusResponse,
-    ListJobsResponse, MemoryEntry, MemoryInsertRequest, MemorySearchRequest, MemoryStats,
-    QueueJobRecord, SkillInfo, SubmitJobRequest, SubmitJobResponse, ToolExecRequest,
-    ToolExecResponse, ToolInfo, TopicResultsResponse,
+    ApiEnvelope, CancelChatStreamResponse, CancelJobResponse, ChatRequest, ChatResponse,
+    EntityStatus, JobStatusResponse, ListJobsResponse, MemoryEntry, MemoryInsertRequest,
+    MemorySearchRequest, MemoryStats, QueueJobRecord, SkillInfo, SubmitJobRequest,
+    SubmitJobResponse, ToolExecRequest, ToolExecResponse, ToolInfo, TopicResultsResponse,
 };
 use futures_util::{Stream, StreamExt};
 use std::convert::Infallible;
+use tokio_util::sync::CancellationToken;
 
 // ---------------------------------------------------------------------------
 // GET /health
@@ -216,9 +217,17 @@ pub async fn chat_stream(
         &body.message,
     );
     let tools = entity_chat::build_tool_definitions(&state.registry);
-    let target: String = body.target.unwrap_or_else(|| "AUTO".to_string());
 
     let (sse_tx, sse_rx) = tokio::sync::mpsc::channel::<Event>(64);
+
+    // Create cancellation token and store it so POST /v1/chat/cancel can fire it.
+    let cancel_token = CancellationToken::new();
+    {
+        let mut active = state.active_stream_cancel.lock().await;
+        if let Some(prev) = active.replace(cancel_token.clone()) {
+            prev.cancel();
+        }
+    }
 
     let router = state.router.clone();
     let executor = state.executor.clone();
@@ -226,6 +235,7 @@ pub async fn chat_stream(
     let broker_for_stream = state.stream_broker.clone();
     let archive_exporter = state.archive_exporter.clone();
     let turns_since_archive = state.turns_since_archive.clone();
+    let cancel_state = state.active_stream_cancel.clone();
     let sid = session_id.clone();
 
     tokio::spawn(async move {
@@ -241,9 +251,20 @@ pub async fn chat_stream(
             }
         });
 
-        let result =
-            entity_chat::stream_chat_pipeline(&router, &executor, messages, tools, &target, tx)
-                .await;
+        let pipeline_fut =
+            entity_chat::stream_chat_pipeline(&router, &executor, messages, tools, tx);
+        tokio::pin!(pipeline_fut);
+
+        let result = tokio::select! {
+            res = &mut pipeline_fut => res,
+            _ = cancel_token.cancelled() => Err(anyhow::anyhow!("Interrupted by user")),
+        };
+
+        // Clear the stored token.
+        {
+            let mut active = cancel_state.lock().await;
+            *active = None;
+        }
 
         let _ = fwd_task.await;
 
@@ -319,6 +340,66 @@ pub async fn chat_stream(
 
     let stream = tokio_stream::wrappers::ReceiverStream::new(sse_rx).map(Ok);
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/governance/constraints — list learned constraints
+// ---------------------------------------------------------------------------
+
+pub async fn get_constraints(
+    State(state): State<EntityDaemonState>,
+) -> Json<ApiEnvelope<Vec<abigail_router::constraint_store::Constraint>>> {
+    let store = state.constraints.read().await;
+    Json(ApiEnvelope::success(store.all().to_vec()))
+}
+
+// ---------------------------------------------------------------------------
+// DELETE /v1/governance/constraints — clear all learned constraints
+// ---------------------------------------------------------------------------
+
+pub async fn clear_constraints(
+    State(state): State<EntityDaemonState>,
+) -> Json<ApiEnvelope<serde_json::Value>> {
+    let mut store = state.constraints.write().await;
+    store.clear();
+    if let Err(e) = store.save() {
+        tracing::warn!("Failed to persist cleared constraints: {}", e);
+    }
+    Json(ApiEnvelope::success(serde_json::json!({ "cleared": true })))
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/governance/status — governor metadata
+// ---------------------------------------------------------------------------
+
+pub async fn get_governance_status(
+    State(state): State<EntityDaemonState>,
+) -> Json<ApiEnvelope<serde_json::Value>> {
+    let store = state.constraints.read().await;
+    Json(ApiEnvelope::success(serde_json::json!({
+        "constraints_count": store.len(),
+        "governor": "ephemeral (created per-task)",
+    })))
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/chat/cancel — cancel the active streaming chat
+// ---------------------------------------------------------------------------
+
+pub async fn cancel_chat_stream(
+    State(state): State<EntityDaemonState>,
+) -> Json<ApiEnvelope<CancelChatStreamResponse>> {
+    let mut active = state.active_stream_cancel.lock().await;
+    if let Some(token) = active.take() {
+        token.cancel();
+        Json(ApiEnvelope::success(CancelChatStreamResponse {
+            cancelled: true,
+        }))
+    } else {
+        Json(ApiEnvelope::success(CancelChatStreamResponse {
+            cancelled: false,
+        }))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -868,6 +949,10 @@ mod tests {
             instruction_registry: Arc::new(InstructionRegistry::empty()),
             archive_exporter: None,
             turns_since_archive: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            active_stream_cancel: Arc::new(tokio::sync::Mutex::new(None)),
+            constraints: Arc::new(tokio::sync::RwLock::new(
+                abigail_router::ConstraintStore::new(),
+            )),
         }
     }
 

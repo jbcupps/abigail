@@ -22,6 +22,7 @@ use crate::commands::cli::*;
 use crate::commands::config::*;
 use crate::commands::forge::*;
 use crate::commands::identity::*;
+use crate::commands::jobs::*;
 use crate::commands::logging::*;
 use crate::commands::memory::*;
 use crate::commands::ollama::*;
@@ -384,6 +385,32 @@ pub fn run() {
     #[allow(deprecated)]
     let orchestration_scheduler = Arc::new(OrchestrationScheduler::new(data_dir.clone()));
 
+    // Open job queue database for async task management.
+    let job_queue = {
+        let job_db_path = data_dir.join("jobs.db");
+        let conn =
+            rusqlite::Connection::open(&job_db_path).expect("Failed to open job queue database");
+        conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+        conn.execute_batch(abigail_queue::MIGRATION_V3_JOB_QUEUE)
+            .unwrap();
+        for stmt in abigail_queue::MIGRATION_V4_ORCHESTRATION.split(';') {
+            let trimmed = stmt.trim();
+            if !trimmed.is_empty() {
+                let _ = conn.execute_batch(trimmed);
+            }
+        }
+        for stmt in abigail_queue::MIGRATION_V5_DEPENDS_ON.split(';') {
+            let trimmed = stmt.trim();
+            if !trimmed.is_empty() {
+                let _ = conn.execute_batch(trimmed);
+            }
+        }
+        Arc::new(abigail_queue::JobQueue::new(
+            Arc::new(std::sync::Mutex::new(conn)),
+            stream_broker.clone(),
+        ))
+    };
+
     // Seed skill instructions into data_dir when absent (first run / clean install).
     skill_instructions::bootstrap_if_needed(&data_dir);
 
@@ -424,6 +451,10 @@ pub fn run() {
         cli_server: Arc::new(tokio::sync::Mutex::new(None)),
         log_buffer: log_buffer.clone(),
         active_chat_cancel: Arc::new(tokio::sync::Mutex::new(None)),
+        constraints: Arc::new(std::sync::RwLock::new(
+            abigail_router::ConstraintStore::with_data_dir(data_dir.clone()),
+        )),
+        job_queue,
     };
 
     tauri::Builder::default()
@@ -792,7 +823,6 @@ pub fn run() {
             get_forge_audit_events,
             get_forge_undo_status,
             genesis_chat,
-            chat,
             chat_stream,
             cancel_chat_stream,
             get_system_diagnostics,
@@ -818,7 +848,12 @@ pub fn run() {
             set_tier_thresholds,
             get_tier_models,
             set_tier_model,
-            reset_tier_models
+            reset_tier_models,
+            submit_job,
+            list_jobs,
+            get_job_status,
+            cancel_job,
+            list_recurring_templates
         ])
         .build(tauri::generate_context!())
         .expect("error building tauri app")
