@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-03-03 13:20 EST: Fix Ollama startup lifecycle — resolve premature model_loading state, progress bar visibility for non-typewriter paths, double identity-check, pull button port mismatch, and CI curl error handling
 - 2026-03-02 12:15 EST: Fix "Unsupported 16-Bit Application" error — validate bundled Ollama is a 64-bit PE before spawning, fall back to system Ollama when invalid
 - 2026-03-02 23:20 EST: Fix startup flow — bundle Ollama in release-fast workflow, fix pull button parameter mismatch, show loading screen instead of skipping when Ollama unavailable
 - 2026-03-02 21:40 EST: Fix release workflow version auto-increment failing on suffixed tags (e.g. v0.0.65-fast.4) — filter to clean semver tags only
