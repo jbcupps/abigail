@@ -348,20 +348,18 @@ async fn turn2_fetch_emails() {
     let hive_ops: Arc<dyn HiveOperations> = Arc::new(TestHiveOps::new(vault.clone()));
     let registry = build_skill_registry(hive_ops);
 
-    // Initialize ProtonMailSkill with a timeout (IMAP server may be unavailable)
-    let mut proton_skill = skill_proton_mail::ProtonMailSkill::new(
-        skill_proton_mail::ProtonMailSkill::default_manifest(),
-    );
+    // Initialize EmailSkill with a timeout (IMAP server may be unavailable)
+    let mut email_skill = skill_email::EmailSkill::new(skill_email::EmailSkill::default_manifest());
     let skill_config = build_skill_config_from_vault(&initial_secrets);
     let init_result = tokio::time::timeout(
         std::time::Duration::from_secs(IMAP_INIT_TIMEOUT_SECS),
-        proton_skill.initialize(skill_config),
+        email_skill.initialize(skill_config),
     )
     .await;
     match init_result {
-        Ok(Ok(())) => eprintln!("ProtonMailSkill initialized successfully"),
+        Ok(Ok(())) => eprintln!("EmailSkill initialized successfully"),
         Ok(Err(e)) => {
-            eprintln!("Skipping Turn 2 — ProtonMailSkill init failed: {e}");
+            eprintln!("Skipping Turn 2 — EmailSkill init failed: {e}");
             return;
         }
         Err(_) => {
@@ -375,10 +373,10 @@ async fn turn2_fetch_emails() {
 
     registry
         .register(
-            SkillId("com.abigail.skills.proton-mail".to_string()),
-            Arc::new(proton_skill),
+            SkillId("com.abigail.skills.email".to_string()),
+            Arc::new(email_skill),
         )
-        .expect("Failed to register ProtonMailSkill");
+        .expect("Failed to register email skill");
 
     let executor = SkillExecutor::new(registry.clone());
     let instruction_reg = build_instruction_registry();
@@ -459,20 +457,18 @@ async fn turn3_send_email() {
     let hive_ops: Arc<dyn HiveOperations> = Arc::new(TestHiveOps::new(vault.clone()));
     let registry = build_skill_registry(hive_ops);
 
-    // Initialize ProtonMailSkill with a timeout
-    let mut proton_skill = skill_proton_mail::ProtonMailSkill::new(
-        skill_proton_mail::ProtonMailSkill::default_manifest(),
-    );
+    // Initialize EmailSkill with a timeout
+    let mut email_skill = skill_email::EmailSkill::new(skill_email::EmailSkill::default_manifest());
     let skill_config = build_skill_config_from_vault(&initial_secrets);
     let init_result = tokio::time::timeout(
         std::time::Duration::from_secs(IMAP_INIT_TIMEOUT_SECS),
-        proton_skill.initialize(skill_config),
+        email_skill.initialize(skill_config),
     )
     .await;
     match init_result {
-        Ok(Ok(())) => eprintln!("ProtonMailSkill initialized successfully"),
+        Ok(Ok(())) => eprintln!("EmailSkill initialized successfully"),
         Ok(Err(e)) => {
-            eprintln!("Skipping Turn 3 — ProtonMailSkill init failed: {e}");
+            eprintln!("Skipping Turn 3 — EmailSkill init failed: {e}");
             return;
         }
         Err(_) => {
@@ -486,10 +482,10 @@ async fn turn3_send_email() {
 
     registry
         .register(
-            SkillId("com.abigail.skills.proton-mail".to_string()),
-            Arc::new(proton_skill),
+            SkillId("com.abigail.skills.email".to_string()),
+            Arc::new(email_skill),
         )
-        .expect("Failed to register ProtonMailSkill");
+        .expect("Failed to register email skill");
 
     let executor = SkillExecutor::new(registry.clone());
     let instruction_reg = build_instruction_registry();

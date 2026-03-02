@@ -1,12 +1,12 @@
-# Proton Mail-style email skill (abigail-skills IMAP/SMTP).
+# Generic IMAP/SMTP email skill (abigail-skills transport layer).
 
 [skill]
-id = "com.abigail.skills.proton-mail"
-name = "Proton Mail"
+id = "com.abigail.skills.email"
+name = "Email"
 version = "0.1.0"
-description = "Proton Mail-style email: fetch, send, and manage mail via IMAP/SMTP (abigail-skills)."
+description = "Email via IMAP/SMTP: fetch, send, and manage mail with any compatible server."
 category = "Communication"
-keywords = ["email", "proton", "imap", "smtp"]
+keywords = ["email", "imap", "smtp", "inbox"]
 
 [runtime]
 runtime = "Native"
@@ -18,8 +18,8 @@ capability = "email_transport"
 version = "1.0"
 
 [[permissions]]
-permission = { Network = { Domains = ["mail.proton.me", "smtp.proton.me"] } }
-reason = "IMAP and SMTP for Proton Mail"
+permission = { Network = "Full" }
+reason = "IMAP and SMTP server depends on user configuration"
 
 [[secrets]]
 name = "imap_password"
@@ -33,8 +33,8 @@ required = true
 
 [[secrets]]
 name = "imap_host"
-description = "IMAP server hostname (default: mail.proton.me)"
-required = false
+description = "IMAP server hostname (required — no default)"
+required = true
 
 [[secrets]]
 name = "imap_port"
@@ -48,8 +48,8 @@ required = false
 
 [[secrets]]
 name = "smtp_host"
-description = "SMTP server hostname (default: smtp.proton.me)"
-required = false
+description = "SMTP server hostname (required — no default)"
+required = true
 
 [[secrets]]
 name = "smtp_port"
@@ -57,4 +57,4 @@ description = "SMTP server port (default: 587)"
 required = false
 
 [config]
-defaults = { imap_host = "mail.proton.me", imap_port = 993, smtp_host = "smtp.proton.me", smtp_port = 587 }
+defaults = { imap_port = 993, smtp_port = 587 }

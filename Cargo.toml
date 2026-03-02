@@ -38,6 +38,7 @@ members = [
     "skills/skill-image",
     "skills/skill-clipboard",
     "skills/skill-system-monitor",
+    "skills/skill-email",
     "tauri-app",
 ]
 

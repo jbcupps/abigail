@@ -61,17 +61,37 @@ function AppInner() {
         await invoke("suspend_agent");
       }
 
-      // Start managed Ollama (bundled local LLM) — may need to pull model
+      // Start managed Ollama (bundled Hive agent LLM).
+      // Always show loading screen while Ollama starts and model warms up.
       try {
+        setOllamaProgress(0);
+        setOllamaStatus("Starting Hive agent...");
+        setAppState("model_loading");
+
         const needsPull = await invoke<boolean>("start_managed_ollama");
         if (needsPull) {
-          // Model is being downloaded — show loading screen
+          // Model is being downloaded — stay on loading screen, events will advance
           setIsFirstPull(true);
-          setOllamaProgress(0);
-          setOllamaStatus("Starting download...");
-          setAppState("model_loading");
-          return; // Event listeners will advance state when ready
+          setOllamaStatus("Downloading model...");
+          return;
         }
+
+        // Model exists — warm it up with a quick probe, then advance
+        setIsFirstPull(false);
+        setOllamaStatus("Warming up Hive agent...");
+        setOllamaProgress(80);
+
+        // Brief warm-up request to load model into memory
+        try {
+          await invoke("warmup_ollama_model");
+        } catch {
+          // Non-fatal — model will load on first real request
+        }
+
+        setOllamaProgress(100);
+        // Small delay so user sees the loading screen, then advance
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        // Fall through to identity checks below
       } catch (e) {
         console.warn("[App] start_managed_ollama failed; continuing without bundled Ollama:", e);
         // Non-fatal — user may have their own LLM or cloud-only setup

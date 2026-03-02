@@ -21,4 +21,4 @@ async-trait.workspace = true
 chrono.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 abigail-core = { path = "../abigail-core" }
-skill-proton-mail = { path = "../../skills/skill-proton-mail" }
+skill-email = { path = "../../skills/skill-email" }

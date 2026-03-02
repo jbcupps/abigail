@@ -1,6 +1,6 @@
 # Email (IMAP/SMTP) Skill
 
-You have access to email tools via the Proton Mail skill. Use these when the user asks about email, their inbox, or wants to send messages.
+You have access to email tools via the Email skill. Use these when the user asks about email, their inbox, or wants to send messages.
 
 ## Mailbox Setup
 
@@ -18,7 +18,7 @@ When the user provides mailbox / IMAP credentials, store each value using the `s
 
 Call `store_secret` once per field with `{ "key": "<vault_key>", "value": "<user_value>" }`.
 
-Only `imap_user` and `imap_password` are required. The others have sensible defaults (host: `mail.proton.me`, port: `993`, TLS: `IMPLICIT`, smtp_host: `smtp.proton.me`, smtp_port: `587`) and only need to be stored when the user supplies non-default values.
+`imap_user`, `imap_password`, `imap_host`, and `smtp_host` are **required** — there are no default host values. `imap_port` defaults to `993`, `smtp_port` defaults to `587`, and `imap_tls_mode` defaults to `IMPLICIT`. Only store port/TLS values when the user supplies non-default values.
 
 After storing, confirm each key was saved and summarize the configuration (mask the password).
 

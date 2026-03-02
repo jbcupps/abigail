@@ -5,9 +5,9 @@
 # the corresponding instruction file is injected into the system prompt.
 
 [[skill]]
-id = "com.abigail.skills.proton-mail"
+id = "com.abigail.skills.email"
 instruction_file = "skill_email_imap.md"
-keywords = ["email", "mail", "inbox", "imap", "smtp", "send mail", "proton"]
+keywords = ["email", "mail", "inbox", "imap", "smtp", "send mail"]
 enabled = true
 
 [[skill]]
