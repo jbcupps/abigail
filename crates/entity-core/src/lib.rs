@@ -379,6 +379,98 @@ pub struct MemoryStats {
 }
 
 // ---------------------------------------------------------------------------
+// Queue / Jobs
+// ---------------------------------------------------------------------------
+
+/// Request to submit a delegated async job.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubmitJobRequest {
+    pub goal: String,
+    pub topic: String,
+    #[serde(default)]
+    pub capability: Option<String>,
+    #[serde(default)]
+    pub priority: Option<String>,
+    #[serde(default)]
+    pub time_budget_ms: Option<u64>,
+    #[serde(default)]
+    pub max_turns: Option<u32>,
+    #[serde(default)]
+    pub system_context: Option<String>,
+    #[serde(default)]
+    pub allowed_skill_ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub ttl_seconds: Option<u64>,
+    #[serde(default)]
+    pub input_data: Option<serde_json::Value>,
+    #[serde(default)]
+    pub parent_job_id: Option<String>,
+}
+
+/// Response after queue submission.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubmitJobResponse {
+    pub job_id: String,
+    pub topic: String,
+    pub status: String,
+}
+
+/// View model of a queued job record.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueJobRecord {
+    pub id: String,
+    pub topic: String,
+    pub goal: String,
+    pub capability: String,
+    pub priority: String,
+    pub status: String,
+    pub time_budget_ms: u64,
+    pub max_turns: u32,
+    pub system_context: Option<String>,
+    pub allowed_skill_ids: Vec<String>,
+    pub input_data: Option<serde_json::Value>,
+    pub parent_job_id: Option<String>,
+    pub agent_id: Option<String>,
+    pub model_used: Option<String>,
+    pub provider_used: Option<String>,
+    pub result: Option<String>,
+    pub error: Option<String>,
+    pub turns_consumed: u32,
+    pub ttl_seconds: u64,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub expires_at: String,
+}
+
+/// Response for querying a single job.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobStatusResponse {
+    pub job: QueueJobRecord,
+}
+
+/// Response for listing jobs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListJobsResponse {
+    pub jobs: Vec<QueueJobRecord>,
+}
+
+/// Response for cancelling a job.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CancelJobResponse {
+    pub job_id: String,
+    pub status: String,
+}
+
+/// Response for topic result retrieval.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopicResultsResponse {
+    pub topic: String,
+    pub all_terminal: bool,
+    pub jobs: Vec<QueueJobRecord>,
+}
+
+// ---------------------------------------------------------------------------
 // Chat memory hook (for future Hive / Superego integration)
 // ---------------------------------------------------------------------------
 

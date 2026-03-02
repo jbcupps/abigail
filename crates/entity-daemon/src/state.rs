@@ -2,9 +2,11 @@
 
 use abigail_core::AppConfig;
 use abigail_memory::{ArchiveExporter, MemoryStore};
+use abigail_queue::JobQueue;
 use abigail_router::IdEgoRouter;
 use abigail_skills::channel::EventBus;
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
+use abigail_streaming::StreamBroker;
 use entity_core::ChatMemoryHook;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -25,6 +27,11 @@ pub struct EntityDaemonState {
     pub docs_dir: PathBuf,
     /// SQLite memory store for persistent memory across conversations.
     pub memory: Arc<MemoryStore>,
+    /// Persistent async job queue for delegated sub-agent tasks.
+    pub job_queue: Arc<JobQueue>,
+    /// Backing stream broker (Iggy in alpha).
+    #[allow(dead_code)]
+    pub stream_broker: Arc<dyn StreamBroker>,
     /// Optional hook called when a chat memory is persisted (for future Hive/Superego use).
     pub memory_hook: Option<Arc<dyn ChatMemoryHook>>,
     /// Skill instruction registry for injecting matched LLM instructions into prompts.

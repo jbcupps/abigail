@@ -1,87 +1,43 @@
-# Abigail UI Test Program Index
+# Abigail Test Program Index (Current)
+
+Date: 2026-03-02
 
 ## Scope
 
-This program defines six executable UI test suites:
-- Birth
-- Crystallization
-- Operational Hive Interface
-- Skills
-- Agent Spawning
-- Message Flow Stability
+This is the canonical test-program index for the current architecture:
 
-Primary references:
-- `documents/BROWSER_HARNESS_QA_PROTOCOL.md`
-- `documents/GUI_ENTITY_STABILITY_ROADMAP.md`
-- `documents/GUI_ENTITY_CODE_REVIEW_REPORT.md`
-- `tauri-app/src-ui/src/__tests__/App.browserFlow.test.tsx`
-- `tauri-app/src-ui/src/__tests__/HarnessDebug.test.tsx`
+- Hive/Entity split daemons
+- Gateway-based desktop chat flow
+- Tier-based routing with `tier_based`, `ego_primary`, `council`, and `cli_orchestrator`
+- Skill trust and signed allowlist enforcement
 
-## Shared Test Case Schema
+## Canonical Program Documents
 
-Every test case in all suite documents must use this structure:
+- `documents/tests/UNIT_TEST_PROGRAM.md`
+- `documents/tests/UX_TEST_PROGRAM.md`
+- `documents/tests/E2E_TEST_PROGRAM.md`
+- `documents/tests/AUTOMATION_MATRIX.md`
+- `documents/tests/VALIDATION_AND_GATE_REPORT.md`
 
-- `Test ID`: unique suite-prefixed identifier
-- `Title`
-- `Priority`: `P0`, `P1`, `P2`
-- `Type`: `AutomatedHarness`, `ManualNative`, `Hybrid`
-- `Preconditions`
-- `Steps` (numbered)
-- `Expected`
-- `Evidence`
-- `Result`: `Pass`, `Fail`, `Blocked`
-- `Defect / Notes`
+## Program Tracks
 
-## ID Ranges
-
-- `BIRTH-001..099`
-- `CRYS-001..099`
-- `OPER-001..099`
-- `SKILL-001..099`
-- `SPAWN-001..099`
-- `STAB-001..099`
-
-## Severity / Triage
-
-- `Critical`: release-blocking, no workaround
-- `High`: core flow broken, workaround weak
-- `Medium`: non-core behavior or recoverable failure
-- `Low`: minor UX/documentation/cosmetic gap
-
-## Execution Order
-
-1. Birth Suite
-2. Crystallization Suite
-3. Operational Suite
-4. Skills Suite
-5. Agent Spawning Suite
-6. Message Flow Stability Suite
-7. Regression + Native parity gates
-
-## Automation Matrix (Program-Level)
-
-| Suite | Automated Harness | Manual Native | Hybrid |
-|---|---:|---:|---:|
-| Birth | Yes | Yes | Yes |
-| Crystallization | Yes | Yes | Yes |
-| Operational | Yes | Yes | Yes |
-| Skills | Partial | Yes | Yes |
-| Agent Spawning | Partial | Yes | Yes |
-| Message Flow Stability | Yes | Yes | Yes |
-
-Notes:
-- Skills creation and deep spawning lifecycle may require harness extensions for full automation parity.
-- Native parity remains mandatory for release `Go`.
+1. Unit: crate-level logic and invariants (Rust + TypeScript unit/component tests)
+2. UX: user-visible desktop/browser-harness behavior and regressions
+3. End-to-End: daemon/runtime integration, live tool-use, and policy checks
 
 ## Program Gates
 
-- `Gate-A`: All P0 automated harness tests pass.
-- `Gate-B`: `npm run build` passes.
-- `Gate-C`: `npm run test:coverage` passes.
-- `Gate-D`: Native parity smoke checks pass.
-- `Gate-E`: No unresolved P0 `Blocked` tests.
+- `Gate-U1`: `cargo test --workspace --exclude abigail-app` passes.
+- `Gate-U2`: `cargo clippy --workspace --exclude abigail-app -- -D warnings` passes.
+- `Gate-U3`: `cargo check -p abigail-app` passes.
+- `Gate-X1`: `cd tauri-app/src-ui && npm run build` passes.
+- `Gate-X2`: `cd tauri-app/src-ui && npm run test:coverage` passes.
+- `Gate-E1`: command-contract check passes (`npm run check:command-contract`).
+- `Gate-E2`: env-gated live E2E suites pass when enabled (email + Tauri probe).
 
-## Suite Documents
+## Legacy Suite Status
+
+The following documents remain for historical traceability but are no longer the canonical planning surface:
 
 - `documents/tests/BIRTH_UI_TEST_PLAN.md`
 - `documents/tests/CRYSTALLIZATION_UI_TEST_PLAN.md`
@@ -89,20 +45,12 @@ Notes:
 - `documents/tests/SKILLS_TEST_PLAN.md`
 - `documents/tests/AGENT_SPAWNING_TEST_PLAN.md`
 - `documents/tests/MESSAGE_FLOW_STABILITY_TEST_PLAN.md`
-- `documents/tests/AUTOMATION_MATRIX.md`
-- `documents/tests/VALIDATION_AND_GATE_REPORT.md`
 
-## Sprint Execution Documents
+Legacy IDs (`BIRTH-*`, `CRYS-*`, `OPER-*`, `SKILL-*`, `SPAWN-*`, `STAB-*`) are consolidated into the new `UNIT-*`, `UX-*`, and `E2E-*` tracks.
 
-- `documents/tests/SPRINT_1_GUI_ENTITY_STABILITY_REPORT.md`
-- `documents/tests/SPRINT_2_CHAT_GATEWAY_KICKOFF_CHECKLIST.md`
-- `documents/tests/SPRINT_2_CHAT_GATEWAY_REPORT.md`
-- `documents/tests/SPRINT_3_INTERNAL_MESSAGE_BOUNDARY_REPORT.md`
-- `documents/tests/SPRINT_4_ENTITY_INITIATED_AGENTS_KICKOFF_CHECKLIST.md`
-- `documents/tests/SPRINT_4_ENTITY_INITIATED_AGENTS_REPORT.md`
-- `documents/tests/SPRINT_5_HARDENING_AND_CUTOVER_REPORT.md`
+## Execution Order
 
-## Integration Test Guides
-
-- `documents/tests/EMAIL_INTEGRATION_TEST_GUIDE.md` — Step-by-step instructions for running the live email E2E tests (`entity-chat` crate, env-gated)
-- `documents/tests/EMAIL_INTEGRATION_REPORT.md` — Detailed report of email integration test results, bugs found, and fixes applied
+1. Unit gates (`Gate-U1`..`Gate-U3`)
+2. UX gates (`Gate-X1`..`Gate-X2`)
+3. E2E gates (`Gate-E1`..`Gate-E2`)
+4. Release decision from `documents/tests/VALIDATION_AND_GATE_REPORT.md`

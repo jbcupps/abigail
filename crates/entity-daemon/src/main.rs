@@ -3,24 +3,34 @@
 //! Wraps `IdEgoRouter`, `SkillRegistry`, `SkillExecutor`, and `EventBus` behind
 //! an Axum REST API. Fetches provider configuration from hive-daemon on startup.
 
+mod capability_matcher;
 mod hive_client;
+mod job_scheduler;
+mod queue_ops;
 mod routes;
 mod state;
+mod subagent_runner;
 
 use abigail_core::{AppConfig, SecretsVault};
 use abigail_hive::Hive;
 use abigail_memory::MemoryStore;
+use abigail_queue::JobQueue;
 use abigail_router::IdEgoRouter;
 use abigail_skills::channel::EventBus;
 use abigail_skills::skill::SkillConfig;
 use abigail_skills::{Skill, SkillExecutionPolicy, SkillExecutor, SkillRegistry};
+use abigail_streaming::{IggyBroker, StreamBroker, TopicConfig};
 use axum::routing::{get, post};
 use axum::Router;
+use capability_matcher::CapabilityMatcher;
 use clap::Parser;
 use hive_client::HiveClient;
+use job_scheduler::JobScheduler;
+use queue_ops::LocalQueueOperations;
 use state::EntityDaemonState;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use subagent_runner::SubagentRunner;
 use tower_http::cors::{Any, CorsLayer};
 
 #[derive(Parser)]
@@ -42,6 +52,10 @@ struct Cli {
     /// Must match the Hive's --data-dir for shared identity resolution.
     #[arg(long)]
     data_dir: Option<String>,
+
+    /// Iggy connection string used for persistent event streaming.
+    #[arg(long, default_value = "iggy://iggy:iggy@127.0.0.1:8090")]
+    iggy_connection: String,
 }
 
 #[tokio::main]
@@ -400,6 +414,55 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    // 10. Initialize persistent event streaming (Iggy) and job queue.
+    let stream_broker: Arc<dyn StreamBroker> = Arc::new(
+        IggyBroker::new(cli.iggy_connection.clone())
+            .map_err(|e| anyhow::anyhow!("Failed to configure Iggy broker: {}", e))?,
+    );
+    stream_broker
+        .ensure_topic("abigail", "job-events", TopicConfig::default())
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to ensure Iggy topic abigail/job-events: {}", e))?;
+    stream_broker
+        .ensure_consumer_group("abigail", "job-events", "entity-daemon")
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!("Failed to ensure Iggy consumer group entity-daemon: {}", e)
+        })?;
+    tracing::info!("Connected to Iggy at {}", cli.iggy_connection);
+
+    let queue_conn = rusqlite::Connection::open(&config.db_path).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to open queue SQLite DB {}: {}",
+            config.db_path.display(),
+            e
+        )
+    })?;
+    queue_conn
+        .execute_batch("PRAGMA journal_mode=WAL;")
+        .map_err(|e| anyhow::anyhow!("Failed to configure queue SQLite WAL mode: {}", e))?;
+    queue_conn
+        .execute_batch(abigail_queue::MIGRATION_V3_JOB_QUEUE)
+        .map_err(|e| anyhow::anyhow!("Failed to apply queue migration: {}", e))?;
+    let job_queue = Arc::new(JobQueue::new(
+        Arc::new(Mutex::new(queue_conn)),
+        stream_broker.clone(),
+    ));
+    let recovered = job_queue.recover_running_jobs("entity-daemon restarted")?;
+    if recovered > 0 {
+        tracing::warn!("Recovered {} running jobs at startup", recovered);
+    }
+
+    // 11. Register QueueManagementSkill (queue submit/status/list/cancel tools).
+    {
+        let queue_ops = Arc::new(LocalQueueOperations::new(job_queue.clone()));
+        let queue_skill = abigail_skills::QueueManagementSkill::new(queue_ops);
+        let _ = registry.register(
+            abigail_skills::manifest::SkillId("builtin.queue_management".to_string()),
+            Arc::new(queue_skill),
+        );
+    }
+
     let state = EntityDaemonState {
         entity_id: cli.entity_id.clone(),
         config,
@@ -409,11 +472,31 @@ async fn main() -> anyhow::Result<()> {
         event_bus,
         docs_dir,
         memory,
+        job_queue,
+        stream_broker,
         memory_hook: None,
         instruction_registry,
         archive_exporter,
         turns_since_archive: Arc::new(std::sync::atomic::AtomicU32::new(0)),
     };
+
+    // Start background queue scheduler (Phase 1 async sub-agent execution).
+    let capability_matcher = CapabilityMatcher::from_router(state.router.clone());
+    let subagent_runner = Arc::new(SubagentRunner::new(
+        state.job_queue.clone(),
+        state.router.clone(),
+        state.registry.clone(),
+        state.executor.clone(),
+        capability_matcher,
+        state.config.agent_name.clone(),
+    ));
+    let scheduler = Arc::new(
+        JobScheduler::new(state.job_queue.clone(), subagent_runner)
+            .with_max_concurrency(2)
+            .with_poll_interval(std::time::Duration::from_millis(500)),
+    );
+    scheduler.spawn();
+    tracing::info!("Job scheduler started (max_concurrency=2)");
 
     // Spawn SkillsWatcher for hot-reload of new skills (before state is consumed)
     let _watcher = {
@@ -486,6 +569,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/status", get(routes::get_status))
         .route("/v1/chat", post(routes::chat))
         .route("/v1/chat/stream", post(routes::chat_stream))
+        .route("/v1/jobs/submit", post(routes::submit_job))
+        .route("/v1/jobs", get(routes::list_jobs))
+        .route("/v1/jobs/:job_id", get(routes::get_job_status))
+        .route("/v1/jobs/:job_id/cancel", post(routes::cancel_job))
+        .route("/v1/topics/:topic/results", get(routes::topic_results))
+        .route("/v1/topics/:topic/watch", get(routes::watch_topic))
         .route("/v1/routing/diagnose", get(routes::diagnose_routing))
         .route("/v1/skills", get(routes::list_skills))
         .route("/v1/tools/execute", post(routes::execute_tool))

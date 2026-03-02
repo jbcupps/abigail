@@ -107,6 +107,12 @@ keywords = ["notify", "notification", "alert", "remind", "desktop notification"]
 enabled = true
 
 [[skill]]
+id = "builtin.queue_management"
+instruction_file = "skill_queue_management.md"
+keywords = ["queue", "job", "sub-agent", "delegate", "topic results", "async task", "task queue"]
+enabled = true
+
+[[skill]]
 id = "com.abigail.skills.troubleshooting"
 instruction_file = "skill_troubleshooting.md"
 keywords = ["troubleshoot", "troubleshooting", "diagnose", "diagnostic", "diagnostics", "debug", "status", "health check", "what is wrong", "not working"]
