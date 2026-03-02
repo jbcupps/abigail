@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use abigail_core::SecretsVault;
 
 use crate::manifest::{CapabilityDescriptor, SkillId, SkillManifest};
+use crate::policy::SkillExecutionPolicy;
 use crate::skill::{Skill, SkillError, SkillResult};
 
 pub struct RegisteredSkill {
@@ -28,6 +29,7 @@ pub struct SkillRegistry {
     skills: RwLock<HashMap<SkillId, RegisteredSkill>>,
     pub skill_paths: Vec<PathBuf>,
     secrets: Option<Arc<Mutex<SecretsVault>>>,
+    execution_policy: RwLock<SkillExecutionPolicy>,
 }
 
 impl Default for SkillRegistry {
@@ -42,6 +44,7 @@ impl SkillRegistry {
             skills: RwLock::new(HashMap::new()),
             skill_paths: Vec::new(),
             secrets: None,
+            execution_policy: RwLock::new(SkillExecutionPolicy::default()),
         }
     }
 
@@ -51,12 +54,43 @@ impl SkillRegistry {
             skills: RwLock::new(HashMap::new()),
             skill_paths: Vec::new(),
             secrets: Some(secrets),
+            execution_policy: RwLock::new(SkillExecutionPolicy::default()),
         }
+    }
+
+    pub fn set_execution_policy(&self, policy: SkillExecutionPolicy) -> SkillResult<()> {
+        let mut guard = self
+            .execution_policy
+            .write()
+            .map_err(|e| SkillError::InitFailed(e.to_string()))?;
+        *guard = policy;
+        Ok(())
+    }
+
+    pub fn enforce_skill_activation(&self, skill_id: &SkillId) -> SkillResult<()> {
+        let policy = self
+            .execution_policy
+            .read()
+            .map_err(|e| SkillError::InitFailed(e.to_string()))?;
+        policy
+            .evaluate_activation(&skill_id.0)
+            .map_err(SkillError::PermissionDenied)
+    }
+
+    pub fn enforce_skill_execution(&self, skill_id: &SkillId) -> SkillResult<()> {
+        let policy = self
+            .execution_policy
+            .read()
+            .map_err(|e| SkillError::InitFailed(e.to_string()))?;
+        policy
+            .evaluate_execution(&skill_id.0)
+            .map_err(SkillError::PermissionDenied)
     }
 
     /// Register a skill. Caller must initialize the skill before registering.
     pub fn register(&self, skill_id: SkillId, skill: Arc<dyn Skill>) -> SkillResult<()> {
         let manifest = skill.manifest().clone();
+        self.enforce_skill_activation(&manifest.id)?;
         let mut skills = self
             .skills
             .write()

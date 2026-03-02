@@ -13,7 +13,7 @@ use abigail_memory::MemoryStore;
 use abigail_router::IdEgoRouter;
 use abigail_skills::channel::EventBus;
 use abigail_skills::skill::SkillConfig;
-use abigail_skills::{Skill, SkillExecutor, SkillRegistry};
+use abigail_skills::{Skill, SkillExecutionPolicy, SkillExecutor, SkillRegistry};
 use axum::routing::{get, post};
 use axum::Router;
 use clap::Parser;
@@ -157,6 +157,28 @@ async fn main() -> anyhow::Result<()> {
     let docs_dir = entity_dir.join("docs");
     let skills_dir = entity_dir.join("skills");
 
+    // Load entity config when present so policy fields are enforced in runtime.
+    let config_path = entity_dir.join("config.json");
+    let mut config = if config_path.exists() {
+        AppConfig::load(&config_path).unwrap_or_else(|e| {
+            tracing::warn!(
+                "Failed to load entity config at {}: {}. Falling back to defaults.",
+                config_path.display(),
+                e
+            );
+            AppConfig::default_paths()
+        })
+    } else {
+        AppConfig::default_paths()
+    };
+    config.agent_name = Some(entity_info.name.clone());
+    config.birth_complete = entity_info.birth_complete;
+    config.routing_mode = hive_config.routing_mode;
+    config.data_dir = entity_dir.clone();
+    config.docs_dir = docs_dir.clone();
+    config.db_path = entity_dir.join("abigail_memory.db");
+    config.models_dir = entity_dir.join("models");
+
     // 5. Create skill registry with secrets vault and executor
     let skill_secrets_dir = data_root.join("skill_secrets");
     std::fs::create_dir_all(&skill_secrets_dir)?;
@@ -168,6 +190,9 @@ async fn main() -> anyhow::Result<()> {
     let skill_vault = Arc::new(Mutex::new(skill_vault));
 
     let registry = Arc::new(SkillRegistry::with_secrets(skill_vault.clone()));
+    if let Err(e) = registry.set_execution_policy(SkillExecutionPolicy::from_app_config(&config)) {
+        tracing::error!("Failed to apply entity skill execution policy: {}", e);
+    }
     let executor = Arc::new(SkillExecutor::new(registry.clone()));
     let event_bus = Arc::new(EventBus::new(256));
 
@@ -341,17 +366,6 @@ async fn main() -> anyhow::Result<()> {
             tracing::warn!("Failed to register Proton Mail skill: {}", e);
         }
     }
-
-    let config = AppConfig {
-        agent_name: Some(entity_info.name),
-        birth_complete: entity_info.birth_complete,
-        routing_mode: hive_config.routing_mode,
-        data_dir: entity_dir.clone(),
-        docs_dir: docs_dir.clone(),
-        db_path: entity_dir.join("abigail_memory.db"),
-        models_dir: entity_dir.join("models"),
-        ..AppConfig::default_paths()
-    };
 
     // Log total skills loaded
     let total_skills = registry.list().map(|s| s.len()).unwrap_or(0);

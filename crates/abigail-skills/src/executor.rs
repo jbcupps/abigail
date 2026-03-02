@@ -98,6 +98,7 @@ impl SkillExecutor {
         );
 
         let start = Instant::now();
+        self.registry.enforce_skill_execution(skill_id)?;
         let (skill, manifest) = self.registry.get_skill(skill_id)?;
 
         let tool = skill
@@ -182,7 +183,11 @@ impl SkillExecutor {
 mod tests {
     use super::*;
     use crate::manifest::{NetworkPermission, Permission};
+    use crate::policy::SkillExecutionPolicy;
     use crate::skill::{HealthStatus, SkillHealth, ToolDescriptor};
+    use abigail_core::{config::SignedSkillAllowlistEntry, AppConfig};
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    use ed25519_dalek::Signer as _;
     use std::collections::HashMap;
 
     /// Skill that sleeps longer than the test timeout so executor returns timeout error.
@@ -961,6 +966,90 @@ mod tests {
         assert!(
             result.is_ok(),
             "shell execution should succeed with permission"
+        );
+    }
+
+    #[tokio::test]
+    async fn policy_blocks_execution_when_not_approved() {
+        let registry = Arc::new(SkillRegistry::new());
+        let skill_id = SkillId("test.echo".to_string());
+        let manifest = test_manifest("test.echo", vec![]);
+        let skill = EchoSkill { manifest };
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .unwrap();
+
+        let mut cfg = AppConfig::default_paths();
+        cfg.approved_skill_ids = vec!["some.other.skill".to_string()];
+        registry
+            .set_execution_policy(SkillExecutionPolicy::from_app_config(&cfg))
+            .unwrap();
+
+        let executor = SkillExecutor::new(registry);
+        let err = executor
+            .execute(&skill_id, "echo", ToolParams::new())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("not in approved_skill_ids"),
+            "expected approval denial, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn policy_fails_closed_on_signature_regression_after_activation() {
+        let registry = Arc::new(SkillRegistry::new());
+        let skill_id = SkillId("dynamic.signed_demo".to_string());
+
+        let signing_key = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+        let signer = BASE64.encode(signing_key.verifying_key().to_bytes());
+
+        let mut signed_cfg = AppConfig::default_paths();
+        signed_cfg.trusted_skill_signers = vec![signer.clone()];
+        let mut entry = SignedSkillAllowlistEntry {
+            skill_id: skill_id.0.clone(),
+            signer: signer.clone(),
+            signature: String::new(),
+            source: "executor_test".to_string(),
+            added_at: "2026-03-01T00:00:00Z".to_string(),
+            active: true,
+        };
+        let payload = format!(
+            "abigail-signed-skill-allowlist-v1\nskill_id={}\nsigner={}\nsource={}\nactive={}",
+            entry.skill_id, entry.signer, entry.source, entry.active
+        );
+        entry.signature = BASE64.encode(signing_key.sign(payload.as_bytes()).to_bytes());
+        signed_cfg.signed_skill_allowlist = vec![entry];
+
+        registry
+            .set_execution_policy(SkillExecutionPolicy::from_app_config(&signed_cfg))
+            .unwrap();
+
+        let manifest = test_manifest(&skill_id.0, vec![]);
+        let skill = EchoSkill { manifest };
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .expect("activation should succeed with valid signed allowlist");
+
+        // Rotate policy to an invalid signature entry without re-registering.
+        let mut tampered_cfg = signed_cfg.clone();
+        tampered_cfg.signed_skill_allowlist[0].signature = BASE64.encode([1u8; 64]);
+        registry
+            .set_execution_policy(SkillExecutionPolicy::from_app_config(&tampered_cfg))
+            .unwrap();
+
+        let executor = SkillExecutor::new(registry);
+        let err = executor
+            .execute(&skill_id, "echo", ToolParams::new())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("verification failed"),
+            "expected signature verification failure, got: {}",
+            err
         );
     }
 }

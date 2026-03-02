@@ -74,8 +74,8 @@ Scope: `S2-01..S2-05` Chat Gateway Abstraction execution and required gate comma
      - `Harness command cases checked: 70`
 2. `cd tauri-app/src-ui && npm test` -> **PASS**
    - Output:
-     - `Test Files  9 passed (9)`
-     - `Tests  28 passed (28)`
+     - `Test Files  10 passed (10)`
+     - `Tests  29 passed (29)`
      - Includes new parity suite: `src/chat/__tests__/ChatGateway.parity.test.ts (4 tests)`
 3. `cd /Users/jamescupps/Repo/abigail/abigail && cargo check -p abigail-app` -> **PASS**
    - Output:
@@ -148,3 +148,41 @@ Scope: `S4-01..S4-06` Entity-Initiated Agents.
 - `Gate-STAB-S4-D` (entity-initiated non-GUI run entrypoint available) -> **PASS**
 - `Gate-STAB-S4-E` (orchestration/jobs UI re-enabled only when backend healthy) -> **PASS**
 - `Gate-STAB-S4-F` (required validation command set) -> **PASS**
+
+---
+
+## Sprint 5 Validation Evidence (2026-03-01)
+
+Scope: `S5-01..S5-04` Hardening and Cutover.
+
+### Required Commands Executed
+
+1. `cd tauri-app/src-ui && npm run check:command-contract` -> **PASS**
+   - Output:
+     - `[PASS] Command surface check: frontend invokes and harness mocks are aligned with native command registry.`
+     - `Frontend commands checked: 104`
+     - `Native commands registered: 147`
+     - `Harness command cases checked: 86`
+2. `cd tauri-app/src-ui && npm test` -> **PASS**
+   - Output:
+     - `Test Files  9 passed (9)`
+     - `Tests  28 passed (28)`
+3. `cd /Users/jamescupps/Repo/abigail/abigail && cargo check -p abigail-app` -> **PASS**
+   - Output:
+     - `Finished 'dev' profile ...`
+
+### Targeted Policy Regression Checks
+
+- `cargo test -p abigail-core test_mcp_trust_policy -- --nocapture` -> **PASS** (3 tests)
+- `cargo test -p abigail-skills policy:: -- --nocapture` -> **PASS** (3 tests)
+- `cargo test -p abigail-skills mcp_client_denies_disallowed_host_before_request -- --nocapture` -> **PASS**
+- `cargo test -p abigail-skills policy_blocks_execution_when_not_approved -- --nocapture` -> **PASS**
+- `cargo test -p abigail-skills policy_fails_closed_on_signature_regression_after_activation -- --nocapture` -> **PASS**
+
+### Sprint 5 Gate Status
+
+- `Gate-STAB-S5-A` (MCP trust policy enforced in runtime resolution/execution paths) -> **PASS**
+- `Gate-STAB-S5-B` (signed allowlist verification enforced before activation/execution; invalid/untrusted fails closed) -> **PASS**
+- `Gate-STAB-S5-C` (CLI permission posture behavior/documentation aligned) -> **PASS**
+- `Gate-STAB-S5-D` (legacy chat event path removed from production streaming path; gateway envelope cutover) -> **PASS**
+- `Gate-STAB-S5-E` (required validation command set) -> **PASS**

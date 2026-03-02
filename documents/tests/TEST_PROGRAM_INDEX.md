@@ -99,7 +99,8 @@ Notes:
 - `documents/tests/SPRINT_2_CHAT_GATEWAY_REPORT.md`
 - `documents/tests/SPRINT_3_INTERNAL_MESSAGE_BOUNDARY_REPORT.md`
 - `documents/tests/SPRINT_4_ENTITY_INITIATED_AGENTS_KICKOFF_CHECKLIST.md`
-- `documents/tests/SPRINT_4_ENTITY_INITIATED_AGENTS_REPORT.md` (to be added at Sprint 4 completion)
+- `documents/tests/SPRINT_4_ENTITY_INITIATED_AGENTS_REPORT.md`
+- `documents/tests/SPRINT_5_HARDENING_AND_CUTOVER_REPORT.md`
 
 ## Integration Test Guides
 

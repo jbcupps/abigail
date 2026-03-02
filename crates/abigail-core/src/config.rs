@@ -87,6 +87,84 @@ pub struct McpTrustPolicy {
     pub allowed_http_hosts: Vec<String>,
 }
 
+impl McpTrustPolicy {
+    fn normalized_allowed_hosts(&self) -> Vec<String> {
+        self.allowed_http_hosts
+            .iter()
+            .map(|h| h.trim().trim_end_matches('.').to_ascii_lowercase())
+            .filter(|h| !h.is_empty())
+            .collect()
+    }
+
+    fn is_host_allowed(&self, host: &str) -> bool {
+        let allowed = self.normalized_allowed_hosts();
+        if allowed.is_empty() {
+            return false;
+        }
+
+        let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+        allowed.iter().any(|allowed_host| {
+            host == *allowed_host || host.ends_with(&format!(".{}", allowed_host))
+        })
+    }
+
+    /// Validate an MCP HTTP server URL against the configured trust policy.
+    ///
+    /// Rules:
+    /// - `allow_list_only = true`: host must be in `allowed_http_hosts` (empty list => deny all).
+    /// - `allow_list_only = false` and `allowed_http_hosts` non-empty: host must be in allowlist.
+    /// - `allow_list_only = false` and `allowed_http_hosts` empty: allow (backward compatibility).
+    pub fn validate_http_server_url(&self, server_id: &str, url: &str) -> Result<url::Url, String> {
+        let parsed = url::Url::parse(url).map_err(|e| {
+            format!(
+                "MCP server '{}' has invalid URL '{}': {}",
+                server_id, url, e
+            )
+        })?;
+
+        if parsed.scheme() != "http" && parsed.scheme() != "https" {
+            return Err(format!(
+                "MCP server '{}' is blocked: URL scheme '{}' is not allowed for HTTP transport.",
+                server_id,
+                parsed.scheme()
+            ));
+        }
+
+        let host = parsed.host_str().ok_or_else(|| {
+            format!(
+                "MCP server '{}' is blocked: URL '{}' does not contain a host.",
+                server_id, url
+            )
+        })?;
+
+        let allow_hosts_empty = self.normalized_allowed_hosts().is_empty();
+        if self.allow_list_only {
+            if allow_hosts_empty {
+                return Err(format!(
+                    "MCP server '{}' is blocked: mcp_trust_policy.allow_list_only=true but allowed_http_hosts is empty.",
+                    server_id
+                ));
+            }
+            if !self.is_host_allowed(host) {
+                return Err(format!(
+                    "MCP server '{}' is blocked: host '{}' is not in mcp_trust_policy.allowed_http_hosts.",
+                    server_id, host
+                ));
+            }
+            return Ok(parsed);
+        }
+
+        if !allow_hosts_empty && !self.is_host_allowed(host) {
+            return Err(format!(
+                "MCP server '{}' is blocked: host '{}' is not in mcp_trust_policy.allowed_http_hosts.",
+                server_id, host
+            ));
+        }
+
+        Ok(parsed)
+    }
+}
+
 /// Model tier for routing — selects which model quality to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -1273,5 +1351,36 @@ mod tests {
         let config = AppConfig::default_paths();
         assert_eq!(config.tier_thresholds, TierThresholds::default());
         assert_eq!(config.force_override, ForceOverride::default());
+    }
+
+    #[test]
+    fn test_mcp_trust_policy_denies_non_allowlisted_host_when_strict() {
+        let policy = McpTrustPolicy {
+            allow_list_only: true,
+            allowed_http_hosts: vec!["trusted.example.com".to_string()],
+        };
+        let err = policy
+            .validate_http_server_url("github", "https://evil.example.com/mcp")
+            .unwrap_err();
+        assert!(err.contains("not in mcp_trust_policy.allowed_http_hosts"));
+    }
+
+    #[test]
+    fn test_mcp_trust_policy_allows_allowlisted_subdomain() {
+        let policy = McpTrustPolicy {
+            allow_list_only: true,
+            allowed_http_hosts: vec!["example.com".to_string()],
+        };
+        assert!(policy
+            .validate_http_server_url("good", "https://api.example.com/mcp")
+            .is_ok());
+    }
+
+    #[test]
+    fn test_mcp_trust_policy_allows_any_host_when_allowlist_disabled_and_empty() {
+        let policy = McpTrustPolicy::default();
+        assert!(policy
+            .validate_http_server_url("legacy", "https://any-host.example.net/mcp")
+            .is_ok());
     }
 }

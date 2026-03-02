@@ -79,6 +79,7 @@ The active near-term engineering priority is **GUI/Entity stability and message-
 
 See: [GUI/Entity Stability Roadmap](documents/GUI_ENTITY_STABILITY_ROADMAP.md)
 See: [GUI/Entity Code Review Report](documents/GUI_ENTITY_CODE_REVIEW_REPORT.md)
+See: [Planning and Tracking](documents/PLANNING_AND_TRACKING.md)
 
 ---
 

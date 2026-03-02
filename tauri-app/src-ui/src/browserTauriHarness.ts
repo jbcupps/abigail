@@ -74,6 +74,8 @@ let eventListenerCounter = 1;
 let traceLog: HarnessTraceEntry[] = [];
 let faultMode: HarnessFaultMode = "none";
 let agentSeq = 1;
+let chatCorrelationSeq = 1;
+let activeChatCorrelationId: string | null = null;
 const providerValidationResults = new Map<string, string>();
 let activeChatTimer: ReturnType<typeof setTimeout> | null = null;
 const harnessConfig = {
@@ -148,6 +150,17 @@ function emitEvent(event: string, payload: unknown): void {
       listeners.delete(eventId);
     }
   }
+}
+
+function emitChatEnvelope(kind: "request" | "token" | "done" | "error", payload: Record<string, unknown> = {}): void {
+  const correlationId = String(payload.correlation_id ?? activeChatCorrelationId ?? `corr-${chatCorrelationSeq++}`);
+  activeChatCorrelationId = correlationId;
+  emitEvent("chat-internal-envelope", {
+    kind,
+    correlation_id: correlationId,
+    session_id: String(payload.session_id ?? "harness-session"),
+    ...payload,
+  });
 }
 
 function sleep(ms: number): Promise<void> {
@@ -569,25 +582,35 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
       state.memoryDisclosureEnabled = Boolean(args.enabled);
       return null;
 
-    // Streaming chat — emits chat-token and chat-done events.
+    // Streaming chat — emits internal chat envelope events.
     case "cancel_chat_stream":
       if (activeChatTimer) {
         clearTimeout(activeChatTimer);
         activeChatTimer = null;
-        emitEvent("chat-error", "Interrupted by user");
+        emitChatEnvelope("error", { error: "Interrupted by user" });
         return true;
       }
       return false;
     case "chat_stream": {
+      const correlationId = `corr-${chatCorrelationSeq++}`;
+      activeChatCorrelationId = correlationId;
+      emitChatEnvelope("request", { correlation_id: correlationId, session_id: "harness-session" });
+
       if (faultMode === "chat_timeout") {
         trace("fault", "chat_timeout");
         await sleep(1500);
-        emitEvent("chat-error", "Synthetic chat timeout injected by harness");
+        emitChatEnvelope("error", {
+          correlation_id: correlationId,
+          error: "Synthetic chat timeout injected by harness",
+        });
         return null;
       }
       if (faultMode === "chat_error") {
         trace("fault", "chat_error");
-        emitEvent("chat-error", "Synthetic chat failure injected by harness");
+        emitChatEnvelope("error", {
+          correlation_id: correlationId,
+          error: "Synthetic chat failure injected by harness",
+        });
         return null;
       }
 
@@ -625,9 +648,16 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
         activeChatTimer = null;
       }
       activeChatTimer = setTimeout(() => {
-        emitEvent("chat-token", response.reply);
-        emitEvent("chat-done", response);
+        emitChatEnvelope("token", {
+          correlation_id: correlationId,
+          token: String(response.reply ?? ""),
+        });
+        emitChatEnvelope("done", {
+          correlation_id: correlationId,
+          done: response,
+        });
         activeChatTimer = null;
+        activeChatCorrelationId = null;
       }, 5);
       return null;
     }
@@ -680,6 +710,8 @@ function resetHarnessState(): void {
     clearTimeout(activeChatTimer);
     activeChatTimer = null;
   }
+  activeChatCorrelationId = null;
+  chatCorrelationSeq = 1;
   providerValidationResults.clear();
   traceLog = [];
 }

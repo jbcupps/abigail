@@ -3,19 +3,22 @@ use abigail_core::config::SignedSkillAllowlistEntry;
 use abigail_core::McpServerDefinition;
 use abigail_skills::protocol::mcp::{HttpMcpClient, McpTool};
 use abigail_skills::{
-    FileSystemPermission, Permission, SkillId, SkillManifest, ToolDescriptor, ToolOutput,
-    ToolParams,
+    FileSystemPermission, Permission, SkillExecutionPolicy, SkillId, SkillManifest, ToolDescriptor,
+    ToolOutput, ToolParams,
 };
 use std::collections::HashMap;
 use tauri::State;
 
 pub const RESERVED_PROVIDER_KEYS: &[&str] = &["openai", "anthropic", "xai", "google", "tavily"];
 
-fn is_signed_allowlisted(config: &abigail_core::AppConfig, skill_id: &str) -> bool {
-    config
-        .signed_skill_allowlist
-        .iter()
-        .any(|entry| entry.active && entry.skill_id == skill_id)
+fn refresh_skill_policy(
+    state: &State<'_, AppState>,
+    config: &abigail_core::AppConfig,
+) -> Result<(), String> {
+    state
+        .registry
+        .set_execution_policy(SkillExecutionPolicy::from_app_config(config))
+        .map_err(|e| e.to_string())
 }
 
 fn is_dangerous_tool(td: &ToolDescriptor) -> bool {
@@ -35,7 +38,10 @@ fn is_dangerous_tool(td: &ToolDescriptor) -> bool {
     td.requires_confirmation || destructive_name || destructive_permission
 }
 
-fn resolve_mcp_server_url(state: &State<'_, AppState>, server_id: &str) -> Result<String, String> {
+fn resolve_mcp_server_url(
+    state: &State<'_, AppState>,
+    server_id: &str,
+) -> Result<(String, abigail_core::McpTrustPolicy), String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let server = config
         .mcp_servers
@@ -45,7 +51,13 @@ fn resolve_mcp_server_url(state: &State<'_, AppState>, server_id: &str) -> Resul
     if server.transport != "http" {
         return Err("Only HTTP transport is supported for MCP list_tools".to_string());
     }
-    Ok(server.command_or_url.clone())
+    config
+        .mcp_trust_policy
+        .validate_http_server_url(server_id, &server.command_or_url)?;
+    Ok((
+        server.command_or_url.clone(),
+        config.mcp_trust_policy.clone(),
+    ))
 }
 
 #[tauri::command]
@@ -219,16 +231,11 @@ pub async fn execute_tool(
     tool_name: String,
     params: HashMap<String, serde_json::Value>,
 ) -> Result<ToolOutput, String> {
-    {
-        let config = state.config.read().map_err(|e| e.to_string())?;
-        if !is_signed_allowlisted(&config, &skill_id)
-            && !config.approved_skill_ids.is_empty()
-            && !config.approved_skill_ids.contains(&skill_id)
-        {
-            return Err(format!("Skill {} is not approved for execution.", skill_id));
-        }
-    }
     let id = SkillId(skill_id);
+    state
+        .registry
+        .enforce_skill_execution(&id)
+        .map_err(|e| e.to_string())?;
     if let Ok((skill, _)) = state.registry.get_skill(&id) {
         if let Some(td) = skill.tools().into_iter().find(|t| t.name == tool_name) {
             let mentor_confirmed = params
@@ -262,8 +269,8 @@ pub async fn mcp_list_tools(
     state: State<'_, AppState>,
     server_id: String,
 ) -> Result<Vec<McpTool>, String> {
-    let url = resolve_mcp_server_url(&state, &server_id)?;
-    let client = HttpMcpClient::new(url);
+    let (url, trust_policy) = resolve_mcp_server_url(&state, &server_id)?;
+    let client = HttpMcpClient::new_with_policy(server_id, url, Some(trust_policy));
     client.initialize().await.map_err(|e| e.to_string())?;
     client.list_tools_impl().await.map_err(|e| e.to_string())
 }
@@ -282,6 +289,7 @@ pub fn approve_skill(state: State<AppState>, skill_id: String) -> Result<(), Str
         config
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;
+        refresh_skill_policy(&state, &config)?;
     }
     Ok(())
 }
@@ -330,6 +338,7 @@ pub fn upsert_signed_skill_allowlist_entry(
     config
         .save(&config.config_path())
         .map_err(|e| e.to_string())?;
+    refresh_skill_policy(&state, &config)?;
     Ok(())
 }
 
@@ -354,6 +363,7 @@ pub fn revoke_signed_skill_allowlist_entry(
         config
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;
+        refresh_skill_policy(&state, &config)?;
         return Ok(());
     }
     Err(format!(

@@ -7,6 +7,7 @@ pub mod factory;
 pub mod hive;
 pub mod instruction_registry;
 pub mod manifest;
+pub mod policy;
 pub mod preloaded;
 pub mod prelude;
 pub mod protocol;
@@ -27,6 +28,7 @@ pub use factory::SkillFactory;
 pub use hive::{HiveAgentInfo, HiveManagementSkill, HiveOperations};
 pub use instruction_registry::InstructionRegistry;
 pub use manifest::*;
+pub use policy::SkillExecutionPolicy;
 pub use preloaded::{
     build_preloaded_skills, preloaded_integration_skills, PreloadedSkillAuth,
     PRELOADED_SKILLS_VERSION,

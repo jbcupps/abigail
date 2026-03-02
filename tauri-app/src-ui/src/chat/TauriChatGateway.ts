@@ -14,6 +14,17 @@ import {
 
 type InvokeFn = typeof invoke;
 type ListenFn = typeof listen;
+const INTERNAL_EVENT_NAME = "chat-internal-envelope";
+
+type InternalChatEnvelopeKind = "request" | "metadata" | "token" | "done" | "error";
+
+interface InternalChatEnvelope {
+  kind: InternalChatEnvelopeKind;
+  correlation_id?: string;
+  token?: string;
+  done?: unknown;
+  error?: string;
+}
 
 interface TauriChatGatewayDeps {
   invokeFn?: InvokeFn;
@@ -43,6 +54,7 @@ export class TauriChatGateway implements ChatGateway {
   async send(request: ChatGatewayRequest, callbacks: ChatGatewayCallbacks): Promise<ChatGatewayStream> {
     let terminal = false;
     let disposed = false;
+    let activeCorrelationId: string | null = null;
     const unlisteners: UnlistenFn[] = [];
 
     const cleanup = async (): Promise<void> => {
@@ -83,25 +95,52 @@ export class TauriChatGateway implements ChatGateway {
     };
 
     try {
-      await registerListener<string>("chat-token", (event) => {
+      await registerListener<InternalChatEnvelope>(INTERNAL_EVENT_NAME, (event: Event<InternalChatEnvelope>) => {
         if (terminal || disposed) return;
-        if (typeof event.payload !== "string") return;
-        callbacks.onToken?.(event.payload);
+        const envelope = event.payload;
+        if (!envelope || typeof envelope !== "object" || typeof envelope.kind !== "string") return;
+
+        const envelopeCorrelation =
+          typeof envelope.correlation_id === "string" ? envelope.correlation_id : null;
+        if (envelope.kind === "request" && envelopeCorrelation && !activeCorrelationId) {
+          activeCorrelationId = envelopeCorrelation;
+          return;
+        }
+        if (!activeCorrelationId && envelopeCorrelation) {
+          activeCorrelationId = envelopeCorrelation;
+        }
+        if (
+          activeCorrelationId &&
+          envelopeCorrelation &&
+          envelopeCorrelation !== activeCorrelationId
+        ) {
+          return;
+        }
+
+        switch (envelope.kind) {
+          case "token":
+            if (typeof envelope.token === "string") {
+              callbacks.onToken?.(envelope.token);
+            }
+            break;
+          case "done":
+            void finalizeDone(envelope.done);
+            break;
+          case "error":
+            void finalizeError(envelope.error ?? "Unknown chat stream error");
+            break;
+          default:
+            break;
+        }
       });
 
-      await registerListener<unknown>("chat-done", (event) => {
-        void finalizeDone(event.payload);
-      });
-
-      await registerListener<unknown>("chat-error", (event) => {
-        void finalizeError(event.payload);
-      });
-
-      await this.invokeFn("chat_stream", {
+      void this.invokeFn("chat_stream", {
         message: request.message,
         target: request.target,
         sessionMessages: request.sessionMessages,
         sessionId: request.sessionId,
+      }).catch((error) => {
+        void finalizeError(error);
       });
     } catch (error) {
       await finalizeError(error);

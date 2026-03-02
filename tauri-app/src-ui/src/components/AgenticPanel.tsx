@@ -57,7 +57,9 @@ export default function AgenticPanel() {
   }, []);
 
   useEffect(() => {
-    eventsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (typeof eventsEndRef.current?.scrollIntoView === "function") {
+      eventsEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
   }, [events]);
 
   const startRun = async () => {

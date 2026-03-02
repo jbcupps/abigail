@@ -3,6 +3,7 @@
 //! Implements JSON-RPC 2.0 lifecycle, tools/list, and tools/call for HTTP transport.
 //! See https://modelcontextprotocol.io/specification/2025-11-25/server/tools
 
+use abigail_core::McpTrustPolicy;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
@@ -80,20 +81,32 @@ struct ToolCallResult {
 
 /// HTTP-based MCP client. Connects to an MCP server over HTTP (Streamable HTTP or simple POST).
 pub struct HttpMcpClient {
+    server_id: String,
     base_url: String,
     client: reqwest::Client,
     next_id: std::sync::atomic::AtomicU64,
+    trust_policy: Option<McpTrustPolicy>,
 }
 
 impl HttpMcpClient {
     pub fn new(base_url: impl Into<String>) -> Self {
+        Self::new_with_policy("ad_hoc", base_url, None)
+    }
+
+    pub fn new_with_policy(
+        server_id: impl Into<String>,
+        base_url: impl Into<String>,
+        trust_policy: Option<McpTrustPolicy>,
+    ) -> Self {
         Self {
+            server_id: server_id.into(),
             base_url: base_url.into(),
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new()),
             next_id: std::sync::atomic::AtomicU64::new(1),
+            trust_policy,
         }
     }
 
@@ -102,12 +115,23 @@ impl HttpMcpClient {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
+    fn enforce_trust_policy(&self) -> SkillResult<()> {
+        if let Some(policy) = &self.trust_policy {
+            policy
+                .validate_http_server_url(&self.server_id, &self.base_url)
+                .map(|_| ())
+                .map_err(SkillError::PermissionDenied)?;
+        }
+        Ok(())
+    }
+
     /// Send a JSON-RPC request and return the result value (or error).
     async fn send(
         &self,
         method: &str,
         params: Option<serde_json::Value>,
     ) -> SkillResult<serde_json::Value> {
+        self.enforce_trust_policy()?;
         let id = self.next_id();
         let req = JsonRpcRequest {
             jsonrpc: "2.0",
@@ -295,6 +319,7 @@ impl McpSkillRuntime {
         server_id: impl Into<String>,
         server_name: impl Into<String>,
         base_url: impl Into<String>,
+        trust_policy: Option<McpTrustPolicy>,
     ) -> Self {
         let id = server_id.into();
         let name = server_name.into();
@@ -319,7 +344,7 @@ impl McpSkillRuntime {
         };
         Self {
             manifest,
-            client: HttpMcpClient::new(base_url),
+            client: HttpMcpClient::new_with_policy(id, base_url, trust_policy),
             tools_cache: RwLock::new(Vec::new()),
         }
     }
@@ -397,6 +422,7 @@ impl Skill for McpSkillRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use abigail_core::McpTrustPolicy;
 
     #[test]
     fn mcp_tool_to_descriptor_maps_name_and_schema() {
@@ -415,5 +441,25 @@ mod tests {
         assert_eq!(d.parameters["type"], "object");
         assert!(d.requires_confirmation);
         assert_eq!(d.required_permissions.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn mcp_client_denies_disallowed_host_before_request() {
+        let policy = McpTrustPolicy {
+            allow_list_only: true,
+            allowed_http_hosts: vec!["localhost".to_string()],
+        };
+        let client = HttpMcpClient::new_with_policy(
+            "remote-mcp",
+            "https://evil.example.com/mcp",
+            Some(policy),
+        );
+
+        let err = client.list_tools_impl().await.unwrap_err().to_string();
+        assert!(
+            err.contains("blocked") && err.contains("allowed_http_hosts"),
+            "expected trust-policy denial, got: {}",
+            err
+        );
     }
 }

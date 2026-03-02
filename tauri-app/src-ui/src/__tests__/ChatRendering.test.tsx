@@ -91,19 +91,39 @@ describe("ChatRendering parity", () => {
       if (cmd === "chat_stream") {
         // Simulate streaming after a microtask
         setTimeout(() => {
-          if (listeners["chat-token"]) {
-            listeners["chat-token"]({ payload: "Hello " });
-            listeners["chat-token"]({ payload: "world!" });
-          }
-          if (listeners["chat-done"]) {
-            listeners["chat-done"]({
+          if (listeners["chat-internal-envelope"]) {
+            listeners["chat-internal-envelope"]({
+              payload: { kind: "request", correlation_id: "corr-stream", session_id: "s-stream" },
+            });
+            listeners["chat-internal-envelope"]({
               payload: {
-                reply: "Hello world!",
-                provider: "openai",
-                tier: "standard",
-                model_used: "gpt-4.1",
-                tool_calls_made: [],
-                complexity_score: 50,
+                kind: "token",
+                correlation_id: "corr-stream",
+                session_id: "s-stream",
+                token: "Hello ",
+              },
+            });
+            listeners["chat-internal-envelope"]({
+              payload: {
+                kind: "token",
+                correlation_id: "corr-stream",
+                session_id: "s-stream",
+                token: "world!",
+              },
+            });
+            listeners["chat-internal-envelope"]({
+              payload: {
+                kind: "done",
+                correlation_id: "corr-stream",
+                session_id: "s-stream",
+                done: {
+                  reply: "Hello world!",
+                  provider: "openai",
+                  tier: "standard",
+                  model_used: "gpt-4.1",
+                  tool_calls_made: [],
+                  complexity_score: 50,
+                },
               },
             });
           }
@@ -186,8 +206,18 @@ describe("ChatRendering parity", () => {
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "chat_stream") {
         setTimeout(() => {
-          if (listeners["chat-error"]) {
-            listeners["chat-error"]({ payload: "Provider unavailable" });
+          if (listeners["chat-internal-envelope"]) {
+            listeners["chat-internal-envelope"]({
+              payload: { kind: "request", correlation_id: "corr-error", session_id: "s-error" },
+            });
+            listeners["chat-internal-envelope"]({
+              payload: {
+                kind: "error",
+                correlation_id: "corr-error",
+                session_id: "s-error",
+                error: "Provider unavailable",
+              },
+            });
           }
         }, 10);
         return Promise.resolve();

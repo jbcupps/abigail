@@ -18,6 +18,7 @@ type SanctumTab =
   | "data"
   | "diagnostics"
   | "repair";
+type IdentityPanelTab = Extract<SanctumTab, "identity" | "keys" | "llm" | "data" | "repair">;
 
 interface SanctumDrawerProps {
   open: boolean;
@@ -44,19 +45,27 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
   const [activeTab, setActiveTab] = useState<SanctumTab>("conscience");
 
   // IdentityPanel mapping
-  const identityPanelTabs = ["identity", "llm", "keys", "data", "repair"] as const;
-  const isIdentityPanelTab = identityPanelTabs.includes(activeTab as any);
-
-  const handleDiagnosticsNavigate = (tab: string) => {
-    if (TABS.some((t) => t.id === tab)) {
-      setActiveTab(tab as SanctumTab);
-    }
-  };
+  const identityPanelTabs: IdentityPanelTab[] = ["identity", "llm", "keys", "data", "repair"];
+  const isIdentityPanelTab = (tab: SanctumTab): tab is IdentityPanelTab =>
+    identityPanelTabs.includes(tab as IdentityPanelTab);
 
   const staffJobsEnabled = backendReady || experimentalUiEnabled;
   const visibleTabs = TABS.filter((tab) =>
     staffJobsEnabled ? true : tab.id !== "staff" && tab.id !== "jobs"
   );
+  const isVisibleTab = (tab: string): tab is SanctumTab => visibleTabs.some((t) => t.id === tab);
+
+  const handleDiagnosticsNavigate = (tab: string) => {
+    if (isVisibleTab(tab)) {
+      setActiveTab(tab);
+    }
+  };
+
+  useEffect(() => {
+    if (!isVisibleTab(activeTab)) {
+      setActiveTab("conscience");
+    }
+  }, [activeTab, visibleTabs]);
 
   useEffect(() => {
     let mounted = true;
@@ -157,9 +166,9 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
 
           {staffJobsEnabled && activeTab === "jobs" && <OrchestrationPanel />}
 
-          {isIdentityPanelTab && (
+          {isIdentityPanelTab(activeTab) && (
             <IdentityPanel
-              initialTab={activeTab === "identity" ? "identity" : activeTab as any}
+              initialTab={activeTab}
               embedded
             />
           )}
