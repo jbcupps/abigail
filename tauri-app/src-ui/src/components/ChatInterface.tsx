@@ -77,6 +77,17 @@ function redactApiKeys(text: string): string {
   );
 }
 
+type ForceOverride = { pinned_model: string | null; pinned_tier: string | null; pinned_provider: string | null };
+type ModelRegistryEntry = { provider: string; model_id: string; display_name: string | null };
+
+const FALLBACK_MODELS: Record<string, string[]> = {
+  openai: ["gpt-4.1", "gpt-4.1-mini", "gpt-5.2", "o3-mini"],
+  anthropic: ["claude-sonnet-4-6", "claude-haiku-4-5", "claude-opus-4-6"],
+  google: ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"],
+  xai: ["grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning", "grok-4-0709"],
+  perplexity: ["sonar", "sonar-pro", "sonar-reasoning-pro"],
+};
+
 export default function ChatInterface({
   initialSession = null,
   onSessionSnapshot,
@@ -101,6 +112,9 @@ export default function ChatInterface({
   const [cliPortInput, setCliPortInput] = useState("8080");
   const [showRoutingDetails, setShowRoutingDetails] = useState(false);
   const [memoryDisclosureEnabled, setMemoryDisclosureEnabled] = useState(true);
+  const [forceOverride, setForceOverride] = useState<ForceOverride>({ pinned_model: null, pinned_tier: null, pinned_provider: null });
+  const [modelRegistry, setModelRegistry] = useState<ModelRegistryEntry[]>([]);
+  const [headerProvider, setHeaderProvider] = useState<string>("");
   const showDebugTelemetry = isBrowserHarnessRuntime() && isHarnessDebugEnabled();
   const chatGateway = useMemo(() => createChatGateway(), []);
 
@@ -247,6 +261,21 @@ export default function ChatInterface({
         if (!mountedRef.current) return;
         setMemoryDisclosureEnabled(true);
       });
+
+    // Fetch force override + model registry for header dropdowns
+    invoke<ForceOverride>("get_force_override")
+      .then((fo) => {
+        if (!mountedRef.current || !fo) return;
+        setForceOverride(fo);
+      })
+      .catch(() => {});
+    invoke<{ models: ModelRegistryEntry[] }>("get_model_registry")
+      .then((reg) => {
+        if (!mountedRef.current || !reg) return;
+        setModelRegistry(reg.models ?? []);
+      })
+      .catch(() => {});
+
     return () => {
       const activeChat = activeChatRef.current;
       activeChatRef.current = null;
@@ -263,6 +292,45 @@ export default function ChatInterface({
       mountedRef.current = false;
     };
   }, [onSessionSnapshot]);
+
+  // -- Header model/provider dropdown logic --
+
+  // Derive headerProvider from forceOverride or routerStatus when not yet set by user
+  useEffect(() => {
+    if (headerProvider) return; // user already picked one
+    if (forceOverride?.pinned_model) {
+      const entry = modelRegistry.find((m) => m.model_id === forceOverride.pinned_model);
+      if (entry) { setHeaderProvider(entry.provider); return; }
+    }
+    if (routerStatus?.ego_provider) {
+      setHeaderProvider(routerStatus.ego_provider);
+    }
+  }, [forceOverride, modelRegistry, routerStatus, headerProvider]);
+
+  const knownProviders = useMemo(() => {
+    const fromReg = [...new Set(modelRegistry.map((m) => m.provider))];
+    return fromReg.length > 0 ? fromReg : Object.keys(FALLBACK_MODELS);
+  }, [modelRegistry]);
+
+  const headerModels = useMemo(() => {
+    if (!headerProvider) return [];
+    const fromReg = modelRegistry.filter((m) => m.provider === headerProvider);
+    if (fromReg.length > 0) return fromReg.map((m) => m.model_id);
+    return FALLBACK_MODELS[headerProvider] ?? [];
+  }, [headerProvider, modelRegistry]);
+
+  const handleModelOverride = async (modelId: string) => {
+    const next: ForceOverride = modelId === ""
+      ? { pinned_model: null, pinned_tier: null, pinned_provider: null }
+      : { pinned_model: modelId, pinned_tier: null, pinned_provider: null };
+    setForceOverride(next);
+    try {
+      await invoke("set_force_override", { forceOverride: next });
+      refreshRouterStatus();
+    } catch (err) {
+      console.error("[ChatInterface] set_force_override failed:", err);
+    }
+  };
 
   const handleConfigSelect = async (option: number) => {
     setConfigError("");
@@ -983,6 +1051,28 @@ export default function ChatInterface({
         >
           Memory disclosure: {memoryDisclosureEnabled ? "On" : "Off"}
         </button>
+        <span className="mx-1 text-theme-border">|</span>
+        <select
+          className="bg-transparent text-[11px] text-theme-text-dim border border-theme-border rounded px-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          value={headerProvider}
+          disabled={routerStatus?.routing_mode === "cli_orchestrator"}
+          onChange={(e) => setHeaderProvider(e.target.value)}
+        >
+          {knownProviders.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
+        <select
+          className="bg-transparent text-[11px] text-theme-text-dim border border-theme-border rounded px-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          value={forceOverride?.pinned_model ?? ""}
+          disabled={routerStatus?.routing_mode === "cli_orchestrator"}
+          onChange={(e) => handleModelOverride(e.target.value)}
+        >
+          <option value="">Auto</option>
+          {headerModels.map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
         {showDebugTelemetry && (
           <span className="text-theme-text-dim">
             mode: non-streaming
