@@ -5,12 +5,26 @@ use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+/// Controls how instruction injection behaves during prompt assembly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptInjectionMode {
+    /// Inject matching instructions directly into the prompt (default for Full mode).
+    PerMessage,
+    /// Skip all instruction injection (orchestrator mode — delegates to sub-agents).
+    None,
+    /// Select instructions by topic affinity for delegation to sub-agents.
+    TopicAffinity,
+}
+
 /// A single skill entry deserialized from `registry.toml`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SkillInstructionEntry {
     pub id: String,
     pub instruction_file: String,
     pub keywords: Vec<String>,
+    /// Optional topic tags for semantic affinity matching in delegation mode.
+    #[serde(default)]
+    pub topics: Vec<String>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 }
@@ -221,6 +235,69 @@ impl InstructionRegistry {
             return String::new();
         }
 
+        section
+    }
+
+    /// Select instructions suitable for delegation to a sub-agent.
+    ///
+    /// Returns `Vec<(skill_id, instruction_content)>` matched by either keyword
+    /// or topic affinity. Unlike `format_for_prompt*`, this returns raw data so
+    /// callers can inject it into a `JobSpec.system_context` or other target.
+    ///
+    /// Matching logic:
+    /// 1. If a skill has `topics` and the message matches any topic (substring),
+    ///    it is included (topic affinity).
+    /// 2. Otherwise, falls back to keyword matching (same as `select_instructions`).
+    pub fn select_instructions_for_delegation(
+        &self,
+        user_message: &str,
+        registered_skill_ids: &HashSet<String>,
+    ) -> Vec<(&str, &str)> {
+        let msg_lower = user_message.to_lowercase();
+        let mut matched = Vec::new();
+
+        for (id, (entry, content)) in &self.entries {
+            if !registered_skill_ids.contains(id.as_str()) {
+                continue;
+            }
+
+            // Try topic affinity first (more semantic)
+            let topic_hit = !entry.topics.is_empty()
+                && entry
+                    .topics
+                    .iter()
+                    .any(|t| msg_lower.contains(&t.to_lowercase()));
+
+            // Fall back to keyword matching
+            let keyword_hit = entry
+                .keywords
+                .iter()
+                .any(|kw| msg_lower.contains(&kw.to_lowercase()));
+
+            if topic_hit || keyword_hit {
+                matched.push((id.as_str(), content.as_str()));
+            }
+        }
+
+        matched
+    }
+
+    /// Format delegation instructions as a single string for injection into
+    /// a sub-agent's system context.
+    pub fn format_for_delegation(
+        &self,
+        user_message: &str,
+        registered_skill_ids: &HashSet<String>,
+    ) -> String {
+        let matched = self.select_instructions_for_delegation(user_message, registered_skill_ids);
+        if matched.is_empty() {
+            return String::new();
+        }
+
+        let mut section = String::from("\n## Skill-Specific Instructions\n\n");
+        for (id, content) in &matched {
+            section.push_str(&format!("<!-- skill: {} -->\n{}\n\n", id, content));
+        }
         section
     }
 
@@ -559,5 +636,156 @@ enabled = true
         assert_eq!(reg.list_entries().len(), 1);
         assert!(reg.select_instructions("missing keyword").is_empty());
         assert_eq!(reg.select_instructions("present keyword").len(), 1);
+    }
+
+    #[test]
+    fn test_select_instructions_for_delegation_keyword_match() {
+        let toml = r#"
+[[skill]]
+id = "test.email"
+instruction_file = "email.md"
+keywords = ["email", "inbox"]
+enabled = true
+
+[[skill]]
+id = "test.search"
+instruction_file = "search.md"
+keywords = ["search"]
+enabled = true
+"#;
+        let (_dir, reg) = setup_registry(
+            "delegation_keyword",
+            toml,
+            &[
+                ("email.md", "# Email\nUse fetch_emails."),
+                ("search.md", "# Search\nUse web_search."),
+            ],
+        );
+
+        let mut registered = HashSet::new();
+        registered.insert("test.email".to_string());
+        registered.insert("test.search".to_string());
+
+        let matched = reg.select_instructions_for_delegation("check email", &registered);
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].0, "test.email");
+    }
+
+    #[test]
+    fn test_select_instructions_for_delegation_topic_match() {
+        let toml = r#"
+[[skill]]
+id = "test.email"
+instruction_file = "email.md"
+keywords = ["email"]
+topics = ["communication", "messaging"]
+enabled = true
+
+[[skill]]
+id = "test.search"
+instruction_file = "search.md"
+keywords = ["search"]
+topics = ["research"]
+enabled = true
+"#;
+        let (_dir, reg) = setup_registry(
+            "delegation_topic",
+            toml,
+            &[
+                ("email.md", "# Email\nUse fetch_emails."),
+                ("search.md", "# Search\nUse web_search."),
+            ],
+        );
+
+        let mut registered = HashSet::new();
+        registered.insert("test.email".to_string());
+        registered.insert("test.search".to_string());
+
+        // "communication" should match via topics even though "communication" isn't a keyword
+        let matched =
+            reg.select_instructions_for_delegation("handle communication tasks", &registered);
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].0, "test.email");
+    }
+
+    #[test]
+    fn test_select_instructions_for_delegation_filters_unregistered() {
+        let toml = r#"
+[[skill]]
+id = "test.email"
+instruction_file = "email.md"
+keywords = ["email"]
+enabled = true
+
+[[skill]]
+id = "test.search"
+instruction_file = "search.md"
+keywords = ["email"]
+enabled = true
+"#;
+        let (_dir, reg) = setup_registry(
+            "delegation_filters",
+            toml,
+            &[
+                ("email.md", "# Email\nContent."),
+                ("search.md", "# Search\nContent."),
+            ],
+        );
+
+        // Only register test.email
+        let mut registered = HashSet::new();
+        registered.insert("test.email".to_string());
+
+        let matched = reg.select_instructions_for_delegation("email stuff", &registered);
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].0, "test.email");
+    }
+
+    #[test]
+    fn test_format_for_delegation() {
+        let toml = r#"
+[[skill]]
+id = "test.email"
+instruction_file = "email.md"
+keywords = ["email"]
+enabled = true
+"#;
+        let (_dir, reg) = setup_registry(
+            "format_delegation",
+            toml,
+            &[("email.md", "# Email\nUse fetch_emails.")],
+        );
+
+        let mut registered = HashSet::new();
+        registered.insert("test.email".to_string());
+
+        let section = reg.format_for_delegation("check email", &registered);
+        assert!(section.contains("## Skill-Specific Instructions"));
+        assert!(section.contains("test.email"));
+        assert!(section.contains("fetch_emails"));
+
+        // No match returns empty
+        let section = reg.format_for_delegation("unrelated query", &registered);
+        assert!(section.is_empty());
+    }
+
+    #[test]
+    fn test_topics_field_defaults_empty() {
+        let toml = r#"
+[[skill]]
+id = "test.notopics"
+instruction_file = "notopics.md"
+keywords = ["test"]
+enabled = true
+"#;
+        let (_dir, reg) = setup_registry(
+            "topics_default",
+            toml,
+            &[("notopics.md", "# No topics\nContent.")],
+        );
+
+        let entries = reg.list_entries();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].topics.is_empty());
     }
 }

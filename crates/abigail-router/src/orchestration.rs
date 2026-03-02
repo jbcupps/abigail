@@ -84,6 +84,15 @@ pub struct OrchestrationJobLog {
 }
 
 /// Manages orchestration jobs and their execution.
+///
+/// **Deprecated**: Use `abigail_queue::JobQueue` with `is_recurring = true` and
+/// `cron_expression` fields instead. This scheduler uses JSON files and has a stub
+/// `check_due_jobs()`. The JobQueue-based scheduler in `entity-daemon::job_scheduler`
+/// provides SQLite persistence, StreamBroker events, and real cron evaluation.
+#[deprecated(
+    since = "0.4.0",
+    note = "Use abigail_queue::JobQueue recurring jobs instead. See entity-daemon::job_scheduler."
+)]
 pub struct OrchestrationScheduler {
     jobs: Arc<RwLock<Vec<OrchestrationJob>>>,
     logs: Arc<RwLock<Vec<OrchestrationJobLog>>>,
@@ -91,6 +100,7 @@ pub struct OrchestrationScheduler {
     logs_path: PathBuf,
 }
 
+#[allow(deprecated)]
 impl OrchestrationScheduler {
     /// Create a new scheduler, loading persisted state from the data directory.
     pub fn new(data_dir: PathBuf) -> Self {
@@ -266,6 +276,7 @@ impl OrchestrationScheduler {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 

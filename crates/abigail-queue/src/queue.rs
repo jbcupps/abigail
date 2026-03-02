@@ -11,6 +11,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
+/// All columns in the job_queue table, for consistent SELECTs.
+const JOB_COLUMNS: &str = "id, topic, goal, capability, priority, status, time_budget_ms, \
+    max_turns, system_context, allowed_skill_ids, input_data, parent_job_id, agent_id, \
+    model_used, provider_used, result, error, turns_consumed, ttl_seconds, \
+    created_at, started_at, completed_at, expires_at, \
+    cron_expression, is_recurring, significance_keywords, significance_threshold, \
+    job_mode, goal_template, last_scheduled_at, depends_on";
+
 /// Persistent job queue backed by SQLite with event streaming.
 pub struct JobQueue {
     db: Arc<Mutex<Connection>>,
@@ -53,6 +61,8 @@ impl JobQueue {
             .transpose()?;
         let capability_str = spec.capability.as_str().to_string();
         let priority_i32 = spec.priority.as_i32();
+        let significance_keywords_json = serde_json::to_string(&spec.significance_keywords)?;
+        let is_recurring_i = if spec.is_recurring { 1i32 } else { 0i32 };
 
         {
             let conn = self.lock_db()?;
@@ -60,8 +70,11 @@ impl JobQueue {
                 "INSERT INTO job_queue \
                  (id, topic, goal, capability, priority, status, time_budget_ms, max_turns, \
                   system_context, allowed_skill_ids, input_data, parent_job_id, \
-                  turns_consumed, ttl_seconds, created_at, expires_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'queued', ?6, ?7, ?8, ?9, ?10, ?11, 0, ?12, ?13, ?14)",
+                  turns_consumed, ttl_seconds, created_at, expires_at, \
+                  cron_expression, is_recurring, significance_keywords, significance_threshold, \
+                  job_mode, goal_template, depends_on) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'queued', ?6, ?7, ?8, ?9, ?10, ?11, 0, ?12, ?13, ?14, \
+                         ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
                 rusqlite::params![
                     job_id,
                     spec.topic,
@@ -77,6 +90,17 @@ impl JobQueue {
                     spec.ttl_seconds as i64,
                     created_at,
                     expires_at,
+                    spec.cron_expression,
+                    is_recurring_i,
+                    significance_keywords_json,
+                    spec.significance_threshold as f64,
+                    spec.job_mode,
+                    spec.goal_template,
+                    if spec.depends_on.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::to_string(&spec.depends_on).unwrap_or_default())
+                    },
                 ],
             )?;
         }
@@ -279,13 +303,8 @@ impl JobQueue {
     /// Get a job record by ID.
     pub fn get_job(&self, job_id: &str) -> anyhow::Result<Option<JobRecord>> {
         let conn = self.lock_db()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, topic, goal, capability, priority, status, time_budget_ms, max_turns, \
-             system_context, allowed_skill_ids, input_data, parent_job_id, agent_id, \
-             model_used, provider_used, result, error, turns_consumed, ttl_seconds, \
-             created_at, started_at, completed_at, expires_at \
-             FROM job_queue WHERE id = ?1",
-        )?;
+        let sql = format!("SELECT {JOB_COLUMNS} FROM job_queue WHERE id = ?1");
+        let mut stmt = conn.prepare(&sql)?;
         let result = stmt
             .query_map([job_id], Self::map_job_record)?
             .filter_map(|r| r.ok())
@@ -296,31 +315,27 @@ impl JobQueue {
     /// List jobs filtered by status, ordered by priority (desc) then created_at (asc).
     pub fn list_jobs(&self, status: Option<&str>, limit: usize) -> anyhow::Result<Vec<JobRecord>> {
         let conn = self.lock_db()?;
-        let (sql, params): (&str, Vec<Box<dyn rusqlite::types::ToSql>>) = match status {
+        let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match status {
             Some(s) => (
-                "SELECT id, topic, goal, capability, priority, status, time_budget_ms, max_turns, \
-                 system_context, allowed_skill_ids, input_data, parent_job_id, agent_id, \
-                 model_used, provider_used, result, error, turns_consumed, ttl_seconds, \
-                 created_at, started_at, completed_at, expires_at \
-                 FROM job_queue WHERE status = ?1 \
-                 ORDER BY priority DESC, created_at ASC LIMIT ?2",
+                format!(
+                    "SELECT {JOB_COLUMNS} FROM job_queue WHERE status = ?1 \
+                     ORDER BY priority DESC, created_at ASC LIMIT ?2"
+                ),
                 vec![
                     Box::new(s.to_string()) as Box<dyn rusqlite::types::ToSql>,
                     Box::new(limit as i64),
                 ],
             ),
             None => (
-                "SELECT id, topic, goal, capability, priority, status, time_budget_ms, max_turns, \
-                 system_context, allowed_skill_ids, input_data, parent_job_id, agent_id, \
-                 model_used, provider_used, result, error, turns_consumed, ttl_seconds, \
-                 created_at, started_at, completed_at, expires_at \
-                 FROM job_queue \
-                 ORDER BY priority DESC, created_at ASC LIMIT ?1",
+                format!(
+                    "SELECT {JOB_COLUMNS} FROM job_queue \
+                     ORDER BY priority DESC, created_at ASC LIMIT ?1"
+                ),
                 vec![Box::new(limit as i64) as Box<dyn rusqlite::types::ToSql>],
             ),
         };
 
-        let mut stmt = conn.prepare(sql)?;
+        let mut stmt = conn.prepare(&sql)?;
         let params_ref: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|p| p.as_ref()).collect();
         let rows = stmt
@@ -333,14 +348,11 @@ impl JobQueue {
     /// List all jobs in a topic, ordered by creation time (newest first).
     pub fn list_topic_jobs(&self, topic: &str, limit: usize) -> anyhow::Result<Vec<JobRecord>> {
         let conn = self.lock_db()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, topic, goal, capability, priority, status, time_budget_ms, max_turns, \
-             system_context, allowed_skill_ids, input_data, parent_job_id, agent_id, \
-             model_used, provider_used, result, error, turns_consumed, ttl_seconds, \
-             created_at, started_at, completed_at, expires_at \
-             FROM job_queue WHERE topic = ?1 \
-             ORDER BY created_at DESC LIMIT ?2",
-        )?;
+        let sql = format!(
+            "SELECT {JOB_COLUMNS} FROM job_queue WHERE topic = ?1 \
+             ORDER BY created_at DESC LIMIT ?2"
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt
             .query_map(rusqlite::params![topic, limit as i64], Self::map_job_record)?
             .filter_map(|r| r.ok())
@@ -351,14 +363,11 @@ impl JobQueue {
     /// Get completed results for a topic.
     pub fn topic_results(&self, topic: &str, limit: usize) -> anyhow::Result<Vec<JobRecord>> {
         let conn = self.lock_db()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, topic, goal, capability, priority, status, time_budget_ms, max_turns, \
-             system_context, allowed_skill_ids, input_data, parent_job_id, agent_id, \
-             model_used, provider_used, result, error, turns_consumed, ttl_seconds, \
-             created_at, started_at, completed_at, expires_at \
-             FROM job_queue WHERE topic = ?1 AND status = 'completed' \
-             ORDER BY completed_at DESC LIMIT ?2",
-        )?;
+        let sql = format!(
+            "SELECT {JOB_COLUMNS} FROM job_queue WHERE topic = ?1 AND status = 'completed' \
+             ORDER BY completed_at DESC LIMIT ?2"
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt
             .query_map(rusqlite::params![topic, limit as i64], Self::map_job_record)?
             .filter_map(|r| r.ok())
@@ -368,25 +377,45 @@ impl JobQueue {
 
     /// Get the next queued job to run (highest priority, oldest first).
     /// Also respects parent_job_id dependency: only picks jobs whose parent is completed.
+    /// Respects `depends_on` chains: skips jobs whose dependencies are not all completed.
+    /// Excludes recurring job templates (is_recurring = 1) — those spawn instances.
     pub fn next_queued_job(&self) -> anyhow::Result<Option<JobRecord>> {
         let conn = self.lock_db()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, topic, goal, capability, priority, status, time_budget_ms, max_turns, \
-             system_context, allowed_skill_ids, input_data, parent_job_id, agent_id, \
-             model_used, provider_used, result, error, turns_consumed, ttl_seconds, \
-             created_at, started_at, completed_at, expires_at \
-             FROM job_queue \
+        let sql = format!(
+            "SELECT {JOB_COLUMNS} FROM job_queue \
              WHERE status = 'queued' \
+               AND (is_recurring IS NULL OR is_recurring = 0) \
                AND (parent_job_id IS NULL \
                     OR parent_job_id IN (SELECT id FROM job_queue WHERE status = 'completed')) \
-             ORDER BY priority DESC, created_at ASC \
-             LIMIT 1",
-        )?;
-        let result = stmt
+             ORDER BY priority DESC, created_at ASC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let candidates: Vec<JobRecord> = stmt
             .query_map([], Self::map_job_record)?
             .filter_map(|r| r.ok())
-            .next();
-        Ok(result)
+            .collect();
+
+        // Filter by depends_on: all dependency IDs must be in 'completed' status.
+        for candidate in candidates {
+            if candidate.depends_on.is_empty() {
+                return Ok(Some(candidate));
+            }
+            // Check all dependencies are completed
+            let all_completed = candidate.depends_on.iter().all(|dep_id| {
+                conn.query_row(
+                    "SELECT status FROM job_queue WHERE id = ?1",
+                    [dep_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map(|s| s == "completed")
+                .unwrap_or(false) // Missing dep = not satisfied
+            });
+            if all_completed {
+                return Ok(Some(candidate));
+            }
+        }
+
+        Ok(None)
     }
 
     /// Count jobs by status.
@@ -429,6 +458,70 @@ impl JobQueue {
             tracing::warn!("Crash recovery: marked {} running jobs as failed", updated);
         }
         Ok(updated)
+    }
+
+    /// Get all recurring job templates that have a cron expression.
+    /// Returns templates for the scheduler to evaluate against the current time.
+    pub fn get_recurring_templates(&self) -> anyhow::Result<Vec<JobRecord>> {
+        let conn = self.lock_db()?;
+        let sql = format!(
+            "SELECT {JOB_COLUMNS} FROM job_queue \
+             WHERE is_recurring = 1 AND cron_expression IS NOT NULL \
+               AND status = 'queued'"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map([], Self::map_job_record)?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    /// Spawn a one-shot instance from a recurring template.
+    /// The instance gets a new ID, links back to the template via `parent_job_id`,
+    /// and uses the template's goal (or interpolated `goal_template`).
+    pub async fn spawn_recurring_instance(
+        &self,
+        template: &JobRecord,
+        goal_override: Option<String>,
+    ) -> anyhow::Result<JobId> {
+        let goal = goal_override.unwrap_or_else(|| template.goal.clone());
+        let spec = JobSpec {
+            goal,
+            topic: template.topic.clone(),
+            capability: template.capability.clone(),
+            priority: template.priority,
+            time_budget_ms: template.time_budget_ms,
+            max_turns: template.max_turns,
+            system_context: template.system_context.clone(),
+            allowed_skill_ids: template.allowed_skill_ids.clone(),
+            ttl_seconds: template.ttl_seconds,
+            input_data: template.input_data.clone(),
+            parent_job_id: Some(template.id.clone()),
+            cron_expression: None,
+            is_recurring: false,
+            significance_keywords: template.significance_keywords.clone(),
+            significance_threshold: template.significance_threshold,
+            job_mode: template.job_mode.clone(),
+            goal_template: None,
+            depends_on: vec![],
+        };
+        let job_id = self.submit_job(spec).await?;
+
+        // Update last_scheduled_at on the template
+        let now = Utc::now().to_rfc3339();
+        let conn = self.lock_db()?;
+        conn.execute(
+            "UPDATE job_queue SET last_scheduled_at = ?2 WHERE id = ?1",
+            rusqlite::params![template.id, now],
+        )?;
+
+        tracing::info!(
+            "Spawned recurring instance {} from template {}",
+            job_id,
+            template.id
+        );
+        Ok(job_id)
     }
 
     // ── Internal helpers ──
@@ -476,6 +569,13 @@ impl JobQueue {
         let input_data: Option<serde_json::Value> =
             input_data_json.and_then(|s| serde_json::from_str(&s).ok());
 
+        // V4 columns (23-29)
+        let significance_keywords_json: Option<String> = row.get(25)?;
+        let significance_keywords: Vec<String> = significance_keywords_json
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        let is_recurring_i: Option<i32> = row.get(24)?;
+
         Ok(JobRecord {
             id: row.get(0)?,
             topic: row.get(1)?,
@@ -500,6 +600,22 @@ impl JobQueue {
             started_at: row.get(20)?,
             completed_at: row.get(21)?,
             expires_at: row.get(22)?,
+            cron_expression: row.get(23)?,
+            is_recurring: is_recurring_i.unwrap_or(0) != 0,
+            significance_keywords,
+            significance_threshold: row.get::<_, f64>(26).unwrap_or(0.5) as f32,
+            job_mode: row
+                .get::<_, String>(27)
+                .unwrap_or_else(|_| "agentic_run".to_string()),
+            goal_template: row.get(28)?,
+            last_scheduled_at: row.get(29)?,
+            // V5 column (30)
+            depends_on: {
+                let depends_json: Option<String> = row.get(30).unwrap_or(None);
+                depends_json
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or_default()
+            },
         })
     }
 }
@@ -514,6 +630,24 @@ mod tests {
         conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
         conn.execute_batch(crate::schema::MIGRATION_V3_JOB_QUEUE)
             .unwrap();
+        // Apply V4 orchestration columns (cron, significance, etc.)
+        for stmt in crate::schema::MIGRATION_V4_ORCHESTRATION.split(';') {
+            let trimmed = stmt.trim();
+            if !trimmed.is_empty() {
+                conn.execute_batch(trimmed).unwrap_or_else(|e| {
+                    tracing::debug!("V4 migration statement skipped: {}", e);
+                });
+            }
+        }
+        // Apply V5 depends_on column
+        for stmt in crate::schema::MIGRATION_V5_DEPENDS_ON.split(';') {
+            let trimmed = stmt.trim();
+            if !trimmed.is_empty() {
+                conn.execute_batch(trimmed).unwrap_or_else(|e| {
+                    tracing::debug!("V5 migration statement skipped: {}", e);
+                });
+            }
+        }
         let db = Arc::new(Mutex::new(conn));
         let broker = Arc::new(MemoryBroker::new(64));
         JobQueue::new(db, broker)
@@ -532,6 +666,13 @@ mod tests {
             ttl_seconds: 3600,
             input_data: None,
             parent_job_id: None,
+            cron_expression: None,
+            is_recurring: false,
+            significance_keywords: vec![],
+            significance_threshold: 0.5,
+            job_mode: "agentic_run".into(),
+            goal_template: None,
+            depends_on: vec![],
         }
     }
 
@@ -793,5 +934,49 @@ mod tests {
         let queue = setup_test_queue();
         let result = queue.get_job("nonexistent").unwrap();
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_depends_on_blocks_scheduling() {
+        let queue = setup_test_queue();
+
+        // Create two independent jobs
+        let dep1 = queue.submit_job(test_spec("deps")).await.unwrap();
+        let dep2 = queue.submit_job(test_spec("deps")).await.unwrap();
+
+        // Create a job that depends on both
+        let mut dependent_spec = test_spec("deps");
+        dependent_spec.depends_on = vec![dep1.clone(), dep2.clone()];
+        dependent_spec.priority = JobPriority::Critical; // Highest priority, but blocked
+        let dependent_id = queue.submit_job(dependent_spec).await.unwrap();
+
+        // Dependent should NOT be picked (despite Critical priority) because deps are not completed
+        let next = queue.next_queued_job().unwrap().unwrap();
+        assert_ne!(next.id, dependent_id);
+
+        // Complete dep1 only — still blocked
+        queue.mark_running(&dep1, "a", "m", "p").await.unwrap();
+        queue.mark_completed(&dep1, "ok", 1).await.unwrap();
+
+        // Complete dep2
+        queue.mark_running(&dep2, "a", "m", "p").await.unwrap();
+        queue.mark_completed(&dep2, "ok", 1).await.unwrap();
+
+        // Now dependent should be eligible
+        let next = queue.next_queued_job().unwrap().unwrap();
+        assert_eq!(next.id, dependent_id);
+        assert_eq!(next.depends_on.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_depends_on_roundtrip() {
+        let queue = setup_test_queue();
+
+        let mut spec = test_spec("dep-rt");
+        spec.depends_on = vec!["job-a".to_string(), "job-b".to_string()];
+        let job_id = queue.submit_job(spec).await.unwrap();
+
+        let record = queue.get_job(&job_id).unwrap().unwrap();
+        assert_eq!(record.depends_on, vec!["job-a", "job-b"]);
     }
 }

@@ -512,8 +512,13 @@ pub async fn extract_crystallization_identity(
     let router = state.router.read().map_err(|e| e.to_string())?.clone();
 
     // Use Ego when available; Id is for background tasks only.
-    let response_result =
-        tokio::time::timeout(std::time::Duration::from_secs(30), router.route(messages)).await;
+    let response_result = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        router
+            .route_unified(abigail_router::RoutingRequest::simple(messages))
+            .await
+            .map(|r| r.completion)
+    })
+    .await;
 
     let response = match response_result {
         Ok(Ok(res)) => res,
@@ -713,10 +718,16 @@ pub async fn propose_entity_visuals(
     )];
     let router = state.router.read().map_err(|e| e.to_string())?.clone();
 
-    let response = if router.status().has_ego {
-        router.route(messages).await.map_err(|e| e.to_string())?
-    } else {
-        router.id_only(messages).await.map_err(|e| e.to_string())?
+    let response = {
+        let mut req = abigail_router::RoutingRequest::simple(messages);
+        if !router.status().has_ego {
+            req.force_id_only = true;
+        }
+        router
+            .route_unified(req)
+            .await
+            .map(|r| r.completion)
+            .map_err(|e| e.to_string())?
     };
 
     if let Some(start) = response.content.find('{') {

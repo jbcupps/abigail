@@ -35,6 +35,8 @@ reqwest.workspace = true
 async-trait.workspace = true
 uuid.workspace = true
 rusqlite.workspace = true
+chrono.workspace = true
+cron = "0.15"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

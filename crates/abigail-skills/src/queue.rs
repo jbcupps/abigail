@@ -208,6 +208,19 @@ impl Skill for QueueManagementSkill {
                     ttl_seconds,
                     input_data,
                     parent_job_id,
+                    cron_expression: params.get_string("cron_expression"),
+                    is_recurring: params.get::<bool>("is_recurring").unwrap_or(false),
+                    significance_keywords: params
+                        .get::<Vec<String>>("significance_keywords")
+                        .unwrap_or_default(),
+                    significance_threshold: params
+                        .get::<f32>("significance_threshold")
+                        .unwrap_or(0.5),
+                    job_mode: params
+                        .get_string("job_mode")
+                        .unwrap_or_else(|| "agentic_run".to_string()),
+                    goal_template: params.get_string("goal_template"),
+                    depends_on: params.get::<Vec<String>>("depends_on").unwrap_or_default(),
                 };
                 let job_id = self
                     .ops

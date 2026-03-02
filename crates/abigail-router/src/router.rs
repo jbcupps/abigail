@@ -17,7 +17,8 @@ use abigail_hive::{BuiltProviders, ProviderKind, ProviderRegistry};
 use entity_core::{ExecutionTrace, SelectionReason};
 use std::sync::Arc;
 
-use crate::council::CouncilEngine;
+use crate::council::{CouncilEngine, CouncilJobGraph};
+use abigail_queue::JobQueue;
 
 // Re-export RoutingMode from abigail-core for convenience
 pub use abigail_core::RoutingMode;
@@ -126,6 +127,54 @@ impl From<ProviderKind> for EgoProvider {
             ProviderKind::GrokCli => EgoProvider::GrokCli,
         }
     }
+}
+
+// ── Unified routing types ────────────────────────────────────────
+
+/// All parameters for a single routing call, replacing 10+ individual method signatures.
+pub struct RoutingRequest {
+    /// Messages to send (system + history + user).
+    pub messages: Vec<Message>,
+    /// Tool definitions (None = no tool-use).
+    pub tools: Option<Vec<ToolDefinition>>,
+    /// Explicit model override (takes precedence over tier-based selection).
+    pub model_override: Option<String>,
+    /// Streaming channel (None = non-streaming).
+    pub stream_tx: Option<tokio::sync::mpsc::Sender<StreamEvent>>,
+    /// Force Id-only routing (skip Ego target selection).
+    pub force_id_only: bool,
+}
+
+impl RoutingRequest {
+    /// Simple non-streaming, non-tool request.
+    pub fn simple(messages: Vec<Message>) -> Self {
+        Self {
+            messages,
+            tools: None,
+            model_override: None,
+            stream_tx: None,
+            force_id_only: false,
+        }
+    }
+
+    /// Request with tools.
+    pub fn with_tools(messages: Vec<Message>, tools: Vec<ToolDefinition>) -> Self {
+        Self {
+            messages,
+            tools: Some(tools),
+            model_override: None,
+            stream_tx: None,
+            force_id_only: false,
+        }
+    }
+}
+
+/// Unified response from any routing call.
+pub struct RoutingResponse {
+    /// The completion from the provider.
+    pub completion: CompletionResponse,
+    /// Execution trace (always present from `route_unified`).
+    pub trace: Option<ExecutionTrace>,
 }
 
 /// Structured snapshot of the router's configuration for diagnostics and UI display.
@@ -645,7 +694,237 @@ impl IdEgoRouter {
         tokio::spawn(async move { ConscienceVerdict::Clear })
     }
 
+    // ── Unified routing ──────────────────────────────────────────────
+
+    /// Unified routing entry point that replaces 10+ individual methods.
+    ///
+    /// All routing decisions (tier-based model selection, ego/id fallback,
+    /// council delegation, streaming, tracing) flow through this single path.
+    pub async fn route_unified(&self, req: RoutingRequest) -> anyhow::Result<RoutingResponse> {
+        let last_msg = req.messages.last().map_or("", |m| &m.content).to_string();
+
+        // Council mode for non-tool, non-stream, non-id-only requests
+        if self.mode == RoutingMode::Council
+            && !req.force_id_only
+            && req.stream_tx.is_none()
+            && req.tools.is_none()
+        {
+            if let Some(ref council) = self.council {
+                if council.provider_count() >= 2 {
+                    return self.execute_council(council, req.messages, &last_msg).await;
+                }
+                tracing::warn!(
+                    "Council has {} provider(s) — degraded passthrough to single-provider path",
+                    council.provider_count()
+                );
+            } else {
+                tracing::warn!("Council mode active but no CouncilEngine configured — falling back to tier-based");
+            }
+        }
+
+        // Build the routing target and model override
+        let (target, model_override) = if req.force_id_only {
+            (FastPathTarget::Id, None)
+        } else {
+            let target = self.target_for_mode(&last_msg);
+            let model_override = req.model_override.or_else(|| {
+                if self.mode == RoutingMode::TierBased || self.mode == RoutingMode::Council {
+                    self.resolve_model_for_request(&last_msg)
+                } else {
+                    None
+                }
+            });
+            (target, model_override)
+        };
+
+        let mut trace = self.begin_trace(&last_msg, &model_override);
+
+        let request = CompletionRequest {
+            messages: req.messages,
+            tools: req.tools,
+            model_override: model_override.clone(),
+        };
+
+        let completion = self
+            .execute_with_fallback(&request, target, &model_override, req.stream_tx, &mut trace)
+            .await?;
+
+        Ok(RoutingResponse {
+            completion,
+            trace: Some(trace),
+        })
+    }
+
+    /// Internal fallback chain: try primary target, fall back to the other on failure.
+    async fn execute_with_fallback(
+        &self,
+        request: &CompletionRequest,
+        target: FastPathTarget,
+        model_override: &Option<String>,
+        stream_tx: Option<tokio::sync::mpsc::Sender<StreamEvent>>,
+        trace: &mut ExecutionTrace,
+    ) -> anyhow::Result<CompletionResponse> {
+        let is_stream = stream_tx.is_some();
+
+        if target == FastPathTarget::Ego {
+            if let Some(ref ego) = self.ego {
+                let t0 = chrono::Utc::now();
+                let result = if let Some(ref tx) = stream_tx {
+                    ego.stream(request, tx.clone()).await
+                } else {
+                    ego.complete(request).await
+                };
+                match result {
+                    Ok(response) => {
+                        trace.record_success(&self.ego_label(), model_override.clone(), t0);
+                        return Ok(response);
+                    }
+                    Err(e) => {
+                        trace.record_error(
+                            &self.ego_label(),
+                            model_override.clone(),
+                            &e.to_string(),
+                            t0,
+                        );
+                        tracing::warn!(
+                            "Ego provider failed{}, falling back to Id: {}",
+                            if is_stream { " (stream)" } else { "" },
+                            e
+                        );
+                        let t1 = chrono::Utc::now();
+                        let resp = if let Some(ref tx) = stream_tx {
+                            self.id.stream(request, tx.clone()).await?
+                        } else {
+                            self.id.complete(request).await?
+                        };
+                        trace.record_success(self.id_label(), None, t1);
+                        return Ok(resp);
+                    }
+                }
+            }
+        }
+
+        // Id-first path (or no Ego available)
+        let t0 = chrono::Utc::now();
+        let result = if let Some(ref tx) = stream_tx {
+            self.id.stream(request, tx.clone()).await
+        } else {
+            self.id.complete(request).await
+        };
+        match result {
+            Ok(response) => {
+                trace.record_success(self.id_label(), None, t0);
+                Ok(response)
+            }
+            Err(e) => {
+                trace.record_error(self.id_label(), None, &e.to_string(), t0);
+                if let Some(ref ego) = self.ego {
+                    tracing::warn!(
+                        "Id provider failed{}, falling back to Ego: {}",
+                        if is_stream { " (stream)" } else { "" },
+                        e
+                    );
+                    let t1 = chrono::Utc::now();
+                    let resp = if let Some(ref tx) = stream_tx {
+                        ego.stream(request, tx.clone()).await?
+                    } else {
+                        ego.complete(request).await?
+                    };
+                    trace.record_success(&self.ego_label(), model_override.clone(), t1);
+                    return Ok(resp);
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Council-specific execution path.
+    async fn execute_council(
+        &self,
+        council: &CouncilEngine,
+        messages: Vec<Message>,
+        last_msg: &str,
+    ) -> anyhow::Result<RoutingResponse> {
+        let mut trace = self.begin_trace(last_msg, &None);
+        trace.selection_reason = Some(SelectionReason::Council);
+
+        let t0 = chrono::Utc::now();
+        match council.deliberate(messages, None).await {
+            Ok(result) => {
+                let synthesis_provider = result
+                    .drafts
+                    .first()
+                    .map(|d| d.provider.as_str())
+                    .unwrap_or("council");
+                let provider_label = format!(
+                    "council({} providers, synthesis={})",
+                    result.provider_count, synthesis_provider
+                );
+                trace.record_success(&provider_label, None, t0);
+
+                Ok(RoutingResponse {
+                    completion: CompletionResponse {
+                        content: result.synthesis,
+                        tool_calls: None,
+                    },
+                    trace: Some(trace),
+                })
+            }
+            Err(e) => {
+                trace.record_error("council", None, &e.to_string(), t0);
+                tracing::warn!("Council deliberation failed, falling back to ego/id: {}", e);
+
+                if let Some(ref ego) = self.ego {
+                    let t1 = chrono::Utc::now();
+                    let request = CompletionRequest::simple(vec![Message::new("user", last_msg)]);
+                    let resp = ego.complete(&request).await?;
+                    trace.record_success(&self.ego_label(), None, t1);
+                    trace.selection_reason = Some(SelectionReason::Fallback);
+                    return Ok(RoutingResponse {
+                        completion: resp,
+                        trace: Some(trace),
+                    });
+                }
+
+                Err(e)
+            }
+        }
+    }
+
+    /// Submit a council deliberation as an async job graph instead of blocking.
+    ///
+    /// Creates draft, critique, and synthesis jobs with proper `depends_on`
+    /// chains in the job queue. Returns a `CouncilJobGraph` with all job IDs.
+    /// The caller can poll the synthesis job for the final result.
+    ///
+    /// Falls back to synchronous `route_unified()` if no council engine is
+    /// configured or if it has fewer than 2 providers.
+    pub async fn route_council_async(
+        &self,
+        messages: &[Message],
+        system_context: Option<&str>,
+        queue: &JobQueue,
+    ) -> anyhow::Result<CouncilJobGraph> {
+        let council = self.council.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("No CouncilEngine configured for async council routing")
+        })?;
+
+        if council.provider_count() < 2 {
+            anyhow::bail!(
+                "Council async routing requires at least 2 providers (have {})",
+                council.provider_count()
+            );
+        }
+
+        council
+            .submit_as_jobs(queue, messages, system_context)
+            .await
+    }
+
+    // ── Legacy routing methods (thin wrappers over route_unified) ────
+
     /// Route using the fast path with tier-based model selection.
+    #[deprecated(since = "0.4.0", note = "Use route_unified() instead")]
     pub async fn route_fast(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
         let last_msg = messages.last().map_or("", |m| &m.content);
         let target = self.target_for_mode(last_msg);
@@ -683,11 +962,14 @@ impl IdEgoRouter {
     }
 
     /// Main route method.
+    #[deprecated(since = "0.4.0", note = "Use route_unified() instead")]
     pub async fn route(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
+        #[allow(deprecated)]
         self.route_fast(messages).await
     }
 
     /// Route with tools and tier-based model selection.
+    #[deprecated(since = "0.4.0", note = "Use route_unified() instead")]
     pub async fn route_with_tools(
         &self,
         messages: Vec<Message>,
@@ -735,6 +1017,10 @@ impl IdEgoRouter {
     }
 
     /// Id only routing (falls back to Ego when Id fails).
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use route_unified() with force_id_only instead"
+    )]
     pub async fn id_only(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
         let request = CompletionRequest::simple(messages);
         match self.id.complete(&request).await {
@@ -750,6 +1036,10 @@ impl IdEgoRouter {
     }
 
     /// Id only streaming (falls back to Ego when Id fails).
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use route_unified() with force_id_only + stream_tx instead"
+    )]
     pub async fn id_stream(
         &self,
         messages: Vec<Message>,
@@ -769,6 +1059,7 @@ impl IdEgoRouter {
     }
 
     /// Streaming routing with tier-based model selection and failsafe.
+    #[deprecated(since = "0.4.0", note = "Use route_unified() with stream_tx instead")]
     pub async fn route_stream(
         &self,
         messages: Vec<Message>,
@@ -817,6 +1108,10 @@ impl IdEgoRouter {
     }
 
     /// Streaming with tools and tier-based model selection.
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use route_unified() with tools + stream_tx instead"
+    )]
     pub async fn route_stream_with_tools(
         &self,
         messages: Vec<Message>,
@@ -939,6 +1234,10 @@ impl IdEgoRouter {
     }
 
     /// Traced variant of `route_fast` / `route`.
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use route_unified() instead — it always returns a trace"
+    )]
     pub async fn route_traced(
         &self,
         messages: Vec<Message>,
@@ -1073,11 +1372,13 @@ impl IdEgoRouter {
     ///
     /// Council mode does not support tool-use (deliberation is text-only),
     /// so this falls through to the standard ego/id path with tier selection.
+    #[deprecated(since = "0.4.0", note = "Use route_unified() with tools instead")]
     pub async fn route_with_tools_traced(
         &self,
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
     ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
+        #[allow(deprecated)]
         self.route_with_tools_traced_override(messages, tools, None)
             .await
     }
@@ -1086,6 +1387,10 @@ impl IdEgoRouter {
     ///
     /// If `forced_model_override` is `Some`, it takes precedence over the router's
     /// tier-based model selection logic.
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use route_unified() with tools + model_override instead"
+    )]
     pub async fn route_with_tools_traced_override(
         &self,
         messages: Vec<Message>,
@@ -1160,6 +1465,10 @@ impl IdEgoRouter {
     }
 
     /// Traced variant of `id_only`.
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use route_unified() with force_id_only instead"
+    )]
     pub async fn id_only_traced(
         &self,
         messages: Vec<Message>,
@@ -1192,6 +1501,10 @@ impl IdEgoRouter {
     }
 
     /// Traced variant of `id_stream`.
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use route_unified() with force_id_only + stream_tx instead"
+    )]
     pub async fn id_stream_traced(
         &self,
         messages: Vec<Message>,
@@ -1225,6 +1538,7 @@ impl IdEgoRouter {
     }
 
     /// Traced variant of `route_stream`.
+    #[deprecated(since = "0.4.0", note = "Use route_unified() with stream_tx instead")]
     pub async fn route_stream_traced(
         &self,
         messages: Vec<Message>,
@@ -1290,6 +1604,10 @@ impl IdEgoRouter {
     }
 
     /// Traced variant of `route_stream_with_tools`.
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use route_unified() with tools + stream_tx instead"
+    )]
     pub async fn route_stream_with_tools_traced(
         &self,
         messages: Vec<Message>,

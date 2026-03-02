@@ -204,7 +204,7 @@ fn build_skill_config_from_vault(secrets: &HashMap<String, String>) -> SkillConf
         secrets: secret_map,
         limits: Default::default(),
         permissions: vec![],
-        event_sender: None,
+        stream_broker: None,
     }
 }
 
@@ -219,6 +219,7 @@ the store_secret tool from builtin.hive_management.";
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
+#[allow(deprecated)]
 async fn turn1_credential_setup() {
     let Some(env) = TestEnv::load() else {
         return;
@@ -249,6 +250,7 @@ async fn turn1_credential_setup() {
         &instruction_reg,
         &user_message,
         &entity_chat::RuntimeContext::default(),
+        entity_chat::PromptMode::Full,
     );
     let messages = build_contextual_messages(&augmented_prompt, None, &user_message);
     let tools = build_tool_definitions(&registry);
@@ -389,6 +391,7 @@ async fn turn2_fetch_emails() {
         &instruction_reg,
         user_message,
         &entity_chat::RuntimeContext::default(),
+        entity_chat::PromptMode::Full,
     );
     let messages = build_contextual_messages(&augmented_prompt, None, user_message);
     let tools = build_tool_definitions(&registry);
@@ -500,6 +503,7 @@ async fn turn3_send_email() {
         &instruction_reg,
         user_message,
         &entity_chat::RuntimeContext::default(),
+        entity_chat::PromptMode::Full,
     );
     let messages = build_contextual_messages(&augmented_prompt, None, user_message);
     let tools = build_tool_definitions(&registry);

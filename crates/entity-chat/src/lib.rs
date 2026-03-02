@@ -13,6 +13,22 @@ use entity_core::{SessionMessage, ToolCallRecord};
 use std::collections::HashSet;
 
 // ---------------------------------------------------------------------------
+// PromptMode — controls how much context goes into the system prompt
+// ---------------------------------------------------------------------------
+
+/// Controls the verbosity and content of the assembled system prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptMode {
+    /// Full constitutional docs with runtime context, full tool descriptions,
+    /// and all matching skill instructions. Used for main entity conversations.
+    Full,
+    /// Lean orchestrator (~2 KB base) that skips runtime context, uses compact
+    /// tool lists (grouped names only), and budgets instructions (max 1, 2 KB).
+    /// Used when the entity has sub-agent capability and delegates heavy lifting.
+    Orchestrator,
+}
+
+// ---------------------------------------------------------------------------
 // RuntimeContext — per-request metadata injected into the system prompt
 // ---------------------------------------------------------------------------
 
@@ -232,45 +248,92 @@ pub fn build_memory_context(
 /// Skill instructions are filtered against actually-registered skill IDs to
 /// prevent "phantom tool" hallucinations (where the LLM sees instructions for
 /// skills that aren't loaded).
+///
+/// `mode` controls verbosity:
+/// - `Full`: runtime context + full tool descriptions + all matched instructions
+/// - `Orchestrator`: skip runtime context, compact tool list, budgeted instructions
 pub fn augment_system_prompt(
     base: &str,
     registry: &SkillRegistry,
     instruction_registry: &abigail_skills::InstructionRegistry,
     user_message: &str,
     runtime_ctx: &RuntimeContext,
+    mode: PromptMode,
 ) -> String {
     let mut prompt = base.to_string();
 
-    // Inject runtime context so the entity knows its own provider/model
-    let ctx_section = runtime_ctx.format_for_prompt();
-    if !ctx_section.is_empty() {
-        prompt.push_str(&ctx_section);
-    }
+    match mode {
+        PromptMode::Full => {
+            // Inject runtime context so the entity knows its own provider/model
+            let ctx_section = runtime_ctx.format_for_prompt();
+            if !ctx_section.is_empty() {
+                prompt.push_str(&ctx_section);
+            }
 
-    // Collect registered skill IDs for instruction filtering
-    let mut registered_ids = HashSet::new();
+            // Collect registered skill IDs for instruction filtering
+            let mut registered_ids = HashSet::new();
 
-    if let Ok(manifests) = registry.list() {
-        let mut tool_lines = Vec::new();
-        for m in &manifests {
-            registered_ids.insert(m.id.0.clone());
-            if let Ok((skill, _)) = registry.get_skill(&m.id) {
-                for t in skill.tools() {
-                    tool_lines.push(format!("- `{}::{}`: {}", m.id.0, t.name, t.description));
+            if let Ok(manifests) = registry.list() {
+                let mut tool_lines = Vec::new();
+                for m in &manifests {
+                    registered_ids.insert(m.id.0.clone());
+                    if let Ok((skill, _)) = registry.get_skill(&m.id) {
+                        for t in skill.tools() {
+                            tool_lines
+                                .push(format!("- `{}::{}`: {}", m.id.0, t.name, t.description));
+                        }
+                    }
+                }
+                if !tool_lines.is_empty() {
+                    prompt.push_str("\n\n## Available Tools\n\n");
+                    prompt.push_str(&tool_lines.join("\n"));
                 }
             }
-        }
-        if !tool_lines.is_empty() {
-            prompt.push_str("\n\n## Available Tools\n\n");
-            prompt.push_str(&tool_lines.join("\n"));
-        }
-    }
 
-    // Only inject instructions for skills that are actually registered
-    let skill_section =
-        instruction_registry.format_for_prompt_filtered(user_message, &registered_ids);
-    if !skill_section.is_empty() {
-        prompt.push_str(&skill_section);
+            // Only inject instructions for skills that are actually registered
+            let skill_section =
+                instruction_registry.format_for_prompt_filtered(user_message, &registered_ids);
+            if !skill_section.is_empty() {
+                prompt.push_str(&skill_section);
+            }
+        }
+        PromptMode::Orchestrator => {
+            // Compact grouped tool list + budgeted instructions
+            let mut registered_ids = HashSet::new();
+            let mut skill_tools: std::collections::HashMap<String, Vec<String>> =
+                std::collections::HashMap::new();
+
+            if let Ok(manifests) = registry.list() {
+                for m in &manifests {
+                    registered_ids.insert(m.id.0.clone());
+                    if let Ok((skill, _)) = registry.get_skill(&m.id) {
+                        let tool_names: Vec<String> =
+                            skill.tools().iter().map(|t| t.name.clone()).collect();
+                        if !tool_names.is_empty() {
+                            let short_name =
+                                m.id.0.rsplit('.').next().unwrap_or(&m.id.0).to_string();
+                            skill_tools
+                                .entry(short_name)
+                                .or_default()
+                                .extend(tool_names);
+                        }
+                    }
+                }
+            }
+
+            if !skill_tools.is_empty() {
+                prompt.push_str("\n\n## Available Tools\n");
+                let mut entries: Vec<_> = skill_tools.into_iter().collect();
+                entries.sort_by(|a, b| a.0.cmp(&b.0));
+                for (skill_name, tools) in &entries {
+                    prompt.push_str(&format!("{}: {}\n", skill_name, tools.join(", ")));
+                }
+            }
+
+            // Orchestrator mode: skip instruction injection entirely.
+            // The orchestrator delegates to sub-agents, which receive matched
+            // instructions via SubagentRunner::build_job_messages().
+        }
     }
 
     prompt
@@ -474,6 +537,42 @@ impl ToolUseResult {
     }
 }
 
+/// Configuration for the tool-use loop's async delegation behavior.
+#[derive(Debug, Clone)]
+pub struct ToolUseConfig {
+    /// Maximum tool rounds to execute inline before considering delegation.
+    /// Defaults to `MAX_TOOL_ROUNDS` (35) when async is disabled.
+    pub inline_max_rounds: usize,
+    /// When true, the loop will delegate remaining work as a background job
+    /// after exhausting `inline_max_rounds` if more tool calls are expected.
+    pub async_enabled: bool,
+    /// Topic for the delegated job (used when `async_enabled` is true).
+    pub delegation_topic: String,
+}
+
+impl Default for ToolUseConfig {
+    fn default() -> Self {
+        Self {
+            inline_max_rounds: MAX_TOOL_ROUNDS,
+            async_enabled: false,
+            delegation_topic: "delegation".to_string(),
+        }
+    }
+}
+
+/// Outcome of the tool-use loop — either completed inline or delegated to background.
+pub enum ToolUseOutcome {
+    /// The tool-use loop completed inline with a final response.
+    Completed(ToolUseResult),
+    /// The loop exhausted inline rounds and delegated remaining work to a background job.
+    Delegated {
+        /// Partial results from inline rounds.
+        partial: ToolUseResult,
+        /// The background job ID for the delegated continuation.
+        job_id: String,
+    },
+}
+
 /// Run the full tool-use loop:
 /// 1. Send messages + tool definitions to the LLM via `route_with_tools`.
 /// 2. If the LLM returns `tool_calls`, execute each one via `SkillExecutor`.
@@ -505,14 +604,17 @@ pub async fn run_tool_use_loop_with_model_override(
     for round in 0..MAX_TOOL_ROUNDS {
         tracing::debug!("Tool-use loop round {}", round);
 
-        let (response, trace) = router
-            .route_with_tools_traced_override(
-                messages.clone(),
-                tools.clone(),
-                model_override.clone(),
-            )
+        let resp = router
+            .route_unified(abigail_router::RoutingRequest {
+                messages: messages.clone(),
+                tools: Some(tools.clone()),
+                model_override: model_override.clone(),
+                stream_tx: None,
+                force_id_only: false,
+            })
             .await?;
-        last_trace = Some(trace);
+        let response = resp.completion;
+        last_trace = resp.trace;
 
         let tool_calls = match response.tool_calls {
             Some(ref tcs) if !tcs.is_empty() => tcs.clone(),
@@ -548,6 +650,135 @@ pub async fn run_tool_use_loop_with_model_override(
         tool_calls_made: all_records,
         execution_trace: last_trace,
     })
+}
+
+/// Run the tool-use loop with async delegation support.
+///
+/// When `config.async_enabled` is true and the loop hits `inline_max_rounds`
+/// with more tool calls expected, it submits the remaining work as a background
+/// job to the `JobQueue` and returns `ToolUseOutcome::Delegated`.
+pub async fn run_tool_use_loop_with_delegation(
+    router: &IdEgoRouter,
+    executor: &SkillExecutor,
+    mut messages: Vec<Message>,
+    tools: Vec<ToolDefinition>,
+    config: ToolUseConfig,
+    job_queue: Option<&abigail_queue::JobQueue>,
+) -> anyhow::Result<ToolUseOutcome> {
+    let effective_rounds = if config.async_enabled {
+        config.inline_max_rounds
+    } else {
+        MAX_TOOL_ROUNDS
+    };
+
+    let mut all_records = Vec::new();
+    let mut last_trace: Option<entity_core::ExecutionTrace> = None;
+
+    for round in 0..effective_rounds {
+        tracing::debug!("Tool-use loop (delegatable) round {}", round);
+
+        let resp = router
+            .route_unified(abigail_router::RoutingRequest {
+                messages: messages.clone(),
+                tools: Some(tools.clone()),
+                model_override: None,
+                stream_tx: None,
+                force_id_only: false,
+            })
+            .await?;
+        let response = resp.completion;
+        last_trace = resp.trace;
+
+        let tool_calls = match response.tool_calls {
+            Some(ref tcs) if !tcs.is_empty() => tcs.clone(),
+            _ => {
+                return Ok(ToolUseOutcome::Completed(ToolUseResult {
+                    content: response.content,
+                    tool_calls_made: all_records,
+                    execution_trace: last_trace,
+                }));
+            }
+        };
+
+        messages.push(Message {
+            role: "assistant".into(),
+            content: response.content.clone(),
+            tool_call_id: None,
+            tool_calls: Some(tool_calls.clone()),
+        });
+
+        for tc in &tool_calls {
+            let (output_json, record) = execute_single_tool_call(executor, tc).await;
+            all_records.push(record);
+            messages.push(Message::tool_result(&tc.id, output_json));
+        }
+    }
+
+    // Exhausted inline rounds — delegate if enabled and queue available.
+    if config.async_enabled {
+        if let Some(queue) = job_queue {
+            let conversation_json =
+                serde_json::to_string(&messages).unwrap_or_else(|_| "[]".to_string());
+            let spec = abigail_queue::JobSpec {
+                goal: format!(
+                    "Continue tool-use conversation that exceeded {} inline rounds.",
+                    effective_rounds
+                ),
+                topic: config.delegation_topic,
+                capability: abigail_queue::RequiredCapability::General,
+                priority: abigail_queue::JobPriority::Normal,
+                time_budget_ms: 120_000,
+                max_turns: (MAX_TOOL_ROUNDS - effective_rounds) as u32,
+                system_context: Some(
+                    "You are continuing a tool-use conversation that was delegated to \
+                     a background job. The input_data contains the full message history."
+                        .to_string(),
+                ),
+                allowed_skill_ids: vec![],
+                ttl_seconds: 3600,
+                input_data: Some(serde_json::json!({
+                    "conversation": conversation_json,
+                    "delegated_at_round": effective_rounds,
+                })),
+                parent_job_id: None,
+                cron_expression: None,
+                is_recurring: false,
+                significance_keywords: vec![],
+                significance_threshold: 0.5,
+                job_mode: "agentic_run".to_string(),
+                goal_template: None,
+                depends_on: vec![],
+            };
+
+            let job_id = queue.submit_job(spec).await?;
+            tracing::info!(
+                "Delegated tool-use continuation to background job {}",
+                job_id
+            );
+
+            return Ok(ToolUseOutcome::Delegated {
+                partial: ToolUseResult {
+                    content: format!(
+                        "I've started working on this in the background (job: {}). \
+                         I'll continue the task with the remaining tool calls.",
+                        job_id
+                    ),
+                    tool_calls_made: all_records,
+                    execution_trace: last_trace,
+                },
+                job_id,
+            });
+        }
+    }
+
+    // Fallback: no queue or async disabled — return partial result.
+    Ok(ToolUseOutcome::Completed(ToolUseResult {
+        content: "I attempted several tool calls but hit the maximum number of rounds. \
+                  Here's what I have so far."
+            .to_string(),
+        tool_calls_made: all_records,
+        execution_trace: last_trace,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -587,10 +818,14 @@ pub async fn run_tool_use_loop_rounds_only(
     for round in 0..MAX_TOOL_ROUNDS {
         tracing::debug!("Tool-use loop (rounds-only) round {}", round);
 
-        let (response, trace) = router
-            .route_with_tools_traced(messages.clone(), tools.to_vec())
+        let resp = router
+            .route_unified(abigail_router::RoutingRequest::with_tools(
+                messages.clone(),
+                tools.to_vec(),
+            ))
             .await?;
-        last_trace = Some(trace);
+        let response = resp.completion;
+        last_trace = resp.trace;
 
         let tool_calls = match response.tool_calls {
             Some(ref tcs) if !tcs.is_empty() => tcs.clone(),
@@ -673,13 +908,19 @@ pub async fn stream_chat_pipeline(
         }
     }
 
-    let (final_response, trace) = if tools.is_empty() {
-        router.route_stream_traced(messages, tx.clone()).await?
-    } else {
-        router
-            .route_stream_with_tools_traced(messages, tools, tx.clone())
-            .await?
-    };
+    let stream_resp = router
+        .route_unified(abigail_router::RoutingRequest {
+            messages,
+            tools: if tools.is_empty() { None } else { Some(tools) },
+            model_override: None,
+            stream_tx: Some(tx.clone()),
+            force_id_only: false,
+        })
+        .await?;
+    let final_response = stream_resp.completion;
+    let trace = stream_resp
+        .trace
+        .unwrap_or_else(|| entity_core::ExecutionTrace::new("unknown", None, None, "unknown"));
 
     drop(tx);
 
@@ -1245,6 +1486,7 @@ mod tests {
             &instr_reg,
             "hello",
             &RuntimeContext::default(),
+            PromptMode::Full,
         );
         assert!(result.starts_with("Base prompt."));
         assert!(result.contains("## Available Tools"));
@@ -1261,6 +1503,7 @@ mod tests {
             &instr_reg,
             "hi",
             &RuntimeContext::default(),
+            PromptMode::Full,
         );
         assert_eq!(result, "Base.");
     }
@@ -1275,7 +1518,8 @@ mod tests {
             entity_name: Some("Adam".to_string()),
             ..Default::default()
         };
-        let result = augment_system_prompt("Base.", &registry, &instr_reg, "hi", &ctx);
+        let result =
+            augment_system_prompt("Base.", &registry, &instr_reg, "hi", &ctx, PromptMode::Full);
         assert!(result.contains("## Runtime Context"));
         assert!(result.contains("anthropic"));
         assert!(result.contains("claude-sonnet-4-6"));

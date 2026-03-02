@@ -9,7 +9,9 @@ use tokio::sync::RwLock;
 use abigail_skills::capability::email::{
     EmailTransportCapability, EmailTransportInfo, FetchOptions, OutgoingEmail,
 };
-use abigail_skills::channel::{SkillEvent, TriggerDescriptor, TriggerFrequency, TriggerPriority};
+use abigail_skills::channel::{
+    publish_skill_event, SkillEvent, TriggerDescriptor, TriggerFrequency, TriggerPriority,
+};
 use abigail_skills::manifest::{
     CapabilityDescriptor, NetworkPermission, Permission, SkillId, SkillManifest,
 };
@@ -30,7 +32,7 @@ pub const EMAIL_SKILL_ID: &str = "com.abigail.skills.email";
 pub struct EmailSkill {
     manifest: SkillManifest,
     transport: Option<Arc<RwLock<EmailTransport>>>,
-    event_sender: Option<std::sync::Arc<tokio::sync::broadcast::Sender<SkillEvent>>>,
+    stream_broker: Option<Arc<dyn abigail_streaming::StreamBroker>>,
 }
 
 impl EmailSkill {
@@ -70,7 +72,7 @@ impl EmailSkill {
         Self {
             manifest,
             transport: None,
-            event_sender: None,
+            stream_broker: None,
         }
     }
 
@@ -163,7 +165,7 @@ impl Skill for EmailSkill {
     }
 
     async fn initialize(&mut self, config: SkillConfig) -> SkillResult<()> {
-        self.event_sender = config.event_sender.clone();
+        self.stream_broker = config.stream_broker.clone();
         let host = config
             .values
             .get("imap_host")
@@ -304,14 +306,15 @@ impl Skill for EmailSkill {
                         .map(|e| serde_json::json!({ "id": e.id, "from": e.from.email, "subject": e.subject, "date": e.date.to_rfc3339() }))
                         .collect::<Vec<_>>(),
                 );
-                if let Some(ref sender) = self.event_sender {
-                    let _ = sender.send(SkillEvent {
+                if let Some(ref broker) = self.stream_broker {
+                    let event = SkillEvent {
                         skill_id: self.manifest.id.clone(),
                         trigger: "email_received".to_string(),
                         payload: serde_json::json!({ "count": count, "first_id": first_id }),
                         timestamp: chrono::Utc::now(),
                         priority: TriggerPriority::Normal,
-                    });
+                    };
+                    publish_skill_event(broker, event).await;
                 }
                 Ok(out)
             }

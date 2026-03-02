@@ -27,7 +27,7 @@ pub use dynamic::{DynamicApiSkill, DynamicSkillConfig, DynamicToolConfig};
 pub use executor::SkillExecutor;
 pub use factory::SkillFactory;
 pub use hive::{HiveAgentInfo, HiveManagementSkill, HiveOperations};
-pub use instruction_registry::InstructionRegistry;
+pub use instruction_registry::{InstructionRegistry, PromptInjectionMode};
 pub use manifest::*;
 pub use policy::SkillExecutionPolicy;
 pub use preloaded::{

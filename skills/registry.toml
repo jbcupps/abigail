@@ -8,12 +8,14 @@
 id = "com.abigail.skills.email"
 instruction_file = "skill_email_imap.md"
 keywords = ["email", "mail", "inbox", "imap", "smtp", "send mail"]
+topics = ["communication", "messaging"]
 enabled = true
 
 [[skill]]
 id = "com.abigail.skills.web-search"
 instruction_file = "skill_web_search.md"
 keywords = ["search", "look up", "find online", "google", "tavily", "web search"]
+topics = ["research", "information retrieval"]
 enabled = true
 
 [[skill]]
@@ -50,6 +52,7 @@ enabled = true
 id = "com.abigail.skills.git"
 instruction_file = "skill_git.md"
 keywords = ["git", "commit", "branch", "diff", "merge", "repo", "repository"]
+topics = ["version control", "code management"]
 enabled = true
 
 [[skill]]
@@ -68,6 +71,7 @@ enabled = true
 id = "com.abigail.skills.code-analysis"
 instruction_file = "skill_code_analysis.md"
 keywords = ["analyze code", "code analysis", "code review", "code structure", "patterns", "complexity"]
+topics = ["development", "code quality"]
 enabled = true
 
 [[skill]]

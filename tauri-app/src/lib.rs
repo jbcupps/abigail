@@ -34,15 +34,16 @@ use abigail_auth::AuthManager;
 use abigail_core::{validate_local_llm_url, AppConfig, SecretsVault};
 use abigail_hive::{Hive, ModelRegistry};
 use abigail_memory::MemoryStore;
+#[allow(deprecated)]
 use abigail_router::{
     IdEgoRouter, OrchestrationScheduler, SubagentDefinition, SubagentManager, SubagentProvider,
 };
-use abigail_skills::channel::EventBus;
 use abigail_skills::protocol::mcp::McpSkillRuntime;
 use abigail_skills::{
     build_preloaded_skills, DynamicApiSkill, InstructionRegistry, ResourceLimits, Skill,
     SkillConfig, SkillExecutionPolicy, SkillExecutor, SkillRegistry, PRELOADED_SKILLS_VERSION,
 };
+use abigail_streaming::MemoryBroker;
 use identity_manager::IdentityManager;
 use rate_limit::CooldownGuard;
 use std::collections::HashMap;
@@ -140,7 +141,7 @@ pub fn create_email_skill_for_registry(state: &AppState) -> Result<Arc<dyn Skill
             secrets,
             limits: ResourceLimits::default(),
             permissions: vec![],
-            event_sender: Some(Arc::new(state.event_bus.sender())),
+            stream_broker: Some(state.stream_broker.clone()),
         };
 
         match tauri::async_runtime::block_on(async {
@@ -328,7 +329,7 @@ pub fn run() {
         tracing::error!("Failed to apply initial skill execution policy: {}", e);
     }
     let executor = Arc::new(SkillExecutor::new(registry.clone()));
-    let event_bus = Arc::new(EventBus::new(100));
+    let stream_broker: Arc<dyn abigail_streaming::StreamBroker> = Arc::new(MemoryBroker::default());
 
     let hive_data_dir = abigail_core::AppConfig::default_paths().data_dir;
     let hive_secrets = Arc::new(Mutex::new(
@@ -380,6 +381,7 @@ pub fn run() {
     let memory =
         Arc::new(MemoryStore::open_with_config(&config).expect("Failed to open MemoryStore"));
     let agentic_runtime = Arc::new(agentic_runtime::AgenticRuntime::new(&data_dir));
+    #[allow(deprecated)]
     let orchestration_scheduler = Arc::new(OrchestrationScheduler::new(data_dir.clone()));
 
     // Seed skill instructions into data_dir when absent (first run / clean install).
@@ -391,7 +393,7 @@ pub fn run() {
         router: RwLock::new(router),
         registry,
         executor,
-        event_bus,
+        stream_broker,
         secrets,
         skills_secrets,
         hive_secrets,
@@ -641,7 +643,7 @@ pub fn run() {
                                 secrets: HashMap::new(),
                                 limits: ResourceLimits::default(),
                                 permissions: vec![],
-                                event_sender: Some(Arc::new(state.event_bus.sender())),
+                                stream_broker: Some(state.stream_broker.clone()),
                             })
                             .await
                     });

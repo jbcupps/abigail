@@ -242,7 +242,7 @@ fn probe_live_imap(result: &mut ProbeResult, vault: &Arc<Mutex<SecretsVault>>) {
         secrets,
         limits: ResourceLimits::default(),
         permissions: vec![],
-        event_sender: None,
+        stream_broker: None,
     };
 
     match tokio_block(async {

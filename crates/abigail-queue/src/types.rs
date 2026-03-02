@@ -155,6 +155,27 @@ pub struct JobSpec {
     /// Parent job for chaining/dependency.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_job_id: Option<JobId>,
+    /// Cron expression (UTC) for recurring jobs. E.g. "0 */6 * * *".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cron_expression: Option<String>,
+    /// Whether this is a recurring job template (spawns instances on schedule).
+    #[serde(default)]
+    pub is_recurring: bool,
+    /// Keywords for significance scoring of results.
+    #[serde(default)]
+    pub significance_keywords: Vec<String>,
+    /// Minimum significance threshold (0.0–1.0) to trigger action.
+    #[serde(default = "default_significance_threshold")]
+    pub significance_threshold: f32,
+    /// Execution mode: "agentic_run" (default) or "id_check".
+    #[serde(default = "default_job_mode")]
+    pub job_mode: String,
+    /// Goal template for recurring jobs (interpolated at scheduling time).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub goal_template: Option<String>,
+    /// Job IDs that must complete before this job can run.
+    #[serde(default)]
+    pub depends_on: Vec<JobId>,
 }
 
 fn default_capability() -> RequiredCapability {
@@ -171,6 +192,12 @@ fn default_max_turns() -> u32 {
 }
 fn default_ttl() -> u64 {
     3600
+}
+fn default_significance_threshold() -> f32 {
+    0.5
+}
+fn default_job_mode() -> String {
+    "agentic_run".to_string()
 }
 
 /// Full job record as stored in SQLite.
@@ -199,6 +226,22 @@ pub struct JobRecord {
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub expires_at: String,
+    /// Cron expression (UTC) for recurring jobs.
+    pub cron_expression: Option<String>,
+    /// Whether this is a recurring job template.
+    pub is_recurring: bool,
+    /// Keywords for significance scoring.
+    pub significance_keywords: Vec<String>,
+    /// Significance threshold (0.0–1.0).
+    pub significance_threshold: f32,
+    /// Execution mode.
+    pub job_mode: String,
+    /// Goal template for recurring jobs.
+    pub goal_template: Option<String>,
+    /// Last time a recurring instance was scheduled.
+    pub last_scheduled_at: Option<String>,
+    /// Job IDs that must complete before this job can run.
+    pub depends_on: Vec<JobId>,
 }
 
 /// Real-time event published when job state changes.
@@ -348,6 +391,13 @@ mod tests {
             ttl_seconds: 1800,
             input_data: None,
             parent_job_id: None,
+            cron_expression: None,
+            is_recurring: false,
+            significance_keywords: vec![],
+            significance_threshold: 0.5,
+            job_mode: "agentic_run".into(),
+            goal_template: None,
+            depends_on: vec![],
         };
 
         let json = serde_json::to_string(&spec).unwrap();
@@ -355,5 +405,6 @@ mod tests {
         assert_eq!(back.goal, "Research quantum computing");
         assert_eq!(back.capability, RequiredCapability::Reasoning);
         assert_eq!(back.priority, JobPriority::High);
+        assert!(!back.is_recurring);
     }
 }

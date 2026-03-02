@@ -1,39 +1,30 @@
-//! Triggers, skill events, and event bus.
+//! Triggers, skill events, and StreamBroker-based event publishing.
 
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast;
+use std::sync::Arc;
 
 use crate::manifest::SkillId;
 
-/// Event bus for skill events. Subscribe to receive events; publish from skills or registry.
-pub struct EventBus {
-    sender: broadcast::Sender<SkillEvent>,
-}
-
-impl EventBus {
-    pub fn new(capacity: usize) -> Self {
-        let (sender, _) = broadcast::channel(capacity);
-        Self { sender }
-    }
-
-    pub fn subscribe(&self) -> broadcast::Receiver<SkillEvent> {
-        self.sender.subscribe()
-    }
-
-    pub fn publish(&self, event: SkillEvent) {
-        let _ = self.sender.send(event);
-    }
-
-    pub fn sender(&self) -> broadcast::Sender<SkillEvent> {
-        self.sender.clone()
-    }
-}
-
-impl Clone for EventBus {
-    fn clone(&self) -> Self {
-        Self {
-            sender: self.sender.clone(),
+/// Publish a skill event to the StreamBroker on the "abigail/skill-events" topic.
+/// Fire-and-forget: logs a warning on failure but never blocks the caller.
+pub async fn publish_skill_event(
+    broker: &Arc<dyn abigail_streaming::StreamBroker>,
+    event: SkillEvent,
+) {
+    let payload = match serde_json::to_vec(&event) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("Failed to serialize SkillEvent: {}", e);
+            return;
         }
+    };
+    let mut msg = abigail_streaming::StreamMessage::new(payload);
+    msg.headers
+        .insert("skill_id".to_string(), event.skill_id.0.clone());
+    msg.headers
+        .insert("trigger".to_string(), event.trigger.clone());
+    if let Err(e) = broker.publish("abigail", "skill-events", msg).await {
+        tracing::warn!("Failed to publish skill event: {}", e);
     }
 }
 

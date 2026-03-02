@@ -1,3 +1,5 @@
 pub mod event;
 
-pub use event::{EventBus, SkillEvent, TriggerDescriptor, TriggerFrequency, TriggerPriority};
+pub use event::{
+    publish_skill_event, SkillEvent, TriggerDescriptor, TriggerFrequency, TriggerPriority,
+};

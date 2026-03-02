@@ -4,7 +4,6 @@ use abigail_core::AppConfig;
 use abigail_memory::{ArchiveExporter, MemoryStore};
 use abigail_queue::JobQueue;
 use abigail_router::IdEgoRouter;
-use abigail_skills::channel::EventBus;
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use abigail_streaming::StreamBroker;
 use entity_core::ChatMemoryHook;
@@ -20,17 +19,13 @@ pub struct EntityDaemonState {
     pub router: Arc<IdEgoRouter>,
     pub registry: Arc<SkillRegistry>,
     pub executor: Arc<SkillExecutor>,
-    /// Event bus for skill-to-skill communication (used in Phase 2 streaming).
-    #[allow(dead_code)]
-    pub event_bus: Arc<EventBus>,
     /// Path to this entity's constitutional documents directory.
     pub docs_dir: PathBuf,
     /// SQLite memory store for persistent memory across conversations.
     pub memory: Arc<MemoryStore>,
     /// Persistent async job queue for delegated sub-agent tasks.
     pub job_queue: Arc<JobQueue>,
-    /// Backing stream broker (Iggy in alpha).
-    #[allow(dead_code)]
+    /// Backing stream broker for topic-based event publishing.
     pub stream_broker: Arc<dyn StreamBroker>,
     /// Optional hook called when a chat memory is persisted (for future Hive/Superego use).
     pub memory_hook: Option<Arc<dyn ChatMemoryHook>>,

@@ -6,6 +6,8 @@
 //! 3. **Synthesis**: the first provider merges the ranked drafts into a final answer.
 
 use abigail_capabilities::cognitive::provider::{CompletionRequest, LlmProvider, Message};
+use abigail_queue::{JobId, JobPriority, JobQueue, JobSpec, RequiredCapability};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -351,6 +353,176 @@ impl CouncilEngine {
         let response = synthesizer.complete(&request).await?;
 
         Ok(response.content)
+    }
+}
+
+/// Describes the job graph produced by `CouncilEngine::submit_as_jobs()`.
+///
+/// Three phases, each represented as one or more jobs:
+/// 1. **Drafts**: N independent jobs (one per provider), no dependencies.
+/// 2. **Critique**: one job that depends on all draft jobs completing.
+/// 3. **Synthesis**: one job that depends on the critique job completing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CouncilJobGraph {
+    /// Job IDs for the draft phase (one per provider).
+    pub draft_job_ids: Vec<JobId>,
+    /// Job ID for the critique phase.
+    pub critique_job_id: JobId,
+    /// Job ID for the synthesis phase.
+    pub synthesis_job_id: JobId,
+    /// Topic used to group all council jobs.
+    pub topic: String,
+}
+
+impl CouncilEngine {
+    /// Submit the three council phases as a job graph to the queue.
+    ///
+    /// This is the async alternative to `deliberate()`. Instead of blocking,
+    /// it creates a fan-out job graph:
+    /// - Draft jobs run in parallel (no dependencies).
+    /// - Critique job waits for all drafts (`depends_on: [draft_ids]`).
+    /// - Synthesis job waits for critique (`depends_on: [critique_id]`).
+    ///
+    /// The caller can poll or subscribe to the synthesis job for the final result.
+    pub async fn submit_as_jobs(
+        &self,
+        queue: &JobQueue,
+        messages: &[Message],
+        system_context: Option<&str>,
+    ) -> anyhow::Result<CouncilJobGraph> {
+        if self.providers.is_empty() {
+            anyhow::bail!("CouncilEngine requires at least one provider for job submission");
+        }
+
+        let topic = format!("council-{}", uuid::Uuid::new_v4());
+        let user_question: String = messages
+            .iter()
+            .filter(|m| m.role == "user")
+            .map(|m| m.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Build system context for sub-agent jobs
+        let base_context =
+            system_context.unwrap_or("You are a council member providing an expert response.");
+
+        // ── Phase 1: Draft jobs (no dependencies) ──────────────────────
+        let mut draft_job_ids = Vec::new();
+        for (name, _provider) in &self.providers {
+            let draft_goal = format!(
+                "Council draft (provider: {name}): Provide an independent, thorough answer to the user's question.\n\n\
+                 User question:\n{user_question}"
+            );
+            let spec = JobSpec {
+                goal: draft_goal,
+                topic: topic.clone(),
+                capability: RequiredCapability::Reasoning,
+                priority: JobPriority::High,
+                time_budget_ms: self.timeout.as_millis() as u64 / 3, // ~1/3 budget per phase
+                max_turns: 3,
+                system_context: Some(base_context.to_string()),
+                allowed_skill_ids: vec![],
+                ttl_seconds: 300,
+                input_data: Some(serde_json::json!({
+                    "council_phase": "draft",
+                    "provider_name": name,
+                })),
+                parent_job_id: None,
+                cron_expression: None,
+                is_recurring: false,
+                significance_keywords: vec![],
+                significance_threshold: 0.5,
+                job_mode: "agentic_run".to_string(),
+                goal_template: None,
+                depends_on: vec![],
+            };
+            let job_id = queue.submit_job(spec).await?;
+            tracing::debug!(
+                "Council: submitted draft job {} for provider '{}'",
+                job_id,
+                name
+            );
+            draft_job_ids.push(job_id);
+        }
+
+        // ── Phase 2: Critique job (depends on all drafts) ──────────────
+        let critique_goal = format!(
+            "Council critique: Review and score each draft response to the user's question.\n\n\
+             User question:\n{user_question}\n\n\
+             Score each draft from 0 to 10 on accuracy, completeness, and helpfulness.\n\
+             Return a JSON array of objects: [{{\"draft_index\": 0, \"score\": N, \"reason\": \"...\"}}]"
+        );
+        let critique_spec = JobSpec {
+            goal: critique_goal,
+            topic: topic.clone(),
+            capability: RequiredCapability::Reasoning,
+            priority: JobPriority::High,
+            time_budget_ms: self.timeout.as_millis() as u64 / 3,
+            max_turns: 3,
+            system_context: Some(base_context.to_string()),
+            allowed_skill_ids: vec![],
+            ttl_seconds: 300,
+            input_data: Some(serde_json::json!({
+                "council_phase": "critique",
+                "draft_job_ids": &draft_job_ids,
+            })),
+            parent_job_id: None,
+            cron_expression: None,
+            is_recurring: false,
+            significance_keywords: vec![],
+            significance_threshold: 0.5,
+            job_mode: "agentic_run".to_string(),
+            goal_template: None,
+            depends_on: draft_job_ids.clone(),
+        };
+        let critique_job_id = queue.submit_job(critique_spec).await?;
+        tracing::debug!("Council: submitted critique job {}", critique_job_id);
+
+        // ── Phase 3: Synthesis job (depends on critique) ───────────────
+        let synthesis_goal = format!(
+            "Council synthesis: Combine the best elements from the scored drafts into a single \
+             authoritative answer.\n\n\
+             User question:\n{user_question}\n\n\
+             Produce a concise, accurate final answer. Do not mention the drafts or scoring process."
+        );
+        let synthesis_spec = JobSpec {
+            goal: synthesis_goal,
+            topic: topic.clone(),
+            capability: RequiredCapability::Reasoning,
+            priority: JobPriority::High,
+            time_budget_ms: self.timeout.as_millis() as u64 / 3,
+            max_turns: 3,
+            system_context: Some(base_context.to_string()),
+            allowed_skill_ids: vec![],
+            ttl_seconds: 300,
+            input_data: Some(serde_json::json!({
+                "council_phase": "synthesis",
+                "critique_job_id": &critique_job_id,
+            })),
+            parent_job_id: None,
+            cron_expression: None,
+            is_recurring: false,
+            significance_keywords: vec![],
+            significance_threshold: 0.5,
+            job_mode: "agentic_run".to_string(),
+            goal_template: None,
+            depends_on: vec![critique_job_id.clone()],
+        };
+        let synthesis_job_id = queue.submit_job(synthesis_spec).await?;
+        tracing::debug!("Council: submitted synthesis job {}", synthesis_job_id);
+
+        tracing::info!(
+            "Council: submitted job graph with {} drafts, topic={}",
+            draft_job_ids.len(),
+            topic
+        );
+
+        Ok(CouncilJobGraph {
+            draft_job_ids,
+            critique_job_id,
+            synthesis_job_id,
+            topic,
+        })
     }
 }
 
