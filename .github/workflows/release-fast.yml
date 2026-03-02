@@ -178,12 +178,18 @@ jobs:
         run: |
           OLLAMA_BASE="https://github.com/ollama/ollama/releases/download/${{ env.OLLAMA_VERSION }}"
           if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
-            curl -L -o "tauri-app/${{ matrix.ollama_bin }}" "${OLLAMA_BASE}/ollama-windows-amd64.exe"
+            curl -fL -o "tauri-app/${{ matrix.ollama_bin }}" "${OLLAMA_BASE}/ollama-windows-amd64.exe"
           elif [[ "${{ matrix.platform }}" == "ubuntu-22.04" ]]; then
-            curl -L -o "tauri-app/${{ matrix.ollama_bin }}" "${OLLAMA_BASE}/ollama-linux-amd64"
+            curl -fL -o "tauri-app/${{ matrix.ollama_bin }}" "${OLLAMA_BASE}/ollama-linux-amd64"
             chmod +x "tauri-app/${{ matrix.ollama_bin }}"
           fi
           ls -la "tauri-app/${{ matrix.ollama_bin }}"
+          # Validate binary is not a truncated download or error page
+          FILE_SIZE=$(stat -c%s "tauri-app/${{ matrix.ollama_bin }}" 2>/dev/null || stat -f%z "tauri-app/${{ matrix.ollama_bin }}" 2>/dev/null)
+          if [ "$FILE_SIZE" -lt 10000000 ]; then
+            echo "ERROR: Downloaded Ollama binary is too small (${FILE_SIZE} bytes)"
+            exit 1
+          fi
 
       - name: Validate updater signing key preflight
         shell: bash

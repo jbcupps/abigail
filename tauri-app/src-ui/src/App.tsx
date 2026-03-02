@@ -62,61 +62,42 @@ function AppInner() {
       }
 
       // Start managed Ollama (bundled Hive agent LLM).
-      // Always show loading screen while Ollama starts and model warms up.
+      // Await the result BEFORE entering model_loading so AbnormalBrainScreen
+      // mounts with correct initial values for isFirstPull / progress / status.
+      let needsPull = false;
+      let ollamaFailed = false;
       try {
-        setOllamaProgress(0);
-        setOllamaStatus("Starting Hive agent...");
-        setAppState("model_loading");
-
-        const needsPull = await invoke<boolean>("start_managed_ollama");
-        if (needsPull) {
-          // Model is being downloaded — stay on loading screen, events will advance
-          setIsFirstPull(true);
-          setOllamaStatus("Downloading model...");
-          return;
-        }
-
-        // Model exists — warm it up with a quick probe, then advance
-        setIsFirstPull(false);
-        setOllamaStatus("Warming up Hive agent...");
-        setOllamaProgress(80);
-
-        // Brief warm-up request to load model into memory
-        try {
-          await invoke("warmup_ollama_model");
-        } catch {
-          // Non-fatal — model will load on first real request
-        }
-
-        setOllamaProgress(100);
-        // Small delay so user sees the loading screen, then advance
-        await new Promise((resolve) => setTimeout(resolve, 600));
-        // Fall through to identity checks below
+        needsPull = await invoke<boolean>("start_managed_ollama");
       } catch (e) {
         console.warn("[App] start_managed_ollama failed; continuing without bundled Ollama:", e);
-        // Non-fatal — show brief message on loading screen, then advance via onReady
+        ollamaFailed = true;
+      }
+
+      if (ollamaFailed) {
+        // No Ollama — show instant text + 100% bar, let onReady transition
         setIsFirstPull(false);
-        setOllamaStatus("No local LLM found — continuing with cloud providers");
         setOllamaProgress(100);
-        return; // Let AbnormalBrainScreen's onReady handle the transition
+        setOllamaStatus("No local LLM found — continuing with cloud providers");
+        setAppState("model_loading");
+        return;
       }
 
-      // Check if Hive has any agents
-      const identities = await invoke<unknown[]>("get_identities");
-
-      if (identities.length === 0) {
-        // Check for legacy single-identity installation
-        const identity = await invoke<IdentitySummary | null>("check_existing_identity");
-        if (identity) {
-          // Show identity conflict/migration screen
-          setExistingIdentity(identity);
-          setAppState("identity_conflict");
-          return;
-        }
+      if (needsPull) {
+        // Model is being downloaded — typewriter + progress bar via events
+        setIsFirstPull(true);
+        setOllamaProgress(0);
+        setOllamaStatus("Downloading model...");
+        setAppState("model_loading");
+        return;
       }
 
-      // Default: show the management screen (identity selector)
-      setAppState("management");
+      // Model exists — show instant text + 100% bar, fire warmup in background
+      setIsFirstPull(false);
+      setOllamaProgress(100);
+      setOllamaStatus("Hive agent ready");
+      setAppState("model_loading");
+      // Non-blocking warmup — model will load on first real request if this fails
+      invoke("warmup_ollama_model").catch(() => {});
     } catch (e) {
       console.error("[App] initializeApp failed; falling back to management screen:", e);
       // Fallback to management screen on error

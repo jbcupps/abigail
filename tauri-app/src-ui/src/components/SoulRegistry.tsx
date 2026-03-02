@@ -20,6 +20,7 @@ function HiveAgentPanel() {
   const [status, setStatus] = useState<OllamaStatusInfo | null>(null);
   const [models, setModels] = useState<OllamaModelTag[]>([]);
   const [activeModel, setActiveModel] = useState("");
+  const [baseUrl, setBaseUrl] = useState("http://localhost:11434");
   const [expanded, setExpanded] = useState(false);
   const [pullModel, setPullModel] = useState("");
   const [pulling, setPulling] = useState(false);
@@ -36,12 +37,13 @@ function HiveAgentPanel() {
 
       // Fetch model list from Ollama API
       const config = await invoke<{ local_llm_base_url?: string; bundled_model?: string }>("get_config_snapshot");
-      const baseUrl = config.local_llm_base_url || `http://127.0.0.1:${s.port}`;
+      const computedBaseUrl = config.local_llm_base_url || `http://127.0.0.1:${s.port}`;
+      setBaseUrl(computedBaseUrl);
       setActiveModel(config.bundled_model || "llama3.2:3b");
 
       if (s.running) {
         try {
-          const resp = await fetch(`${baseUrl}/api/tags`);
+          const resp = await fetch(`${computedBaseUrl}/api/tags`);
           if (resp.ok) {
             const data = await resp.json();
             setModels(
@@ -66,7 +68,7 @@ function HiveAgentPanel() {
     setPulling(true);
     setPullStatus("Starting pull...");
     try {
-      await invoke("pull_ollama_model", { model: pullModel.trim() });
+      await invoke("pull_ollama_model", { model: pullModel.trim(), baseUrl });
       setPullStatus("Complete");
       setPullModel("");
       await refreshStatus();

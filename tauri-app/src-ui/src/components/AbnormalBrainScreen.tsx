@@ -55,6 +55,11 @@ export default function AbnormalBrainScreen({
     }
   }, [progress, onReady]);
 
+  // Sync typewriterDone when isFirstPull changes to false after mount
+  useEffect(() => {
+    if (!isFirstPull) setTypewriterDone(true);
+  }, [isFirstPull]);
+
   // Typewriter effect — first-time only
   useEffect(() => {
     if (!isFirstPull || typewriterDone) return;
@@ -169,8 +174,8 @@ export default function AbnormalBrainScreen({
         {renderLines()}
       </div>
 
-      {/* Progress bar — show after typewriter completes (or immediately for subsequent runs) */}
-      {typewriterDone && (
+      {/* Progress bar — show after typewriter completes (or immediately for non-typewriter paths) */}
+      {(typewriterDone || !isFirstPull) && (
         <div className="max-w-lg w-full animate-fade-in-up">
           <div className="flex justify-between text-xs text-theme-text-dim mb-1">
             <span>{progressLabel}</span>
