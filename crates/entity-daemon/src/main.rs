@@ -3,9 +3,12 @@
 //! Wraps `IdEgoRouter`, `SkillRegistry`, `SkillExecutor`, and `EventBus` behind
 //! an Axum REST API. Fetches provider configuration from hive-daemon on startup.
 
+mod capability_matcher;
 mod hive_client;
+mod job_scheduler;
 mod routes;
 mod state;
+mod subagent_runner;
 
 use abigail_core::{AppConfig, SecretsVault};
 use abigail_hive::Hive;
@@ -18,11 +21,14 @@ use abigail_skills::{Skill, SkillExecutionPolicy, SkillExecutor, SkillRegistry};
 use abigail_streaming::{IggyBroker, StreamBroker, TopicConfig};
 use axum::routing::{get, post};
 use axum::Router;
+use capability_matcher::CapabilityMatcher;
 use clap::Parser;
 use hive_client::HiveClient;
+use job_scheduler::JobScheduler;
 use state::EntityDaemonState;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use subagent_runner::SubagentRunner;
 use tower_http::cors::{Any, CorsLayer};
 
 #[derive(Parser)]
@@ -461,6 +467,24 @@ async fn main() -> anyhow::Result<()> {
         archive_exporter,
         turns_since_archive: Arc::new(std::sync::atomic::AtomicU32::new(0)),
     };
+
+    // Start background queue scheduler (Phase 1 async sub-agent execution).
+    let capability_matcher = CapabilityMatcher::from_router(state.router.clone());
+    let subagent_runner = Arc::new(SubagentRunner::new(
+        state.job_queue.clone(),
+        state.router.clone(),
+        state.registry.clone(),
+        state.executor.clone(),
+        capability_matcher,
+        state.config.agent_name.clone(),
+    ));
+    let scheduler = Arc::new(
+        JobScheduler::new(state.job_queue.clone(), subagent_runner)
+            .with_max_concurrency(2)
+            .with_poll_interval(std::time::Duration::from_millis(500)),
+    );
+    scheduler.spawn();
+    tracing::info!("Job scheduler started (max_concurrency=2)");
 
     // Spawn SkillsWatcher for hot-reload of new skills (before state is consumed)
     let _watcher = {

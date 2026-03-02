@@ -30,6 +30,7 @@ pub struct EntityDaemonState {
     /// Persistent async job queue for delegated sub-agent tasks.
     pub job_queue: Arc<JobQueue>,
     /// Backing stream broker (Iggy in alpha).
+    #[allow(dead_code)]
     pub stream_broker: Arc<dyn StreamBroker>,
     /// Optional hook called when a chat memory is persisted (for future Hive/Superego use).
     pub memory_hook: Option<Arc<dyn ChatMemoryHook>>,

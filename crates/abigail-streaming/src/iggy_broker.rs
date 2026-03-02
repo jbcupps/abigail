@@ -1,18 +1,23 @@
 //! Iggy-backed `StreamBroker` implementation.
 //!
-//! This is the production broker for alpha. It provides persistent topics and
-//! consumer groups backed by Apache Iggy.
+//! Uses the native Iggy Rust client (`iggy` crate) for persistent topics and
+//! consumer groups.
 
 use crate::broker::{MessageHandler, StreamBroker};
 use crate::types::{StreamMessage, SubscriptionHandle, TopicConfig};
 use anyhow::Context;
-use iggy::prelude::{
-    AutoCommit, AutoCommitWhen, DirectConfig, IggyClient, IggyDuration, IggyMessage, Partitioning,
-    PollingStrategy,
-};
-use std::str::FromStr;
+use iggy::client::{Client, ConsumerGroupClient, MessageClient, StreamClient, TopicClient};
+use iggy::clients::client::IggyClient;
+use iggy::compression::compression_algorithm::CompressionAlgorithm;
+use iggy::consumer::Consumer;
+use iggy::identifier::Identifier;
+use iggy::messages::poll_messages::PollingStrategy;
+use iggy::messages::send_messages::{Message as IggyMessage, Partitioning};
+use iggy::utils::expiry::IggyExpiry;
+use iggy::utils::topic_size::MaxTopicSize;
 use std::sync::Arc;
-use tokio::time::{sleep, timeout, Duration};
+use tokio::time::{sleep, Duration};
+use tokio_util::bytes::Bytes;
 use tokio_util::sync::CancellationToken;
 
 /// Runtime configuration for `IggyBroker`.
@@ -20,24 +25,15 @@ use tokio_util::sync::CancellationToken;
 pub struct IggyBrokerConfig {
     /// Iggy connection string, e.g. `iggy://iggy:iggy@127.0.0.1:8090`.
     pub connection_string: String,
-    /// Producer batch length.
-    pub producer_batch_length: u32,
-    /// Producer linger time in milliseconds.
-    pub producer_linger_ms: u64,
-    /// Consumer polling interval in milliseconds.
-    pub consumer_poll_interval_ms: u64,
-    /// Upper bound wait for a single poll call in milliseconds.
-    pub consumer_poll_timeout_ms: u64,
+    /// Poll interval used by the fallback `subscribe()` loop.
+    pub subscribe_poll_interval_ms: u64,
 }
 
 impl Default for IggyBrokerConfig {
     fn default() -> Self {
         Self {
             connection_string: "iggy://iggy:iggy@127.0.0.1:8090".to_string(),
-            producer_batch_length: 1000,
-            producer_linger_ms: 1,
-            consumer_poll_interval_ms: 10,
-            consumer_poll_timeout_ms: 100,
+            subscribe_poll_interval_ms: 50,
         }
     }
 }
@@ -68,19 +64,60 @@ impl IggyBroker {
         })
     }
 
-    fn producer_linger_duration(&self) -> anyhow::Result<IggyDuration> {
-        IggyDuration::from_str(&format!("{}ms", self.cfg.producer_linger_ms))
-            .map_err(|e| anyhow::anyhow!("Invalid producer linger duration: {}", e))
+    async fn ensure_connected(&self) -> anyhow::Result<()> {
+        self.client
+            .connect()
+            .await
+            .context("Failed to connect/authenticate with Iggy")
     }
 
-    fn consumer_poll_interval_duration(&self) -> anyhow::Result<IggyDuration> {
-        IggyDuration::from_str(&format!("{}ms", self.cfg.consumer_poll_interval_ms))
-            .map_err(|e| anyhow::anyhow!("Invalid consumer poll interval: {}", e))
-    }
+    async fn ensure_stream_and_topic(
+        &self,
+        stream: &str,
+        topic: &str,
+        topic_cfg: &TopicConfig,
+    ) -> anyhow::Result<()> {
+        self.ensure_connected().await?;
 
-    fn consumer_auto_commit_duration(&self) -> anyhow::Result<IggyDuration> {
-        IggyDuration::from_str("1s")
-            .map_err(|e| anyhow::anyhow!("Invalid consumer auto-commit duration: {}", e))
+        let stream_id = Identifier::named(stream).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let topic_id = Identifier::named(topic).map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        if self
+            .client
+            .get_stream(&stream_id)
+            .await
+            .context("Iggy get_stream failed")?
+            .is_none()
+        {
+            self.client
+                .create_stream(stream, None)
+                .await
+                .with_context(|| format!("Failed to create Iggy stream '{}'", stream))?;
+        }
+
+        if self
+            .client
+            .get_topic(&stream_id, &topic_id)
+            .await
+            .context("Iggy get_topic failed")?
+            .is_none()
+        {
+            self.client
+                .create_topic(
+                    &stream_id,
+                    topic,
+                    topic_cfg.partitions.max(1),
+                    CompressionAlgorithm::None,
+                    None,
+                    None,
+                    expiry_from_topic_config(topic_cfg),
+                    MaxTopicSize::ServerDefault,
+                )
+                .await
+                .with_context(|| format!("Failed to create Iggy topic '{}/{}'", stream, topic))?;
+        }
+
+        Ok(())
     }
 }
 
@@ -92,36 +129,24 @@ impl StreamBroker for IggyBroker {
         topic: &str,
         message: StreamMessage,
     ) -> anyhow::Result<()> {
-        let linger = self.producer_linger_duration()?;
-        let mut producer = self
-            .client
-            .producer(stream, topic)
-            .with_context(|| format!("Failed to create producer for {}/{}", stream, topic))?
-            .direct(
-                DirectConfig::builder()
-                    .batch_length(self.cfg.producer_batch_length)
-                    .linger_time(linger)
-                    .build(),
+        self.ensure_stream_and_topic(stream, topic, &TopicConfig::default())
+            .await?;
+
+        let stream_id = Identifier::named(stream).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let topic_id = Identifier::named(topic).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let payload = serde_json::to_vec(&message)
+            .context("Failed to serialize StreamMessage for Iggy publish")?;
+        let mut messages = vec![IggyMessage::new(None, Bytes::from(payload), None)];
+
+        self.client
+            .send_messages(
+                &stream_id,
+                &topic_id,
+                &Partitioning::balanced(),
+                &mut messages,
             )
-            .partitioning(Partitioning::balanced())
-            .build();
-
-        // init() validates/creates stream and topic as needed.
-        producer
-            .init()
             .await
-            .with_context(|| format!("Failed to initialize producer for {}/{}", stream, topic))?;
-
-        let serialized = serde_json::to_string(&message)
-            .context("Failed to serialize StreamMessage for publish")?;
-        let iggy_message = IggyMessage::from_str(&serialized)
-            .context("Failed to create Iggy message from StreamMessage payload")?;
-        producer
-            .send(vec![iggy_message])
-            .await
-            .with_context(|| format!("Failed to publish message to {}/{}", stream, topic))?;
-
-        Ok(())
+            .with_context(|| format!("Failed to publish to Iggy topic '{}/{}'", stream, topic))
     }
 
     async fn poll(
@@ -131,57 +156,41 @@ impl StreamBroker for IggyBroker {
         consumer_group: &str,
         batch_size: u32,
     ) -> anyhow::Result<Vec<StreamMessage>> {
-        let poll_interval = self.consumer_poll_interval_duration()?;
-        let auto_commit_every = self.consumer_auto_commit_duration()?;
-        let mut consumer = self
+        self.ensure_stream_and_topic(stream, topic, &TopicConfig::default())
+            .await?;
+        self.ensure_consumer_group(stream, topic, consumer_group)
+            .await?;
+
+        let stream_id = Identifier::named(stream).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let topic_id = Identifier::named(topic).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let group_id = Identifier::named(consumer_group).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let consumer = Consumer::group(group_id.clone());
+
+        let polled = self
             .client
-            .consumer_group(consumer_group, stream, topic)
+            .poll_messages(
+                &stream_id,
+                &topic_id,
+                None,
+                &consumer,
+                &PollingStrategy::next(),
+                batch_size.max(1),
+                true, // auto-commit server offset for this group
+            )
+            .await
             .with_context(|| {
                 format!(
-                    "Failed to create consumer for {}/{}, group={}",
-                    stream, topic, consumer_group
-                )
-            })?
-            .create_consumer_group_if_not_exists()
-            .auto_join_consumer_group()
-            .auto_commit(AutoCommit::IntervalOrWhen(
-                auto_commit_every,
-                AutoCommitWhen::ConsumingAllMessages,
-            ))
-            .polling_strategy(PollingStrategy::next())
-            .poll_interval(poll_interval)
-            .batch_length(batch_size)
-            .build();
-
-        consumer
-            .init()
-            .await
-            .with_context(|| format!("Failed to initialize consumer {}/{}", stream, topic))?;
-
-        let mut out = Vec::new();
-        let wait = Duration::from_millis(self.cfg.consumer_poll_timeout_ms);
-        while out.len() < batch_size as usize {
-            let next = timeout(wait, consumer.next()).await;
-            let Some(polled) = (match next {
-                Ok(value) => value,
-                Err(_) => break,
-            }) else {
-                break;
-            };
-
-            let received = polled.with_context(|| {
-                format!(
-                    "Failed reading message from {}/{}, group={}",
+                    "Failed to poll from Iggy topic '{}/{}' for group '{}'",
                     stream, topic, consumer_group
                 )
             })?;
 
-            let payload = received.message.payload.as_ref();
-            let msg: StreamMessage = serde_json::from_slice(payload)
+        let mut out = Vec::new();
+        for polled_msg in polled.messages {
+            let msg: StreamMessage = serde_json::from_slice(polled_msg.payload.as_ref())
                 .context("Failed to deserialize StreamMessage from Iggy payload")?;
             out.push(msg);
         }
-
         Ok(out)
     }
 
@@ -198,6 +207,7 @@ impl StreamBroker for IggyBroker {
         let stream = stream.to_string();
         let topic = topic.to_string();
         let group = consumer_group.to_string();
+        let poll_every = Duration::from_millis(self.cfg.subscribe_poll_interval_ms.max(10));
 
         tokio::spawn(async move {
             while !cancel_clone.is_cancelled() {
@@ -220,9 +230,7 @@ impl StreamBroker for IggyBroker {
                         );
                     }
                 }
-
-                // Avoid hot-looping when no messages are available.
-                sleep(Duration::from_millis(25)).await;
+                sleep(poll_every).await;
             }
         });
 
@@ -233,27 +241,9 @@ impl StreamBroker for IggyBroker {
         &self,
         stream: &str,
         topic: &str,
-        _config: TopicConfig,
+        config: TopicConfig,
     ) -> anyhow::Result<()> {
-        let linger = self.producer_linger_duration()?;
-        let mut producer = self
-            .client
-            .producer(stream, topic)
-            .with_context(|| format!("Failed to create producer for {}/{}", stream, topic))?
-            .direct(
-                DirectConfig::builder()
-                    .batch_length(1)
-                    .linger_time(linger)
-                    .build(),
-            )
-            .partitioning(Partitioning::balanced())
-            .build();
-
-        producer
-            .init()
-            .await
-            .with_context(|| format!("Failed to ensure topic {}/{}", stream, topic))?;
-        Ok(())
+        self.ensure_stream_and_topic(stream, topic, &config).await
     }
 
     async fn ensure_consumer_group(
@@ -262,34 +252,51 @@ impl StreamBroker for IggyBroker {
         topic: &str,
         group_name: &str,
     ) -> anyhow::Result<()> {
-        let poll_interval = self.consumer_poll_interval_duration()?;
-        let auto_commit_every = self.consumer_auto_commit_duration()?;
-        let mut consumer = self
+        self.ensure_stream_and_topic(stream, topic, &TopicConfig::default())
+            .await?;
+
+        let stream_id = Identifier::named(stream).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let topic_id = Identifier::named(topic).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let group_id = Identifier::named(group_name).map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        if self
             .client
-            .consumer_group(group_name, stream, topic)
+            .get_consumer_group(&stream_id, &topic_id, &group_id)
+            .await
+            .context("Iggy get_consumer_group failed")?
+            .is_none()
+        {
+            self.client
+                .create_consumer_group(&stream_id, &topic_id, group_name, None)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to create Iggy consumer group '{}' for {}/{}",
+                        group_name, stream, topic
+                    )
+                })?;
+        }
+
+        // Join on ensure so polling with this group can start immediately.
+        self.client
+            .join_consumer_group(&stream_id, &topic_id, &group_id)
+            .await
             .with_context(|| {
                 format!(
-                    "Failed to create consumer group for {}/{}, group={}",
-                    stream, topic, group_name
+                    "Failed to join Iggy consumer group '{}' for {}/{}",
+                    group_name, stream, topic
                 )
-            })?
-            .create_consumer_group_if_not_exists()
-            .auto_join_consumer_group()
-            .auto_commit(AutoCommit::IntervalOrWhen(
-                auto_commit_every,
-                AutoCommitWhen::ConsumingAllMessages,
-            ))
-            .polling_strategy(PollingStrategy::next())
-            .poll_interval(poll_interval)
-            .batch_length(1)
-            .build();
+            })?;
 
-        consumer.init().await.with_context(|| {
-            format!(
-                "Failed to ensure consumer group for {}/{}, group={}",
-                stream, topic, group_name
-            )
-        })?;
         Ok(())
     }
+}
+
+fn expiry_from_topic_config(cfg: &TopicConfig) -> IggyExpiry {
+    if cfg.retention_seconds == 0 {
+        return IggyExpiry::NeverExpire;
+    }
+    // IggyDuration::from(u64) expects microseconds.
+    let micros = cfg.retention_seconds.saturating_mul(1_000_000);
+    IggyExpiry::from(micros)
 }
