@@ -1078,14 +1078,29 @@ impl IdEgoRouter {
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
     ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
+        self.route_with_tools_traced_override(messages, tools, None)
+            .await
+    }
+
+    /// Traced routing with tools and an optional explicit model override.
+    ///
+    /// If `forced_model_override` is `Some`, it takes precedence over the router's
+    /// tier-based model selection logic.
+    pub async fn route_with_tools_traced_override(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolDefinition>,
+        forced_model_override: Option<String>,
+    ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
         let last_msg = messages.last().map_or("", |m| &m.content).to_string();
         let target = self.target_for_mode(&last_msg);
-        let model_override =
+        let model_override = forced_model_override.or_else(|| {
             if self.mode == RoutingMode::TierBased || self.mode == RoutingMode::Council {
                 self.resolve_model_for_request(&last_msg)
             } else {
                 None
-            };
+            }
+        });
         let mut trace = self.begin_trace(&last_msg, &model_override);
         let request = CompletionRequest {
             messages,

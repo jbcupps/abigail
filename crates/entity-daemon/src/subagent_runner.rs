@@ -63,7 +63,13 @@ impl SubagentRunner {
         let tools = filter_tools_for_job(entity_chat::build_tool_definitions(&self.registry), &job);
 
         let timeout_ms = job.time_budget_ms.max(1_000);
-        let task = entity_chat::run_tool_use_loop(&self.router, &self.executor, messages, tools);
+        let task = entity_chat::run_tool_use_loop_with_model_override(
+            &self.router,
+            &self.executor,
+            messages,
+            tools,
+            selection.model_hint.clone(),
+        );
         match timeout(Duration::from_millis(timeout_ms), task).await {
             Ok(Ok(result)) => {
                 let turns = result

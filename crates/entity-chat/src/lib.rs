@@ -484,8 +484,20 @@ impl ToolUseResult {
 pub async fn run_tool_use_loop(
     router: &IdEgoRouter,
     executor: &SkillExecutor,
+    messages: Vec<Message>,
+    tools: Vec<ToolDefinition>,
+) -> anyhow::Result<ToolUseResult> {
+    run_tool_use_loop_with_model_override(router, executor, messages, tools, None).await
+}
+
+/// Same as [`run_tool_use_loop`] but allows forcing a model override for all
+/// LLM calls in the loop.
+pub async fn run_tool_use_loop_with_model_override(
+    router: &IdEgoRouter,
+    executor: &SkillExecutor,
     mut messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
+    model_override: Option<String>,
 ) -> anyhow::Result<ToolUseResult> {
     let mut all_records = Vec::new();
     let mut last_trace: Option<entity_core::ExecutionTrace> = None;
@@ -494,7 +506,11 @@ pub async fn run_tool_use_loop(
         tracing::debug!("Tool-use loop round {}", round);
 
         let (response, trace) = router
-            .route_with_tools_traced(messages.clone(), tools.clone())
+            .route_with_tools_traced_override(
+                messages.clone(),
+                tools.clone(),
+                model_override.clone(),
+            )
             .await?;
         last_trace = Some(trace);
 
