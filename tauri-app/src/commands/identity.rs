@@ -100,6 +100,16 @@ pub async fn load_agent(state: State<'_, AppState>, agent_id: String) -> Result<
             .unwrap_or_else(|_| SecretsVault::new(config.data_dir.clone()));
     }
 
+    // Rebuild MemoryStore against the new agent's db_path.
+    {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let new_store =
+            abigail_memory::MemoryStore::open_with_config(&config).map_err(|e| e.to_string())?;
+        let mut memory = state.memory.write().map_err(|e| e.to_string())?;
+        *memory = new_store;
+        tracing::info!("load_agent: reopened MemoryStore at {:?}", config.db_path);
+    }
+
     crate::rebuild_router(&state).await?;
 
     {

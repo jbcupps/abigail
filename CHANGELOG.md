@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-03-04 16:30 EST: Add file upload and drag-and-drop to ChatInterface — paperclip file picker, drag overlay, attachment preview strip, save-to-entity-docs persistence, and get_entity_documents_path/save_to_entity_docs Tauri commands
+- 2026-03-03 23:30 EST: Add BackupManagementSkill — entity self-restore: list/preview/import conversation turns and memories from backup SQLite databases into running MemoryStore
 - 2026-03-04 14:00 EST: Fix 6 runtime bugs — author_skill secrets declaration, email SMTP config, filesystem allowed_roots expansion, OpenAI non-chat model filtering, perplexity reserved key, and provider-to-skill secret sync
 - 2026-03-03 19:10 EST: Add OllamaDrawer (left) and ProviderDrawer (right) slide-out panels to SoulRegistry for pre-birth Ollama management and provider/CLI configuration
 - 2026-03-03 17:55 EST: Add inline Provider + Model dropdowns to ChatInterface toolbar for instant model switching without leaving the conversation

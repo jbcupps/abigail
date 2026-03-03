@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import McpAppFrame from "./McpAppFrame";
@@ -11,6 +12,16 @@ import {
   type ChatGatewayStream,
   type ExecutionTrace,
 } from "../chat/chatGateway";
+
+interface Attachment {
+  filename: string;
+  content: string;
+  contentType: string;
+  sizeBytes: number;
+  truncated: boolean;
+  filePath: string;
+  savedPath?: string;
+}
 
 /** Normalize raw trace/provider labels for chat-facing display.
  *  Id is a background system function, never a conversational actor. */
@@ -115,6 +126,8 @@ export default function ChatInterface({
   const [forceOverride, setForceOverride] = useState<ForceOverride>({ pinned_model: null, pinned_tier: null, pinned_provider: null });
   const [modelRegistry, setModelRegistry] = useState<ModelRegistryEntry[]>([]);
   const [headerProvider, setHeaderProvider] = useState<string>("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [dragOver, setDragOver] = useState(false);
   const showDebugTelemetry = isBrowserHarnessRuntime() && isHarnessDebugEnabled();
   const chatGateway = useMemo(() => createChatGateway(), []);
 
@@ -154,6 +167,100 @@ export default function ChatInterface({
     el.style.height = "auto";
     // Clamp to ~6 rows max (approx 144px at default line-height)
     el.style.height = Math.min(el.scrollHeight, 144) + "px";
+  }, []);
+
+  const ingestFile = useCallback(async (filePath: string) => {
+    try {
+      const result = await invoke<{
+        content: string;
+        content_type: string;
+        filename: string;
+        size_bytes: number;
+        truncated: boolean;
+      }>("upload_chat_attachment", { filePath });
+
+      const attachment: Attachment = {
+        filename: result.filename,
+        content: result.content,
+        contentType: result.content_type,
+        sizeBytes: result.size_bytes,
+        truncated: result.truncated,
+        filePath,
+      };
+
+      // Save to entity docs folder in background
+      try {
+        const savedPath = await invoke<string>("save_to_entity_docs", {
+          sourcePath: filePath,
+          filename: result.filename,
+        });
+        attachment.savedPath = savedPath;
+      } catch (e) {
+        console.warn("[ChatInterface] save_to_entity_docs failed:", e);
+      }
+
+      setAttachments((prev) => [...prev, attachment]);
+    } catch (e) {
+      console.error("[ChatInterface] upload_chat_attachment failed:", e);
+    }
+  }, []);
+
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOver(false);
+
+      const files = e.dataTransfer?.files;
+      if (!files || files.length === 0) return;
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        // Tauri exposes the native path on File objects from OS drops
+        const path = (file as File & { path?: string }).path;
+        if (path) {
+          await ingestFile(path);
+        }
+      }
+    },
+    [ingestFile]
+  );
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+  }, []);
+
+  const openFilePicker = useCallback(async () => {
+    try {
+      const selected = await open({ multiple: true });
+      if (!selected) return;
+      const paths = Array.isArray(selected) ? selected : [selected];
+      for (const filePath of paths) {
+        if (typeof filePath === "string") {
+          await ingestFile(filePath);
+        }
+      }
+    } catch (e) {
+      console.error("[ChatInterface] file picker failed:", e);
+    }
+  }, [ingestFile]);
+
+  const removeAttachment = useCallback((index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const formatFileSize = useCallback((bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }, []);
 
   const refreshRouterStatus = () => {
@@ -543,8 +650,21 @@ export default function ChatInterface({
   };
 
   const send = async () => {
-    if (!input.trim() || loading) return;
-    const userMessage: Message = { role: "user", content: input.trim() };
+    if ((!input.trim() && attachments.length === 0) || loading) return;
+
+    // Build message content: prepend attachment blocks, then user text
+    let messageContent = "";
+    for (const att of attachments) {
+      const truncNote = att.truncated ? " (truncated)" : "";
+      messageContent += `[File: ${att.filename} (${formatFileSize(att.sizeBytes)})${truncNote}]\n`;
+      if (att.savedPath) {
+        messageContent += `[Saved to: ${att.savedPath}]\n`;
+      }
+      messageContent += `${att.content}\n\n`;
+    }
+    messageContent += input.trim();
+
+    const userMessage: Message = { role: "user", content: messageContent };
     const sessionBeforeTurn = messagesRef.current
       .filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim().length > 0)
       .map((m) => ({ role: m.role, content: m.content }));
@@ -557,6 +677,7 @@ export default function ChatInterface({
 
     setMessages((m) => [...m, userMessage, { role: "assistant", content: "" }]);
     setInput("");
+    setAttachments([]);
     setLoading(true);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -1028,7 +1149,12 @@ export default function ChatInterface({
   };
 
   return (
-    <div className="h-full bg-theme-bg text-theme-text font-mono flex flex-col">
+    <div
+      className={`h-full bg-theme-bg text-theme-text font-mono flex flex-col relative ${dragOver ? "ring-2 ring-inset ring-theme-primary" : ""}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {getStatusIndicator()}
       <div className="px-4 py-1 text-[11px] border-b border-theme-border flex items-center gap-3 bg-theme-bg-elevated">
         <button
@@ -1227,12 +1353,57 @@ export default function ChatInterface({
         ))}
         {loading && <ThinkingIndicator status={chatStatus} label={assistantLabel} />}
       </div>
+      {dragOver && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 pointer-events-none">
+          <div className="border-2 border-dashed border-theme-primary rounded-xl px-8 py-6 bg-theme-surface/90">
+            <p className="text-theme-primary text-sm">Drop files to attach</p>
+          </div>
+        </div>
+      )}
+      {attachments.length > 0 && (
+        <div className="px-4 py-2 border-t border-theme-border bg-theme-surface flex gap-2 flex-wrap items-center">
+          {attachments.map((att, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-theme-input-bg border border-theme-border-dim rounded-lg text-xs"
+            >
+              <span className="text-theme-text-bright truncate max-w-[150px]" title={att.filename}>
+                {att.filename}
+              </span>
+              <span className="text-theme-text-dim">
+                {formatFileSize(att.sizeBytes)}
+              </span>
+              {att.truncated && (
+                <span className="text-yellow-500" title="File was truncated">!</span>
+              )}
+              <button
+                className="text-theme-text-dim hover:text-red-400 ml-0.5"
+                onClick={() => removeAttachment(i)}
+                title="Remove"
+              >
+                x
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="p-4 border-t border-theme-border flex gap-2 items-end">
+        <button
+          aria-label="Attach file"
+          className="border border-theme-border-dim px-2.5 py-2 rounded hover:bg-theme-surface hover:border-theme-primary text-theme-text-dim hover:text-theme-text"
+          onClick={openFilePicker}
+          disabled={loading}
+          title="Attach files"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+          </svg>
+        </button>
         <textarea
           ref={textareaRef}
           aria-label="Message input"
           className="flex-1 bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded resize-none overflow-y-auto focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
-          placeholder="Message"
+          placeholder={attachments.length > 0 ? "Add a message (optional)" : "Message"}
           rows={1}
           value={input}
           onChange={(e) => {

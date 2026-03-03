@@ -3,6 +3,7 @@
 //! Wraps `IdEgoRouter`, `SkillRegistry`, `SkillExecutor`, and `StreamBroker` behind
 //! an Axum REST API. Fetches provider configuration from hive-daemon on startup.
 
+mod backup_ops;
 mod capability_matcher;
 mod hive_client;
 mod job_scheduler;
@@ -396,6 +397,20 @@ async fn main() -> anyhow::Result<()> {
         let _ = registry.register(
             abigail_skills::manifest::SkillId("builtin.queue_management".to_string()),
             Arc::new(queue_skill),
+        );
+    }
+
+    // 11b. Register BackupManagementSkill (backup list/preview/import tools).
+    {
+        let backup_ops = Arc::new(backup_ops::LocalBackupOps::new(
+            memory.clone(),
+            data_root.clone(),
+            config.agent_name.clone(),
+        ));
+        let backup_skill = abigail_skills::BackupManagementSkill::new(backup_ops);
+        let _ = registry.register(
+            abigail_skills::manifest::SkillId("builtin.backup_management".to_string()),
+            Arc::new(backup_skill),
         );
     }
 

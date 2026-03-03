@@ -511,6 +511,55 @@ impl MemoryStore {
         })
     }
 
+    // ── Idempotent inserts (for backup import) ────────────────────
+
+    /// Insert a conversation turn, ignoring if the ID already exists.
+    /// Returns `true` if a new row was inserted.
+    pub fn insert_turn_or_ignore(&self, turn: &ConversationTurn) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        let changed = conn.execute(
+            "INSERT OR IGNORE INTO conversation_turns \
+             (id, session_id, turn_number, role, content, provider, model, tier, \
+              complexity_score, token_estimate, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![
+                turn.id,
+                turn.session_id,
+                turn.turn_number,
+                turn.role,
+                turn.content,
+                turn.provider,
+                turn.model,
+                turn.tier,
+                turn.complexity_score.map(|v| v as i64),
+                turn.token_estimate.map(|v| v as i64),
+                turn.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Insert a memory, ignoring if the ID already exists.
+    /// Returns `true` if a new row was inserted.
+    pub fn insert_memory_or_ignore(&self, memory: &Memory) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        let changed = conn.execute(
+            "INSERT OR IGNORE INTO memories (id, content, weight, created_at) \
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![
+                memory.id,
+                memory.content,
+                memory.weight.as_str(),
+                memory.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(changed > 0)
+    }
+
     // ── Memories ──────────────────────────────────────────────────
 
     /// Recent memories (MVP: by created_at DESC; sqlite-vec stubbed).
@@ -769,5 +818,32 @@ mod tests {
 
         // VACUUM should succeed
         assert!(store.vacuum().is_ok());
+    }
+
+    #[test]
+    fn test_insert_turn_or_ignore_idempotent() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        let turn = ConversationTurn::new("sess1", "user", "hello");
+
+        // First insert succeeds
+        assert!(store.insert_turn_or_ignore(&turn).unwrap());
+        assert_eq!(store.total_turn_count().unwrap(), 1);
+
+        // Second insert with same ID is silently ignored
+        assert!(!store.insert_turn_or_ignore(&turn).unwrap());
+        assert_eq!(store.total_turn_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_insert_memory_or_ignore_idempotent() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        let mem = Memory::ephemeral("remember this".into());
+
+        assert!(store.insert_memory_or_ignore(&mem).unwrap());
+        assert_eq!(store.count_memories().unwrap(), 1);
+
+        // Duplicate is ignored
+        assert!(!store.insert_memory_or_ignore(&mem).unwrap());
+        assert_eq!(store.count_memories().unwrap(), 1);
     }
 }

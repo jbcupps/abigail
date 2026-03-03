@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 pub mod agentic_runtime;
+pub mod backup_ops;
 pub mod chat_coordinator;
 pub mod commands;
 pub mod hive_ops;
@@ -390,8 +391,10 @@ pub fn run() {
     ));
 
     // Open shared MemoryStore for chat persistence and memory queries.
-    let memory =
-        Arc::new(MemoryStore::open_with_config(&config).expect("Failed to open MemoryStore"));
+    // Wrapped in RwLock so load_agent can swap to the per-entity DB.
+    let memory = Arc::new(std::sync::RwLock::new(
+        MemoryStore::open_with_config(&config).expect("Failed to open MemoryStore"),
+    ));
     let agentic_runtime = Arc::new(agentic_runtime::AgenticRuntime::new(&data_dir));
     #[allow(deprecated)]
     let orchestration_scheduler = Arc::new(OrchestrationScheduler::new(data_dir.clone()));
@@ -494,6 +497,20 @@ pub fn run() {
                 .register(
                     abigail_skills::manifest::SkillId("builtin.hive_management".to_string()),
                     hive_skill,
+                )
+                .map_err(|e| e.to_string())?;
+
+            // Register Backup Management Skill
+            let backup_ops = Arc::new(crate::backup_ops::TauriBackupOps::new(handle.clone()));
+            let backup_skill =
+                Arc::new(abigail_skills::backup::BackupManagementSkill::new(backup_ops));
+            state
+                .registry
+                .register(
+                    abigail_skills::manifest::SkillId(
+                        "builtin.backup_management".to_string(),
+                    ),
+                    backup_skill,
                 )
                 .map_err(|e| e.to_string())?;
 
@@ -834,6 +851,8 @@ pub fn run() {
             get_constraint_store,
             clear_constraints,
             upload_chat_attachment,
+            get_entity_documents_path,
+            save_to_entity_docs,
             get_forge_scenarios,
             crystallize_forge,
             preview_forge_primary_intelligence,
