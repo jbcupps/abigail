@@ -40,6 +40,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
+ "directories 5.0.1",
  "ed25519-dalek",
  "entity-chat",
  "entity-core",

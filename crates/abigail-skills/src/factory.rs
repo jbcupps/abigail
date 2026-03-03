@@ -12,6 +12,14 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+/// A secret required by an authored skill, parsed from the `required_secrets` JSON parameter.
+#[derive(serde::Deserialize)]
+struct SecretEntry {
+    name: String,
+    #[serde(default)]
+    description: String,
+}
+
 pub struct SkillFactory {
     manifest: SkillManifest,
     skills_dir: PathBuf,
@@ -97,7 +105,8 @@ impl Skill for SkillFactory {
                         "tools_json": { "type": "string", "description": "For dynamic_api format: JSON array of tool configs, each with name, description, parameters, method, url_template, headers, body_template, response_extract" },
                         "script_content": { "type": "string", "description": "For script format: the code (Python or Node.js preferred)" },
                         "script_filename": { "type": "string", "description": "For script format: e.g., 'main.py' or 'index.js'" },
-                        "how_to_use_md": { "type": "string", "description": "Instructional legacy for future Egos" }
+                        "how_to_use_md": { "type": "string", "description": "Instructional legacy for future Egos" },
+                        "required_secrets": { "type": "string", "description": "JSON array of secrets this skill needs, each with 'name' and 'description'. Example: [{\"name\":\"api_key\",\"description\":\"API key for the service\"}]" }
                     },
                     "required": ["id", "name", "how_to_use_md"]
                 }),
@@ -147,6 +156,16 @@ impl Skill for SkillFactory {
 
                 let format: String = params.get("format").unwrap_or_else(|| "dynamic_api".into());
 
+                // Parse optional required_secrets JSON array
+                let secrets: Vec<SecretEntry> =
+                    if let Some(raw) = params.get::<String>("required_secrets") {
+                        serde_json::from_str(&raw).map_err(|e| {
+                            SkillError::ToolFailed(format!("Invalid required_secrets JSON: {}", e))
+                        })?
+                    } else {
+                        vec![]
+                    };
+
                 let skill_dir = self.skills_dir.join(&id);
                 std::fs::create_dir_all(&skill_dir)
                     .map_err(|e| SkillError::ToolFailed(e.to_string()))?;
@@ -156,9 +175,9 @@ impl Skill for SkillFactory {
                     .map_err(|e| SkillError::ToolFailed(e.to_string()))?;
 
                 if format == "dynamic_api" {
-                    self.author_dynamic_api(&id, &name, &desc, &skill_dir, &params)?;
+                    self.author_dynamic_api(&id, &name, &desc, &skill_dir, &params, &secrets)?;
                 } else {
-                    self.author_script(&id, &name, &desc, &skill_dir, &params)?;
+                    self.author_script(&id, &name, &desc, &skill_dir, &params, &secrets)?;
                 }
 
                 Ok(ToolOutput::success(serde_json::json!({
@@ -204,6 +223,19 @@ impl Skill for SkillFactory {
 }
 
 impl SkillFactory {
+    /// Format `[[secrets]]` TOML blocks from parsed secret entries.
+    fn format_secrets_toml(secrets: &[SecretEntry]) -> String {
+        let mut out = String::new();
+        for s in secrets {
+            out.push_str(&format!(
+                "\n[[secrets]]\nname = \"{}\"\ndescription = \"{}\"\nrequired = true\n",
+                s.name,
+                s.description.replace('"', "\\\""),
+            ));
+        }
+        out
+    }
+
     fn author_dynamic_api(
         &self,
         id: &str,
@@ -211,6 +243,7 @@ impl SkillFactory {
         desc: &str,
         skill_dir: &std::path::Path,
         params: &ToolParams,
+        secrets: &[SecretEntry],
     ) -> SkillResult<()> {
         let tools_json_str: String = params.get("tools_json").unwrap_or_else(|| {
             serde_json::json!([{
@@ -249,6 +282,27 @@ impl SkillFactory {
             .map_err(|e| SkillError::ToolFailed(e.to_string()))?;
         std::fs::write(&json_path, json).map_err(|e| SkillError::ToolFailed(e.to_string()))?;
 
+        // Write skill.toml with secrets so namespace validation can find them
+        if !secrets.is_empty() {
+            let manifest_toml = format!(
+                r#"[skill]
+id = "{id}"
+name = "{name}"
+version = "0.1.0"
+description = "{desc}"
+runtime = "Native"
+category = "Custom"
+{secrets_block}"#,
+                secrets_block = Self::format_secrets_toml(secrets)
+            );
+            std::fs::write(skill_dir.join("skill.toml"), manifest_toml)
+                .map_err(|e| SkillError::ToolFailed(e.to_string()))?;
+
+            // The new skill.toml is now on disk. validate_secret_namespace_with()
+            // calls SkillRegistry::discover() which re-scans the filesystem, so
+            // the declared secrets will be visible on the next store_secret call.
+        }
+
         // Immediately register the skill if we have a registry.
         if let Some(ref registry) = self.registry {
             match DynamicApiSkill::load_from_path(&json_path, self.secrets.clone()) {
@@ -273,6 +327,7 @@ impl SkillFactory {
         desc: &str,
         skill_dir: &std::path::Path,
         params: &ToolParams,
+        secrets: &[SecretEntry],
     ) -> SkillResult<()> {
         let content: String = params.get("script_content").ok_or_else(|| {
             SkillError::ToolFailed("Missing 'script_content' for script format".into())
@@ -289,7 +344,8 @@ version = "0.1.0"
 description = "{desc}"
 runtime = "Native"
 category = "Custom"
-"#
+{secrets_block}"#,
+            secrets_block = Self::format_secrets_toml(secrets)
         );
 
         std::fs::write(skill_dir.join("skill.toml"), manifest)

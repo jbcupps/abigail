@@ -547,6 +547,28 @@ pub async fn store_provider_key(
         }
     }
 
+    // Cross-write: provider keys that also serve as skill secrets (tavily,
+    // perplexity) must be mirrored into the skills_secrets vault so that
+    // skills can find them at runtime without a separate store_secret call.
+    const SKILL_SECRET_PROVIDERS: &[&str] = &["tavily", "perplexity"];
+    if SKILL_SECRET_PROVIDERS.contains(&provider.as_str()) {
+        if let Ok(mut skills_vault) = state.skills_secrets.lock() {
+            skills_vault.set_secret(&provider, &key);
+            if let Err(e) = skills_vault.save() {
+                tracing::warn!(
+                    "Provider key '{}' saved but failed to mirror to skills_secrets: {}",
+                    provider,
+                    e
+                );
+            } else {
+                tracing::info!(
+                    "Provider key '{}' mirrored to skills_secrets vault",
+                    provider
+                );
+            }
+        }
+    }
+
     if let Err(e) = crate::rebuild_router(&state).await {
         return Ok(StoreKeyResult {
             success: true, // Key saved, but router update failed
