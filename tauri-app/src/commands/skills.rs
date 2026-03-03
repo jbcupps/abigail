@@ -3,13 +3,20 @@ use abigail_core::config::SignedSkillAllowlistEntry;
 use abigail_core::McpServerDefinition;
 use abigail_skills::protocol::mcp::{HttpMcpClient, McpTool};
 use abigail_skills::{
-    FileSystemPermission, Permission, SkillExecutionPolicy, SkillId, SkillManifest, ToolDescriptor,
-    ToolOutput, ToolParams,
+    FileSystemPermission, HealthStatus, Permission, SkillExecutionPolicy, SkillId, SkillManifest,
+    ToolDescriptor, ToolOutput, ToolParams,
 };
 use std::collections::HashMap;
 use tauri::State;
 
-pub const RESERVED_PROVIDER_KEYS: &[&str] = &["openai", "anthropic", "xai", "google", "tavily"];
+pub const RESERVED_PROVIDER_KEYS: &[&str] = &[
+    "openai",
+    "anthropic",
+    "xai",
+    "google",
+    "tavily",
+    "perplexity",
+];
 
 fn refresh_skill_policy(
     state: &State<'_, AppState>,
@@ -170,12 +177,14 @@ fn validate_secret_namespace(state: &State<AppState>, key: &str) -> Result<(), S
 
 /// Keys that, when stored, should trigger re-initialization of the Email skill
 /// so it picks up new credentials without an app restart.
-const IMAP_SECRET_KEYS: &[&str] = &[
+const EMAIL_SECRET_KEYS: &[&str] = &[
     "imap_password",
     "imap_user",
     "imap_host",
     "imap_port",
     "imap_tls_mode",
+    "smtp_host",
+    "smtp_port",
 ];
 
 #[tauri::command]
@@ -193,17 +202,24 @@ pub fn store_secret(state: State<AppState>, key: String, value: String) -> Resul
     vault.set_secret(&key, &value);
     vault.save().map_err(|e| e.to_string())?;
 
-    // Re-initialize Email skill when IMAP-related secrets change so the skill
+    // Re-initialize Email skill when email-related secrets change so the skill
     // picks up new credentials without requiring an app restart.
-    if IMAP_SECRET_KEYS.contains(&key.as_str()) {
+    if EMAIL_SECRET_KEYS.contains(&key.as_str()) {
         match crate::create_email_skill_for_registry(&state) {
             Ok(skill) => {
                 let skill_id = skill_email::EmailSkill::default_manifest().id.clone();
+                // Check actual health before logging success
+                let health = skill.health();
                 let _ = state.registry.unregister(&skill_id);
                 if let Err(e) = state.registry.register(skill_id, skill) {
                     tracing::warn!("Email skill re-register after secret store failed: {}", e);
-                } else {
+                } else if health.status == HealthStatus::Healthy {
                     tracing::info!("Email skill re-initialized after secret update");
+                } else {
+                    tracing::warn!(
+                        "Email skill re-registered but not fully initialized: {:?}",
+                        health.message
+                    );
                 }
             }
             Err(e) => {

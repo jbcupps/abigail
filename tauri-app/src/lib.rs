@@ -100,20 +100,19 @@ pub fn create_email_skill_for_registry(state: &AppState) -> Result<Arc<dyn Skill
         .is_some();
 
     if has_creds {
-        let (imap_user, imap_password, imap_host, imap_port) = {
+        let (imap_user, imap_password, imap_host, imap_port, imap_tls_mode, smtp_host, smtp_port) = {
             let v = state.skills_secrets.lock().map_err(|e| e.to_string())?;
             (
                 v.get_secret("imap_user").unwrap_or("").to_string(),
                 v.get_secret("imap_password").unwrap_or("").to_string(),
                 v.get_secret("imap_host").unwrap_or("").to_string(),
                 v.get_secret("imap_port").unwrap_or("993").to_string(),
+                v.get_secret("imap_tls_mode")
+                    .unwrap_or("IMPLICIT")
+                    .to_string(),
+                v.get_secret("smtp_host").unwrap_or("").to_string(),
+                v.get_secret("smtp_port").unwrap_or("587").to_string(),
             )
-        };
-        let imap_tls_mode = {
-            let v = state.skills_secrets.lock().map_err(|e| e.to_string())?;
-            v.get_secret("imap_tls_mode")
-                .unwrap_or("IMPLICIT")
-                .to_string()
         };
 
         let mut values = HashMap::new();
@@ -133,6 +132,18 @@ pub fn create_email_skill_for_registry(state: &AppState) -> Result<Arc<dyn Skill
             "imap_tls_mode".to_string(),
             serde_json::Value::String(imap_tls_mode),
         );
+        if !smtp_host.is_empty() {
+            values.insert(
+                "smtp_host".to_string(),
+                serde_json::Value::String(smtp_host),
+            );
+        }
+        if !smtp_port.is_empty() {
+            values.insert(
+                "smtp_port".to_string(),
+                serde_json::json!(smtp_port.parse::<u64>().unwrap_or(587)),
+            );
+        }
 
         let mut secrets = HashMap::new();
         secrets.insert("imap_password".to_string(), imap_password);
@@ -565,7 +576,15 @@ pub fn run() {
                     cfg.data_dir.clone()
                 };
                 let skills_secrets = state.skills_secrets.clone();
-                let allowed_roots = vec![data_dir.clone()];
+                let mut allowed_roots = vec![data_dir.clone()];
+                // Allow scratch work in system temp dir
+                allowed_roots.push(std::env::temp_dir());
+                // Allow user-facing outputs in Documents/Abigail/
+                if let Some(docs_dir) = directories::UserDirs::new()
+                    .and_then(|u| u.document_dir().map(|d| d.to_path_buf()))
+                {
+                    allowed_roots.push(docs_dir.join("Abigail"));
+                }
 
                 macro_rules! register_skill {
                     ($skill:expr) => {{

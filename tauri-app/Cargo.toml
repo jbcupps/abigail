@@ -59,6 +59,7 @@ chrono.workspace = true
 uuid.workspace = true
 rusqlite.workspace = true
 which = "7"
+directories.workspace = true
 axum = "0.7"
 
 [lib]
