@@ -52,7 +52,10 @@ async fn entity_status() {
     assert!(resp.status().is_success());
     let body: serde_json::Value = resp.json().await.unwrap();
     assert!(body["ok"].as_bool().unwrap_or(false));
-    assert_eq!(body["data"]["entity_id"].as_str(), Some(c.entity_id.as_str()));
+    assert_eq!(
+        body["data"]["entity_id"].as_str(),
+        Some(c.entity_id.as_str())
+    );
 }
 
 #[tokio::test]

@@ -377,9 +377,7 @@ impl DynamicApiSkill {
                 if let Ok(sub_entries) = std::fs::read_dir(&path) {
                     for sub in sub_entries.flatten() {
                         let sp = sub.path();
-                        if sp.is_file()
-                            && sp.extension().and_then(|e| e.to_str()) == Some("json")
-                        {
+                        if sp.is_file() && sp.extension().and_then(|e| e.to_str()) == Some("json") {
                             Self::try_load(&sp, secrets.clone(), &mut skills);
                         }
                     }
@@ -389,11 +387,7 @@ impl DynamicApiSkill {
         skills
     }
 
-    fn try_load(
-        path: &Path,
-        secrets: Option<Arc<Mutex<SecretsVault>>>,
-        out: &mut Vec<Self>,
-    ) {
+    fn try_load(path: &Path, secrets: Option<Arc<Mutex<SecretsVault>>>, out: &mut Vec<Self>) {
         match Self::load_from_path(path, secrets) {
             Ok(skill) => {
                 tracing::debug!(

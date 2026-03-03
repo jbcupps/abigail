@@ -1141,7 +1141,6 @@ impl IdEgoRouter {
             }
         }
     }
-
 }
 
 #[cfg(test)]

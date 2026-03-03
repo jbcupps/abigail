@@ -169,13 +169,9 @@ impl TestCluster {
             .to_string();
 
         // Start entity-daemon using the same data dir
-        let entity = EntityDaemonHandle::start(
-            &entity_id,
-            hive.url(),
-            Some(hive.data_dir()),
-            timeout,
-        )
-        .await?;
+        let entity =
+            EntityDaemonHandle::start(&entity_id, hive.url(), Some(hive.data_dir()), timeout)
+                .await?;
 
         Ok(Self {
             hive,

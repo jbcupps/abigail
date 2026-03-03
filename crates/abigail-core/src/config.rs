@@ -985,7 +985,6 @@ mod tests {
         assert!(config.birth_stage.is_none());
     }
 
-
     #[test]
     fn test_migrate_v4_to_v8() {
         let mut config = AppConfig::default_paths();

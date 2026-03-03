@@ -471,9 +471,9 @@ pub fn run() {
             abigail_router::ConstraintStore::with_data_dir(data_dir.clone()),
         )),
         job_queue,
-        daemon_manager: Arc::new(tokio::sync::Mutex::new(
-            daemon_manager::DaemonManager::new(data_dir.clone()),
-        )),
+        daemon_manager: Arc::new(tokio::sync::Mutex::new(daemon_manager::DaemonManager::new(
+            data_dir.clone(),
+        ))),
     };
 
     tauri::Builder::default()

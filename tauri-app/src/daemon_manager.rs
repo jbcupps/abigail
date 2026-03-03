@@ -66,7 +66,10 @@ impl DaemonManager {
         wait_for_health(&url, STARTUP_TIMEOUT).await?;
 
         tracing::info!("Hive daemon ready at {}", url);
-        self.hive = Some(DaemonProcess { child, url: url.clone() });
+        self.hive = Some(DaemonProcess {
+            child,
+            url: url.clone(),
+        });
         Ok(url)
     }
 
@@ -80,11 +83,7 @@ impl DaemonManager {
         self.stop_entity();
 
         let binary = find_daemon_binary("entity-daemon")?;
-        tracing::info!(
-            "Starting entity-daemon for {} from {:?}",
-            entity_id,
-            binary
-        );
+        tracing::info!("Starting entity-daemon for {} from {:?}", entity_id, binary);
 
         let mut child = Command::new(&binary)
             .args([
@@ -106,7 +105,10 @@ impl DaemonManager {
         wait_for_health(&url, STARTUP_TIMEOUT).await?;
 
         tracing::info!("Entity daemon ready at {}", url);
-        self.entity = Some(DaemonProcess { child, url: url.clone() });
+        self.entity = Some(DaemonProcess {
+            child,
+            url: url.clone(),
+        });
         Ok(url)
     }
 

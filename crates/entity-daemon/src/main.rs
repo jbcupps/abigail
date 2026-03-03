@@ -608,23 +608,19 @@ async fn main() -> anyhow::Result<()> {
                             }
                             abigail_skills::SkillFileEvent::Removed(path) => {
                                 tracing::info!("Skill watcher: skill removed at {:?}", path);
-                                let is_json = path
-                                    .extension()
-                                    .and_then(|e| e.to_str())
-                                    == Some("json");
+                                let is_json =
+                                    path.extension().and_then(|e| e.to_str()) == Some("json");
                                 if is_json {
                                     if let Ok(bytes) = std::fs::read_to_string(&path) {
-                                        if let Ok(cfg) = serde_json::from_str::<
-                                            abigail_skills::dynamic::DynamicSkillConfig,
-                                        >(&bytes)
+                                        if let Ok(cfg) =
+                                            serde_json::from_str::<
+                                                abigail_skills::dynamic::DynamicSkillConfig,
+                                            >(&bytes)
                                         {
                                             let sid =
                                                 abigail_skills::manifest::SkillId(cfg.id.clone());
                                             let _ = registry_for_watcher.unregister(&sid);
-                                            tracing::info!(
-                                                "Skill watcher: unregistered {}",
-                                                sid.0
-                                            );
+                                            tracing::info!("Skill watcher: unregistered {}", sid.0);
                                         }
                                     }
                                 }
@@ -641,12 +637,10 @@ async fn main() -> anyhow::Result<()> {
                                                 >(
                                                     &bytes
                                                 ) {
-                                                    let sid =
-                                                        abigail_skills::manifest::SkillId(
-                                                            cfg.id.clone(),
-                                                        );
-                                                    let _ =
-                                                        registry_for_watcher.unregister(&sid);
+                                                    let sid = abigail_skills::manifest::SkillId(
+                                                        cfg.id.clone(),
+                                                    );
+                                                    let _ = registry_for_watcher.unregister(&sid);
                                                     tracing::info!(
                                                         "Skill watcher: unregistered {}",
                                                         sid.0

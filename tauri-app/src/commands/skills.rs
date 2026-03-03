@@ -69,12 +69,15 @@ fn resolve_mcp_server_url(
 
 #[tauri::command]
 pub async fn list_skills(state: State<'_, AppState>) -> Result<Vec<SkillManifest>, String> {
-    let mode = {
-        state.config.read().map_err(|e| e.to_string())?.runtime_mode
-    };
+    let mode = { state.config.read().map_err(|e| e.to_string())?.runtime_mode };
     if mode == RuntimeMode::Daemon {
         let entity_url = {
-            state.config.read().map_err(|e| e.to_string())?.entity_daemon_url.clone()
+            state
+                .config
+                .read()
+                .map_err(|e| e.to_string())?
+                .entity_daemon_url
+                .clone()
         };
         let client = daemon_client::EntityClient::new(&entity_url);
         let skills = client.list_skills().await.map_err(|e| e.to_string())?;
@@ -217,7 +220,11 @@ const EMAIL_SECRET_KEYS: &[&str] = &[
 ];
 
 #[tauri::command]
-pub async fn store_secret(state: State<'_, AppState>, key: String, value: String) -> Result<(), String> {
+pub async fn store_secret(
+    state: State<'_, AppState>,
+    key: String,
+    value: String,
+) -> Result<(), String> {
     let key = key.trim().to_string();
     let value = value.trim().to_string();
     if key.is_empty() {
@@ -227,15 +234,21 @@ pub async fn store_secret(state: State<'_, AppState>, key: String, value: String
         return Err("Secret value cannot be empty".to_string());
     }
 
-    let mode = {
-        state.config.read().map_err(|e| e.to_string())?.runtime_mode
-    };
+    let mode = { state.config.read().map_err(|e| e.to_string())?.runtime_mode };
     if mode == RuntimeMode::Daemon {
         let hive_url = {
-            state.config.read().map_err(|e| e.to_string())?.hive_daemon_url.clone()
+            state
+                .config
+                .read()
+                .map_err(|e| e.to_string())?
+                .hive_daemon_url
+                .clone()
         };
         let client = daemon_client::HiveDaemonClient::new(&hive_url);
-        client.store_secret(&key, &value).await.map_err(|e| e.to_string())?;
+        client
+            .store_secret(&key, &value)
+            .await
+            .map_err(|e| e.to_string())?;
         return Ok(());
     }
 

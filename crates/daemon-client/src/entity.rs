@@ -194,11 +194,7 @@ impl EntityClient {
         unwrap_envelope(resp)
     }
 
-    pub async fn memory_insert(
-        &self,
-        content: &str,
-        weight: &str,
-    ) -> anyhow::Result<()> {
+    pub async fn memory_insert(&self, content: &str, weight: &str) -> anyhow::Result<()> {
         let resp: ApiEnvelope<serde_json::Value> = self
             .client
             .post(format!("{}/v1/memory/insert", self.base_url))
@@ -224,10 +220,7 @@ impl EntityClient {
         unwrap_envelope(resp)
     }
 
-    pub async fn submit_job(
-        &self,
-        body: &serde_json::Value,
-    ) -> anyhow::Result<serde_json::Value> {
+    pub async fn submit_job(&self, body: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
         let resp: ApiEnvelope<serde_json::Value> = self
             .client
             .post(format!("{}/v1/jobs/submit", self.base_url))
@@ -306,12 +299,13 @@ fn parse_sse_block(block: &str) -> Option<ChatStreamEvent> {
 
     match (event_type.as_deref(), data) {
         (Some("token"), Some(d)) => Some(ChatStreamEvent::Token(d)),
-        (Some("done"), Some(d)) => {
-            match serde_json::from_str::<ChatResponse>(&d) {
-                Ok(resp) => Some(ChatStreamEvent::Done(Box::new(resp))),
-                Err(e) => Some(ChatStreamEvent::Error(format!("Failed to parse done event: {}", e))),
-            }
-        }
+        (Some("done"), Some(d)) => match serde_json::from_str::<ChatResponse>(&d) {
+            Ok(resp) => Some(ChatStreamEvent::Done(Box::new(resp))),
+            Err(e) => Some(ChatStreamEvent::Error(format!(
+                "Failed to parse done event: {}",
+                e
+            ))),
+        },
         (Some("error"), Some(d)) => Some(ChatStreamEvent::Error(d)),
         _ => None,
     }

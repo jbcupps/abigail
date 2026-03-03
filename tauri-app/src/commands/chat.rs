@@ -11,12 +11,15 @@ use tauri::{Emitter, State};
 
 #[tauri::command]
 pub async fn cancel_chat_stream(state: State<'_, AppState>) -> Result<bool, String> {
-    let mode = {
-        state.config.read().map_err(|e| e.to_string())?.runtime_mode
-    };
+    let mode = { state.config.read().map_err(|e| e.to_string())?.runtime_mode };
     if mode == RuntimeMode::Daemon {
         let entity_url = {
-            state.config.read().map_err(|e| e.to_string())?.entity_daemon_url.clone()
+            state
+                .config
+                .read()
+                .map_err(|e| e.to_string())?
+                .entity_daemon_url
+                .clone()
         };
         let client = daemon_client::EntityClient::new(&entity_url);
         return client.cancel_chat_stream().await.map_err(|e| e.to_string());
@@ -38,13 +41,16 @@ pub async fn chat_stream(
     session_messages: Option<Vec<SessionMessage>>,
     session_id: Option<String>,
 ) -> Result<(), String> {
-    let mode = {
-        state.config.read().map_err(|e| e.to_string())?.runtime_mode
-    };
+    let mode = { state.config.read().map_err(|e| e.to_string())?.runtime_mode };
 
     if mode == RuntimeMode::Daemon {
         let entity_url = {
-            state.config.read().map_err(|e| e.to_string())?.entity_daemon_url.clone()
+            state
+                .config
+                .read()
+                .map_err(|e| e.to_string())?
+                .entity_daemon_url
+                .clone()
         };
         let client = daemon_client::EntityClient::new(&entity_url);
         let request = ChatRequest {
@@ -60,7 +66,10 @@ pub async fn chat_stream(
             serde_json::json!({ "type": "Request", "message": message }),
         );
 
-        let mut rx = client.chat_stream(&request).await.map_err(|e| e.to_string())?;
+        let mut rx = client
+            .chat_stream(&request)
+            .await
+            .map_err(|e| e.to_string())?;
         while let Some(event) = rx.recv().await {
             match event {
                 daemon_client::ChatStreamEvent::Token(t) => {

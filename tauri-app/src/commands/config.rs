@@ -162,7 +162,6 @@ pub fn get_active_provider(state: State<AppState>) -> Result<Option<String>, Str
     Ok(config.active_provider_preference.clone())
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityTheme {
     pub primary_color: Option<String>,
@@ -634,14 +633,14 @@ pub async fn refresh_model_registry(
 #[tauri::command]
 pub fn get_runtime_mode(state: State<AppState>) -> Result<String, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
-    Ok(serde_json::to_string(&config.runtime_mode).unwrap_or_else(|_| "\"in_process\"".to_string()))
+    Ok(
+        serde_json::to_string(&config.runtime_mode)
+            .unwrap_or_else(|_| "\"in_process\"".to_string()),
+    )
 }
 
 #[tauri::command]
-pub async fn set_runtime_mode(
-    state: State<'_, AppState>,
-    mode: String,
-) -> Result<(), String> {
+pub async fn set_runtime_mode(state: State<'_, AppState>, mode: String) -> Result<(), String> {
     let parsed: abigail_core::RuntimeMode =
         serde_json::from_str(&format!("\"{}\"", mode)).map_err(|e| e.to_string())?;
 
@@ -656,7 +655,12 @@ pub async fn set_runtime_mode(
     // When switching to Daemon mode, start the managed daemons
     if parsed == abigail_core::RuntimeMode::Daemon {
         let data_dir = {
-            state.config.read().map_err(|e| e.to_string())?.data_dir.clone()
+            state
+                .config
+                .read()
+                .map_err(|e| e.to_string())?
+                .data_dir
+                .clone()
         };
         let mut mgr = state.daemon_manager.lock().await;
         *mgr = crate::daemon_manager::DaemonManager::new(data_dir);
@@ -667,7 +671,11 @@ pub async fn set_runtime_mode(
         }
 
         let entity_id = {
-            state.active_agent_id.read().map_err(|e| e.to_string())?.clone()
+            state
+                .active_agent_id
+                .read()
+                .map_err(|e| e.to_string())?
+                .clone()
         };
         if let Some(eid) = entity_id {
             let entity_url = mgr.start_entity(&eid).await.map_err(|e| e.to_string())?;

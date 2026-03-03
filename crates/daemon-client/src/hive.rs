@@ -68,10 +68,7 @@ impl HiveDaemonClient {
         unwrap_envelope(resp)
     }
 
-    pub async fn get_provider_config(
-        &self,
-        entity_id: &str,
-    ) -> anyhow::Result<ProviderConfig> {
+    pub async fn get_provider_config(&self, entity_id: &str) -> anyhow::Result<ProviderConfig> {
         let resp: ApiEnvelope<ProviderConfig> = self
             .client
             .get(format!(

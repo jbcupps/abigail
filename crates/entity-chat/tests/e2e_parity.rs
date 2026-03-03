@@ -8,7 +8,7 @@
 use abigail_capabilities::cognitive::{
     CompletionRequest, CompletionResponse, LlmProvider, ToolCall,
 };
-use abigail_core::{ForceOverride, RoutingMode, TierModels, TierThresholds};
+use abigail_core::RoutingMode;
 use abigail_router::IdEgoRouter;
 use abigail_skills::manifest::{SkillId, SkillManifest};
 use abigail_skills::skill::{
@@ -172,12 +172,8 @@ fn build_test_env(
         id: Arc::new(provider),
         ego: None,
         ego_provider: None,
-        council: None,
         local_http: None,
-        mode: RoutingMode::TierBased,
-        tier_models: TierModels::default(),
-        tier_thresholds: TierThresholds::default(),
-        force_override: ForceOverride::default(),
+        mode: RoutingMode::EgoPrimary,
     };
     let registry = Arc::new(SkillRegistry::new());
     registry
