@@ -2,6 +2,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useState, useEffect } from "react";
 import { isBrowserHarnessRuntime } from "../runtimeMode";
+import type {
+  OllamaDetection,
+  RecommendedModel,
+  OllamaInstallProgress,
+  OllamaModelProgress,
+  InstalledModel,
+  CliDetection,
+} from "../types/llm";
+import { formatBytes } from "../types/llm";
 
 interface DetectedLlm {
   name: string;
@@ -11,49 +20,6 @@ interface DetectedLlm {
 
 interface ProbeResult {
   detected: DetectedLlm[];
-}
-
-interface OllamaDetection {
-  status: "running" | "installed" | "not_found";
-  path: string | null;
-}
-
-interface RecommendedModel {
-  name: string;
-  label: string;
-  size_bytes: number;
-  description: string;
-  recommended: boolean;
-}
-
-interface OllamaInstallProgress {
-  step: string;
-  written?: number;
-  total?: number;
-  message: string;
-}
-
-interface OllamaModelProgress {
-  model: string;
-  completed?: number;
-  total?: number;
-  status: string;
-}
-
-interface InstalledModel {
-  name: string;
-  size: number;
-  modified_at: string;
-}
-
-interface CliDetection {
-  provider_name: string;
-  binary: string;
-  on_path: boolean;
-  is_official: boolean;
-  is_authenticated: boolean;
-  version: string | null;
-  auth_hint: string | null;
 }
 
 interface LlmSetupPanelProps {
@@ -235,17 +201,6 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
     ollamaHasModels,
   ]);
 
-  const formatBytes = (value?: number) => {
-    if (!value || value <= 0) return "0 B";
-    const units = ["B", "KB", "MB", "GB"];
-    let size = value;
-    let unit = 0;
-    while (size >= 1024 && unit < units.length - 1) {
-      size /= 1024;
-      unit += 1;
-    }
-    return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
-  };
 
   const probeOllama = async () => {
     setProbing(true);

@@ -473,6 +473,32 @@ export default function SoulRegistry({
     </div>
   );
 
+  // Shared drawer button bar (parameterized by container width)
+  const drawerButtons = (maxWidth: string) => (
+    <div className={`w-full ${maxWidth} flex gap-3 mb-6`}>
+      <button
+        className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-mono uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
+        onClick={() => setOllamaDrawerOpen(true)}
+      >
+        Manage Ollama
+      </button>
+      <button
+        className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-mono uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
+        onClick={() => setProviderDrawerOpen(true)}
+      >
+        Configure Providers
+      </button>
+    </div>
+  );
+
+  // Conditionally rendered drawers (shared between both states)
+  const drawers = (
+    <>
+      {ollamaDrawerOpen && <OllamaDrawer onClose={() => setOllamaDrawerOpen(false)} />}
+      {providerDrawerOpen && <ProviderDrawer onClose={() => setProviderDrawerOpen(false)} />}
+    </>
+  );
+
   // Empty state: Welcome landing page
   if (souls.length === 0) {
     return (
@@ -493,21 +519,7 @@ export default function SoulRegistry({
 
         <HiveAgentPanel />
 
-        {/* Drawer buttons */}
-        <div className="w-full max-w-md flex gap-3 mb-6">
-          <button
-            className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-mono uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
-            onClick={() => setOllamaDrawerOpen(true)}
-          >
-            Manage Ollama
-          </button>
-          <button
-            className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-mono uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
-            onClick={() => setProviderDrawerOpen(true)}
-          >
-            Configure Providers
-          </button>
-        </div>
+        {drawerButtons("max-w-md")}
 
         {/* Create soul card */}
         <div className="w-full max-w-md border-2 border-theme-primary rounded-lg p-6 mb-6 bg-theme-bg-elevated">
@@ -617,8 +629,7 @@ export default function SoulRegistry({
           </div>
         )}
 
-        <OllamaDrawer open={ollamaDrawerOpen} onClose={() => setOllamaDrawerOpen(false)} />
-        <ProviderDrawer open={providerDrawerOpen} onClose={() => setProviderDrawerOpen(false)} />
+        {drawers}
       </div>
     );
   }
@@ -638,21 +649,7 @@ export default function SoulRegistry({
 
       <HiveAgentPanel />
 
-      {/* Drawer buttons */}
-      <div className="w-full max-w-4xl flex gap-3 mb-6">
-        <button
-          className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-mono uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
-          onClick={() => setOllamaDrawerOpen(true)}
-        >
-          Manage Ollama
-        </button>
-        <button
-          className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-mono uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
-          onClick={() => setProviderDrawerOpen(true)}
-        >
-          Configure Providers
-        </button>
-      </div>
+      {drawerButtons("max-w-4xl")}
 
       {/* Soul cards grid */}
       <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
@@ -833,8 +830,7 @@ export default function SoulRegistry({
         </div>
       )}
 
-      <OllamaDrawer open={ollamaDrawerOpen} onClose={() => setOllamaDrawerOpen(false)} />
-      <ProviderDrawer open={providerDrawerOpen} onClose={() => setProviderDrawerOpen(false)} />
+      {drawers}
     </div>
   );
 }
