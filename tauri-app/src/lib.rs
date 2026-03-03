@@ -421,6 +421,12 @@ pub fn run() {
                 let _ = conn.execute_batch(trimmed);
             }
         }
+        for stmt in abigail_queue::MIGRATION_V6_EXECUTION_MODE.split(';') {
+            let trimmed = stmt.trim();
+            if !trimmed.is_empty() {
+                let _ = conn.execute_batch(trimmed);
+            }
+        }
         Arc::new(abigail_queue::JobQueue::new(
             Arc::new(std::sync::Mutex::new(conn)),
             stream_broker.clone(),
@@ -885,6 +891,19 @@ pub fn run() {
                 }
             }
 
+            // Relay JobQueue local broadcast events to the Tauri frontend.
+            {
+                let mut job_rx = state.job_queue.subscribe_local();
+                let app_handle = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    while let Ok(event) = job_rx.recv().await {
+                        if let Ok(payload) = serde_json::to_value(&event) {
+                            let _ = tauri::Emitter::emit(&app_handle, "job-event", payload);
+                        }
+                    }
+                });
+            }
+
             Ok(())
         })
         .manage(state)
@@ -1044,6 +1063,7 @@ pub fn run() {
             get_job_status,
             cancel_job,
             list_recurring_templates,
+            get_queue_stats,
             get_runtime_mode,
             set_runtime_mode
         ])

@@ -361,6 +361,17 @@ async fn main() -> anyhow::Result<()> {
             });
         }
     }
+    for stmt in abigail_queue::MIGRATION_V6_EXECUTION_MODE.split(';') {
+        let trimmed = stmt.trim();
+        if !trimmed.is_empty() {
+            queue_conn.execute_batch(trimmed).unwrap_or_else(|e| {
+                tracing::debug!(
+                    "V6 migration statement skipped (likely already applied): {}",
+                    e
+                );
+            });
+        }
+    }
     let job_queue = Arc::new(JobQueue::new(
         Arc::new(Mutex::new(queue_conn)),
         stream_broker.clone(),

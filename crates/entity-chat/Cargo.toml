@@ -11,6 +11,7 @@ abigail-capabilities = { path = "../abigail-capabilities" }
 abigail-router = { path = "../abigail-router" }
 abigail-skills = { path = "../abigail-skills" }
 abigail-queue = { path = "../abigail-queue" }
+cron = "0.15"
 serde_json.workspace = true
 tracing.workspace = true
 anyhow.workspace = true

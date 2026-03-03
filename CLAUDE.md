@@ -377,20 +377,38 @@ Current priorities, in order:
 8. ~~**End-to-end daemon testing**~~ — `daemon-test-harness` crate with `HiveDaemonHandle`, `EntityDaemonHandle`, `TestCluster`. Hive integration tests (health, entity lifecycle, secrets, provider config). Cross-daemon E2E tests (startup, skills, memory, tool exec, governance, jobs, routing). Run with `--ignored` flag.
 9. ~~**Tauri app → daemon delegation**~~ — `RuntimeMode` config (InProcess/Daemon), `daemon-client` crate (`HiveDaemonClient`, `EntityClient` with SSE streaming), `DaemonManager` for managed daemon lifecycle, `chat_stream`/`list_skills`/`store_secret` migrated to dual-mode delegation, DiagnosticsPanel runtime mode toggle.
 
-### Phase 3a: Simplify Routing
-10. **Remove Council and TierBased routing** — Simplify to EgoPrimary (user picks model via ChatInterface dropdown) + CliOrchestrator (auto-detected for CLI providers). Delete complexity classifier, tier thresholds, force overrides, council execution path, and 7 related Tauri commands. ~2,100 lines removed.
+### Phase 3a: Simplify Routing — DONE
+10. ~~**Remove Council and TierBased routing**~~ — Simplified to EgoPrimary (user picks model via ChatInterface dropdown) + CliOrchestrator (auto-detected for CLI providers). Deleted complexity classifier, tier thresholds, force overrides, council execution path, and 7 related Tauri commands. ~2,100 lines removed.
 
-### Phase 3b: Jobs Tab
-11. **Wire JobQueue to UI** — Replace OrchestrationPanel with live job list using existing `list_jobs`/`get_job_status` Tauri commands + SSE streaming from `abigail/job-events` topic.
+### Phase 3b: Jobs Tab — DONE
+11. ~~**Wire JobQueue to UI**~~ — OrchestrationPanel with live job list using `list_jobs`/`get_job_status` Tauri commands, recurring template display, and job cancel.
 
-### Phase 3c: Identity Prompt Viewer
-12. **Show assembled system prompt** — Add `get_assembled_prompt` Tauri command exposing the full LLM system prompt (soul + runtime context + tools + skill instructions). Display in Identity/Soul tab.
+### Phase 3c: Identity Prompt Viewer — DONE
+12. ~~**Show assembled system prompt**~~ — `get_assembled_prompt` Tauri command exposing the full LLM system prompt (soul + runtime context + tools + skill instructions). Displayed in Identity/Soul tab.
 
-### Phase 3d: Topic Monitor ("Nerve Center")
-13. **Replace ForgePanel tier config with topic monitor** — Live StreamBroker event timeline across all topics (conversation-turns, job-events, skill-events, conscience-check, ethical-signals). Shows consumer health and message counts.
+### Phase 3d: Topic Monitor ("Nerve Center") — DONE
+13. ~~**Replace ForgePanel tier config with topic monitor**~~ — Live StreamBroker event timeline across all topics (conversation-turns, job-events, skill-events, conscience-check, ethical-signals). Shows consumer health and message counts.
 
-### Phase 3e: Data Explorer
-14. **Memory browser** — Replace DataSourcesPanel with tabbed explorer: browse memories with weight tier badges, text search, conversation session list, and existing stats/optimize/reset.
+### Phase 3e: Data Explorer — DONE
+14. ~~**Memory browser**~~ — Replaced DataSourcesPanel with tabbed explorer: browse memories with weight tier badges, text search, conversation session list, and existing stats/optimize/reset.
+
+### Phase 4a: Chat UX & Job Visibility
+15. **Fix provider/model dropdowns** — Provider dropdown merges stored keys + model registry so all configured providers appear. Model list whitelist-filtered to chat-capable models only. Chat page job activity badge shows running/queued/scheduled counts via Tauri event stream.
+
+### Phase 4b: Ego Delegation Tools
+16. **LLM-callable job tools** — Add `submit_background_job`, `get_job_result`, `list_my_jobs` as built-in tools in the entity-chat tool-use loop so the ego can delegate work and check results mid-conversation.
+
+### Phase 4c: Capability-Aware Routing
+17. **Upgrade CapabilityMatcher** — Config-driven provider/model routing per capability. Extend `RequiredCapability` with `ImageGeneration`, `AudioGeneration`, `VideoGeneration`, `Transcription`. Add `ExecutionMode` (Mediated vs Direct) to `JobSpec` with V6 schema migration.
+
+### Phase 4d: Direct Execution
+18. **SubagentRunner direct mode** — Skip LLM tool-use loop for `ExecutionMode::Direct` jobs — call `SkillExecutor` directly with pre-built tool call params. Enables ego to prepare exact API calls (e.g. DALL-E prompt) and dispatch without mediation overhead.
+
+### Phase 4e: Cron Self-Management
+19. **Ego cron tools** — Add `create_recurring_job`, `list_recurring_jobs`, `cancel_recurring_job` so the entity can autonomously schedule its own background work (e.g. daily email check, weekly summaries).
+
+### Phase 4f: Live Events & Result Threading
+20. **SSE job events** — Replace OrchestrationPanel polling with reactive Tauri `job-event` listener. Job result threading: ego formats completed job results for inline conversation display (image URLs, text summaries).
 
 ## Known Issues
 

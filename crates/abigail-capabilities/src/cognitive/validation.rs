@@ -186,28 +186,48 @@ pub async fn discover_models(provider: &str, api_key: &str) -> Result<Vec<ModelI
     }
 }
 
-/// Returns true for OpenAI model IDs that are NOT chat-completion models
-/// (embeddings, TTS, image generation, audio transcription, moderation, legacy completions).
-fn is_non_chat_openai_model(id: &str) -> bool {
-    const NON_CHAT_PREFIXES: &[&str] = &[
-        "text-embedding-",
-        "tts-",
-        "dall-e-",
-        "whisper-",
-        "text-moderation-",
-        "babbage-",
-        "davinci-",
-        "text-davinci-",
-        "code-davinci-",
-        "text-babbage-",
-        "text-curie-",
-        "text-ada-",
-        "canary-tts",
-        "omni-moderation-",
+/// Whitelist of OpenAI model prefixes that are chat-completion capable.
+/// Everything else (embeddings, TTS, DALL-E, Sora, Whisper, moderation,
+/// realtime, audio, search-preview, instruct, legacy completions) is excluded.
+fn is_chat_openai_model(id: &str) -> bool {
+    const CHAT_PREFIXES: &[&str] = &[
+        "gpt-4.1",
+        "gpt-4.5",
+        "gpt-5",
+        "gpt-4o",
+        "gpt-4-turbo",
+        "gpt-4-",
+        "gpt-4",
+        "o1",
+        "o3",
+        "o4",
+        "chatgpt-4o-latest",
     ];
-    NON_CHAT_PREFIXES
-        .iter()
-        .any(|prefix| id.starts_with(prefix))
+    const BLOCKED_SUFFIXES: &[&str] = &["-instruct", "-search-preview", "-realtime", "-audio"];
+    if BLOCKED_SUFFIXES.iter().any(|s| id.contains(s)) {
+        return false;
+    }
+    CHAT_PREFIXES.iter().any(|prefix| id.starts_with(prefix))
+}
+
+/// Whitelist of Google model prefixes that are chat capable.
+fn is_chat_google_model(id: &str) -> bool {
+    const CHAT_PREFIXES: &[&str] = &["gemini-2", "gemini-1.5-pro", "gemini-1.5-flash"];
+    const BLOCKED: &[&str] = &["embedding", "aqa", "imagen", "veo", "chirp"];
+    if BLOCKED.iter().any(|b| id.contains(b)) {
+        return false;
+    }
+    CHAT_PREFIXES.iter().any(|prefix| id.starts_with(prefix))
+}
+
+/// Whitelist of xAI model prefixes that are chat capable.
+fn is_chat_xai_model(id: &str) -> bool {
+    const CHAT_PREFIXES: &[&str] = &["grok-"];
+    const BLOCKED: &[&str] = &["embedding", "image"];
+    if BLOCKED.iter().any(|b| id.contains(b)) {
+        return false;
+    }
+    CHAT_PREFIXES.iter().any(|prefix| id.starts_with(prefix))
 }
 
 /// OpenAI: GET /v1/models → parse data[].id, filtering out non-chat models
@@ -242,8 +262,7 @@ async fn discover_openai_models(key: &str) -> Result<Vec<ModelInfo>, String> {
             arr.iter()
                 .filter_map(|m| {
                     let id = m["id"].as_str()?.to_string();
-                    // Filter out non-chat models (embeddings, tts, dall-e, etc.)
-                    if is_non_chat_openai_model(&id) {
+                    if !is_chat_openai_model(&id) {
                         return None;
                     }
                     let created = m["created"].as_i64();
@@ -292,6 +311,9 @@ async fn discover_xai_models(key: &str) -> Result<Vec<ModelInfo>, String> {
             arr.iter()
                 .filter_map(|m| {
                     let id = m["id"].as_str()?.to_string();
+                    if !is_chat_xai_model(&id) {
+                        return None;
+                    }
                     let created = m["created"].as_i64();
                     Some(ModelInfo {
                         display_name: None,
@@ -342,6 +364,9 @@ async fn discover_google_models(key: &str) -> Result<Vec<ModelInfo>, String> {
                     // Google format: "models/gemini-2.0-flash" → strip prefix
                     let raw_name = m["name"].as_str()?;
                     let id = raw_name.strip_prefix("models/").unwrap_or(raw_name);
+                    if !is_chat_google_model(id) {
+                        return None;
+                    }
                     let display = m["displayName"].as_str().map(|s| s.to_string());
                     Some(ModelInfo {
                         id: id.to_string(),
@@ -465,26 +490,57 @@ mod tests {
     }
 
     #[test]
-    fn test_non_chat_model_filter() {
-        // Non-chat models should be filtered
-        assert!(is_non_chat_openai_model("text-embedding-3-small"));
-        assert!(is_non_chat_openai_model("text-embedding-ada-002"));
-        assert!(is_non_chat_openai_model("tts-1"));
-        assert!(is_non_chat_openai_model("tts-1-hd"));
-        assert!(is_non_chat_openai_model("dall-e-3"));
-        assert!(is_non_chat_openai_model("whisper-1"));
-        assert!(is_non_chat_openai_model("text-moderation-latest"));
-        assert!(is_non_chat_openai_model("babbage-002"));
-        assert!(is_non_chat_openai_model("davinci-002"));
-        assert!(is_non_chat_openai_model("omni-moderation-latest"));
+    fn test_openai_chat_model_whitelist() {
+        assert!(is_chat_openai_model("gpt-4.1"));
+        assert!(is_chat_openai_model("gpt-4.1-mini"));
+        assert!(is_chat_openai_model("gpt-4.5-preview"));
+        assert!(is_chat_openai_model("gpt-5"));
+        assert!(is_chat_openai_model("gpt-5.2"));
+        assert!(is_chat_openai_model("gpt-4o"));
+        assert!(is_chat_openai_model("gpt-4o-mini"));
+        assert!(is_chat_openai_model("gpt-4-turbo"));
+        assert!(is_chat_openai_model("gpt-4-0613"));
+        assert!(is_chat_openai_model("o1-preview"));
+        assert!(is_chat_openai_model("o3-mini"));
+        assert!(is_chat_openai_model("o4-mini"));
+        assert!(is_chat_openai_model("chatgpt-4o-latest"));
 
-        // Chat models should NOT be filtered
-        assert!(!is_non_chat_openai_model("gpt-4.1"));
-        assert!(!is_non_chat_openai_model("gpt-4.1-mini"));
-        assert!(!is_non_chat_openai_model("gpt-5.2"));
-        assert!(!is_non_chat_openai_model("gpt-5.2-pro"));
-        assert!(!is_non_chat_openai_model("o1-preview"));
-        assert!(!is_non_chat_openai_model("o3-mini"));
-        assert!(!is_non_chat_openai_model("chatgpt-4o-latest"));
+        assert!(!is_chat_openai_model("text-embedding-3-small"));
+        assert!(!is_chat_openai_model("tts-1"));
+        assert!(!is_chat_openai_model("dall-e-3"));
+        assert!(!is_chat_openai_model("whisper-1"));
+        assert!(!is_chat_openai_model("text-moderation-latest"));
+        assert!(!is_chat_openai_model("babbage-002"));
+        assert!(!is_chat_openai_model("davinci-002"));
+        assert!(!is_chat_openai_model("omni-moderation-latest"));
+        assert!(!is_chat_openai_model("gpt-3.5-turbo-instruct"));
+        assert!(!is_chat_openai_model("gpt-4o-realtime-preview"));
+        assert!(!is_chat_openai_model("gpt-4o-audio-preview"));
+        assert!(!is_chat_openai_model("gpt-4o-search-preview"));
+        assert!(!is_chat_openai_model("sora-2025"));
+        assert!(!is_chat_openai_model("canary-tts"));
+    }
+
+    #[test]
+    fn test_google_chat_model_whitelist() {
+        assert!(is_chat_google_model("gemini-2.0-flash"));
+        assert!(is_chat_google_model("gemini-2.5-pro"));
+        assert!(is_chat_google_model("gemini-2.5-flash"));
+        assert!(is_chat_google_model("gemini-1.5-pro"));
+        assert!(is_chat_google_model("gemini-1.5-flash"));
+
+        assert!(!is_chat_google_model("text-embedding-004"));
+        assert!(!is_chat_google_model("embedding-001"));
+        assert!(!is_chat_google_model("aqa"));
+        assert!(!is_chat_google_model("imagen-3.0"));
+    }
+
+    #[test]
+    fn test_xai_chat_model_whitelist() {
+        assert!(is_chat_xai_model("grok-3"));
+        assert!(is_chat_xai_model("grok-4-1-fast-reasoning"));
+
+        assert!(!is_chat_xai_model("some-embedding-model"));
+        assert!(!is_chat_xai_model("grok-image-gen"));
     }
 }

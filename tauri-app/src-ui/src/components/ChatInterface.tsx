@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTheme } from "../contexts/ThemeContext";
@@ -92,10 +93,10 @@ type ForceOverride = { pinned_model: string | null; pinned_tier: string | null; 
 type ModelRegistryEntry = { provider: string; model_id: string; display_name: string | null };
 
 const FALLBACK_MODELS: Record<string, string[]> = {
-  openai: ["gpt-4.1", "gpt-4.1-mini", "gpt-5.2", "o3-mini"],
+  openai: ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "o3-mini", "o4-mini"],
   anthropic: ["claude-sonnet-4-6", "claude-haiku-4-5", "claude-opus-4-6"],
-  google: ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"],
-  xai: ["grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning", "grok-4-0709"],
+  google: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+  xai: ["grok-3", "grok-3-mini"],
   perplexity: ["sonar", "sonar-pro", "sonar-reasoning-pro"],
 };
 
@@ -128,6 +129,7 @@ export default function ChatInterface({
   const [headerProvider, setHeaderProvider] = useState<string>("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [jobCounts, setJobCounts] = useState<{ running: number; queued: number; scheduled: number }>({ running: 0, queued: 0, scheduled: 0 });
   const showDebugTelemetry = isBrowserHarnessRuntime() && isHarnessDebugEnabled();
   const chatGateway = useMemo(() => createChatGateway(), []);
 
@@ -400,6 +402,19 @@ export default function ChatInterface({
     };
   }, [onSessionSnapshot]);
 
+  // -- Job activity badge --
+  useEffect(() => {
+    const fetchStats = () => {
+      invoke<{ running: number; queued: number; scheduled: number }>("get_queue_stats")
+        .then((s) => { if (mountedRef.current) setJobCounts({ running: s.running, queued: s.queued, scheduled: s.scheduled }); })
+        .catch(() => {});
+    };
+    fetchStats();
+    let unlisten: (() => void) | null = null;
+    listen("job-event", () => fetchStats()).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, []);
+
   // -- Header model/provider dropdown logic --
 
   // Derive headerProvider from forceOverride or routerStatus when not yet set by user
@@ -415,9 +430,11 @@ export default function ChatInterface({
   }, [forceOverride, modelRegistry, routerStatus, headerProvider]);
 
   const knownProviders = useMemo(() => {
-    const fromReg = [...new Set(modelRegistry.map((m) => m.provider))];
-    return fromReg.length > 0 ? fromReg : Object.keys(FALLBACK_MODELS);
-  }, [modelRegistry]);
+    const fromReg = new Set(modelRegistry.map((m) => m.provider));
+    const fromVault = new Set(storedProviders.filter((p) => !p.endsWith("-cli")));
+    const merged = new Set([...fromReg, ...fromVault]);
+    return merged.size > 0 ? [...merged] : Object.keys(FALLBACK_MODELS);
+  }, [modelRegistry, storedProviders]);
 
   const headerModels = useMemo(() => {
     if (!headerProvider) return [];
@@ -1199,6 +1216,19 @@ export default function ChatInterface({
             <option key={m} value={m}>{m}</option>
           ))}
         </select>
+        {(jobCounts.running > 0 || jobCounts.queued > 0 || jobCounts.scheduled > 0) && (
+          <span className="ml-1 inline-flex items-center gap-1 text-[10px] font-mono border border-theme-border rounded px-1.5 py-0.5 text-theme-text-dim">
+            {jobCounts.running > 0 && (
+              <span className="text-blue-400">● {jobCounts.running}</span>
+            )}
+            {jobCounts.queued > 0 && (
+              <span className="text-yellow-400">○ {jobCounts.queued}</span>
+            )}
+            {jobCounts.scheduled > 0 && (
+              <span className="text-theme-primary-dim">↻ {jobCounts.scheduled}</span>
+            )}
+          </span>
+        )}
         {showDebugTelemetry && (
           <span className="text-theme-text-dim">
             mode: non-streaming

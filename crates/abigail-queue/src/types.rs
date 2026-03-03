@@ -23,6 +23,14 @@ pub enum RequiredCapability {
     Reasoning,
     /// Web search, information retrieval.
     Search,
+    /// Image generation (DALL-E, Stable Diffusion, etc.).
+    ImageGeneration,
+    /// Audio generation (TTS, music).
+    AudioGeneration,
+    /// Video generation (Sora, etc.).
+    VideoGeneration,
+    /// Audio/video transcription (Whisper, etc.).
+    Transcription,
     /// Custom capability identified by name.
     Custom(String),
 }
@@ -35,6 +43,10 @@ impl RequiredCapability {
             RequiredCapability::Vision => "vision",
             RequiredCapability::Reasoning => "reasoning",
             RequiredCapability::Search => "search",
+            RequiredCapability::ImageGeneration => "image_generation",
+            RequiredCapability::AudioGeneration => "audio_generation",
+            RequiredCapability::VideoGeneration => "video_generation",
+            RequiredCapability::Transcription => "transcription",
             RequiredCapability::Custom(s) => s.as_str(),
         }
     }
@@ -46,9 +58,35 @@ impl RequiredCapability {
             "vision" => RequiredCapability::Vision,
             "reasoning" => RequiredCapability::Reasoning,
             "search" => RequiredCapability::Search,
+            "image_generation" => RequiredCapability::ImageGeneration,
+            "audio_generation" => RequiredCapability::AudioGeneration,
+            "video_generation" => RequiredCapability::VideoGeneration,
+            "transcription" => RequiredCapability::Transcription,
             other => RequiredCapability::Custom(other.to_string()),
         }
     }
+}
+
+/// How a job should be executed by the SubagentRunner.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    /// LLM tool-use loop — an agent reasons about the task (default).
+    #[default]
+    Mediated,
+    /// Skip LLM loop — execute a pre-built tool call directly via SkillExecutor.
+    Direct,
+}
+
+/// A pre-built tool call for `ExecutionMode::Direct` jobs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectToolCall {
+    /// Skill ID (e.g. "com.abigail.skills.image").
+    pub skill_id: String,
+    /// Tool name within the skill (e.g. "generate_image").
+    pub tool_name: String,
+    /// JSON parameters for the tool call.
+    pub params: serde_json::Value,
 }
 
 /// Job priority level.
@@ -176,6 +214,12 @@ pub struct JobSpec {
     /// Job IDs that must complete before this job can run.
     #[serde(default)]
     pub depends_on: Vec<JobId>,
+    /// Execution strategy: Mediated (LLM loop) or Direct (skip LLM, call skill).
+    #[serde(default)]
+    pub execution_mode: ExecutionMode,
+    /// Pre-built tool call for Direct execution mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direct_tool_call: Option<DirectToolCall>,
 }
 
 fn default_capability() -> RequiredCapability {
@@ -242,6 +286,10 @@ pub struct JobRecord {
     pub last_scheduled_at: Option<String>,
     /// Job IDs that must complete before this job can run.
     pub depends_on: Vec<JobId>,
+    /// Execution strategy.
+    pub execution_mode: ExecutionMode,
+    /// Pre-built tool call for Direct execution mode.
+    pub direct_tool_call: Option<DirectToolCall>,
 }
 
 /// Real-time event published when job state changes.
@@ -355,6 +403,10 @@ mod tests {
             RequiredCapability::Vision,
             RequiredCapability::Reasoning,
             RequiredCapability::Search,
+            RequiredCapability::ImageGeneration,
+            RequiredCapability::AudioGeneration,
+            RequiredCapability::VideoGeneration,
+            RequiredCapability::Transcription,
             RequiredCapability::Custom("my_cap".into()),
         ];
         for cap in caps {
@@ -398,6 +450,12 @@ mod tests {
             job_mode: "agentic_run".into(),
             goal_template: None,
             depends_on: vec![],
+            execution_mode: ExecutionMode::Direct,
+            direct_tool_call: Some(DirectToolCall {
+                skill_id: "com.abigail.skills.image".into(),
+                tool_name: "generate_image".into(),
+                params: serde_json::json!({"prompt": "a cat"}),
+            }),
         };
 
         let json = serde_json::to_string(&spec).unwrap();
@@ -406,5 +464,7 @@ mod tests {
         assert_eq!(back.capability, RequiredCapability::Reasoning);
         assert_eq!(back.priority, JobPriority::High);
         assert!(!back.is_recurring);
+        assert_eq!(back.execution_mode, ExecutionMode::Direct);
+        assert!(back.direct_tool_call.is_some());
     }
 }

@@ -2,8 +2,10 @@
 
 use crate::capability_matcher::{CapabilityMatcher, CapabilitySelection};
 use abigail_capabilities::cognitive::Message;
-use abigail_queue::{JobQueue, JobRecord};
+use abigail_queue::{ExecutionMode, JobQueue, JobRecord};
 use abigail_router::IdEgoRouter;
+use abigail_skills::manifest::SkillId;
+use abigail_skills::skill::ToolParams;
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -76,17 +78,99 @@ impl SubagentRunner {
             return Err(err);
         }
 
+        let effective_mode = if job.execution_mode == ExecutionMode::Direct {
+            ExecutionMode::Direct
+        } else {
+            selection.execution_mode.clone()
+        };
+
+        let timeout_ms = job.time_budget_ms.max(1_000);
+
+        match effective_mode {
+            ExecutionMode::Direct => {
+                self.run_direct(&job, timeout_ms).await;
+            }
+            ExecutionMode::Mediated => {
+                self.run_mediated(&job, &selection, timeout_ms).await;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Direct execution: skip the LLM loop and call SkillExecutor directly.
+    async fn run_direct(&self, job: &JobRecord, timeout_ms: u64) {
+        let dtc = match &job.direct_tool_call {
+            Some(dtc) => dtc.clone(),
+            None => {
+                let msg = "Direct execution requested but no direct_tool_call specified";
+                let _ = self.queue.mark_failed(&job.id, msg, 0).await;
+                tracing::warn!("Job {} failed: {}", job.id, msg);
+                return;
+            }
+        };
+
+        let mut params = ToolParams::new();
+        if let Some(obj) = dtc.params.as_object() {
+            for (k, v) in obj {
+                params.values.insert(k.clone(), v.clone());
+            }
+        }
+
+        let skill_id = SkillId(dtc.skill_id.clone());
+        tracing::info!(
+            "Direct execution: job={} skill={}::{}",
+            job.id,
+            dtc.skill_id,
+            dtc.tool_name
+        );
+
+        let task = self.executor.execute(&skill_id, &dtc.tool_name, params);
+        match timeout(Duration::from_millis(timeout_ms), task).await {
+            Ok(Ok(output)) => {
+                let result = serde_json::json!({
+                    "success": output.success,
+                    "data": output.data,
+                })
+                .to_string();
+                let _ = self.queue.mark_completed(&job.id, &result, 1).await;
+                tracing::info!(
+                    "Direct job {} completed (skill={}::{})",
+                    job.id,
+                    dtc.skill_id,
+                    dtc.tool_name
+                );
+            }
+            Ok(Err(err)) => {
+                let msg = format!("Direct skill execution failed: {}", err);
+                let _ = self.queue.mark_failed(&job.id, &msg, 0).await;
+                tracing::warn!("Job {} direct exec failed: {}", job.id, err);
+            }
+            Err(_) => {
+                let msg = format!("Job exceeded time budget ({} ms)", timeout_ms);
+                let _ = self.queue.mark_failed(&job.id, &msg, 0).await;
+                tracing::warn!("Job {} timed out after {} ms", job.id, timeout_ms);
+            }
+        }
+    }
+
+    /// Mediated execution: run the LLM tool-use loop.
+    async fn run_mediated(
+        &self,
+        job: &JobRecord,
+        selection: &CapabilitySelection,
+        timeout_ms: u64,
+    ) {
         let messages = build_job_messages(
-            &job,
-            &selection,
+            job,
+            selection,
             self.entity_name.as_deref(),
             &self.docs_dir,
             &self.instruction_registry,
             &self.registry,
         );
-        let tools = filter_tools_for_job(entity_chat::build_tool_definitions(&self.registry), &job);
+        let tools = filter_tools_for_job(entity_chat::build_tool_definitions(&self.registry), job);
 
-        let timeout_ms = job.time_budget_ms.max(1_000);
         let task = entity_chat::run_tool_use_loop_with_model_override(
             &self.router,
             &self.executor,
@@ -101,9 +185,10 @@ impl SubagentRunner {
                     .as_ref()
                     .map(|t| t.steps.len() as u32)
                     .unwrap_or(1);
-                self.queue
+                let _ = self
+                    .queue
                     .mark_completed(&job.id, &result.content, turns.max(1))
-                    .await?;
+                    .await;
                 tracing::info!(
                     "Completed queued job {} (topic={}, capability={})",
                     job.id,
@@ -113,17 +198,15 @@ impl SubagentRunner {
             }
             Ok(Err(err)) => {
                 let msg = format!("Sub-agent execution failed: {}", err);
-                self.queue.mark_failed(&job.id, &msg, 0).await?;
+                let _ = self.queue.mark_failed(&job.id, &msg, 0).await;
                 tracing::warn!("Job {} failed (topic={}): {}", job.id, job.topic, err);
             }
             Err(_) => {
                 let msg = format!("Job exceeded time budget ({} ms)", timeout_ms);
-                self.queue.mark_failed(&job.id, &msg, 0).await?;
+                let _ = self.queue.mark_failed(&job.id, &msg, 0).await;
                 tracing::warn!("Job {} timed out after {} ms", job.id, timeout_ms);
             }
         }
-
-        Ok(())
     }
 }
 
@@ -151,8 +234,6 @@ fn build_job_messages(
         selection.provider,
     ));
 
-    // Inject constitutional context: use job-supplied context if set,
-    // otherwise build the full constitutional docs from disk.
     if let Some(ref ctx) = job.system_context {
         system.push('\n');
         system.push_str(ctx);
@@ -173,8 +254,6 @@ fn build_job_messages(
         ));
     }
 
-    // Topic-affinity instruction delegation: inject skill-specific instructions
-    // matched against the job goal so sub-agents know how to use relevant tools.
     let registered_ids: HashSet<String> = skill_registry
         .list()
         .unwrap_or_default()

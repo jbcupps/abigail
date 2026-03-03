@@ -4,13 +4,17 @@
 //! and the GUI (Tauri desktop app). Changes here automatically affect both
 //! consumers, so testing `cargo test -p entity-chat` validates the shared engine.
 
+pub mod job_tools;
+
 use abigail_capabilities::cognitive::{Message, StreamEvent, ToolCall, ToolDefinition};
+use abigail_queue::JobQueue;
 use abigail_router::IdEgoRouter;
 use abigail_skills::manifest::SkillId;
 use abigail_skills::skill::ToolParams;
 use abigail_skills::{SkillExecutor, SkillRegistry};
 use entity_core::{SessionMessage, ToolCallRecord};
 use std::collections::HashSet;
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // PromptMode — controls how much context goes into the system prompt
@@ -488,6 +492,16 @@ pub fn build_tool_definitions(registry: &SkillRegistry) -> Vec<ToolDefinition> {
     defs
 }
 
+/// Build tool definitions including built-in job delegation tools.
+///
+/// Appends `submit_background_job`, `get_job_result`, and `list_my_jobs` to the
+/// skill-derived tool list so the ego can delegate work from within conversation.
+pub fn build_tool_definitions_with_jobs(registry: &SkillRegistry) -> Vec<ToolDefinition> {
+    let mut defs = build_tool_definitions(registry);
+    defs.extend(job_tools::job_tool_definitions());
+    defs
+}
+
 /// Split a qualified tool name `skill_id::tool_name` back into its parts.
 fn split_qualified_tool_name(qualified: &str) -> Option<(String, String)> {
     let idx = qualified.find("::")?;
@@ -587,6 +601,82 @@ pub async fn run_tool_use_loop(
     tools: Vec<ToolDefinition>,
 ) -> anyhow::Result<ToolUseResult> {
     run_tool_use_loop_with_model_override(router, executor, messages, tools, None).await
+}
+
+/// Same as [`run_tool_use_loop_with_model_override`] but also handles built-in
+/// job delegation tools (`submit_background_job`, `get_job_result`, `list_my_jobs`).
+pub async fn run_tool_use_loop_with_jobs(
+    router: &IdEgoRouter,
+    executor: &SkillExecutor,
+    mut messages: Vec<Message>,
+    tools: Vec<ToolDefinition>,
+    model_override: Option<String>,
+    job_queue: Arc<JobQueue>,
+) -> anyhow::Result<ToolUseResult> {
+    let mut all_records = Vec::new();
+    let mut last_trace: Option<entity_core::ExecutionTrace> = None;
+
+    for round in 0..MAX_TOOL_ROUNDS {
+        tracing::debug!("Tool-use loop (with jobs) round {}", round);
+
+        let resp = router
+            .route_unified(abigail_router::RoutingRequest {
+                messages: messages.clone(),
+                tools: Some(tools.clone()),
+                model_override: model_override.clone(),
+                stream_tx: None,
+                force_id_only: false,
+            })
+            .await?;
+        let response = resp.completion;
+        last_trace = resp.trace;
+
+        let tool_calls = match response.tool_calls {
+            Some(ref tcs) if !tcs.is_empty() => tcs.clone(),
+            _ => {
+                return Ok(ToolUseResult {
+                    content: response.content,
+                    tool_calls_made: all_records,
+                    execution_trace: last_trace,
+                });
+            }
+        };
+
+        messages.push(Message {
+            role: "assistant".into(),
+            content: response.content.clone(),
+            tool_call_id: None,
+            tool_calls: Some(tool_calls.clone()),
+        });
+
+        for tc in &tool_calls {
+            let (output_json, record) = if job_tools::is_job_tool(&tc.name) {
+                let args: serde_json::Value =
+                    serde_json::from_str(&tc.arguments).unwrap_or_default();
+                let result = job_tools::execute_job_tool(&job_queue, &tc.name, &args).await;
+                let record = ToolCallRecord {
+                    skill_id: "builtin.jobs".into(),
+                    tool_name: tc.name.clone(),
+                    success: !result.contains("\"error\""),
+                };
+                (result, record)
+            } else {
+                execute_single_tool_call(executor, tc).await
+            };
+            all_records.push(record);
+            messages.push(Message::tool_result(&tc.id, output_json));
+        }
+    }
+
+    tracing::warn!(
+        "Tool-use loop (with jobs) exhausted {} rounds",
+        MAX_TOOL_ROUNDS
+    );
+    Ok(ToolUseResult {
+        content: "I attempted several tool calls but hit the maximum number of rounds.".into(),
+        tool_calls_made: all_records,
+        execution_trace: last_trace,
+    })
 }
 
 /// Same as [`run_tool_use_loop`] but allows forcing a model override for all
@@ -748,6 +838,8 @@ pub async fn run_tool_use_loop_with_delegation(
                 job_mode: "agentic_run".to_string(),
                 goal_template: None,
                 depends_on: vec![],
+                execution_mode: abigail_queue::ExecutionMode::Mediated,
+                direct_tool_call: None,
             };
 
             let job_id = queue.submit_job(spec).await?;

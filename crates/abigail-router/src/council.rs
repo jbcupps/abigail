@@ -6,7 +6,7 @@
 //! 3. **Synthesis**: the first provider merges the ranked drafts into a final answer.
 
 use abigail_capabilities::cognitive::provider::{CompletionRequest, LlmProvider, Message};
-use abigail_queue::{JobId, JobPriority, JobQueue, JobSpec, RequiredCapability};
+use abigail_queue::{ExecutionMode, JobId, JobPriority, JobQueue, JobSpec, RequiredCapability};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -435,6 +435,8 @@ impl CouncilEngine {
                 job_mode: "agentic_run".to_string(),
                 goal_template: None,
                 depends_on: vec![],
+                execution_mode: ExecutionMode::Mediated,
+                direct_tool_call: None,
             };
             let job_id = queue.submit_job(spec).await?;
             tracing::debug!(
@@ -474,6 +476,8 @@ impl CouncilEngine {
             job_mode: "agentic_run".to_string(),
             goal_template: None,
             depends_on: draft_job_ids.clone(),
+            execution_mode: ExecutionMode::Mediated,
+            direct_tool_call: None,
         };
         let critique_job_id = queue.submit_job(critique_spec).await?;
         tracing::debug!("Council: submitted critique job {}", critique_job_id);
@@ -507,6 +511,8 @@ impl CouncilEngine {
             job_mode: "agentic_run".to_string(),
             goal_template: None,
             depends_on: vec![critique_job_id.clone()],
+            execution_mode: ExecutionMode::Mediated,
+            direct_tool_call: None,
         };
         let synthesis_job_id = queue.submit_job(synthesis_spec).await?;
         tracing::debug!("Council: submitted synthesis job {}", synthesis_job_id);
