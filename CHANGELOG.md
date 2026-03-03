@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-03-03 19:10 EST: Add OllamaDrawer (left) and ProviderDrawer (right) slide-out panels to SoulRegistry for pre-birth Ollama management and provider/CLI configuration
 - 2026-03-03 17:55 EST: Add inline Provider + Model dropdowns to ChatInterface toolbar for instant model switching without leaving the conversation
 - 2026-03-03 15:30 EST: Address 6 residual risks — wire server-side cancel for SSE streams (daemon + Tauri), expose governance constraints via routes and Tauri commands, remove legacy blocking chat command, deprecate target field across full stack, expose job scheduler via Tauri commands, add entity-cli skill-sign subcommand for signed allowlist entry generation
 - 2026-03-03 13:40 EST: Fix Ollama startup lifecycle — resolve premature model_loading state, progress bar visibility for non-typewriter paths, double identity-check, pull button port mismatch, CI curl hardening, and fix download URLs to extract from archives (zip/tgz) instead of non-existent standalone binaries
