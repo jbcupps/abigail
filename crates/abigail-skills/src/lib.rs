@@ -1,5 +1,6 @@
 //! Abigail Skills — plugin and tool execution layer.
 
+pub mod backup;
 pub mod channel;
 pub mod dynamic;
 pub mod executor;
@@ -22,6 +23,7 @@ pub mod watcher;
 /// Backward-compatible alias: `capability` now lives in `protocol`.
 pub use protocol as capability;
 
+pub use backup::{BackupManagementSkill, BackupOperations};
 pub use channel::*;
 pub use dynamic::{DynamicApiSkill, DynamicSkillConfig, DynamicToolConfig};
 pub use executor::SkillExecutor;

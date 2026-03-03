@@ -363,8 +363,13 @@ async fn archive_turn(
     if let Some(m) = metadata {
         turn = turn.with_metadata(m.provider, m.model_used, m.tier, m.complexity_score);
     }
-    if let Err(e) = state.memory.insert_turn(&turn) {
-        tracing::warn!("Failed to archive {} turn: {}", role, e);
+    match state.memory.read() {
+        Ok(mem) => {
+            if let Err(e) = mem.insert_turn(&turn) {
+                tracing::warn!("Failed to archive {} turn: {}", role, e);
+            }
+        }
+        Err(e) => tracing::warn!("Failed to acquire memory lock for {} turn: {}", role, e),
     }
 }
 

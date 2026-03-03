@@ -59,8 +59,9 @@ pub struct AppState {
     pub auth_manager: Arc<AuthManager>,
     /// Identity manager for the Hive multi-agent system
     pub identity_manager: Arc<IdentityManager>,
-    /// Shared SQLite memory store for chat persistence and memory queries
-    pub memory: Arc<MemoryStore>,
+    /// Shared SQLite memory store for chat persistence and memory queries.
+    /// Wrapped in `RwLock` so `load_agent` can swap to the per-entity DB.
+    pub memory: Arc<RwLock<MemoryStore>>,
     /// Currently active agent UUID (None if no agent loaded)
     pub active_agent_id: RwLock<Option<String>>,
     /// Subagent manager for delegating tasks to specialized subagents

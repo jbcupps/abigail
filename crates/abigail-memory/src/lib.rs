@@ -1,4 +1,5 @@
 pub mod archive;
+pub mod backup_import;
 pub mod embeddings;
 pub mod graph;
 pub mod postgres;
@@ -6,6 +7,10 @@ pub mod schema;
 pub mod store;
 
 pub use archive::ArchiveExporter;
+pub use backup_import::{
+    find_memory_db, import_from_backup, preview_backup_db, scan_backup_dirs, BackupEntry,
+    BackupStats, ImportStats,
+};
 pub use embeddings::cosine_similarity;
 pub use graph::{EdgeType, MemoryEdge, MemoryGraph};
 pub use schema::*;
