@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import ConfirmationModal from "./ConfirmationModal";
+import OllamaDrawer from "./OllamaDrawer";
+import ProviderDrawer from "./ProviderDrawer";
 
 interface OllamaStatusInfo {
   managed: boolean;
@@ -259,6 +261,8 @@ export default function SoulRegistry({
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [showRecoverPanel, setShowRecoverPanel] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
+  const [ollamaDrawerOpen, setOllamaDrawerOpen] = useState(false);
+  const [providerDrawerOpen, setProviderDrawerOpen] = useState(false);
   const mountedRef = useRef(true);
 
   const fetchSouls = async () => {
@@ -489,6 +493,22 @@ export default function SoulRegistry({
 
         <HiveAgentPanel />
 
+        {/* Drawer buttons */}
+        <div className="w-full max-w-md flex gap-3 mb-6">
+          <button
+            className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-mono uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
+            onClick={() => setOllamaDrawerOpen(true)}
+          >
+            Manage Ollama
+          </button>
+          <button
+            className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-mono uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
+            onClick={() => setProviderDrawerOpen(true)}
+          >
+            Configure Providers
+          </button>
+        </div>
+
         {/* Create soul card */}
         <div className="w-full max-w-md border-2 border-theme-primary rounded-lg p-6 mb-6 bg-theme-bg-elevated">
           <p className="text-theme-text-bright text-sm mb-4">
@@ -596,6 +616,9 @@ export default function SoulRegistry({
             )}
           </div>
         )}
+
+        <OllamaDrawer open={ollamaDrawerOpen} onClose={() => setOllamaDrawerOpen(false)} />
+        <ProviderDrawer open={providerDrawerOpen} onClose={() => setProviderDrawerOpen(false)} />
       </div>
     );
   }
@@ -614,6 +637,22 @@ export default function SoulRegistry({
       {errorBanner}
 
       <HiveAgentPanel />
+
+      {/* Drawer buttons */}
+      <div className="w-full max-w-4xl flex gap-3 mb-6">
+        <button
+          className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-mono uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
+          onClick={() => setOllamaDrawerOpen(true)}
+        >
+          Manage Ollama
+        </button>
+        <button
+          className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-mono uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
+          onClick={() => setProviderDrawerOpen(true)}
+        >
+          Configure Providers
+        </button>
+      </div>
 
       {/* Soul cards grid */}
       <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
@@ -793,6 +832,9 @@ export default function SoulRegistry({
           )}
         </div>
       )}
+
+      <OllamaDrawer open={ollamaDrawerOpen} onClose={() => setOllamaDrawerOpen(false)} />
+      <ProviderDrawer open={providerDrawerOpen} onClose={() => setProviderDrawerOpen(false)} />
     </div>
   );
 }
