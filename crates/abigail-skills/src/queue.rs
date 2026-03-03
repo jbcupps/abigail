@@ -5,7 +5,7 @@ use crate::skill::{
     CostEstimate, ExecutionContext, HealthStatus, Skill, SkillConfig, SkillError, SkillHealth,
     SkillResult, ToolDescriptor, ToolOutput, ToolParams,
 };
-use abigail_queue::{JobPriority, JobRecord, JobSpec, RequiredCapability};
+use abigail_queue::{ExecutionMode, JobPriority, JobRecord, JobSpec, RequiredCapability};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -221,6 +221,8 @@ impl Skill for QueueManagementSkill {
                         .unwrap_or_else(|| "agentic_run".to_string()),
                     goal_template: params.get_string("goal_template"),
                     depends_on: params.get::<Vec<String>>("depends_on").unwrap_or_default(),
+                    execution_mode: ExecutionMode::Mediated,
+                    direct_tool_call: None,
                 };
                 let job_id = self
                     .ops

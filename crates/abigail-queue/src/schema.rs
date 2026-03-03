@@ -65,3 +65,9 @@ CREATE INDEX IF NOT EXISTS idx_job_queue_cron
 pub const MIGRATION_V5_DEPENDS_ON: &str = r#"
 ALTER TABLE job_queue ADD COLUMN depends_on TEXT;
 "#;
+
+/// V6 migration: adds execution_mode and direct_tool_call for direct job execution.
+pub const MIGRATION_V6_EXECUTION_MODE: &str = r#"
+ALTER TABLE job_queue ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'mediated';
+ALTER TABLE job_queue ADD COLUMN direct_tool_call TEXT;
+"#;

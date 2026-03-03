@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 interface JobRecord {
   id: string;
@@ -15,6 +16,7 @@ interface JobRecord {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+  execution_mode: string;
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -53,8 +55,9 @@ export default function OrchestrationPanel() {
 
   useEffect(() => {
     void refresh();
-    const interval = setInterval(refresh, 5000);
-    return () => clearInterval(interval);
+    let unlisten: (() => void) | null = null;
+    listen("job-event", () => void refresh()).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
   }, [refresh]);
 
   const cancelJob = async (jobId: string) => {
@@ -131,6 +134,11 @@ export default function OrchestrationPanel() {
                 >
                   {job.status}
                 </span>
+                {job.execution_mode === "direct" && (
+                  <span className="px-1 py-0.5 text-[8px] font-mono rounded border border-purple-500/30 text-purple-400 bg-purple-500/10">
+                    direct
+                  </span>
+                )}
                 <span className="text-xs text-theme-text font-mono truncate flex-1">
                   {job.goal.length > 80 ? job.goal.slice(0, 80) + "..." : job.goal}
                 </span>
@@ -156,6 +164,7 @@ export default function OrchestrationPanel() {
                   <div>Topic: {job.topic}</div>
                   <div>Priority: {job.priority}</div>
                   <div>Capability: {job.capability}</div>
+                  <div>Execution: {job.execution_mode}</div>
                   {job.started_at && <div>Started: {job.started_at}</div>}
                   {job.completed_at && <div>Completed: {job.completed_at}</div>}
                   {job.result && (
@@ -180,7 +189,7 @@ export default function OrchestrationPanel() {
       {recurring.length > 0 && (
         <div className="mt-2">
           <h3 className="text-[10px] font-semibold text-theme-text-dim tracking-wider uppercase mb-1">
-            Recurring Schedules
+            Recurring Schedules ({recurring.length})
           </h3>
           <div className="flex flex-col gap-1">
             {recurring.map((t) => (
@@ -189,7 +198,7 @@ export default function OrchestrationPanel() {
                 className="bg-theme-bg-elevated border border-theme-border-dim rounded px-3 py-1.5 flex items-center gap-2"
               >
                 <span className="text-[10px] text-theme-primary font-mono">
-                  {t.cron_expression || "—"}
+                  {t.cron_expression || "\u2014"}
                 </span>
                 <span className="text-xs text-theme-text-dim font-mono truncate flex-1">
                   {t.goal}
@@ -197,6 +206,12 @@ export default function OrchestrationPanel() {
                 <span className="text-[10px] text-theme-text-dim font-mono">
                   {t.topic}
                 </span>
+                <button
+                  className="text-[10px] text-theme-danger hover:text-red-400 font-mono"
+                  onClick={() => cancelJob(t.id)}
+                >
+                  cancel
+                </button>
               </div>
             ))}
           </div>

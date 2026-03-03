@@ -2706,6 +2706,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "cron",
  "entity-core",
  "serde_json",
  "skill-email",

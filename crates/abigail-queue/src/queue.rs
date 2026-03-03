@@ -17,7 +17,7 @@ const JOB_COLUMNS: &str = "id, topic, goal, capability, priority, status, time_b
     model_used, provider_used, result, error, turns_consumed, ttl_seconds, \
     created_at, started_at, completed_at, expires_at, \
     cron_expression, is_recurring, significance_keywords, significance_threshold, \
-    job_mode, goal_template, last_scheduled_at, depends_on";
+    job_mode, goal_template, last_scheduled_at, depends_on, execution_mode, direct_tool_call";
 
 /// Persistent job queue backed by SQLite with event streaming.
 pub struct JobQueue {
@@ -63,6 +63,14 @@ impl JobQueue {
         let priority_i32 = spec.priority.as_i32();
         let significance_keywords_json = serde_json::to_string(&spec.significance_keywords)?;
         let is_recurring_i = if spec.is_recurring { 1i32 } else { 0i32 };
+        let execution_mode_str = match spec.execution_mode {
+            ExecutionMode::Mediated => "mediated",
+            ExecutionMode::Direct => "direct",
+        };
+        let direct_tool_call_json = spec
+            .direct_tool_call
+            .as_ref()
+            .map(|d| serde_json::to_string(d).unwrap_or_default());
 
         {
             let conn = self.lock_db()?;
@@ -72,9 +80,9 @@ impl JobQueue {
                   system_context, allowed_skill_ids, input_data, parent_job_id, \
                   turns_consumed, ttl_seconds, created_at, expires_at, \
                   cron_expression, is_recurring, significance_keywords, significance_threshold, \
-                  job_mode, goal_template, depends_on) \
+                  job_mode, goal_template, depends_on, execution_mode, direct_tool_call) \
                  VALUES (?1, ?2, ?3, ?4, ?5, 'queued', ?6, ?7, ?8, ?9, ?10, ?11, 0, ?12, ?13, ?14, \
-                         ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+                         ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
                 rusqlite::params![
                     job_id,
                     spec.topic,
@@ -101,6 +109,8 @@ impl JobQueue {
                     } else {
                         Some(serde_json::to_string(&spec.depends_on).unwrap_or_default())
                     },
+                    execution_mode_str,
+                    direct_tool_call_json,
                 ],
             )?;
         }
@@ -505,6 +515,8 @@ impl JobQueue {
             job_mode: template.job_mode.clone(),
             goal_template: None,
             depends_on: vec![],
+            execution_mode: template.execution_mode.clone(),
+            direct_tool_call: template.direct_tool_call.clone(),
         };
         let job_id = self.submit_job(spec).await?;
 
@@ -616,6 +628,20 @@ impl JobQueue {
                     .and_then(|s| serde_json::from_str(&s).ok())
                     .unwrap_or_default()
             },
+            // V6 columns (31-32)
+            execution_mode: {
+                let mode_str: String = row
+                    .get::<_, String>(31)
+                    .unwrap_or_else(|_| "mediated".to_string());
+                match mode_str.as_str() {
+                    "direct" => ExecutionMode::Direct,
+                    _ => ExecutionMode::Mediated,
+                }
+            },
+            direct_tool_call: {
+                let dtc_json: Option<String> = row.get(32).unwrap_or(None);
+                dtc_json.and_then(|s| serde_json::from_str(&s).ok())
+            },
         })
     }
 }
@@ -648,6 +674,15 @@ mod tests {
                 });
             }
         }
+        // Apply V6 execution_mode columns
+        for stmt in crate::schema::MIGRATION_V6_EXECUTION_MODE.split(';') {
+            let trimmed = stmt.trim();
+            if !trimmed.is_empty() {
+                conn.execute_batch(trimmed).unwrap_or_else(|e| {
+                    tracing::debug!("V6 migration statement skipped: {}", e);
+                });
+            }
+        }
         let db = Arc::new(Mutex::new(conn));
         let broker = Arc::new(MemoryBroker::new(64));
         JobQueue::new(db, broker)
@@ -673,6 +708,8 @@ mod tests {
             job_mode: "agentic_run".into(),
             goal_template: None,
             depends_on: vec![],
+            execution_mode: ExecutionMode::Mediated,
+            direct_tool_call: None,
         }
     }
 

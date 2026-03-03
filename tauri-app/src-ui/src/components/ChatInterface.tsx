@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTheme } from "../contexts/ThemeContext";
@@ -92,10 +93,10 @@ type ForceOverride = { pinned_model: string | null; pinned_tier: string | null; 
 type ModelRegistryEntry = { provider: string; model_id: string; display_name: string | null };
 
 const FALLBACK_MODELS: Record<string, string[]> = {
-  openai: ["gpt-4.1", "gpt-4.1-mini", "gpt-5.2", "o3-mini"],
+  openai: ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "o3-mini", "o4-mini"],
   anthropic: ["claude-sonnet-4-6", "claude-haiku-4-5", "claude-opus-4-6"],
-  google: ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"],
-  xai: ["grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning", "grok-4-0709"],
+  google: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+  xai: ["grok-3", "grok-3-mini"],
   perplexity: ["sonar", "sonar-pro", "sonar-reasoning-pro"],
 };
 
@@ -128,6 +129,7 @@ export default function ChatInterface({
   const [headerProvider, setHeaderProvider] = useState<string>("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [jobCounts, setJobCounts] = useState<{ running: number; queued: number; scheduled: number }>({ running: 0, queued: 0, scheduled: 0 });
   const showDebugTelemetry = isBrowserHarnessRuntime() && isHarnessDebugEnabled();
   const chatGateway = useMemo(() => createChatGateway(), []);
 
@@ -400,6 +402,19 @@ export default function ChatInterface({
     };
   }, [onSessionSnapshot]);
 
+  // -- Job activity badge --
+  useEffect(() => {
+    const fetchStats = () => {
+      invoke<{ running: number; queued: number; scheduled: number }>("get_queue_stats")
+        .then((s) => { if (mountedRef.current) setJobCounts({ running: s.running, queued: s.queued, scheduled: s.scheduled }); })
+        .catch(() => {});
+    };
+    fetchStats();
+    let unlisten: (() => void) | null = null;
+    listen("job-event", () => fetchStats()).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, []);
+
   // -- Header model/provider dropdown logic --
 
   // Derive headerProvider from forceOverride or routerStatus when not yet set by user
@@ -414,10 +429,13 @@ export default function ChatInterface({
     }
   }, [forceOverride, modelRegistry, routerStatus, headerProvider]);
 
+  const providers = storedProviders ?? [];
   const knownProviders = useMemo(() => {
-    const fromReg = [...new Set(modelRegistry.map((m) => m.provider))];
-    return fromReg.length > 0 ? fromReg : Object.keys(FALLBACK_MODELS);
-  }, [modelRegistry]);
+    const fromReg = new Set(modelRegistry.map((m) => m.provider));
+    const fromVault = new Set(providers.filter((p) => !p.endsWith("-cli")));
+    const merged = new Set([...fromReg, ...fromVault]);
+    return merged.size > 0 ? [...merged] : Object.keys(FALLBACK_MODELS);
+  }, [modelRegistry, providers]);
 
   const headerModels = useMemo(() => {
     if (!headerProvider) return [];
@@ -454,7 +472,7 @@ export default function ChatInterface({
       if (!step) return false;
 
       // CLI providers detected on PATH can be activated directly (OAuth auth)
-      if (storedProviders.includes(step as string)) {
+      if (providers.includes(step as string)) {
         try {
           await invoke("use_stored_provider", { provider: step });
           refreshRouterStatus();
@@ -466,7 +484,7 @@ export default function ChatInterface({
 
       // Fall back to linked API key (e.g. anthropic key for claude-cli)
       const vaultKey = cliToVault[step];
-      if (vaultKey && storedProviders.includes(vaultKey)) {
+      if (vaultKey && providers.includes(vaultKey)) {
         try {
           await invoke("use_stored_provider", { provider: vaultKey });
           refreshRouterStatus();
@@ -848,11 +866,11 @@ export default function ChatInterface({
 
             <div className="flex gap-2">
               <button
-                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("openai"))}`}
+                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, providers.includes("openai"))}`}
                 onClick={() => handleConfigSelect(3)}
               >
                 <span className="text-theme-text-bright">[3]</span> OpenAI (cloud, requires API key)
-                {storedProviders.includes("openai") && <span className="ml-2 text-xs text-green-500">✓ Auth</span>}
+                {providers.includes("openai") && <span className="ml-2 text-xs text-green-500">✓ Auth</span>}
               </button>
               <a href="https://platform.openai.com" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
@@ -907,48 +925,48 @@ export default function ChatInterface({
 
             <div className="flex gap-2">
               <button
-                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("claude-cli") || storedProviders.includes("anthropic"))}`}
+                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, providers.includes("claude-cli") || providers.includes("anthropic"))}`}
                 onClick={() => handleConfigSelect(4)}
               >
                 <span className="text-theme-text-bright">[4]</span> Claude Code CLI
-                {storedProviders.includes("claude-cli") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Detected</span>}
-                {!storedProviders.includes("claude-cli") && storedProviders.includes("anthropic") && <span className="ml-2 text-xs text-green-500">✓ API key</span>}
+                {providers.includes("claude-cli") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Detected</span>}
+                {!providers.includes("claude-cli") && providers.includes("anthropic") && <span className="ml-2 text-xs text-green-500">✓ API key</span>}
               </button>
               <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
 
             <div className="flex gap-2">
               <button
-                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("gemini-cli") || storedProviders.includes("google"))}`}
+                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, providers.includes("gemini-cli") || providers.includes("google"))}`}
                 onClick={() => handleConfigSelect(5)}
               >
                 <span className="text-theme-text-bright">[5]</span> Gemini CLI
-                {storedProviders.includes("gemini-cli") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Detected</span>}
-                {!storedProviders.includes("gemini-cli") && storedProviders.includes("google") && <span className="ml-2 text-xs text-green-500">✓ API key</span>}
+                {providers.includes("gemini-cli") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Detected</span>}
+                {!providers.includes("gemini-cli") && providers.includes("google") && <span className="ml-2 text-xs text-green-500">✓ API key</span>}
               </button>
               <a href="https://github.com/google-gemini/gemini-cli" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
 
             <div className="flex gap-2">
               <button
-                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("codex-cli") || storedProviders.includes("openai"))}`}
+                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, providers.includes("codex-cli") || providers.includes("openai"))}`}
                 onClick={() => handleConfigSelect(6)}
               >
                 <span className="text-theme-text-bright">[6]</span> Codex CLI
-                {storedProviders.includes("codex-cli") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Detected</span>}
-                {!storedProviders.includes("codex-cli") && storedProviders.includes("openai") && <span className="ml-2 text-xs text-green-500">✓ API key</span>}
+                {providers.includes("codex-cli") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Detected</span>}
+                {!providers.includes("codex-cli") && providers.includes("openai") && <span className="ml-2 text-xs text-green-500">✓ API key</span>}
               </button>
               <a href="https://github.com/openai/codex" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
 
             <div className="flex gap-2">
               <button
-                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, storedProviders.includes("grok-cli") || storedProviders.includes("xai"))}`}
+                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, providers.includes("grok-cli") || providers.includes("xai"))}`}
                 onClick={() => handleConfigSelect(7)}
               >
                 <span className="text-theme-text-bright">[7]</span> Grok CLI
-                {storedProviders.includes("grok-cli") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Detected</span>}
-                {!storedProviders.includes("grok-cli") && storedProviders.includes("xai") && <span className="ml-2 text-xs text-green-500">✓ API key</span>}
+                {providers.includes("grok-cli") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Detected</span>}
+                {!providers.includes("grok-cli") && providers.includes("xai") && <span className="ml-2 text-xs text-green-500">✓ API key</span>}
               </button>
               <a href="https://docs.x.ai/docs/grok-cli" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
@@ -1073,7 +1091,7 @@ export default function ChatInterface({
         "grok-cli": { label: "Grok CLI", placeholder: "xai-...", authCmd: "grok auth login" },
       };
       const cli = cliLabels[configStep];
-      const isDetected = storedProviders.includes(configStep);
+      const isDetected = providers.includes(configStep);
       return (
         <div className="p-4 border-b border-theme-border bg-theme-surface">
           <p className="text-theme-primary-dim mb-2">{cli.label}</p>
@@ -1199,6 +1217,19 @@ export default function ChatInterface({
             <option key={m} value={m}>{m}</option>
           ))}
         </select>
+        {(jobCounts.running > 0 || jobCounts.queued > 0 || jobCounts.scheduled > 0) && (
+          <span className="ml-1 inline-flex items-center gap-1 text-[10px] font-mono border border-theme-border rounded px-1.5 py-0.5 text-theme-text-dim">
+            {jobCounts.running > 0 && (
+              <span className="text-blue-400">● {jobCounts.running}</span>
+            )}
+            {jobCounts.queued > 0 && (
+              <span className="text-yellow-400">○ {jobCounts.queued}</span>
+            )}
+            {jobCounts.scheduled > 0 && (
+              <span className="text-theme-primary-dim">↻ {jobCounts.scheduled}</span>
+            )}
+          </span>
+        )}
         {showDebugTelemetry && (
           <span className="text-theme-text-dim">
             mode: non-streaming

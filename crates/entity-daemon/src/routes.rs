@@ -654,6 +654,8 @@ pub async fn submit_job(
         job_mode: "agentic_run".into(),
         goal_template: None,
         depends_on: vec![],
+        execution_mode: abigail_queue::ExecutionMode::Mediated,
+        direct_tool_call: None,
     };
 
     match state.job_queue.submit_job(spec).await {
@@ -865,6 +867,7 @@ mod tests {
     use abigail_memory::MemoryStore;
     use abigail_queue::{
         MIGRATION_V3_JOB_QUEUE, MIGRATION_V4_ORCHESTRATION, MIGRATION_V5_DEPENDS_ON,
+        MIGRATION_V6_EXECUTION_MODE,
     };
     use abigail_router::IdEgoRouter;
     use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
@@ -914,6 +917,12 @@ mod tests {
             }
         }
         for stmt in MIGRATION_V5_DEPENDS_ON.split(';') {
+            let trimmed = stmt.trim();
+            if !trimmed.is_empty() {
+                conn.execute_batch(trimmed).unwrap_or_else(|_| {});
+            }
+        }
+        for stmt in MIGRATION_V6_EXECUTION_MODE.split(';') {
             let trimmed = stmt.trim();
             if !trimmed.is_empty() {
                 conn.execute_batch(trimmed).unwrap_or_else(|_| {});
@@ -1000,6 +1009,8 @@ mod tests {
                 job_mode: "agentic_run".into(),
                 goal_template: None,
                 depends_on: vec![],
+                execution_mode: abigail_queue::ExecutionMode::Mediated,
+                direct_tool_call: None,
             })
             .await
             .unwrap();
@@ -1035,6 +1046,8 @@ mod tests {
                 job_mode: "agentic_run".into(),
                 goal_template: None,
                 depends_on: vec![],
+                execution_mode: abigail_queue::ExecutionMode::Mediated,
+                direct_tool_call: None,
             })
             .await
             .unwrap();

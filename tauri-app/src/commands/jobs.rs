@@ -1,7 +1,7 @@
 //! Tauri commands for the async job queue.
 
 use crate::state::AppState;
-use abigail_queue::{JobPriority, JobSpec, RequiredCapability};
+use abigail_queue::{DirectToolCall, ExecutionMode, JobPriority, JobSpec, RequiredCapability};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -23,6 +23,10 @@ pub struct SubmitJobArgs {
     pub is_recurring: Option<bool>,
     /// Goal template for recurring jobs (interpolated at scheduling time).
     pub goal_template: Option<String>,
+    /// Execution mode: "mediated" (default) or "direct".
+    pub execution_mode: Option<String>,
+    /// Pre-built tool call for direct execution mode.
+    pub direct_tool_call: Option<DirectToolCall>,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,6 +51,7 @@ pub struct JobRecord {
     pub created_at: String,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
+    pub execution_mode: String,
 }
 
 fn to_record(j: abigail_queue::JobRecord) -> JobRecord {
@@ -70,6 +75,11 @@ fn to_record(j: abigail_queue::JobRecord) -> JobRecord {
         created_at: j.created_at,
         started_at: j.started_at,
         completed_at: j.completed_at,
+        execution_mode: match j.execution_mode {
+            ExecutionMode::Mediated => "mediated",
+            ExecutionMode::Direct => "direct",
+        }
+        .to_string(),
     }
 }
 
@@ -112,6 +122,11 @@ pub async fn submit_job(
         job_mode: "agentic_run".into(),
         goal_template: args.goal_template,
         depends_on: vec![],
+        execution_mode: match args.execution_mode.as_deref() {
+            Some("direct") => ExecutionMode::Direct,
+            _ => ExecutionMode::Mediated,
+        },
+        direct_tool_call: args.direct_tool_call,
     };
 
     let job_id = state
@@ -167,6 +182,24 @@ pub async fn cancel_job(
         .await
         .map_err(|e| e.to_string())?;
     Ok(serde_json::json!({ "job_id": job_id, "status": "cancelled" }))
+}
+
+/// Get aggregate counts by job status plus recurring template count.
+#[tauri::command]
+pub async fn get_queue_stats(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let stats = state.job_queue.queue_stats().map_err(|e| e.to_string())?;
+    let recurring_count = state
+        .job_queue
+        .get_recurring_templates()
+        .map(|t| t.len())
+        .unwrap_or(0);
+    Ok(serde_json::json!({
+        "queued": stats.get("queued").copied().unwrap_or(0),
+        "running": stats.get("running").copied().unwrap_or(0),
+        "completed": stats.get("completed").copied().unwrap_or(0),
+        "failed": stats.get("failed").copied().unwrap_or(0),
+        "scheduled": recurring_count,
+    }))
 }
 
 /// List recurring job templates.
