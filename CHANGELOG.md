@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-03-03 17:30 EST: Complete Phase 3 Simplification, Observability, and UX — 3a: remove Council/TierBased routing (~2000 lines); 3b: Jobs tab with live JobQueue list and recurring templates; 3c: system prompt viewer in Identity/Soul tab; 3d: replace ForgePanel with Nerve Center topic monitor; 3e: Data Explorer with memory browse/search/sessions/stats tabs
+- 2026-03-03 14:30 EST: Complete Phase 2c Memory and Integration — daemon-test-harness crate (HiveDaemonHandle, EntityDaemonHandle, TestCluster), hive-daemon and cross-daemon E2E tests, daemon-client crate (HiveDaemonClient, EntityClient with SSE), RuntimeMode config (InProcess/Daemon), DaemonManager for managed daemon lifecycle, chat_stream/list_skills/store_secret dual-mode delegation, DiagnosticsPanel runtime mode toggle
+- 2026-03-03 13:15 EST: Complete Phase 2b Skill Creation — Dynamic API authoring docs, recursive discover (nested subdirs), SkillsWatcher for skill.toml+JSON hot-reload with register/unregister, StreamBroker skill events, Tauri watcher wiring with UI toast notifications
 - 2026-03-04 16:30 EST: Add file upload and drag-and-drop to ChatInterface — paperclip file picker, drag overlay, attachment preview strip, save-to-entity-docs persistence, and get_entity_documents_path/save_to_entity_docs Tauri commands
 - 2026-03-03 23:30 EST: Add BackupManagementSkill — entity self-restore: list/preview/import conversation turns and memories from backup SQLite databases into running MemoryStore
 - 2026-03-04 14:00 EST: Fix 6 runtime bugs — author_skill secrets declaration, email SMTP config, filesystem allowed_roots expansion, OpenAI non-chat model filtering, perplexity reserved key, and provider-to-skill secret sync

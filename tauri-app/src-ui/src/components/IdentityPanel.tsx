@@ -28,6 +28,69 @@ interface IdentityPanelProps {
   embedded?: boolean;
 }
 
+function PromptViewer() {
+  const [prompt, setPrompt] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const loadPrompt = async () => {
+    setLoading(true);
+    try {
+      const text = await invoke<string>("get_assembled_prompt");
+      setPrompt(text);
+    } catch (e) {
+      setPrompt(`Error: ${e}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mt-6 border border-theme-border-dim rounded overflow-hidden">
+      <button
+        className="w-full flex items-center justify-between px-4 py-2 bg-theme-bg-elevated hover:bg-theme-bg-inset transition-colors text-left"
+        onClick={() => {
+          setOpen(!open);
+          if (!open && !prompt) loadPrompt();
+        }}
+      >
+        <span className="text-[10px] font-semibold text-theme-text tracking-wider uppercase">
+          System Prompt
+        </span>
+        <span className="text-[10px] text-theme-text-dim">
+          {open ? "collapse" : "expand"}
+        </span>
+      </button>
+      {open && (
+        <div className="p-3 max-h-80 overflow-y-auto bg-theme-bg-inset">
+          {loading ? (
+            <p className="text-xs text-theme-text-dim animate-pulse">Assembling prompt...</p>
+          ) : prompt ? (
+            <>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-[9px] text-theme-text-dim font-mono">
+                  ~{Math.ceil((prompt.length * 0.25))} tokens (est.)
+                </span>
+                <button
+                  className="text-[9px] text-theme-primary hover:underline font-mono"
+                  onClick={loadPrompt}
+                >
+                  refresh
+                </button>
+              </div>
+              <pre className="text-[10px] text-theme-text font-mono whitespace-pre-wrap break-words leading-relaxed">
+                {prompt}
+              </pre>
+            </>
+          ) : (
+            <p className="text-xs text-theme-text-dim">Click to load the assembled system prompt.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function IdentityPanel({ initialTab, embedded }: IdentityPanelProps = {}) {
   const [tab, setTab] = useState<Tab>(initialTab || "identity");
   const [routerStatus, setRouterStatus] = useState<RouterStatus | null>(null);
@@ -291,6 +354,8 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
             >
               Re-crystallize Soul
             </button>
+
+            <PromptViewer />
           </div>
         )}
 

@@ -186,36 +186,6 @@ impl ModelRegistry {
             .unwrap_or(false)
     }
 
-    /// Validate tier model assignments against the registry.
-    ///
-    /// Returns a list of warnings for models that are assigned to tiers
-    /// but not found in the provider's model catalog.
-    pub fn validate_tier_models(&self, tier_models: &abigail_core::TierModels) -> Vec<String> {
-        let mut warnings = Vec::new();
-
-        let tiers = [
-            ("fast", &tier_models.fast),
-            ("standard", &tier_models.standard),
-            ("pro", &tier_models.pro),
-        ];
-
-        for (tier_name, tier_map) in &tiers {
-            for (provider, model_id) in *tier_map {
-                if let Some(cache) = self.cache.get(provider.as_str()) {
-                    if !cache.models.iter().any(|m| m.id == *model_id) {
-                        warnings.push(format!(
-                            "Model '{}' assigned to {} tier for provider '{}' not found in registry",
-                            model_id, tier_name, provider
-                        ));
-                    }
-                }
-                // If provider has no cache entry, skip validation (may not have been discovered yet)
-            }
-        }
-
-        warnings
-    }
-
     /// List all providers that have cached models.
     pub fn providers(&self) -> Vec<&str> {
         self.cache.keys().map(|s| s.as_str()).collect()
@@ -318,36 +288,6 @@ mod tests {
             last_fetched: fresh_time,
         };
         assert!(!cache.is_expired(DEFAULT_TTL_SECS));
-    }
-
-    #[test]
-    fn test_validate_tier_models_no_warnings_when_empty() {
-        let reg = ModelRegistry::new();
-        let tier_models = abigail_core::TierModels::defaults();
-        // No cached providers → no validation → no warnings
-        let warnings = reg.validate_tier_models(&tier_models);
-        assert!(warnings.is_empty());
-    }
-
-    #[test]
-    fn test_validate_tier_models_warns_on_missing() {
-        let catalog = vec![ProviderCatalogEntry {
-            provider: "openai".to_string(),
-            model_id: "gpt-4.1".to_string(),
-            display_name: "GPT 4.1".to_string(),
-            lifecycle: None,
-            last_fetched: Some(Utc::now().to_rfc3339()),
-        }];
-
-        let mut reg = ModelRegistry::new();
-        reg.load_from_catalog(&catalog);
-
-        let tier_models = abigail_core::TierModels::defaults();
-        let warnings = reg.validate_tier_models(&tier_models);
-
-        // openai fast model (gpt-4.1-mini) is not in our catalog → should warn
-        assert!(!warnings.is_empty());
-        assert!(warnings.iter().any(|w| w.contains("gpt-4.1-mini")));
     }
 
     #[test]

@@ -28,7 +28,7 @@ interface SanctumDrawerProps {
 
 const TABS: { id: SanctumTab; label: string }[] = [
   { id: "conscience", label: "Conscience" },
-  { id: "forge", label: "Forge" },
+  { id: "forge", label: "Nerve Center" },
   { id: "staff", label: "Staff" },
   { id: "jobs", label: "Registry" },
   { id: "identity", label: "Soul" },

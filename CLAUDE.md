@@ -173,41 +173,28 @@ splash → loading → management → boot → chat
 - `AgenticPanel.tsx` / `OrchestrationPanel.tsx` — Agentic workflow and orchestration controls
 - `HarnessDebugPanel.tsx` — Browser harness debug mode (for development without Tauri)
 
-### Tier-Based Model Routing
+### Model Routing
 
-The router (`abigail-router`) implements a **tier-based dual-LLM pattern** with three quality tiers:
-- **Fast** — cheapest, fastest models (e.g. `gpt-4.1-mini`, `claude-haiku-4-5`)
-- **Standard** — balanced quality/speed (e.g. `gpt-4.1`, `claude-sonnet-4-6`)
-- **Pro** — highest quality (e.g. `gpt-5.2`, `claude-opus-4-6`)
+The router (`abigail-router`) implements a **dual-LLM pattern**:
 
 **Core components:**
 - **Id** = local LLM (LocalHttpProvider for OpenAI-compatible servers, or CandleProvider stub) — **failsafe only**
 - **Ego** = cloud LLM (provider selected via `active_provider_preference`)
-- `CompletionRequest.model_override` — per-request model selection (single provider instance, model chosen at routing time)
+- `CompletionRequest.model_override` — per-request model selection (user picks from ChatInterface dropdown)
 
 **Routing modes:**
-- `RoutingMode::TierBased` — classifies message complexity (score 5–95), maps to tier via `TierThresholds` (default: <35 → Fast, 35–69 → Standard, ≥70 → Pro)
-- `RoutingMode::EgoPrimary` — all queries to cloud (uses Standard tier model)
-- `RoutingMode::Council` — multi-provider consensus
-- `RoutingMode::CliOrchestrator` — all messages routed directly to an authenticated CLI tool (Claude Code, Gemini CLI, etc.). Bypasses tier scoring, complexity classification, setup-intent detection, and model override. **Auto-detected:** `from_built_providers()` upgrades TierBased/EgoPrimary to CliOrchestrator when the ego provider is a CLI variant.
-
-**Force override (3 levels, highest priority first):**
-1. `ForceOverride.pinned_model` — exact model ID, bypasses all tier logic
-2. `ForceOverride.pinned_tier` (+ optional `pinned_provider`) — forces a specific tier
-3. Normal complexity-based selection
-
-**Config types** (`abigail-core`): `ModelTier`, `TierModels`, `TierThresholds`, `ForceOverride`
+- `RoutingMode::EgoPrimary` — all queries to cloud provider; user selects model via inline dropdown
+- `RoutingMode::CliOrchestrator` — all messages routed directly to an authenticated CLI tool (Claude Code, Gemini CLI, etc.). **Auto-detected:** `from_built_providers()` upgrades EgoPrimary to CliOrchestrator when the ego provider is a CLI variant.
 
 **Dynamic model registry** (`abigail-hive::ModelRegistry`):
 - Discovers available models from provider APIs (OpenAI, Anthropic, Google, xAI)
 - Per-provider caching with 24h TTL
 - Persisted to `provider_catalog` in config.json
-- Validates tier model assignments against discovered models
 
 **Wiring:**
-- In Tauri: router is rebuilt via `set_api_key`/`set_local_llm_url`/`set_force_override`/`set_tier_thresholds` commands when config changes
+- In Tauri: router is rebuilt via `set_api_key`/`set_local_llm_url` commands when config changes
 - In entity-daemon: router is built once at startup from `ProviderConfig` fetched from Hive; CLI providers are auto-detected and routing mode is upgraded to CliOrchestrator
-- `ChatResponse` includes `tier`, `model_used`, and `complexity_score` metadata
+- `ChatResponse` includes `model_used` metadata
 - CLI providers always use `--dangerously-skip-permissions`; entity-level tool permissions are enforced by `SkillSandbox`/`SkillExecutor`, not by the CLI tool's own permission system
 
 ### Constitutional Documents
@@ -380,26 +367,39 @@ Current priorities, in order:
 2. ~~**Auto-load skills from disk**~~ — All 16 native skills registered at Tauri/daemon startup.
 3. ~~**Wire tools into LLM requests**~~ — `build_tool_definitions()` converts `ToolDescriptor`s to provider-native format.
 
-### Phase 2b: Skill Creation (P2)
+### Phase 2b: Skill Creation — DONE
 4. ~~**Scaffolding CLI**~~ — `entity-cli scaffold <name>` generates a skill directory with `skill.toml` template, boilerplate Rust (`native`) or JSON (`dynamic`) config, and an instruction markdown file.
-5. **Dynamic API skill authoring docs** — Document the JSON config format with examples for common patterns (REST CRUD, OAuth, webhook).
-6. **Skill hot-reload** — File-watcher on `skills/` directory to re-discover and register new/updated skills without daemon restart.
+5. ~~**Dynamic API skill authoring docs**~~ — See `documents/DYNAMIC_API_SKILL_AUTHORING.md`: JSON schema, templating, SSRF rules, cookbook examples (REST CRUD, OAuth, webhook), authoring paths, instruction format, lifecycle.
+6. ~~**Skill hot-reload**~~ — `SkillsWatcher` monitors `skills/` for `skill.toml` and `*.json` changes. Both entity-daemon and Tauri app register/unregister dynamically with StreamBroker events and UI toast notifications. `DynamicApiSkill::discover()` recurses one level into subdirectories.
 
-### Phase 2c: Memory & Integration (P3)
+### Phase 2c: Memory & Integration — DONE
 7. ~~**Memory persistence**~~ — Done: `abigail-memory` wired into entity-daemon with REST endpoints, chat persistence, and memory CLI commands.
-8. **End-to-end daemon testing** — Automated integration tests: hive-daemon + entity-daemon + skill execution + memory round-trip.
-9. **Tauri app → daemon delegation** — Desktop app calls daemons via HTTP instead of running everything in-process.
+8. ~~**End-to-end daemon testing**~~ — `daemon-test-harness` crate with `HiveDaemonHandle`, `EntityDaemonHandle`, `TestCluster`. Hive integration tests (health, entity lifecycle, secrets, provider config). Cross-daemon E2E tests (startup, skills, memory, tool exec, governance, jobs, routing). Run with `--ignored` flag.
+9. ~~**Tauri app → daemon delegation**~~ — `RuntimeMode` config (InProcess/Daemon), `daemon-client` crate (`HiveDaemonClient`, `EntityClient` with SSE streaming), `DaemonManager` for managed daemon lifecycle, `chat_stream`/`list_skills`/`store_secret` migrated to dual-mode delegation, DiagnosticsPanel runtime mode toggle.
+
+### Phase 3a: Simplify Routing
+10. **Remove Council and TierBased routing** — Simplify to EgoPrimary (user picks model via ChatInterface dropdown) + CliOrchestrator (auto-detected for CLI providers). Delete complexity classifier, tier thresholds, force overrides, council execution path, and 7 related Tauri commands. ~2,100 lines removed.
+
+### Phase 3b: Jobs Tab
+11. **Wire JobQueue to UI** — Replace OrchestrationPanel with live job list using existing `list_jobs`/`get_job_status` Tauri commands + SSE streaming from `abigail/job-events` topic.
+
+### Phase 3c: Identity Prompt Viewer
+12. **Show assembled system prompt** — Add `get_assembled_prompt` Tauri command exposing the full LLM system prompt (soul + runtime context + tools + skill instructions). Display in Identity/Soul tab.
+
+### Phase 3d: Topic Monitor ("Nerve Center")
+13. **Replace ForgePanel tier config with topic monitor** — Live StreamBroker event timeline across all topics (conversation-turns, job-events, skill-events, conscience-check, ethical-signals). Shows consumer health and message counts.
+
+### Phase 3e: Data Explorer
+14. **Memory browser** — Replace DataSourcesPanel with tabbed explorer: browse memories with weight tier badges, text search, conversation session list, and existing stats/optimize/reset.
 
 ## Known Issues
 
 ### Router
-The router uses tier-based routing with complexity classification (or CliOrchestrator mode for CLI providers). Debug with `RUST_LOG=abigail_router=debug`. Key diagnostics:
-- `get_router_status` Tauri command returns current routing/provider state (tier mode, provider selection, local/cloud readiness)
+The router uses EgoPrimary routing (or CliOrchestrator mode for CLI providers). Debug with `RUST_LOG=abigail_router=debug`. Key diagnostics:
+- `get_router_status` Tauri command returns current routing/provider state
 - If Ego shows as unconfigured after birth, check TrinityConfig in config.json
 - CandleProvider stub returns a helpful message instead of erroring when no local LLM exists
 - The `chat_stream` Ego path streams from the start
-- `ChatResponse` now includes `tier`, `model_used`, and `complexity_score` — check these to verify tier routing is working
-- Force overrides (`ForceOverride`) bypass complexity scoring — if routing seems stuck on one tier, check `config.json` `force_override`
 - Model registry discovery runs in background at startup — check logs for `ModelRegistry:` messages
 - CLI providers auto-upgrade to CliOrchestrator mode — look for `Auto-upgrading routing mode to CliOrchestrator` in logs
 - `CliPermissionMode` in config is retained for serialization but has no runtime effect — all CLI subprocesses use `--dangerously-skip-permissions`

@@ -23,6 +23,8 @@ members = [
     "crates/entity-cli",
     "crates/abigail-streaming",
     "crates/abigail-queue",
+    "crates/daemon-test-harness",
+    "crates/daemon-client",
     "skills/skill-web-search",
     "skills/skill-filesystem",
     "skills/skill-shell",

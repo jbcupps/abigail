@@ -4,6 +4,7 @@ pub mod agentic_runtime;
 pub mod backup_ops;
 pub mod chat_coordinator;
 pub mod commands;
+pub mod daemon_manager;
 pub mod hive_ops;
 pub mod identity_manager;
 pub mod log_capture;
@@ -43,7 +44,8 @@ use abigail_router::{
 use abigail_skills::protocol::mcp::McpSkillRuntime;
 use abigail_skills::{
     build_preloaded_skills, DynamicApiSkill, InstructionRegistry, ResourceLimits, Skill,
-    SkillConfig, SkillExecutionPolicy, SkillExecutor, SkillRegistry, PRELOADED_SKILLS_VERSION,
+    SkillConfig, SkillExecutionPolicy, SkillExecutor, SkillRegistry, SkillsWatcher,
+    PRELOADED_SKILLS_VERSION,
 };
 use abigail_streaming::MemoryBroker;
 use identity_manager::IdentityManager;
@@ -51,7 +53,7 @@ use rate_limit::CooldownGuard;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// Recursively copy a directory (for skill package install).
 pub fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
@@ -469,6 +471,9 @@ pub fn run() {
             abigail_router::ConstraintStore::with_data_dir(data_dir.clone()),
         )),
         job_queue,
+        daemon_manager: Arc::new(tokio::sync::Mutex::new(
+            daemon_manager::DaemonManager::new(data_dir.clone()),
+        )),
     };
 
     tauri::Builder::default()
@@ -728,6 +733,158 @@ pub fn run() {
                 }
             }
 
+            // Spawn SkillsWatcher for hot-reload of dynamic skills
+            {
+                let skills_dir = {
+                    let cfg = state.config.read().map_err(|e| e.to_string())?;
+                    cfg.data_dir.join("skills")
+                };
+                let registry_for_watcher = state.registry.clone();
+                let vault_for_watcher = Some(state.skills_secrets.clone());
+                let broker_for_watcher = state.stream_broker.clone();
+                let app_handle = handle.clone();
+                match SkillsWatcher::start(vec![skills_dir]) {
+                    Ok((watcher, mut rx)) => {
+                        // Keep the watcher alive by leaking the handle (dropped on app exit)
+                        std::mem::forget(watcher);
+                        tauri::async_runtime::spawn(async move {
+                            while let Ok(event) = rx.recv().await {
+                                match event {
+                                    abigail_skills::SkillFileEvent::Changed(path) => {
+                                        tracing::info!(
+                                            "Skill watcher: detected change at {:?}",
+                                            path
+                                        );
+                                        let dir = if path.is_file() {
+                                            path.parent().map(|p| p.to_path_buf())
+                                        } else {
+                                            Some(path.clone())
+                                        };
+                                        if let Some(parent) = dir {
+                                            for entry in std::fs::read_dir(parent)
+                                                .into_iter()
+                                                .flatten()
+                                                .flatten()
+                                            {
+                                                let p = entry.path();
+                                                if p.extension().and_then(|e| e.to_str())
+                                                    == Some("json")
+                                                {
+                                                    match DynamicApiSkill::load_from_path(
+                                                        &p,
+                                                        vault_for_watcher.clone(),
+                                                    ) {
+                                                        Ok(skill) => {
+                                                            let sid =
+                                                                abigail_skills::manifest::SkillId(
+                                                                    skill
+                                                                        .manifest()
+                                                                        .id
+                                                                        .0
+                                                                        .clone(),
+                                                                );
+                                                            let _ = registry_for_watcher.register(
+                                                                sid.clone(),
+                                                                Arc::new(skill),
+                                                            );
+                                                            tracing::info!(
+                                                                "Skill watcher: registered {}",
+                                                                sid.0
+                                                            );
+                                                            let _ = app_handle.emit(
+                                                                "skill-reloaded",
+                                                                serde_json::json!({
+                                                                    "skill_id": sid.0,
+                                                                    "path": p.display().to_string()
+                                                                }),
+                                                            );
+                                                            abigail_skills::channel::event::publish_skill_event(
+                                                                &broker_for_watcher,
+                                                                abigail_skills::channel::event::SkillEvent {
+                                                                    skill_id: sid,
+                                                                    trigger: "skill_reloaded".to_string(),
+                                                                    payload: serde_json::json!({ "path": p.display().to_string() }),
+                                                                    timestamp: chrono::Utc::now(),
+                                                                    priority: abigail_skills::channel::TriggerPriority::Normal,
+                                                                },
+                                                            ).await;
+                                                        }
+                                                        Err(e) => tracing::debug!(
+                                                            "Skill watcher: skip {:?}: {}",
+                                                            p,
+                                                            e
+                                                        ),
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    abigail_skills::SkillFileEvent::Removed(path) => {
+                                        tracing::info!(
+                                            "Skill watcher: skill removed at {:?}",
+                                            path
+                                        );
+                                        if let Some(parent) = path.parent() {
+                                            for entry in std::fs::read_dir(parent)
+                                                .into_iter()
+                                                .flatten()
+                                                .flatten()
+                                            {
+                                                let p = entry.path();
+                                                if p.extension().and_then(|e| e.to_str())
+                                                    == Some("json")
+                                                {
+                                                    if let Ok(bytes) =
+                                                        std::fs::read_to_string(&p)
+                                                    {
+                                                        if let Ok(cfg) = serde_json::from_str::<
+                                                            abigail_skills::dynamic::DynamicSkillConfig,
+                                                        >(
+                                                            &bytes
+                                                        ) {
+                                                            let sid =
+                                                                abigail_skills::manifest::SkillId(
+                                                                    cfg.id.clone(),
+                                                                );
+                                                            let _ = registry_for_watcher
+                                                                .unregister(&sid);
+                                                            tracing::info!(
+                                                                "Skill watcher: unregistered {}",
+                                                                sid.0
+                                                            );
+                                                            let _ = app_handle.emit(
+                                                                "skill-removed",
+                                                                serde_json::json!({
+                                                                    "skill_id": sid.0,
+                                                                    "path": p.display().to_string()
+                                                                }),
+                                                            );
+                                                            abigail_skills::channel::event::publish_skill_event(
+                                                                &broker_for_watcher,
+                                                                abigail_skills::channel::event::SkillEvent {
+                                                                    skill_id: sid,
+                                                                    trigger: "skill_removed".to_string(),
+                                                                    payload: serde_json::json!({ "path": p.display().to_string() }),
+                                                                    timestamp: chrono::Utc::now(),
+                                                                    priority: abigail_skills::channel::TriggerPriority::Normal,
+                                                                },
+                                                            ).await;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to start skills watcher: {}", e);
+                    }
+                }
+            }
+
             Ok(())
         })
         .manage(state)
@@ -821,13 +978,14 @@ pub fn run() {
             detect_cli_providers_full,
             set_active_provider,
             get_active_provider,
-            set_ego_model,
-            get_ego_model,
             set_routing_mode,
             get_sqlite_stats,
             optimize_sqlite,
             reset_memories,
             search_memories,
+            list_sessions,
+            get_session_turns,
+            recent_memories,
             start_agentic_run,
             start_entity_initiated_agentic_run,
             get_agentic_run_status,
@@ -862,7 +1020,9 @@ pub fn run() {
             genesis_chat,
             chat_stream,
             cancel_chat_stream,
+            get_assembled_prompt,
             get_system_diagnostics,
+            get_topic_stats,
             get_log_level,
             set_log_level,
             get_captured_logs,
@@ -879,18 +1039,13 @@ pub fn run() {
             get_model_registry,
             discover_provider_models,
             refresh_model_registry,
-            get_force_override,
-            set_force_override,
-            get_tier_thresholds,
-            set_tier_thresholds,
-            get_tier_models,
-            set_tier_model,
-            reset_tier_models,
             submit_job,
             list_jobs,
             get_job_status,
             cancel_job,
-            list_recurring_templates
+            list_recurring_templates,
+            get_runtime_mode,
+            set_runtime_mode
         ])
         .build(tauri::generate_context!())
         .expect("error building tauri app")

@@ -95,23 +95,6 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // 2. Build providers from the resolved config
-    let tier_models = provider_config
-        .tier_models_json
-        .as_deref()
-        .and_then(|json| serde_json::from_str::<abigail_core::TierModels>(json).ok())
-        .unwrap_or_else(abigail_core::TierModels::defaults);
-
-    let tier_thresholds = abigail_core::TierThresholds {
-        fast_ceiling: provider_config.tier_threshold_fast_ceiling.unwrap_or(35),
-        pro_floor: provider_config.tier_threshold_pro_floor.unwrap_or(70),
-    };
-
-    let force_override = provider_config
-        .force_override_json
-        .as_deref()
-        .and_then(|json| serde_json::from_str::<abigail_core::ForceOverride>(json).ok())
-        .unwrap_or_default();
-
     let cli_permission_mode = provider_config
         .cli_permission_mode
         .as_deref()
@@ -126,9 +109,6 @@ async fn main() -> anyhow::Result<()> {
         ego_api_key: provider_config.ego_api_key,
         ego_model: provider_config.ego_model,
         routing_mode: parse_routing_mode(&provider_config.routing_mode),
-        tier_models,
-        tier_thresholds,
-        force_override,
         cli_permission_mode,
     };
 
@@ -565,11 +545,12 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| tracing::warn!("Failed to start conscience consumer: {}", e))
         .ok();
 
-    // Spawn SkillsWatcher for hot-reload of new skills (before state is consumed)
+    // Spawn SkillsWatcher for hot-reload of new/changed/removed skills
     let _watcher = {
         let watch_dir = skills_dir.clone();
         let registry_for_watcher = state.registry.clone();
         let vault_for_watcher = Some(skill_vault.clone());
+        let broker_for_watcher = state.stream_broker.clone();
 
         match abigail_skills::SkillsWatcher::start(vec![watch_dir]) {
             Ok((watcher, mut rx)) => {
@@ -578,8 +559,12 @@ async fn main() -> anyhow::Result<()> {
                         match event {
                             abigail_skills::SkillFileEvent::Changed(path) => {
                                 tracing::info!("Skill watcher: detected change at {:?}", path);
-                                // Check for a sibling JSON file (DynamicApiSkill)
-                                if let Some(parent) = path.parent() {
+                                let dir = if path.is_file() {
+                                    path.parent().map(|p| p.to_path_buf())
+                                } else {
+                                    Some(path.clone())
+                                };
+                                if let Some(parent) = dir {
                                     for entry in
                                         std::fs::read_dir(parent).into_iter().flatten().flatten()
                                     {
@@ -599,6 +584,17 @@ async fn main() -> anyhow::Result<()> {
                                                         "Skill watcher: registered {}",
                                                         sid.0
                                                     );
+                                                    abigail_skills::channel::event::publish_skill_event(
+                                                        &broker_for_watcher,
+                                                        abigail_skills::channel::event::SkillEvent {
+                                                            skill_id: sid,
+                                                            trigger: "skill_reloaded".to_string(),
+                                                            payload: serde_json::json!({ "path": p.display().to_string() }),
+                                                            timestamp: chrono::Utc::now(),
+                                                            priority: abigail_skills::channel::TriggerPriority::Normal,
+                                                        },
+                                                    )
+                                                    .await;
                                                 }
                                                 Err(e) => tracing::debug!(
                                                     "Skill watcher: skip {:?}: {}",
@@ -612,6 +608,65 @@ async fn main() -> anyhow::Result<()> {
                             }
                             abigail_skills::SkillFileEvent::Removed(path) => {
                                 tracing::info!("Skill watcher: skill removed at {:?}", path);
+                                let is_json = path
+                                    .extension()
+                                    .and_then(|e| e.to_str())
+                                    == Some("json");
+                                if is_json {
+                                    if let Ok(bytes) = std::fs::read_to_string(&path) {
+                                        if let Ok(cfg) = serde_json::from_str::<
+                                            abigail_skills::dynamic::DynamicSkillConfig,
+                                        >(&bytes)
+                                        {
+                                            let sid =
+                                                abigail_skills::manifest::SkillId(cfg.id.clone());
+                                            let _ = registry_for_watcher.unregister(&sid);
+                                            tracing::info!(
+                                                "Skill watcher: unregistered {}",
+                                                sid.0
+                                            );
+                                        }
+                                    }
+                                }
+                                // For skill.toml removal: scan sibling JSONs and unregister
+                                if let Some(parent) = path.parent() {
+                                    for entry in
+                                        std::fs::read_dir(parent).into_iter().flatten().flatten()
+                                    {
+                                        let p = entry.path();
+                                        if p.extension().and_then(|e| e.to_str()) == Some("json") {
+                                            if let Ok(bytes) = std::fs::read_to_string(&p) {
+                                                if let Ok(cfg) = serde_json::from_str::<
+                                                    abigail_skills::dynamic::DynamicSkillConfig,
+                                                >(
+                                                    &bytes
+                                                ) {
+                                                    let sid =
+                                                        abigail_skills::manifest::SkillId(
+                                                            cfg.id.clone(),
+                                                        );
+                                                    let _ =
+                                                        registry_for_watcher.unregister(&sid);
+                                                    tracing::info!(
+                                                        "Skill watcher: unregistered {}",
+                                                        sid.0
+                                                    );
+                                                    abigail_skills::channel::event::publish_skill_event(
+                                                        &broker_for_watcher,
+                                                        abigail_skills::channel::event::SkillEvent {
+                                                            skill_id: sid,
+                                                            trigger: "skill_removed".to_string(),
+                                                            payload: serde_json::json!({ "path": p.display().to_string() }),
+                                                            timestamp: chrono::Utc::now(),
+                                                            priority: abigail_skills::channel::TriggerPriority::Normal,
+                                                        },
+                                                    )
+                                                    .await;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -670,12 +725,10 @@ async fn main() -> anyhow::Result<()> {
 
 fn parse_routing_mode(s: &str) -> abigail_core::RoutingMode {
     match s {
-        "EgoPrimary" => abigail_core::RoutingMode::EgoPrimary,
-        "Council" => abigail_core::RoutingMode::Council,
+        "EgoPrimary" | "TierBased" | "IdPrimary" | "Council" => {
+            abigail_core::RoutingMode::EgoPrimary
+        }
         "CliOrchestrator" => abigail_core::RoutingMode::CliOrchestrator,
-        // Legacy compatibility shim: "IdPrimary" maps to TierBased.
-        // Planned removal window: after 2026-03-31 cleanup review.
-        "TierBased" | "IdPrimary" => abigail_core::RoutingMode::TierBased,
         _ => abigail_core::RoutingMode::default(),
     }
 }

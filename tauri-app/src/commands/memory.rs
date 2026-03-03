@@ -72,6 +72,52 @@ pub fn reset_memories(state: State<AppState>) -> Result<u64, String> {
 }
 
 #[tauri::command]
+pub fn list_sessions(
+    state: State<AppState>,
+    limit: Option<usize>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let mem = state.memory.read().map_err(|e| e.to_string())?;
+    let sessions = mem
+        .list_sessions(limit.unwrap_or(20))
+        .map_err(|e| e.to_string())?;
+    Ok(sessions
+        .into_iter()
+        .map(|s| serde_json::to_value(s).unwrap_or_default())
+        .collect())
+}
+
+#[tauri::command]
+pub fn get_session_turns(
+    state: State<AppState>,
+    session_id: String,
+    limit: Option<usize>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let mem = state.memory.read().map_err(|e| e.to_string())?;
+    let turns = mem
+        .recent_turns(&session_id, limit.unwrap_or(50))
+        .map_err(|e| e.to_string())?;
+    Ok(turns
+        .into_iter()
+        .map(|t| serde_json::to_value(t).unwrap_or_default())
+        .collect())
+}
+
+#[tauri::command]
+pub fn recent_memories(
+    state: State<AppState>,
+    limit: Option<usize>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let mem = state.memory.read().map_err(|e| e.to_string())?;
+    let mems = mem
+        .recent_memories(limit.unwrap_or(20))
+        .map_err(|e| e.to_string())?;
+    Ok(mems
+        .into_iter()
+        .map(|m| serde_json::to_value(m).unwrap_or_default())
+        .collect())
+}
+
+#[tauri::command]
 pub fn search_memories(
     state: State<AppState>,
     query: String,

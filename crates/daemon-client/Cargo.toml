@@ -1,0 +1,15 @@
+[package]
+name = "daemon-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hive-core = { path = "../hive-core" }
+entity-core = { path = "../entity-core" }
+reqwest.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+futures-util = "0.3"

@@ -392,13 +392,12 @@ fn build_router_and_prompt(
     } else {
         let base =
             abigail_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
-        let (t, m, c) = router.tier_metadata_for_message(message);
         let runtime_ctx = entity_chat::RuntimeContext {
             provider_name: status.ego_provider.clone(),
-            model_id: m,
+            model_id: None,
             routing_mode: Some(format!("{:?}", status.mode)),
-            tier: t,
-            complexity_score: c,
+            tier: None,
+            complexity_score: None,
             entity_name: config.agent_name.clone(),
             entity_id: None,
             has_local_llm: status.has_local_http,

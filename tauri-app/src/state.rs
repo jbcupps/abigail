@@ -1,4 +1,5 @@
 use crate::agentic_runtime::AgenticRuntime;
+use crate::daemon_manager::DaemonManager;
 use crate::identity_manager::IdentityManager;
 use crate::log_capture::LogBuffer;
 use crate::ollama_manager::OllamaManager;
@@ -98,6 +99,8 @@ pub struct AppState {
     pub constraints: Arc<std::sync::RwLock<ConstraintStore>>,
     /// Async job queue for delegated tasks and recurring jobs.
     pub job_queue: Arc<JobQueue>,
+    /// Managed daemon lifecycle (hive + entity as child processes) for Daemon runtime mode.
+    pub daemon_manager: Arc<tokio::sync::Mutex<DaemonManager>>,
 }
 
 pub struct CliServerHandle {

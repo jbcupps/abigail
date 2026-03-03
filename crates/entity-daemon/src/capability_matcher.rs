@@ -1,40 +1,33 @@
-//! Capability-to-model selection for queued sub-agent jobs.
+//! Capability-to-provider selection for queued sub-agent jobs.
 
-use abigail_core::ModelTier;
 use abigail_queue::RequiredCapability;
 use abigail_router::IdEgoRouter;
 use std::sync::Arc;
 
 /// Selection result produced by [`CapabilityMatcher`].
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct CapabilitySelection {
     /// Provider label selected for this job (typically the active Ego provider).
     pub provider: String,
     /// Optional model hint for this job capability.
     pub model_hint: Option<String>,
-    /// Tier selected by policy.
-    pub tier: ModelTier,
+    /// Capability label used for logging/prompt context.
+    pub capability_label: String,
 }
 
-/// Maps job capabilities to model tiers (and provider-specific model IDs).
+/// Maps job capabilities to the active provider.
 ///
-/// This phase intentionally keeps the policy deterministic and simple:
-/// - `search` -> fast
-/// - `general` -> standard
-/// - `code`, `reasoning`, `vision` -> pro
-/// - `custom` -> standard
+/// With tier-based routing removed, the matcher always selects the ego
+/// provider. The capability label is retained for sub-agent prompt context.
 #[derive(Debug, Clone)]
 pub struct CapabilityMatcher {
     provider: String,
-    tier_models: abigail_core::TierModels,
 }
 
 impl CapabilityMatcher {
-    pub fn new(provider: String, tier_models: abigail_core::TierModels) -> Self {
-        Self {
-            provider,
-            tier_models,
-        }
+    pub fn new(provider: String) -> Self {
+        Self { provider }
     }
 
     pub fn from_router(router: Arc<IdEgoRouter>) -> Self {
@@ -42,24 +35,14 @@ impl CapabilityMatcher {
             .status()
             .ego_provider
             .unwrap_or_else(|| "local".to_string());
-        Self::new(provider, router.tier_models.clone())
+        Self::new(provider)
     }
 
     pub fn select(&self, capability: &RequiredCapability) -> CapabilitySelection {
-        let tier = match capability {
-            RequiredCapability::Search => ModelTier::Fast,
-            RequiredCapability::General => ModelTier::Standard,
-            RequiredCapability::Code
-            | RequiredCapability::Reasoning
-            | RequiredCapability::Vision => ModelTier::Pro,
-            RequiredCapability::Custom(_) => ModelTier::Standard,
-        };
-
-        let model_hint = self.tier_models.get_model(&self.provider, tier).cloned();
         CapabilitySelection {
             provider: self.provider.clone(),
-            model_hint,
-            tier,
+            model_hint: None,
+            capability_label: capability.as_str().to_string(),
         }
     }
 }
@@ -70,18 +53,18 @@ mod tests {
     use abigail_queue::RequiredCapability;
 
     #[test]
-    fn maps_search_to_fast() {
-        let matcher =
-            CapabilityMatcher::new("openai".to_string(), abigail_core::TierModels::defaults());
+    fn selects_provider_for_search() {
+        let matcher = CapabilityMatcher::new("openai".to_string());
         let selected = matcher.select(&RequiredCapability::Search);
-        assert_eq!(selected.tier, ModelTier::Fast);
+        assert_eq!(selected.provider, "openai");
+        assert_eq!(selected.capability_label, "search");
     }
 
     #[test]
-    fn maps_reasoning_to_pro() {
-        let matcher =
-            CapabilityMatcher::new("openai".to_string(), abigail_core::TierModels::defaults());
+    fn selects_provider_for_reasoning() {
+        let matcher = CapabilityMatcher::new("openai".to_string());
         let selected = matcher.select(&RequiredCapability::Reasoning);
-        assert_eq!(selected.tier, ModelTier::Pro);
+        assert_eq!(selected.provider, "openai");
+        assert_eq!(selected.capability_label, "reasoning");
     }
 }

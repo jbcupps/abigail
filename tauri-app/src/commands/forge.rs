@@ -35,9 +35,6 @@ struct ForgeUndoEntry {
 struct ForgeConfigSnapshot {
     active_provider_preference: Option<String>,
     routing_mode: abigail_core::RoutingMode,
-    tier_models: Option<abigail_core::TierModels>,
-    force_override: abigail_core::ForceOverride,
-    tier_thresholds: abigail_core::TierThresholds,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,7 +93,7 @@ pub fn crystallize_forge(_state: State<AppState>) -> Result<(), String> {
 pub fn preview_forge_primary_intelligence(
     state: State<AppState>,
     provider: String,
-    model: String,
+    _model: String,
     routing_mode: String,
     superego_mode: Option<String>,
 ) -> Result<ForgeChangePreview, String> {
@@ -114,24 +111,6 @@ pub fn preview_forge_primary_intelligence(
                 .clone()
                 .unwrap_or_else(|| "none".to_string()),
             provider
-        ));
-    }
-
-    let current_model = config
-        .tier_models
-        .as_ref()
-        .and_then(|tm| tm.standard.get(&provider).cloned())
-        .unwrap_or_default();
-    if !model.is_empty() && current_model != model {
-        changes.push(format!(
-            "Model for {}: {} -> {}",
-            provider,
-            if current_model.is_empty() {
-                "default"
-            } else {
-                &current_model
-            },
-            model
         ));
     }
 
@@ -158,7 +137,7 @@ pub fn preview_forge_primary_intelligence(
 pub async fn apply_forge_primary_intelligence(
     state: State<'_, AppState>,
     provider: String,
-    model: String,
+    _model: String,
     routing_mode: String,
     superego_mode: Option<String>,
 ) -> Result<ForgeApplyResult, String> {
@@ -174,9 +153,6 @@ pub async fn apply_forge_primary_intelligence(
         let snapshot = ForgeConfigSnapshot {
             active_provider_preference: config.active_provider_preference.clone(),
             routing_mode: config.routing_mode,
-            tier_models: config.tier_models.clone(),
-            force_override: config.force_override.clone(),
-            tier_thresholds: config.tier_thresholds,
         };
         if let Ok(mut undo) = undo_log().lock() {
             undo.push(ForgeUndoEntry {
@@ -189,16 +165,6 @@ pub async fn apply_forge_primary_intelligence(
         if config.active_provider_preference.as_deref() != Some(provider.as_str()) {
             changes_applied.push(format!("Active provider set to {}", provider));
             config.active_provider_preference = Some(provider.clone());
-        }
-        if !model.is_empty() {
-            let tm = config
-                .tier_models
-                .get_or_insert_with(abigail_core::TierModels::defaults);
-            let prev = tm.standard.get(&provider).cloned().unwrap_or_default();
-            if prev != model {
-                changes_applied.push(format!("Model for {} set to {}", provider, model));
-                tm.standard.insert(provider.clone(), model);
-            }
         }
         if config.routing_mode != parsed_mode {
             changes_applied.push(format!("Routing mode set to {}", routing_mode));
@@ -254,9 +220,6 @@ pub async fn forge_undo_last_change(state: State<'_, AppState>) -> Result<String
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         config.active_provider_preference = entry.snapshot.active_provider_preference;
         config.routing_mode = entry.snapshot.routing_mode;
-        config.tier_models = entry.snapshot.tier_models;
-        config.force_override = entry.snapshot.force_override;
-        config.tier_thresholds = entry.snapshot.tier_thresholds;
         config
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;
