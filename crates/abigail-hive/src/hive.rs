@@ -8,10 +8,7 @@ use crate::provider_registry::{ProviderKind, ProviderRegistry};
 use abigail_capabilities::cognitive::{
     detect_all_cli_providers, CliDetectionResult, LlmProvider, LocalHttpProvider,
 };
-use abigail_core::{
-    AppConfig, CliPermissionMode, ForceOverride, RoutingMode, SecretsVault, TierModels,
-    TierThresholds,
-};
+use abigail_core::{AppConfig, CliPermissionMode, RoutingMode, SecretsVault};
 use std::sync::{Arc, Mutex};
 
 /// Check whether a binary is reachable on the system PATH.
@@ -50,12 +47,6 @@ pub struct HiveConfig {
     pub ego_api_key: Option<String>,
     pub ego_model: Option<String>,
     pub routing_mode: RoutingMode,
-    /// Per-provider model assignments for Fast/Standard/Pro tiers.
-    pub tier_models: TierModels,
-    /// Complexity score thresholds for tier selection.
-    pub tier_thresholds: TierThresholds,
-    /// Force override for model selection.
-    pub force_override: ForceOverride,
     /// Permission mode for CLI tool invocations.
     pub cli_permission_mode: CliPermissionMode,
 }
@@ -67,12 +58,6 @@ pub struct BuiltProviders {
     pub ego: Option<Arc<dyn LlmProvider>>,
     pub ego_kind: Option<ProviderKind>,
     pub routing_mode: RoutingMode,
-    /// Per-provider model assignments for Fast/Standard/Pro tiers.
-    pub tier_models: TierModels,
-    /// Complexity score thresholds for tier selection.
-    pub tier_thresholds: TierThresholds,
-    /// Force override for model selection.
-    pub force_override: ForceOverride,
 }
 
 /// The Hive owns vault references and acts as the single entry-point for
@@ -220,38 +205,20 @@ impl Hive {
             }
         };
 
-        let ego_model = ego_name.as_ref().and_then(|name| {
-            let model = config
-                .tier_models
-                .as_ref()
-                .and_then(|tm| tm.standard.get(name).cloned());
-            tracing::info!("Model for {:?} found in TierModels: {:?}", name, model);
-            model
-        });
-
         tracing::debug!(
-            "Resolved config: local_url={:?}, ego_name={:?}, ego_model={:?}, has_ego_key={}, mode={:?}",
+            "Resolved config: local_url={:?}, ego_name={:?}, has_ego_key={}, mode={:?}",
             config.local_llm_base_url,
             ego_name,
-            ego_model,
             ego_key.is_some(),
             config.routing_mode
         );
-
-        let tier_models = config
-            .tier_models
-            .clone()
-            .unwrap_or_else(TierModels::defaults);
 
         Ok(HiveConfig {
             local_llm_base_url: config.local_llm_base_url.clone(),
             ego_provider_name: ego_name,
             ego_api_key: ego_key,
-            ego_model,
+            ego_model: None,
             routing_mode: config.routing_mode,
-            tier_models,
-            tier_thresholds: config.tier_thresholds,
-            force_override: config.force_override.clone(),
             cli_permission_mode: config.cli_permission_mode,
         })
     }
@@ -274,9 +241,6 @@ impl Hive {
             ego: ego_result.provider,
             ego_kind: ego_result.kind,
             routing_mode: hive_config.routing_mode,
-            tier_models: hive_config.tier_models.clone(),
-            tier_thresholds: hive_config.tier_thresholds,
-            force_override: hive_config.force_override.clone(),
         }
     }
 

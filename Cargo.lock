@@ -40,6 +40,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
+ "daemon-client",
  "directories 5.0.1",
  "ed25519-dalek",
  "entity-chat",
@@ -2156,6 +2157,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "daemon-client"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "entity-core",
+ "futures-util",
+ "hive-core",
+ "reqwest 0.13.2",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "daemon-test-harness"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "reqwest 0.13.2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "darling"
 version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2731,6 +2760,7 @@ dependencies = [
  "chrono",
  "clap",
  "cron",
+ "daemon-test-harness",
  "entity-chat",
  "entity-core",
  "futures-util",
@@ -3902,7 +3932,9 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "daemon-test-harness",
  "hive-core",
+ "reqwest 0.13.2",
  "serde",
  "serde_json",
  "tokio",

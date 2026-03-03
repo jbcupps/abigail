@@ -457,15 +457,14 @@ async fn chat_with_pipeline(
     let base_prompt =
         abigail_core::system_prompt::build_system_prompt(&docs_dir, &state.agent_name);
 
-    let (tier, model_used, complexity_score) = router.tier_metadata_for_message(&body.message);
     let status = router.status();
 
     let runtime_ctx = entity_chat::RuntimeContext {
         provider_name: status.ego_provider.clone(),
-        model_id: model_used,
+        model_id: None,
         routing_mode: Some(format!("{:?}", status.mode)),
-        tier,
-        complexity_score,
+        tier: None,
+        complexity_score: None,
         entity_name: state.agent_name.clone(),
         entity_id: None,
         has_local_llm: status.has_local_http,

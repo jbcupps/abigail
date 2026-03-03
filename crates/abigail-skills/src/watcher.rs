@@ -1,7 +1,7 @@
 //! Skills watcher — monitors skill directories for file changes (hot-reload).
 //!
-//! Watches for changes to skill.toml files and notifies listeners
-//! via a tokio broadcast channel so the registry can be refreshed.
+//! Watches for changes to `skill.toml` and `*.json` files, notifying
+//! listeners via a tokio broadcast channel so the registry can be refreshed.
 
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
@@ -12,10 +12,14 @@ use tokio::sync::broadcast;
 /// Events emitted by the skills watcher.
 #[derive(Debug, Clone)]
 pub enum SkillFileEvent {
-    /// A skill.toml was created or modified.
+    /// A skill.toml or *.json was created or modified.
     Changed(PathBuf),
-    /// A skill.toml was removed.
+    /// A skill.toml or *.json was removed.
     Removed(PathBuf),
+}
+
+fn is_skill_file(name: &str) -> bool {
+    name == "skill.toml" || name.ends_with(".json")
 }
 
 /// Watches skill directories for changes and emits events.
@@ -25,7 +29,7 @@ pub struct SkillsWatcher {
 }
 
 impl SkillsWatcher {
-    /// Start watching the given directories for skill.toml changes.
+    /// Start watching the given directories for skill file changes.
     ///
     /// Returns a `SkillsWatcher` (keep alive to maintain the watch) and
     /// a `broadcast::Receiver` for subscribing to change events.
@@ -38,7 +42,6 @@ impl SkillsWatcher {
         let (tx, rx) = broadcast::channel::<SkillFileEvent>(64);
         let tx_clone = tx.clone();
 
-        // notify uses std::sync::mpsc internally
         let (notify_tx, notify_rx) = mpsc::channel::<notify::Result<Event>>();
 
         let mut watcher = RecommendedWatcher::new(
@@ -60,30 +63,28 @@ impl SkillsWatcher {
             }
         }
 
-        // Background thread to process notify events
         std::thread::spawn(move || {
             for res in notify_rx {
                 match res {
                     Ok(event) => {
-                        // Filter to only skill.toml changes
-                        let skill_toml_paths: Vec<PathBuf> = event
+                        let relevant: Vec<PathBuf> = event
                             .paths
                             .iter()
                             .filter(|p| {
                                 p.file_name()
                                     .and_then(|n| n.to_str())
-                                    .map(|n| n == "skill.toml")
+                                    .map(is_skill_file)
                                     .unwrap_or(false)
                             })
                             .cloned()
                             .collect();
 
-                        if skill_toml_paths.is_empty() {
+                        if relevant.is_empty() {
                             continue;
                         }
 
-                        for path in skill_toml_paths {
-                            let event = match event.kind {
+                        for path in relevant {
+                            let ev = match event.kind {
                                 EventKind::Create(_) | EventKind::Modify(_) => {
                                     tracing::info!("Skill file changed: {}", path.display());
                                     SkillFileEvent::Changed(path)
@@ -94,8 +95,7 @@ impl SkillsWatcher {
                                 }
                                 _ => continue,
                             };
-                            // Best-effort send; if no receivers, that's fine
-                            let _ = tx_clone.send(event);
+                            let _ = tx_clone.send(ev);
                         }
                     }
                     Err(e) => {
@@ -126,6 +126,25 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn test_is_skill_file_matches_toml() {
+        assert!(is_skill_file("skill.toml"));
+    }
+
+    #[test]
+    fn test_is_skill_file_matches_json() {
+        assert!(is_skill_file("dynamic.weather.json"));
+        assert!(is_skill_file("custom_api.json"));
+    }
+
+    #[test]
+    fn test_is_skill_file_rejects_others() {
+        assert!(!is_skill_file("readme.md"));
+        assert!(!is_skill_file("config.toml"));
+        assert!(!is_skill_file("Cargo.toml"));
+        assert!(!is_skill_file("data.csv"));
+    }
+
+    #[test]
     fn test_watcher_starts_on_existing_dir() {
         let tmp = std::env::temp_dir().join("abigail_watcher_test_start");
         let _ = fs::remove_dir_all(&tmp);
@@ -140,7 +159,6 @@ mod tests {
     #[test]
     fn test_watcher_handles_nonexistent_dir() {
         let nonexistent = std::env::temp_dir().join("abigail_watcher_nonexistent_12345");
-        // Should not error - just skip non-existent paths
         let result = SkillsWatcher::start(vec![nonexistent]);
         assert!(result.is_ok());
     }
@@ -153,14 +171,11 @@ mod tests {
 
         let (watcher, mut rx) = SkillsWatcher::start(vec![tmp.clone()]).unwrap();
 
-        // Give the watcher time to start
         tokio::time::sleep(Duration::from_millis(500)).await;
 
-        // Create a skill.toml file
         let skill_toml = tmp.join("skill.toml");
         fs::write(&skill_toml, "[skill]\nid = \"test\"\nname = \"Test\"").unwrap();
 
-        // Wait for the event (with timeout)
         let result = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await;
 
         match result {
@@ -168,15 +183,50 @@ mod tests {
                 assert!(path.to_string_lossy().contains("skill.toml"));
             }
             Ok(Ok(SkillFileEvent::Removed(_))) => {
-                // Some OSes emit remove+create for writes - acceptable
+                // Some OSes emit remove+create for writes
             }
             Ok(Err(e)) => {
-                // Broadcast lagged - acceptable in test
                 tracing::warn!("Broadcast lagged: {}", e);
             }
             Err(_) => {
-                // Timeout - filesystem events can be slow on some systems
-                // This is a known issue with notify in CI/containers
+                tracing::warn!(
+                    "Timeout waiting for filesystem event - skipping (expected in containers)"
+                );
+            }
+        }
+
+        drop(watcher);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn test_watcher_detects_json_change() {
+        let tmp = std::env::temp_dir().join("abigail_watcher_test_json_detect");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let (watcher, mut rx) = SkillsWatcher::start(vec![tmp.clone()]).unwrap();
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let json_file = tmp.join("custom_weather.json");
+        fs::write(&json_file, r#"{"id":"custom.weather"}"#).unwrap();
+
+        let result = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await;
+
+        match result {
+            Ok(Ok(SkillFileEvent::Changed(path))) => {
+                assert!(
+                    path.to_string_lossy().contains(".json"),
+                    "Expected .json path, got {:?}",
+                    path
+                );
+            }
+            Ok(Ok(SkillFileEvent::Removed(_))) => {}
+            Ok(Err(e)) => {
+                tracing::warn!("Broadcast lagged: {}", e);
+            }
+            Err(_) => {
                 tracing::warn!(
                     "Timeout waiting for filesystem event - skipping (expected in containers)"
                 );

@@ -1,6 +1,6 @@
 use crate::state::AppState;
 use abigail_core::config::SignedSkillAllowlistEntry;
-use abigail_core::McpServerDefinition;
+use abigail_core::{McpServerDefinition, RuntimeMode};
 use abigail_skills::protocol::mcp::{HttpMcpClient, McpTool};
 use abigail_skills::{
     FileSystemPermission, HealthStatus, Permission, SkillExecutionPolicy, SkillId, SkillManifest,
@@ -68,7 +68,39 @@ fn resolve_mcp_server_url(
 }
 
 #[tauri::command]
-pub fn list_skills(state: State<AppState>) -> Result<Vec<SkillManifest>, String> {
+pub async fn list_skills(state: State<'_, AppState>) -> Result<Vec<SkillManifest>, String> {
+    let mode = { state.config.read().map_err(|e| e.to_string())?.runtime_mode };
+    if mode == RuntimeMode::Daemon {
+        let entity_url = {
+            state
+                .config
+                .read()
+                .map_err(|e| e.to_string())?
+                .entity_daemon_url
+                .clone()
+        };
+        let client = daemon_client::EntityClient::new(&entity_url);
+        let skills = client.list_skills().await.map_err(|e| e.to_string())?;
+        return Ok(skills
+            .into_iter()
+            .map(|s| SkillManifest {
+                id: SkillId(s.id),
+                name: s.name,
+                version: s.version,
+                description: s.description,
+                license: None,
+                category: String::new(),
+                keywords: vec![],
+                runtime: String::new(),
+                min_abigail_version: String::new(),
+                platforms: vec![],
+                capabilities: vec![],
+                permissions: vec![],
+                secrets: vec![],
+                config_defaults: std::collections::HashMap::new(),
+            })
+            .collect());
+    }
     state.registry.list().map_err(|e| e.to_string())
 }
 
@@ -188,7 +220,11 @@ const EMAIL_SECRET_KEYS: &[&str] = &[
 ];
 
 #[tauri::command]
-pub fn store_secret(state: State<AppState>, key: String, value: String) -> Result<(), String> {
+pub async fn store_secret(
+    state: State<'_, AppState>,
+    key: String,
+    value: String,
+) -> Result<(), String> {
     let key = key.trim().to_string();
     let value = value.trim().to_string();
     if key.is_empty() {
@@ -197,6 +233,25 @@ pub fn store_secret(state: State<AppState>, key: String, value: String) -> Resul
     if value.is_empty() {
         return Err("Secret value cannot be empty".to_string());
     }
+
+    let mode = { state.config.read().map_err(|e| e.to_string())?.runtime_mode };
+    if mode == RuntimeMode::Daemon {
+        let hive_url = {
+            state
+                .config
+                .read()
+                .map_err(|e| e.to_string())?
+                .hive_daemon_url
+                .clone()
+        };
+        let client = daemon_client::HiveDaemonClient::new(&hive_url);
+        client
+            .store_secret(&key, &value)
+            .await
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
     validate_secret_namespace(&state, &key)?;
     let mut vault = state.skills_secrets.lock().map_err(|e| e.to_string())?;
     vault.set_secret(&key, &value);

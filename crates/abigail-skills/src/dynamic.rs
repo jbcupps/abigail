@@ -360,6 +360,9 @@ impl DynamicApiSkill {
         std::fs::write(path, json).map_err(|e| e.to_string())
     }
 
+    /// Discover dynamic skills by scanning `dir` for `*.json` files.
+    /// Also recurses one level into subdirectories (`dir/*/\*.json`)
+    /// so that scaffold and factory output layouts are found.
     pub fn discover(dir: &Path, secrets: Option<Arc<Mutex<SecretsVault>>>) -> Vec<Self> {
         let mut skills = Vec::new();
         let entries = match std::fs::read_dir(dir) {
@@ -368,23 +371,36 @@ impl DynamicApiSkill {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                match Self::load_from_path(&path, secrets.clone()) {
-                    Ok(skill) => {
-                        tracing::debug!(
-                            "Discovered dynamic skill: {} at {:?}",
-                            skill.config.id,
-                            path
-                        );
-                        skills.push(skill);
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to load dynamic skill from {:?}: {}", path, e);
+            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("json") {
+                Self::try_load(&path, secrets.clone(), &mut skills);
+            } else if path.is_dir() {
+                if let Ok(sub_entries) = std::fs::read_dir(&path) {
+                    for sub in sub_entries.flatten() {
+                        let sp = sub.path();
+                        if sp.is_file() && sp.extension().and_then(|e| e.to_str()) == Some("json") {
+                            Self::try_load(&sp, secrets.clone(), &mut skills);
+                        }
                     }
                 }
             }
         }
         skills
+    }
+
+    fn try_load(path: &Path, secrets: Option<Arc<Mutex<SecretsVault>>>, out: &mut Vec<Self>) {
+        match Self::load_from_path(path, secrets) {
+            Ok(skill) => {
+                tracing::debug!(
+                    "Discovered dynamic skill: {} at {:?}",
+                    skill.config.id,
+                    path
+                );
+                out.push(skill);
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load dynamic skill from {:?}: {}", path, e);
+            }
+        }
     }
 
     pub fn config(&self) -> &DynamicSkillConfig {
@@ -897,6 +913,73 @@ mod tests {
         let skills = DynamicApiSkill::discover(&tmp, None);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].manifest().id.0, "dynamic.test_api");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_discover_recurses_one_level() {
+        let tmp = std::env::temp_dir().join("abigail_dynamic_discover_nested");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let sub = tmp.join("skill-weather");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        let mut config = sample_config();
+        config.id = "custom.weather".to_string();
+        config.name = "Weather".to_string();
+        let json = serde_json::to_string_pretty(&config).unwrap();
+        std::fs::write(sub.join("custom_weather.json"), &json).unwrap();
+
+        let skills = DynamicApiSkill::discover(&tmp, None);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].manifest().id.0, "custom.weather");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_discover_finds_both_flat_and_nested() {
+        let tmp = std::env::temp_dir().join("abigail_dynamic_discover_both");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let sub = tmp.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        let config_flat = sample_config();
+        std::fs::write(
+            tmp.join("dynamic.test_api.json"),
+            serde_json::to_string_pretty(&config_flat).unwrap(),
+        )
+        .unwrap();
+
+        let mut config_nested = sample_config();
+        config_nested.id = "custom.nested".to_string();
+        config_nested.name = "Nested".to_string();
+        std::fs::write(
+            sub.join("custom_nested.json"),
+            serde_json::to_string_pretty(&config_nested).unwrap(),
+        )
+        .unwrap();
+
+        let skills = DynamicApiSkill::discover(&tmp, None);
+        assert_eq!(skills.len(), 2);
+        let ids: Vec<&str> = skills.iter().map(|s| s.manifest().id.0.as_str()).collect();
+        assert!(ids.contains(&"dynamic.test_api"));
+        assert!(ids.contains(&"custom.nested"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_discover_ignores_non_json_files() {
+        let tmp = std::env::temp_dir().join("abigail_dynamic_discover_ignore");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        std::fs::write(tmp.join("readme.txt"), "not a skill").unwrap();
+        std::fs::write(tmp.join("config.toml"), "[skill]\nid=\"x\"").unwrap();
+
+        let skills = DynamicApiSkill::discover(&tmp, None);
+        assert_eq!(skills.len(), 0);
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

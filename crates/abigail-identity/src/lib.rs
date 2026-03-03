@@ -281,9 +281,6 @@ impl IdentityManager {
             approved_skill_ids: Default::default(),
             trusted_skill_signers: Default::default(),
             sao_endpoint: None,
-            tier_models: None,
-            force_override: Default::default(),
-            tier_thresholds: Default::default(),
             provider_catalog: Vec::new(),
             active_provider_preference: None,
             email_accounts: Vec::new(),
@@ -303,6 +300,9 @@ impl IdentityManager {
             skill_recovery_budget: 3,
             last_provider_change_at: None,
             cli_permission_mode: Default::default(),
+            runtime_mode: Default::default(),
+            hive_daemon_url: "http://127.0.0.1:3141".to_string(),
+            entity_daemon_url: "http://127.0.0.1:3142".to_string(),
         };
         let config_path = agent_dir.join("config.json");
         config.save(&config_path).map_err(|e| e.to_string())?;

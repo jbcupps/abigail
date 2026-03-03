@@ -1666,7 +1666,7 @@ mod tests {
     #[test]
     fn test_provider_label_never_returns_id() {
         use abigail_router::{IdEgoRouter, RoutingMode};
-        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::TierBased);
+        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
         let label = provider_label(&router);
         assert_eq!(label, "local", "provider_label must never return 'id'");
     }

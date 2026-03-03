@@ -4,7 +4,7 @@
 //! the HTTP response matches the expected ApiEnvelope<ChatResponse> structure.
 
 use abigail_capabilities::cognitive::{CompletionRequest, CompletionResponse, LlmProvider};
-use abigail_core::{AppConfig, ForceOverride, RoutingMode, TierModels, TierThresholds};
+use abigail_core::{AppConfig, RoutingMode};
 use abigail_memory::MemoryStore;
 use abigail_router::IdEgoRouter;
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
@@ -51,12 +51,8 @@ fn build_daemon_state() -> entity_daemon_test_state::EntityDaemonState {
         id: Arc::new(MockProvider::new()),
         ego: None,
         ego_provider: None,
-        council: None,
         local_http: None,
-        mode: RoutingMode::TierBased,
-        tier_models: TierModels::default(),
-        tier_thresholds: TierThresholds::default(),
-        force_override: ForceOverride::default(),
+        mode: RoutingMode::EgoPrimary,
     };
 
     let registry = Arc::new(SkillRegistry::new());

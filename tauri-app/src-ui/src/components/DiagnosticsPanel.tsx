@@ -214,8 +214,76 @@ export default function DiagnosticsPanel({ onNavigate }: DiagnosticsPanelProps) 
     navigator.clipboard.writeText(text).catch(() => {});
   };
 
+  // --- Runtime mode ---
+  const [runtimeMode, setRuntimeMode] = useState<string>("in_process");
+  const [modeLoading, setModeLoading] = useState(false);
+
+  useEffect(() => {
+    invoke<string>("get_runtime_mode").then((m) => {
+      if (mountedRef.current) {
+        try {
+          setRuntimeMode(JSON.parse(m));
+        } catch {
+          setRuntimeMode(m);
+        }
+      }
+    }).catch(() => {});
+  }, []);
+
+  const toggleRuntimeMode = async () => {
+    setModeLoading(true);
+    const next = runtimeMode === "in_process" ? "daemon" : "in_process";
+    try {
+      await invoke("set_runtime_mode", { mode: next });
+      setRuntimeMode(next);
+    } catch (err) {
+      console.error("Failed to set runtime mode:", err);
+    } finally {
+      setModeLoading(false);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
+      {/* ── RUNTIME MODE ── */}
+      <section>
+        <h2 className="text-xs font-semibold text-theme-text tracking-wider uppercase mb-2">
+          Runtime Mode
+        </h2>
+        <div className="flex items-center gap-3">
+          <button
+            className={`px-3 py-1.5 text-xs rounded border font-mono transition-colors ${
+              runtimeMode === "in_process"
+                ? "border-theme-primary text-theme-primary bg-theme-primary/10"
+                : "border-theme-border-dim text-theme-text-dim hover:border-theme-text-dim"
+            }`}
+            onClick={runtimeMode !== "in_process" ? toggleRuntimeMode : undefined}
+            disabled={modeLoading}
+          >
+            In-Process
+          </button>
+          <button
+            className={`px-3 py-1.5 text-xs rounded border font-mono transition-colors ${
+              runtimeMode === "daemon"
+                ? "border-theme-primary text-theme-primary bg-theme-primary/10"
+                : "border-theme-border-dim text-theme-text-dim hover:border-theme-text-dim"
+            }`}
+            onClick={runtimeMode !== "daemon" ? toggleRuntimeMode : undefined}
+            disabled={modeLoading}
+          >
+            Daemon
+          </button>
+          {modeLoading && (
+            <span className="text-[10px] text-theme-text-dim animate-pulse">switching...</span>
+          )}
+        </div>
+        <p className="text-[10px] text-theme-text-dim mt-1">
+          {runtimeMode === "daemon"
+            ? "Chat, skills, and memory delegate to hive-daemon + entity-daemon over HTTP."
+            : "All subsystems run inside the desktop app process."}
+        </p>
+      </section>
+
       {/* ── TROUBLESHOOTING MODE ── */}
       <section>
         <div className="flex items-center justify-between mb-3">

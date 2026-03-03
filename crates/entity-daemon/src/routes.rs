@@ -78,14 +78,12 @@ pub async fn chat(
             &state.docs_dir,
             &state.config.agent_name,
         );
-        let (tier, model_used, complexity_score) =
-            state.router.tier_metadata_for_message(&body.message);
         let runtime_ctx = entity_chat::RuntimeContext {
             provider_name: status.ego_provider.clone(),
-            model_id: model_used,
+            model_id: None,
             routing_mode: Some(format!("{:?}", status.mode)),
-            tier,
-            complexity_score,
+            tier: None,
+            complexity_score: None,
             entity_name: state.config.agent_name.clone(),
             entity_id: Some(state.entity_id.clone()),
             has_local_llm: status.has_local_http,
@@ -109,7 +107,6 @@ pub async fn chat(
 
     let tools = entity_chat::build_tool_definitions(&state.registry);
 
-    // Chat never uses Id; Id is for background tasks only. Always route (Ego when available).
     let result = if tools.is_empty() {
         let resp = state
             .router
@@ -186,16 +183,14 @@ pub async fn chat_stream(
 
     let base_prompt =
         abigail_core::system_prompt::build_system_prompt(&state.docs_dir, &state.config.agent_name);
-    let (tier, model_used, complexity_score) =
-        state.router.tier_metadata_for_message(&body.message);
     let router_status = state.router.status();
 
     let runtime_ctx = entity_chat::RuntimeContext {
         provider_name: router_status.ego_provider.clone(),
-        model_id: model_used,
+        model_id: None,
         routing_mode: Some(format!("{:?}", router_status.mode)),
-        tier,
-        complexity_score,
+        tier: None,
+        complexity_score: None,
         entity_name: state.config.agent_name.clone(),
         entity_id: Some(state.entity_id.clone()),
         has_local_llm: router_status.has_local_http,
@@ -866,7 +861,7 @@ fn queue_job_record(job: JobRecord) -> QueueJobRecord {
 mod tests {
     use super::*;
     use abigail_capabilities::cognitive::{CompletionRequest, CompletionResponse, LlmProvider};
-    use abigail_core::{AppConfig, ForceOverride, RoutingMode, TierModels, TierThresholds};
+    use abigail_core::{AppConfig, RoutingMode};
     use abigail_memory::MemoryStore;
     use abigail_queue::{
         MIGRATION_V3_JOB_QUEUE, MIGRATION_V4_ORCHESTRATION, MIGRATION_V5_DEPENDS_ON,
@@ -899,12 +894,8 @@ mod tests {
             id: Arc::new(MockProvider),
             ego: None,
             ego_provider: None,
-            council: None,
             local_http: None,
-            mode: RoutingMode::TierBased,
-            tier_models: TierModels::default(),
-            tier_thresholds: TierThresholds::default(),
-            force_override: ForceOverride::default(),
+            mode: RoutingMode::EgoPrimary,
         };
 
         let registry = Arc::new(SkillRegistry::new());

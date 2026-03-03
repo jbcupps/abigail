@@ -104,7 +104,6 @@ pub struct RouterStatus {
     pub ego_provider: Option<String>,
     pub superego_configured: bool,
     pub routing_mode: String,
-    pub council_providers: usize,
 }
 
 #[tauri::command]
@@ -127,7 +126,6 @@ pub fn get_router_status(state: State<AppState>) -> Result<RouterStatus, String>
             .ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()))
             .unwrap_or_else(|| format!("{:?}", config.routing_mode).to_lowercase()),
-        council_providers: status.council_provider_count,
     })
 }
 
@@ -162,123 +160,6 @@ pub async fn set_active_provider(
 pub fn get_active_provider(state: State<AppState>) -> Result<Option<String>, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     Ok(config.active_provider_preference.clone())
-}
-
-#[tauri::command]
-pub async fn set_ego_model(
-    state: State<'_, AppState>,
-    provider: String,
-    model: String,
-) -> Result<(), String> {
-    {
-        let mut config = state.config.write().map_err(|e| e.to_string())?;
-        let tier_models = config
-            .tier_models
-            .get_or_insert_with(abigail_core::TierModels::defaults);
-        tier_models.standard.insert(provider, model);
-        config
-            .save(&config.config_path())
-            .map_err(|e| e.to_string())?;
-    }
-    crate::rebuild_router(&state).await?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn get_ego_model(
-    state: State<'_, AppState>,
-    provider: String,
-) -> Result<Option<String>, String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    if let Some(tm) = &config.tier_models {
-        Ok(tm.standard.get(&provider).cloned())
-    } else {
-        Ok(abigail_core::TierModels::defaults()
-            .standard
-            .get(&provider)
-            .cloned())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Tier model assignment commands (Fast / Standard / Pro grid)
-// ---------------------------------------------------------------------------
-
-/// DTO for tier model assignments across all providers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TierModelAssignments {
-    pub fast: std::collections::HashMap<String, String>,
-    pub standard: std::collections::HashMap<String, String>,
-    pub pro: std::collections::HashMap<String, String>,
-}
-
-/// Get all tier model assignments, falling back to defaults.
-#[tauri::command]
-pub fn get_tier_models(state: State<AppState>) -> Result<TierModelAssignments, String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    let tm = config
-        .tier_models
-        .clone()
-        .unwrap_or_else(abigail_core::TierModels::defaults);
-    Ok(TierModelAssignments {
-        fast: tm.fast,
-        standard: tm.standard,
-        pro: tm.pro,
-    })
-}
-
-/// Set a specific tier model for a provider.
-///
-/// `tier` must be one of: "fast", "standard", "pro".
-#[tauri::command]
-pub async fn set_tier_model(
-    state: State<'_, AppState>,
-    provider: String,
-    tier: String,
-    model: String,
-) -> Result<(), String> {
-    {
-        let mut config = state.config.write().map_err(|e| e.to_string())?;
-        let tier_models = config
-            .tier_models
-            .get_or_insert_with(abigail_core::TierModels::defaults);
-        match tier.as_str() {
-            "fast" => {
-                tier_models.fast.insert(provider, model);
-            }
-            "standard" => {
-                tier_models.standard.insert(provider, model);
-            }
-            "pro" => {
-                tier_models.pro.insert(provider, model);
-            }
-            _ => {
-                return Err(format!(
-                    "Invalid tier '{}'. Must be fast, standard, or pro.",
-                    tier
-                ))
-            }
-        }
-        config
-            .save(&config.config_path())
-            .map_err(|e| e.to_string())?;
-    }
-    crate::rebuild_router(&state).await?;
-    Ok(())
-}
-
-/// Reset tier models back to defaults.
-#[tauri::command]
-pub async fn reset_tier_models(state: State<'_, AppState>) -> Result<(), String> {
-    {
-        let mut config = state.config.write().map_err(|e| e.to_string())?;
-        config.tier_models = Some(abigail_core::TierModels::defaults());
-        config
-            .save(&config.config_path())
-            .map_err(|e| e.to_string())?;
-    }
-    crate::rebuild_router(&state).await?;
-    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -745,50 +626,67 @@ pub async fn refresh_model_registry(
     })
 }
 
-/// Get/set force override settings.
+// ---------------------------------------------------------------------------
+// Runtime mode
+// ---------------------------------------------------------------------------
+
 #[tauri::command]
-pub fn get_force_override(state: State<AppState>) -> Result<serde_json::Value, String> {
+pub fn get_runtime_mode(state: State<AppState>) -> Result<String, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
-    serde_json::to_value(&config.force_override).map_err(|e| e.to_string())
+    Ok(
+        serde_json::to_string(&config.runtime_mode)
+            .unwrap_or_else(|_| "\"in_process\"".to_string()),
+    )
 }
 
 #[tauri::command]
-pub async fn set_force_override(
-    state: State<'_, AppState>,
-    force_override: serde_json::Value,
-) -> Result<(), String> {
-    let parsed: abigail_core::ForceOverride =
-        serde_json::from_value(force_override).map_err(|e| e.to_string())?;
+pub async fn set_runtime_mode(state: State<'_, AppState>, mode: String) -> Result<(), String> {
+    let parsed: abigail_core::RuntimeMode =
+        serde_json::from_str(&format!("\"{}\"", mode)).map_err(|e| e.to_string())?;
+
     {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
-        config.force_override = parsed;
+        config.runtime_mode = parsed;
         config
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;
     }
-    crate::rebuild_router(&state).await
-}
 
-/// Get/set tier thresholds.
-#[tauri::command]
-pub fn get_tier_thresholds(state: State<AppState>) -> Result<serde_json::Value, String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    serde_json::to_value(&config.tier_thresholds).map_err(|e| e.to_string())
-}
+    // When switching to Daemon mode, start the managed daemons
+    if parsed == abigail_core::RuntimeMode::Daemon {
+        let data_dir = {
+            state
+                .config
+                .read()
+                .map_err(|e| e.to_string())?
+                .data_dir
+                .clone()
+        };
+        let mut mgr = state.daemon_manager.lock().await;
+        *mgr = crate::daemon_manager::DaemonManager::new(data_dir);
+        let hive_url = mgr.start_hive().await.map_err(|e| e.to_string())?;
+        {
+            let mut config = state.config.write().map_err(|e| e.to_string())?;
+            config.hive_daemon_url = hive_url;
+        }
 
-#[tauri::command]
-pub async fn set_tier_thresholds(
-    state: State<'_, AppState>,
-    tier_thresholds: serde_json::Value,
-) -> Result<(), String> {
-    let parsed: abigail_core::TierThresholds =
-        serde_json::from_value(tier_thresholds).map_err(|e| e.to_string())?;
-    {
-        let mut config = state.config.write().map_err(|e| e.to_string())?;
-        config.tier_thresholds = parsed;
-        config
-            .save(&config.config_path())
-            .map_err(|e| e.to_string())?;
+        let entity_id = {
+            state
+                .active_agent_id
+                .read()
+                .map_err(|e| e.to_string())?
+                .clone()
+        };
+        if let Some(eid) = entity_id {
+            let entity_url = mgr.start_entity(&eid).await.map_err(|e| e.to_string())?;
+            let mut config = state.config.write().map_err(|e| e.to_string())?;
+            config.entity_daemon_url = entity_url;
+        }
+    } else {
+        // Switching back to InProcess: stop managed daemons
+        let mut mgr = state.daemon_manager.lock().await;
+        mgr.shutdown();
     }
-    crate::rebuild_router(&state).await
+
+    Ok(())
 }

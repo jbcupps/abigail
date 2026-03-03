@@ -41,6 +41,59 @@ function assertNeverState(state: never): never {
   throw new Error(`Unhandled AppState: ${state}`);
 }
 
+interface SkillToast {
+  id: number;
+  message: string;
+  kind: "reloaded" | "removed";
+}
+
+function useSkillEvents() {
+  const [toasts, setToasts] = useState<SkillToast[]>([]);
+
+  useEffect(() => {
+    const unlisteners: (() => void)[] = [];
+    let nextId = 0;
+
+    const push = (message: string, kind: SkillToast["kind"]) => {
+      const id = nextId++;
+      setToasts((prev) => [...prev, { id, message, kind }]);
+      setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
+    };
+
+    listen<{ skill_id: string }>("skill-reloaded", (e) => {
+      push(`Skill loaded: ${e.payload.skill_id}`, "reloaded");
+    }).then((fn) => unlisteners.push(fn));
+
+    listen<{ skill_id: string }>("skill-removed", (e) => {
+      push(`Skill removed: ${e.payload.skill_id}`, "removed");
+    }).then((fn) => unlisteners.push(fn));
+
+    return () => { unlisteners.forEach((fn) => fn()); };
+  }, []);
+
+  return toasts;
+}
+
+function SkillToastContainer({ toasts }: { toasts: SkillToast[] }) {
+  if (toasts.length === 0) return null;
+  return (
+    <div className="fixed top-3 right-3 z-[9998] flex flex-col gap-2 pointer-events-none">
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          className={`pointer-events-auto px-3 py-2 rounded border text-xs font-mono animate-fade-in-up ${
+            t.kind === "reloaded"
+              ? "bg-theme-bg-elevated border-theme-primary/40 text-theme-primary"
+              : "bg-theme-bg-elevated border-theme-danger/40 text-theme-danger"
+          }`}
+        >
+          {t.message}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AppInner() {
   const [appState, setAppState] = useState<AppState>("splash");
   const [startupError, setStartupError] = useState<string | null>(null);
@@ -52,6 +105,7 @@ function AppInner() {
   const [ollamaStatus, setOllamaStatus] = useState("");
   const [isFirstPull, setIsFirstPull] = useState(true);
   const { setMode, refreshAgentName } = useTheme();
+  const skillToasts = useSkillEvents();
 
   const initializeApp = async () => {
     try {
@@ -293,12 +347,15 @@ function AppInner() {
     [activeSoulId]
   );
 
+  const toastOverlay = <SkillToastContainer toasts={skillToasts} />;
+
   switch (appState) {
     case "splash":
       return <SplashScreen onComplete={handleSplashComplete} />;
     case "loading":
       return (
         <div className="min-h-screen bg-theme-bg text-theme-text-dim font-mono flex items-center justify-center">
+          {toastOverlay}
           <div className="animate-pulse">Loading...</div>
         </div>
       );
@@ -381,6 +438,7 @@ function AppInner() {
     case "chat":
       return (
         <div className="h-screen flex flex-col">
+          {toastOverlay}
           <UpdateNotification />
           <PersonaToggle
             onToggle={() => setForgeOpen((prev) => !prev)}

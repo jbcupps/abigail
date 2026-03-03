@@ -21,9 +21,9 @@ pub use capability_envelope::{
     evaluate_gate, CapabilityEnvelope, CapabilityGateResult, RequestedCapability,
 };
 pub use config::{
-    AppConfig, CliPermissionMode, EmailAccountConfig, EmailConfig, ForceOverride,
-    McpServerDefinition, McpTrustPolicy, ModelTier, ProviderCatalogEntry, RoutingMode, TierModels,
-    TierThresholds, TrinityConfig, CONFIG_SCHEMA_VERSION,
+    AppConfig, CliPermissionMode, EmailAccountConfig, EmailConfig, McpServerDefinition,
+    McpTrustPolicy, ProviderCatalogEntry, RoutingMode, RuntimeMode, TrinityConfig,
+    CONFIG_SCHEMA_VERSION,
 };
 pub use document::{CoreDocument, DocumentTier};
 pub use error::{CoreError, Result};

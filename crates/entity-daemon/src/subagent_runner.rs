@@ -146,14 +146,10 @@ fn build_job_messages(
         system.push_str(&format!("Entity: {}.\n", name));
     }
     system.push_str(&format!(
-        "Capability requirement: {}.\nPreferred provider: {}.\nPreferred tier: {:?}.\n",
+        "Capability requirement: {}.\nPreferred provider: {}.\n",
         job.capability.as_str(),
         selection.provider,
-        selection.tier
     ));
-    if let Some(ref model) = selection.model_hint {
-        system.push_str(&format!("Preferred model: {}.\n", model));
-    }
 
     // Inject constitutional context: use job-supplied context if set,
     // otherwise build the full constitutional docs from disk.

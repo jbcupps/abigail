@@ -41,3 +41,5 @@ cron = "0.15"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+daemon-test-harness = { path = "../daemon-test-harness" }
+reqwest.workspace = true
