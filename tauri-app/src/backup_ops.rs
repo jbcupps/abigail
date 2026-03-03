@@ -23,8 +23,7 @@ impl BackupOperations for TauriBackupOps {
             (config.data_dir.clone(), config.agent_name.clone())
         };
 
-        let entries =
-            abigail_memory::scan_backup_dirs(&data_dir, agent_name.as_deref());
+        let entries = abigail_memory::scan_backup_dirs(&data_dir, agent_name.as_deref());
 
         Ok(entries
             .into_iter()
@@ -41,8 +40,7 @@ impl BackupOperations for TauriBackupOps {
         let db_path = abigail_memory::find_memory_db(&backup_dir)
             .ok_or_else(|| format!("No memory database found in {}", backup_path))?;
 
-        let stats =
-            abigail_memory::preview_backup_db(&db_path).map_err(|e| e.to_string())?;
+        let stats = abigail_memory::preview_backup_db(&db_path).map_err(|e| e.to_string())?;
 
         Ok(BackupPreview {
             db_path: stats.db_path,

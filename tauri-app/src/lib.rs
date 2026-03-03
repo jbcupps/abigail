@@ -502,14 +502,13 @@ pub fn run() {
 
             // Register Backup Management Skill
             let backup_ops = Arc::new(crate::backup_ops::TauriBackupOps::new(handle.clone()));
-            let backup_skill =
-                Arc::new(abigail_skills::backup::BackupManagementSkill::new(backup_ops));
+            let backup_skill = Arc::new(abigail_skills::backup::BackupManagementSkill::new(
+                backup_ops,
+            ));
             state
                 .registry
                 .register(
-                    abigail_skills::manifest::SkillId(
-                        "builtin.backup_management".to_string(),
-                    ),
+                    abigail_skills::manifest::SkillId("builtin.backup_management".to_string()),
                     backup_skill,
                 )
                 .map_err(|e| e.to_string())?;

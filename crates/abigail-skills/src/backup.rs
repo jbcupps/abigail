@@ -194,9 +194,7 @@ impl Skill for BackupManagementSkill {
                     .list_backups()
                     .await
                     .map_err(SkillError::ToolFailed)?;
-                Ok(ToolOutput::success(
-                    serde_json::to_value(backups).unwrap(),
-                ))
+                Ok(ToolOutput::success(serde_json::to_value(backups).unwrap()))
             }
             "preview_backup" => {
                 let path: String = params
@@ -207,9 +205,7 @@ impl Skill for BackupManagementSkill {
                     .preview_backup(&path)
                     .await
                     .map_err(SkillError::ToolFailed)?;
-                Ok(ToolOutput::success(
-                    serde_json::to_value(preview).unwrap(),
-                ))
+                Ok(ToolOutput::success(serde_json::to_value(preview).unwrap()))
             }
             "import_backup" => {
                 let path: String = params
@@ -220,9 +216,7 @@ impl Skill for BackupManagementSkill {
                     .import_backup(&path)
                     .await
                     .map_err(SkillError::ToolFailed)?;
-                Ok(ToolOutput::success(
-                    serde_json::to_value(result).unwrap(),
-                ))
+                Ok(ToolOutput::success(serde_json::to_value(result).unwrap()))
             }
             _ => Err(SkillError::ToolFailed(format!(
                 "Unknown tool: {}",

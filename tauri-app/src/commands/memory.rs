@@ -45,7 +45,12 @@ pub fn optimize_sqlite(state: State<AppState>) -> Result<i64, String> {
 
     let size_before = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
 
-    state.memory.read().map_err(|e| e.to_string())?.vacuum().map_err(|e| e.to_string())?;
+    state
+        .memory
+        .read()
+        .map_err(|e| e.to_string())?
+        .vacuum()
+        .map_err(|e| e.to_string())?;
 
     let size_after = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
 
@@ -56,7 +61,12 @@ pub fn optimize_sqlite(state: State<AppState>) -> Result<i64, String> {
 
 #[tauri::command]
 pub fn reset_memories(state: State<AppState>) -> Result<u64, String> {
-    let deleted = state.memory.read().map_err(|e| e.to_string())?.clear_memories().map_err(|e| e.to_string())?;
+    let deleted = state
+        .memory
+        .read()
+        .map_err(|e| e.to_string())?
+        .clear_memories()
+        .map_err(|e| e.to_string())?;
     tracing::warn!("Reset memories: {} memories deleted", deleted);
     Ok(deleted)
 }

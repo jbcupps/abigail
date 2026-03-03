@@ -282,10 +282,7 @@ pub fn scan_backup_dirs(data_root: &Path, agent_name: Option<&str>) -> Vec<Backu
             for ts_entry in timestamp_dirs {
                 let ts_path = ts_entry.path();
                 let has_db = find_memory_db(&ts_path).is_some();
-                let timestamp = ts_entry
-                    .file_name()
-                    .to_string_lossy()
-                    .to_string();
+                let timestamp = ts_entry.file_name().to_string_lossy().to_string();
 
                 entries.push(BackupEntry {
                     path: ts_path.to_string_lossy().to_string(),

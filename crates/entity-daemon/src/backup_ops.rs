@@ -23,8 +23,7 @@ impl LocalBackupOps {
 #[async_trait]
 impl BackupOperations for LocalBackupOps {
     async fn list_backups(&self) -> Result<Vec<BackupInfo>, String> {
-        let entries =
-            abigail_memory::scan_backup_dirs(&self.data_root, self.agent_name.as_deref());
+        let entries = abigail_memory::scan_backup_dirs(&self.data_root, self.agent_name.as_deref());
 
         Ok(entries
             .into_iter()
@@ -41,8 +40,7 @@ impl BackupOperations for LocalBackupOps {
         let db_path = abigail_memory::find_memory_db(&backup_dir)
             .ok_or_else(|| format!("No memory database found in {}", backup_path))?;
 
-        let stats =
-            abigail_memory::preview_backup_db(&db_path).map_err(|e| e.to_string())?;
+        let stats = abigail_memory::preview_backup_db(&db_path).map_err(|e| e.to_string())?;
 
         Ok(BackupPreview {
             db_path: stats.db_path,
