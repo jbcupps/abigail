@@ -27,20 +27,14 @@ describe("OllamaDrawer", () => {
     vi.restoreAllMocks();
   });
 
-  it("is hidden when not open", () => {
-    render(<OllamaDrawer open={false} onClose={() => {}} />);
+  it("renders the drawer when open", () => {
+    render(<OllamaDrawer onClose={() => {}} />);
     const drawer = screen.getByTestId("ollama-drawer");
-    expect(drawer.className).toContain("-translate-x-full");
+    expect(drawer).toBeInTheDocument();
   });
 
-  it("is visible when open", () => {
-    render(<OllamaDrawer open={true} onClose={() => {}} />);
-    const drawer = screen.getByTestId("ollama-drawer");
-    expect(drawer.className).toContain("translate-x-0");
-  });
-
-  it("calls detect_ollama and list_recommended_models on open", async () => {
-    render(<OllamaDrawer open={true} onClose={() => {}} />);
+  it("calls detect_ollama and list_recommended_models on mount", async () => {
+    render(<OllamaDrawer onClose={() => {}} />);
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("detect_ollama");
@@ -50,7 +44,7 @@ describe("OllamaDrawer", () => {
   });
 
   it("shows installed models when ollama is running", async () => {
-    render(<OllamaDrawer open={true} onClose={() => {}} />);
+    render(<OllamaDrawer onClose={() => {}} />);
 
     await waitFor(() => {
       expect(screen.getByText("Running")).toBeInTheDocument();
@@ -61,7 +55,7 @@ describe("OllamaDrawer", () => {
   it("fires onClose when backdrop is clicked", async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();
-    render(<OllamaDrawer open={true} onClose={onClose} />);
+    render(<OllamaDrawer onClose={onClose} />);
 
     const backdrop = screen.getByTestId("ollama-drawer-backdrop");
     await user.click(backdrop);
@@ -71,7 +65,7 @@ describe("OllamaDrawer", () => {
   it("fires onClose when close button is clicked", async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();
-    render(<OllamaDrawer open={true} onClose={onClose} />);
+    render(<OllamaDrawer onClose={onClose} />);
 
     const closeBtn = screen.getByLabelText("Close drawer");
     await user.click(closeBtn);
@@ -86,7 +80,7 @@ describe("OllamaDrawer", () => {
       return Promise.resolve(null);
     });
 
-    render(<OllamaDrawer open={true} onClose={() => {}} />);
+    render(<OllamaDrawer onClose={() => {}} />);
 
     await waitFor(() => {
       expect(screen.getByText("Not Found")).toBeInTheDocument();
@@ -102,7 +96,7 @@ describe("OllamaDrawer", () => {
       return Promise.resolve(null);
     });
 
-    render(<OllamaDrawer open={true} onClose={() => {}} />);
+    render(<OllamaDrawer onClose={() => {}} />);
 
     await waitFor(() => {
       expect(screen.getByText("Installed")).toBeInTheDocument();

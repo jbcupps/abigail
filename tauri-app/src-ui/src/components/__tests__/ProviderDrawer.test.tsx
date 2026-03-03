@@ -32,21 +32,14 @@ describe("ProviderDrawer", () => {
     vi.restoreAllMocks();
   });
 
-  it("is hidden when not open", () => {
-    render(<ProviderDrawer open={false} onClose={() => {}} />);
+  it("renders the drawer when open", () => {
+    render(<ProviderDrawer onClose={() => {}} />);
     const drawer = screen.getByTestId("provider-drawer");
-    expect(drawer.className).toContain("translate-x-full");
+    expect(drawer).toBeInTheDocument();
   });
 
-  it("is visible when open", () => {
-    render(<ProviderDrawer open={true} onClose={() => {}} />);
-    const drawer = screen.getByTestId("provider-drawer");
-    expect(drawer.className).toContain("translate-x-0");
-    expect(drawer.className).not.toContain("translate-x-full");
-  });
-
-  it("calls get_stored_providers and get_router_status on open", async () => {
-    render(<ProviderDrawer open={true} onClose={() => {}} />);
+  it("calls get_stored_providers and get_router_status on mount", async () => {
+    render(<ProviderDrawer onClose={() => {}} />);
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("get_stored_providers");
@@ -56,7 +49,7 @@ describe("ProviderDrawer", () => {
   });
 
   it("shows API providers with ready badges", async () => {
-    render(<ProviderDrawer open={true} onClose={() => {}} />);
+    render(<ProviderDrawer onClose={() => {}} />);
 
     await waitFor(() => {
       expect(screen.getByText("OpenAI")).toBeInTheDocument();
@@ -67,7 +60,7 @@ describe("ProviderDrawer", () => {
   it("fires onClose when backdrop is clicked", async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();
-    render(<ProviderDrawer open={true} onClose={onClose} />);
+    render(<ProviderDrawer onClose={onClose} />);
 
     const backdrop = screen.getByTestId("provider-drawer-backdrop");
     await user.click(backdrop);
@@ -77,7 +70,7 @@ describe("ProviderDrawer", () => {
   it("fires onClose when close button is clicked", async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();
-    render(<ProviderDrawer open={true} onClose={onClose} />);
+    render(<ProviderDrawer onClose={onClose} />);
 
     const closeBtn = screen.getByLabelText("Close drawer");
     await user.click(closeBtn);
@@ -86,7 +79,7 @@ describe("ProviderDrawer", () => {
 
   it("switches to CLI tab and shows detected tools", async () => {
     const user = userEvent.setup();
-    render(<ProviderDrawer open={true} onClose={() => {}} />);
+    render(<ProviderDrawer onClose={() => {}} />);
 
     const cliTab = await screen.findByRole("tab", { name: /cli tools/i });
     await user.click(cliTab);
@@ -99,7 +92,7 @@ describe("ProviderDrawer", () => {
   });
 
   it("shows active provider indicator", async () => {
-    render(<ProviderDrawer open={true} onClose={() => {}} />);
+    render(<ProviderDrawer onClose={() => {}} />);
 
     await waitFor(() => {
       expect(screen.getByText("openai")).toBeInTheDocument();
