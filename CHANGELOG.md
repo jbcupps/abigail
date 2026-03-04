@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-03-04 00:05 EST: Wire provider/model dropdown to chat — add get_force_override/set_force_override Tauri commands, force_override state, pass model_override through stream_chat_pipeline to route_unified
 - 2026-03-04 07:30 EST: Theme engine — three built-in themes (Modern Clean, Phosphor Terminal, Classic Desktop) with hive-level default + per-entity override, ThemeDrawer on SoulRegistry, Appearance tab in Sanctum, birth flow theme selection, ~250 hardcoded color migrations to semantic tokens, expanded CSS token system (typography, border-radius, semantic colors, overlays)
 - 2026-03-04 05:05 EST: Integrated skills upgrade — backend confirmation enforcement (SkillExecutor), shared secret redaction (redact_secrets in core), strict tool argument validation, normalized tool result semantics (shell/git success=false on failure), manifest-driven daemon secret sync, native skill parity in entity-daemon (all 15 skills), dynamic skill method-aware confirmation defaults, Iggy connection configurable in AppConfig with DaemonManager passthrough, standardized 5-topic bootstrap, and fixed stale integration instructions
 - 2026-03-03 20:55 EST: Cross-platform vault overhaul — replace DPAPI-only encryption with AES-256-GCM envelope + HKDF-scoped key derivation, hybrid unlock (OS keyring / passphrase fallback), rewire SecretsVault/Keyring/encrypted_storage to new crypto core, add shared RESERVED_PROVIDER_KEYS, harden daemon secret namespace validation

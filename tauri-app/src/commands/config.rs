@@ -1,4 +1,4 @@
-use crate::state::AppState;
+use crate::state::{AppState, ForceOverride};
 use abigail_capabilities::cognitive::validation::validate_api_key;
 use abigail_core::{validate_local_llm_url, TrinityConfig};
 use serde::{Deserialize, Serialize};
@@ -138,6 +138,22 @@ pub fn diagnose_routing(
 ) -> Result<abigail_router::RoutingDiagnosis, String> {
     let router = state.router.read().map_err(|e| e.to_string())?;
     Ok(router.diagnose(&message))
+}
+
+#[tauri::command]
+pub fn get_force_override(state: State<AppState>) -> Result<ForceOverride, String> {
+    let fo = state.force_override.read().map_err(|e| e.to_string())?;
+    Ok(fo.clone())
+}
+
+#[tauri::command]
+pub fn set_force_override(
+    state: State<'_, AppState>,
+    force_override: ForceOverride,
+) -> Result<(), String> {
+    let mut fo = state.force_override.write().map_err(|e| e.to_string())?;
+    *fo = force_override;
+    Ok(())
 }
 
 #[tauri::command]

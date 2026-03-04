@@ -337,7 +337,7 @@ async fn rounds_only_returns_final_text_when_no_tools_called() {
     let tools = entity_chat::build_tool_definitions(&registry);
 
     let result =
-        entity_chat::run_tool_use_loop_rounds_only(&router, &executor, &mut messages, &tools)
+        entity_chat::run_tool_use_loop_rounds_only(&router, &executor, &mut messages, &tools, None)
             .await
             .unwrap();
 
