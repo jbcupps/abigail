@@ -71,6 +71,13 @@ pub fn derive_scope_key(root_kek: &[u8; KEY_LEN], scope: &str) -> [u8; KEY_LEN] 
     okm
 }
 
+/// Check whether `data` looks like a vault envelope (starts with the version byte).
+///
+/// This is used to distinguish new AES-256-GCM vault files from legacy DPAPI-encrypted files.
+pub fn is_vault_envelope(data: &[u8]) -> bool {
+    !data.is_empty() && data[0] == ENVELOPE_VERSION
+}
+
 /// Derive a 32-byte key from a passphrase using HKDF-SHA256.
 ///
 /// This is intentionally *not* a slow KDF (Argon2/scrypt) because the primary

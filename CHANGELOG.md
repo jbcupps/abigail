@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-03-04 10:30 EST: Fix crypto bootstrapping crash on fresh install — return signing key directly from generate_master_key to avoid KEK mismatch when OS keyring store fails, add vault format detection in load_master_key to prevent AES-GCM data being fed to DPAPI
 - 2026-03-04 08:40 EST: Fix Windows installer startup failure — bundle WebView2 bootstrapper in NSIS installer, replace silent startup panics with native OS error dialogs (MessageBoxW on Windows) so users see what went wrong instead of the app silently vanishing
 - 2026-03-04 00:05 EST: Wire provider/model dropdown to chat — add get_force_override/set_force_override Tauri commands, force_override state, pass model_override through stream_chat_pipeline to route_unified
 - 2026-03-04 07:30 EST: Theme engine — three built-in themes (Modern Clean, Phosphor Terminal, Classic Desktop) with hive-level default + per-entity override, ThemeDrawer on SoulRegistry, Appearance tab in Sanctum, birth flow theme selection, ~250 hardcoded color migrations to semantic tokens, expanded CSS token system (typography, border-radius, semantic colors, overlays)
