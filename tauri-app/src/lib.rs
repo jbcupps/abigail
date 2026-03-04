@@ -55,6 +55,94 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 use tauri::{Emitter, Manager};
 
+/// Show a native OS error dialog (blocking) so users see startup failures
+/// even when running as a Windows GUI app with no console.
+pub fn show_fatal_error(title: &str, message: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+
+        fn to_wide(s: &str) -> Vec<u16> {
+            OsStr::new(s)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect()
+        }
+
+        let title_w = to_wide(title);
+        let msg_w = to_wide(message);
+
+        // MB_OK | MB_ICONERROR
+        const MB_OK: u32 = 0x0000_0000;
+        const MB_ICONERROR: u32 = 0x0000_0010;
+
+        unsafe {
+            #[link(name = "user32")]
+            extern "system" {
+                fn MessageBoxW(
+                    hwnd: *const (),
+                    text: *const u16,
+                    caption: *const u16,
+                    utype: u32,
+                ) -> i32;
+            }
+            MessageBoxW(
+                std::ptr::null(),
+                msg_w.as_ptr(),
+                title_w.as_ptr(),
+                MB_OK | MB_ICONERROR,
+            );
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // On non-Windows, print to stderr (best effort).
+        eprintln!("[{title}] {message}");
+    }
+}
+
+/// Install a panic hook that shows a native dialog before aborting.
+/// Call this once, early in main(), before any work that might panic.
+pub fn install_panic_dialog_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "Unknown error".to_string()
+        };
+
+        let location = info
+            .location()
+            .map(|loc| {
+                format!(
+                    "\n\nLocation: {}:{}:{}",
+                    loc.file(),
+                    loc.line(),
+                    loc.column()
+                )
+            })
+            .unwrap_or_default();
+
+        let message = format!(
+            "Abigail failed to start:\n\n{payload}{location}\n\n\
+             If this keeps happening, try deleting the data folder at:\n\
+             %LOCALAPPDATA%\\abigail\\Abigail\\\n\
+             and reinstalling."
+        );
+
+        show_fatal_error("Abigail — Startup Error", &message);
+
+        // Also call the default hook so it prints to stderr (useful when
+        // launched from a terminal).
+        default_hook(info);
+    }));
+}
+
 /// Recursively copy a directory (for skill package install).
 pub fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
     std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
@@ -321,6 +409,21 @@ pub async fn rebuild_router_from_handle(handle: &tauri::AppHandle) -> Result<(),
 }
 
 pub fn run() {
+    if let Err(e) = try_run() {
+        show_fatal_error(
+            "Abigail — Startup Error",
+            &format!(
+                "Abigail failed to start:\n\n{e}\n\n\
+             If this keeps happening, try deleting the data folder at:\n\
+             %LOCALAPPDATA%\\abigail\\Abigail\\\n\
+             and reinstalling."
+            ),
+        );
+        std::process::exit(1);
+    }
+}
+
+fn try_run() -> Result<(), String> {
     if probe::should_run() {
         probe::run_and_exit();
     }
@@ -359,9 +462,9 @@ pub fn run() {
         let built = hive
             .build_providers_from_config(&config)
             .await
-            .expect("Failed to build initial providers");
-        IdEgoRouter::from_built_providers(built)
-    });
+            .map_err(|e| format!("Failed to build LLM providers: {e}"))?;
+        Ok::<_, String>(IdEgoRouter::from_built_providers(built))
+    })?;
 
     // Initialize model registry from persisted catalog
     let model_registry = {
@@ -378,8 +481,10 @@ pub fn run() {
     };
 
     let auth_manager = Arc::new(AuthManager::new(secrets.clone()));
-    let identity_manager =
-        Arc::new(IdentityManager::new(hive_data_dir).expect("Failed to init IdentityManager"));
+    let identity_manager = Arc::new(
+        IdentityManager::new(hive_data_dir)
+            .map_err(|e| format!("Failed to init IdentityManager: {e}"))?,
+    );
     let subagent_manager = RwLock::new(SubagentManager::new(Arc::new(router.clone())));
 
     let browser_config = abigail_capabilities::sensory::browser::BrowserCapabilityConfig::default();
@@ -390,13 +495,14 @@ pub fn run() {
         abigail_capabilities::sensory::http_client::HttpClientCapability::new(
             data_dir.join("downloads"),
         )
-        .expect("Failed to init HttpClientCapability"),
+        .map_err(|e| format!("Failed to init HttpClientCapability: {e}"))?,
     ));
 
     // Open shared MemoryStore for chat persistence and memory queries.
     // Wrapped in RwLock so load_agent can swap to the per-entity DB.
     let memory = Arc::new(std::sync::RwLock::new(
-        MemoryStore::open_with_config(&config).expect("Failed to open MemoryStore"),
+        MemoryStore::open_with_config(&config)
+            .map_err(|e| format!("Failed to open MemoryStore: {e}"))?,
     ));
     let agentic_runtime = Arc::new(agentic_runtime::AgenticRuntime::new(&data_dir));
     #[allow(deprecated)]
@@ -405,11 +511,16 @@ pub fn run() {
     // Open job queue database for async task management.
     let job_queue = {
         let job_db_path = data_dir.join("jobs.db");
-        let conn =
-            rusqlite::Connection::open(&job_db_path).expect("Failed to open job queue database");
-        conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+        let conn = rusqlite::Connection::open(&job_db_path).map_err(|e| {
+            format!(
+                "Failed to open job queue database at {}: {e}",
+                job_db_path.display()
+            )
+        })?;
+        conn.execute_batch("PRAGMA journal_mode=WAL;")
+            .map_err(|e| format!("Failed to set WAL mode on job queue: {e}"))?;
         conn.execute_batch(abigail_queue::MIGRATION_V3_JOB_QUEUE)
-            .unwrap();
+            .map_err(|e| format!("Failed to run job queue migrations: {e}"))?;
         for stmt in abigail_queue::MIGRATION_V4_ORCHESTRATION.split(';') {
             let trimmed = stmt.trim();
             if !trimmed.is_empty() {
@@ -1074,7 +1185,7 @@ pub fn run() {
             set_runtime_mode
         ])
         .build(tauri::generate_context!())
-        .expect("error building tauri app")
+        .map_err(|e| format!("Failed to build Tauri app: {e}"))?
         .run(|app_handle, event| {
             if let tauri::RunEvent::Exit = event {
                 // Gracefully shut down managed Ollama process
@@ -1089,4 +1200,6 @@ pub fn run() {
                 });
             }
         });
+
+    Ok(())
 }
