@@ -82,8 +82,7 @@ mod tests {
             SecretsVault::open_with_provider(tmp.clone(), "secrets", unlock.clone()).unwrap();
         update_provider_key(&mut vault, "openai", "sk-test-key-123").unwrap();
 
-        let loaded =
-            SecretsVault::open_with_provider(tmp.clone(), "secrets", unlock).unwrap();
+        let loaded = SecretsVault::open_with_provider(tmp.clone(), "secrets", unlock).unwrap();
         assert_eq!(loaded.get_secret("openai"), Some("sk-test-key-123"));
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -102,8 +101,7 @@ mod tests {
         update_provider_key(&mut vault, "openai", "sk-old-key").unwrap();
         update_provider_key(&mut vault, "openai", "sk-new-key").unwrap();
 
-        let loaded =
-            SecretsVault::open_with_provider(tmp.clone(), "secrets", unlock).unwrap();
+        let loaded = SecretsVault::open_with_provider(tmp.clone(), "secrets", unlock).unwrap();
         assert_eq!(loaded.get_secret("openai"), Some("sk-new-key"));
 
         let _ = std::fs::remove_dir_all(&tmp);

@@ -247,11 +247,7 @@ pub async fn chat_stream(
         });
 
         let pipeline_fut = entity_chat::stream_chat_pipeline(
-            &router,
-            &executor,
-            messages,
-            tools,
-            tx,
+            &router, &executor, messages, tools, tx,
             None, // model_override: daemon receives from ChatRequest when client supports it
         );
         tokio::pin!(pipeline_fut);
@@ -481,11 +477,18 @@ pub async fn execute_tool(
     use abigail_skills::skill::ToolParams;
 
     let skill_id = SkillId(body.skill_id);
-    // Build ToolParams from the JSON value
+    let confirmed = body
+        .params
+        .get("mentor_confirmed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     let params = if let Some(obj) = body.params.as_object() {
         let mut tp = ToolParams::new();
         for (k, v) in obj {
-            tp.values.insert(k.clone(), v.clone());
+            if k != "mentor_confirmed" {
+                tp.values.insert(k.clone(), v.clone());
+            }
         }
         tp
     } else {
@@ -494,7 +497,7 @@ pub async fn execute_tool(
 
     match state
         .executor
-        .execute(&skill_id, &body.tool_name, params)
+        .execute_with_confirmation(&skill_id, &body.tool_name, params, confirmed)
         .await
     {
         Ok(output) => Json(ApiEnvelope::success(ToolExecResponse {
@@ -763,13 +766,18 @@ pub async fn topic_results(
 }
 
 /// GET /v1/topics/:topic/watch
+///
+/// SSE endpoint that streams job events filtered by topic.
+/// Each connection gets an ephemeral consumer group (short suffix, not full UUID)
+/// so Iggy-backed brokers don't accumulate many long-lived groups.
 pub async fn watch_topic(
     State(state): State<EntityDaemonState>,
     Path(topic): Path<String>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let (tx, rx) = tokio::sync::mpsc::channel::<Event>(64);
     let broker = state.stream_broker.clone();
-    let group_name = format!("topic-watch-{}-{}", topic, uuid::Uuid::new_v4());
+    let short_id = &uuid::Uuid::new_v4().to_string()[..8];
+    let group_name = format!("watch-{}-{}", topic, short_id);
     let topic_filter = topic.clone();
 
     tokio::spawn(async move {

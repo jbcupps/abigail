@@ -33,8 +33,8 @@ pub use instruction_registry::{InstructionRegistry, PromptInjectionMode};
 pub use manifest::*;
 pub use policy::{build_allowlist_payload, SkillExecutionPolicy};
 pub use preloaded::{
-    build_preloaded_skills, preloaded_integration_skills, PreloadedSkillAuth,
-    PRELOADED_SKILLS_VERSION,
+    build_preloaded_skills, preloaded_integration_skills, preloaded_secret_keys,
+    PreloadedSkillAuth, PRELOADED_SKILLS_VERSION,
 };
 pub use prelude::*;
 pub use protocol::*;

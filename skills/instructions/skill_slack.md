@@ -9,7 +9,7 @@ You have access to Slack tools for sending messages and listing channels.
 
 ## Authentication
 
-Requires a Slack Bot User OAuth Token stored as `slack_bot_token` in the secrets vault. Before using these tools, call `check_integration_status` to verify the token is configured. If not configured, instruct the user to create a Slack App at https://api.slack.com/apps, install it to their workspace, and store the Bot Token (xoxb-...) with `store_secret`.
+Requires a Slack Bot User OAuth Token stored as `slack_bot_token` in the secrets vault. Before using these tools, call `list_secrets` from `builtin.hive_management` to verify the token is configured. If not configured, instruct the user to create a Slack App at https://api.slack.com/apps, install it to their workspace, and store the Bot Token (xoxb-...) with `store_secret` from `builtin.hive_management`.
 
 ## Usage Guidelines
 

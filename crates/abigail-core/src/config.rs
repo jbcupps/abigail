@@ -465,6 +465,12 @@ pub struct AppConfig {
     /// URL of the entity-daemon when in Daemon mode.
     #[serde(default = "default_entity_daemon_url")]
     pub entity_daemon_url: String,
+
+    /// Optional Iggy connection string for persistent event streaming.
+    /// When set, managed daemons receive `--iggy-connection` at startup.
+    /// Example: `iggy://iggy:iggy@127.0.0.1:8090`
+    #[serde(default)]
+    pub iggy_connection: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -527,6 +533,7 @@ impl AppConfig {
             runtime_mode: RuntimeMode::default(),
             hive_daemon_url: default_hive_daemon_url(),
             entity_daemon_url: default_entity_daemon_url(),
+            iggy_connection: None,
         }
     }
 
@@ -879,6 +886,7 @@ mod tests {
             runtime_mode: RuntimeMode::default(),
             hive_daemon_url: default_hive_daemon_url(),
             entity_daemon_url: default_entity_daemon_url(),
+            iggy_connection: None,
         }
     }
 

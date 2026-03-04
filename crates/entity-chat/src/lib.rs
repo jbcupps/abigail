@@ -991,8 +991,14 @@ pub async fn stream_chat_pipeline(
 
     // Chat never uses Id; always Ego path. Tool-use loop when tools present.
     if !tools.is_empty() {
-        let intermediate =
-            run_tool_use_loop_rounds_only(router, executor, &mut messages, &tools, model_override.clone()).await?;
+        let intermediate = run_tool_use_loop_rounds_only(
+            router,
+            executor,
+            &mut messages,
+            &tools,
+            model_override.clone(),
+        )
+        .await?;
         tool_calls_made = intermediate.tool_calls_made;
         if let Some(final_text) = intermediate.final_text {
             drop(tx);
@@ -1063,7 +1069,6 @@ async fn execute_single_tool_call(
         );
     };
 
-    // Parse the arguments JSON into ToolParams.
     let params = match serde_json::from_str::<serde_json::Value>(&tc.arguments) {
         Ok(serde_json::Value::Object(obj)) => {
             let mut tp = ToolParams::new();
@@ -1078,32 +1083,50 @@ async fn execute_single_tool_call(
             );
             tp
         }
-        Ok(other) => {
-            tracing::warn!(
-                "Tool {}::{} arguments parsed as non-object JSON (type: {}), using empty params. Raw: {}",
+        Ok(serde_json::Value::Null) => {
+            tracing::debug!(
+                "Tool {}::{} arguments are null, using empty params",
                 skill_id_str,
-                tool_name,
-                match &other {
-                    serde_json::Value::Null => "null",
-                    serde_json::Value::Bool(_) => "bool",
-                    serde_json::Value::Number(_) => "number",
-                    serde_json::Value::String(_) => "string",
-                    serde_json::Value::Array(_) => "array",
-                    _ => "unknown",
-                },
-                &tc.arguments.chars().take(200).collect::<String>()
+                tool_name
             );
             ToolParams::new()
         }
-        Err(e) => {
-            tracing::warn!(
-                "Tool {}::{} arguments JSON parse failed: {}. Raw (first 200 chars): {}",
-                skill_id_str,
-                tool_name,
-                e,
-                &tc.arguments.chars().take(200).collect::<String>()
+        Ok(other) => {
+            let type_name = match &other {
+                serde_json::Value::Bool(_) => "bool",
+                serde_json::Value::Number(_) => "number",
+                serde_json::Value::String(_) => "string",
+                serde_json::Value::Array(_) => "array",
+                _ => "unknown",
+            };
+            let err_msg = format!(
+                "Invalid arguments for {}::{}: expected a JSON object but got {}. Provide arguments as a JSON object with named parameters.",
+                skill_id_str, tool_name, type_name
             );
-            ToolParams::new()
+            tracing::warn!("{}", err_msg);
+            return (
+                serde_json::json!({"error": err_msg}).to_string(),
+                ToolCallRecord {
+                    skill_id: skill_id_str,
+                    tool_name,
+                    success: false,
+                },
+            );
+        }
+        Err(e) => {
+            let err_msg = format!(
+                "Malformed JSON arguments for {}::{}: {}. Provide arguments as a valid JSON object.",
+                skill_id_str, tool_name, e
+            );
+            tracing::warn!("{}", err_msg);
+            return (
+                serde_json::json!({"error": err_msg}).to_string(),
+                ToolCallRecord {
+                    skill_id: skill_id_str,
+                    tool_name,
+                    success: false,
+                },
+            );
         }
     };
 
@@ -1432,11 +1455,14 @@ mod tests {
         };
         let (json, record) = execute_single_tool_call(&executor, &tc).await;
         assert!(
-            record.success,
-            "malformed args should default to empty params, not fail"
+            !record.success,
+            "malformed args should return an error, not silently succeed"
         );
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed["success"], true);
+        assert!(
+            parsed.get("error").is_some(),
+            "should contain error key for malformed args"
+        );
     }
 
     #[tokio::test]
