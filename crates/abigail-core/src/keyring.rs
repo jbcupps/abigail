@@ -1,11 +1,15 @@
 use crate::document::DocumentTier;
-use crate::dpapi::{dpapi_decrypt, dpapi_encrypt};
 use crate::error::{CoreError, Result};
+use crate::vault::crypto;
+use crate::vault::unlock::{HybridUnlockProvider, UnlockProvider};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier as DalekVerifier, VerifyingKey};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+const KEYRING_SCOPE: &str = "keyring:identity";
 
 #[derive(Serialize, Deserialize)]
 struct StoredKeysV2 {
@@ -21,6 +25,7 @@ struct StoredKeysV1 {
 pub struct Keyring {
     mentor_keypair: SigningKey,
     storage_path: PathBuf,
+    unlock: Arc<dyn UnlockProvider>,
 }
 
 impl Keyring {
@@ -29,35 +34,91 @@ impl Keyring {
         Ok(Self {
             mentor_keypair,
             storage_path,
+            unlock: Arc::new(HybridUnlockProvider::new()),
         })
     }
 
     pub fn load(storage_path: PathBuf) -> Result<Self> {
-        let keys_file = storage_path.join("keys.bin");
-        let encrypted = std::fs::read(&keys_file)?;
-        let decrypted = dpapi_decrypt(&encrypted)?;
-        if let Ok(stored) = serde_json::from_slice::<StoredKeysV2>(&decrypted) {
-            let mentor_slice: [u8; 32] = stored
-                .mentor_secret
-                .as_slice()
-                .try_into()
-                .map_err(|_| CoreError::Crypto("Invalid mentor key length".into()))?;
-            return Ok(Self {
-                mentor_keypair: SigningKey::from_bytes(&mentor_slice),
-                storage_path,
-            });
+        let keys_file = storage_path.join("keys.vault");
+        let unlock: Arc<dyn UnlockProvider> = Arc::new(HybridUnlockProvider::new());
+
+        if keys_file.exists() {
+            return Self::load_new_format(&keys_file, storage_path, unlock);
         }
-        let stored: StoredKeysV1 =
+
+        // Fallback: try legacy DPAPI keys.bin
+        let legacy_file = storage_path.join("keys.bin");
+        if legacy_file.exists() {
+            return Self::load_legacy(&legacy_file, storage_path, unlock);
+        }
+
+        Err(CoreError::Keyring(format!(
+            "No keyring found at {} (tried keys.vault and keys.bin)",
+            storage_path.display()
+        )))
+    }
+
+    fn load_new_format(
+        keys_file: &Path,
+        storage_path: PathBuf,
+        unlock: Arc<dyn UnlockProvider>,
+    ) -> Result<Self> {
+        let root_kek = unlock.root_kek()?;
+        let dek = crypto::derive_scope_key(&root_kek, KEYRING_SCOPE);
+        let envelope = std::fs::read(keys_file)?;
+        let decrypted = crypto::open(&dek, &envelope)?;
+
+        let stored: StoredKeysV2 =
             serde_json::from_slice(&decrypted).map_err(|e| CoreError::Keyring(e.to_string()))?;
         let mentor_slice: [u8; 32] = stored
             .mentor_secret
             .as_slice()
             .try_into()
             .map_err(|_| CoreError::Crypto("Invalid mentor key length".into()))?;
+
         Ok(Self {
             mentor_keypair: SigningKey::from_bytes(&mentor_slice),
             storage_path,
+            unlock,
         })
+    }
+
+    fn load_legacy(
+        legacy_file: &Path,
+        storage_path: PathBuf,
+        unlock: Arc<dyn UnlockProvider>,
+    ) -> Result<Self> {
+        use crate::dpapi::dpapi_decrypt;
+        let encrypted = std::fs::read(legacy_file)?;
+        let decrypted = dpapi_decrypt(&encrypted)?;
+
+        let mentor_bytes = if let Ok(stored) = serde_json::from_slice::<StoredKeysV2>(&decrypted) {
+            stored.mentor_secret
+        } else {
+            let stored: StoredKeysV1 = serde_json::from_slice(&decrypted)
+                .map_err(|e| CoreError::Keyring(e.to_string()))?;
+            stored.mentor_secret
+        };
+
+        let mentor_slice: [u8; 32] = mentor_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| CoreError::Crypto("Invalid mentor key length".into()))?;
+
+        let keyring = Self {
+            mentor_keypair: SigningKey::from_bytes(&mentor_slice),
+            storage_path,
+            unlock,
+        };
+
+        // Auto-upgrade: save in new format so legacy file is no longer needed
+        if let Err(e) = keyring.save() {
+            tracing::warn!("Could not auto-upgrade keyring to new format: {}", e);
+        } else {
+            tracing::info!("Keyring auto-upgraded from legacy keys.bin to keys.vault");
+        }
+
+        Ok(keyring)
     }
 
     pub fn save(&self) -> Result<()> {
@@ -65,10 +126,13 @@ impl Keyring {
             mentor_secret: self.mentor_keypair.to_bytes().to_vec(),
         };
         let serialized = serde_json::to_vec(&stored)?;
-        let encrypted = dpapi_encrypt(&serialized)?;
-        let keys_file = self.storage_path.join("keys.bin");
+        let root_kek = self.unlock.root_kek()?;
+        let dek = crypto::derive_scope_key(&root_kek, KEYRING_SCOPE);
+        let envelope = crypto::seal(&dek, &serialized)?;
+
+        let keys_file = self.storage_path.join("keys.vault");
         std::fs::create_dir_all(&self.storage_path)?;
-        std::fs::write(keys_file, encrypted)?;
+        std::fs::write(keys_file, envelope)?;
         Ok(())
     }
 
@@ -83,11 +147,17 @@ impl Keyring {
 
 impl Keyring {
     pub fn encrypt_bytes(data: &[u8]) -> Result<Vec<u8>> {
-        dpapi_encrypt(data)
+        let unlock = HybridUnlockProvider::new();
+        let root_kek = unlock.root_kek()?;
+        let dek = crypto::derive_scope_key(&root_kek, "keyring:encrypt");
+        crypto::seal(&dek, data)
     }
 
     pub fn decrypt_bytes(data: &[u8]) -> Result<Vec<u8>> {
-        dpapi_decrypt(data)
+        let unlock = HybridUnlockProvider::new();
+        let root_kek = unlock.root_kek()?;
+        let dek = crypto::derive_scope_key(&root_kek, "keyring:encrypt");
+        crypto::open(&dek, data)
     }
 }
 
@@ -103,19 +173,42 @@ pub struct MasterKeyResult {
 pub fn generate_master_key(data_dir: &Path) -> Result<MasterKeyResult> {
     let signing_key = SigningKey::generate(&mut OsRng);
     std::fs::create_dir_all(data_dir)?;
+
     let master_key_path = data_dir.join("master.key");
     let stored = MasterKeyStored {
         secret: signing_key.to_bytes().to_vec(),
     };
     let serialized = serde_json::to_vec(&stored)?;
-    let encrypted = dpapi_encrypt(&serialized)?;
-    std::fs::write(&master_key_path, encrypted)?;
+
+    let unlock = HybridUnlockProvider::new();
+    let root_kek = unlock.root_kek()?;
+    let dek = crypto::derive_scope_key(&root_kek, "keyring:master");
+    let envelope = crypto::seal(&dek, &serialized)?;
+    std::fs::write(&master_key_path, envelope)?;
     Ok(MasterKeyResult { master_key_path })
 }
 
 pub fn load_master_key(path: &Path) -> Result<SigningKey> {
-    let encrypted = std::fs::read(path)?;
-    let decrypted = dpapi_decrypt(&encrypted)?;
+    let data = std::fs::read(path)?;
+
+    // Try new envelope format first
+    let unlock = HybridUnlockProvider::new();
+    if let Ok(root_kek) = unlock.root_kek() {
+        let dek = crypto::derive_scope_key(&root_kek, "keyring:master");
+        if let Ok(decrypted) = crypto::open(&dek, &data) {
+            let stored: MasterKeyStored = serde_json::from_slice(&decrypted)
+                .map_err(|e| CoreError::Keyring(e.to_string()))?;
+            let key_bytes: [u8; 32] = stored
+                .secret
+                .as_slice()
+                .try_into()
+                .map_err(|_| CoreError::Crypto("Invalid master key length".into()))?;
+            return Ok(SigningKey::from_bytes(&key_bytes));
+        }
+    }
+
+    // Fallback: try legacy DPAPI format
+    let decrypted = crate::dpapi::dpapi_decrypt(&data)?;
     let stored: MasterKeyStored =
         serde_json::from_slice(&decrypted).map_err(|e| CoreError::Keyring(e.to_string()))?;
     let key_bytes: [u8; 32] = stored

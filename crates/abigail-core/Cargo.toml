@@ -18,6 +18,10 @@ tokio.workspace = true
 directories = "6.0"
 url = "2.5"
 reqwest.workspace = true
+aes-gcm.workspace = true
+sha2.workspace = true
+hkdf = "0.12"
+keyring = { version = "3.6", features = ["sync-secret-service", "crypto-rust"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.52", features = [

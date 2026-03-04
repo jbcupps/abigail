@@ -9,14 +9,7 @@ use abigail_skills::{
 use std::collections::HashMap;
 use tauri::State;
 
-pub const RESERVED_PROVIDER_KEYS: &[&str] = &[
-    "openai",
-    "anthropic",
-    "xai",
-    "google",
-    "tavily",
-    "perplexity",
-];
+pub use abigail_core::RESERVED_PROVIDER_KEYS;
 
 fn refresh_skill_policy(
     state: &State<'_, AppState>,

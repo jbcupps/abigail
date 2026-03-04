@@ -1,16 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import ApiKeyModal from "./ApiKeyModal";
-
-interface CliDetection {
-  provider_name: string;
-  binary: string;
-  on_path: boolean;
-  is_official: boolean;
-  is_authenticated: boolean;
-  version: string | null;
-  auth_hint: string | null;
-}
+import type { CliDetection } from "../types/llm";
 
 interface RouterStatus {
   routing_mode: string;
@@ -18,7 +9,6 @@ interface RouterStatus {
 }
 
 interface ProviderDrawerProps {
-  open: boolean;
   onClose: () => void;
 }
 
@@ -31,7 +21,7 @@ const API_PROVIDERS = [
   { id: "xai", label: "X.AI (Grok)" },
 ];
 
-export default function ProviderDrawer({ open, onClose }: ProviderDrawerProps) {
+export default function ProviderDrawer({ onClose }: ProviderDrawerProps) {
   const [tab, setTab] = useState<Tab>("api");
   const [storedProviders, setStoredProviders] = useState<string[]>([]);
   const [cliDetections, setCliDetections] = useState<CliDetection[]>([]);
@@ -41,12 +31,10 @@ export default function ProviderDrawer({ open, onClose }: ProviderDrawerProps) {
   const [activating, setActivating] = useState<string | null>(null);
   const [error, setError] = useState("");
 
-  // Refresh data when drawer opens
+  // Fetch data on mount (component is conditionally rendered)
   useEffect(() => {
-    if (open) {
-      refreshAll();
-    }
-  }, [open]);
+    refreshAll();
+  }, []);
 
   const refreshAll = async () => {
     setError("");
@@ -100,7 +88,7 @@ export default function ProviderDrawer({ open, onClose }: ProviderDrawerProps) {
 
   const isActiveProvider = (name: string) => {
     if (!routerStatus?.ego_provider) return false;
-    return routerStatus.ego_provider.toLowerCase().includes(name.toLowerCase());
+    return routerStatus.ego_provider.toLowerCase() === name.toLowerCase();
   };
 
   const onPathCli = cliDetections.filter((d) => d.on_path);
@@ -108,19 +96,15 @@ export default function ProviderDrawer({ open, onClose }: ProviderDrawerProps) {
   return (
     <>
       {/* Backdrop */}
-      {open && (
-        <div
-          className="fixed inset-0 bg-black/50 z-40 transition-opacity"
-          onClick={onClose}
-          data-testid="provider-drawer-backdrop"
-        />
-      )}
+      <div
+        className="fixed inset-0 bg-black/50 z-40 transition-opacity"
+        onClick={onClose}
+        data-testid="provider-drawer-backdrop"
+      />
 
       {/* Drawer */}
       <div
-        className={`fixed top-0 right-0 h-full w-[420px] max-w-[90vw] bg-theme-bg border-l border-theme-border z-50 flex flex-col transform transition-transform duration-200 ${
-          open ? "translate-x-0" : "translate-x-full"
-        }`}
+        className="fixed top-0 right-0 h-full w-[420px] max-w-[90vw] bg-theme-bg border-l border-theme-border z-50 flex flex-col"
         data-testid="provider-drawer"
       >
         {/* Header */}
@@ -246,9 +230,7 @@ export default function ProviderDrawer({ open, onClose }: ProviderDrawerProps) {
                         className={`px-4 py-3 border rounded ${
                           active
                             ? "border-green-600 bg-green-950/20"
-                            : ready
-                              ? "border-theme-border-dim bg-theme-bg-inset"
-                              : "border-theme-border-dim bg-theme-bg-inset"
+                            : "border-theme-border-dim bg-theme-bg-inset"
                         }`}
                       >
                         <div className="flex items-center justify-between">

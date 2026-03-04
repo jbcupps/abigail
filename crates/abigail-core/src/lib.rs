@@ -34,8 +34,11 @@ pub use keyring::{
     ExternalKeypairResult, Keyring, MasterKeyResult, SignatureMetadata,
 };
 pub use local_llm_url::validate_local_llm_url;
+pub use ops::{is_reserved_provider_key, RESERVED_PROVIDER_KEYS};
 pub use sao_bridge::{AgentState, SaoBridgeClient, SaoBridgeError};
-pub use secrets::SecretsVault;
+pub use secrets::{test_vault, SecretsVault};
 pub use structured_failure::StructuredFailure;
-pub use vault::{ExternalVault, ReadOnlyFileVault};
+pub use vault::external::{ExternalVault, ReadOnlyFileVault};
+pub use vault::scoped::{ScopedVault, VaultScope};
+pub use vault::unlock::{HybridUnlockProvider, PassphraseUnlockProvider, UnlockProvider};
 pub use verifier::{write_sig_file, Verifier};

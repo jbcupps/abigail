@@ -1,58 +1,33 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
-
-interface OllamaDetection {
-  status: "running" | "installed" | "not_found";
-  path: string | null;
-}
-
-interface RecommendedModel {
-  name: string;
-  label: string;
-  size_bytes: number;
-  description: string;
-  recommended: boolean;
-}
-
-interface InstalledModel {
-  name: string;
-  size: number;
-  modified_at: string;
-}
-
-interface OllamaInstallProgress {
-  step: string;
-  written?: number;
-  total?: number;
-  message: string;
-}
-
-interface OllamaModelProgress {
-  model: string;
-  completed?: number;
-  total?: number;
-  status: string;
-}
+import type {
+  OllamaDetection,
+  RecommendedModel,
+  InstalledModel,
+  OllamaInstallProgress,
+  OllamaModelProgress,
+} from "../types/llm";
+import { formatBytes } from "../types/llm";
 
 interface OllamaDrawerProps {
-  open: boolean;
   onClose: () => void;
 }
 
-export default function OllamaDrawer({ open, onClose }: OllamaDrawerProps) {
+export default function OllamaDrawer({ onClose }: OllamaDrawerProps) {
   const [ollama, setOllama] = useState<OllamaDetection | null>(null);
   const [installedModels, setInstalledModels] = useState<InstalledModel[]>([]);
   const [recommendedModels, setRecommendedModels] = useState<RecommendedModel[]>([]);
   const [activeModel, setActiveModel] = useState("");
   const [installing, setInstalling] = useState(false);
   const [installProgress, setInstallProgress] = useState<OllamaInstallProgress | null>(null);
-  const [pulling, setPulling] = useState(false);
   const [pullingModel, setPullingModel] = useState("");
   const [modelProgress, setModelProgress] = useState<OllamaModelProgress | null>(null);
   const [customModel, setCustomModel] = useState("");
   const [error, setError] = useState("");
   const [starting, setStarting] = useState(false);
+
+  const pulling = pullingModel !== "";
 
   // Event listeners for progress
   useEffect(() => {
@@ -60,13 +35,21 @@ export default function OllamaDrawer({ open, onClose }: OllamaDrawerProps) {
     let unlistenModel: (() => void) | null = null;
     let cancelled = false;
 
-    listen<OllamaInstallProgress>("ollama-install-progress", (event) => {
-      if (!cancelled) setInstallProgress(event.payload);
-    }).then((fn) => { unlistenInstall = fn; }).catch(() => {});
+    (async () => {
+      try {
+        const fn = await listen<OllamaInstallProgress>("ollama-install-progress", (event) => {
+          if (!cancelled) setInstallProgress(event.payload);
+        });
+        if (cancelled) { fn(); } else { unlistenInstall = fn; }
+      } catch { /* listener setup failed */ }
 
-    listen<OllamaModelProgress>("ollama-model-progress", (event) => {
-      if (!cancelled) setModelProgress(event.payload);
-    }).then((fn) => { unlistenModel = fn; }).catch(() => {});
+      try {
+        const fn = await listen<OllamaModelProgress>("ollama-model-progress", (event) => {
+          if (!cancelled) setModelProgress(event.payload);
+        });
+        if (cancelled) { fn(); } else { unlistenModel = fn; }
+      } catch { /* listener setup failed */ }
+    })();
 
     return () => {
       cancelled = true;
@@ -75,12 +58,10 @@ export default function OllamaDrawer({ open, onClose }: OllamaDrawerProps) {
     };
   }, []);
 
-  // Fetch status when drawer opens
+  // Fetch status on mount (component is conditionally rendered)
   useEffect(() => {
-    if (open) {
-      refreshAll();
-    }
-  }, [open]);
+    refreshAll();
+  }, []);
 
   const refreshAll = async () => {
     setError("");
@@ -120,6 +101,7 @@ export default function OllamaDrawer({ open, onClose }: OllamaDrawerProps) {
       setError(String(e));
     } finally {
       setInstalling(false);
+      setInstallProgress(null);
     }
   };
 
@@ -146,7 +128,6 @@ export default function OllamaDrawer({ open, onClose }: OllamaDrawerProps) {
   };
 
   const handlePullModel = async (modelName: string) => {
-    setPulling(true);
     setPullingModel(modelName);
     setModelProgress({ model: modelName, status: "starting" });
     setError("");
@@ -156,28 +137,20 @@ export default function OllamaDrawer({ open, onClose }: OllamaDrawerProps) {
     } catch (e) {
       setError(String(e));
     } finally {
-      setPulling(false);
       setPullingModel("");
+      setModelProgress(null);
     }
   };
 
   const handlePullCustom = async () => {
     const name = customModel.trim();
     if (!name) return;
-    await handlePullModel(name);
-    setCustomModel("");
-  };
-
-  const formatBytes = (value: number) => {
-    if (value <= 0) return "0 B";
-    const units = ["B", "KB", "MB", "GB"];
-    let size = value;
-    let unit = 0;
-    while (size >= 1024 && unit < units.length - 1) {
-      size /= 1024;
-      unit += 1;
+    try {
+      await handlePullModel(name);
+      setCustomModel("");
+    } catch {
+      // Keep the input value on failure so the user can retry
     }
-    return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
   };
 
   const isModelActive = (name: string) =>
@@ -200,19 +173,15 @@ export default function OllamaDrawer({ open, onClose }: OllamaDrawerProps) {
   return (
     <>
       {/* Backdrop */}
-      {open && (
-        <div
-          className="fixed inset-0 bg-black/50 z-40 transition-opacity"
-          onClick={onClose}
-          data-testid="ollama-drawer-backdrop"
-        />
-      )}
+      <div
+        className="fixed inset-0 bg-black/50 z-40 transition-opacity"
+        onClick={onClose}
+        data-testid="ollama-drawer-backdrop"
+      />
 
       {/* Drawer */}
       <div
-        className={`fixed top-0 left-0 h-full w-[420px] max-w-[90vw] bg-theme-bg border-r border-theme-border z-50 flex flex-col transform transition-transform duration-200 ${
-          open ? "translate-x-0" : "-translate-x-full"
-        }`}
+        className="fixed top-0 left-0 h-full w-[420px] max-w-[90vw] bg-theme-bg border-r border-theme-border z-50 flex flex-col"
         data-testid="ollama-drawer"
       >
         {/* Header */}
@@ -281,7 +250,7 @@ export default function OllamaDrawer({ open, onClose }: OllamaDrawerProps) {
                         <div className="h-2 bg-theme-primary rounded" style={{ width: `${installPercent}%` }} />
                       </div>
                       <p className="text-xs text-theme-text-dim mt-1">
-                        {installPercent}% ({formatBytes(installProgress?.written ?? 0)} / {formatBytes(installProgress?.total ?? 0)})
+                        {installPercent}% ({formatBytes(installProgress?.written)} / {formatBytes(installProgress?.total)})
                       </p>
                     </div>
                   )}
@@ -385,7 +354,7 @@ export default function OllamaDrawer({ open, onClose }: OllamaDrawerProps) {
                         onClick={() => handlePullModel(m.name)}
                         disabled={pulling}
                       >
-                        {pulling && pullingModel === m.name ? "Pulling..." : "Pull"}
+                        {pullingModel === m.name ? "Pulling..." : "Pull"}
                       </button>
                     </div>
                   </div>
@@ -406,7 +375,7 @@ export default function OllamaDrawer({ open, onClose }: OllamaDrawerProps) {
                     <div className="h-2 bg-theme-primary rounded" style={{ width: `${modelPercent}%` }} />
                   </div>
                   <p className="text-xs text-theme-text-dim mt-1">
-                    {modelPercent}% ({formatBytes(modelProgress?.completed ?? 0)} / {formatBytes(modelProgress?.total ?? 0)})
+                    {modelPercent}% ({formatBytes(modelProgress?.completed)} / {formatBytes(modelProgress?.total)})
                   </p>
                 </div>
               )}
