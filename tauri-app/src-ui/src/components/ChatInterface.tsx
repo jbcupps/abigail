@@ -60,7 +60,6 @@ interface RouterStatus {
   ego_provider: string | null;
   superego_configured: boolean;
   routing_mode: string;
-  council_providers?: number;
 }
 
 interface OllamaStatus {
@@ -69,8 +68,6 @@ interface OllamaStatus {
   port: number;
   model_ready: boolean;
 }
-
-type ConfigStep = "menu" | "ollama" | "lmstudio" | "openai" | "claude-cli" | "gemini-cli" | "codex-cli" | "grok-cli" | null;
 
 interface ChatInterfaceProps {
   initialSession?: ChatSessionSnapshot | null;
@@ -110,17 +107,11 @@ export default function ChatInterface({
   const [loading, setLoading] = useState(false);
   const [interrupting, setInterrupting] = useState(false);
   const [routerStatus, setRouterStatus] = useState<RouterStatus | null>(null);
-  const [configStep, setConfigStep] = useState<ConfigStep>(null);
-  const [configInput, setConfigInput] = useState("");
-  const [configError, setConfigError] = useState("");
   const [missingSecrets, setMissingSecrets] = useState<MissingSkillSecret[]>([]);
   const [activeSecret, setActiveSecret] = useState<MissingSkillSecret | null>(null);
   const [chatStatus, setChatStatus] = useState<string | null>(null);
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
-  const [lmStudioStatus, setLmStudioStatus] = useState<boolean>(false);
   const [storedProviders, setStoredProviders] = useState<string[]>([]);
-  const [cliServerStatus, setCliServerStatus] = useState<{ running: boolean, port?: number, token?: string }>({ running: false });
-  const [cliPortInput, setCliPortInput] = useState("8080");
   const [showRoutingDetails, setShowRoutingDetails] = useState(false);
   const [memoryDisclosureEnabled, setMemoryDisclosureEnabled] = useState(true);
   const [selectedModel, setSelectedModel] = useState<string>("");
@@ -269,12 +260,6 @@ export default function ChatInterface({
       .then((status) => {
         if (!mountedRef.current) return;
         setRouterStatus(status);
-        // Show config menu if no LLM configured
-        if (!status.ego_configured && status.id_provider === "candle_stub") {
-          setConfigStep("menu");
-        } else {
-          setConfigStep(null);
-        }
       })
       .catch((err) => {
         console.error("[ChatInterface] get_router_status failed:", err);
@@ -297,9 +282,6 @@ export default function ChatInterface({
           const next = await invoke<RouterStatus>("get_router_status");
           if (!mountedRef.current) return;
           setRouterStatus(next);
-          if (next.id_provider === "local_http") {
-            setConfigStep(null);
-          }
         } catch (e) {
           console.warn("[ChatInterface] auto local bootstrap failed:", e);
         }
@@ -307,17 +289,6 @@ export default function ChatInterface({
       .catch(() => {
         if (!mountedRef.current) return;
         setOllamaStatus(null);
-      });
-
-    // Fetch LM Studio status (using probe_local_llm)
-    invoke<{ detected: { name: string; url: string; reachable: boolean }[] }>("probe_local_llm")
-      .then((res) => {
-        if (!mountedRef.current) return;
-        setLmStudioStatus(res.detected.some((d) => d.name === "LM Studio" && d.reachable));
-      })
-      .catch(() => {
-        if (!mountedRef.current) return;
-        setLmStudioStatus(false);
       });
 
     // Fetch stored providers
@@ -331,17 +302,6 @@ export default function ChatInterface({
         setStoredProviders([]);
       });
 
-    // Fetch CLI server status
-    invoke<{ running: boolean, port?: number, token?: string }>("get_cli_server_status")
-      .then((status) => {
-        if (!mountedRef.current) return;
-        setCliServerStatus(status);
-        if (status.port) setCliPortInput(status.port.toString());
-      })
-      .catch(() => {
-        if (!mountedRef.current) return;
-        setCliServerStatus({ running: false });
-      });
   };
 
   const refreshMissingSecrets = () => {
@@ -410,163 +370,41 @@ export default function ChatInterface({
 
   // -- Header model/provider dropdown logic --
 
-  // Derive headerProvider from routerStatus when not yet set by user
+  const isCliMode = routerStatus?.routing_mode === "cli_orchestrator";
+
+  // Sync headerProvider with the active ego provider from the router.
+  // When the backend provider changes (e.g. after use_stored_provider or startup),
+  // we update the dropdown to match.
   useEffect(() => {
-    if (headerProvider) return; // user already picked one
-    if (routerStatus?.ego_provider) {
-      setHeaderProvider(routerStatus.ego_provider);
-    }
-  }, [routerStatus, headerProvider]);
+    if (!routerStatus?.ego_provider) return;
+    setHeaderProvider(routerStatus.ego_provider);
+  }, [routerStatus?.ego_provider]);
 
   const providers = storedProviders ?? [];
   const knownProviders = useMemo(() => {
+    // Merge providers from model registry + vault (stored API keys).
+    // CLI providers are excluded from the selector — they show as a static label.
     const fromReg = new Set(modelRegistry.map((m) => m.provider));
     const fromVault = new Set(providers.filter((p) => !p.endsWith("-cli")));
     const merged = new Set([...fromReg, ...fromVault]);
-    return merged.size > 0 ? [...merged] : Object.keys(FALLBACK_MODELS);
-  }, [modelRegistry, providers]);
+    if (merged.size > 0) {
+      // Ensure the currently active non-CLI provider is always in the list
+      if (headerProvider && !headerProvider.endsWith("-cli") && !merged.has(headerProvider)) {
+        merged.add(headerProvider);
+      }
+      return [...merged].sort();
+    }
+    return Object.keys(FALLBACK_MODELS);
+  }, [modelRegistry, providers, headerProvider]);
 
   const headerModels = useMemo(() => {
     if (!headerProvider) return [];
+    // CLI providers don't expose models via the registry — skip
+    if (headerProvider.endsWith("-cli")) return [];
     const fromReg = modelRegistry.filter((m) => m.provider === headerProvider);
     if (fromReg.length > 0) return fromReg.map((m) => m.model_id);
     return FALLBACK_MODELS[headerProvider] ?? [];
   }, [headerProvider, modelRegistry]);
-
-  const handleConfigSelect = async (option: number) => {
-    setConfigError("");
-    setConfigInput("");
-    
-    const cliToVault: Record<string, string> = {
-      "claude-cli": "anthropic",
-      "gemini-cli": "google",
-      "codex-cli": "openai",
-      "grok-cli": "xai",
-    };
-
-    const checkAndUseStored = async (step: ConfigStep) => {
-      if (!step) return false;
-
-      // CLI providers detected on PATH can be activated directly (OAuth auth)
-      if (providers.includes(step as string)) {
-        try {
-          await invoke("use_stored_provider", { provider: step });
-          refreshRouterStatus();
-          return true;
-        } catch (e) {
-          console.error("Failed to use CLI provider:", e);
-        }
-      }
-
-      // Fall back to linked API key (e.g. anthropic key for claude-cli)
-      const vaultKey = cliToVault[step];
-      if (vaultKey && providers.includes(vaultKey)) {
-        try {
-          await invoke("use_stored_provider", { provider: vaultKey });
-          refreshRouterStatus();
-          return true;
-        } catch (e) {
-          console.error("Failed to use stored provider:", e);
-        }
-      }
-      return false;
-    };
-
-    switch (option) {
-      case 1:
-        setConfigStep("ollama");
-        setConfigInput("11434");
-        break;
-      case 2:
-        setConfigStep("lmstudio");
-        setConfigInput("1234");
-        break;
-      case 3:
-        setConfigStep("openai");
-        break;
-      case 4:
-        if (!(await checkAndUseStored("claude-cli"))) {
-          setConfigStep("claude-cli");
-        }
-        break;
-      case 5:
-        if (!(await checkAndUseStored("gemini-cli"))) {
-          setConfigStep("gemini-cli");
-        }
-        break;
-      case 6:
-        if (!(await checkAndUseStored("codex-cli"))) {
-          setConfigStep("codex-cli");
-        }
-        break;
-      case 7:
-        if (!(await checkAndUseStored("grok-cli"))) {
-          setConfigStep("grok-cli");
-        }
-        break;
-    }
-  };
-
-  const handleConfigSubmit = async () => {
-    setConfigError("");
-    try {
-      if (configStep === "ollama") {
-        const port = configInput.trim() || "11434";
-        await invoke("set_local_llm_url", { url: `http://localhost:${port}` });
-      } else if (configStep === "lmstudio") {
-        const port = configInput.trim() || "1234";
-        await invoke("set_local_llm_url", { url: `http://localhost:${port}` });
-      } else if (configStep === "openai") {
-        if (!configInput.trim()) {
-          setConfigError("API key is required");
-          return;
-        }
-        await invoke("set_api_key", { key: configInput.trim() });
-      } else if (configStep === "claude-cli" || configStep === "gemini-cli" || configStep === "codex-cli" || configStep === "grok-cli") {
-        if (configInput.trim()) {
-          const res = await invoke<{ success: boolean, error: string }>("store_provider_key", { provider: configStep, key: configInput.trim(), validate: true });
-          if (!res.success) {
-            setConfigError(res.error || "Failed to store key");
-            return;
-          }
-        } else {
-          await invoke("use_stored_provider", { provider: configStep });
-        }
-      }
-      setConfigInput("");
-      refreshRouterStatus();
-    } catch (e) {
-      setConfigError(String(e));
-    }
-  };
-
-  const handleUseSystemAuth = async () => {
-    if (!configStep) return;
-    setConfigError("");
-    try {
-      const res = await invoke<{ success: boolean, error: string }>("store_provider_key", { 
-        provider: configStep, 
-        key: "system", 
-        validate: false 
-      });
-      if (!res.success) {
-        setConfigError(res.error || "Failed to set system auth");
-        return;
-      }
-      setConfigInput("");
-      refreshRouterStatus();
-    } catch (e) {
-      setConfigError(String(e));
-    }
-  };
-
-  const handleConfigKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      handleConfigSubmit();
-    } else if (e.key === "Escape") {
-      setConfigStep("menu");
-    }
-  };
 
   const applyChatError = (errorMsg: string) => {
     const interrupted = isInterruptedByUserMessage(errorMsg);
@@ -683,7 +521,7 @@ export default function ChatInterface({
           message: userMessage.content,
           sessionMessages: sessionBeforeTurn,
           sessionId,
-          modelOverride: selectedModel || undefined,
+          modelOverride: (!isCliMode && selectedModel) ? selectedModel : undefined,
         },
         {
           onToken: (token) => {
@@ -754,32 +592,17 @@ export default function ChatInterface({
     const egoName = routerStatus.ego_provider || "Cloud";
     const egoLabel = egoName.charAt(0).toUpperCase() + egoName.slice(1);
 
-    const councilCount = routerStatus.council_providers || 0;
-
     if (mode === "cli_orchestrator" && hasEgo) {
       const cliLabel = egoName.replace("-cli", "").replace("_cli", "");
       statusText = `[cli orchestrator] ${cliLabel.charAt(0).toUpperCase() + cliLabel.slice(1)} Code`;
       statusColor = "text-theme-info";
-    } else if (mode === "tier_based" && hasEgo && hasLocal) {
-      statusText = `[tier] ${egoLabel} + Local`;
-      statusColor = "text-theme-text";
-    } else if (mode === "tier_based" && hasEgo) {
-      statusText = `[tier] ${egoLabel}`;
-      statusColor = "text-theme-info";
-    } else if (mode === "tier_based" && hasLocal) {
-      statusText = "[tier] Local";
-      statusColor = "text-theme-primary-dim";
-    } else if (mode === "council" && councilCount > 1) {
-      statusText = `[council: ${councilCount} providers]`;
-      statusColor = "text-theme-info";
     } else if (hasEgo && hasLocal) {
-      statusText = `[${mode}] ${egoLabel} + Local`;
+      statusText = `${egoLabel} + Local`;
       statusColor = "text-theme-text";
     } else if (hasEgo) {
       statusText = `[cloud] ${egoLabel}`;
       statusColor = "text-theme-info";
     } else if (hasLocal) {
-      // Show "bundled" label when the local LLM is from managed Ollama
       if (ollamaStatus?.managed && ollamaStatus?.running) {
         statusText = "[local: bundled]";
       } else {
@@ -790,357 +613,17 @@ export default function ChatInterface({
       statusText = "Starting local AI...";
       statusColor = "text-theme-warning";
     } else {
-      statusText = "[no LLM] Press 1-7 to configure";
+      statusText = "[no LLM] configure in settings";
       statusColor = "text-theme-danger";
     }
 
     return (
       <div
-        className={`text-xs ${statusColor} px-4 py-1 border-b border-theme-border cursor-pointer hover:bg-theme-surface`}
-        onClick={() => setConfigStep("menu")}
+        className={`text-xs ${statusColor} px-4 py-1 border-b border-theme-border`}
       >
         {!showRoutingDetails && !statusText.includes("[no LLM]") ? "[routing hidden]" : statusText}
       </div>
     );
-  };
-
-  const renderConfigMenu = () => {
-    if (configStep === "menu") {
-      const isOllamaAvailable = ollamaStatus?.running;
-      const isLmStudioAvailable = lmStudioStatus;
-      
-      const getHighlightClass = (available: boolean, authenticated: boolean) => {
-        if (authenticated) return "border-theme-success bg-theme-success-dim";
-        if (available) return "border-theme-primary bg-theme-primary-glow";
-        return "border-theme-primary-faint";
-      };
-
-      return (
-        <div className="p-4 border-b border-theme-border bg-theme-surface">
-          <p className="text-theme-primary-dim mb-3">Configure LLM Provider:</p>
-          <div className="space-y-2">
-            <div className="flex gap-2">
-              <button
-                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(!!isOllamaAvailable, false)}`}
-                onClick={() => handleConfigSelect(1)}
-              >
-                <span className="text-theme-text-bright">[1]</span> Ollama (local, default port 11434)
-                {isOllamaAvailable && <span className="ml-2 text-xs text-theme-success font-bold">● Running</span>}
-              </button>
-              <a href="https://ollama.com" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(isLmStudioAvailable, false)}`}
-                onClick={() => handleConfigSelect(2)}
-              >
-                <span className="text-theme-text-bright">[2]</span> LM Studio (local, default port 1234)
-                {isLmStudioAvailable && <span className="ml-2 text-xs text-theme-success font-bold">● Running</span>}
-              </button>
-              <a href="https://lmstudio.ai" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, providers.includes("openai"))}`}
-                onClick={() => handleConfigSelect(3)}
-              >
-                <span className="text-theme-text-bright">[3]</span> OpenAI (cloud, requires API key)
-                {providers.includes("openai") && <span className="ml-2 text-xs text-theme-success">✓ Auth</span>}
-              </button>
-              <a href="https://platform.openai.com" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
-            </div>
-
-            <div className="border-t border-theme-border-dim my-2 pt-2">
-              <p className="text-theme-primary-dim text-xs mb-2 uppercase tracking-wider">CLI / API Access (Local Server):</p>
-              <div className="flex gap-2 items-center mb-2">
-                <span className="text-theme-text-dim text-xs">Port:</span>
-                <input
-                  type="text"
-                  className="w-16 bg-theme-input-bg border border-theme-border-dim text-theme-text px-2 py-1 rounded text-xs focus:border-theme-primary outline-none"
-                  value={cliPortInput}
-                  onChange={(e) => setCliPortInput(e.target.value)}
-                  disabled={cliServerStatus.running}
-                />
-                <button
-                  className={`px-3 py-1 rounded text-xs border ${
-                    cliServerStatus.running
-                      ? "border-theme-danger text-theme-danger hover:bg-theme-danger-dim"
-                      : "border-theme-primary text-theme-primary hover:bg-theme-primary-glow"
-                  }`}
-                  onClick={async () => {
-                    if (cliServerStatus.running) {
-                      await invoke("stop_cli_server");
-                    } else {
-                      try {
-                        await invoke("start_cli_server", { port: parseInt(cliPortInput) || 8080 });
-                      } catch (e) {
-                        alert(String(e));
-                      }
-                    }
-                    refreshRouterStatus();
-                  }}
-                >
-                  {cliServerStatus.running ? "Stop Server" : "Start Server"}
-                </button>
-              </div>
-              {cliServerStatus.running && (
-                <div className="bg-theme-overlay p-2 rounded text-[10px] space-y-1 border border-theme-border-dim">
-                  <p className="text-theme-success font-bold">● API Active at http://localhost:{cliServerStatus.port}</p>
-                  <p className="text-theme-text-dim">Token: <span className="text-theme-text-bright select-all">{cliServerStatus.token}</span></p>
-                  <div className="pt-1 text-theme-primary-dim">
-                    Example: <code className="text-theme-text-bright break-all">curl -H &quot;Authorization: Bearer {cliServerStatus.token}&quot; -X POST -H &quot;Content-Type: application/json&quot; -d &#123;&quot;message&quot;:&quot;Hello&quot;&#125; http://localhost:{cliServerStatus.port}/chat</code>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="border-t border-theme-border-dim my-2 pt-2">
-              <p className="text-theme-text-dim text-xs mb-2 uppercase tracking-wider">CLI Providers (auto-detected on PATH):</p>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, providers.includes("claude-cli") || providers.includes("anthropic"))}`}
-                onClick={() => handleConfigSelect(4)}
-              >
-                <span className="text-theme-text-bright">[4]</span> Claude Code CLI
-                {providers.includes("claude-cli") && <span className="ml-2 text-xs text-theme-success font-bold">✓ Detected</span>}
-                {!providers.includes("claude-cli") && providers.includes("anthropic") && <span className="ml-2 text-xs text-theme-success">✓ API key</span>}
-              </button>
-              <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, providers.includes("gemini-cli") || providers.includes("google"))}`}
-                onClick={() => handleConfigSelect(5)}
-              >
-                <span className="text-theme-text-bright">[5]</span> Gemini CLI
-                {providers.includes("gemini-cli") && <span className="ml-2 text-xs text-theme-success font-bold">✓ Detected</span>}
-                {!providers.includes("gemini-cli") && providers.includes("google") && <span className="ml-2 text-xs text-theme-success">✓ API key</span>}
-              </button>
-              <a href="https://github.com/google-gemini/gemini-cli" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, providers.includes("codex-cli") || providers.includes("openai"))}`}
-                onClick={() => handleConfigSelect(6)}
-              >
-                <span className="text-theme-text-bright">[6]</span> Codex CLI
-                {providers.includes("codex-cli") && <span className="ml-2 text-xs text-theme-success font-bold">✓ Detected</span>}
-                {!providers.includes("codex-cli") && providers.includes("openai") && <span className="ml-2 text-xs text-theme-success">✓ API key</span>}
-              </button>
-              <a href="https://github.com/openai/codex" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                className={`flex-1 text-left px-3 py-2 border rounded hover:bg-theme-surface ${getHighlightClass(false, providers.includes("grok-cli") || providers.includes("xai"))}`}
-                onClick={() => handleConfigSelect(7)}
-              >
-                <span className="text-theme-text-bright">[7]</span> Grok CLI
-                {providers.includes("grok-cli") && <span className="ml-2 text-xs text-theme-success font-bold">✓ Detected</span>}
-                {!providers.includes("grok-cli") && providers.includes("xai") && <span className="ml-2 text-xs text-theme-success">✓ API key</span>}
-              </button>
-              <a href="https://docs.x.ai/docs/grok-cli" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
-            </div>
-          </div>
-          {routerStatus && (
-            <div className="mt-4 pt-3 border-t border-theme-border-dim">
-              <p className="text-[10px] text-theme-text-dim uppercase tracking-wider mb-2">Routing Mode</p>
-              <div className="flex gap-1.5 flex-wrap">
-                {([
-                  ["tier_based", "Tier"],
-                  ["ego_primary", "Ego"],
-                  ["council", "Council"],
-                  ["cli_orchestrator", "CLI Orchestrator"],
-                ] as const).map(([value, label]) => (
-                  <button
-                    key={value}
-                    className={`px-2.5 py-1 text-xs rounded border transition-all ${
-                      routerStatus.routing_mode === value
-                        ? "border-theme-primary text-theme-text bg-theme-primary-glow"
-                        : "border-theme-border-dim text-theme-text-dim hover:border-theme-primary"
-                    }`}
-                    onClick={async () => {
-                      try {
-                        await invoke("set_routing_mode", { mode: value });
-                        const status = await invoke<RouterStatus>("get_router_status");
-                        setRouterStatus(status);
-                      } catch (e) {
-                        setConfigError(String(e));
-                      }
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {routerStatus && (routerStatus.ego_configured || routerStatus.id_provider === "local_http") && (
-            <button
-              className="mt-3 text-xs text-theme-text-dim hover:text-theme-primary-dim"
-              onClick={() => setConfigStep(null)}
-            >
-              [ESC] Cancel
-            </button>
-          )}
-        </div>
-      );
-    }
-
-    if (configStep === "ollama" || configStep === "lmstudio") {
-      const label = configStep === "ollama" ? "Ollama" : "LM Studio";
-      const defaultPort = configStep === "ollama" ? "11434" : "1234";
-      return (
-        <div className="p-4 border-b border-theme-border bg-theme-surface">
-          <p className="text-theme-primary-dim mb-2">{label} Configuration:</p>
-          <div className="flex gap-2 items-center">
-            <span className="text-theme-text-dim">http://localhost:</span>
-            <input
-              type="text"
-              className="flex-1 bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded max-w-[100px] focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
-              placeholder={defaultPort}
-              value={configInput}
-              onChange={(e) => setConfigInput(e.target.value)}
-              onKeyDown={handleConfigKeyDown}
-              autoFocus
-            />
-            <button
-              className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
-              onClick={handleConfigSubmit}
-            >
-              Connect
-            </button>
-            <button
-              className="border border-theme-primary-faint px-3 py-2 rounded hover:bg-theme-surface text-theme-text-dim"
-              onClick={() => setConfigStep("menu")}
-            >
-              Back
-            </button>
-          </div>
-          {configError && <p className="text-theme-danger mt-2 text-sm">{configError}</p>}
-        </div>
-      );
-    }
-
-    if (configStep === "openai") {
-      return (
-        <div className="p-4 border-b border-theme-border bg-theme-surface">
-          <p className="text-theme-primary-dim mb-2">OpenAI Configuration:</p>
-          <div className="flex gap-2">
-            <input
-              type="password"
-              className="flex-1 bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
-              placeholder="sk-..."
-              value={configInput}
-              onChange={(e) => setConfigInput(e.target.value)}
-              onKeyDown={handleConfigKeyDown}
-              autoFocus
-            />
-            <button
-              className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
-              onClick={handleConfigSubmit}
-            >
-              Save
-            </button>
-            <button
-              className="border border-theme-primary-faint px-3 py-2 rounded hover:bg-theme-surface text-theme-text-dim"
-              onClick={() => setConfigStep("menu")}
-            >
-              Back
-            </button>
-          </div>
-          {configError && <p className="text-theme-danger mt-2 text-sm">{configError}</p>}
-        </div>
-      );
-    }
-
-    if (configStep === "claude-cli" || configStep === "gemini-cli" || configStep === "codex-cli" || configStep === "grok-cli") {
-      const cliLabels: Record<string, { label: string; placeholder: string; authCmd: string }> = {
-        "claude-cli": { label: "Claude Code CLI", placeholder: "sk-ant-...", authCmd: "claude auth login" },
-        "gemini-cli": { label: "Gemini CLI", placeholder: "AIza...", authCmd: "gemini auth login" },
-        "codex-cli": { label: "Codex CLI", placeholder: "sk-...", authCmd: "codex auth" },
-        "grok-cli": { label: "Grok CLI", placeholder: "xai-...", authCmd: "grok auth login" },
-      };
-      const cli = cliLabels[configStep];
-      const isDetected = providers.includes(configStep);
-      return (
-        <div className="p-4 border-b border-theme-border bg-theme-surface">
-          <p className="text-theme-primary-dim mb-2">{cli.label}</p>
-          {isDetected ? (
-            <div className="space-y-2">
-              <p className="text-theme-success text-xs">Detected on PATH. Already authenticated via <code className="bg-theme-input-bg px-1 rounded">{cli.authCmd}</code>?</p>
-              <div className="flex gap-2">
-                <button
-                  className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
-                  onClick={handleUseSystemAuth}
-                >
-                  Activate
-                </button>
-                <button
-                  className="border border-theme-primary-faint px-3 py-2 rounded hover:bg-theme-surface text-theme-text-dim"
-                  onClick={() => setConfigStep("menu")}
-                >
-                  Back
-                </button>
-              </div>
-              <p className="text-theme-text-dim text-xs mt-1">Or paste an API key instead:</p>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  className="flex-1 bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
-                  placeholder={cli.placeholder}
-                  value={configInput}
-                  onChange={(e) => setConfigInput(e.target.value)}
-                  onKeyDown={handleConfigKeyDown}
-                />
-                <button
-                  className="border border-theme-primary-faint px-4 py-2 rounded hover:bg-theme-surface text-theme-text-dim"
-                  onClick={handleConfigSubmit}
-                >
-                  Save Key
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-theme-warning text-xs">Not found on PATH. Install it, or paste an API key.</p>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  className="flex-1 bg-theme-input-bg border border-theme-border-dim text-theme-text px-3 py-2 rounded focus:border-theme-primary focus:ring-1 focus:ring-theme-focus-ring"
-                  placeholder={cli.placeholder}
-                  value={configInput}
-                  onChange={(e) => setConfigInput(e.target.value)}
-                  onKeyDown={handleConfigKeyDown}
-                  autoFocus
-                />
-                <button
-                  className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
-                  onClick={handleConfigSubmit}
-                >
-                  Save Key
-                </button>
-                <button
-                  className="border border-theme-primary-faint px-3 py-2 rounded hover:bg-theme-surface text-theme-text-dim"
-                  onClick={() => setConfigStep("menu")}
-                >
-                  Back
-                </button>
-              </div>
-            </div>
-          )}
-          {configError && <p className="text-theme-danger mt-2 text-sm">{configError}</p>}
-        </div>
-      );
-    }
-
-    return null;
   };
 
   return (
@@ -1173,34 +656,40 @@ export default function ChatInterface({
           Memory disclosure: {memoryDisclosureEnabled ? "On" : "Off"}
         </button>
         <span className="mx-1 text-theme-border">|</span>
-        <select
-          className="bg-transparent text-[11px] text-theme-text-dim border border-theme-border rounded px-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-          value={headerProvider}
-          disabled={routerStatus?.routing_mode === "cli_orchestrator"}
-          onChange={(e) => {
-            const provider = e.target.value;
-            setHeaderProvider(provider);
-            setSelectedModel("");
-            invoke("use_stored_provider", { provider }).catch((err: unknown) => {
-              console.error("[ChatInterface] use_stored_provider failed:", err);
-            });
-          }}
-        >
-          {knownProviders.map((p) => (
-            <option key={p} value={p}>{p}</option>
-          ))}
-        </select>
-        <select
-          className="bg-transparent text-[11px] text-theme-text-dim border border-theme-border rounded px-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-          value={selectedModel}
-          disabled={routerStatus?.routing_mode === "cli_orchestrator"}
-          onChange={(e) => setSelectedModel(e.target.value)}
-        >
-          <option value="">Auto</option>
-          {headerModels.map((m) => (
-            <option key={m} value={m}>{m}</option>
-          ))}
-        </select>
+        {isCliMode ? (
+          <span className="text-[11px] text-theme-text-dim px-1 font-mono">
+            {headerProvider || "cli"}
+          </span>
+        ) : (
+          <>
+            <select
+              className="bg-transparent text-[11px] text-theme-text-dim border border-theme-border rounded px-1 cursor-pointer"
+              value={headerProvider}
+              onChange={(e) => {
+                const provider = e.target.value;
+                setHeaderProvider(provider);
+                setSelectedModel("");
+                invoke("use_stored_provider", { provider }).catch((err: unknown) => {
+                  console.error("[ChatInterface] use_stored_provider failed:", err);
+                });
+              }}
+            >
+              {knownProviders.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+            <select
+              className="bg-transparent text-[11px] text-theme-text-dim border border-theme-border rounded px-1 cursor-pointer"
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+            >
+              <option value="">Auto</option>
+              {headerModels.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </>
+        )}
         {(jobCounts.running > 0 || jobCounts.queued > 0 || jobCounts.scheduled > 0) && (
           <span className="ml-1 inline-flex items-center gap-1 text-[10px] font-mono border border-theme-border rounded px-1.5 py-0.5 text-theme-text-dim">
             {jobCounts.running > 0 && (
@@ -1220,7 +709,6 @@ export default function ChatInterface({
           </span>
         )}
       </div>
-      {renderConfigMenu()}
       {missingSecrets.length > 0 && (
         <div className="px-4 py-2 border-b border-theme-warning bg-theme-warning-dim">
           <p className="text-theme-warning text-xs mb-1">Skills need setup:</p>
@@ -1296,16 +784,6 @@ export default function ChatInterface({
                               setup
                             </span>
                           )}
-                          {reason === "council" && (
-                            <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-theme-info-dim text-theme-info font-mono">
-                              council
-                            </span>
-                          )}
-                          {trace.complexity_score != null && tierLabel && (
-                            <span className="ml-1 text-[10px] opacity-40">
-                              score:{trace.complexity_score}
-                            </span>
-                          )}
                           <span className="ml-2 text-[10px] opacity-40">{ts}</span>
                           {trace.fallback_occurred && (
                             <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-theme-warning-dim text-theme-warning font-mono">
@@ -1317,9 +795,9 @@ export default function ChatInterface({
                     })() : (
                       <>
                         {showRoutingDetails && msg.provider && <span className="ml-2 opacity-50 font-normal">via {normalizeProviderLabel(msg.provider)}</span>}
-                        {msg.tier && msg.modelUsed && (
+                        {msg.modelUsed && (
                           <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-theme-input-bg text-theme-text-dim font-mono">
-                            {msg.tier.charAt(0).toUpperCase() + msg.tier.slice(1)} · {msg.modelUsed}
+                            {msg.modelUsed}
                           </span>
                         )}
                       </>
