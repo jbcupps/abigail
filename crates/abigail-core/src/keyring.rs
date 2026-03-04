@@ -165,9 +165,13 @@ impl Keyring {
 // Master Key Generation (for Hive identity signing)
 // ============================================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct MasterKeyResult {
     pub master_key_path: PathBuf,
+    /// The generated signing key, returned so callers can use it directly
+    /// without a separate `load_master_key()` call (which would create a second
+    /// `HybridUnlockProvider` instance and risk a KEK mismatch on first run).
+    pub signing_key: SigningKey,
 }
 
 pub fn generate_master_key(data_dir: &Path) -> Result<MasterKeyResult> {
@@ -185,29 +189,33 @@ pub fn generate_master_key(data_dir: &Path) -> Result<MasterKeyResult> {
     let dek = crypto::derive_scope_key(&root_kek, "keyring:master");
     let envelope = crypto::seal(&dek, &serialized)?;
     std::fs::write(&master_key_path, envelope)?;
-    Ok(MasterKeyResult { master_key_path })
+    Ok(MasterKeyResult {
+        master_key_path,
+        signing_key,
+    })
 }
 
 pub fn load_master_key(path: &Path) -> Result<SigningKey> {
     let data = std::fs::read(path)?;
 
-    // Try new envelope format first
-    let unlock = HybridUnlockProvider::new();
-    if let Ok(root_kek) = unlock.root_kek() {
+    if crypto::is_vault_envelope(&data) {
+        // New AES-256-GCM envelope format — propagate errors instead of
+        // silently falling through to DPAPI (which would crash on non-DPAPI data).
+        let unlock = HybridUnlockProvider::new();
+        let root_kek = unlock.root_kek()?;
         let dek = crypto::derive_scope_key(&root_kek, "keyring:master");
-        if let Ok(decrypted) = crypto::open(&dek, &data) {
-            let stored: MasterKeyStored = serde_json::from_slice(&decrypted)
-                .map_err(|e| CoreError::Keyring(e.to_string()))?;
-            let key_bytes: [u8; 32] = stored
-                .secret
-                .as_slice()
-                .try_into()
-                .map_err(|_| CoreError::Crypto("Invalid master key length".into()))?;
-            return Ok(SigningKey::from_bytes(&key_bytes));
-        }
+        let decrypted = crypto::open(&dek, &data)?;
+        let stored: MasterKeyStored =
+            serde_json::from_slice(&decrypted).map_err(|e| CoreError::Keyring(e.to_string()))?;
+        let key_bytes: [u8; 32] = stored
+            .secret
+            .as_slice()
+            .try_into()
+            .map_err(|_| CoreError::Crypto("Invalid master key length".into()))?;
+        return Ok(SigningKey::from_bytes(&key_bytes));
     }
 
-    // Fallback: try legacy DPAPI format
+    // Legacy DPAPI format (file does NOT start with vault envelope version byte)
     let decrypted = crate::dpapi::dpapi_decrypt(&data)?;
     let stored: MasterKeyStored =
         serde_json::from_slice(&decrypted).map_err(|e| CoreError::Keyring(e.to_string()))?;
