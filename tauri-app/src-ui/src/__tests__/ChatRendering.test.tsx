@@ -187,9 +187,8 @@ describe("ChatRendering parity", () => {
       { timeout: 3000 },
     );
 
-    // Verify tier and model metadata rendered
+    // Verify model metadata rendered (tier badge removed in Phase 3a cleanup)
     await waitFor(() => {
-      expect(screen.getByText(/Standard/)).toBeInTheDocument();
       expect(screen.getByText(/gpt-4\.1/)).toBeInTheDocument();
     });
   });
