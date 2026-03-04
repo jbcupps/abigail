@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import ConfirmationModal from "./ConfirmationModal";
 import OllamaDrawer from "./OllamaDrawer";
 import ProviderDrawer from "./ProviderDrawer";
+import ThemeDrawer from "./ThemeDrawer";
 
 interface OllamaStatusInfo {
   managed: boolean;
@@ -111,10 +112,10 @@ function HiveAgentPanel() {
             <div
               className={`w-2 h-2 rounded-full ${
                 status.running && status.model_ready
-                  ? "bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]"
+                  ? "bg-theme-success shadow-[0_0_6px_rgba(34,197,94,0.5)]"
                   : status.running
-                    ? "bg-yellow-500"
-                    : "bg-red-500"
+                    ? "bg-theme-warning"
+                    : "bg-theme-danger"
               }`}
             />
             <span className="text-[10px] uppercase tracking-widest text-theme-text-dim font-bold">
@@ -124,13 +125,13 @@ function HiveAgentPanel() {
               {activeModel}
             </span>
             {status.running && status.model_ready && (
-              <span className="text-[9px] text-green-500 uppercase">Online</span>
+              <span className="text-[9px] text-theme-success uppercase">Online</span>
             )}
             {status.running && !status.model_ready && (
-              <span className="text-[9px] text-yellow-500 uppercase">Loading</span>
+              <span className="text-[9px] text-theme-warning uppercase">Loading</span>
             )}
             {!status.running && (
-              <span className="text-[9px] text-red-500 uppercase">Offline</span>
+              <span className="text-[9px] text-theme-danger uppercase">Offline</span>
             )}
           </div>
           <span className="text-theme-text-dim text-xs">{expanded ? "\u25B2" : "\u25BC"}</span>
@@ -153,7 +154,7 @@ function HiveAgentPanel() {
                       key={m.name}
                       className={`flex items-center justify-between px-3 py-2 rounded border text-xs ${
                         m.name === activeModel || m.name.startsWith(activeModel + ":")
-                          ? "border-green-800 bg-green-950/20 text-green-400"
+                          ? "border-theme-success bg-theme-success-dim text-theme-success"
                           : "border-theme-border-dim text-theme-text-dim"
                       }`}
                     >
@@ -170,7 +171,7 @@ function HiveAgentPanel() {
                         </button>
                       )}
                       {(m.name === activeModel || m.name.startsWith(activeModel + ":")) && (
-                        <span className="text-[10px] text-green-500">Active</span>
+                        <span className="text-[10px] text-theme-success">Active</span>
                       )}
                     </div>
                   ))}
@@ -202,7 +203,7 @@ function HiveAgentPanel() {
                 </button>
               </div>
               {pullStatus && (
-                <p className={`text-[10px] mt-1 ${pullStatus.startsWith("Error") ? "text-red-400" : "text-theme-text-dim"}`}>
+                <p className={`text-[10px] mt-1 ${pullStatus.startsWith("Error") ? "text-theme-danger" : "text-theme-text-dim"}`}>
                   {pullStatus}
                 </p>
               )}
@@ -263,6 +264,7 @@ export default function SoulRegistry({
   const [restoring, setRestoring] = useState<string | null>(null);
   const [ollamaDrawerOpen, setOllamaDrawerOpen] = useState(false);
   const [providerDrawerOpen, setProviderDrawerOpen] = useState(false);
+  const [themeDrawerOpen, setThemeDrawerOpen] = useState(false);
   const mountedRef = useRef(true);
 
   const fetchSouls = async () => {
@@ -416,7 +418,7 @@ export default function SoulRegistry({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-theme-bg text-theme-text-dim font-mono flex items-center justify-center">
+      <div className="min-h-screen bg-theme-bg text-theme-text-dim font-primary flex items-center justify-center">
         <div className="animate-pulse">Consulting the Soul Registry...</div>
       </div>
     );
@@ -462,10 +464,10 @@ export default function SoulRegistry({
 
   // Error banner (shared between both states)
   const errorBanner = error && (
-    <div className="w-full max-w-lg mb-4 p-3 border border-red-800 rounded bg-red-900/20 text-red-400 text-sm">
+    <div className="w-full max-w-lg mb-4 p-3 border border-theme-danger rounded bg-theme-danger-dim text-theme-danger text-sm">
       {error}
       <button
-        className="ml-2 text-red-300 underline"
+        className="ml-2 text-theme-danger underline"
         onClick={() => setError(null)}
       >
         dismiss
@@ -477,16 +479,22 @@ export default function SoulRegistry({
   const drawerButtons = (maxWidth: string) => (
     <div className={`w-full ${maxWidth} flex gap-3 mb-6`}>
       <button
-        className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-mono uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
+        className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-primary uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
         onClick={() => setOllamaDrawerOpen(true)}
       >
         Manage Ollama
       </button>
       <button
-        className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-mono uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
+        className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-primary uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
         onClick={() => setProviderDrawerOpen(true)}
       >
         Configure Providers
+      </button>
+      <button
+        className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-primary uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
+        onClick={() => setThemeDrawerOpen(true)}
+      >
+        Theme
       </button>
     </div>
   );
@@ -496,13 +504,14 @@ export default function SoulRegistry({
     <>
       {ollamaDrawerOpen && <OllamaDrawer onClose={() => setOllamaDrawerOpen(false)} />}
       {providerDrawerOpen && <ProviderDrawer onClose={() => setProviderDrawerOpen(false)} />}
+      {themeDrawerOpen && <ThemeDrawer onClose={() => setThemeDrawerOpen(false)} />}
     </>
   );
 
   // Empty state: Welcome landing page
   if (souls.length === 0) {
     return (
-      <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col items-center justify-center p-8">
+      <div className="min-h-screen bg-theme-bg text-theme-text font-primary flex flex-col items-center justify-center p-8">
         {confirmModal}
 
         {/* Welcome header */}
@@ -592,8 +601,8 @@ export default function SoulRegistry({
                         <span
                           className={`text-[9px] uppercase px-1 py-0.5 rounded border ${
                             backup.backup_type === "archive"
-                              ? "border-amber-900 text-amber-500 bg-amber-950/20"
-                              : "border-green-900 text-green-500 bg-green-950/20"
+                              ? "border-theme-warning text-theme-warning bg-theme-warning-dim"
+                              : "border-theme-success text-theme-success bg-theme-success-dim"
                           }`}
                         >
                           {backup.backup_type === "archive" ? "Archived" : "Backup"}
@@ -614,7 +623,7 @@ export default function SoulRegistry({
                         {restoring === backup.directory_name ? "..." : "Restore"}
                       </button>
                       <button
-                        className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-red-700 hover:text-red-500"
+                        className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-danger hover:text-theme-danger"
                         onClick={() =>
                           setConfirmAction({ type: "delete_backup", backup })
                         }
@@ -636,7 +645,7 @@ export default function SoulRegistry({
 
   // Populated state: Soul selector
   return (
-    <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col items-center justify-center p-8">
+    <div className="min-h-screen bg-theme-bg text-theme-text font-primary flex flex-col items-center justify-center p-8">
       {confirmModal}
 
       {/* Header */}
@@ -686,7 +695,7 @@ export default function SoulRegistry({
                   <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={(e) => handleBackupSoul(e, soul)}
-                      className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-green-700 hover:text-green-500"
+                      className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-success hover:text-theme-success"
                       title="Create Backup"
                     >
                       Backup
@@ -706,7 +715,7 @@ export default function SoulRegistry({
                         e.stopPropagation();
                         setConfirmAction({ type: "delete", soul });
                       }}
-                      className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-red-700 hover:text-red-500"
+                      className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-danger hover:text-theme-danger"
                       title="Delete Entity"
                     >
                       Delete
@@ -714,7 +723,7 @@ export default function SoulRegistry({
                   </div>
                 </div>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded border ${soul.birth_complete ? "border-green-900 text-green-500 bg-green-950/20" : "border-yellow-900 text-yellow-500 bg-yellow-950/20"}`}>
+                  <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded border ${soul.birth_complete ? "border-theme-success text-theme-success bg-theme-success-dim" : "border-theme-warning text-theme-warning bg-theme-warning-dim"}`}>
                     {soul.birth_complete ? "Active" : "In-Utero"}
                   </span>
                   <span className="text-[10px] text-theme-text-dim font-mono">
@@ -793,8 +802,8 @@ export default function SoulRegistry({
                       <span
                         className={`text-[9px] uppercase px-1 py-0.5 rounded border ${
                           backup.backup_type === "archive"
-                            ? "border-amber-900 text-amber-500 bg-amber-950/20"
-                            : "border-green-900 text-green-500 bg-green-950/20"
+                            ? "border-theme-warning text-theme-warning bg-theme-warning-dim"
+                            : "border-theme-success text-theme-success bg-theme-success-dim"
                         }`}
                       >
                         {backup.backup_type === "archive" ? "Archived" : "Backup"}
@@ -815,7 +824,7 @@ export default function SoulRegistry({
                       {restoring === backup.directory_name ? "..." : "Restore"}
                     </button>
                     <button
-                      className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-red-700 hover:text-red-500"
+                      className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-danger hover:text-theme-danger"
                       onClick={() =>
                         setConfirmAction({ type: "delete_backup", backup })
                       }

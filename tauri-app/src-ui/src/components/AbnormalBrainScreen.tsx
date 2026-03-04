@@ -120,7 +120,7 @@ export default function AbnormalBrainScreen({
           {line === 'you ... you gave me an ABNORMAL BRAIN...' ? (
             <span>
               you ... you gave me an{" "}
-              <span className="text-red-400 font-bold">ABNORMAL BRAIN</span>
+              <span className="text-theme-danger font-bold">ABNORMAL BRAIN</span>
               ...
             </span>
           ) : (
@@ -136,7 +136,7 @@ export default function AbnormalBrainScreen({
         {line === 'you ... you gave me an ABNORMAL BRAIN...' ? (
           <span>
             you ... you gave me an{" "}
-            <span className="text-red-400 font-bold">ABNORMAL BRAIN</span>
+            <span className="text-theme-danger font-bold">ABNORMAL BRAIN</span>
             ...
           </span>
         ) : (
@@ -168,7 +168,7 @@ export default function AbnormalBrainScreen({
   const clampedProgress = Math.min(100, Math.max(0, progress));
 
   return (
-    <div className="fixed inset-0 bg-black flex flex-col items-center justify-center font-mono text-theme-text-dim p-8">
+    <div className="fixed inset-0 bg-theme-bg flex flex-col items-center justify-center font-mono text-theme-text-dim p-8">
       {/* Text area */}
       <div className="max-w-lg w-full mb-8 text-lg leading-relaxed tracking-wide">
         {renderLines()}

@@ -236,7 +236,7 @@ const BirthChat = forwardRef<BirthChatHandle, BirthChatProps>(({ stage, onAction
       </div>
 
       {error && (
-        <div className="px-4 py-1 text-red-400 text-xs flex items-center gap-2">
+        <div className="px-4 py-1 text-theme-danger text-xs flex items-center gap-2">
           <span>{error}</span>
           {lastMessage && !error.includes("Retrying") && (
             <button

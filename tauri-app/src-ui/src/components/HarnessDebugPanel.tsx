@@ -81,7 +81,7 @@ export default function HarnessDebugPanel() {
       </button>
       {open && (
         <div className="mt-1 p-2 rounded border border-theme-border-dim bg-theme-bg-elevated text-theme-text-dim space-y-2">
-          {error && <p className="text-red-400">{error}</p>}
+          {error && <p className="text-theme-danger">{error}</p>}
           <div>
             <p>stage: {snapshot?.state.birthStage ?? "?"}</p>
             <p>agent: {snapshot?.state.activeAgentId ?? "none"}</p>

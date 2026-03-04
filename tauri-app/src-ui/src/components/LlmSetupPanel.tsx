@@ -403,7 +403,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
               mode === key
                 ? "border-theme-primary text-theme-text"
                 : initialProbeComplete && available
-                  ? "border-green-600 text-theme-text hover:border-theme-primary bg-green-950/10"
+                  ? "border-theme-success text-theme-text hover:border-theme-primary bg-theme-success-dim"
                   : "border-theme-border-dim text-theme-text-dim hover:border-theme-primary"
             }`}
             onClick={() => setMode(key)}
@@ -411,7 +411,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
           >
             {label}
             {initialProbeComplete && available && mode !== key && (
-              <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-green-500" />
+              <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-theme-success" />
             )}
           </button>
         ))}
@@ -428,13 +428,13 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
         <div className="mb-6 space-y-4">
           <div className="border border-theme-border-dim rounded p-4 bg-theme-surface">
             {ollama.status === "running" && (
-              <p className="text-green-500 text-sm">Ollama is running and ready at `localhost:11434`.</p>
+              <p className="text-theme-success text-sm">Ollama is running and ready at `localhost:11434`.</p>
             )}
             {ollama.status === "installed" && (
-              <p className="text-yellow-500 text-sm">Ollama is installed. Continue to choose a model and connect.</p>
+              <p className="text-theme-warning text-sm">Ollama is installed. Continue to choose a model and connect.</p>
             )}
             {ollama.status === "not_found" && (
-              <p className="text-yellow-500 text-sm">Ollama is not installed yet.</p>
+              <p className="text-theme-warning text-sm">Ollama is not installed yet.</p>
             )}
           </div>
 
@@ -478,7 +478,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
             <div>
               <p className="text-theme-primary-dim mb-2">Choose a local model</p>
               <select
-                className="w-full bg-black border border-theme-primary text-theme-text px-3 py-2 rounded text-sm"
+                className="w-full bg-theme-bg border border-theme-primary text-theme-text px-3 py-2 rounded text-sm"
                 value={customModelMode ? "__custom__" : selectedModel}
                 onChange={(e) => {
                   if (e.target.value === "__custom__") {
@@ -513,7 +513,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
               {customModelMode && (
                 <input
                   type="text"
-                  className="mt-2 w-full bg-black border border-theme-primary text-theme-text px-3 py-2 rounded text-sm"
+                  className="mt-2 w-full bg-theme-bg border border-theme-primary text-theme-text px-3 py-2 rounded text-sm"
                   placeholder="e.g. llama3:70b, deepseek-coder:6.7b"
                   value={customModelName}
                   onChange={(e) => setCustomModelName(e.target.value)}
@@ -612,11 +612,11 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
 
       {mode === "lmstudio" && !probing && reachable.length === 0 && (
         <div className="mb-6">
-          <div className="border border-yellow-700 bg-yellow-900/20 p-4 rounded mb-4">
-            <p className="text-yellow-500 text-sm">
+            <div className="border border-theme-warning bg-theme-warning-dim p-4 rounded mb-4">
+            <p className="text-theme-warning text-sm">
               No local LLM server detected on default ports.
             </p>
-            <p className="text-yellow-400/80 text-xs mt-2">
+            <p className="text-theme-warning text-xs mt-2">
               In LM Studio: load a model, then click <strong>Start Server</strong> (default port 1234).
               Enter the URL below or click Re-scan after starting.
             </p>
@@ -630,7 +630,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
           <div className="flex gap-2">
             <input
               type="text"
-              className="flex-1 bg-black border border-theme-primary text-theme-text px-3 py-2 rounded text-sm"
+              className="flex-1 bg-theme-bg border border-theme-primary text-theme-text px-3 py-2 rounded text-sm"
               placeholder="http://localhost:1234"
               value={manualUrl}
               onChange={(e) => setManualUrl(e.target.value)}
@@ -665,9 +665,9 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
       {mode === "cli" && !cliProbing && (
         <div className="mb-6 space-y-4">
           {cliDetections.filter(d => d.on_path).length === 0 ? (
-            <div className="border border-yellow-700 bg-yellow-900/20 p-4 rounded">
-              <p className="text-yellow-500 text-sm">No CLI tools detected on PATH.</p>
-              <p className="text-yellow-400/80 text-xs mt-2">
+            <div className="border border-theme-warning bg-theme-warning-dim p-4 rounded">
+              <p className="text-theme-warning text-sm">No CLI tools detected on PATH.</p>
+              <p className="text-theme-warning text-xs mt-2">
                 Install one of the supported CLI tools below, then click Re-scan.
               </p>
             </div>
@@ -680,7 +680,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
                     key={d.provider_name}
                     className={`px-4 py-3 border rounded ${
                       ready
-                        ? "border-green-600 bg-green-950/20"
+                        ? "border-theme-success bg-theme-success-dim"
                         : "border-theme-border-dim bg-theme-bg-inset"
                     }`}
                   >
@@ -695,27 +695,27 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
                       </div>
                       <div className="flex items-center gap-2">
                         {d.is_official ? (
-                          <span className="text-green-500 text-[10px] uppercase">Official</span>
+                          <span className="text-theme-success text-[10px] uppercase">Official</span>
                         ) : (
-                          <span className="text-yellow-500 text-[10px] uppercase">Unverified</span>
+                          <span className="text-theme-warning text-[10px] uppercase">Unverified</span>
                         )}
                         {d.is_authenticated ? (
-                          <span className="text-green-500 text-[10px] uppercase">Authed</span>
+                          <span className="text-theme-success text-[10px] uppercase">Authed</span>
                         ) : (
-                          <span className="text-yellow-500 text-[10px] uppercase">Not Authed</span>
+                          <span className="text-theme-warning text-[10px] uppercase">Not Authed</span>
                         )}
                       </div>
                     </div>
                     {ready ? (
                       <button
-                        className="mt-2 px-4 py-1.5 border border-green-600 text-green-500 rounded text-xs hover:bg-green-950/40 disabled:opacity-50"
+                        className="mt-2 px-4 py-1.5 border border-theme-success text-theme-success rounded text-xs hover:bg-theme-success-dim disabled:opacity-50"
                         onClick={() => activateCliProvider(d.provider_name)}
                         disabled={activatingCli}
                       >
                         {activatingCli ? "Activating..." : "Activate as Primary"}
                       </button>
                     ) : (
-                      <p className="text-yellow-400/80 text-xs mt-2">
+                      <p className="text-theme-warning text-xs mt-2">
                         {d.auth_hint || "CLI tool needs authentication."}
                       </p>
                     )}
@@ -736,7 +736,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
 
       {error && (
         <div className="mt-2">
-          <p className="text-red-400 text-sm">{error}</p>
+          <p className="text-theme-danger text-sm">{error}</p>
           {showProceedAnyway && (
             <button
               className="mt-2 text-xs text-theme-text-dim hover:text-theme-primary underline"

@@ -22,18 +22,18 @@ type JobRecord = {
 };
 
 const TOPIC_COLORS: Record<string, string> = {
-  "conversation-turns": "text-cyan-400",
-  "job-events": "text-yellow-400",
-  "skill-events": "text-green-400",
-  "conscience-check": "text-purple-400",
-  "ethical-signals": "text-pink-400",
+  "conversation-turns": "text-theme-info",
+  "job-events": "text-theme-warning",
+  "skill-events": "text-theme-success",
+  "conscience-check": "text-theme-info",
+  "ethical-signals": "text-theme-danger",
 };
 
 const STATUS_DOT: Record<string, string> = {
-  queued: "bg-yellow-400",
-  running: "bg-blue-400 animate-pulse",
-  completed: "bg-green-400",
-  failed: "bg-red-400",
+  queued: "bg-theme-warning",
+  running: "bg-theme-info animate-pulse",
+  completed: "bg-theme-success",
+  failed: "bg-theme-danger",
   cancelled: "bg-theme-text-dim",
   expired: "bg-theme-text-dim",
 };
@@ -214,7 +214,7 @@ export default function ForgePanel() {
               className="px-2 py-1.5 bg-theme-bg-elevated border border-theme-border-dim rounded"
             >
               <div className="flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                <span className="w-1.5 h-1.5 rounded-full bg-theme-success" />
                 <span className="text-[9px] font-mono text-theme-text">{c.name}</span>
               </div>
               <p className="text-[8px] text-theme-text-dim mt-0.5">{c.desc}</p>

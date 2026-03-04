@@ -83,13 +83,13 @@ export default function IdentityConflictPanel({
         <div className="mb-6 p-3 border border-theme-border-dim rounded text-sm">
           <div className="flex justify-between mb-1">
             <span className="text-theme-text-dim">Memories:</span>
-            <span className={identity.has_memories ? "text-green-400" : "text-yellow-400"}>
+            <span className={identity.has_memories ? "text-theme-success" : "text-theme-warning"}>
               {identity.has_memories ? "Present" : "None"}
             </span>
           </div>
           <div className="flex justify-between mb-1">
             <span className="text-theme-text-dim">Signatures:</span>
-            <span className={identity.has_signatures ? "text-green-400" : "text-red-400"}>
+            <span className={identity.has_signatures ? "text-theme-success" : "text-theme-danger"}>
               {identity.has_signatures ? "Valid" : "Missing"}
             </span>
           </div>
@@ -132,7 +132,7 @@ export default function IdentityConflictPanel({
             <button
               onClick={handleWipe}
               disabled={!!action}
-              className="w-full p-4 border border-theme-border-dim rounded-lg hover:border-red-500 transition-colors disabled:opacity-50 text-left"
+              className="w-full p-4 border border-theme-border-dim rounded-lg hover:border-theme-danger transition-colors disabled:opacity-50 text-left"
             >
               <div className="text-theme-text-dim font-bold">FACTORY RESET</div>
               <div className="text-theme-text-dim text-sm">
@@ -140,8 +140,8 @@ export default function IdentityConflictPanel({
               </div>
             </button>
           ) : (
-            <div className="w-full p-4 border-2 border-red-500 bg-red-900/20 rounded-lg">
-              <div className="text-red-500 font-bold mb-2">CONFIRM FACTORY RESET</div>
+            <div className="w-full p-4 border-2 border-theme-danger bg-theme-danger-dim rounded-lg">
+              <div className="text-theme-danger font-bold mb-2">CONFIRM FACTORY RESET</div>
               <div className="text-theme-text-dim text-sm mb-3">
                 This will permanently delete all data for {identity.name}.
                 Your private key backup is the only way to recover if you change your mind.
@@ -150,7 +150,7 @@ export default function IdentityConflictPanel({
                 <button
                   onClick={handleWipe}
                   disabled={!!action}
-                  className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white rounded disabled:opacity-50"
+                  className="flex-1 py-2 bg-theme-danger hover:bg-theme-danger text-theme-text-bright rounded disabled:opacity-50"
                 >
                   {action === "wiping" ? "Wiping..." : "Yes, Wipe Everything"}
                 </button>
@@ -174,7 +174,7 @@ export default function IdentityConflictPanel({
         )}
 
         {error && (
-          <div className="mt-4 text-center text-red-400 text-sm">
+          <div className="mt-4 text-center text-theme-danger text-sm">
             {error}
           </div>
         )}

@@ -21,15 +21,15 @@ export default function ConfirmationModal({
 }: ConfirmationModalProps) {
   const isDanger = variant === "danger";
 
-  const borderColor = isDanger ? "border-red-700" : "border-amber-700";
+  const borderColor = isDanger ? "border-theme-danger" : "border-theme-warning";
   const confirmBg = isDanger
-    ? "bg-red-800 hover:bg-red-700 text-red-100"
-    : "bg-amber-800 hover:bg-amber-700 text-amber-100";
-  const iconColor = isDanger ? "text-red-500" : "text-amber-500";
+    ? "bg-theme-danger hover:bg-theme-danger text-theme-text-bright"
+    : "bg-theme-warning hover:bg-theme-warning text-theme-text-bright";
+  const iconColor = isDanger ? "text-theme-danger" : "text-theme-warning";
 
   return (
     <div
-      className="fixed inset-0 bg-black/80 flex items-center justify-center z-50"
+      className="fixed inset-0 bg-theme-overlay flex items-center justify-center z-50"
       role="dialog"
       aria-modal="true"
       onClick={(e) => {
