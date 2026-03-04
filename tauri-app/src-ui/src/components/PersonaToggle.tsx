@@ -15,12 +15,12 @@ export default function PersonaToggle({ onToggle, forgeOpen }: PersonaToggleProp
       onClick={onToggle}
       title={forgeOpen ? "Close The Forge" : "Open The Forge"}
       className={`fixed top-3 right-3 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full border bg-theme-bg/80 backdrop-blur-sm transition-colors hover:bg-theme-bg/90 ${
-        forgeOpen ? "border-amber-500" : "border-green-500"
+        forgeOpen ? "border-theme-warning" : "border-theme-primary"
       }`}
     >
       {/* Gear icon */}
       <svg
-        className={`w-3.5 h-3.5 ${forgeOpen ? "text-amber-500" : "text-green-500"}`}
+        className={`w-3.5 h-3.5 ${forgeOpen ? "text-theme-warning" : "text-theme-primary"}`}
         fill="none"
         viewBox="0 0 24 24"
         stroke="currentColor"
@@ -38,8 +38,8 @@ export default function PersonaToggle({ onToggle, forgeOpen }: PersonaToggleProp
         />
       </svg>
       <span
-        className={`text-xs font-mono font-bold tracking-wide ${
-          forgeOpen ? "text-amber-500" : "text-green-500"
+        className={`text-xs font-primary font-bold tracking-wide ${
+          forgeOpen ? "text-theme-warning" : "text-theme-primary"
         }`}
       >
         {label}

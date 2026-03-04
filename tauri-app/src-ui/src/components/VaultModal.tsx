@@ -49,7 +49,7 @@ export default function VaultModal({ secret, onSaved, onCancel }: VaultModalProp
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-label="Setup Required">
+    <div className="fixed inset-0 bg-theme-overlay flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-label="Setup Required">
       <div className="bg-theme-bg-elevated border border-theme-primary rounded-lg p-6 max-w-md w-full mx-4">
         <h2 className="text-theme-primary-dim text-lg mb-2">Setup Required</h2>
         <p className="text-theme-text-dim text-sm mb-4">
@@ -73,7 +73,7 @@ export default function VaultModal({ secret, onSaved, onCancel }: VaultModalProp
             autoFocus
           />
         </div>
-        {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+        {error && <p className="text-theme-danger text-sm mb-3">{error}</p>}
         <div className="flex gap-3 justify-end">
           {!secret.required && (
             <button

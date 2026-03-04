@@ -40,9 +40,9 @@ interface SearchResult {
 }
 
 const WEIGHT_BADGE: Record<string, string> = {
-  Ephemeral: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-  Distilled: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-  Crystallized: "bg-purple-500/20 text-purple-400 border-purple-500/30",
+  Ephemeral: "bg-theme-warning-dim text-theme-warning border-theme-warning",
+  Distilled: "bg-theme-info-dim text-theme-info border-theme-info",
+  Crystallized: "bg-theme-info-dim text-theme-info border-theme-info",
 };
 
 export default function DataSourcesPanel() {
@@ -336,7 +336,7 @@ function StatsTab() {
       ) : null}
 
       {message && (
-        <p className={`text-xs ${message.type === "error" ? "text-theme-danger" : "text-green-400"}`}>
+        <p className={`text-xs ${message.type === "error" ? "text-theme-danger" : "text-theme-success"}`}>
           {message.text}
         </p>
       )}
@@ -360,7 +360,7 @@ function StatsTab() {
         ) : (
           <div className="flex gap-1">
             <button
-              className="px-3 py-1.5 text-xs rounded bg-theme-danger text-white font-mono"
+              className="px-3 py-1.5 text-xs rounded bg-theme-danger text-theme-text-bright font-mono"
               onClick={handleReset}
               disabled={actionInProgress !== null}
             >

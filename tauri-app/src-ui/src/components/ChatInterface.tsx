@@ -782,7 +782,7 @@ export default function ChatInterface({
     if (mode === "cli_orchestrator" && hasEgo) {
       const cliLabel = egoName.replace("-cli", "").replace("_cli", "");
       statusText = `[cli orchestrator] ${cliLabel.charAt(0).toUpperCase() + cliLabel.slice(1)} Code`;
-      statusColor = "text-cyan-400";
+      statusColor = "text-theme-info";
     } else if (mode === "tier_based" && hasEgo && hasLocal) {
       statusText = `[tier] ${egoLabel} + Local`;
       statusColor = "text-theme-text";
@@ -794,7 +794,7 @@ export default function ChatInterface({
       statusColor = "text-theme-primary-dim";
     } else if (mode === "council" && councilCount > 1) {
       statusText = `[council: ${councilCount} providers]`;
-      statusColor = "text-purple-400";
+      statusColor = "text-theme-info";
     } else if (hasEgo && hasLocal) {
       statusText = `[${mode}] ${egoLabel} + Local`;
       statusColor = "text-theme-text";
@@ -833,7 +833,7 @@ export default function ChatInterface({
       const isLmStudioAvailable = lmStudioStatus;
       
       const getHighlightClass = (available: boolean, authenticated: boolean) => {
-        if (authenticated) return "border-green-600 bg-green-950/20";
+        if (authenticated) return "border-theme-success bg-theme-success-dim";
         if (available) return "border-theme-primary bg-theme-primary-glow";
         return "border-theme-primary-faint";
       };
@@ -848,7 +848,7 @@ export default function ChatInterface({
                 onClick={() => handleConfigSelect(1)}
               >
                 <span className="text-theme-text-bright">[1]</span> Ollama (local, default port 11434)
-                {isOllamaAvailable && <span className="ml-2 text-xs text-green-500 font-bold">● Running</span>}
+                {isOllamaAvailable && <span className="ml-2 text-xs text-theme-success font-bold">● Running</span>}
               </button>
               <a href="https://ollama.com" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
@@ -859,7 +859,7 @@ export default function ChatInterface({
                 onClick={() => handleConfigSelect(2)}
               >
                 <span className="text-theme-text-bright">[2]</span> LM Studio (local, default port 1234)
-                {isLmStudioAvailable && <span className="ml-2 text-xs text-green-500 font-bold">● Running</span>}
+                {isLmStudioAvailable && <span className="ml-2 text-xs text-theme-success font-bold">● Running</span>}
               </button>
               <a href="https://lmstudio.ai" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
@@ -870,7 +870,7 @@ export default function ChatInterface({
                 onClick={() => handleConfigSelect(3)}
               >
                 <span className="text-theme-text-bright">[3]</span> OpenAI (cloud, requires API key)
-                {providers.includes("openai") && <span className="ml-2 text-xs text-green-500">✓ Auth</span>}
+                {providers.includes("openai") && <span className="ml-2 text-xs text-theme-success">✓ Auth</span>}
               </button>
               <a href="https://platform.openai.com" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
@@ -889,7 +889,7 @@ export default function ChatInterface({
                 <button
                   className={`px-3 py-1 rounded text-xs border ${
                     cliServerStatus.running
-                      ? "border-red-600 text-red-400 hover:bg-red-950/20"
+                      ? "border-theme-danger text-theme-danger hover:bg-theme-danger-dim"
                       : "border-theme-primary text-theme-primary hover:bg-theme-primary-glow"
                   }`}
                   onClick={async () => {
@@ -909,8 +909,8 @@ export default function ChatInterface({
                 </button>
               </div>
               {cliServerStatus.running && (
-                <div className="bg-black/40 p-2 rounded text-[10px] space-y-1 border border-theme-border-dim">
-                  <p className="text-green-500 font-bold">● API Active at http://localhost:{cliServerStatus.port}</p>
+                <div className="bg-theme-overlay p-2 rounded text-[10px] space-y-1 border border-theme-border-dim">
+                  <p className="text-theme-success font-bold">● API Active at http://localhost:{cliServerStatus.port}</p>
                   <p className="text-theme-text-dim">Token: <span className="text-theme-text-bright select-all">{cliServerStatus.token}</span></p>
                   <div className="pt-1 text-theme-primary-dim">
                     Example: <code className="text-theme-text-bright break-all">curl -H &quot;Authorization: Bearer {cliServerStatus.token}&quot; -X POST -H &quot;Content-Type: application/json&quot; -d &#123;&quot;message&quot;:&quot;Hello&quot;&#125; http://localhost:{cliServerStatus.port}/chat</code>
@@ -929,8 +929,8 @@ export default function ChatInterface({
                 onClick={() => handleConfigSelect(4)}
               >
                 <span className="text-theme-text-bright">[4]</span> Claude Code CLI
-                {providers.includes("claude-cli") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Detected</span>}
-                {!providers.includes("claude-cli") && providers.includes("anthropic") && <span className="ml-2 text-xs text-green-500">✓ API key</span>}
+                {providers.includes("claude-cli") && <span className="ml-2 text-xs text-theme-success font-bold">✓ Detected</span>}
+                {!providers.includes("claude-cli") && providers.includes("anthropic") && <span className="ml-2 text-xs text-theme-success">✓ API key</span>}
               </button>
               <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
@@ -941,8 +941,8 @@ export default function ChatInterface({
                 onClick={() => handleConfigSelect(5)}
               >
                 <span className="text-theme-text-bright">[5]</span> Gemini CLI
-                {providers.includes("gemini-cli") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Detected</span>}
-                {!providers.includes("gemini-cli") && providers.includes("google") && <span className="ml-2 text-xs text-green-500">✓ API key</span>}
+                {providers.includes("gemini-cli") && <span className="ml-2 text-xs text-theme-success font-bold">✓ Detected</span>}
+                {!providers.includes("gemini-cli") && providers.includes("google") && <span className="ml-2 text-xs text-theme-success">✓ API key</span>}
               </button>
               <a href="https://github.com/google-gemini/gemini-cli" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
@@ -953,8 +953,8 @@ export default function ChatInterface({
                 onClick={() => handleConfigSelect(6)}
               >
                 <span className="text-theme-text-bright">[6]</span> Codex CLI
-                {providers.includes("codex-cli") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Detected</span>}
-                {!providers.includes("codex-cli") && providers.includes("openai") && <span className="ml-2 text-xs text-green-500">✓ API key</span>}
+                {providers.includes("codex-cli") && <span className="ml-2 text-xs text-theme-success font-bold">✓ Detected</span>}
+                {!providers.includes("codex-cli") && providers.includes("openai") && <span className="ml-2 text-xs text-theme-success">✓ API key</span>}
               </button>
               <a href="https://github.com/openai/codex" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
@@ -965,8 +965,8 @@ export default function ChatInterface({
                 onClick={() => handleConfigSelect(7)}
               >
                 <span className="text-theme-text-bright">[7]</span> Grok CLI
-                {providers.includes("grok-cli") && <span className="ml-2 text-xs text-green-500 font-bold">✓ Detected</span>}
-                {!providers.includes("grok-cli") && providers.includes("xai") && <span className="ml-2 text-xs text-green-500">✓ API key</span>}
+                {providers.includes("grok-cli") && <span className="ml-2 text-xs text-theme-success font-bold">✓ Detected</span>}
+                {!providers.includes("grok-cli") && providers.includes("xai") && <span className="ml-2 text-xs text-theme-success">✓ API key</span>}
               </button>
               <a href="https://docs.x.ai/docs/grok-cli" target="_blank" rel="noreferrer" className="px-3 py-2 border border-theme-border-dim rounded hover:text-theme-primary text-xs flex items-center">Docs</a>
             </div>
@@ -1046,7 +1046,7 @@ export default function ChatInterface({
               Back
             </button>
           </div>
-          {configError && <p className="text-red-400 mt-2 text-sm">{configError}</p>}
+          {configError && <p className="text-theme-danger mt-2 text-sm">{configError}</p>}
         </div>
       );
     }
@@ -1078,7 +1078,7 @@ export default function ChatInterface({
               Back
             </button>
           </div>
-          {configError && <p className="text-red-400 mt-2 text-sm">{configError}</p>}
+          {configError && <p className="text-theme-danger mt-2 text-sm">{configError}</p>}
         </div>
       );
     }
@@ -1097,7 +1097,7 @@ export default function ChatInterface({
           <p className="text-theme-primary-dim mb-2">{cli.label}</p>
           {isDetected ? (
             <div className="space-y-2">
-              <p className="text-green-400 text-xs">Detected on PATH. Already authenticated via <code className="bg-theme-input-bg px-1 rounded">{cli.authCmd}</code>?</p>
+              <p className="text-theme-success text-xs">Detected on PATH. Already authenticated via <code className="bg-theme-input-bg px-1 rounded">{cli.authCmd}</code>?</p>
               <div className="flex gap-2">
                 <button
                   className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
@@ -1132,7 +1132,7 @@ export default function ChatInterface({
             </div>
           ) : (
             <div className="space-y-2">
-              <p className="text-yellow-400 text-xs">Not found on PATH. Install it, or paste an API key.</p>
+              <p className="text-theme-warning text-xs">Not found on PATH. Install it, or paste an API key.</p>
               <div className="flex gap-2">
                 <input
                   type="password"
@@ -1158,7 +1158,7 @@ export default function ChatInterface({
               </div>
             </div>
           )}
-          {configError && <p className="text-red-400 mt-2 text-sm">{configError}</p>}
+          {configError && <p className="text-theme-danger mt-2 text-sm">{configError}</p>}
         </div>
       );
     }
@@ -1168,7 +1168,7 @@ export default function ChatInterface({
 
   return (
     <div
-      className={`h-full bg-theme-bg text-theme-text font-mono flex flex-col relative ${dragOver ? "ring-2 ring-inset ring-theme-primary" : ""}`}
+      className={`h-full bg-theme-bg text-theme-text font-primary flex flex-col relative ${dragOver ? "ring-2 ring-inset ring-theme-primary" : ""}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -1220,10 +1220,10 @@ export default function ChatInterface({
         {(jobCounts.running > 0 || jobCounts.queued > 0 || jobCounts.scheduled > 0) && (
           <span className="ml-1 inline-flex items-center gap-1 text-[10px] font-mono border border-theme-border rounded px-1.5 py-0.5 text-theme-text-dim">
             {jobCounts.running > 0 && (
-              <span className="text-blue-400">● {jobCounts.running}</span>
+              <span className="text-theme-info">● {jobCounts.running}</span>
             )}
             {jobCounts.queued > 0 && (
-              <span className="text-yellow-400">○ {jobCounts.queued}</span>
+              <span className="text-theme-warning">○ {jobCounts.queued}</span>
             )}
             {jobCounts.scheduled > 0 && (
               <span className="text-theme-primary-dim">↻ {jobCounts.scheduled}</span>
@@ -1238,12 +1238,12 @@ export default function ChatInterface({
       </div>
       {renderConfigMenu()}
       {missingSecrets.length > 0 && (
-        <div className="px-4 py-2 border-b border-yellow-800 bg-yellow-950/20">
-          <p className="text-yellow-500 text-xs mb-1">Skills need setup:</p>
+        <div className="px-4 py-2 border-b border-theme-warning bg-theme-warning-dim">
+          <p className="text-theme-warning text-xs mb-1">Skills need setup:</p>
           {missingSecrets.map((s, i) => (
             <button
               key={i}
-              className="text-xs text-yellow-400 hover:text-yellow-300 mr-3 underline"
+              className="text-xs text-theme-warning hover:text-theme-warning mr-3 underline"
               onClick={() => setActiveSecret(s)}
             >
               {s.skill_name}: {s.secret_name}
@@ -1273,13 +1273,13 @@ export default function ChatInterface({
             <div
               className={`max-w-[80%] px-4 py-2.5 text-sm ${
                 msg.isError
-                  ? "bg-theme-danger-dim border border-red-800 rounded-xl"
+                  ? "bg-theme-danger-dim border border-theme-danger rounded-xl"
                   : msg.role === "user"
                     ? "bg-theme-bubble-user rounded-xl rounded-br-sm"
                     : "bg-theme-bubble-assistant rounded-xl rounded-bl-sm"
               }`}
             >
-              <p className={`text-xs mb-1 ${msg.isError ? "text-red-400" : "text-theme-text-dim"}`}>
+              <p className={`text-xs mb-1 ${msg.isError ? "text-theme-danger" : "text-theme-text-dim"}`}>
                 {msg.role === "user" ? "You" : (
                   <>
                     {assistantLabel}
@@ -1303,17 +1303,17 @@ export default function ChatInterface({
                             </span>
                           )}
                           {isPinned && (
-                            <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-purple-900/30 text-purple-400 font-mono">
+                            <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-theme-info-dim text-theme-info font-mono">
                               pinned
                             </span>
                           )}
                           {reason === "setup_intent" && (
-                            <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-blue-900/30 text-blue-400 font-mono">
+                            <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-theme-info-dim text-theme-info font-mono">
                               setup
                             </span>
                           )}
                           {reason === "council" && (
-                            <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-cyan-900/30 text-cyan-400 font-mono">
+                            <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-theme-info-dim text-theme-info font-mono">
                               council
                             </span>
                           )}
@@ -1324,7 +1324,7 @@ export default function ChatInterface({
                           )}
                           <span className="ml-2 text-[10px] opacity-40">{ts}</span>
                           {trace.fallback_occurred && (
-                            <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-yellow-900/30 text-yellow-400 font-mono">
+                            <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-theme-warning-dim text-theme-warning font-mono">
                               fallback
                             </span>
                           )}
@@ -1347,17 +1347,17 @@ export default function ChatInterface({
                 <div className="mb-1 text-[10px] text-theme-text-dim opacity-60 font-mono space-y-0.5">
                   {msg.executionTrace.steps.map((step, si) => (
                     <div key={si} className="flex items-center gap-1">
-                      <span className={step.result === "success" ? "text-green-400" : "text-red-400"}>
+                      <span className={step.result === "success" ? "text-theme-success" : "text-theme-danger"}>
                         {step.result === "success" ? "\u2713" : "\u2717"}
                       </span>
                       <span>{normalizeProviderLabel(step.provider_label)}</span>
                       {step.model_requested && <span className="opacity-50">({step.model_requested})</span>}
-                      {step.error_summary && <span className="text-red-400 truncate max-w-[200px]" title={step.error_summary}>{step.error_summary}</span>}
+                      {step.error_summary && <span className="text-theme-danger truncate max-w-[200px]" title={step.error_summary}>{step.error_summary}</span>}
                     </div>
                   ))}
                 </div>
               )}
-              <span className={msg.isError ? "text-red-300" : "text-theme-text-bright"}>
+              <span className={msg.isError ? "text-theme-danger" : "text-theme-text-bright"}>
                 {redactApiKeys(msg.content || "").split("\n").map((line, j) => (
                   <span key={j}>
                     {line}
@@ -1385,7 +1385,7 @@ export default function ChatInterface({
         {loading && <ThinkingIndicator status={chatStatus} label={assistantLabel} />}
       </div>
       {dragOver && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 pointer-events-none">
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-theme-overlay pointer-events-none">
           <div className="border-2 border-dashed border-theme-primary rounded-xl px-8 py-6 bg-theme-surface/90">
             <p className="text-theme-primary text-sm">Drop files to attach</p>
           </div>
@@ -1405,10 +1405,10 @@ export default function ChatInterface({
                 {formatFileSize(att.sizeBytes)}
               </span>
               {att.truncated && (
-                <span className="text-yellow-500" title="File was truncated">!</span>
+                <span className="text-theme-warning" title="File was truncated">!</span>
               )}
               <button
-                className="text-theme-text-dim hover:text-red-400 ml-0.5"
+                className="text-theme-text-dim hover:text-theme-danger ml-0.5"
                 onClick={() => removeAttachment(i)}
                 title="Remove"
               >

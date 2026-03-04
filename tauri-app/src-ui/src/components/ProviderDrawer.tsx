@@ -97,7 +97,7 @@ export default function ProviderDrawer({ onClose }: ProviderDrawerProps) {
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/50 z-40 transition-opacity"
+        className="fixed inset-0 bg-theme-overlay z-40 transition-opacity"
         onClick={onClose}
         data-testid="provider-drawer-backdrop"
       />
@@ -170,7 +170,7 @@ export default function ProviderDrawer({ onClose }: ProviderDrawerProps) {
                   <div
                     key={p.id}
                     className={`flex items-center justify-between px-4 py-3 border rounded bg-theme-bg-inset ${
-                      active ? "border-green-800 bg-green-950/10" : "border-theme-border-dim"
+                      active ? "border-theme-success bg-theme-success-dim" : "border-theme-border-dim"
                     }`}
                   >
                     <div className="flex items-center gap-2">
@@ -181,13 +181,13 @@ export default function ProviderDrawer({ onClose }: ProviderDrawerProps) {
                         <span className="text-theme-primary text-[10px] font-bold">[READY]</span>
                       )}
                       {active && (
-                        <span className="text-green-500 text-[10px] font-bold">[ACTIVE]</span>
+                        <span className="text-theme-success text-[10px] font-bold">[ACTIVE]</span>
                       )}
                     </div>
                     <div className="flex items-center gap-2">
                       {hasKey && !active && (
                         <button
-                          className="text-[10px] border border-green-800 text-green-500 px-2 py-1 rounded hover:bg-green-950/40 disabled:opacity-50"
+                          className="text-[10px] border border-theme-success text-theme-success px-2 py-1 rounded hover:bg-theme-success-dim disabled:opacity-50"
                           onClick={() => handleActivate(p.id)}
                           disabled={activating !== null}
                         >
@@ -213,9 +213,9 @@ export default function ProviderDrawer({ onClose }: ProviderDrawerProps) {
               {cliProbing ? (
                 <div className="text-theme-text-dim text-sm animate-pulse">Detecting CLI tools...</div>
               ) : onPathCli.length === 0 ? (
-                <div className="border border-yellow-700 bg-yellow-900/20 p-4 rounded">
-                  <p className="text-yellow-500 text-sm">No CLI tools detected on PATH.</p>
-                  <p className="text-yellow-400/80 text-xs mt-2">
+                <div className="border border-theme-warning bg-theme-warning-dim p-4 rounded">
+                  <p className="text-theme-warning text-sm">No CLI tools detected on PATH.</p>
+                  <p className="text-theme-warning text-xs mt-2">
                     Install a supported CLI tool (Claude Code, Gemini CLI, etc.), then click Re-scan.
                   </p>
                 </div>
@@ -229,7 +229,7 @@ export default function ProviderDrawer({ onClose }: ProviderDrawerProps) {
                         key={d.provider_name}
                         className={`px-4 py-3 border rounded ${
                           active
-                            ? "border-green-600 bg-green-950/20"
+                            ? "border-theme-success bg-theme-success-dim"
                             : "border-theme-border-dim bg-theme-bg-inset"
                         }`}
                       >
@@ -244,30 +244,30 @@ export default function ProviderDrawer({ onClose }: ProviderDrawerProps) {
                           </div>
                           <div className="flex items-center gap-2">
                             {d.is_official ? (
-                              <span className="text-green-500 text-[10px] uppercase">Official</span>
+                              <span className="text-theme-success text-[10px] uppercase">Official</span>
                             ) : (
-                              <span className="text-yellow-500 text-[10px] uppercase">Unverified</span>
+                              <span className="text-theme-warning text-[10px] uppercase">Unverified</span>
                             )}
                             {d.is_authenticated ? (
-                              <span className="text-green-500 text-[10px] uppercase">Authed</span>
+                              <span className="text-theme-success text-[10px] uppercase">Authed</span>
                             ) : (
-                              <span className="text-yellow-500 text-[10px] uppercase">Not Authed</span>
+                              <span className="text-theme-warning text-[10px] uppercase">Not Authed</span>
                             )}
                           </div>
                         </div>
                         {active && (
-                          <span className="text-green-500 text-[10px] font-bold mt-1 block">[ACTIVE]</span>
+                          <span className="text-theme-success text-[10px] font-bold mt-1 block">[ACTIVE]</span>
                         )}
                         {ready && !active ? (
                           <button
-                            className="mt-2 px-4 py-1.5 border border-green-600 text-green-500 rounded text-xs hover:bg-green-950/40 disabled:opacity-50"
+                            className="mt-2 px-4 py-1.5 border border-theme-success text-theme-success rounded text-xs hover:bg-theme-success-dim disabled:opacity-50"
                             onClick={() => handleActivate(d.provider_name)}
                             disabled={activating !== null}
                           >
                             {activating === d.provider_name ? "Activating..." : "Activate as Primary"}
                           </button>
                         ) : !ready ? (
-                          <p className="text-yellow-400/80 text-xs mt-2">
+                          <p className="text-theme-warning text-xs mt-2">
                             {d.auth_hint || "CLI tool needs authentication."}
                           </p>
                         ) : null}
@@ -288,10 +288,10 @@ export default function ProviderDrawer({ onClose }: ProviderDrawerProps) {
 
           {/* Error */}
           {error && (
-            <div className="p-3 border border-red-800 rounded bg-red-900/20 text-red-400 text-sm">
+            <div className="p-3 border border-theme-danger rounded bg-theme-danger-dim text-theme-danger text-sm">
               {error}
               <button
-                className="ml-2 text-red-300 underline text-xs"
+                className="ml-2 text-theme-danger underline text-xs"
                 onClick={() => setError("")}
               >
                 dismiss

@@ -81,6 +81,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [crystalMentorName, setCrystalMentorName] = useState("");
   const [crystalPrimaryColor, setCrystalPrimaryColor] = useState("#00ffcc");
   const [crystalAvatarUrl, setCrystalAvatarUrl] = useState("");
+  const [crystalThemeId, setCrystalThemeId] = useState<string>("modern");
   const [genesisPath, setGenesisPath] = useState<string | null>(null);
   const [visualizing, setVisualizing] = useState(false);
   const [cliDetections, _setCliDetections] = useState<Array<{
@@ -100,6 +101,9 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   useEffect(() => {
     mountedRef.current = true;
     handleStart();
+    invoke<string>("get_hive_theme").then((t) => {
+      if (mountedRef.current && t) setCrystalThemeId(t);
+    }).catch(() => {});
     return () => { mountedRef.current = false; };
   }, []);
 
@@ -435,6 +439,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         mentorName: crystalMentorName.trim(),
         primaryColor: crystalPrimaryColor,
         avatarUrl: crystalAvatarUrl,
+        themeId: crystalThemeId,
       });
       setSoulPreview(preview);
       setStage("Emergence");
@@ -485,7 +490,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   };
 
   return (
-    <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col">
+    <div className="min-h-screen bg-theme-bg text-theme-text font-primary flex flex-col">
       <div className="px-4 py-3 border-b border-theme-border-dim bg-theme-bg-elevated">
         <pre className="text-sm text-theme-primary">
           ABIGAIL BOOT SEQUENCE
@@ -508,15 +513,15 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         {/* ── KEY PRESENTATION ── */}
         {stage === "KeyPresentation" && (
           <div className="p-6 max-w-2xl">
-            <div className="border border-yellow-500 bg-yellow-500/10 p-4 rounded mb-6">
-              <h2 className="text-yellow-500 text-lg font-bold mb-2">
+            <div className="border border-theme-warning bg-theme-warning-dim p-4 rounded mb-6">
+              <h2 className="text-theme-warning text-lg font-bold mb-2">
                 YOUR CONSTITUTIONAL SIGNING KEY
               </h2>
-              <p className="text-yellow-400 text-sm mb-2">
+              <p className="text-theme-warning text-sm mb-2">
                 This is the ONLY time you will see this key. Abigail does NOT store
                 it.
               </p>
-              <p className="text-yellow-400/80 text-sm mt-3">
+              <p className="text-theme-warning text-sm mt-3">
                 This key signs Abigail's constitutional documents — her soul, ethics,
                 and instincts. These documents define who she is and what she will
                 never do. Abigail maintains a separate internal keyring for day-to-day
@@ -554,7 +559,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 Auto-save to Documents
               </button>
               {autoSavedPath && (
-                <p className="mt-2 text-[10px] text-green-500 bg-green-950/20 p-2 rounded border border-green-900">
+                <p className="mt-2 text-[10px] text-theme-success bg-theme-success-dim p-2 rounded border border-theme-success">
                   ✓ Saved to: <span className="select-all">{autoSavedPath}</span>
                 </p>
               )}
@@ -567,9 +572,9 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               </code>
             </div>
 
-            <div className="border border-red-700 bg-red-900/20 p-4 rounded mb-6">
-              <h3 className="text-red-400 font-bold mb-2">SECURITY WARNINGS</h3>
-              <ul className="text-red-300 text-sm space-y-2">
+            <div className="border border-theme-danger bg-theme-danger-dim p-4 rounded mb-6">
+              <h3 className="text-theme-danger font-bold mb-2">SECURITY WARNINGS</h3>
+              <ul className="text-theme-danger text-sm space-y-2">
                 <li>
                   - <strong>This key proves you authored Abigail's constitutional documents and are her legitimate mentor.</strong>
                 </li>
@@ -632,7 +637,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                   <p className="text-theme-text-dim text-xs">Establish trust with cloud intelligence providers.</p>
                 </div>
                 <div className="text-right">
-                  <div className="text-[10px] text-theme-text-dim uppercase mb-1 font-mono">Overall Linkage</div>
+                  <div className="text-[10px] text-theme-text-dim uppercase mb-1 font-primary">Overall Linkage</div>
                   <div className="w-32 h-2 bg-theme-bg-inset rounded-full overflow-hidden border border-theme-border-dim">
                     <div 
                       className="h-full bg-theme-primary transition-all duration-1000" 
@@ -652,7 +657,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                         key={p}
                         className={`text-left px-3 py-2 rounded border transition-all ${
                           storedProviders.includes(p)
-                            ? "border-green-600 bg-green-950/20 text-green-500"
+                            ? "border-theme-success bg-theme-success-dim text-theme-success"
                             : "border-theme-border-dim bg-theme-bg-inset text-theme-text-dim hover:border-theme-primary hover:text-theme-text"
                         }`}
                         onClick={() => {
@@ -665,8 +670,8 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                           <span className="text-xs font-bold uppercase">{p}</span>
                           {storedProviders.includes(p) && <span className="text-[10px]">✓</span>}
                         </div>
-                        <div className="mt-1.5 w-full h-1 bg-black/20 rounded-full overflow-hidden">
-                          <div className={`h-full transition-all duration-500 ${storedProviders.includes(p) ? "bg-green-500 w-full" : "bg-theme-primary-faint w-0"}`} />
+                        <div className="mt-1.5 w-full h-1 bg-theme-bg rounded-full overflow-hidden">
+                          <div className={`h-full transition-all duration-500 ${storedProviders.includes(p) ? "bg-theme-success w-full" : "bg-theme-primary-faint w-0"}`} />
                         </div>
                       </button>
                     ))}
@@ -687,9 +692,9 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                           key={p}
                           className={`text-left px-3 py-2 rounded border transition-all ${
                             active
-                              ? "border-green-600 bg-green-950/20 text-green-500"
+                              ? "border-theme-success bg-theme-success-dim text-theme-success"
                               : authed
-                                ? "border-green-700/50 bg-green-950/10 text-green-400 hover:border-green-600"
+                                ? "border-theme-success bg-theme-success-dim text-theme-success hover:border-theme-success"
                                 : "border-theme-border-dim bg-theme-bg-inset text-theme-text-dim hover:border-theme-primary hover:text-theme-text"
                           }`}
                           onClick={() => {
@@ -710,8 +715,8 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                               {active ? "✓" : authed ? "Authed" : detected ? "No Auth" : ""}
                             </span>
                           </div>
-                          <div className="mt-1.5 w-full h-1 bg-black/20 rounded-full overflow-hidden">
-                            <div className={`h-full transition-all duration-500 ${active ? "bg-green-500 w-full" : authed ? "bg-green-700 w-3/4" : "bg-theme-primary-faint w-0"}`} />
+                          <div className="mt-1.5 w-full h-1 bg-theme-bg rounded-full overflow-hidden">
+                            <div className={`h-full transition-all duration-500 ${active ? "bg-theme-success w-full" : authed ? "bg-theme-success w-3/4" : "bg-theme-primary-faint w-0"}`} />
                           </div>
                         </button>
                       );
@@ -919,9 +924,34 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                   </div>
                 </div>
               </div>
+
+              {/* Theme selector */}
+              <div className="mt-4">
+                <label className="text-[10px] text-theme-text-dim uppercase mb-2 block">Theme</label>
+                <div className="flex gap-2">
+                  {[
+                    { id: "modern", label: "Modern", color: "#6366f1" },
+                    { id: "phosphor", label: "Phosphor", color: "#33ff33" },
+                    { id: "classic", label: "Classic", color: "#000080" },
+                  ].map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => setCrystalThemeId(t.id)}
+                      className={`flex items-center gap-2 px-3 py-1.5 rounded-theme-sm border text-xs transition-all ${
+                        crystalThemeId === t.id
+                          ? "border-theme-primary bg-theme-surface text-theme-text"
+                          : "border-theme-border-dim text-theme-text-dim hover:border-theme-border"
+                      }`}
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: t.color }} />
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
-            {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
+            {error && <p className="text-theme-danger text-sm mb-4">{error}</p>}
 
             <button
               onClick={handleCrystallize}
@@ -960,7 +990,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               </button>
             </div>
 
-            {error && <p className="text-red-400 text-sm mt-4">{error}</p>}
+            {error && <p className="text-theme-danger text-sm mt-4">{error}</p>}
           </div>
         )}
 
@@ -978,11 +1008,11 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         {/* ── REPAIR ── */}
         {stage === "Repair" && (
           <div className="p-6 max-w-2xl">
-            <div className="border border-red-500 bg-red-900/20 p-4 rounded mb-6">
-              <h2 className="text-red-500 text-lg font-bold mb-2">
+            <div className="border border-theme-danger bg-theme-danger-dim p-4 rounded mb-6">
+              <h2 className="text-theme-danger text-lg font-bold mb-2">
                 IDENTITY VERIFICATION FAILED
               </h2>
-              <p className="text-red-400 text-sm mb-4">{error}</p>
+              <p className="text-theme-danger text-sm mb-4">{error}</p>
               <p className="text-theme-text-dim text-sm">
                 Abigail's constitutional documents cannot be verified. This usually
                 happens if files were corrupted or tampered with.
@@ -1018,7 +1048,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
             </div>
 
             <div className="border-t border-theme-border-dim pt-6">
-              <h3 className="text-red-400 font-bold mb-2">
+              <h3 className="text-theme-danger font-bold mb-2">
                 Option 2: Hard Reset
               </h3>
               <p className="text-sm text-theme-text-dim mb-4">
@@ -1030,7 +1060,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               </p>
               <button
                 onClick={handleReset}
-                className="px-4 py-2 rounded font-bold text-sm border border-red-700 text-red-500 hover:bg-red-900/20"
+                className="px-4 py-2 rounded font-bold text-sm border border-theme-danger text-theme-danger hover:bg-theme-danger-dim"
               >
                 Reset Identity (Destructive)
               </button>
@@ -1041,7 +1071,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         {/* ── GENERAL ERROR ── */}
         {error && !["Repair", "SoulPreview", "Emergence"].includes(stage) && stage !== "Darkness" && (
           <div className="p-4">
-            <p className="text-red-400">{error}</p>
+            <p className="text-theme-danger">{error}</p>
             <div className="flex gap-2 mt-2">
               <button
                 className="border border-theme-primary px-4 py-2 rounded hover:bg-theme-primary-glow"
@@ -1050,7 +1080,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 Retry
               </button>
               <button
-                className="border border-theme-danger text-red-400 px-4 py-2 rounded hover:bg-red-950/20"
+                className="border border-theme-danger text-theme-danger px-4 py-2 rounded hover:bg-theme-danger-dim"
                 onClick={handleResetBirth}
               >
                 Fresh Start
@@ -1061,9 +1091,9 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
         {error && stage === "Darkness" && (
           <div className="p-6">
-            <p className="text-red-400 mb-2">{error}</p>
+            <p className="text-theme-danger mb-2">{error}</p>
             {timedOut && bootStep && (
-              <p className="text-yellow-500 text-xs mb-4">
+              <p className="text-theme-warning text-xs mb-4">
                 The boot sequence stalled at step &quot;{bootStep}&quot;.
                 Check the Rust console for diagnostics. You can retry or skip to
                 start fresh.
@@ -1078,7 +1108,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
               </button>
               {timedOut && (
                 <button
-                  className="border border-yellow-600 text-yellow-500 px-4 py-2 rounded hover:bg-yellow-600/20"
+                  className="border border-theme-warning text-theme-warning px-4 py-2 rounded hover:bg-theme-warning-dim"
                   onClick={handleSkipInteractive}
                 >
                   Skip to defaults

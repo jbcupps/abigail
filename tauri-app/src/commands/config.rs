@@ -166,6 +166,15 @@ pub fn get_active_provider(state: State<AppState>) -> Result<Option<String>, Str
 pub struct EntityTheme {
     pub primary_color: Option<String>,
     pub avatar_url: Option<String>,
+    pub theme_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThemeInfo {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub mode: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,7 +218,67 @@ pub fn get_entity_theme(state: State<AppState>) -> Result<EntityTheme, String> {
     Ok(EntityTheme {
         primary_color: config.primary_color.clone(),
         avatar_url: config.avatar_url.clone(),
+        theme_id: config.theme_id.clone(),
     })
+}
+
+#[tauri::command]
+pub fn get_entity_theme_id(state: State<AppState>) -> Result<Option<String>, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    Ok(config.theme_id.clone())
+}
+
+#[tauri::command]
+pub fn set_entity_theme_id(state: State<AppState>, theme_id: String) -> Result<(), String> {
+    let mut config = state.config.write().map_err(|e| e.to_string())?;
+    config.theme_id = Some(theme_id);
+    config
+        .save(&config.config_path())
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_hive_theme(state: State<AppState>) -> Result<String, String> {
+    let gc = state
+        .identity_manager
+        .global_config()
+        .read()
+        .map_err(|e| e.to_string())?;
+    Ok(gc.default_theme.clone())
+}
+
+#[tauri::command]
+pub fn set_hive_theme(state: State<AppState>, theme_id: String) -> Result<(), String> {
+    let im = &state.identity_manager;
+    let mut gc = im.global_config().write().map_err(|e| e.to_string())?;
+    gc.default_theme = theme_id;
+    gc.save(&im.data_root()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn list_available_themes() -> Vec<ThemeInfo> {
+    vec![
+        ThemeInfo {
+            id: "modern".to_string(),
+            name: "Modern Clean".to_string(),
+            description: "Professional dark theme with indigo accent".to_string(),
+            mode: "dark".to_string(),
+        },
+        ThemeInfo {
+            id: "phosphor".to_string(),
+            name: "Phosphor Terminal".to_string(),
+            description: "Green-on-black CRT terminal aesthetic".to_string(),
+            mode: "dark".to_string(),
+        },
+        ThemeInfo {
+            id: "classic".to_string(),
+            name: "Classic Desktop".to_string(),
+            description: "Retro beveled surfaces with system gray".to_string(),
+            mode: "light".to_string(),
+        },
+    ]
 }
 
 #[tauri::command]

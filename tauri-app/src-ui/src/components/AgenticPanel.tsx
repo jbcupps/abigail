@@ -188,7 +188,7 @@ export default function AgenticPanel() {
 
       {/* Mentor ask / Tool confirmation */}
       {activeRun?.status === "waiting_for_input" && (
-        <div className="bg-yellow-900/30 border border-yellow-600 rounded-lg p-3 flex gap-2">
+        <div className="bg-theme-warning-dim border border-theme-warning rounded-lg p-3 flex gap-2">
           <input
             className="flex-1 bg-theme-input-bg text-theme-text rounded px-3 py-2"
             placeholder="Respond to agent question..."
@@ -206,7 +206,7 @@ export default function AgenticPanel() {
       )}
 
       {activeRun?.status === "waiting_for_confirmation" && (
-        <div className="bg-orange-900/30 border border-orange-600 rounded-lg p-3 flex items-center gap-3">
+        <div className="bg-theme-warning-dim border border-theme-warning rounded-lg p-3 flex items-center gap-3">
           <span className="text-sm text-theme-warning flex-1">
             Agent wants to execute a tool. Approve?
           </span>
@@ -247,15 +247,15 @@ export default function AgenticPanel() {
               </div>
             )}
             {ev.type === "tool_executed" && (
-              <div className="text-purple-400 pl-4">
+              <div className="text-theme-info pl-4">
                 Tool: {(ev as any).tool_name} → {(ev as any).result?.substring(0, 100)}
               </div>
             )}
             {ev.type === "mentor_ask" && (
-              <div className="text-yellow-400">Question: {(ev as any).question}</div>
+              <div className="text-theme-warning">Question: {(ev as any).question}</div>
             )}
             {ev.type === "tool_confirmation" && (
-              <div className="text-orange-400">
+              <div className="text-theme-warning">
                 Confirm tool: {(ev as any).tool_name}
               </div>
             )}

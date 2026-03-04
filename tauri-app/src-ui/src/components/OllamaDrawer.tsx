@@ -174,7 +174,7 @@ export default function OllamaDrawer({ onClose }: OllamaDrawerProps) {
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/50 z-40 transition-opacity"
+        className="fixed inset-0 bg-theme-overlay z-40 transition-opacity"
         onClick={onClose}
         data-testid="ollama-drawer-backdrop"
       />
@@ -211,10 +211,10 @@ export default function OllamaDrawer({ onClose }: OllamaDrawerProps) {
               <div
                 className={`w-2.5 h-2.5 rounded-full ${
                   ollama.status === "running"
-                    ? "bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]"
+                    ? "bg-theme-success shadow-[0_0_6px_rgba(34,197,94,0.5)]"
                     : ollama.status === "installed"
-                      ? "bg-yellow-500"
-                      : "bg-red-500"
+                      ? "bg-theme-warning"
+                      : "bg-theme-danger"
                 }`}
               />
               <div className="flex-1">
@@ -298,7 +298,7 @@ export default function OllamaDrawer({ onClose }: OllamaDrawerProps) {
                       key={m.name}
                       className={`flex items-center justify-between px-3 py-2 rounded border text-xs ${
                         isModelActive(m.name)
-                          ? "border-green-800 bg-green-950/20 text-green-400"
+                          ? "border-theme-success bg-theme-success-dim text-theme-success"
                           : "border-theme-border-dim text-theme-text-dim"
                       }`}
                     >
@@ -307,7 +307,7 @@ export default function OllamaDrawer({ onClose }: OllamaDrawerProps) {
                         <span className="text-[10px] text-theme-text-dim">{formatBytes(m.size)}</span>
                       </div>
                       {isModelActive(m.name) ? (
-                        <span className="text-[10px] text-green-500">Active</span>
+                        <span className="text-[10px] text-theme-success">Active</span>
                       ) : (
                         <button
                           className="text-[10px] px-2 py-0.5 border border-theme-border-dim rounded hover:border-theme-primary hover:text-theme-primary"
@@ -339,7 +339,7 @@ export default function OllamaDrawer({ onClose }: OllamaDrawerProps) {
                       <div className="flex items-center gap-2">
                         <span className="text-theme-text-bright text-xs font-bold">{m.label}</span>
                         {m.recommended && (
-                          <span className="text-[9px] text-green-500 uppercase border border-green-900 px-1 py-0.5 rounded bg-green-950/20">
+                          <span className="text-[9px] text-theme-success uppercase border border-theme-success px-1 py-0.5 rounded bg-theme-success-dim">
                             Recommended
                           </span>
                         )}
@@ -409,10 +409,10 @@ export default function OllamaDrawer({ onClose }: OllamaDrawerProps) {
 
           {/* Error */}
           {error && (
-            <div className="p-3 border border-red-800 rounded bg-red-900/20 text-red-400 text-sm">
+            <div className="p-3 border border-theme-danger rounded bg-theme-danger-dim text-theme-danger text-sm">
               {error}
               <button
-                className="ml-2 text-red-300 underline text-xs"
+                className="ml-2 text-theme-danger underline text-xs"
                 onClick={() => setError("")}
               >
                 dismiss
