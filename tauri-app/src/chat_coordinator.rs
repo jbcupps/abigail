@@ -87,6 +87,7 @@ struct PreparedChat {
     router: IdEgoRouter,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
+    model_override: Option<String>,
 }
 
 pub struct ChatCoordinator<'a> {
@@ -183,6 +184,7 @@ impl<'a> ChatCoordinator<'a> {
             prepared.messages,
             prepared.tools,
             tx,
+            prepared.model_override,
         );
         tokio::pin!(pipeline_fut);
 
@@ -270,12 +272,21 @@ impl<'a> ChatCoordinator<'a> {
         );
         let tools = entity_chat::build_tool_definitions(&self.state.registry);
 
+        let model_override = self
+            .state
+            .force_override
+            .read()
+            .map_err(|e| e.to_string())?
+            .pinned_model
+            .clone();
+
         tracing::debug!(
             mode = %mode.as_str(),
             correlation_id = %correlation_id,
             session_id = %session_id,
             target_effective = %target_resolution.effective,
             deprecated_target = ?target_resolution.deprecated_input,
+            model_override = ?model_override,
             "Prepared chat request"
         );
 
@@ -286,6 +297,7 @@ impl<'a> ChatCoordinator<'a> {
             router,
             messages,
             tools,
+            model_override,
         })
     }
 

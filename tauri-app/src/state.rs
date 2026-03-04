@@ -101,6 +101,16 @@ pub struct AppState {
     pub job_queue: Arc<JobQueue>,
     /// Managed daemon lifecycle (hive + entity as child processes) for Daemon runtime mode.
     pub daemon_manager: Arc<tokio::sync::Mutex<DaemonManager>>,
+    /// Per-session model override from ChatInterface dropdown (pinned_model).
+    pub force_override: RwLock<ForceOverride>,
+}
+
+/// User-selected model override from the ChatInterface dropdown.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ForceOverride {
+    pub pinned_model: Option<String>,
+    pub pinned_tier: Option<String>,
+    pub pinned_provider: Option<String>,
 }
 
 pub struct CliServerHandle {
