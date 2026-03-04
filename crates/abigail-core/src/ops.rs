@@ -21,10 +21,14 @@ pub const RESERVED_PROVIDER_KEYS: &[&str] = &[
 /// Does NOT enforce namespace validation (that requires the skill registry).
 pub fn validate_secret_basic(key: &str, value: &str) -> crate::Result<()> {
     if key.is_empty() {
-        return Err(crate::CoreError::Config("Secret key cannot be empty".into()));
+        return Err(crate::CoreError::Config(
+            "Secret key cannot be empty".into(),
+        ));
     }
     if value.is_empty() {
-        return Err(crate::CoreError::Config("Secret value cannot be empty".into()));
+        return Err(crate::CoreError::Config(
+            "Secret value cannot be empty".into(),
+        ));
     }
     Ok(())
 }

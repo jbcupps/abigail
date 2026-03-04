@@ -54,9 +54,9 @@ pub fn open(key: &[u8; KEY_LEN], envelope: &[u8]) -> Result<Vec<u8>> {
     let ciphertext = &envelope[1 + NONCE_LEN..];
 
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
-    cipher
-        .decrypt(nonce, ciphertext)
-        .map_err(|_| CoreError::Crypto("AES-GCM decryption failed (wrong key or tampered data)".into()))
+    cipher.decrypt(nonce, ciphertext).map_err(|_| {
+        CoreError::Crypto("AES-GCM decryption failed (wrong key or tampered data)".into())
+    })
 }
 
 /// Derive a 32-byte scope key from a root KEK using HKDF-SHA256.
