@@ -592,6 +592,7 @@ fn try_run() -> Result<(), String> {
         daemon_manager: Arc::new(tokio::sync::Mutex::new(
             daemon_manager::DaemonManager::new(data_dir.clone()).with_iggy(iggy_connection),
         )),
+        force_override: RwLock::new(crate::state::ForceOverride::default()),
     };
 
     tauri::Builder::default()
@@ -1081,6 +1082,8 @@ fn try_run() -> Result<(), String> {
             set_local_llm_url,
             store_provider_key,
             get_router_status,
+            get_force_override,
+            set_force_override,
             diagnose_routing,
             detect_ollama,
             list_recommended_models,

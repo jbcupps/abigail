@@ -246,8 +246,10 @@ pub async fn chat_stream(
             }
         });
 
-        let pipeline_fut =
-            entity_chat::stream_chat_pipeline(&router, &executor, messages, tools, tx);
+        let pipeline_fut = entity_chat::stream_chat_pipeline(
+            &router, &executor, messages, tools, tx,
+            None, // model_override: daemon receives from ChatRequest when client supports it
+        );
         tokio::pin!(pipeline_fut);
 
         let result = tokio::select! {
