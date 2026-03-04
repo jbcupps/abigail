@@ -25,6 +25,10 @@ pub struct ChatRequest {
     /// the backend uses it to archive turns and retrieve context from memory.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Per-request model override. When set, the router uses this model ID
+    /// instead of the default for the active provider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_override: Option<String>,
 }
 
 /// A single message in a chat session (for multi-turn context).

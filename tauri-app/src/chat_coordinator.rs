@@ -59,6 +59,7 @@ pub struct ChatCommandRequest {
     pub target: Option<String>,
     pub session_messages: Option<Vec<SessionMessage>>,
     pub session_id: Option<String>,
+    pub model_override: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -272,21 +273,13 @@ impl<'a> ChatCoordinator<'a> {
         );
         let tools = entity_chat::build_tool_definitions(&self.state.registry);
 
-        let model_override = self
-            .state
-            .force_override
-            .read()
-            .map_err(|e| e.to_string())?
-            .pinned_model
-            .clone();
-
         tracing::debug!(
             mode = %mode.as_str(),
             correlation_id = %correlation_id,
             session_id = %session_id,
             target_effective = %target_resolution.effective,
             deprecated_target = ?target_resolution.deprecated_input,
-            model_override = ?model_override,
+            model_override = ?request.model_override,
             "Prepared chat request"
         );
 
@@ -297,7 +290,7 @@ impl<'a> ChatCoordinator<'a> {
             router,
             messages,
             tools,
-            model_override,
+            model_override: request.model_override,
         })
     }
 

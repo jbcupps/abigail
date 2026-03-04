@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-03-04 18:45 EST: Fix provider/model dropdown pipeline — thread model_override from UI through gateway/Tauri/entity-chat to router, wire provider dropdown to use_stored_provider backend, remove dead ForceOverride code, filter non-LLM providers from dropdown
 - 2026-03-04 10:30 EST: Fix crypto bootstrapping crash on fresh install — return signing key directly from generate_master_key to avoid KEK mismatch when OS keyring store fails, add vault format detection in load_master_key to prevent AES-GCM data being fed to DPAPI
 - 2026-03-04 08:40 EST: Fix Windows installer startup failure — bundle WebView2 bootstrapper in NSIS installer, replace silent startup panics with native OS error dialogs (MessageBoxW on Windows) so users see what went wrong instead of the app silently vanishing
 - 2026-03-04 00:05 EST: Wire provider/model dropdown to chat — add get_force_override/set_force_override Tauri commands, force_override state, pass model_override through stream_chat_pipeline to route_unified

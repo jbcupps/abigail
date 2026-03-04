@@ -140,6 +140,7 @@ export class EntityHttpChatGateway implements ChatGateway {
       target: request.target,
       session_messages: normalizeSessionMessages(request.sessionMessages),
       session_id: request.sessionId,
+      model_override: request.modelOverride,
     });
 
     const clearTimers = (): void => {

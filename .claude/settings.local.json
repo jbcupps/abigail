@@ -222,7 +222,9 @@
       "Bash(gh release:*)",
       "Bash(PYTHONIOENCODING=utf-8 python:*)",
       "Bash(sqlite3:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "mcp__filesystem__list_allowed_directories",
+      "Bash(node_modules/.bin/tsc --noEmit)"
     ]
   }
 }

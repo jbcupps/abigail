@@ -107,10 +107,17 @@ pub async fn chat(
 
     let tools = entity_chat::build_tool_definitions(&state.registry);
 
+    let model_override = body.model_override.clone();
     let result = if tools.is_empty() {
         let resp = state
             .router
-            .route_unified(abigail_router::RoutingRequest::simple(messages))
+            .route_unified(abigail_router::RoutingRequest {
+                messages,
+                tools: None,
+                model_override,
+                stream_tx: None,
+                force_id_only: false,
+            })
             .await;
         resp.map(|r| entity_chat::ToolUseResult {
             content: r.completion.content,
@@ -118,7 +125,14 @@ pub async fn chat(
             execution_trace: r.trace,
         })
     } else {
-        entity_chat::run_tool_use_loop(&state.router, &state.executor, messages, tools).await
+        entity_chat::run_tool_use_loop_with_model_override(
+            &state.router,
+            &state.executor,
+            messages,
+            tools,
+            model_override,
+        )
+        .await
     };
 
     match result {
@@ -232,6 +246,7 @@ pub async fn chat_stream(
     let turns_since_archive = state.turns_since_archive.clone();
     let cancel_state = state.active_stream_cancel.clone();
     let sid = session_id.clone();
+    let model_override = body.model_override.clone();
 
     tokio::spawn(async move {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
@@ -247,8 +262,12 @@ pub async fn chat_stream(
         });
 
         let pipeline_fut = entity_chat::stream_chat_pipeline(
-            &router, &executor, messages, tools, tx,
-            None, // model_override: daemon receives from ChatRequest when client supports it
+            &router,
+            &executor,
+            messages,
+            tools,
+            tx,
+            model_override,
         );
         tokio::pin!(pipeline_fut);
 

@@ -89,7 +89,6 @@ function redactApiKeys(text: string): string {
   );
 }
 
-type ForceOverride = { pinned_model: string | null; pinned_tier: string | null; pinned_provider: string | null };
 type ModelRegistryEntry = { provider: string; model_id: string; display_name: string | null };
 
 const FALLBACK_MODELS: Record<string, string[]> = {
@@ -124,7 +123,7 @@ export default function ChatInterface({
   const [cliPortInput, setCliPortInput] = useState("8080");
   const [showRoutingDetails, setShowRoutingDetails] = useState(false);
   const [memoryDisclosureEnabled, setMemoryDisclosureEnabled] = useState(true);
-  const [forceOverride, setForceOverride] = useState<ForceOverride>({ pinned_model: null, pinned_tier: null, pinned_provider: null });
+  const [selectedModel, setSelectedModel] = useState<string>("");
   const [modelRegistry, setModelRegistry] = useState<ModelRegistryEntry[]>([]);
   const [headerProvider, setHeaderProvider] = useState<string>("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -371,13 +370,7 @@ export default function ChatInterface({
         setMemoryDisclosureEnabled(true);
       });
 
-    // Fetch force override + model registry for header dropdowns
-    invoke<ForceOverride>("get_force_override")
-      .then((fo) => {
-        if (!mountedRef.current || !fo) return;
-        setForceOverride(fo);
-      })
-      .catch(() => {});
+    // Fetch model registry for header dropdowns
     invoke<{ models: ModelRegistryEntry[] }>("get_model_registry")
       .then((reg) => {
         if (!mountedRef.current || !reg) return;
@@ -417,17 +410,13 @@ export default function ChatInterface({
 
   // -- Header model/provider dropdown logic --
 
-  // Derive headerProvider from forceOverride or routerStatus when not yet set by user
+  // Derive headerProvider from routerStatus when not yet set by user
   useEffect(() => {
     if (headerProvider) return; // user already picked one
-    if (forceOverride?.pinned_model) {
-      const entry = modelRegistry.find((m) => m.model_id === forceOverride.pinned_model);
-      if (entry) { setHeaderProvider(entry.provider); return; }
-    }
     if (routerStatus?.ego_provider) {
       setHeaderProvider(routerStatus.ego_provider);
     }
-  }, [forceOverride, modelRegistry, routerStatus, headerProvider]);
+  }, [routerStatus, headerProvider]);
 
   const providers = storedProviders ?? [];
   const knownProviders = useMemo(() => {
@@ -443,19 +432,6 @@ export default function ChatInterface({
     if (fromReg.length > 0) return fromReg.map((m) => m.model_id);
     return FALLBACK_MODELS[headerProvider] ?? [];
   }, [headerProvider, modelRegistry]);
-
-  const handleModelOverride = async (modelId: string) => {
-    const next: ForceOverride = modelId === ""
-      ? { pinned_model: null, pinned_tier: null, pinned_provider: null }
-      : { pinned_model: modelId, pinned_tier: null, pinned_provider: null };
-    setForceOverride(next);
-    try {
-      await invoke("set_force_override", { forceOverride: next });
-      refreshRouterStatus();
-    } catch (err) {
-      console.error("[ChatInterface] set_force_override failed:", err);
-    }
-  };
 
   const handleConfigSelect = async (option: number) => {
     setConfigError("");
@@ -707,6 +683,7 @@ export default function ChatInterface({
           message: userMessage.content,
           sessionMessages: sessionBeforeTurn,
           sessionId,
+          modelOverride: selectedModel || undefined,
         },
         {
           onToken: (token) => {
@@ -1200,7 +1177,14 @@ export default function ChatInterface({
           className="bg-transparent text-[11px] text-theme-text-dim border border-theme-border rounded px-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           value={headerProvider}
           disabled={routerStatus?.routing_mode === "cli_orchestrator"}
-          onChange={(e) => setHeaderProvider(e.target.value)}
+          onChange={(e) => {
+            const provider = e.target.value;
+            setHeaderProvider(provider);
+            setSelectedModel("");
+            invoke("use_stored_provider", { provider }).catch((err: unknown) => {
+              console.error("[ChatInterface] use_stored_provider failed:", err);
+            });
+          }}
         >
           {knownProviders.map((p) => (
             <option key={p} value={p}>{p}</option>
@@ -1208,9 +1192,9 @@ export default function ChatInterface({
         </select>
         <select
           className="bg-transparent text-[11px] text-theme-text-dim border border-theme-border rounded px-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-          value={forceOverride?.pinned_model ?? ""}
+          value={selectedModel}
           disabled={routerStatus?.routing_mode === "cli_orchestrator"}
-          onChange={(e) => handleModelOverride(e.target.value)}
+          onChange={(e) => setSelectedModel(e.target.value)}
         >
           <option value="">Auto</option>
           {headerModels.map((m) => (

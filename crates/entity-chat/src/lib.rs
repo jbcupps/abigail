@@ -1014,7 +1014,7 @@ pub async fn stream_chat_pipeline(
         .route_unified(abigail_router::RoutingRequest {
             messages,
             tools: if tools.is_empty() { None } else { Some(tools) },
-            model_override: model_override.clone(),
+            model_override,
             stream_tx: Some(tx.clone()),
             force_id_only: false,
         })
