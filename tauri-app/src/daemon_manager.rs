@@ -30,6 +30,7 @@ pub struct DaemonManager {
     hive: Option<DaemonProcess>,
     entity: Option<DaemonProcess>,
     data_dir: PathBuf,
+    iggy_connection: Option<String>,
 }
 
 impl DaemonManager {
@@ -38,7 +39,13 @@ impl DaemonManager {
             hive: None,
             entity: None,
             data_dir,
+            iggy_connection: None,
         }
+    }
+
+    pub fn with_iggy(mut self, conn: Option<String>) -> Self {
+        self.iggy_connection = conn;
+        self
     }
 
     /// Start hive-daemon. Returns the URL it's listening on.
@@ -85,17 +92,23 @@ impl DaemonManager {
         let binary = find_daemon_binary("entity-daemon")?;
         tracing::info!("Starting entity-daemon for {} from {:?}", entity_id, binary);
 
+        let mut args = vec![
+            "--entity-id".to_string(),
+            entity_id.to_string(),
+            "--hive-url".to_string(),
+            hive_url,
+            "--port".to_string(),
+            "0".to_string(),
+            "--data-dir".to_string(),
+            self.data_dir.to_str().unwrap_or(".").to_string(),
+        ];
+        if let Some(ref conn) = self.iggy_connection {
+            args.push("--iggy-connection".to_string());
+            args.push(conn.clone());
+        }
+
         let mut child = Command::new(&binary)
-            .args([
-                "--entity-id",
-                entity_id,
-                "--hive-url",
-                &hive_url,
-                "--port",
-                "0",
-                "--data-dir",
-                self.data_dir.to_str().unwrap_or("."),
-            ])
+            .args(&args)
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()

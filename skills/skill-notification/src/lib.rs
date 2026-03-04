@@ -49,7 +49,7 @@ impl NotificationSkill {
 
         match result {
             Ok(_) => {
-                tracing::info!("Notification sent: {} - {}", title, body);
+                tracing::info!("Notification sent: {}", title);
                 Ok(ToolOutput::success(serde_json::json!({
                     "formatted": format!("Notification sent: {}", title),
                     "title": title,
@@ -85,7 +85,7 @@ impl NotificationSkill {
                 .show();
 
             match result {
-                Ok(_) => tracing::info!("Scheduled notification fired: {} - {}", title, body),
+                Ok(_) => tracing::info!("Scheduled notification fired: {}", title),
                 Err(e) => tracing::error!("Scheduled notification failed: {}", e),
             }
 

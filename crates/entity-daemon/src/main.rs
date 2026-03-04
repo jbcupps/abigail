@@ -244,22 +244,123 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // 9. Sync skill-relevant secrets from Hive into the local skill vault.
-    //    This allows the UAT (and operators) to seed all secrets via the Hive API,
-    //    and have them automatically available to skill initialization.
+    // 8b. Register native Rust skills (matching Tauri in-process registration).
     {
-        let skill_keys = [
-            "imap_password",
-            "imap_user",
-            "imap_host",
-            "imap_port",
-            "imap_tls_mode",
-        ];
-        for key in &skill_keys {
+        let mut allowed_roots = vec![entity_dir.clone()];
+        allowed_roots.push(std::env::temp_dir());
+        if let Some(docs_dir) =
+            directories::UserDirs::new().and_then(|u| u.document_dir().map(|d| d.to_path_buf()))
+        {
+            allowed_roots.push(docs_dir.join("Abigail"));
+        }
+
+        macro_rules! register_skill {
+            ($skill:expr) => {{
+                let s = $skill;
+                let id = s.manifest().id.clone();
+                if let Err(e) = registry.register(id.clone(), Arc::new(s)) {
+                    tracing::warn!("Failed to register {}: {}", id.0, e);
+                }
+            }};
+        }
+
+        register_skill!(skill_clipboard::ClipboardSkill::new(
+            skill_clipboard::ClipboardSkill::default_manifest()
+        ));
+        register_skill!(skill_shell::ShellSkill::new(
+            skill_shell::ShellSkill::default_manifest()
+        ));
+        register_skill!(skill_git::GitSkill::new(
+            skill_git::GitSkill::default_manifest()
+        ));
+        register_skill!(skill_notification::NotificationSkill::new(
+            skill_notification::NotificationSkill::default_manifest()
+        ));
+        register_skill!(skill_system_monitor::SystemMonitorSkill::new(
+            skill_system_monitor::SystemMonitorSkill::default_manifest()
+        ));
+        register_skill!(skill_http::HttpSkill::new(
+            skill_http::HttpSkill::default_manifest()
+        ));
+        register_skill!(skill_calendar::CalendarSkill::new(
+            skill_calendar::CalendarSkill::default_manifest(),
+            entity_dir.clone()
+        ));
+        register_skill!(skill_knowledge_base::KnowledgeBaseSkill::new(
+            skill_knowledge_base::KnowledgeBaseSkill::default_manifest(),
+            entity_dir.clone()
+        ));
+        register_skill!(skill_filesystem::FilesystemSkill::new(
+            skill_filesystem::FilesystemSkill::default_manifest(),
+            allowed_roots.clone()
+        ));
+        register_skill!(skill_database::DatabaseSkill::new(
+            skill_database::DatabaseSkill::default_manifest(),
+            allowed_roots.clone()
+        ));
+        register_skill!(skill_code_analysis::CodeAnalysisSkill::new(
+            skill_code_analysis::CodeAnalysisSkill::default_manifest(),
+            allowed_roots.clone()
+        ));
+        register_skill!(skill_document::DocumentSkill::new(
+            skill_document::DocumentSkill::default_manifest(),
+            allowed_roots.clone()
+        ));
+        register_skill!(skill_image::ImageSkill::new(
+            skill_image::ImageSkill::default_manifest(),
+            allowed_roots.clone()
+        ));
+        register_skill!(skill_web_search::WebSearchSkill::with_secrets(
+            skill_web_search::WebSearchSkill::default_manifest(),
+            skill_vault.clone()
+        ));
+        register_skill!(
+            skill_perplexity_search::PerplexitySearchSkill::with_secrets(
+                skill_perplexity_search::PerplexitySearchSkill::default_manifest(),
+                skill_vault.clone()
+            )
+        );
+
+        tracing::info!("Native skills registered for entity-daemon");
+    }
+
+    // 9. Sync all declared skill secrets from Hive into the local skill vault.
+    //    Collects secret names from: registered skills, discovered manifests,
+    //    preloaded integrations, and reserved provider keys.
+    {
+        let mut all_secret_keys: Vec<String> = Vec::new();
+
+        if let Ok(manifests) = registry.list() {
+            for m in &manifests {
+                for s in &m.secrets {
+                    all_secret_keys.push(s.name.clone());
+                }
+            }
+        }
+
+        let discovered = abigail_skills::SkillRegistry::discover(std::slice::from_ref(&skills_dir));
+        for m in &discovered {
+            for s in &m.secrets {
+                all_secret_keys.push(s.name.clone());
+            }
+        }
+
+        all_secret_keys.extend(abigail_skills::preloaded_secret_keys());
+
+        for key in abigail_core::RESERVED_PROVIDER_KEYS {
+            all_secret_keys.push(key.to_string());
+        }
+
+        all_secret_keys.sort();
+        all_secret_keys.dedup();
+
+        let mut synced_count = 0u32;
+        for key in &all_secret_keys {
             if let Ok(Some(value)) = hive_client.get_secret(key).await {
                 if let Ok(mut v) = skill_vault.lock() {
                     if v.get_secret(key).is_none() {
                         v.set_secret(key, &value);
+                        synced_count += 1;
                         tracing::info!("Synced skill secret '{}' from Hive", key);
                     }
                 }
@@ -267,6 +368,13 @@ async fn main() -> anyhow::Result<()> {
         }
         if let Ok(v) = skill_vault.lock() {
             let _ = v.save();
+        }
+        if synced_count > 0 {
+            tracing::info!(
+                "Synced {} skill secret(s) from Hive (checked {} declared keys)",
+                synced_count,
+                all_secret_keys.len()
+            );
         }
     }
 
@@ -305,19 +413,38 @@ async fn main() -> anyhow::Result<()> {
             IggyBroker::new(conn.clone())
                 .map_err(|e| anyhow::anyhow!("Failed to configure Iggy broker: {}", e))?,
         );
-        broker
-            .ensure_topic("abigail", "job-events", TopicConfig::default())
-            .await
-            .map_err(|e| {
-                anyhow::anyhow!("Failed to ensure Iggy topic abigail/job-events: {}", e)
-            })?;
-        broker
-            .ensure_consumer_group("abigail", "job-events", "entity-daemon")
-            .await
-            .map_err(|e| {
-                anyhow::anyhow!("Failed to ensure Iggy consumer group entity-daemon: {}", e)
-            })?;
-        tracing::info!("Connected to Iggy at {}", conn);
+
+        let topics: &[(&str, &str)] = &[
+            ("abigail", "job-events"),
+            ("abigail", "conversation-turns"),
+            ("abigail", "skill-events"),
+            ("entity", "conscience-check"),
+            ("entity", "ethical-signals"),
+        ];
+        for (stream, topic) in topics {
+            broker
+                .ensure_topic(stream, topic, TopicConfig::default())
+                .await
+                .map_err(|e| {
+                    anyhow::anyhow!("Failed to ensure Iggy topic {}/{}: {}", stream, topic, e)
+                })?;
+            broker
+                .ensure_consumer_group(stream, topic, "entity-daemon")
+                .await
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to ensure Iggy consumer group entity-daemon for {}/{}: {}",
+                        stream,
+                        topic,
+                        e
+                    )
+                })?;
+        }
+        tracing::info!(
+            "Connected to Iggy at {} ({} topics bootstrapped)",
+            conn,
+            topics.len()
+        );
         broker
     } else {
         tracing::info!("Using in-process MemoryBroker (no --iggy-connection provided)");

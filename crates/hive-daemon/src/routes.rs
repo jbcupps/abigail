@@ -175,10 +175,13 @@ pub async fn store_secret(
     }
 
     if !abigail_core::is_reserved_provider_key(&body.key) {
-        tracing::debug!(
-            "Secret key '{}' is not a reserved provider name — accepting from Hive scope",
-            body.key
-        );
+        let preloaded = abigail_skills::preloaded_secret_keys();
+        if !preloaded.contains(&body.key) {
+            tracing::info!(
+                "Secret key '{}' is not a reserved provider or preloaded skill key — accepting for entity-level validation",
+                body.key
+            );
+        }
     }
 
     match state.hive_secrets.lock() {

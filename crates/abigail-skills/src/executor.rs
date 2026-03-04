@@ -89,6 +89,17 @@ impl SkillExecutor {
         tool_name: &str,
         params: ToolParams,
     ) -> SkillResult<ToolOutput> {
+        self.execute_with_confirmation(skill_id, tool_name, params, true)
+            .await
+    }
+
+    pub async fn execute_with_confirmation(
+        &self,
+        skill_id: &SkillId,
+        tool_name: &str,
+        params: ToolParams,
+        confirmed: bool,
+    ) -> SkillResult<ToolOutput> {
         let request_id = Uuid::new_v4().to_string();
         tracing::info!(
             skill_id = %skill_id,
@@ -106,6 +117,18 @@ impl SkillExecutor {
             .into_iter()
             .find(|t| t.name == tool_name)
             .ok_or_else(|| SkillError::ToolFailed(format!("Unknown tool: {}", tool_name)))?;
+
+        if tool.requires_confirmation && !confirmed {
+            tracing::warn!(
+                skill_id = %skill_id,
+                tool_name = tool_name,
+                "Tool requires explicit confirmation before execution"
+            );
+            return Err(SkillError::ConfirmationRequired(format!(
+                "Tool '{}' requires explicit mentor confirmation. Re-run with mentor_confirmed: true.",
+                tool_name
+            )));
+        }
 
         let limits = ResourceLimits::default();
         let mut sandbox =
@@ -1050,6 +1073,66 @@ mod tests {
             err.contains("verification failed"),
             "expected signature verification failure, got: {}",
             err
+        );
+    }
+
+    #[tokio::test]
+    async fn confirmation_required_blocks_unconfirmed() {
+        let registry = Arc::new(SkillRegistry::new());
+        let skill_id = SkillId("test.shell_confirm".to_string());
+        let manifest = test_manifest("test.shell_confirm", vec![Permission::ShellExecute]);
+        let skill = ShellToolSkill { manifest };
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .unwrap();
+        let executor = SkillExecutor::new(registry);
+
+        let err = executor
+            .execute_with_confirmation(&skill_id, "shell_exec", ToolParams::new(), false)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("Confirmation required") || err.contains("confirmation"),
+            "expected confirmation required error, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn confirmation_required_passes_when_confirmed() {
+        let registry = Arc::new(SkillRegistry::new());
+        let skill_id = SkillId("test.shell_confirm2".to_string());
+        let manifest = test_manifest("test.shell_confirm2", vec![Permission::ShellExecute]);
+        let skill = ShellToolSkill { manifest };
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .unwrap();
+        let executor = SkillExecutor::new(registry);
+
+        let result = executor
+            .execute_with_confirmation(&skill_id, "shell_exec", ToolParams::new(), true)
+            .await;
+        assert!(result.is_ok(), "confirmed execution should succeed");
+    }
+
+    #[tokio::test]
+    async fn no_confirmation_tools_work_without_flag() {
+        let registry = Arc::new(SkillRegistry::new());
+        let skill_id = SkillId("test.echo_noconfirm".to_string());
+        let manifest = test_manifest("test.echo_noconfirm", vec![]);
+        let skill = EchoSkill { manifest };
+        registry
+            .register(skill_id.clone(), Arc::new(skill))
+            .unwrap();
+        let executor = SkillExecutor::new(registry);
+
+        let result = executor
+            .execute_with_confirmation(&skill_id, "echo", ToolParams::new(), false)
+            .await;
+        assert!(
+            result.is_ok(),
+            "tools without requires_confirmation should work even with confirmed=false"
         );
     }
 }

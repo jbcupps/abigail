@@ -20,6 +20,22 @@ abigail-memory = { path = "../abigail-memory" }
 abigail-queue = { path = "../abigail-queue" }
 abigail-streaming = { path = "../abigail-streaming" }
 skill-email = { path = "../../skills/skill-email" }
+skill-clipboard = { path = "../../skills/skill-clipboard" }
+skill-shell = { path = "../../skills/skill-shell" }
+skill-git = { path = "../../skills/skill-git" }
+skill-notification = { path = "../../skills/skill-notification" }
+skill-system-monitor = { path = "../../skills/skill-system-monitor" }
+skill-http = { path = "../../skills/skill-http" }
+skill-calendar = { path = "../../skills/skill-calendar" }
+skill-knowledge-base = { path = "../../skills/skill-knowledge-base" }
+skill-filesystem = { path = "../../skills/skill-filesystem" }
+skill-database = { path = "../../skills/skill-database" }
+skill-code-analysis = { path = "../../skills/skill-code-analysis" }
+skill-document = { path = "../../skills/skill-document" }
+skill-image = { path = "../../skills/skill-image" }
+skill-web-search = { path = "../../skills/skill-web-search" }
+skill-perplexity-search = { path = "../../skills/skill-perplexity-search" }
+directories = "5"
 axum.workspace = true
 tower-http.workspace = true
 tokio.workspace = true

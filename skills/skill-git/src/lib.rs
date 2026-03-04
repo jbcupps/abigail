@@ -68,7 +68,10 @@ impl GitSkill {
         } else {
             args.to_vec()
         };
-        tracing::info!("Executing: git {}", full_args.join(" "));
+        tracing::info!(
+            "Executing: git {}",
+            abigail_core::redact_secrets(&full_args.join(" "))
+        );
 
         let timeout = Duration::from_secs(GIT_TIMEOUT_SECS);
         let result = tokio::time::timeout(timeout, cmd.output()).await;
@@ -112,7 +115,7 @@ impl GitSkill {
                     msg
                 };
 
-                Ok(ToolOutput::success(serde_json::json!({
+                let data = serde_json::json!({
                     "formatted": formatted,
                     "exit_code": exit_code,
                     "success": success,
@@ -120,7 +123,17 @@ impl GitSkill {
                     "stderr": stderr,
                     "stdout_truncated": stdout_truncated,
                     "stderr_truncated": stderr_truncated,
-                })))
+                });
+                if success {
+                    Ok(ToolOutput::success(data))
+                } else {
+                    Ok(ToolOutput {
+                        success: false,
+                        data: Some(data),
+                        error: Some(formatted),
+                        metadata: Default::default(),
+                    })
+                }
             }
             Ok(Err(e)) => Ok(ToolOutput::error(format!("Failed to execute git: {}", e))),
             Err(_) => Ok(ToolOutput::error(format!(

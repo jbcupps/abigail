@@ -11,11 +11,11 @@ You have access to Jira tools for searching and creating issues.
 
 Requires three secrets in the vault:
 - `jira_domain`: Your Atlassian domain (e.g. `mycompany.atlassian.net`)
-- `jira_basic_auth`: Base64-encoded `email:api_token` (computed automatically when using `store_integration_credential`)
+- `jira_basic_auth`: Base64-encoded `email:api_token` string
 
-Before using these tools, call `check_integration_status` to verify credentials are configured. If not configured, instruct the user to:
+Before using these tools, call `list_secrets` from `builtin.hive_management` to verify credentials are configured. If not configured, instruct the user to:
 1. Create an API token at https://id.atlassian.com/manage-profile/security/api-tokens
-2. Store their Jira email, API token, and domain using `store_integration_credential`
+2. Store each value individually using `store_secret` from `builtin.hive_management`: `jira_domain` for their domain, `jira_basic_auth` for the Base64-encoded email:api_token string
 
 ## Usage Guidelines
 

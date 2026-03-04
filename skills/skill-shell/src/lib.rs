@@ -149,7 +149,7 @@ impl ShellSkill {
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
-        tracing::info!("Executing: {}", command);
+        tracing::info!("Executing: {}", abigail_core::redact_secrets(command));
 
         let result = tokio::time::timeout(timeout, cmd.output()).await;
 
@@ -190,7 +190,7 @@ impl ShellSkill {
                     msg
                 };
 
-                Ok(ToolOutput::success(serde_json::json!({
+                let data = serde_json::json!({
                     "formatted": formatted,
                     "exit_code": exit_code,
                     "success": success,
@@ -198,7 +198,17 @@ impl ShellSkill {
                     "stderr": stderr,
                     "stdout_truncated": stdout_truncated,
                     "stderr_truncated": stderr_truncated,
-                })))
+                });
+                if success {
+                    Ok(ToolOutput::success(data))
+                } else {
+                    Ok(ToolOutput {
+                        success: false,
+                        data: Some(data),
+                        error: Some(formatted),
+                        metadata: Default::default(),
+                    })
+                }
             }
             Ok(Err(e)) => Ok(ToolOutput::error(format!(
                 "Failed to execute command: {}",
@@ -408,9 +418,10 @@ mod tests {
             "ls /nonexistent_dir_12345"
         };
         let result = skill.run_command(cmd, None, Some(5)).await.unwrap();
-        assert!(result.success); // ToolOutput.success is true, but the command failed
+        assert!(!result.success, "failed commands should have success=false");
         let data = result.data.unwrap();
-        assert!(!data["success"].as_bool().unwrap()); // exit code != 0
+        assert!(!data["success"].as_bool().unwrap());
+        assert!(result.error.is_some(), "should include error description");
     }
 
     #[tokio::test]
