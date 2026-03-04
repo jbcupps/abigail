@@ -1,25 +1,38 @@
-//! File-level encrypted storage using DPAPI (Windows) or plaintext (dev).
+//! File-level encrypted storage using the vault crypto layer.
 //!
-//! Wraps `dpapi_encrypt`/`dpapi_decrypt` for reading and writing encrypted files.
+//! Provides simple encrypt-to-file and decrypt-from-file helpers.
+//! Uses AES-256-GCM via the vault envelope format (cross-platform).
 
-use crate::dpapi::{dpapi_decrypt, dpapi_encrypt};
 use crate::error::Result;
+use crate::vault::crypto;
+use crate::vault::unlock::HybridUnlockProvider;
+use crate::vault::unlock::UnlockProvider;
 use std::path::Path;
 
-/// Write data to a file, encrypting it with DPAPI.
+const STORAGE_SCOPE: &str = "encrypted-storage:general";
+
+/// Write data to a file, encrypting it with AES-256-GCM.
 pub fn write_encrypted(path: &Path, data: &[u8]) -> Result<()> {
+    let unlock = HybridUnlockProvider::new();
+    let root_kek = unlock.root_kek()?;
+    let dek = crypto::derive_scope_key(&root_kek, STORAGE_SCOPE);
+
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let encrypted = dpapi_encrypt(data)?;
-    std::fs::write(path, &encrypted)?;
+    let envelope = crypto::seal(&dek, data)?;
+    std::fs::write(path, &envelope)?;
     Ok(())
 }
 
-/// Read and decrypt a DPAPI-encrypted file.
+/// Read and decrypt a file encrypted by [`write_encrypted`].
 pub fn read_encrypted(path: &Path) -> Result<Vec<u8>> {
-    let encrypted = std::fs::read(path)?;
-    dpapi_decrypt(&encrypted)
+    let unlock = HybridUnlockProvider::new();
+    let root_kek = unlock.root_kek()?;
+    let dek = crypto::derive_scope_key(&root_kek, STORAGE_SCOPE);
+
+    let envelope = std::fs::read(path)?;
+    crypto::open(&dek, &envelope)
 }
 
 #[cfg(test)]
@@ -29,7 +42,10 @@ mod tests {
 
     #[test]
     fn test_write_read_encrypted_roundtrip() {
-        let tmp = std::env::temp_dir().join("abigail_enc_storage_test");
+        // Set a deterministic passphrase for test reproducibility
+        std::env::set_var("ABIGAIL_VAULT_PASSPHRASE", "test-enc-storage");
+
+        let tmp = std::env::temp_dir().join("abigail_enc_storage_v2_test");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 
@@ -43,5 +59,6 @@ mod tests {
         assert_eq!(decrypted, data);
 
         let _ = fs::remove_dir_all(&tmp);
+        std::env::remove_var("ABIGAIL_VAULT_PASSPHRASE");
     }
 }
