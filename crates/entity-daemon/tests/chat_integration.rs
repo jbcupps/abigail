@@ -184,6 +184,7 @@ async fn chat_endpoint_returns_valid_response() {
             target: None,
             session_messages: None,
             session_id: None,
+            model_override: None,
         })
         .send()
         .await
@@ -226,6 +227,7 @@ async fn chat_endpoint_with_session_history() {
                 },
             ]),
             session_id: None,
+            model_override: None,
         })
         .send()
         .await

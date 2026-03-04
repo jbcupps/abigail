@@ -138,6 +138,7 @@ export class TauriChatGateway implements ChatGateway {
         message: request.message,
         sessionMessages: request.sessionMessages,
         sessionId: request.sessionId,
+        modelOverride: request.modelOverride,
       }).catch((error) => {
         void finalizeError(error);
       });

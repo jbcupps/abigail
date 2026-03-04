@@ -367,6 +367,28 @@ pub fn set_forge_advanced_mode(state: State<AppState>, advanced_mode: bool) -> R
         .map_err(|e| e.to_string())
 }
 
+/// Known LLM provider names. Vault keys not in this list (e.g. "tavily") are
+/// filtered out so the provider dropdown only shows chat-capable providers.
+const LLM_PROVIDER_NAMES: &[&str] = &[
+    "openai",
+    "anthropic",
+    "google",
+    "xai",
+    "openrouter",
+    "deepseek",
+    "mistral",
+    "groq",
+    "together",
+    "fireworks",
+    "cohere",
+    "local_llm",
+];
+
+fn is_llm_provider(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    LLM_PROVIDER_NAMES.contains(&lower.as_str()) || lower.ends_with("-cli")
+}
+
 #[tauri::command]
 pub fn get_stored_providers(state: State<AppState>) -> Result<Vec<String>, String> {
     let secrets = state.secrets.lock().map_err(|e| e.to_string())?;
@@ -374,13 +396,14 @@ pub fn get_stored_providers(state: State<AppState>) -> Result<Vec<String>, Strin
         .list_providers()
         .into_iter()
         .map(|s| s.to_string())
+        .filter(|s| is_llm_provider(s))
         .collect();
 
     // Include the explicitly-activated provider (e.g. a CLI tool selected by the
     // user) so it appears in the stored-providers list even without a vault secret.
     let config = state.config.read().map_err(|e| e.to_string())?;
     if let Some(ref active) = config.active_provider_preference {
-        if !providers.contains(active) {
+        if !providers.contains(active) && is_llm_provider(active) {
             providers.push(active.clone());
         }
     }

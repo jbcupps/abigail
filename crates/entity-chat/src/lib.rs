@@ -902,6 +902,7 @@ pub async fn run_tool_use_loop_rounds_only(
     executor: &SkillExecutor,
     messages: &mut Vec<Message>,
     tools: &[ToolDefinition],
+    model_override: Option<String>,
 ) -> anyhow::Result<IntermediateToolResult> {
     let mut all_records = Vec::new();
     let mut did_tool_calls = false;
@@ -911,10 +912,13 @@ pub async fn run_tool_use_loop_rounds_only(
         tracing::debug!("Tool-use loop (rounds-only) round {}", round);
 
         let resp = router
-            .route_unified(abigail_router::RoutingRequest::with_tools(
-                messages.clone(),
-                tools.to_vec(),
-            ))
+            .route_unified(abigail_router::RoutingRequest {
+                messages: messages.clone(),
+                tools: Some(tools.to_vec()),
+                model_override: model_override.clone(),
+                stream_tx: None,
+                force_id_only: false,
+            })
             .await?;
         let response = resp.completion;
         last_trace = resp.trace;
@@ -980,14 +984,21 @@ pub async fn stream_chat_pipeline(
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     tx: tokio::sync::mpsc::Sender<StreamEvent>,
+    model_override: Option<String>,
 ) -> anyhow::Result<StreamPipelineResult> {
     let mut messages = messages;
     let mut tool_calls_made = Vec::new();
 
     // Chat never uses Id; always Ego path. Tool-use loop when tools present.
     if !tools.is_empty() {
-        let intermediate =
-            run_tool_use_loop_rounds_only(router, executor, &mut messages, &tools).await?;
+        let intermediate = run_tool_use_loop_rounds_only(
+            router,
+            executor,
+            &mut messages,
+            &tools,
+            model_override.clone(),
+        )
+        .await?;
         tool_calls_made = intermediate.tool_calls_made;
         if let Some(final_text) = intermediate.final_text {
             drop(tx);
@@ -1003,7 +1014,7 @@ pub async fn stream_chat_pipeline(
         .route_unified(abigail_router::RoutingRequest {
             messages,
             tools: if tools.is_empty() { None } else { Some(tools) },
-            model_override: None,
+            model_override,
             stream_tx: Some(tx.clone()),
             force_id_only: false,
         })

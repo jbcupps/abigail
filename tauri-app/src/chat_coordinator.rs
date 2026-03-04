@@ -59,6 +59,7 @@ pub struct ChatCommandRequest {
     pub target: Option<String>,
     pub session_messages: Option<Vec<SessionMessage>>,
     pub session_id: Option<String>,
+    pub model_override: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +88,7 @@ struct PreparedChat {
     router: IdEgoRouter,
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
+    model_override: Option<String>,
 }
 
 pub struct ChatCoordinator<'a> {
@@ -183,6 +185,7 @@ impl<'a> ChatCoordinator<'a> {
             prepared.messages,
             prepared.tools,
             tx,
+            prepared.model_override,
         );
         tokio::pin!(pipeline_fut);
 
@@ -286,6 +289,7 @@ impl<'a> ChatCoordinator<'a> {
             router,
             messages,
             tools,
+            model_override: request.model_override,
         })
     }
 

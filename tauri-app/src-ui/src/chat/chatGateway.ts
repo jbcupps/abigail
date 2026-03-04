@@ -41,6 +41,7 @@ export interface ChatGatewayRequest {
   target?: "ID" | "EGO" | "AUTO";
   sessionMessages?: ChatGatewaySessionMessage[];
   sessionId?: string;
+  modelOverride?: string;
 }
 
 export interface ChatGatewayResponse {

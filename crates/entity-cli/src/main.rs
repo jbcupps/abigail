@@ -201,6 +201,7 @@ async fn main() -> anyhow::Result<()> {
                     target,
                     session_messages: None,
                     session_id: None,
+                    model_override: None,
                 })
                 .send()
                 .await?

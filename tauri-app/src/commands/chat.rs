@@ -40,6 +40,7 @@ pub async fn chat_stream(
     message: String,
     session_messages: Option<Vec<SessionMessage>>,
     session_id: Option<String>,
+    model_override: Option<String>,
 ) -> Result<(), String> {
     let mode = { state.config.read().map_err(|e| e.to_string())?.runtime_mode };
 
@@ -58,6 +59,7 @@ pub async fn chat_stream(
             target: None,
             session_messages: session_messages.clone(),
             session_id: session_id.clone(),
+            model_override: model_override.clone(),
         };
 
         // Emit request envelope so the frontend knows a chat started
@@ -111,6 +113,7 @@ pub async fn chat_stream(
                 target: None,
                 session_messages,
                 session_id,
+                model_override,
             },
         )
         .await
