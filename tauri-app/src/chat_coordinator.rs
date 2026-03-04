@@ -279,6 +279,7 @@ impl<'a> ChatCoordinator<'a> {
             session_id = %session_id,
             target_effective = %target_resolution.effective,
             deprecated_target = ?target_resolution.deprecated_input,
+            model_override = ?request.model_override,
             "Prepared chat request"
         );
 

@@ -92,8 +92,13 @@ impl IdentityManager {
             load_master_key(&master_key_path)?
         } else {
             tracing::info!("No master key found, generating new Hive master key");
-            generate_master_key(&data_root)?;
-            load_master_key(&master_key_path)?
+            // Use the signing key returned directly from generate_master_key().
+            // Previously we called load_master_key() immediately after, which
+            // created a second HybridUnlockProvider — if the OS credential store
+            // failed to persist the KEK, the second provider would generate a
+            // *different* random KEK, causing AES-GCM decryption to fail.
+            let result = generate_master_key(&data_root)?;
+            result.signing_key
         };
 
         // Load or create global config
