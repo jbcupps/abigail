@@ -7,6 +7,33 @@ use crate::config::{AppConfig, EmailConfig};
 use crate::keyring::Keyring;
 use crate::secrets::SecretsVault;
 
+/// Provider names that are always accepted as secret keys (no skill manifest needed).
+pub const RESERVED_PROVIDER_KEYS: &[&str] = &[
+    "openai",
+    "anthropic",
+    "xai",
+    "google",
+    "tavily",
+    "perplexity",
+];
+
+/// Validate that a secret key is non-empty and its value is non-empty.
+/// Does NOT enforce namespace validation (that requires the skill registry).
+pub fn validate_secret_basic(key: &str, value: &str) -> crate::Result<()> {
+    if key.is_empty() {
+        return Err(crate::CoreError::Config("Secret key cannot be empty".into()));
+    }
+    if value.is_empty() {
+        return Err(crate::CoreError::Config("Secret value cannot be empty".into()));
+    }
+    Ok(())
+}
+
+/// Check whether a key is in the reserved provider namespace.
+pub fn is_reserved_provider_key(key: &str) -> bool {
+    RESERVED_PROVIDER_KEYS.contains(&key)
+}
+
 /// Store a secret in the vault after validation.
 pub fn store_vault_secret(vault: &mut SecretsVault, key: &str, value: &str) -> crate::Result<()> {
     if key.is_empty() {

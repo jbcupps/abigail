@@ -72,15 +72,18 @@ mod tests {
 
     #[test]
     fn test_update_provider_key() {
-        let tmp = std::env::temp_dir().join("abigail_cap_provider_key");
+        let tmp = std::env::temp_dir().join("abigail_cap_provider_key_v2");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
 
-        let mut vault = SecretsVault::new(tmp.clone());
+        let unlock: std::sync::Arc<dyn abigail_core::UnlockProvider> =
+            std::sync::Arc::new(abigail_core::PassphraseUnlockProvider::new("test"));
+        let mut vault =
+            SecretsVault::open_with_provider(tmp.clone(), "secrets", unlock.clone()).unwrap();
         update_provider_key(&mut vault, "openai", "sk-test-key-123").unwrap();
 
-        // Verify key was persisted
-        let loaded = SecretsVault::load(tmp.clone()).unwrap();
+        let loaded =
+            SecretsVault::open_with_provider(tmp.clone(), "secrets", unlock).unwrap();
         assert_eq!(loaded.get_secret("openai"), Some("sk-test-key-123"));
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -88,15 +91,19 @@ mod tests {
 
     #[test]
     fn test_update_provider_key_overwrite() {
-        let tmp = std::env::temp_dir().join("abigail_cap_provider_key_overwrite");
+        let tmp = std::env::temp_dir().join("abigail_cap_provider_key_overwrite_v2");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
 
-        let mut vault = SecretsVault::new(tmp.clone());
+        let unlock: std::sync::Arc<dyn abigail_core::UnlockProvider> =
+            std::sync::Arc::new(abigail_core::PassphraseUnlockProvider::new("test"));
+        let mut vault =
+            SecretsVault::open_with_provider(tmp.clone(), "secrets", unlock.clone()).unwrap();
         update_provider_key(&mut vault, "openai", "sk-old-key").unwrap();
         update_provider_key(&mut vault, "openai", "sk-new-key").unwrap();
 
-        let loaded = SecretsVault::load(tmp.clone()).unwrap();
+        let loaded =
+            SecretsVault::open_with_provider(tmp.clone(), "secrets", unlock).unwrap();
         assert_eq!(loaded.get_secret("openai"), Some("sk-new-key"));
 
         let _ = std::fs::remove_dir_all(&tmp);

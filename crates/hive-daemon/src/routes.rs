@@ -170,6 +170,17 @@ pub async fn store_secret(
     State(state): State<HiveDaemonState>,
     Json(body): Json<StoreSecretRequest>,
 ) -> Json<ApiEnvelope<String>> {
+    if let Err(e) = abigail_core::ops::validate_secret_basic(&body.key, &body.value) {
+        return Json(ApiEnvelope::error(e.to_string()));
+    }
+
+    if !abigail_core::is_reserved_provider_key(&body.key) {
+        tracing::debug!(
+            "Secret key '{}' is not a reserved provider name — accepting from Hive scope",
+            body.key
+        );
+    }
+
     match state.hive_secrets.lock() {
         Ok(mut vault) => {
             vault.set_secret(&body.key, &body.value);
