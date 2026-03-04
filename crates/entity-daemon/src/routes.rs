@@ -261,8 +261,14 @@ pub async fn chat_stream(
             }
         });
 
-        let pipeline_fut =
-            entity_chat::stream_chat_pipeline(&router, &executor, messages, tools, tx, model_override);
+        let pipeline_fut = entity_chat::stream_chat_pipeline(
+            &router,
+            &executor,
+            messages,
+            tools,
+            tx,
+            model_override,
+        );
         tokio::pin!(pipeline_fut);
 
         let result = tokio::select! {
