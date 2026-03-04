@@ -24,6 +24,13 @@ pub struct GlobalConfig {
     /// Path to hive-level secrets vault (shared API keys across all agents).
     #[serde(default)]
     pub hive_secrets_path: Option<PathBuf>,
+    /// Default visual theme for new entities (e.g. "modern", "phosphor", "classic").
+    #[serde(default = "default_hive_theme")]
+    pub default_theme: String,
+}
+
+fn default_hive_theme() -> String {
+    "modern".to_string()
 }
 
 impl GlobalConfig {
@@ -33,6 +40,7 @@ impl GlobalConfig {
             master_key_path: data_root.join("master.key"),
             agents: Vec::new(),
             hive_secrets_path: Some(data_root.join("hive_secrets.bin")),
+            default_theme: default_hive_theme(),
         }
     }
 

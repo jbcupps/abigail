@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useState, useEffect, useRef } from "react";
-import { useTheme } from "../contexts/ThemeContext";
+import { useTheme, type ThemeId } from "../contexts/ThemeContext";
 import LlmSetupPanel from "./LlmSetupPanel";
 import ApiKeyModal from "./ApiKeyModal";
 import DataSourcesPanel from "./DataSourcesPanel";
@@ -12,7 +12,7 @@ interface SkillsVaultEntry {
   is_set: boolean;
 }
 
-type Tab = "identity" | "keys" | "llm" | "data" | "repair";
+type Tab = "identity" | "appearance" | "keys" | "llm" | "data" | "repair";
 
 interface RouterStatus {
   id_provider: string;
@@ -87,6 +87,131 @@ function PromptViewer() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+interface ThemeOption {
+  id: string;
+  name: string;
+  description: string;
+  mode: string;
+}
+
+const THEME_PREVIEWS: Record<string, { bg: string; fg: string; accent: string }> = {
+  modern: { bg: "#0f1419", fg: "#e2e8f0", accent: "#6366f1" },
+  phosphor: { bg: "#0a0a0a", fg: "#33ff33", accent: "#33ff33" },
+  classic: { bg: "#c0c0c0", fg: "#000000", accent: "#000080" },
+};
+
+function AppearanceTab() {
+  const { themeId, setThemeId, primaryColor, refreshTheme } = useTheme();
+  const [themes, setThemes] = useState<ThemeOption[]>([]);
+  const [accentColor, setAccentColor] = useState(primaryColor || "");
+
+  useEffect(() => {
+    invoke<ThemeOption[]>("list_available_themes").then(setThemes).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    setAccentColor(primaryColor || "");
+  }, [primaryColor]);
+
+  const handleThemeChange = async (id: string) => {
+    await setThemeId(id as ThemeId);
+  };
+
+  const handleAccentSave = async () => {
+    if (!accentColor.trim()) return;
+    try {
+      await invoke("crystallize_soul", {
+        name: "",
+        purpose: "",
+        personality: "",
+        mentorName: "",
+        primaryColor: accentColor.trim() || null,
+        avatarUrl: null,
+        themeId: null,
+      });
+      await refreshTheme();
+    } catch {
+      try {
+        await invoke("set_config_value", { key: "primary_color", value: accentColor.trim() });
+        await refreshTheme();
+      } catch (e2) {
+        console.warn("[AppearanceTab] accent save failed:", e2);
+      }
+    }
+  };
+
+  return (
+    <div className="p-6 max-w-lg space-y-6">
+      <div>
+        <h2 className="text-theme-primary-dim text-lg font-bold uppercase tracking-widest mb-2">Appearance</h2>
+        <p className="text-theme-text-dim text-[10px] uppercase tracking-tighter mb-6">
+          Visual theme for this entity. Overrides the hive default.
+        </p>
+      </div>
+
+      {/* Theme selector */}
+      <div className="space-y-3">
+        <label className="text-xs text-theme-text font-bold uppercase tracking-wider">Theme</label>
+        <div className="space-y-2">
+          {themes.map((t) => {
+            const p = THEME_PREVIEWS[t.id] ?? THEME_PREVIEWS.modern;
+            const active = themeId === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => handleThemeChange(t.id)}
+                className={`w-full flex items-center gap-3 p-3 rounded-theme-md border-2 transition-all text-left ${
+                  active
+                    ? "border-theme-primary bg-theme-surface"
+                    : "border-theme-border-dim hover:border-theme-border bg-theme-bg-elevated"
+                }`}
+              >
+                <div className="w-10 h-10 rounded-theme-sm shrink-0 flex items-center justify-center" style={{ backgroundColor: p.bg, border: `1px solid ${p.accent}` }}>
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: p.accent }} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-theme-text font-bold">{t.name}</div>
+                  <div className="text-[10px] text-theme-text-dim">{t.description}</div>
+                </div>
+                {active && (
+                  <span className="text-[10px] text-theme-primary font-bold uppercase tracking-wider shrink-0">Active</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Accent color override */}
+      <div className="space-y-2 pt-4 border-t border-theme-border-dim">
+        <label className="text-xs text-theme-text font-bold uppercase tracking-wider">Accent Color</label>
+        <p className="text-[10px] text-theme-text-dim">Override the primary accent color for this entity</p>
+        <div className="flex items-center gap-2">
+          <input
+            type="color"
+            value={accentColor || "#6366f1"}
+            onChange={(e) => setAccentColor(e.target.value)}
+            className="w-10 h-8 rounded border border-theme-border cursor-pointer bg-transparent"
+          />
+          <input
+            type="text"
+            value={accentColor}
+            onChange={(e) => setAccentColor(e.target.value)}
+            placeholder="#6366f1"
+            className="flex-1 px-2 py-1.5 bg-theme-input-bg border border-theme-border-dim rounded-theme-sm text-xs font-mono text-theme-text"
+          />
+          <button
+            onClick={handleAccentSave}
+            className="px-3 py-1.5 bg-theme-primary/20 border border-theme-primary text-theme-primary text-xs font-bold rounded-theme-sm hover:bg-theme-primary/30 transition-colors"
+          >
+            Save
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -234,6 +359,7 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "identity", label: "Soul" },
+    { id: "appearance", label: "Look" },
     { id: "keys", label: "Secrets" },
     { id: "llm", label: "Mind" },
     { id: "data", label: "Archives" },
@@ -243,7 +369,7 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
   const hasLocalLlm = routerStatus?.id_provider === "local_http";
 
   return (
-    <div className={`${embedded ? "" : "min-h-screen"} bg-theme-bg text-theme-text font-mono flex flex-col`}>
+    <div className={`${embedded ? "" : "min-h-screen"} bg-theme-bg text-theme-text font-primary flex flex-col`}>
       {!embedded && (
         <>
           {/* Header */}
@@ -275,8 +401,8 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
 
       {/* Warning if no local LLM */}
       {!hasLocalLlm && (
-        <div className="px-4 py-2 border-b border-yellow-800 bg-yellow-950/20">
-          <p className="text-yellow-500 text-[10px] uppercase tracking-tighter">
+        <div className="px-4 py-2 border-b border-theme-warning bg-theme-warning-dim">
+          <p className="text-theme-warning text-[10px] uppercase tracking-tighter">
             No local LLM configured. Id mode chat requires a local LLM.
           </p>
         </div>
@@ -344,7 +470,7 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
               </div>
             </div>
             {identityMessage && (
-              <p className={`text-xs mb-4 ${identityMessage.startsWith("Error") ? "text-red-400" : "text-theme-text-bright"}`}>
+              <p className={`text-xs mb-4 ${identityMessage.startsWith("Error") ? "text-theme-danger" : "text-theme-text-bright"}`}>
                 {identityMessage}
               </p>
             )}
@@ -357,6 +483,11 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
 
             <PromptViewer />
           </div>
+        )}
+
+        {/* ── APPEARANCE (THEME) ── */}
+        {tab === "appearance" && (
+          <AppearanceTab />
         )}
 
         {/* ── MIND (LLM SETUP) ── */}
@@ -444,7 +575,7 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
 
             {/* Modal: set skill secret value */}
             {skillsVaultEditing && (
-              <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-label="Set skill secret">
+              <div className="fixed inset-0 bg-theme-overlay flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-label="Set skill secret">
                 <div className="bg-theme-bg-elevated border border-theme-primary rounded-lg p-6 max-w-md w-full mx-4">
                   <h3 className="text-theme-primary-dim text-sm font-bold uppercase tracking-widest mb-2">{skillsVaultEditing}</h3>
                   <p className="text-theme-text-dim text-[10px] mb-4">Value is stored encrypted. You cannot read it back here.</p>
@@ -460,7 +591,7 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
                       if (e.key === "Escape") setSkillsVaultEditing(null);
                     }}
                   />
-                  {skillsVaultError && <p className="text-red-400 text-xs mb-3">{skillsVaultError}</p>}
+                  {skillsVaultError && <p className="text-theme-danger text-xs mb-3">{skillsVaultError}</p>}
                   <div className="flex gap-3 justify-end">
                     <button
                       className="border border-theme-border-dim text-theme-text-dim px-4 py-2 rounded text-xs uppercase tracking-widest hover:bg-theme-bg-inset"
@@ -516,19 +647,19 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
             </div>
 
             {repairMessage && <p className="text-theme-text-bright text-[10px] uppercase font-bold text-center italic">{repairMessage}</p>}
-            {repairError && <p className="text-red-400 text-[10px] uppercase font-bold text-center">{repairError}</p>}
+            {repairError && <p className="text-theme-danger text-[10px] uppercase font-bold text-center">{repairError}</p>}
 
             <div className="border-t border-theme-border pt-8 space-y-4">
               <div>
-                <h3 className="text-red-500 font-bold uppercase text-sm tracking-widest mb-2">Oblivion Protocol</h3>
+                <h3 className="text-theme-danger font-bold uppercase text-sm tracking-widest mb-2">Oblivion Protocol</h3>
                 <p className="text-[10px] text-theme-text-dim uppercase tracking-tighter mb-4">
                   Permanently delete this entity and all its memories from the Hive. 
-                  <strong className="text-red-400/80 block mt-1">WARNING: IRREVERSIBLE ACTION.</strong>
+                  <strong className="text-theme-danger block mt-1">WARNING: IRREVERSIBLE ACTION.</strong>
                 </p>
               </div>
               <button
                 onClick={handleReset}
-                className="w-full px-4 py-2 rounded font-bold text-xs border border-red-700 text-red-500 hover:bg-red-900/20 uppercase tracking-widest transition-all"
+                className="w-full px-4 py-2 rounded font-bold text-xs border border-theme-danger text-theme-danger hover:bg-theme-danger-dim uppercase tracking-widest transition-all"
               >
                 Execute Hard Reset
               </button>

@@ -573,6 +573,7 @@ pub fn crystallize_soul(
     mentor_name: String,
     primary_color: Option<String>,
     avatar_url: Option<String>,
+    theme_id: Option<String>,
 ) -> Result<String, String> {
     let mentor = if mentor_name.trim().is_empty() {
         "my mentor".to_string()
@@ -589,6 +590,9 @@ pub fn crystallize_soul(
         config.agent_name = Some(name.clone());
         config.primary_color = primary_color;
         config.avatar_url = avatar_url;
+        if let Some(tid) = theme_id {
+            config.theme_id = Some(tid);
+        }
         config
             .save(&config.config_path())
             .map_err(|e| e.to_string())?;

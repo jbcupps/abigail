@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 23;
+pub const CONFIG_SCHEMA_VERSION: u32 = 24;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 ///
@@ -471,6 +471,12 @@ pub struct AppConfig {
     /// Example: `iggy://iggy:iggy@127.0.0.1:8090`
     #[serde(default)]
     pub iggy_connection: Option<String>,
+
+    // ── v24 fields ─────────────────────────────────────────────────
+    /// Visual theme ID for this entity (e.g. "modern", "phosphor", "classic").
+    /// Inherited from hive default at creation, independently changeable.
+    #[serde(default)]
+    pub theme_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -534,6 +540,7 @@ impl AppConfig {
             hive_daemon_url: default_hive_daemon_url(),
             entity_daemon_url: default_entity_daemon_url(),
             iggy_connection: None,
+            theme_id: None,
         }
     }
 
@@ -807,6 +814,13 @@ impl AppConfig {
             );
         }
 
+        if self.schema_version < 24 {
+            // v24: Theme engine — add theme_id (None = inherit hive default)
+            self.schema_version = 24;
+            migrated = true;
+            tracing::debug!("Migrated config from v23 to v24 (theme engine: theme_id field)");
+        }
+
         migrated
     }
     /// Check if birth was interrupted (birth_stage set but birth_complete is false).
@@ -887,6 +901,7 @@ mod tests {
             hive_daemon_url: default_hive_daemon_url(),
             entity_daemon_url: default_entity_daemon_url(),
             iggy_connection: None,
+            theme_id: None,
         }
     }
 

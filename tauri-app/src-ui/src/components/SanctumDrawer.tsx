@@ -13,12 +13,13 @@ type SanctumTab =
   | "staff"
   | "jobs"
   | "identity"
+  | "appearance"
   | "keys"
   | "llm"
   | "data"
   | "diagnostics"
   | "repair";
-type IdentityPanelTab = Extract<SanctumTab, "identity" | "keys" | "llm" | "data" | "repair">;
+type IdentityPanelTab = Extract<SanctumTab, "identity" | "appearance" | "keys" | "llm" | "data" | "repair">;
 
 interface SanctumDrawerProps {
   open: boolean;
@@ -32,6 +33,7 @@ const TABS: { id: SanctumTab; label: string }[] = [
   { id: "staff", label: "Staff" },
   { id: "jobs", label: "Registry" },
   { id: "identity", label: "Soul" },
+  { id: "appearance", label: "Look" },
   { id: "keys", label: "Secrets" },
   { id: "llm", label: "Mind" },
   { id: "data", label: "Archives" },
@@ -45,7 +47,7 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
   const [activeTab, setActiveTab] = useState<SanctumTab>("conscience");
 
   // IdentityPanel mapping
-  const identityPanelTabs: IdentityPanelTab[] = ["identity", "llm", "keys", "data", "repair"];
+  const identityPanelTabs: IdentityPanelTab[] = ["identity", "appearance", "llm", "keys", "data", "repair"];
   const isIdentityPanelTab = (tab: SanctumTab): tab is IdentityPanelTab =>
     identityPanelTabs.includes(tab as IdentityPanelTab);
 
@@ -95,7 +97,7 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
       {/* Backdrop */}
       {open && (
         <div
-          className="fixed inset-0 bg-black/50 z-40 transition-opacity"
+          className="fixed inset-0 bg-theme-overlay z-40 transition-opacity"
           onClick={onClose}
         />
       )}
@@ -109,7 +111,7 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-theme-border shrink-0">
           <div>
-            <h1 className="text-theme-primary-dim text-lg font-bold font-mono tracking-widest uppercase">The Sanctum</h1>
+            <h1 className="text-theme-primary-dim text-lg font-bold font-primary tracking-widest uppercase">The Sanctum</h1>
             <p className="text-theme-text-dim text-[10px] uppercase tracking-tighter">Sovereign Core Management</p>
           </div>
           <button
@@ -133,7 +135,7 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
               role="tab"
               aria-selected={activeTab === t.id}
               onClick={() => setActiveTab(t.id)}
-              className={`px-3 py-2 text-[10px] font-mono whitespace-nowrap border-b-2 transition-colors uppercase tracking-widest ${
+              className={`px-3 py-2 text-[10px] font-primary whitespace-nowrap border-b-2 transition-colors uppercase tracking-widest ${
                 activeTab === t.id
                   ? "border-theme-primary text-theme-primary"
                   : "border-transparent text-theme-text-dim hover:text-theme-text"
@@ -180,11 +182,11 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
 
         {/* Footer */}
         <div className="border-t border-theme-border px-4 py-3 shrink-0 flex justify-between items-center">
-          <span className="text-[10px] text-theme-text-dim uppercase tracking-widest font-mono">
+          <span className="text-[10px] text-theme-text-dim uppercase tracking-widest font-primary">
             Sovereign v0.0.1
           </span>
           <button
-            className="text-theme-text-dim hover:text-theme-danger text-[10px] font-mono uppercase tracking-widest border border-theme-border-dim px-2 py-1 rounded"
+            className="text-theme-text-dim hover:text-theme-danger text-[10px] font-primary uppercase tracking-widest border border-theme-border-dim px-2 py-1 rounded"
             onClick={onDisconnect}
           >
             [Eject]

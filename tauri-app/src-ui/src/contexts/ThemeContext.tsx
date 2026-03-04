@@ -1,16 +1,18 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-export type PersonaMode = "id" | "ego" | "neutral";
+const VALID_THEMES = ["modern", "phosphor", "classic"] as const;
+export type ThemeId = (typeof VALID_THEMES)[number];
 
 interface EntityTheme {
   primary_color: string | null;
   avatar_url: string | null;
+  theme_id: string | null;
 }
 
 interface ThemeContextValue {
-  mode: PersonaMode;
-  setMode: (mode: PersonaMode) => void;
+  themeId: ThemeId;
+  setThemeId: (id: ThemeId) => Promise<void>;
   agentName: string | null;
   primaryColor: string | null;
   avatarUrl: string | null;
@@ -21,42 +23,63 @@ interface ThemeContextValue {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 interface ThemeProviderProps {
-  initialMode?: PersonaMode;
   children: ReactNode;
 }
 
-export function ThemeProvider({ initialMode = "neutral", children }: ThemeProviderProps) {
-  const [mode, setMode] = useState<PersonaMode>(initialMode);
+function isValidTheme(id: string | null | undefined): id is ThemeId {
+  return typeof id === "string" && (VALID_THEMES as readonly string[]).includes(id);
+}
+
+function applyThemeClass(themeId: ThemeId) {
+  const root = document.documentElement;
+  for (const t of VALID_THEMES) {
+    root.classList.remove(`theme-${t}`);
+  }
+  root.classList.add(`theme-${themeId}`);
+}
+
+function applyAccentOverride(primaryColor: string | null) {
+  const root = document.documentElement;
+  if (primaryColor) {
+    root.style.setProperty("--color-primary", primaryColor);
+    if (primaryColor.startsWith("#") && primaryColor.length === 7) {
+      root.style.setProperty("--color-primary-dim", primaryColor + "cc");
+      root.style.setProperty("--color-primary-glow", primaryColor + "26");
+    }
+  } else {
+    root.style.removeProperty("--color-primary");
+    root.style.removeProperty("--color-primary-dim");
+    root.style.removeProperty("--color-primary-glow");
+  }
+}
+
+export function ThemeProvider({ children }: ThemeProviderProps) {
+  const [themeId, setThemeIdState] = useState<ThemeId>("modern");
   const [agentName, setAgentName] = useState<string | null>(null);
   const [primaryColor, setPrimaryColor] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
-  // Apply theme class and CSS variables to document root
   useEffect(() => {
-    const root = document.documentElement;
-    root.classList.remove("theme-id", "theme-ego", "theme-neutral");
-    root.classList.add(`theme-${mode}`);
+    applyThemeClass(themeId);
+  }, [themeId]);
 
-    if (primaryColor) {
-      root.style.setProperty("--theme-primary", primaryColor);
-      // Generate a dimmer version for borders/glows if it's hex
-      if (primaryColor.startsWith("#") && primaryColor.length === 7) {
-        root.style.setProperty("--theme-primary-dim", primaryColor + "cc");
-        root.style.setProperty("--theme-primary-faint", primaryColor + "33");
-      }
-    } else {
-      root.style.removeProperty("--theme-primary");
-      root.style.removeProperty("--theme-primary-dim");
-      root.style.removeProperty("--theme-primary-faint");
-    }
-  }, [mode, primaryColor]);
+  useEffect(() => {
+    applyAccentOverride(primaryColor);
+  }, [primaryColor]);
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const setThemeId = useCallback(async (id: ThemeId) => {
+    setThemeIdState(id);
+    try {
+      await invoke("set_entity_theme_id", { themeId: id });
+    } catch (e) {
+      console.warn("[ThemeContext] set_entity_theme_id failed:", e);
+    }
   }, []);
 
   const refreshTheme = useCallback(async () => {
@@ -65,8 +88,19 @@ export function ThemeProvider({ initialMode = "neutral", children }: ThemeProvid
       if (!mountedRef.current) return;
       setPrimaryColor(theme.primary_color);
       setAvatarUrl(theme.avatar_url);
-    } catch (e) {
-      console.warn("[ThemeContext] refreshTheme failed:", e);
+      if (isValidTheme(theme.theme_id)) {
+        setThemeIdState(theme.theme_id);
+      }
+    } catch {
+      try {
+        const hiveTheme = await invoke<string>("get_hive_theme");
+        if (!mountedRef.current) return;
+        if (isValidTheme(hiveTheme)) {
+          setThemeIdState(hiveTheme);
+        }
+      } catch (e2) {
+        console.warn("[ThemeContext] get_hive_theme fallback failed:", e2);
+      }
     }
   }, []);
 
@@ -75,23 +109,21 @@ export function ThemeProvider({ initialMode = "neutral", children }: ThemeProvid
       const name = await invoke<string | null>("get_agent_name");
       if (!mountedRef.current) return;
       setAgentName(name);
-      // When name is refreshed, also refresh theme as they usually change together (e.g. on load)
       await refreshTheme();
     } catch (e) {
-      // Ignore - agent name not yet set
       console.warn("[ThemeContext] refreshAgentName failed:", e);
     }
   }, [refreshTheme]);
 
   return (
-    <ThemeContext.Provider value={{ 
-      mode, 
-      setMode, 
-      agentName, 
-      primaryColor, 
-      avatarUrl, 
-      refreshAgentName, 
-      refreshTheme 
+    <ThemeContext.Provider value={{
+      themeId,
+      setThemeId,
+      agentName,
+      primaryColor,
+      avatarUrl,
+      refreshAgentName,
+      refreshTheme,
     }}>
       {children}
     </ThemeContext.Provider>

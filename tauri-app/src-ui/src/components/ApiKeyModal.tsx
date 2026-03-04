@@ -74,7 +74,7 @@ export default function ApiKeyModal({ provider, onSaved, onCancel }: ApiKeyModal
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-labelledby="api-key-modal-title">
+    <div className="fixed inset-0 bg-theme-overlay flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-labelledby="api-key-modal-title">
       <div className="bg-theme-bg-elevated border border-theme-primary rounded-lg p-6 max-w-md w-full mx-4">
         <h2 id="api-key-modal-title" className="text-theme-primary-dim text-lg mb-2">{info.label} API Key</h2>
         <p className="text-theme-text-dim text-sm mb-2">
@@ -98,7 +98,7 @@ export default function ApiKeyModal({ provider, onSaved, onCancel }: ApiKeyModal
             autoFocus
           />
         </div>
-        {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+        {error && <p className="text-theme-danger text-sm mb-3">{error}</p>}
         <div className="flex gap-3 justify-end">
           <button
             className="border border-theme-primary-faint text-theme-text-dim px-4 py-2 rounded hover:bg-theme-surface text-sm"

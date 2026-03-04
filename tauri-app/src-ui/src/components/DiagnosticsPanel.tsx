@@ -26,10 +26,10 @@ interface CapturedLogs {
 }
 
 const LEVEL_COLORS: Record<string, string> = {
-  ERROR: "text-red-400",
-  WARN: "text-yellow-400",
-  INFO: "text-green-400",
-  DEBUG: "text-cyan-400",
+  ERROR: "text-theme-danger",
+  WARN: "text-theme-warning",
+  INFO: "text-theme-success",
+  DEBUG: "text-theme-info",
   TRACE: "text-theme-text-dim",
 };
 
@@ -300,13 +300,13 @@ export default function DiagnosticsPanel({ onNavigate }: DiagnosticsPanelProps) 
             disabled={cliLoading}
             className={`relative w-12 h-6 rounded-full transition-colors ${
               cliStatus.running
-                ? "bg-green-600"
+                ? "bg-theme-success"
                 : "bg-theme-border-dim"
             }`}
             aria-label="Toggle troubleshooting mode"
           >
             <span
-              className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+              className={`absolute top-0.5 w-5 h-5 rounded-full bg-theme-bg-elevated transition-transform ${
                 cliStatus.running ? "translate-x-6" : "translate-x-0.5"
               }`}
             />
@@ -326,14 +326,14 @@ export default function DiagnosticsPanel({ onNavigate }: DiagnosticsPanelProps) 
         )}
 
         {cliError && (
-          <p className="text-red-400 text-xs mb-2">{cliError}</p>
+          <p className="text-theme-danger text-xs mb-2">{cliError}</p>
         )}
 
         {cliStatus.running && (
-          <div className="bg-black/40 border border-theme-border-dim rounded p-3 space-y-2">
+          <div className="bg-theme-overlay border border-theme-border-dim rounded p-3 space-y-2">
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-              <span className="text-green-400 text-xs font-bold">
+              <span className="w-2 h-2 rounded-full bg-theme-success animate-pulse" />
+              <span className="text-theme-success text-xs font-bold">
                 API Active — http://localhost:{cliStatus.port}
               </span>
             </div>
@@ -354,10 +354,10 @@ export default function DiagnosticsPanel({ onNavigate }: DiagnosticsPanelProps) 
             <div className="border-t border-theme-border-dim pt-2 space-y-1.5">
               <p className="text-theme-text-dim text-[9px] uppercase tracking-wider">Endpoints:</p>
               <div className="space-y-1">
-                <code className="block text-[9px] text-theme-text-bright bg-black/30 px-2 py-1 rounded break-all">
+                <code className="block text-[9px] text-theme-text-bright bg-theme-overlay px-2 py-1 rounded break-all">
                   curl -H "Authorization: Bearer {cliStatus.token}" http://localhost:{cliStatus.port}/status
                 </code>
-                <code className="block text-[9px] text-theme-text-bright bg-black/30 px-2 py-1 rounded break-all">
+                <code className="block text-[9px] text-theme-text-bright bg-theme-overlay px-2 py-1 rounded break-all">
                   curl -H "Authorization: Bearer {cliStatus.token}" -X POST -H "Content-Type: application/json" -d '{"{"}\"message\":\"Hello\"{"}"}'  http://localhost:{cliStatus.port}/chat
                 </code>
               </div>
@@ -383,12 +383,12 @@ export default function DiagnosticsPanel({ onNavigate }: DiagnosticsPanelProps) 
           <button
             onClick={toggleDebug}
             className={`relative w-12 h-6 rounded-full transition-colors ${
-              debugEnabled ? "bg-cyan-600" : "bg-theme-border-dim"
+              debugEnabled ? "bg-theme-info" : "bg-theme-border-dim"
             }`}
             aria-label="Toggle debug logging"
           >
             <span
-              className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+              className={`absolute top-0.5 w-5 h-5 rounded-full bg-theme-bg-elevated transition-transform ${
                 debugEnabled ? "translate-x-6" : "translate-x-0.5"
               }`}
             />
@@ -420,7 +420,7 @@ export default function DiagnosticsPanel({ onNavigate }: DiagnosticsPanelProps) 
             onClick={() => setPolling(!polling)}
             className={`text-[10px] border px-3 py-1 rounded uppercase tracking-wider ${
               polling
-                ? "border-green-600 text-green-400 hover:bg-green-950/20"
+                ? "border-theme-success text-theme-success hover:bg-theme-success-dim"
                 : "border-theme-primary text-theme-primary hover:bg-theme-primary-glow"
             }`}
           >
@@ -448,7 +448,7 @@ export default function DiagnosticsPanel({ onNavigate }: DiagnosticsPanelProps) 
         <div
           ref={logContainerRef}
           onScroll={handleLogScroll}
-          className="bg-black/50 border border-theme-border-dim rounded font-mono text-[10px] leading-relaxed overflow-auto"
+          className="bg-theme-overlay border border-theme-border-dim rounded font-mono text-[10px] leading-relaxed overflow-auto"
           style={{ height: 280 }}
         >
           {logEntries.length === 0 ? (
@@ -496,7 +496,7 @@ export default function DiagnosticsPanel({ onNavigate }: DiagnosticsPanelProps) 
         </div>
 
         {diagError && (
-          <div className="bg-red-950/30 border border-red-800 rounded p-2 text-red-400 text-xs mb-2">
+          <div className="bg-theme-danger-dim border border-theme-danger rounded p-2 text-theme-danger text-xs mb-2">
             {diagError}
           </div>
         )}

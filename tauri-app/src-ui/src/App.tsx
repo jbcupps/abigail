@@ -81,7 +81,7 @@ function SkillToastContainer({ toasts }: { toasts: SkillToast[] }) {
       {toasts.map((t) => (
         <div
           key={t.id}
-          className={`pointer-events-auto px-3 py-2 rounded border text-xs font-mono animate-fade-in-up ${
+          className={`pointer-events-auto px-3 py-2 rounded border text-xs font-primary animate-fade-in-up ${
             t.kind === "reloaded"
               ? "bg-theme-bg-elevated border-theme-primary/40 text-theme-primary"
               : "bg-theme-bg-elevated border-theme-danger/40 text-theme-danger"
@@ -104,7 +104,7 @@ function AppInner() {
   const [ollamaProgress, setOllamaProgress] = useState(0);
   const [ollamaStatus, setOllamaStatus] = useState("");
   const [isFirstPull, setIsFirstPull] = useState(true);
-  const { setMode, refreshAgentName } = useTheme();
+  const { refreshAgentName, refreshTheme } = useTheme();
   const skillToasts = useSkillEvents();
 
   const initializeApp = async () => {
@@ -251,8 +251,6 @@ function AppInner() {
   };
 
   const onBirthComplete = async () => {
-    // After birth, switch to ego and go to chat
-    setMode("ego");
     await refreshAgentName();
     setAppState("chat");
   };
@@ -264,7 +262,6 @@ function AppInner() {
   };
 
   const handleContinueAnyway = () => {
-    setMode("ego");
     setAppState("chat");
   };
 
@@ -277,7 +274,6 @@ function AppInner() {
         await invoke("load_agent", { agentId: uuid });
         setActiveSoulId(uuid);
         setExistingIdentity(null);
-        setMode("ego");
         setAppState("startup_check");
         await refreshAgentName();
         await runStartupChecks();
@@ -310,7 +306,6 @@ function AppInner() {
     setActiveSoulId(_agentId);
     const complete = await invoke<boolean>("get_birth_complete");
     if (complete) {
-      setMode("ego");
       setAppState("startup_check");
       await refreshAgentName();
       await runStartupChecks();
@@ -335,7 +330,7 @@ function AppInner() {
     } catch (e) {
       console.warn("[App] suspend_agent failed; continuing to management:", e);
     }
-    setMode("neutral");
+    refreshTheme();
     setAppState("management");
   };
 
@@ -354,7 +349,7 @@ function AppInner() {
       return <SplashScreen onComplete={handleSplashComplete} />;
     case "loading":
       return (
-        <div className="min-h-screen bg-theme-bg text-theme-text-dim font-mono flex items-center justify-center">
+        <div className="min-h-screen bg-theme-bg text-theme-text-dim font-primary flex items-center justify-center">
           {toastOverlay}
           <div className="animate-pulse">Loading...</div>
         </div>
@@ -398,7 +393,7 @@ function AppInner() {
       return <BootSequence onComplete={onBirthComplete} />;
     case "startup_check":
       return (
-        <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col items-center justify-center">
+        <div className="min-h-screen bg-theme-bg text-theme-text font-primary flex flex-col items-center justify-center">
           <div className="bg-theme-bg-elevated border border-theme-border-dim rounded-lg p-6 text-center">
             <pre className="text-theme-primary text-sm mb-4">
               ABIGAIL STARTUP
@@ -411,7 +406,7 @@ function AppInner() {
       );
     case "startup_failed":
       return (
-        <div className="min-h-screen bg-theme-bg text-theme-text font-mono flex flex-col items-center justify-center p-6">
+        <div className="min-h-screen bg-theme-bg text-theme-text font-primary flex flex-col items-center justify-center p-6">
           <div className="bg-theme-bg-elevated border border-theme-border-dim rounded-lg p-6 text-center">
             <pre className="text-theme-primary text-sm mb-4">
               ABIGAIL STARTUP
@@ -427,7 +422,7 @@ function AppInner() {
               Retry
             </button>
             <button
-              className="border border-yellow-500 text-yellow-500 px-4 py-2 rounded hover:bg-yellow-500/20"
+              className="border border-theme-warning text-theme-warning px-4 py-2 rounded hover:bg-theme-warning-dim"
               onClick={handleContinueAnyway}
             >
               Continue anyway
@@ -468,7 +463,7 @@ function App() {
   const showHarnessDebugPanel = isBrowserHarnessRuntime() && isHarnessDebugEnabled();
 
   return (
-    <ThemeProvider initialMode="neutral">
+    <ThemeProvider>
       {showHarnessDebugPanel && <HarnessDebugPanel />}
       {showRuntimeBadge && (
         <button

@@ -31,7 +31,7 @@ export default function SplashScreen({ onComplete }: SplashScreenProps) {
 
   return (
     <div
-      className="fixed inset-0 bg-black flex items-center justify-center cursor-pointer z-[9999]"
+      className="fixed inset-0 bg-theme-bg flex items-center justify-center cursor-pointer z-[9999]"
       onClick={handleClick}
     >
       {!videoFailed ? (

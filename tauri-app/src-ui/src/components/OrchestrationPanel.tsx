@@ -20,10 +20,10 @@ interface JobRecord {
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  queued: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-  running: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-  completed: "bg-green-500/20 text-green-400 border-green-500/30",
-  failed: "bg-red-500/20 text-red-400 border-red-500/30",
+  queued: "bg-theme-warning-dim text-theme-warning border-theme-warning",
+  running: "bg-theme-info-dim text-theme-info border-theme-info",
+  completed: "bg-theme-success-dim text-theme-success border-theme-success",
+  failed: "bg-theme-danger-dim text-theme-danger border-theme-danger",
   cancelled: "bg-theme-text-dim/20 text-theme-text-dim border-theme-border-dim",
   expired: "bg-theme-text-dim/20 text-theme-text-dim border-theme-border-dim",
 };
@@ -135,7 +135,7 @@ export default function OrchestrationPanel() {
                   {job.status}
                 </span>
                 {job.execution_mode === "direct" && (
-                  <span className="px-1 py-0.5 text-[8px] font-mono rounded border border-purple-500/30 text-purple-400 bg-purple-500/10">
+                  <span className="px-1 py-0.5 text-[8px] font-mono rounded border border-theme-info text-theme-info bg-theme-info-dim">
                     direct
                   </span>
                 )}
@@ -147,7 +147,7 @@ export default function OrchestrationPanel() {
                 </span>
                 {(job.status === "queued" || job.status === "running") && (
                   <button
-                    className="text-[10px] text-theme-danger hover:text-red-400 font-mono"
+                    className="text-[10px] text-theme-danger hover:text-theme-danger font-mono"
                     onClick={(e) => {
                       e.stopPropagation();
                       cancelJob(job.id);
@@ -169,7 +169,7 @@ export default function OrchestrationPanel() {
                   {job.completed_at && <div>Completed: {job.completed_at}</div>}
                   {job.result && (
                     <div className="mt-1">
-                      <span className="text-green-400">Result:</span>{" "}
+                      <span className="text-theme-success">Result:</span>{" "}
                       {job.result.length > 200
                         ? job.result.slice(0, 200) + "..."
                         : job.result}
@@ -207,7 +207,7 @@ export default function OrchestrationPanel() {
                   {t.topic}
                 </span>
                 <button
-                  className="text-[10px] text-theme-danger hover:text-red-400 font-mono"
+                  className="text-[10px] text-theme-danger hover:text-theme-danger font-mono"
                   onClick={() => cancelJob(t.id)}
                 >
                   cancel
