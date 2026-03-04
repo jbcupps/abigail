@@ -24,6 +24,10 @@ pub enum SkillError {
     Timeout(String),
     #[error("Missing secret: {0}")]
     MissingSecret(String),
+    #[error("Confirmation required: {0}")]
+    ConfirmationRequired(String),
+    #[error("Invalid arguments: {0}")]
+    InvalidArguments(String),
 }
 
 #[derive(Clone, Serialize, Deserialize)]

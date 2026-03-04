@@ -303,6 +303,7 @@ impl IdentityManager {
             runtime_mode: Default::default(),
             hive_daemon_url: "http://127.0.0.1:3141".to_string(),
             entity_daemon_url: "http://127.0.0.1:3142".to_string(),
+            iggy_connection: None,
         };
         let config_path = agent_dir.join("config.json");
         config.save(&config_path).map_err(|e| e.to_string())?;

@@ -28,6 +28,7 @@ pub use config::{
 pub use document::{CoreDocument, DocumentTier};
 pub use error::{CoreError, Result};
 pub use global_config::{AgentEntry, GlobalConfig};
+pub use key_detection::redact_secrets;
 pub use keyring::{
     generate_external_keypair, generate_master_key, load_master_key, parse_private_key,
     sign_agent_key, sign_constitutional_documents, sign_document, verify_agent_signature,

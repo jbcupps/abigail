@@ -411,19 +411,26 @@ impl DynamicApiSkill {
         self.config
             .tools
             .iter()
-            .map(|t| ToolDescriptor {
-                name: t.name.clone(),
-                description: t.description.clone(),
-                parameters: t.parameters.clone(),
-                returns: serde_json::json!({"type": "string"}),
-                cost_estimate: CostEstimate {
-                    latency_ms: 2000,
-                    network_bound: true,
-                    token_cost: None,
-                },
-                required_permissions: vec![Permission::Network(NetworkPermission::Full)],
-                autonomous: true,
-                requires_confirmation: false,
+            .map(|t| {
+                let method = t.method.to_uppercase();
+                let (autonomous, requires_confirmation) = match method.as_str() {
+                    "GET" | "HEAD" => (true, false),
+                    _ => (false, true),
+                };
+                ToolDescriptor {
+                    name: t.name.clone(),
+                    description: t.description.clone(),
+                    parameters: t.parameters.clone(),
+                    returns: serde_json::json!({"type": "string"}),
+                    cost_estimate: CostEstimate {
+                        latency_ms: 2000,
+                        network_bound: true,
+                        token_cost: None,
+                    },
+                    required_permissions: vec![Permission::Network(NetworkPermission::Full)],
+                    autonomous,
+                    requires_confirmation,
+                }
             })
             .collect()
     }

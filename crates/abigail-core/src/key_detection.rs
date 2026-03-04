@@ -36,6 +36,30 @@ pub fn detect_api_keys(message: &str) -> Vec<(String, String)> {
     detected
 }
 
+/// Redact detected API key patterns in text, replacing the sensitive portion
+/// with a short visible prefix and `***`. This is the backend-side equivalent
+/// of the UI `redactApiKeys` function.
+pub fn redact_secrets(text: &str) -> String {
+    let mut result = text.to_string();
+    for (pattern, _provider) in KEY_PATTERNS {
+        if let Ok(re) = regex::Regex::new(pattern) {
+            result = re
+                .replace_all(&result, |caps: &regex::Captures<'_>| {
+                    let matched = caps.get(0).map(|m| m.as_str()).unwrap_or("");
+                    let dash_idx = matched.find('-');
+                    let visible = if let Some(idx) = dash_idx {
+                        &matched[..std::cmp::min(idx + 4, matched.len())]
+                    } else {
+                        &matched[..std::cmp::min(4, matched.len())]
+                    };
+                    format!("{}***", visible)
+                })
+                .to_string();
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,5 +109,42 @@ mod tests {
             "OpenAI: sk-abcdefghijklmnopqrstuvwxyz and Anthropic: sk-ant-abc123def456ghi789jklmno";
         let keys = detect_api_keys(msg);
         assert_eq!(keys.len(), 2);
+    }
+
+    #[test]
+    fn redact_openai_key() {
+        let text = "key is sk-abcdefghijklmnopqrstuvwxyz ok";
+        let redacted = redact_secrets(text);
+        assert!(redacted.contains("sk-abc***"));
+        assert!(!redacted.contains("abcdefghijklmnopqrstuvwxyz"));
+    }
+
+    #[test]
+    fn redact_anthropic_key() {
+        let text = "use sk-ant-abc123def456ghi789jklmno for auth";
+        let redacted = redact_secrets(text);
+        assert!(
+            redacted.contains("***"),
+            "should contain redaction marker, got: {}",
+            redacted
+        );
+        assert!(
+            !redacted.contains("abc123def456"),
+            "should not contain raw key body"
+        );
+    }
+
+    #[test]
+    fn redact_preserves_normal_text() {
+        let text = "Hello, this is a normal message with no secrets.";
+        assert_eq!(redact_secrets(text), text);
+    }
+
+    #[test]
+    fn redact_multiple_keys() {
+        let text = "openai=sk-abcdefghijklmnopqrstuvwxyz anthropic=sk-ant-abc123def456ghi789jklmno";
+        let redacted = redact_secrets(text);
+        assert!(!redacted.contains("abcdefghijklmnopqrstuvwxyz"));
+        assert!(!redacted.contains("abc123def456"));
     }
 }

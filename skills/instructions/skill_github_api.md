@@ -10,7 +10,7 @@ You have access to GitHub API tools for interacting with repositories, issues, a
 
 ## Authentication
 
-Requires a GitHub Personal Access Token stored as `github_token` in the secrets vault. Before using these tools, call `check_integration_status` to verify the token is configured. If not configured, instruct the user to create a token at https://github.com/settings/tokens with `repo` scope, then store it with `store_secret`.
+Requires a GitHub Personal Access Token stored as `github_token` in the secrets vault. Before using these tools, call `list_secrets` from `builtin.hive_management` to verify the token is configured. If not configured, instruct the user to create a token at https://github.com/settings/tokens with `repo` scope, then store it with `store_secret` from `builtin.hive_management`.
 
 ## Usage Guidelines
 

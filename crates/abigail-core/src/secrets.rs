@@ -168,9 +168,7 @@ fn force_vault_extension(filename: &str) -> String {
 }
 
 fn scope_from_filename(filename: &str) -> String {
-    let stem = filename
-        .strip_suffix(".vault")
-        .unwrap_or(filename);
+    let stem = filename.strip_suffix(".vault").unwrap_or(filename);
     format!("secrets:{}", stem)
 }
 

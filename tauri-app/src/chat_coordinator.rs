@@ -359,7 +359,8 @@ async fn archive_turn(
     content: &str,
     metadata: Option<ArchiveMetadata>,
 ) {
-    let mut turn = ConversationTurn::new(session_id, role, content);
+    let redacted = abigail_core::redact_secrets(content);
+    let mut turn = ConversationTurn::new(session_id, role, &redacted);
     if let Some(m) = metadata {
         turn = turn.with_metadata(m.provider, m.model_used, m.tier, m.complexity_score);
     }

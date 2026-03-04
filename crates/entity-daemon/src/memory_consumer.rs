@@ -53,7 +53,8 @@ pub async fn spawn_memory_consumer(
         let memory = memory.clone();
         Box::pin(async move {
             match serde_json::from_slice::<ConversationTurn>(&msg.payload) {
-                Ok(turn) => {
+                Ok(mut turn) => {
+                    turn.content = abigail_core::redact_secrets(&turn.content);
                     if let Err(e) = memory.insert_turn(&turn) {
                         tracing::warn!("Memory consumer: failed to persist turn: {}", e);
                     }

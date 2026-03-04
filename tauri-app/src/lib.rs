@@ -330,6 +330,7 @@ pub fn run() {
 
     let config = get_config();
     let data_dir = config.data_dir.clone();
+    let iggy_connection = config.iggy_connection.clone();
     let secrets = Arc::new(Mutex::new(
         SecretsVault::load(data_dir.clone())
             .unwrap_or_else(|_| SecretsVault::new(data_dir.clone())),
@@ -477,9 +478,9 @@ pub fn run() {
             abigail_router::ConstraintStore::with_data_dir(data_dir.clone()),
         )),
         job_queue,
-        daemon_manager: Arc::new(tokio::sync::Mutex::new(daemon_manager::DaemonManager::new(
-            data_dir.clone(),
-        ))),
+        daemon_manager: Arc::new(tokio::sync::Mutex::new(
+            daemon_manager::DaemonManager::new(data_dir.clone()).with_iggy(iggy_connection),
+        )),
     };
 
     tauri::Builder::default()
