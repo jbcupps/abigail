@@ -994,6 +994,18 @@ fn try_run() -> Result<(), String> {
                                             }
                                         }
                                     }
+                                    abigail_skills::SkillFileEvent::RegistryChanged(path) => {
+                                        tracing::info!(
+                                            "Skill watcher: registry changed at {:?} (Tauri runtime does not re-provision persistent topology)",
+                                            path
+                                        );
+                                    }
+                                    abigail_skills::SkillFileEvent::RegistryRemoved(path) => {
+                                        tracing::warn!(
+                                            "Skill watcher: registry removed at {:?}",
+                                            path
+                                        );
+                                    }
                                 }
                             }
                         });

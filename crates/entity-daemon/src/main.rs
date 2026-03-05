@@ -152,6 +152,8 @@ async fn main() -> anyhow::Result<()> {
     let entity_dir = data_root.join("identities").join(&cli.entity_id);
     let docs_dir = entity_dir.join("docs");
     let skills_dir = entity_dir.join("skills");
+    let shared_skills_base = data_root.join("skills");
+    let shared_registry_path = shared_skills_base.join("registry.toml");
 
     // Load entity config when present so policy fields are enforced in runtime.
     let config_path = entity_dir.join("config.json");
@@ -386,9 +388,8 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Memory store opened: {:?}", config.db_path);
 
     let instruction_registry = Arc::new({
-        let skills_base = data_root.join("skills");
-        let reg_path = skills_base.join("registry.toml");
-        let instr_dir = skills_base.join("instructions");
+        let reg_path = shared_registry_path.clone();
+        let instr_dir = shared_skills_base.join("instructions");
         if reg_path.exists() {
             abigail_skills::InstructionRegistry::load(&reg_path, &instr_dir)
         } else {
@@ -450,6 +451,37 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Using in-process MemoryBroker (no --iggy-connection provided)");
         Arc::new(MemoryBroker::default())
     };
+
+    // 10a. Provision persistent skill request/response topology from
+    // shared `skills/registry.toml` at startup.
+    let skill_topology = Arc::new(tokio::sync::Mutex::new(
+        None::<abigail_skills::ProvisionedSkillTopology>,
+    ));
+    if shared_registry_path.exists() {
+        match abigail_skills::provision_all_skills(stream_broker.clone(), &shared_registry_path)
+            .await
+        {
+            Ok(topology) => {
+                let count = topology.skill_count();
+                *skill_topology.lock().await = Some(topology);
+                tracing::info!(
+                    "Provisioned persistent skill topology for {} skill(s) from {}",
+                    count,
+                    shared_registry_path.display()
+                );
+            }
+            Err(e) => tracing::warn!(
+                "Failed to provision persistent skill topology from {}: {}",
+                shared_registry_path.display(),
+                e
+            ),
+        }
+    } else {
+        tracing::warn!(
+            "Shared registry.toml missing at {}; skipping persistent skill topology",
+            shared_registry_path.display()
+        );
+    }
 
     let queue_conn = rusqlite::Connection::open(&config.db_path).map_err(|e| {
         anyhow::anyhow!(
@@ -686,11 +718,14 @@ async fn main() -> anyhow::Result<()> {
     // Spawn SkillsWatcher for hot-reload of new/changed/removed skills
     let _watcher = {
         let watch_dir = skills_dir.clone();
+        let shared_watch_dir = shared_skills_base.clone();
         let registry_for_watcher = state.registry.clone();
         let vault_for_watcher = Some(skill_vault.clone());
         let broker_for_watcher = state.stream_broker.clone();
+        let topology_for_watcher = skill_topology.clone();
+        let registry_path_for_watcher = shared_registry_path.clone();
 
-        match abigail_skills::SkillsWatcher::start(vec![watch_dir]) {
+        match abigail_skills::SkillsWatcher::start(vec![watch_dir, shared_watch_dir]) {
             Ok((watcher, mut rx)) => {
                 tokio::spawn(async move {
                     while let Ok(event) = rx.recv().await {
@@ -799,6 +834,36 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     }
                                 }
+                            }
+                            abigail_skills::SkillFileEvent::RegistryChanged(path) => {
+                                tracing::info!("Skill watcher: registry changed at {:?}", path);
+                                match abigail_skills::provision_all_skills(
+                                    broker_for_watcher.clone(),
+                                    &registry_path_for_watcher,
+                                )
+                                .await
+                                {
+                                    Ok(next) => {
+                                        let mut guard = topology_for_watcher.lock().await;
+                                        *guard = Some(next);
+                                        tracing::info!(
+                                            "Skill watcher: re-provisioned persistent topology from {}",
+                                            registry_path_for_watcher.display()
+                                        );
+                                    }
+                                    Err(e) => tracing::warn!(
+                                        "Skill watcher: failed re-provisioning persistent topology: {}",
+                                        e
+                                    ),
+                                }
+                            }
+                            abigail_skills::SkillFileEvent::RegistryRemoved(path) => {
+                                tracing::warn!(
+                                    "Skill watcher: registry removed at {:?}; cancelling persistent topology workers",
+                                    path
+                                );
+                                let mut guard = topology_for_watcher.lock().await;
+                                *guard = None;
                             }
                         }
                     }

@@ -1,6 +1,6 @@
 //! Skills watcher — monitors skill directories for file changes (hot-reload).
 //!
-//! Watches for changes to `skill.toml` and `*.json` files, notifying
+//! Watches for changes to `skill.toml`, `registry.toml`, and `*.json` files, notifying
 //! listeners via a tokio broadcast channel so the registry can be refreshed.
 
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -16,10 +16,14 @@ pub enum SkillFileEvent {
     Changed(PathBuf),
     /// A skill.toml or *.json was removed.
     Removed(PathBuf),
+    /// `registry.toml` was created or modified.
+    RegistryChanged(PathBuf),
+    /// `registry.toml` was removed.
+    RegistryRemoved(PathBuf),
 }
 
 fn is_skill_file(name: &str) -> bool {
-    name == "skill.toml" || name.ends_with(".json")
+    name == "skill.toml" || name == "registry.toml" || name.ends_with(".json")
 }
 
 /// Watches skill directories for changes and emits events.
@@ -84,14 +88,29 @@ impl SkillsWatcher {
                         }
 
                         for path in relevant {
+                            let is_registry = path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .map(|n| n == "registry.toml")
+                                .unwrap_or(false);
                             let ev = match event.kind {
                                 EventKind::Create(_) | EventKind::Modify(_) => {
-                                    tracing::info!("Skill file changed: {}", path.display());
-                                    SkillFileEvent::Changed(path)
+                                    if is_registry {
+                                        tracing::info!("Skill registry changed: {}", path.display());
+                                        SkillFileEvent::RegistryChanged(path)
+                                    } else {
+                                        tracing::info!("Skill file changed: {}", path.display());
+                                        SkillFileEvent::Changed(path)
+                                    }
                                 }
                                 EventKind::Remove(_) => {
-                                    tracing::info!("Skill file removed: {}", path.display());
-                                    SkillFileEvent::Removed(path)
+                                    if is_registry {
+                                        tracing::info!("Skill registry removed: {}", path.display());
+                                        SkillFileEvent::RegistryRemoved(path)
+                                    } else {
+                                        tracing::info!("Skill file removed: {}", path.display());
+                                        SkillFileEvent::Removed(path)
+                                    }
                                 }
                                 _ => continue,
                             };
@@ -128,6 +147,11 @@ mod tests {
     #[test]
     fn test_is_skill_file_matches_toml() {
         assert!(is_skill_file("skill.toml"));
+    }
+
+    #[test]
+    fn test_is_skill_file_matches_registry_toml() {
+        assert!(is_skill_file("registry.toml"));
     }
 
     #[test]
@@ -185,6 +209,10 @@ mod tests {
             Ok(Ok(SkillFileEvent::Removed(_))) => {
                 // Some OSes emit remove+create for writes
             }
+            Ok(Ok(SkillFileEvent::RegistryChanged(_))) => {
+                // Accept registry event shape as valid watcher output.
+            }
+            Ok(Ok(SkillFileEvent::RegistryRemoved(_))) => {}
             Ok(Err(e)) => {
                 tracing::warn!("Broadcast lagged: {}", e);
             }
@@ -223,6 +251,8 @@ mod tests {
                 );
             }
             Ok(Ok(SkillFileEvent::Removed(_))) => {}
+            Ok(Ok(SkillFileEvent::RegistryChanged(_))) => {}
+            Ok(Ok(SkillFileEvent::RegistryRemoved(_))) => {}
             Ok(Err(e)) => {
                 tracing::warn!("Broadcast lagged: {}", e);
             }

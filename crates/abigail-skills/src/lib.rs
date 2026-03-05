@@ -17,6 +17,7 @@ pub mod registry;
 pub mod runtime;
 pub mod sandbox;
 pub mod skill;
+pub mod topology;
 pub mod transport;
 pub mod watcher;
 
@@ -42,6 +43,10 @@ pub use queue::{QueueManagementSkill, QueueOperations};
 pub use registry::{MissingSkillSecret, RegisteredSkill, SkillRegistry};
 pub use sandbox::*;
 pub use skill::*;
+pub use topology::{
+    binding_for_skill, load_enabled_skill_ids, provision_all_skills, ProvisionedSkillTopology,
+    SkillTopicBinding, SKILL_TOPOLOGY_STREAM,
+};
 pub use watcher::{SkillFileEvent, SkillsWatcher};
 
 #[cfg(test)]

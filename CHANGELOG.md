@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-03-05 21:35 EST: Add persistent startup skill topology provisioning from registry.toml with request/response topics, per-skill subscribers, registry hot-reload reprovisioning, and forge registry entry
 - 2026-03-05 21:20 EST: Formalize skill topology and Forge architecture docs, add canonical ARCHITECTURE_SKILL_TOPOLOGY_AND_FORGE spec, update planning/invariants artifacts, and add architecture flow diagram
 - 2026-03-05 20:30 EST: Add regression test for provider-config-changed selector refresh and update README/CLAUDE/AGENTS plan to mark Phase 0 complete and Phase 4b mentor monitor as next
 - 2026-03-04 20:00 EST: Provider key propagation + model registry sync — emit provider-config-changed event on key store, synchronous model discovery, auto-activate first LLM provider, frontend event listener for live dropdown refresh, fix ChatRendering test multiple-match assertion
