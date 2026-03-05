@@ -97,10 +97,7 @@ impl IdentityManager {
 
                 // Safe reset — only identity data, never the Hive/documents folder
                 let identity_path = data_root.join("identities");
-                if identity_path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    == Some("identities")
+                if identity_path.file_name().and_then(|name| name.to_str()) == Some("identities")
                     && identity_path.exists()
                 {
                     let _ = std::fs::remove_dir_all(&identity_path);
