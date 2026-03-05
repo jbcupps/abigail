@@ -166,8 +166,8 @@ splash → loading → management → boot → chat
 - `SoulCrystallization.tsx` / `CrystallizationPath*.tsx` — Multi-path personality crystallization UI
 - `ForgePanel.tsx` / `ForgeScenario.tsx` — Scenario-based soul forge dilemmas
 - `ChatInterface.tsx` — Main chat: sends messages through `classify()` → `complete()` Tauri commands
-- `SanctumDrawer.tsx` — Settings/management drawer (contains LlmSetupPanel, TierModelPanel, IdentityPanel, etc.)
-- `TierModelPanel.tsx` — Tier-based model routing configuration UI
+- `SanctumDrawer.tsx` — Settings/management drawer (contains `LlmSetupPanel`, `ProviderDrawer`, `IdentityPanel`, etc.)
+- `ProviderDrawer.tsx` — Provider key management and inline provider configuration workflow
 - `DiagnosticsPanel.tsx` — Runtime diagnostics and debug info
 - `McpAppFrame.tsx` — MCP server integration UI
 - `AgenticPanel.tsx` / `OrchestrationPanel.tsx` — Agentic workflow and orchestration controls
@@ -193,6 +193,7 @@ The router (`abigail-router`) implements a **dual-LLM pattern**:
 
 **Wiring:**
 - In Tauri: router is rebuilt via `set_api_key`/`set_local_llm_url` commands when config changes
+- In Tauri UI: `ChatInterface` listens for `provider-config-changed` and re-fetches both `get_router_status` and `get_model_registry`; header provider auto-defaults when empty
 - In entity-daemon: router is built once at startup from `ProviderConfig` fetched from Hive; CLI providers are auto-detected and routing mode is upgraded to CliOrchestrator
 - `ChatResponse` includes `model_used` metadata
 - CLI providers always use `--dangerously-skip-permissions`; entity-level tool permissions are enforced by `SkillSandbox`/`SkillExecutor`, not by the CLI tool's own permission system
@@ -392,23 +393,22 @@ Current priorities, in order:
 ### Phase 3e: Data Explorer — DONE
 14. ~~**Memory browser**~~ — Replaced DataSourcesPanel with tabbed explorer: browse memories with weight tier badges, text search, conversation session list, and existing stats/optimize/reset.
 
-### Phase 4a: Chat UX & Job Visibility
-15. **Fix provider/model dropdowns** — Provider dropdown merges stored keys + model registry so all configured providers appear. Model list whitelist-filtered to chat-capable models only. Chat page job activity badge shows running/queued/scheduled counts via Tauri event stream.
+### Phase 4a: Chat UX & Job Visibility — DONE
+15. ~~**Fix provider/model dropdowns**~~ — Provider dropdown now merges stored keys + model registry, `provider-config-changed` triggers live refresh, and empty header provider auto-defaults to the first known provider. Chat page job activity badge shows running/queued/scheduled counts via Tauri `job-event` stream.
 
-### Phase 4b: Ego Delegation Tools
-16. **LLM-callable job tools** — Add `submit_background_job`, `get_job_result`, `list_my_jobs` as built-in tools in the entity-chat tool-use loop so the ego can delegate work and check results mid-conversation.
+### Phase 4b: Mentor Chat Monitor — NEXT
+16. **Mentor chat-topic subscription** — Subscribe Entity to mentor conversation topics in router flow and pass structured turn envelopes.
+17. **Mentor preprompt injection** — Apply monitor-produced preprompt context before ego completion without coupling to UI concerns.
+18. **Out-of-band monitors** — Keep memory/id/superego/safety observers asynchronous so chat latency remains bounded.
 
-### Phase 4c: Capability-Aware Routing
-17. **Upgrade CapabilityMatcher** — Config-driven provider/model routing per capability. Extend `RequiredCapability` with `ImageGeneration`, `AudioGeneration`, `VideoGeneration`, `Transcription`. Add `ExecutionMode` (Mediated vs Direct) to `JobSpec` with V6 schema migration.
+### Phase 4c: Ego Delegation Tools
+19. **LLM-callable job tools** — Add `submit_background_job`, `get_job_result`, `list_my_jobs` as built-in tools in the entity-chat loop.
 
-### Phase 4d: Direct Execution
-18. **SubagentRunner direct mode** — Skip LLM tool-use loop for `ExecutionMode::Direct` jobs — call `SkillExecutor` directly with pre-built tool call params. Enables ego to prepare exact API calls (e.g. DALL-E prompt) and dispatch without mediation overhead.
+### Phase 4d: Capability-Aware Routing + Direct Execution
+20. **Upgrade CapabilityMatcher + ExecutionMode** — Config-driven provider/model routing per capability with `ExecutionMode` (Mediated vs Direct), plus direct `SkillExecutor` path for structured jobs.
 
-### Phase 4e: Cron Self-Management
-19. **Ego cron tools** — Add `create_recurring_job`, `list_recurring_jobs`, `cancel_recurring_job` so the entity can autonomously schedule its own background work (e.g. daily email check, weekly summaries).
-
-### Phase 4f: Live Events & Result Threading
-20. **SSE job events** — Replace OrchestrationPanel polling with reactive Tauri `job-event` listener. Job result threading: ego formats completed job results for inline conversation display (image URLs, text summaries).
+### Phase 4e: Cron + Live Result Threading
+21. **Ego cron tools + reactive job events** — Add recurring job management tools and replace polling with reactive events; thread job results back into conversation rendering.
 
 ## Known Issues
 
@@ -419,6 +419,7 @@ The router uses EgoPrimary routing (or CliOrchestrator mode for CLI providers). 
 - CandleProvider stub returns a helpful message instead of erroring when no local LLM exists
 - The `chat_stream` Ego path streams from the start
 - Model registry discovery runs in background at startup — check logs for `ModelRegistry:` messages
+- After key storage, the UI refresh path depends on `provider-config-changed`; if selectors stay empty, verify this event is emitted and the listener is active in `ChatInterface`
 - CLI providers auto-upgrade to CliOrchestrator mode — look for `Auto-upgrading routing mode to CliOrchestrator` in logs
 - `CliPermissionMode` in config is retained for serialization but has no runtime effect — all CLI subprocesses use `--dangerously-skip-permissions`
 

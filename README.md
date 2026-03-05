@@ -57,7 +57,7 @@ Project maturity:
 Abigail is a working, modular platform. Recent updates include:
 
 - **Hive/Entity Separation**: Independent HTTP daemons for control plane (Hive) and agent runtime (Entity), enabling multi-entity households and independent evolution.
-- **Tier-Based Model Routing**: 3-tier model selection (Fast/Standard/Pro) with complexity scoring, force overrides, and a dynamic model registry that discovers available models from provider APIs (OpenAI, Anthropic, Google, xAI).
+- **Live Provider/Model Selector Wiring**: Provider keys saved in Sanctum/Hive now trigger immediate frontend refresh (`provider-config-changed`), including model registry reload and provider auto-defaulting.
 - **Shared Chat Engine**: Unified `entity-chat` library crate powering both GUI and CLI with tool-use loop, memory persistence, and skill awareness.
 - **Sovereign Birth Flow**: Multi-stage onboarding (Darkness → Genesis) for new Entities.
 - **Soul Registry**: Manage multiple identities, each with custom themes and avatars.
@@ -70,11 +70,11 @@ Abigail is a working, modular platform. Recent updates include:
 
 ### Stabilization Program (Current Priority)
 
-The active near-term engineering priority is **GUI/Entity stability and message-flow decoupling**:
+The active near-term engineering priority is **Mentor chat flow completion on top of the now-stable selector path**:
 
-- Move GUI chat to a transport abstraction (`ChatGateway`) rather than direct command coupling
-- Stabilize command surface parity between frontend and Tauri handler registration
-- Wire entity-initiated agent lifecycle paths (agentic runs and subagent delegation)
+- Keep provider/model selector propagation stable (key store -> registry -> selector defaults)
+- Wire Mentor Chat Monitor subscription with preprompt injection
+- Keep memory/safety monitors out-of-band (no chat-path coupling)
 - Enforce release gates for command contract, chat parity, and policy/runtime checks
 
 See: [GUI/Entity Stability Roadmap](documents/GUI_ENTITY_STABILITY_ROADMAP.md)
@@ -184,7 +184,7 @@ For Docker-based development, see [How to Run Locally](documents/HOW_TO_RUN_LOCA
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` | Cloud provider for tier-based routing |
+| `OPENAI_API_KEY` | Cloud provider for EgoPrimary routing |
 | `LOCAL_LLM_BASE_URL` | Local LLM endpoint override (e.g., `http://localhost:1234`) |
 | `EXTERNAL_PUBKEY_PATH` | Explicit public key path (otherwise auto-detected) |
 
@@ -229,7 +229,7 @@ The system follows a two-daemon architecture:
 | | `hive-cli` | CLI client for Hive |
 | | `entity-chat` | Shared chat engine: system prompt, tool-use loop, memory, dedup |
 | **Entity** | `entity-core` | API contracts: `ChatRequest/Response`, `EntityStatus`, tool DTOs |
-| | `abigail-router` | Tier-based routing: complexity scoring, tier selection, force overrides |
+| | `abigail-router` | EgoPrimary/CliOrchestrator routing, provider/model targeting, execution tracing |
 | | `abigail-capabilities` | High-trust cognitive/sensory/memory/agent functions |
 | | `abigail-skills` | Sandboxed plugin system with registry, executor, event bus |
 | | `entity-daemon` | Axum HTTP server (port 3142) |
@@ -242,17 +242,18 @@ The system follows a two-daemon architecture:
 
 **Security boundary**: Hive controls secrets and identity (high trust). Skills run in Entity's sandboxed plugin system with declared permissions.
 
-### Tier-Based Model Routing
+### Provider and Model Selection Flow
 
 ```
-User Input → Router scores complexity (5–95)
-  → Fast tier  (<35)   → cheapest model (e.g. gpt-4.1-mini, claude-haiku-4-5)
-  → Standard   (35–69) → balanced model  (e.g. gpt-4.1, claude-sonnet-4-6)
-  → Pro tier   (≥70)   → strongest model (e.g. gpt-5.2, claude-opus-4-6)
-Failsafe: local LLM (Ollama/LM Studio) activates only when cloud providers fail
+Sanctum/Hive key save
+  -> Tauri emits provider-config-changed
+  -> ChatInterface refreshes router status + model registry
+  -> Header provider auto-defaults when empty
+  -> Model selector populates from refreshed registry
+  -> Entity chat uses selected provider/model
 ```
 
-The router classifies message complexity and maps it to one of three quality tiers via configurable thresholds. **Force overrides** let users pin a specific tier, model, or provider+tier combination. A **dynamic model registry** discovers available models from provider APIs (OpenAI, Anthropic, Google, xAI) with 24-hour caching. Policy/oversight (e.g. Superego) will be handled by the Hive later; the entity exposes a **chat memory hook** for future Hive-side alignment (see invariants).
+Model availability comes from the dynamic registry (`get_model_registry`) backed by provider discovery and cache persistence. CLI providers remain in `CliOrchestrator`; non-CLI providers run through `EgoPrimary` with explicit user-selected model targeting.
 
 ### Constitutional Documents
 
@@ -291,33 +292,25 @@ For detailed architecture reference (crate responsibilities, security boundaries
 
 ## Roadmap
 
-### Phase 1: Foundation (Complete)
+### Complete Through Phase 4a
 
-Anthropic Claude provider, core skills (filesystem, shell, HTTP), skills watcher, Hive/Entity daemon separation, CLI interfaces.
+- Hive/Entity daemon split with shared chat engine and skills runtime
+- Routing simplification to EgoPrimary/CliOrchestrator
+- Dynamic model registry + selector wiring in chat header
+- Provider key propagation fix (`provider-config-changed`) with live dropdown refresh
+- Job visibility and topic monitor foundations
 
-### Phase 2a: Skills Use (Complete)
+### Active: Phase 4b
 
-LLM tool-use loop (parse tool-call blocks → execute via SkillExecutor → inject results → re-prompt), auto-load skills from disk, wire tools into LLM requests. Shared `entity-chat` engine for GUI and CLI.
+- Mentor Chat Monitor topic subscription
+- Mentor preprompt injection at the router boundary
+- Keep memory/safety/id-superego monitors out-of-band
 
-### Phase 2b: Routing & Models (Complete)
+### Next After 4b
 
-Tier-based model routing (Fast/Standard/Pro), complexity scoring with configurable thresholds, force overrides (pin tier/model/provider+tier), dynamic model registry with provider API discovery and 24h caching, per-request model override.
-
-### Phase 2c: Memory & Integration (In Progress)
-
-Memory persistence wired into chat pipeline, end-to-end daemon testing, Tauri app → daemon delegation via HTTP.
-
-### Phase 3: Gateway & Messaging
-
-Channel adapters (Telegram, Discord, Slack, WebChat), Hive process management (spawn/stop entity daemons).
-
-### Phase 4: Sensory & Browser
-
-Chrome DevTools Protocol browser automation, semantic snapshots (accessibility tree), voice integration (Whisper STT, ElevenLabs TTS, wake-word detection).
-
-### Phase 5: Ecosystem & Ethical Alignment Platform
-
-Skill SDK and community registry, mobile companion apps, MCP support. Integration with the Ethical Alignment Platform: 5D scoring engine, EOB + PVB on Hardhat, memetic fitness tracking, Liberation Protocol progression, multi-agent ethical cooperation.
+- LLM-callable background job tools (`submit_background_job`, `get_job_result`, `list_my_jobs`)
+- Capability-aware routing and direct execution mode
+- Reactive job events and threaded result rendering in chat
 
 For the complete feature gap analysis, see [Feature Gap Analysis](documents/Feature_Gap_Analysis.md).
 
