@@ -7,6 +7,8 @@
 
 ## Source of truth
 
+Architecture anchor: `documents/ARCHITECTURE_SKILL_TOPOLOGY_AND_FORGE.md`.
+
 Use these artifacts in order:
 
 1. `documents/ARCHITECTURE_SKILL_TOPOLOGY_AND_FORGE.md`  
