@@ -252,7 +252,11 @@ impl IdEgoRouter {
     }
 
     /// Register the selected model as the active entity subscriber identity and
-    /// return the derived subscriber group for chat-topic monitor flows.
+    /// return the derived subscriber group for mentor chat-topic monitor flows.
+    ///
+    /// This subscriber identity is used by the monitor layer:
+    /// - Mentor chat monitor performs preprompt enrichment on request envelopes
+    /// - Memory/Id/Superego observers consume enriched envelopes out-of-band
     pub fn register_selected_model_subscriber(
         &self,
         entity_id: &str,

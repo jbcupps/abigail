@@ -20,6 +20,10 @@ pub struct ChatTopicEnvelope {
     pub stage: String,
     #[serde(default)]
     pub enriched_preprompt: Option<String>,
+    #[serde(default)]
+    pub id_context: Option<String>,
+    #[serde(default)]
+    pub superego_context: Option<String>,
 }
 
 /// Subscribe to `entity/chat-topic` and persist enriched chat-topic envelopes
@@ -49,10 +53,18 @@ pub async fn spawn_chat_topic_subscriber(
                 .enriched_preprompt
                 .clone()
                 .unwrap_or_else(|| env.message.clone());
-            let provider = Some(format!("chat-topic:{}", env.correlation_id));
+            let id_ctx = env.id_context.unwrap_or_else(|| "unknown".to_string());
+            let superego_ctx = env
+                .superego_context
+                .unwrap_or_else(|| "unknown".to_string());
+            let provider = Some(format!(
+                "chat-topic:{}|id:{}|superego:{}",
+                env.correlation_id, id_ctx, superego_ctx
+            ));
             let model = env.selected_model.clone();
+            let tier = Some("mentor-monitor".to_string());
             let turn = ConversationTurn::new(&env.session_id, "mentor_monitor", &content)
-                .with_metadata(provider, model, None, None);
+                .with_metadata(provider, model, tier, None);
 
             if let Err(e) = memory.insert_turn(&turn) {
                 tracing::warn!(
@@ -72,4 +84,12 @@ pub async fn spawn_chat_topic_subscriber(
         TOPIC
     );
     Ok(handle)
+}
+
+/// Startup helper for the out-of-band memory monitor.
+pub async fn start(
+    broker: Arc<dyn StreamBroker>,
+    memory: Arc<MemoryStore>,
+) -> anyhow::Result<SubscriptionHandle> {
+    spawn_chat_topic_subscriber(broker, memory).await
 }

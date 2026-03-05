@@ -456,19 +456,17 @@ async fn main() -> anyhow::Result<()> {
     abigail_skills::set_skill_topology_broker(stream_broker.clone());
     abigail_skills::provision_all_skills(&shared_registry_path.to_string_lossy()).await;
 
-    // 10a. Register out-of-band monitor layer at startup.
-    let _mentor_chat_monitor_handle = abigail_router::MentorChatMonitor::new(stream_broker.clone())
-        .spawn()
-        .await
-        .map_err(|e| tracing::warn!("Failed to start mentor chat monitor: {}", e))
-        .ok();
-    let _superego_monitor_handle = abigail_superego::SuperegoMonitor::new(stream_broker.clone())
-        .spawn()
+    // 10a. Register mentor chat monitor + passive out-of-band observers.
+    let _mentor_chat_monitor_handle =
+        abigail_router::monitors::mentor_chat::start_mentor_chat_monitor(stream_broker.clone())
+            .await
+            .map_err(|e| tracing::warn!("Failed to start mentor chat monitor: {}", e))
+            .ok();
+    let _superego_monitor_handle = abigail_superego::monitor::start(stream_broker.clone())
         .await
         .map_err(|e| tracing::warn!("Failed to start superego monitor: {}", e))
         .ok();
-    let _id_monitor_handle = abigail_id::IdMonitor::new(stream_broker.clone())
-        .spawn()
+    let _id_monitor_handle = abigail_id::monitor::start(stream_broker.clone())
         .await
         .map_err(|e| tracing::warn!("Failed to start id monitor: {}", e))
         .ok();
@@ -480,7 +478,7 @@ async fn main() -> anyhow::Result<()> {
     .map_err(|e| tracing::warn!("Failed to start DevOps forge worker: {}", e))
     .ok();
     let _memory_chat_topic_handle =
-        abigail_memory::spawn_chat_topic_subscriber(stream_broker.clone(), memory.clone())
+        abigail_memory::subscriber::start(stream_broker.clone(), memory.clone())
             .await
             .map_err(|e| tracing::warn!("Failed to start memory chat-topic subscriber: {}", e))
             .ok();

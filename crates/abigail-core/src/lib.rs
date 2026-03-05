@@ -1,5 +1,6 @@
 pub mod capability_envelope;
 pub mod config;
+pub mod constitutional;
 pub mod document;
 pub mod dpapi;
 pub mod encrypted_storage;
@@ -25,6 +26,7 @@ pub use config::{
     McpTrustPolicy, ProviderCatalogEntry, RoutingMode, RuntimeMode, TrinityConfig,
     CONFIG_SCHEMA_VERSION,
 };
+pub use constitutional::load_preprompt_context;
 pub use document::{CoreDocument, DocumentTier};
 pub use error::{CoreError, Result};
 pub use global_config::{AgentEntry, GlobalConfig};
