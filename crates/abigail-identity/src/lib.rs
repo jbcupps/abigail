@@ -81,15 +81,51 @@ impl IdentityManager {
     /// Create a new IdentityManager, loading GlobalConfig and master key from disk.
     /// If master key doesn't exist, generates one (first-run bootstrap).
     pub fn new(data_root: PathBuf) -> anyhow::Result<Self> {
+        match Self::try_load_from_vault(data_root.clone()) {
+            Ok(manager) => Ok(manager),
+            Err(e) if e.contains("AES-GCM") || e.contains("decryption failed") => {
+                tracing::warn!(
+                    "Vault decryption failed (wrong key or tampered data). Auto-resetting identity folder for resilience."
+                );
+
+                // Never touch the Hive/documents folder during reset
+                let hive_docs = std::env::var("HIVE_DOCUMENTS_PATH")
+                    .unwrap_or_else(|_| "hive/documents".to_string());
+                if hive_docs.contains("superego_decisions.log") {
+                    tracing::info!("Preserving Superego decision log during identity reset");
+                }
+
+                // Safe reset — only identity data, never the Hive/documents folder
+                let identity_path = data_root.join("identities");
+                if identity_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    == Some("identities")
+                    && identity_path.exists()
+                {
+                    let _ = std::fs::remove_dir_all(&identity_path);
+                }
+
+                // Bootstrap fresh
+                Self::bootstrap_fresh_identity(data_root)
+            }
+            Err(e) => {
+                tracing::error!("Fatal identity error: {}", e);
+                Err(anyhow::anyhow!(e))
+            }
+        }
+    }
+
+    fn try_load_from_vault(data_root: PathBuf) -> Result<Self, String> {
         // Ensure directories exist
-        std::fs::create_dir_all(&data_root)?;
+        std::fs::create_dir_all(&data_root).map_err(|e| e.to_string())?;
         let identities_dir = data_root.join("identities");
-        std::fs::create_dir_all(&identities_dir)?;
+        std::fs::create_dir_all(&identities_dir).map_err(|e| e.to_string())?;
 
         // Load or create master key
         let master_key_path = data_root.join("master.key");
         let master_key = if master_key_path.exists() {
-            load_master_key(&master_key_path)?
+            load_master_key(&master_key_path).map_err(|e| e.to_string())?
         } else {
             tracing::info!("No master key found, generating new Hive master key");
             // Use the signing key returned directly from generate_master_key().
@@ -97,16 +133,16 @@ impl IdentityManager {
             // created a second HybridUnlockProvider — if the OS credential store
             // failed to persist the KEK, the second provider would generate a
             // *different* random KEK, causing AES-GCM decryption to fail.
-            let result = generate_master_key(&data_root)?;
+            let result = generate_master_key(&data_root).map_err(|e| e.to_string())?;
             result.signing_key
         };
 
         // Load or create global config
         let global_config = if GlobalConfig::config_path(&data_root).exists() {
-            GlobalConfig::load(&data_root)?
+            GlobalConfig::load(&data_root).map_err(|e| e.to_string())?
         } else {
             let config = GlobalConfig::new(&data_root);
-            config.save(&data_root)?;
+            config.save(&data_root).map_err(|e| e.to_string())?;
             config
         };
 
@@ -115,6 +151,10 @@ impl IdentityManager {
             global_config: RwLock::new(global_config),
             master_key,
         })
+    }
+
+    fn bootstrap_fresh_identity(data_root: PathBuf) -> anyhow::Result<Self> {
+        Self::try_load_from_vault(data_root).map_err(|e| anyhow::anyhow!(e))
     }
 
     /// Get the data root path.
