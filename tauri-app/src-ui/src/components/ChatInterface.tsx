@@ -408,6 +408,21 @@ export default function ChatInterface({
     return () => { unlisten?.(); };
   }, []);
 
+  // -- Fix 1: Re-fetch providers + model registry when backend config changes --
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen("provider-config-changed", () => {
+      refreshRouterStatus();
+      invoke<{ models: ModelRegistryEntry[] }>("get_model_registry")
+        .then((reg) => {
+          if (!mountedRef.current || !reg) return;
+          setModelRegistry(reg.models ?? []);
+        })
+        .catch(() => {});
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, []);
+
   // -- Header model/provider dropdown logic --
 
   // Derive headerProvider from routerStatus when not yet set by user
@@ -432,6 +447,15 @@ export default function ChatInterface({
     if (fromReg.length > 0) return fromReg.map((m) => m.model_id);
     return FALLBACK_MODELS[headerProvider] ?? [];
   }, [headerProvider, modelRegistry]);
+
+  // Fix 4: Default headerProvider to first available provider when empty.
+  // This handles the case where a key was just stored but no ego_provider
+  // has been reported by the router yet.
+  useEffect(() => {
+    if (!headerProvider && knownProviders.length > 0) {
+      setHeaderProvider(knownProviders[0]);
+    }
+  }, [headerProvider, knownProviders]);
 
   const handleConfigSelect = async (option: number) => {
     setConfigError("");

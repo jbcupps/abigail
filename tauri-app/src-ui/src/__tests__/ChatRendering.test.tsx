@@ -70,6 +70,10 @@ describe("ChatRendering parity", () => {
           return Promise.resolve("openai");
         case "get_ego_model":
           return Promise.resolve(null);
+        case "get_model_registry":
+          return Promise.resolve({ models: [] });
+        case "get_queue_stats":
+          return Promise.resolve({ running: 0, queued: 0, scheduled: 0 });
         default:
           return Promise.resolve(null);
       }
@@ -161,6 +165,10 @@ describe("ChatRendering parity", () => {
           return Promise.resolve("openai");
         case "get_ego_model":
           return Promise.resolve(null);
+        case "get_model_registry":
+          return Promise.resolve({ models: [] });
+        case "get_queue_stats":
+          return Promise.resolve({ running: 0, queued: 0, scheduled: 0 });
         default:
           return Promise.resolve(null);
       }
@@ -187,10 +195,11 @@ describe("ChatRendering parity", () => {
       { timeout: 3000 },
     );
 
-    // Verify tier and model metadata rendered
+    // Verify tier and model metadata rendered (use getAllByText since the
+    // model dropdown may also contain matching entries from FALLBACK_MODELS)
     await waitFor(() => {
       expect(screen.getByText(/Standard/)).toBeInTheDocument();
-      expect(screen.getByText(/gpt-4\.1/)).toBeInTheDocument();
+      expect(screen.getAllByText(/gpt-4\.1/).length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -252,6 +261,10 @@ describe("ChatRendering parity", () => {
           return Promise.resolve("openai");
         case "get_ego_model":
           return Promise.resolve(null);
+        case "get_model_registry":
+          return Promise.resolve({ models: [] });
+        case "get_queue_stats":
+          return Promise.resolve({ running: 0, queued: 0, scheduled: 0 });
         default:
           return Promise.resolve(null);
       }
