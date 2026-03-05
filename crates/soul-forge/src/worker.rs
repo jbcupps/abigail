@@ -26,6 +26,14 @@ impl PersistentForgeWorker {
     }
 }
 
+/// Minimal worker entrypoint for runtime callers that want a single start API.
+pub async fn start(
+    broker: Arc<dyn StreamBroker>,
+    skills_root: PathBuf,
+) -> anyhow::Result<SubscriptionHandle> {
+    spawn_persistent_worker(broker, skills_root).await
+}
+
 /// Spawn the persistent forge worker subscribed to `topic.skill.forge.request`.
 pub async fn spawn_persistent_worker(
     broker: Arc<dyn StreamBroker>,

@@ -1,3 +1,1 @@
-Superego decisions are now tracked and stored in the Hive/documents folder for future review and subtle pre-prompt guidance.
-
-The DevOps Forge skill is now active. When I need a new capability (including Postgres vector/graph later), I publish code to topic.skill.forge.request. The Forge runs it in sandbox, logs the Superego decision to hive/documents/superego_decisions.log, and deploys if safe. I never create topics or files myself - I only delegate to Forge.
+The DevOps Forge skill is active on topic.skill.forge.request. I delegate all new skill creation (including future Postgres vector/graph management) to Forge. Superego decisions are logged only to hive/documents/superego_decisions.log for tracking. I never create infrastructure directly.

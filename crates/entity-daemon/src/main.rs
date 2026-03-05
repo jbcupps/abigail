@@ -177,14 +177,24 @@ async fn main() -> anyhow::Result<()> {
     config.db_path = entity_dir.join("abigail_memory.db");
     config.models_dir = entity_dir.join("models");
 
-    // 5. Create skill registry with secrets vault and executor
+    // 5. Create skill registry with secrets vault and executor.
+    //    Vault initialization touches disk and keychain, so keep it off the async scheduler.
     let skill_secrets_dir = data_root.join("skill_secrets");
-    std::fs::create_dir_all(&skill_secrets_dir)?;
-    let skill_vault = if skill_secrets_dir.join("secrets.bin").exists() {
-        SecretsVault::load(skill_secrets_dir)?
-    } else {
-        SecretsVault::new(skill_secrets_dir)
-    };
+    let skill_vault = tokio::task::spawn_blocking({
+        let skill_secrets_dir = skill_secrets_dir.clone();
+        move || -> anyhow::Result<SecretsVault> {
+            std::fs::create_dir_all(&skill_secrets_dir)?;
+            if skill_secrets_dir.join("secrets.vault").exists()
+                || skill_secrets_dir.join("secrets.bin").exists()
+            {
+                Ok(SecretsVault::load(skill_secrets_dir)?)
+            } else {
+                Ok(SecretsVault::new(skill_secrets_dir))
+            }
+        }
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("Failed to join vault init task: {}", e))??;
     let skill_vault = Arc::new(Mutex::new(skill_vault));
 
     let registry = Arc::new(SkillRegistry::with_secrets(skill_vault.clone()));
@@ -359,18 +369,40 @@ async fn main() -> anyhow::Result<()> {
         let mut synced_count = 0u32;
         for key in &all_secret_keys {
             if let Ok(Some(value)) = hive_client.get_secret(key).await {
-                if let Ok(mut v) = skill_vault.lock() {
-                    if v.get_secret(key).is_none() {
-                        v.set_secret(key, &value);
-                        synced_count += 1;
-                        tracing::info!("Synced skill secret '{}' from Hive", key);
+                let key_owned = key.clone();
+                let inserted = tokio::task::spawn_blocking({
+                    let skill_vault = skill_vault.clone();
+                    let key_owned = key_owned.clone();
+                    let value = value.clone();
+                    move || {
+                        if let Ok(mut v) = skill_vault.lock() {
+                            if v.get_secret(&key_owned).is_none() {
+                                v.set_secret(&key_owned, &value);
+                                return true;
+                            }
+                        }
+                        false
                     }
+                })
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to join vault sync task: {}", e))?;
+                if inserted {
+                    synced_count += 1;
+                    tracing::info!("Synced skill secret '{}' from Hive", key_owned);
                 }
             }
         }
-        if let Ok(v) = skill_vault.lock() {
-            let _ = v.save();
-        }
+        tokio::task::spawn_blocking({
+            let skill_vault = skill_vault.clone();
+            move || -> anyhow::Result<()> {
+                if let Ok(v) = skill_vault.lock() {
+                    v.save()?;
+                }
+                Ok(())
+            }
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to join vault save task: {}", e))??;
         if synced_count > 0 {
             tracing::info!(
                 "Synced {} skill secret(s) from Hive (checked {} declared keys)",
@@ -454,7 +486,21 @@ async fn main() -> anyhow::Result<()> {
 
     // Phase 2: Provision persistent skill topology from shared registry.
     abigail_skills::set_skill_topology_broker(stream_broker.clone());
-    abigail_skills::provision_all_skills(&shared_registry_path.to_string_lossy()).await;
+    tokio::spawn({
+        let stream_broker = stream_broker.clone();
+        let shared_registry_path = shared_registry_path.clone();
+        async move {
+            let registry_path = shared_registry_path.to_string_lossy().to_string();
+            if let Err(e) = abigail_skills::provision_all_skills_from_registry_path(
+                stream_broker,
+                &registry_path,
+            )
+            .await
+            {
+                tracing::error!("Failed to provision skills: {}", e);
+            }
+        }
+    });
 
     // 10a. Register mentor chat monitor + passive out-of-band observers.
     let _mentor_chat_monitor_handle =
@@ -571,28 +617,55 @@ async fn main() -> anyhow::Result<()> {
         let skill_id = manifest.id.clone();
         let mut skill = skill_email::EmailSkill::new(manifest);
 
-        let has_creds = skill_vault
-            .lock()
-            .map(|v| v.get_secret("imap_password").is_some())
-            .unwrap_or(false);
+        let has_creds = tokio::task::spawn_blocking({
+            let skill_vault = skill_vault.clone();
+            move || {
+                skill_vault
+                    .lock()
+                    .map(|v| v.get_secret("imap_password").is_some())
+                    .unwrap_or(false)
+            }
+        })
+        .await
+        .unwrap_or(false);
 
         if has_creds {
-            let (imap_user, imap_password, imap_host, imap_port) = {
-                let v = skill_vault.lock().unwrap();
-                (
-                    v.get_secret("imap_user").unwrap_or("").to_string(),
-                    v.get_secret("imap_password").unwrap_or("").to_string(),
-                    v.get_secret("imap_host").unwrap_or("").to_string(),
-                    v.get_secret("imap_port").unwrap_or("993").to_string(),
-                )
-            };
-
-            let imap_tls_mode = {
-                let v = skill_vault.lock().unwrap();
-                v.get_secret("imap_tls_mode")
-                    .unwrap_or("IMPLICIT")
-                    .to_string()
-            };
+            let (imap_user, imap_password, imap_host, imap_port, imap_tls_mode) =
+                tokio::task::spawn_blocking({
+                    let skill_vault = skill_vault.clone();
+                    move || {
+                        if let Ok(v) = skill_vault.lock() {
+                            (
+                                v.get_secret("imap_user").unwrap_or("").to_string(),
+                                v.get_secret("imap_password").unwrap_or("").to_string(),
+                                v.get_secret("imap_host").unwrap_or("").to_string(),
+                                v.get_secret("imap_port").unwrap_or("993").to_string(),
+                                v.get_secret("imap_tls_mode")
+                                    .unwrap_or("IMPLICIT")
+                                    .to_string(),
+                            )
+                        } else {
+                            (
+                                String::new(),
+                                String::new(),
+                                String::new(),
+                                "993".to_string(),
+                                "IMPLICIT".to_string(),
+                            )
+                        }
+                    }
+                })
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::warn!("Failed to join vault read task for email skill: {}", e);
+                    (
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        "993".to_string(),
+                        "IMPLICIT".to_string(),
+                    )
+                });
 
             let mut values = HashMap::new();
             values.insert(
