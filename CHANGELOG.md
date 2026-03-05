@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-03-05 21:20 EST: Formalize skill topology and Forge architecture docs, add canonical ARCHITECTURE_SKILL_TOPOLOGY_AND_FORGE spec, update planning/invariants artifacts, and add architecture flow diagram
 - 2026-03-05 20:30 EST: Add regression test for provider-config-changed selector refresh and update README/CLAUDE/AGENTS plan to mark Phase 0 complete and Phase 4b mentor monitor as next
 - 2026-03-04 20:00 EST: Provider key propagation + model registry sync — emit provider-config-changed event on key store, synchronous model discovery, auto-activate first LLM provider, frontend event listener for live dropdown refresh, fix ChatRendering test multiple-match assertion
 - 2026-03-04 19:30 EST: Remove legacy routing config panel and fix provider/model dropdowns — delete ~520 lines of unused ConfigStep UI (provider setup buttons, routing mode selectors, CLI server controls), fix CliOrchestrator dropdown to show static provider label instead of irrelevant model selectors, filter CLI providers from model registry, suppress model_override in CLI mode

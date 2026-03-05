@@ -5,6 +5,8 @@
 
 This document outlines the architectural plan for advancing Abigail's skill system toward Level 4 Earned Autonomy, enabling the Sovereign Entity to self-configure, self-repair, and manage its own Hive operations with minimal Mentor intervention.
 
+> Update (2026-03-05): The dynamic-only skill approach is now deprecated. Runtime skill execution topology is defined by persistent startup provisioning from `skills/registry.toml` and the Forge contract in `documents/ARCHITECTURE_SKILL_TOPOLOGY_AND_FORGE.md`.
+
 ---
 
 ## 1. The "Hive Management" Skill
@@ -80,6 +82,15 @@ Credential management must be strictly compartmentalized.
 ## 6. Instructional Legacy (State vs. Filesystem)
 
 The documentation on *how* to use a skill (`how-to-use.md`) must survive LLM provider changes (e.g., moving from Claude to Gemini) and Hive migrations.
+
+---
+
+## 7. Persistent Topology and Forge Contract (Current Model)
+
+- Skill topology is provisioned at startup from `skills/registry.toml`.
+- Every enabled skill gets deterministic request/response topics and a dedicated subscriber worker.
+- Forge-generated or updated skills are not considered active architecture until represented in the registry contract.
+- Watcher updates (`skill.toml`, `*.json`, and `registry.toml`) trigger safe runtime refresh behavior, including topology re-provision on registry changes.
 
 ### The Decision: Markdown First
 *   We will store the instructional legacy as physical Markdown files (`how-to-use.md`) alongside the `skill.toml` in the filesystem.

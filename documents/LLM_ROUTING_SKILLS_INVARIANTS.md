@@ -3,6 +3,9 @@
 This file captures the runtime invariants used to verify routing and capability
 execution correctness across chat, birth, forge, CLI, and skills commands.
 
+Canonical architecture reference:
+`documents/ARCHITECTURE_SKILL_TOPOLOGY_AND_FORGE.md`
+
 ## Entry Invariants
 
 - All LLM-facing commands (`chat`, `birth_chat`, CLI chat endpoint)
@@ -93,3 +96,15 @@ execution correctness across chat, birth, forge, CLI, and skills commands.
   are discoverable and reachable from runtime paths.
 - Nonfunctional command surfaces must be explicitly gated (no false-success
   stubs).
+
+## Skill Topology and Forge Invariants
+
+- Dynamic-only topology is deprecated.
+- Runtime must provision persistent skill topics from `skills/registry.toml`
+  at startup (`topic.skill.{name}.request` + `.response`).
+- Each enabled registry skill must have a deterministic consumer group
+  (`skill-worker.{name}`) and subscriber worker.
+- `registry.toml` changes must trigger topology re-provision (cancel old
+  workers, rebuild topic bindings, re-subscribe).
+- Forge-authored capability changes are valid only when reflected in
+  `skills/registry.toml`.
