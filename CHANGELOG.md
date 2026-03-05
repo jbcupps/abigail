@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-03-04 20:00 EST: Provider key propagation + model registry sync — emit provider-config-changed event on key store, synchronous model discovery, auto-activate first LLM provider, frontend event listener for live dropdown refresh, fix ChatRendering test multiple-match assertion
 - 2026-03-04 19:30 EST: Remove legacy routing config panel and fix provider/model dropdowns — delete ~520 lines of unused ConfigStep UI (provider setup buttons, routing mode selectors, CLI server controls), fix CliOrchestrator dropdown to show static provider label instead of irrelevant model selectors, filter CLI providers from model registry, suppress model_override in CLI mode
 - 2026-03-04 18:45 EST: Fix provider/model dropdown pipeline — thread model_override from UI through gateway/Tauri/entity-chat to router, wire provider dropdown to use_stored_provider backend, remove dead ForceOverride code, filter non-LLM providers from dropdown
 - 2026-03-04 10:30 EST: Fix crypto bootstrapping crash on fresh install — return signing key directly from generate_master_key to avoid KEK mismatch when OS keyring store fails, add vault format detection in load_master_key to prevent AES-GCM data being fed to DPAPI

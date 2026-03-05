@@ -2,7 +2,7 @@ use crate::state::{AppState, ForceOverride};
 use abigail_capabilities::cognitive::validation::validate_api_key;
 use abigail_core::{validate_local_llm_url, TrinityConfig};
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Emitter, State};
 
 // ---------------------------------------------------------------------------
 // Model registry DTOs
@@ -459,6 +459,7 @@ pub struct StoreKeyResult {
 
 #[tauri::command]
 pub async fn store_provider_key(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     provider: String,
     key: String,
@@ -558,14 +559,62 @@ pub async fn store_provider_key(
         }
     }
 
+    // Fix 3: Auto-activate this provider when no preference is set so the
+    // router picks it up immediately instead of falling through to nothing.
+    if is_llm_provider(&provider) {
+        let should_activate = {
+            let config = state.config.read().map_err(|e| e.to_string())?;
+            config.active_provider_preference.is_none()
+        };
+        if should_activate {
+            let mut config = state.config.write().map_err(|e| e.to_string())?;
+            config.active_provider_preference = Some(provider.clone());
+            let _ = config.save(&config.config_path());
+        }
+    }
+
     if let Err(e) = crate::rebuild_router(&state).await {
+        let _ = app.emit("provider-config-changed", ());
         return Ok(StoreKeyResult {
-            success: true, // Key saved, but router update failed
+            success: true,
             provider,
             validated,
             error: Some(format!("Key saved, but failed to rebuild router: {}", e)),
         });
     }
+
+    // Fix 2: Synchronous model discovery so the registry is populated before
+    // the frontend re-fetches. The background discovery inside rebuild_router
+    // is fire-and-forget; this blocks until models are available.
+    if is_llm_provider(&provider) {
+        let mut reg = state.model_registry.lock().await;
+        match reg.refresh_provider(&provider, &key).await {
+            Ok(cache) => {
+                tracing::info!(
+                    "store_provider_key: discovered {} model(s) for {}",
+                    cache.models.len(),
+                    provider
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "store_provider_key: model discovery failed for {}: {}",
+                    provider,
+                    e
+                );
+            }
+        }
+        let catalog = reg.to_catalog();
+        drop(reg);
+        if let Ok(mut config) = state.config.write() {
+            config.provider_catalog = catalog;
+            let _ = config.save(&config.config_path());
+        }
+    }
+
+    // Fix 1: Notify the frontend that provider config changed so it can
+    // re-fetch stored providers and the model registry in one shot.
+    let _ = app.emit("provider-config-changed", ());
 
     Ok(StoreKeyResult {
         success: true,
