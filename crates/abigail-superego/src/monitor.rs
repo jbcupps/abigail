@@ -3,6 +3,8 @@
 use abigail_streaming::{StreamBroker, StreamMessage, SubscriptionHandle, TopicConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Write;
+use std::path::Path;
 use std::sync::Arc;
 
 const STREAM: &str = "entity";
@@ -32,6 +34,42 @@ pub struct SuperegoSignal {
 
 pub struct SuperegoMonitor {
     broker: Arc<dyn StreamBroker>,
+}
+
+fn append_superego_decision_log(entry: &str) {
+    let base =
+        std::env::var("HIVE_DOCUMENTS_PATH").unwrap_or_else(|_| "hive/documents".to_string());
+    let dir = Path::new(&base);
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        tracing::warn!(
+            "superego monitor: failed to create hive documents dir {}: {}",
+            dir.display(),
+            e
+        );
+        return;
+    }
+
+    let path = dir.join("superego_decisions.log");
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        Ok(mut file) => {
+            if let Err(e) = writeln!(file, "{}", entry) {
+                tracing::warn!(
+                    "superego monitor: failed writing log {}: {}",
+                    path.display(),
+                    e
+                );
+            }
+        }
+        Err(e) => tracing::warn!(
+            "superego monitor: failed opening log {}: {}",
+            path.display(),
+            e
+        ),
+    }
 }
 
 impl SuperegoMonitor {
@@ -67,11 +105,13 @@ impl SuperegoMonitor {
                     .unwrap_or_else(|| env.message.clone())
                     .to_lowercase();
                 let mut maybe_signal: Option<SuperegoSignal> = None;
+                let mut decision = "allow".to_string();
 
                 if text.contains("rm -rf")
                     || text.contains("drop table")
                     || text.contains("delete all")
                 {
+                    decision = "block:destructive-pattern".to_string();
                     maybe_signal = Some(SuperegoSignal {
                         correlation_id: env.correlation_id.clone(),
                         session_id: env.session_id.clone(),
@@ -81,6 +121,7 @@ impl SuperegoMonitor {
                         created_at_utc: chrono::Utc::now(),
                     });
                 } else if text.contains('@') && text.contains('.') {
+                    decision = "flag:pii-likelihood".to_string();
                     maybe_signal = Some(SuperegoSignal {
                         correlation_id: env.correlation_id.clone(),
                         session_id: env.session_id.clone(),
@@ -90,6 +131,15 @@ impl SuperegoMonitor {
                         created_at_utc: chrono::Utc::now(),
                     });
                 }
+
+                append_superego_decision_log(&format!(
+                    "{} | source=superego_monitor | correlation_id={} | session_id={} | decision={} | message={}",
+                    chrono::Utc::now().to_rfc3339(),
+                    env.correlation_id,
+                    env.session_id,
+                    decision,
+                    env.message.replace('\n', " ")
+                ));
 
                 let Some(signal) = maybe_signal else {
                     return;

@@ -6,12 +6,15 @@
 //! 3) enriched envelope is republished to `entity/chat-topic`
 
 use crate::router::IdEgoRouter;
-use abigail_core::constitutional::{infer_id_context, infer_superego_context};
-use abigail_core::load_preprompt_context;
+use abigail_core::constitutional::{
+    infer_id_context, infer_superego_context, load_minimal_preprompt,
+};
 use abigail_streaming::{StreamBroker, StreamMessage, SubscriptionHandle, TopicConfig};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Write;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -73,6 +76,42 @@ fn build_fallback_preprompt(envelope: &MentorChatEnvelope) -> String {
     )
 }
 
+fn append_superego_decision_log(entry: &str) {
+    let base =
+        std::env::var("HIVE_DOCUMENTS_PATH").unwrap_or_else(|_| "hive/documents".to_string());
+    let dir = Path::new(&base);
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        tracing::warn!(
+            "mentor chat monitor: failed to create hive documents dir {}: {}",
+            dir.display(),
+            e
+        );
+        return;
+    }
+
+    let path = dir.join("superego_decisions.log");
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        Ok(mut file) => {
+            if let Err(e) = writeln!(file, "{}", entry) {
+                tracing::warn!(
+                    "mentor chat monitor: failed writing superego decision log {}: {}",
+                    path.display(),
+                    e
+                );
+            }
+        }
+        Err(e) => tracing::warn!(
+            "mentor chat monitor: failed opening superego decision log {}: {}",
+            path.display(),
+            e
+        ),
+    }
+}
+
 /// Monitor subscriber that enriches mentor chat envelopes.
 pub struct MentorChatMonitor {
     broker: Arc<dyn StreamBroker>,
@@ -111,10 +150,21 @@ impl MentorChatMonitor {
                 envelope.id_context = Some(id_context.clone());
                 envelope.superego_context = Some(superego_context.clone());
                 envelope.enriched_preprompt = Some(
-                    load_preprompt_context(&envelope.message)
+                    load_minimal_preprompt(&envelope.message)
                         .await
                         .unwrap_or_else(|_| build_fallback_preprompt(&envelope)),
                 );
+                append_superego_decision_log(&format!(
+                    "{} | source=mentor_chat | correlation_id={} | session_id={} | superego_decision={} | message={}",
+                    chrono::Utc::now().to_rfc3339(),
+                    envelope.correlation_id,
+                    envelope.session_id,
+                    envelope
+                        .superego_context
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    envelope.message.replace('\n', " ")
+                ));
 
                 let Ok(payload) = serde_json::to_vec(&envelope) else {
                     return;
@@ -278,6 +328,6 @@ mod tests {
         assert!(got.is_some());
         let out = got.unwrap();
         assert!(out.contains("Constitutional Monitor Context"));
-        assert!(out.contains("Runtime Signals"));
+        assert!(out.contains("Superego decisions are tracked in Hive/documents"));
     }
 }

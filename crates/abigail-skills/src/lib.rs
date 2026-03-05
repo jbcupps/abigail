@@ -8,6 +8,7 @@ pub mod factory;
 pub mod hive;
 pub mod instruction_registry;
 pub mod manifest;
+pub mod native;
 pub mod policy;
 pub mod preloaded;
 pub mod prelude;

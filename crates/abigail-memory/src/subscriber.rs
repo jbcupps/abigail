@@ -3,6 +3,8 @@
 use crate::{ConversationTurn, MemoryStore};
 use abigail_streaming::{StreamBroker, SubscriptionHandle, TopicConfig};
 use serde::{Deserialize, Serialize};
+use std::io::Write;
+use std::path::Path;
 use std::sync::Arc;
 
 const STREAM: &str = "entity";
@@ -24,6 +26,42 @@ pub struct ChatTopicEnvelope {
     pub id_context: Option<String>,
     #[serde(default)]
     pub superego_context: Option<String>,
+}
+
+fn append_memory_superego_log(entry: &str) {
+    let base =
+        std::env::var("HIVE_DOCUMENTS_PATH").unwrap_or_else(|_| "hive/documents".to_string());
+    let dir = Path::new(&base);
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        tracing::warn!(
+            "memory subscriber: failed to create hive documents dir {}: {}",
+            dir.display(),
+            e
+        );
+        return;
+    }
+
+    let path = dir.join("memory_superego_context.log");
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        Ok(mut file) => {
+            if let Err(e) = writeln!(file, "{}", entry) {
+                tracing::warn!(
+                    "memory subscriber: failed writing log {}: {}",
+                    path.display(),
+                    e
+                );
+            }
+        }
+        Err(e) => tracing::warn!(
+            "memory subscriber: failed opening log {}: {}",
+            path.display(),
+            e
+        ),
+    }
 }
 
 /// Subscribe to `entity/chat-topic` and persist enriched chat-topic envelopes
@@ -48,6 +86,17 @@ pub async fn spawn_chat_topic_subscriber(
             if env.stage != "enriched" {
                 return;
             }
+
+            append_memory_superego_log(&format!(
+                "{} | source=memory_subscriber | correlation_id={} | session_id={} | id_context={} | superego_context={} | message={} | enriched={}",
+                chrono::Utc::now().to_rfc3339(),
+                env.correlation_id,
+                env.session_id,
+                env.id_context.clone().unwrap_or_else(|| "unknown".to_string()),
+                env.superego_context.clone().unwrap_or_else(|| "unknown".to_string()),
+                env.message.replace('\n', " "),
+                env.enriched_preprompt.clone().unwrap_or_default().replace('\n', " ")
+            ));
 
             let content = env
                 .enriched_preprompt
