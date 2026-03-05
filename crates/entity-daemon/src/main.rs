@@ -15,6 +15,7 @@ mod subagent_runner;
 
 use abigail_core::{AppConfig, SecretsVault};
 use abigail_hive::Hive;
+use abigail_identity::IdentityManager;
 use abigail_memory::MemoryStore;
 use abigail_queue::JobQueue;
 use abigail_router::IdEgoRouter;
@@ -484,20 +485,22 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(MemoryBroker::default())
     };
 
-    // Phase 2: Provision persistent skill topology from shared registry.
+    // Phase 5B: Safe async boot - never block the main runtime.
     abigail_skills::set_skill_topology_broker(stream_broker.clone());
-    tokio::spawn({
-        let stream_broker = stream_broker.clone();
-        let shared_registry_path = shared_registry_path.clone();
-        async move {
-            let registry_path = shared_registry_path.to_string_lossy().to_string();
-            if let Err(e) = abigail_skills::provision_all_skills_from_registry_path(
-                stream_broker,
-                &registry_path,
-            )
-            .await
-            {
-                tracing::error!("Failed to provision skills: {}", e);
+    tokio::spawn(async {
+        abigail_skills::provision_all_skills("skills/registry.toml").await;
+    });
+
+    tokio::spawn(async {
+        abigail_core::vault::init_resilient().await;
+    });
+
+    // Also wrap identity manager for extra safety.
+    tokio::task::spawn_blocking({
+        let data_root = data_root.clone();
+        move || {
+            if let Err(e) = IdentityManager::new(data_root) {
+                tracing::error!("IdentityManager init failed: {}", e);
             }
         }
     });

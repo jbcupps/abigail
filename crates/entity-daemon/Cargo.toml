@@ -12,6 +12,7 @@ entity-core = { path = "../entity-core" }
 entity-chat = { path = "../entity-chat" }
 hive-core = { path = "../hive-core" }
 abigail-core = { path = "../abigail-core" }
+abigail-identity = { path = "../abigail-identity" }
 abigail-hive = { path = "../abigail-hive" }
 abigail-router = { path = "../abigail-router" }
 abigail-id = { path = "../abigail-id" }
