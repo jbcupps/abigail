@@ -255,6 +255,19 @@ Sanctum/Hive key save
 
 Model availability comes from the dynamic registry (`get_model_registry`) backed by provider discovery and cache persistence. CLI providers remain in `CliOrchestrator`; non-CLI providers run through `EgoPrimary` with explicit user-selected model targeting.
 
+### DevOps Forge Request/Response Flow
+
+```
+Entity (LLM generates code+md)
+  -> publish entity/topic.skill.forge.request
+  -> DevOps Forge Worker (sandbox + superego scan)
+  -> writes skills/dynamic/* + updates skills/registry.toml
+  -> watcher hot-reload (registry changed)
+  -> publish entity/topic.skill.forge.response
+```
+
+Forge writes are constrained to dynamic skill paths and guarded by TriangleEthic-aligned safety checks before any registry mutation.
+
 ### Constitutional Documents
 
 Templates in `templates/` (soul.md, ethics.md, instincts.md) are compiled into the binary. At first run they're written to the data directory, signed with a generated Ed25519 key, and verified at every subsequent boot.
@@ -305,6 +318,12 @@ For detailed architecture reference (crate responsibilities, security boundaries
 - Mentor Chat Monitor topic subscription
 - Mentor preprompt injection at the router boundary
 - Keep memory/safety/id-superego monitors out-of-band
+
+### Active: Phase 4c
+
+- DevOps Forge worker subscribed to `topic.skill.forge.request`
+- Sandboxed code+markdown skill authoring to `skills/dynamic/`
+- Superego gate + deterministic response on `topic.skill.forge.response`
 
 ### Next After 4b
 

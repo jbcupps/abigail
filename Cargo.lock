@@ -2865,6 +2865,7 @@ dependencies = [
  "skill-shell",
  "skill-system-monitor",
  "skill-web-search",
+ "soul-forge",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -8238,9 +8239,16 @@ dependencies = [
 name = "soul-forge"
 version = "0.0.1"
 dependencies = [
+ "abigail-skills",
+ "abigail-streaming",
+ "anyhow",
+ "chrono",
  "serde",
  "serde_json",
  "sha2",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

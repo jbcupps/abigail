@@ -1,7 +1,7 @@
 # Architecture: Skill Topology and Forge
 
 **Status:** Canonical specification  
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-03-05
 
 This document is the single source of truth for skill topology provisioning and Forge orchestration across the Sovereign stack.
@@ -61,11 +61,12 @@ Provisioning is idempotent and safe to run repeatedly.
 ## 4. Forge Pipeline (Canonical)
 
 1. Intent classification identifies a persistent capability need.
-2. Forge authors or updates skill artifacts (`skill.toml`, runtime file(s), instruction markdown).
-3. Forge updates `skills/registry.toml` entry (or requests explicit mentor action if policy requires).
-4. Watcher detects registry/artifact changes.
-5. Runtime re-provisions persistent topology from registry.
-6. Skill worker becomes available via request/response topics.
+2. Entity publishes code + markdown envelope to `topic.skill.forge.request`.
+3. DevOps Forge worker performs sandbox checks and Superego gate scan.
+4. Forge writes artifacts to `skills/dynamic/` and mirrors instruction markdown for prompt loading.
+5. Forge updates/touches `skills/registry.toml` and publishes `topic.skill.forge.response`.
+6. Watcher detects registry change and re-provisions persistent topology from registry.
+7. Skill worker becomes available via request/response topics.
 
 ## 5. Superego Gates (Policy Boundaries)
 
@@ -120,7 +121,10 @@ flowchart LR
     Hive[Hive Control Plane] --> Registry[skills/registry.toml]
     Registry --> Topics[Persistent Skill Topics]
     Topics --> Entity[Entity Subscriber Workers]
-    Entity --> Forge[Forge Pipeline]
-    Forge --> Registry
+    Entity --> ForgeReq[topic.skill.forge.request]
+    ForgeReq --> ForgeWorker[DevOps Forge Worker]
+    ForgeWorker --> Dynamic[skills/dynamic]
+    ForgeWorker --> Registry
+    Registry --> Watcher[Hot-Reload Re-provision]
+    ForgeWorker --> ForgeResp[topic.skill.forge.response]
 ```
-

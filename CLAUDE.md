@@ -136,7 +136,7 @@ The crates form a layered architecture with clear security boundaries:
 | `abigail-auth` | Authentication provider framework: `AuthProvider` trait, `AuthManager`, static-token and basic-auth providers |
 | `abigail-cli` | Standalone CLI tool: status, secrets, email config, integration status, router diagnostics, REST troubleshooting API |
 | `abigail-soul-crystallization` | Soul crystallization engine: guided multi-phase personality discovery (MentorProfile, CrystallizationPhase, DepthLevel) |
-| `soul-forge` | Scenario-based personality forge: dilemma scenarios with triangle weights (Ego/Superego/Id) producing SoulOutput |
+| `soul-forge` | Scenario-based personality forge + DevOps Forge worker (`topic.skill.forge.request`/`response`) with sandboxed skill artifact writes and superego gating |
 | `abigail-keygen` | Standalone egui utility for Ed25519 keypair generation |
 
 **Security boundary**: Hive controls secrets and identity (high trust). Entity executes skills in a sandboxed plugin system with declared permissions.
@@ -401,14 +401,17 @@ Current priorities, in order:
 17. **Mentor preprompt injection** — Apply monitor-produced preprompt context before ego completion without coupling to UI concerns.
 18. **Out-of-band monitors** — Keep memory/id/superego/safety observers asynchronous so chat latency remains bounded.
 
-### Phase 4c: Ego Delegation Tools
-19. **LLM-callable job tools** — Add `submit_background_job`, `get_job_result`, `list_my_jobs` as built-in tools in the entity-chat loop.
+### Phase 4c: DevOps Forge Worker — ACTIVE
+19. **Forge request/response pipeline** — Persistent worker subscribes to `topic.skill.forge.request`, runs sandbox + superego scan, writes to `skills/dynamic/`, updates `skills/registry.toml`, and publishes `topic.skill.forge.response`.
 
-### Phase 4d: Capability-Aware Routing + Direct Execution
-20. **Upgrade CapabilityMatcher + ExecutionMode** — Config-driven provider/model routing per capability with `ExecutionMode` (Mediated vs Direct), plus direct `SkillExecutor` path for structured jobs.
+### Phase 4d: Ego Delegation Tools
+20. **LLM-callable job tools** — Add `submit_background_job`, `get_job_result`, `list_my_jobs` as built-in tools in the entity-chat loop.
 
-### Phase 4e: Cron + Live Result Threading
-21. **Ego cron tools + reactive job events** — Add recurring job management tools and replace polling with reactive events; thread job results back into conversation rendering.
+### Phase 4e: Capability-Aware Routing + Direct Execution
+21. **Upgrade CapabilityMatcher + ExecutionMode** — Config-driven provider/model routing per capability with `ExecutionMode` (Mediated vs Direct), plus direct `SkillExecutor` path for structured jobs.
+
+### Phase 4f: Cron + Live Result Threading
+22. **Ego cron tools + reactive job events** — Add recurring job management tools and replace polling with reactive events; thread job results back into conversation rendering.
 
 ## Known Issues
 

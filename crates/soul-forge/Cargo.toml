@@ -4,6 +4,15 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+abigail-skills = { path = "../abigail-skills" }
+abigail-streaming = { path = "../abigail-streaming" }
+anyhow.workspace = true
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

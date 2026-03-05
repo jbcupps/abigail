@@ -409,6 +409,623 @@ fn built_in_scenarios() -> Vec<ForgeScenario> {
     ]
 }
 
+/// Persistent stream topology used by the DevOps Forge worker.
+pub const FORGE_STREAM: &str = "entity";
+pub const FORGE_REQUEST_TOPIC: &str = "topic.skill.forge.request";
+pub const FORGE_RESPONSE_TOPIC: &str = "topic.skill.forge.response";
+pub const FORGE_WORKER_GROUP: &str = "skill-worker.forge";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeRequestEnvelope {
+    #[serde(default)]
+    pub correlation_id: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub entity_id: Option<String>,
+    pub skill_id: String,
+    pub code: String,
+    pub markdown: String,
+    #[serde(default)]
+    pub code_filename: Option<String>,
+    #[serde(default)]
+    pub markdown_filename: Option<String>,
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    #[serde(default)]
+    pub topics: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeResponseEnvelope {
+    pub correlation_id: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub entity_id: Option<String>,
+    #[serde(default)]
+    pub skill_id: Option<String>,
+    pub status: String,
+    pub message: String,
+    #[serde(default)]
+    pub code_path: Option<String>,
+    #[serde(default)]
+    pub markdown_path: Option<String>,
+    #[serde(default)]
+    pub instruction_path: Option<String>,
+    #[serde(default)]
+    pub registry_path: Option<String>,
+    #[serde(default)]
+    pub superego_rule: Option<String>,
+    pub hot_reload_triggered: bool,
+    pub created_at_utc: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeWriteResult {
+    pub code_path: String,
+    pub markdown_path: String,
+    pub instruction_path: String,
+    pub registry_path: String,
+    pub sandbox_audit_entries: usize,
+    pub registry_entry_added: bool,
+    pub hot_reload_triggered: bool,
+}
+
+#[derive(Debug)]
+pub enum ForgePipelineError {
+    Blocked { rule: String, reason: String },
+    Failed(String),
+}
+
+impl std::fmt::Display for ForgePipelineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Blocked { rule, reason } => write!(f, "blocked by {}: {}", rule, reason),
+            Self::Failed(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
+impl std::error::Error for ForgePipelineError {}
+
+struct ForgeSuperegoVerdict {
+    rule: &'static str,
+    reason: &'static str,
+}
+
+/// Persistent worker that processes skill forge envelopes from stream topics.
+pub struct DevopsForgeWorker {
+    broker: std::sync::Arc<dyn abigail_streaming::StreamBroker>,
+    skills_root: std::path::PathBuf,
+}
+
+impl DevopsForgeWorker {
+    pub fn new(
+        broker: std::sync::Arc<dyn abigail_streaming::StreamBroker>,
+        skills_root: std::path::PathBuf,
+    ) -> Self {
+        Self {
+            broker,
+            skills_root,
+        }
+    }
+
+    pub async fn spawn(self) -> anyhow::Result<abigail_streaming::SubscriptionHandle> {
+        self.broker
+            .ensure_topic(
+                FORGE_STREAM,
+                FORGE_REQUEST_TOPIC,
+                abigail_streaming::TopicConfig::default(),
+            )
+            .await?;
+        self.broker
+            .ensure_topic(
+                FORGE_STREAM,
+                FORGE_RESPONSE_TOPIC,
+                abigail_streaming::TopicConfig::default(),
+            )
+            .await?;
+        self.broker
+            .ensure_consumer_group(FORGE_STREAM, FORGE_REQUEST_TOPIC, FORGE_WORKER_GROUP)
+            .await?;
+
+        let broker = self.broker.clone();
+        let skills_root = self.skills_root.clone();
+        let handler: abigail_streaming::broker::MessageHandler = Box::new(move |msg| {
+            let broker = broker.clone();
+            let skills_root = skills_root.clone();
+            Box::pin(async move {
+                let mut correlation_id = msg
+                    .headers
+                    .get("correlation_id")
+                    .cloned()
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+                let request = serde_json::from_slice::<ForgeRequestEnvelope>(&msg.payload);
+                let response = match request {
+                    Ok(mut req) => {
+                        if let Some(corr) = req.correlation_id.clone() {
+                            correlation_id = corr;
+                        } else {
+                            req.correlation_id = Some(correlation_id.clone());
+                        }
+                        match process_forge_request(&req, &skills_root) {
+                            Ok(wrote) => ForgeResponseEnvelope {
+                                correlation_id,
+                                session_id: req.session_id.clone(),
+                                entity_id: req.entity_id.clone(),
+                                skill_id: Some(req.skill_id.clone()),
+                                status: "success".to_string(),
+                                message: format!("Skill {} forged and hot-reloaded", req.skill_id),
+                                code_path: Some(wrote.code_path),
+                                markdown_path: Some(wrote.markdown_path),
+                                instruction_path: Some(wrote.instruction_path),
+                                registry_path: Some(wrote.registry_path),
+                                superego_rule: None,
+                                hot_reload_triggered: wrote.hot_reload_triggered,
+                                created_at_utc: chrono::Utc::now(),
+                            },
+                            Err(ForgePipelineError::Blocked { rule, reason }) => {
+                                ForgeResponseEnvelope {
+                                    correlation_id,
+                                    session_id: req.session_id.clone(),
+                                    entity_id: req.entity_id.clone(),
+                                    skill_id: Some(req.skill_id.clone()),
+                                    status: "blocked".to_string(),
+                                    message: reason,
+                                    code_path: None,
+                                    markdown_path: None,
+                                    instruction_path: None,
+                                    registry_path: None,
+                                    superego_rule: Some(rule),
+                                    hot_reload_triggered: false,
+                                    created_at_utc: chrono::Utc::now(),
+                                }
+                            }
+                            Err(ForgePipelineError::Failed(err)) => ForgeResponseEnvelope {
+                                correlation_id,
+                                session_id: req.session_id.clone(),
+                                entity_id: req.entity_id.clone(),
+                                skill_id: Some(req.skill_id.clone()),
+                                status: "error".to_string(),
+                                message: err,
+                                code_path: None,
+                                markdown_path: None,
+                                instruction_path: None,
+                                registry_path: None,
+                                superego_rule: None,
+                                hot_reload_triggered: false,
+                                created_at_utc: chrono::Utc::now(),
+                            },
+                        }
+                    }
+                    Err(e) => ForgeResponseEnvelope {
+                        correlation_id,
+                        session_id: None,
+                        entity_id: None,
+                        skill_id: None,
+                        status: "error".to_string(),
+                        message: format!("Invalid forge envelope: {}", e),
+                        code_path: None,
+                        markdown_path: None,
+                        instruction_path: None,
+                        registry_path: None,
+                        superego_rule: None,
+                        hot_reload_triggered: false,
+                        created_at_utc: chrono::Utc::now(),
+                    },
+                };
+
+                publish_forge_response(broker.clone(), response).await;
+            })
+        });
+
+        let handle = self
+            .broker
+            .subscribe(
+                FORGE_STREAM,
+                FORGE_REQUEST_TOPIC,
+                FORGE_WORKER_GROUP,
+                handler,
+            )
+            .await?;
+        tracing::info!(
+            "DevopsForgeWorker subscribed to {}/{}",
+            FORGE_STREAM,
+            FORGE_REQUEST_TOPIC
+        );
+        Ok(handle)
+    }
+}
+
+async fn publish_forge_response(
+    broker: std::sync::Arc<dyn abigail_streaming::StreamBroker>,
+    response: ForgeResponseEnvelope,
+) {
+    let Ok(payload) = serde_json::to_vec(&response) else {
+        tracing::warn!("forge worker: failed to serialize response");
+        return;
+    };
+    let mut headers = std::collections::HashMap::new();
+    headers.insert("status".to_string(), response.status.clone());
+    headers.insert(
+        "correlation_id".to_string(),
+        response.correlation_id.clone(),
+    );
+    if let Some(skill_id) = response.skill_id.clone() {
+        headers.insert("skill_id".to_string(), skill_id);
+    }
+    headers.insert("worker_group".to_string(), FORGE_WORKER_GROUP.to_string());
+    if let Some(rule) = response.superego_rule.clone() {
+        headers.insert("superego_rule".to_string(), rule);
+    }
+
+    if let Err(e) = broker
+        .publish(
+            FORGE_STREAM,
+            FORGE_RESPONSE_TOPIC,
+            abigail_streaming::StreamMessage::with_headers(payload, headers),
+        )
+        .await
+    {
+        tracing::warn!("forge worker: failed to publish response: {}", e);
+    }
+}
+
+/// Runs the forge pipeline:
+/// 1) validate/superego gate
+/// 2) sandbox permission checks for writes
+/// 3) save code+markdown under skills/dynamic
+/// 4) mirror instruction markdown for registry prompt loading
+/// 5) update registry.toml and touch to trigger hot-reload
+pub fn process_forge_request(
+    request: &ForgeRequestEnvelope,
+    skills_root: &std::path::Path,
+) -> Result<ForgeWriteResult, ForgePipelineError> {
+    let skill_id = request.skill_id.trim();
+    if skill_id.is_empty() {
+        return Err(ForgePipelineError::Failed(
+            "forge request missing skill_id".to_string(),
+        ));
+    }
+    if request.code.trim().is_empty() {
+        return Err(ForgePipelineError::Failed(
+            "forge request missing code payload".to_string(),
+        ));
+    }
+    if request.markdown.trim().is_empty() {
+        return Err(ForgePipelineError::Failed(
+            "forge request missing markdown payload".to_string(),
+        ));
+    }
+
+    if let Some(v) = superego_scan(&request.code, &request.markdown) {
+        return Err(ForgePipelineError::Blocked {
+            rule: v.rule.to_string(),
+            reason: v.reason.to_string(),
+        });
+    }
+
+    let slug = sanitize_skill_slug(skill_id);
+    let dynamic_dir = skills_root.join("dynamic").join(&slug);
+    let code_file = sanitize_filename(request.code_filename.as_deref(), "lib.rs");
+    let markdown_file = sanitize_filename(request.markdown_filename.as_deref(), "how_to_use.md");
+    let code_path = dynamic_dir.join(code_file);
+    let markdown_path = dynamic_dir.join(markdown_file);
+
+    let instructions_dir = skills_root.join("instructions");
+    let instruction_file = format!("dynamic_{}.md", slug);
+    let instruction_path = instructions_dir.join(&instruction_file);
+
+    let registry_path = skills_root.join("registry.toml");
+    std::fs::create_dir_all(skills_root).map_err(to_pipeline_err)?;
+
+    let mut sandbox = build_forge_sandbox(&dynamic_dir, &instructions_dir, &registry_path);
+
+    sandbox_check_write(&mut sandbox, &dynamic_dir)?;
+    std::fs::create_dir_all(&dynamic_dir).map_err(to_pipeline_err)?;
+
+    sandbox_check_write(&mut sandbox, &instructions_dir)?;
+    std::fs::create_dir_all(&instructions_dir).map_err(to_pipeline_err)?;
+
+    sandbox_check_write(&mut sandbox, &code_path)?;
+    std::fs::write(&code_path, &request.code).map_err(to_pipeline_err)?;
+
+    sandbox_check_write(&mut sandbox, &markdown_path)?;
+    std::fs::write(&markdown_path, &request.markdown).map_err(to_pipeline_err)?;
+
+    sandbox_check_write(&mut sandbox, &instruction_path)?;
+    std::fs::write(&instruction_path, &request.markdown).map_err(to_pipeline_err)?;
+
+    if registry_path.exists() {
+        sandbox_check_read(&mut sandbox, &registry_path)?;
+    }
+    sandbox_check_write(&mut sandbox, &registry_path)?;
+    let registry_entry_added =
+        upsert_registry_entry(&registry_path, skill_id, &instruction_file, request)?;
+
+    Ok(ForgeWriteResult {
+        code_path: code_path.to_string_lossy().to_string(),
+        markdown_path: markdown_path.to_string_lossy().to_string(),
+        instruction_path: instruction_path.to_string_lossy().to_string(),
+        registry_path: registry_path.to_string_lossy().to_string(),
+        sandbox_audit_entries: sandbox.audit_log.len(),
+        registry_entry_added,
+        hot_reload_triggered: true,
+    })
+}
+
+fn build_forge_sandbox(
+    dynamic_dir: &std::path::Path,
+    instructions_dir: &std::path::Path,
+    registry_path: &std::path::Path,
+) -> abigail_skills::SkillSandbox {
+    let dynamic_root = dynamic_dir.to_string_lossy().to_string().replace('\\', "/");
+    let instructions_root = instructions_dir
+        .to_string_lossy()
+        .to_string()
+        .replace('\\', "/");
+    let registry = registry_path
+        .to_string_lossy()
+        .to_string()
+        .replace('\\', "/");
+
+    abigail_skills::SkillSandbox::new(
+        abigail_skills::manifest::SkillId("builtin.devops_forge".to_string()),
+        vec![
+            abigail_skills::manifest::Permission::FileSystem(
+                abigail_skills::manifest::FileSystemPermission::Read(vec![registry.clone()]),
+            ),
+            abigail_skills::manifest::Permission::FileSystem(
+                abigail_skills::manifest::FileSystemPermission::Write(vec![
+                    dynamic_root,
+                    instructions_root,
+                    registry,
+                ]),
+            ),
+        ],
+        abigail_skills::sandbox::ResourceLimits::default(),
+    )
+}
+
+fn sandbox_check_read(
+    sandbox: &mut abigail_skills::SkillSandbox,
+    path: &std::path::Path,
+) -> Result<(), ForgePipelineError> {
+    let action = abigail_skills::AuditAction {
+        kind: abigail_skills::AuditActionKind::FileRead {
+            path: path.to_string_lossy().to_string(),
+        },
+    };
+    if sandbox.check_permission(&action) {
+        Ok(())
+    } else {
+        Err(ForgePipelineError::Failed(format!(
+            "sandbox denied read: {}",
+            path.display()
+        )))
+    }
+}
+
+fn sandbox_check_write(
+    sandbox: &mut abigail_skills::SkillSandbox,
+    path: &std::path::Path,
+) -> Result<(), ForgePipelineError> {
+    let action = abigail_skills::AuditAction {
+        kind: abigail_skills::AuditActionKind::FileWrite {
+            path: path.to_string_lossy().to_string(),
+        },
+    };
+    if sandbox.check_permission(&action) {
+        Ok(())
+    } else {
+        Err(ForgePipelineError::Failed(format!(
+            "sandbox denied write: {}",
+            path.display()
+        )))
+    }
+}
+
+fn sanitize_skill_slug(raw: &str) -> String {
+    let out: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if out.trim_matches('_').is_empty() {
+        "skill".to_string()
+    } else {
+        out.trim_matches('_').to_string()
+    }
+}
+
+fn sanitize_filename(raw: Option<&str>, fallback: &str) -> String {
+    let candidate = raw.unwrap_or(fallback);
+    let base = std::path::Path::new(candidate)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(fallback);
+    let mut out: String = base
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if out.is_empty() {
+        out = fallback.to_string();
+    }
+    if !out.contains('.') {
+        if let Some(dot) = fallback.rfind('.') {
+            out.push_str(&fallback[dot..]);
+        }
+    }
+    out
+}
+
+fn superego_scan(code: &str, markdown: &str) -> Option<ForgeSuperegoVerdict> {
+    let payload = format!("{}\n{}", code, markdown).to_lowercase();
+
+    if payload.contains("rm -rf")
+        || payload.contains("drop table")
+        || payload.contains("delete all")
+    {
+        return Some(ForgeSuperegoVerdict {
+            rule: "destructive-pattern",
+            reason: "Forge payload contains destructive execution patterns",
+        });
+    }
+    if payload.contains("invoke-expression")
+        || payload.contains("curl | sh")
+        || payload.contains("wget | sh")
+    {
+        return Some(ForgeSuperegoVerdict {
+            rule: "remote-code-exec-pattern",
+            reason: "Forge payload contains unsafe remote execution pattern",
+        });
+    }
+    if (payload.contains("soul.md")
+        || payload.contains("ethics.md")
+        || payload.contains("instincts.md"))
+        && (payload.contains("overwrite")
+            || payload.contains("delete")
+            || payload.contains("truncate"))
+    {
+        return Some(ForgeSuperegoVerdict {
+            rule: "constitutional-doc-target",
+            reason: "Forge payload targets constitutional documents, which is disallowed",
+        });
+    }
+    None
+}
+
+fn upsert_registry_entry(
+    registry_path: &std::path::Path,
+    skill_id: &str,
+    instruction_file: &str,
+    request: &ForgeRequestEnvelope,
+) -> Result<bool, ForgePipelineError> {
+    let existing = if registry_path.exists() {
+        std::fs::read_to_string(registry_path).map_err(to_pipeline_err)?
+    } else {
+        String::from(
+            "# Skill Instruction Registry — Single Source of Truth\n\
+             # Generated by DevOps Forge worker.\n",
+        )
+    };
+
+    let id_marker = format!("id = \"{}\"", escape_toml(skill_id));
+    if existing.contains(&id_marker) {
+        // Re-write the same content to bump mtime and trigger hot-reload watchers.
+        std::fs::write(registry_path, &existing).map_err(to_pipeline_err)?;
+        return Ok(false);
+    }
+
+    let mut next = existing.trim_end().to_string();
+    if !next.is_empty() {
+        next.push_str("\n\n");
+    }
+
+    let keywords = normalize_keywords(&request.keywords, skill_id);
+    let topics = normalize_topics(&request.topics);
+
+    next.push_str("[[skill]]\n");
+    next.push_str(&format!("id = \"{}\"\n", escape_toml(skill_id)));
+    next.push_str(&format!(
+        "instruction_file = \"{}\"\n",
+        escape_toml(instruction_file)
+    ));
+    next.push_str(&format!("keywords = {}\n", format_toml_array(&keywords)));
+    if !topics.is_empty() {
+        next.push_str(&format!("topics = {}\n", format_toml_array(&topics)));
+    }
+    next.push_str("enabled = true\n");
+    next.push('\n');
+
+    std::fs::write(registry_path, next).map_err(to_pipeline_err)?;
+    Ok(true)
+}
+
+fn normalize_keywords(raw: &[String], skill_id: &str) -> Vec<String> {
+    let mut keywords: Vec<String> = if raw.is_empty() {
+        let mut derived: Vec<String> = skill_id
+            .split(['.', '_', '-'])
+            .filter_map(|p| {
+                let t = p.trim().to_lowercase();
+                if t.is_empty() {
+                    None
+                } else {
+                    Some(t)
+                }
+            })
+            .collect();
+        derived.push("forge".to_string());
+        derived
+    } else {
+        raw.iter()
+            .filter_map(|k| {
+                let t = k.trim().to_lowercase();
+                if t.is_empty() {
+                    None
+                } else {
+                    Some(t)
+                }
+            })
+            .collect()
+    };
+    keywords.sort();
+    keywords.dedup();
+    keywords
+}
+
+fn normalize_topics(raw: &[String]) -> Vec<String> {
+    let mut topics: Vec<String> = if raw.is_empty() {
+        vec![
+            "forge".to_string(),
+            "autonomous-skill-authoring".to_string(),
+        ]
+    } else {
+        raw.iter()
+            .filter_map(|t| {
+                let v = t.trim().to_lowercase();
+                if v.is_empty() {
+                    None
+                } else {
+                    Some(v)
+                }
+            })
+            .collect()
+    };
+    topics.sort();
+    topics.dedup();
+    topics
+}
+
+fn format_toml_array(values: &[String]) -> String {
+    let escaped: Vec<String> = values
+        .iter()
+        .map(|v| format!("\"{}\"", escape_toml(v)))
+        .collect();
+    format!("[{}]", escaped.join(", "))
+}
+
+fn escape_toml(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn to_pipeline_err<E: std::fmt::Display>(err: E) -> ForgePipelineError {
+    ForgePipelineError::Failed(err.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -528,5 +1145,125 @@ mod tests {
         };
         let sigil = generate_sigil(&w);
         assert!(sigil.contains("SOUL  SIGIL"));
+    }
+}
+
+#[cfg(test)]
+mod forge_worker_tests {
+    use super::*;
+    use abigail_streaming::{MemoryBroker, StreamBroker, StreamMessage};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    fn temp_skills_root(test_name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir()
+            .join("abigail_devops_forge_tests")
+            .join(test_name)
+            .join(uuid::Uuid::new_v4().to_string());
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn sample_request() -> ForgeRequestEnvelope {
+        ForgeRequestEnvelope {
+            correlation_id: Some(uuid::Uuid::new_v4().to_string()),
+            session_id: Some("session-1".to_string()),
+            entity_id: Some("entity-1".to_string()),
+            skill_id: "dynamic.devops_ping".to_string(),
+            code: "pub fn run() -> &'static str { \"pong\" }".to_string(),
+            markdown: "# DevOps Ping\n\nUse this skill to answer ping checks.".to_string(),
+            code_filename: Some("lib.rs".to_string()),
+            markdown_filename: Some("how_to_use.md".to_string()),
+            keywords: vec!["ping".to_string(), "devops".to_string()],
+            topics: vec!["forge".to_string()],
+        }
+    }
+
+    #[test]
+    fn process_forge_request_writes_artifacts_and_registry() {
+        let root = temp_skills_root("process_forge_request");
+        let request = sample_request();
+        let wrote = process_forge_request(&request, &root).unwrap();
+
+        assert!(std::path::Path::new(&wrote.code_path).exists());
+        assert!(std::path::Path::new(&wrote.markdown_path).exists());
+        assert!(std::path::Path::new(&wrote.instruction_path).exists());
+        assert!(std::path::Path::new(&wrote.registry_path).exists());
+        assert!(wrote.hot_reload_triggered);
+
+        let reg_text = std::fs::read_to_string(&wrote.registry_path).unwrap();
+        assert!(reg_text.contains("id = \"dynamic.devops_ping\""));
+        assert!(reg_text.contains("instruction_file = \"dynamic_dynamic_devops_ping.md\""));
+        assert!(reg_text.contains("keywords = [\"devops\", \"ping\"]"));
+    }
+
+    #[test]
+    fn process_forge_request_blocks_destructive_payload() {
+        let root = temp_skills_root("superego_block");
+        let mut request = sample_request();
+        request.code = "fn main() { let _ = \"rm -rf /\"; }".to_string();
+
+        let err = process_forge_request(&request, &root).unwrap_err();
+        match err {
+            ForgePipelineError::Blocked { rule, .. } => {
+                assert_eq!(rule, "destructive-pattern");
+            }
+            other => panic!("expected blocked error, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn forge_worker_roundtrip_success_response() {
+        let root = temp_skills_root("worker_roundtrip");
+        let broker: Arc<dyn StreamBroker> = Arc::new(MemoryBroker::default());
+
+        let worker = DevopsForgeWorker::new(broker.clone(), root.clone());
+        let _worker_handle = worker.spawn().await.unwrap();
+
+        let (tx, rx) = tokio::sync::oneshot::channel::<ForgeResponseEnvelope>();
+        let tx_cell = Arc::new(tokio::sync::Mutex::new(Some(tx)));
+        let tx_cell_for_cb = tx_cell.clone();
+
+        let _response_sub = broker
+            .subscribe(
+                FORGE_STREAM,
+                FORGE_RESPONSE_TOPIC,
+                "forge-worker-test-reader",
+                Box::new(move |msg| {
+                    let tx_cell = tx_cell_for_cb.clone();
+                    Box::pin(async move {
+                        let Ok(env) = serde_json::from_slice::<ForgeResponseEnvelope>(&msg.payload)
+                        else {
+                            return;
+                        };
+                        if let Some(sender) = tx_cell.lock().await.take() {
+                            let _ = sender.send(env);
+                        }
+                    })
+                }),
+            )
+            .await
+            .unwrap();
+
+        let request = sample_request();
+        let payload = serde_json::to_vec(&request).unwrap();
+        broker
+            .publish(
+                FORGE_STREAM,
+                FORGE_REQUEST_TOPIC,
+                StreamMessage::new(payload),
+            )
+            .await
+            .unwrap();
+
+        let response = tokio::time::timeout(Duration::from_secs(2), rx)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(response.status, "success");
+        assert!(response.hot_reload_triggered);
+        assert!(response.code_path.unwrap_or_default().contains("dynamic"));
     }
 }
