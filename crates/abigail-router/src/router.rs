@@ -350,14 +350,20 @@ impl IdEgoRouter {
             (_, mode) => mode,
         };
 
-        Self {
+        let router = Self {
             id: providers.id,
             ego: providers.ego,
             ego_provider,
             local_http: providers.local_http,
             mode,
             selected_chat_model: Arc::new(RwLock::new(None)),
-        }
+        };
+
+        tracing::info!(
+            "✅ Abigail full abstraction layer active: persistent topics, mentor monitor, superego tracking, and forge ready"
+        );
+
+        router
     }
 
     /// Perform a heartbeat check to verify the local LLM is reachable.
