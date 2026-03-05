@@ -195,11 +195,17 @@ describe("ChatRendering parity", () => {
       { timeout: 3000 },
     );
 
+<<<<<<< claude/distracted-clarke
     // Verify tier and model metadata rendered (use getAllByText since the
     // model dropdown may also contain matching entries from FALLBACK_MODELS)
     await waitFor(() => {
       expect(screen.getByText(/Standard/)).toBeInTheDocument();
       expect(screen.getAllByText(/gpt-4\.1/).length).toBeGreaterThanOrEqual(1);
+=======
+    // Verify model metadata rendered (tier badge removed in Phase 3a cleanup)
+    await waitFor(() => {
+      expect(screen.getByText(/gpt-4\.1/)).toBeInTheDocument();
+>>>>>>> main
     });
   });
 
