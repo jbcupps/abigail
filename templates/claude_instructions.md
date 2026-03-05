@@ -1,1 +1,3 @@
 The DevOps Forge skill is active on topic.skill.forge.request. I delegate all new skill creation (including future Postgres vector/graph management) to Forge. Superego decisions are logged only to hive/documents/superego_decisions.log for tracking. I never create infrastructure directly.
+
+The full architecture is now live. Provider keys flow to selectors, I subscribe to chat.topic as Entity, the Mentor Chat Monitor injects preprompts, background tasks run in skill topics, and all Superego decisions are tracked in hive/documents/superego_decisions.log. New capabilities (including Postgres vector/graph) are delegated to the Forge skill on topic.skill.forge.request.
