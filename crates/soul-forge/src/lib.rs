@@ -621,6 +621,7 @@ impl DevopsForgeWorker {
                     },
                 };
 
+                append_forge_superego_decision_log(&response);
                 publish_forge_response(broker.clone(), response).await;
             })
         });
@@ -674,6 +675,46 @@ async fn publish_forge_response(
         .await
     {
         tracing::warn!("forge worker: failed to publish response: {}", e);
+    }
+}
+
+fn append_forge_superego_decision_log(response: &ForgeResponseEnvelope) {
+    use std::io::Write as _;
+
+    let base =
+        std::env::var("HIVE_DOCUMENTS_PATH").unwrap_or_else(|_| "hive/documents".to_string());
+    let dir = std::path::Path::new(&base);
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        tracing::warn!(
+            "forge worker: failed to create hive documents dir {}: {}",
+            dir.display(),
+            e
+        );
+        return;
+    }
+
+    let path = dir.join("superego_decisions.log");
+    let entry = format!(
+        "{} | source=forge_worker | correlation_id={} | skill_id={} | decision={} | rule={} | message={}",
+        chrono::Utc::now().to_rfc3339(),
+        response.correlation_id,
+        response.skill_id.as_deref().unwrap_or("unknown"),
+        response.status,
+        response.superego_rule.as_deref().unwrap_or("none"),
+        response.message.replace('\n', " ")
+    );
+
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        Ok(mut file) => {
+            if let Err(e) = writeln!(file, "{}", entry) {
+                tracing::warn!("forge worker: failed writing log {}: {}", path.display(), e);
+            }
+        }
+        Err(e) => tracing::warn!("forge worker: failed opening log {}: {}", path.display(), e),
     }
 }
 
