@@ -368,6 +368,21 @@ export default function ChatInterface({
     return () => { unlisten?.(); };
   }, []);
 
+  // Fix 1: Re-fetch providers + model registry when backend stores a key
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen("provider-config-changed", () => {
+      refreshRouterStatus();
+      invoke<{ models: ModelRegistryEntry[] }>("get_model_registry")
+        .then((reg) => {
+          if (!mountedRef.current || !reg) return;
+          setModelRegistry(reg.models ?? []);
+        })
+        .catch(() => {});
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, []);
+
   // -- Header model/provider dropdown logic --
 
   const isCliMode = routerStatus?.routing_mode === "cli_orchestrator";
@@ -405,6 +420,14 @@ export default function ChatInterface({
     if (fromReg.length > 0) return fromReg.map((m) => m.model_id);
     return FALLBACK_MODELS[headerProvider] ?? [];
   }, [headerProvider, modelRegistry]);
+
+  // Fix 4: Default headerProvider when empty but providers are known
+  // (covers the gap where router status hasn't propagated yet).
+  useEffect(() => {
+    if (!headerProvider && knownProviders.length > 0) {
+      setHeaderProvider(knownProviders[0]);
+    }
+  }, [headerProvider, knownProviders]);
 
   const applyChatError = (errorMsg: string) => {
     const interrupted = isInterruptedByUserMessage(errorMsg);
