@@ -468,6 +468,12 @@ async fn main() -> anyhow::Result<()> {
         .await
         .map_err(|e| tracing::warn!("Failed to start id monitor: {}", e))
         .ok();
+    let _devops_forge_worker_handle =
+        soul_forge::DevopsForgeWorker::new(stream_broker.clone(), shared_skills_base.clone())
+            .spawn()
+            .await
+            .map_err(|e| tracing::warn!("Failed to start DevOps forge worker: {}", e))
+            .ok();
     let _memory_chat_topic_handle =
         abigail_memory::spawn_chat_topic_subscriber(stream_broker.clone(), memory.clone())
             .await

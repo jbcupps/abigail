@@ -16,6 +16,7 @@ abigail-hive = { path = "../abigail-hive" }
 abigail-router = { path = "../abigail-router" }
 abigail-id = { path = "../abigail-id" }
 abigail-superego = { path = "../abigail-superego" }
+soul-forge = { path = "../soul-forge" }
 abigail-capabilities = { path = "../abigail-capabilities" }
 abigail-skills = { path = "../abigail-skills" }
 abigail-memory = { path = "../abigail-memory" }
