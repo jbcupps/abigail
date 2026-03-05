@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-03-05 23:20 EST: Add phase-2 persistent topology wiring helper for registry path strings, use it in entity-daemon startup and watcher reprovision flow, and register builtin.devops_forge instruction mapping
 - 2026-03-05 23:05 EST: Update canonical skill topology and forge architecture spec to v1.2 with explicit out-of-band monitor flow, and sync planning/invariants/design references
 - 2026-03-05 22:35 EST: Add DevOps Forge worker with sandboxed skill authoring pipeline (topic.skill.forge request/response), superego gating, registry hot-reload writes, daemon startup wiring, and architecture/prompt documentation updates
 - 2026-03-05 21:55 EST: Add mentor chat monitor and out-of-band id/superego/memory layer with chat-topic preprompt enrichment, selected-model subscriber wiring, and startup monitor registration

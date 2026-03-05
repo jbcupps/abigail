@@ -124,6 +124,13 @@ topics = ["forge", "skill creation", "topology"]
 enabled = true
 
 [[skill]]
+id = "builtin.devops_forge"
+instruction_file = "skill_forge.md"
+keywords = ["devops forge", "forge request", "skill topology", "topic.skill.forge.request", "topic.skill.forge.response"]
+topics = ["forge", "devops", "autonomous skill authoring"]
+enabled = true
+
+[[skill]]
 id = "com.abigail.skills.troubleshooting"
 instruction_file = "skill_troubleshooting.md"
 keywords = ["troubleshoot", "troubleshooting", "diagnose", "diagnostic", "diagnostics", "debug", "status", "health check", "what is wrong", "not working"]

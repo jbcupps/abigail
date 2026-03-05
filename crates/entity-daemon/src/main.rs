@@ -486,8 +486,11 @@ async fn main() -> anyhow::Result<()> {
         None::<abigail_skills::ProvisionedSkillTopology>,
     ));
     if shared_registry_path.exists() {
-        match abigail_skills::provision_all_skills(stream_broker.clone(), &shared_registry_path)
-            .await
+        match abigail_skills::provision_all_skills_from_registry_path(
+            stream_broker.clone(),
+            &shared_registry_path.to_string_lossy(),
+        )
+        .await
         {
             Ok(topology) => {
                 let count = topology.skill_count();
@@ -865,9 +868,9 @@ async fn main() -> anyhow::Result<()> {
                             }
                             abigail_skills::SkillFileEvent::RegistryChanged(path) => {
                                 tracing::info!("Skill watcher: registry changed at {:?}", path);
-                                match abigail_skills::provision_all_skills(
+                                match abigail_skills::provision_all_skills_from_registry_path(
                                     broker_for_watcher.clone(),
-                                    &registry_path_for_watcher,
+                                    &registry_path_for_watcher.to_string_lossy(),
                                 )
                                 .await
                                 {
