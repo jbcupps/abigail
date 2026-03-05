@@ -116,3 +116,8 @@ impl IdMonitor {
         Ok(handle)
     }
 }
+
+/// Startup helper for the out-of-band Id monitor.
+pub async fn start(broker: Arc<dyn StreamBroker>) -> anyhow::Result<SubscriptionHandle> {
+    IdMonitor::new(broker).spawn().await
+}

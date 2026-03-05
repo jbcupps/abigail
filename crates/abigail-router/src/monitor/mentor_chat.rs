@@ -6,6 +6,8 @@
 //! 3) enriched envelope is republished to `entity/chat-topic`
 
 use crate::router::IdEgoRouter;
+use abigail_core::constitutional::{infer_id_context, infer_superego_context};
+use abigail_core::load_preprompt_context;
 use abigail_streaming::{StreamBroker, StreamMessage, SubscriptionHandle, TopicConfig};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -28,6 +30,10 @@ pub struct MentorChatEnvelope {
     pub stage: String,
     #[serde(default)]
     pub enriched_preprompt: Option<String>,
+    #[serde(default)]
+    pub id_context: Option<String>,
+    #[serde(default)]
+    pub superego_context: Option<String>,
     pub created_at_utc: chrono::DateTime<chrono::Utc>,
 }
 
@@ -47,19 +53,23 @@ impl MentorChatEnvelope {
             selected_model,
             stage: "request".to_string(),
             enriched_preprompt: None,
+            id_context: None,
+            superego_context: None,
             created_at_utc: Utc::now(),
         }
     }
 }
 
-fn build_minimal_preprompt(envelope: &MentorChatEnvelope) -> String {
+fn build_fallback_preprompt(envelope: &MentorChatEnvelope) -> String {
     let model = envelope
         .selected_model
         .clone()
         .unwrap_or_else(|| "default".to_string());
+    let id_context = infer_id_context(&envelope.message.to_lowercase());
+    let superego_context = infer_superego_context(&envelope.message.to_lowercase());
     format!(
-        "Mentor monitor context:\n- correlation: {}\n- selected model subscriber: {}\n- id context: local heartbeat/safety active\n- superego context: out-of-band ethical monitor active",
-        envelope.correlation_id, model
+        "Mentor monitor context:\n- correlation: {}\n- selected model subscriber: {}\n- id context: {}\n- superego context: {}\n- out-of-band observers: memory/id/superego non-blocking",
+        envelope.correlation_id, model, id_context, superego_context
     )
 }
 
@@ -93,8 +103,18 @@ impl MentorChatMonitor {
                     return;
                 }
 
+                let lower = envelope.message.to_lowercase();
+                let id_context = infer_id_context(&lower).to_string();
+                let superego_context = infer_superego_context(&lower).to_string();
+
                 envelope.stage = "enriched".to_string();
-                envelope.enriched_preprompt = Some(build_minimal_preprompt(&envelope));
+                envelope.id_context = Some(id_context.clone());
+                envelope.superego_context = Some(superego_context.clone());
+                envelope.enriched_preprompt = Some(
+                    load_preprompt_context(&envelope.message)
+                        .await
+                        .unwrap_or_else(|_| build_fallback_preprompt(&envelope)),
+                );
 
                 let Ok(payload) = serde_json::to_vec(&envelope) else {
                     return;
@@ -107,6 +127,8 @@ impl MentorChatMonitor {
                     envelope.correlation_id.clone(),
                 );
                 headers.insert("entity_id".to_string(), envelope.entity_id.clone());
+                headers.insert("id_context".to_string(), id_context);
+                headers.insert("superego_context".to_string(), superego_context);
 
                 let _ = broker
                     .publish(
@@ -254,6 +276,8 @@ mod tests {
         )
         .await;
         assert!(got.is_some());
-        assert!(got.unwrap().contains("selected model subscriber"));
+        let out = got.unwrap();
+        assert!(out.contains("Constitutional Monitor Context"));
+        assert!(out.contains("Runtime Signals"));
     }
 }

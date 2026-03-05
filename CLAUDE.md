@@ -396,22 +396,26 @@ Current priorities, in order:
 ### Phase 4a: Chat UX & Job Visibility — DONE
 15. ~~**Fix provider/model dropdowns**~~ — Provider dropdown now merges stored keys + model registry, `provider-config-changed` triggers live refresh, and empty header provider auto-defaults to the first known provider. Chat page job activity badge shows running/queued/scheduled counts via Tauri `job-event` stream.
 
-### Phase 4b: Mentor Chat Monitor — NEXT
-16. **Mentor chat-topic subscription** — Subscribe Entity to mentor conversation topics in router flow and pass structured turn envelopes.
-17. **Mentor preprompt injection** — Apply monitor-produced preprompt context before ego completion without coupling to UI concerns.
-18. **Out-of-band monitors** — Keep memory/id/superego/safety observers asynchronous so chat latency remains bounded.
+### Phase 4b: Mentor Chat Monitor — DONE
+16. ~~**Mentor chat-topic subscription**~~ — Entity subscribes/publishes structured mentor envelopes over `entity/chat-topic` and preserves selected model subscriber identity.
+17. ~~**Mentor preprompt injection**~~ — Monitor-produced constitutional preprompt context is injected before completion without UI coupling.
+18. ~~**Out-of-band monitors**~~ — Memory/Id/Superego observers run asynchronously on enriched chat-topic envelopes and remain non-blocking.
 
-### Phase 4c: DevOps Forge Worker — ACTIVE
-19. **Forge request/response pipeline** — Persistent worker subscribes to `topic.skill.forge.request`, runs sandbox + superego scan, writes to `skills/dynamic/`, updates `skills/registry.toml`, and publishes `topic.skill.forge.response`.
+### Phase 4c: DevOps Forge Worker — DONE (Base Pipeline)
+19. ~~**Forge request/response pipeline**~~ — Persistent worker subscribes to `topic.skill.forge.request`, runs sandbox + superego scan, writes to `skills/dynamic/`, updates `skills/registry.toml`, and publishes `topic.skill.forge.response`.
+
+### Next Hardening Sprint — ACTIVE
+20. **Forge envelope hardening** — Tighten envelope validation, deterministic writes, and failure telemetry.
+21. **End-to-end reliability** — Expand coverage for forge success, blocked, and error fallback behavior plus watcher hot-reload.
 
 ### Phase 4d: Ego Delegation Tools
-20. **LLM-callable job tools** — Add `submit_background_job`, `get_job_result`, `list_my_jobs` as built-in tools in the entity-chat loop.
+22. **LLM-callable job tools** — Add `submit_background_job`, `get_job_result`, `list_my_jobs` as built-in tools in the entity-chat loop.
 
 ### Phase 4e: Capability-Aware Routing + Direct Execution
-21. **Upgrade CapabilityMatcher + ExecutionMode** — Config-driven provider/model routing per capability with `ExecutionMode` (Mediated vs Direct), plus direct `SkillExecutor` path for structured jobs.
+23. **Upgrade CapabilityMatcher + ExecutionMode** — Config-driven provider/model routing per capability with `ExecutionMode` (Mediated vs Direct), plus direct `SkillExecutor` path for structured jobs.
 
 ### Phase 4f: Cron + Live Result Threading
-22. **Ego cron tools + reactive job events** — Add recurring job management tools and replace polling with reactive events; thread job results back into conversation rendering.
+24. **Ego cron tools + reactive job events** — Add recurring job management tools and replace polling with reactive events; thread job results back into conversation rendering.
 
 ## Known Issues
 

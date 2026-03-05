@@ -58,6 +58,8 @@ Abigail is a working, modular platform. Recent updates include:
 
 - **Hive/Entity Separation**: Independent HTTP daemons for control plane (Hive) and agent runtime (Entity), enabling multi-entity households and independent evolution.
 - **Live Provider/Model Selector Wiring**: Provider keys saved in Sanctum/Hive now trigger immediate frontend refresh (`provider-config-changed`), including model registry reload and provider auto-defaulting.
+- **Mentor Chat Monitor Layer**: `entity/chat-topic` request envelopes are enriched with constitutional preprompt context and republished before completion.
+- **Out-of-Band Observers**: Memory/Id/Superego monitors run in parallel and remain non-blocking on the chat path.
 - **Shared Chat Engine**: Unified `entity-chat` library crate powering both GUI and CLI with tool-use loop, memory persistence, and skill awareness.
 - **Sovereign Birth Flow**: Multi-stage onboarding (Darkness → Genesis) for new Entities.
 - **Soul Registry**: Manage multiple identities, each with custom themes and avatars.
@@ -70,12 +72,12 @@ Abigail is a working, modular platform. Recent updates include:
 
 ### Stabilization Program (Current Priority)
 
-The active near-term engineering priority is **Mentor chat flow completion on top of the now-stable selector path**:
+The active near-term engineering priority is **stability hardening after selector + monitor flow landed**:
 
-- Keep provider/model selector propagation stable (key store -> registry -> selector defaults)
-- Wire Mentor Chat Monitor subscription with preprompt injection
-- Keep memory/safety monitors out-of-band (no chat-path coupling)
-- Enforce release gates for command contract, chat parity, and policy/runtime checks
+- Keep selector and mentor monitor paths stable and test-backed
+- Harden Forge envelope validation and failure telemetry
+- Expand end-to-end coverage for forge request/response and watcher hot-reload
+- Keep memory/safety/id-superego observers out-of-band (non-blocking chat path)
 
 See: [GUI/Entity Stability Roadmap](documents/GUI_ENTITY_STABILITY_ROADMAP.md)
 See: [GUI/Entity Code Review Report](documents/GUI_ENTITY_CODE_REVIEW_REPORT.md)
@@ -269,6 +271,20 @@ Entity (LLM generates code+md)
 
 Forge writes are constrained to dynamic skill paths and guarded by TriangleEthic-aligned safety checks before any registry mutation.
 
+### Mentor Chat + Out-of-Band Layer
+
+```mermaid
+flowchart LR
+  ChatReq["entity/chat-topic (request)"] --> Mentor["Mentor Chat Monitor"]
+  Mentor --> ChatEnriched["entity/chat-topic (enriched)"]
+  ChatEnriched --> Entity["Entity completion path"]
+  ChatEnriched --> Memory["Memory monitor (passive)"]
+  ChatEnriched --> Id["Id monitor (passive)"]
+  ChatEnriched --> Superego["Superego monitor (passive)"]
+  Id --> IdSignals["entity/id-signals"]
+  Superego --> EthicalSignals["entity/ethical-signals"]
+```
+
 ### Constitutional Documents
 
 Templates in `templates/` (soul.md, ethics.md, instincts.md) are compiled into the binary. At first run they're written to the data directory, signed with a generated Ed25519 key, and verified at every subsequent boot.
@@ -306,27 +322,24 @@ For detailed architecture reference (crate responsibilities, security boundaries
 
 ## Roadmap
 
-### Complete Through Phase 4a
+### Complete Through Phase 4c
 
 - Hive/Entity daemon split with shared chat engine and skills runtime
 - Routing simplification to EgoPrimary/CliOrchestrator
 - Dynamic model registry + selector wiring in chat header
 - Provider key propagation fix (`provider-config-changed`) with live dropdown refresh
 - Job visibility and topic monitor foundations
+- Mentor chat-topic subscription + monitor preprompt injection
+- Out-of-band memory/id/superego monitor layer
+- DevOps Forge worker request/response pipeline with sandbox + superego gates
 
-### Active: Phase 4b
+### Active: Next Hardening Phase
 
-- Mentor Chat Monitor topic subscription
-- Mentor preprompt injection at the router boundary
-- Keep memory/safety/id-superego monitors out-of-band
+- Harden forge envelope validation and failure telemetry
+- Expand end-to-end coverage for success/blocked/error fallback paths
+- Validate watcher-driven hot-reload reliability for registry updates
 
-### Active: Phase 4c
-
-- DevOps Forge worker subscribed to `topic.skill.forge.request`
-- Sandboxed code+markdown skill authoring to `skills/dynamic/`
-- Superego gate + deterministic response on `topic.skill.forge.response`
-
-### Next After 4b
+### Next After Hardening
 
 - LLM-callable background job tools (`submit_background_job`, `get_job_result`, `list_my_jobs`)
 - Capability-aware routing and direct execution mode

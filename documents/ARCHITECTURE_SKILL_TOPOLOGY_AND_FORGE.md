@@ -1,7 +1,7 @@
 # Architecture: Skill Topology and Forge
 
 **Status:** Canonical specification  
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-03-05
 
 This document is the single source of truth for skill topology provisioning and Forge orchestration across the Sovereign stack.
@@ -55,7 +55,8 @@ Provisioning is idempotent and safe to run repeatedly.
 ### Monitors (out-of-band plane)
 
 - Subscribe to chat-topic envelopes without blocking completion path.
-- Inject monitor preprompt context and publish side-channel signals.
+- Mentor chat monitor intercepts request envelopes, injects constitutional preprompt context, and republishes enriched envelopes.
+- Passive Memory/Id/Superego observers consume enriched envelopes and publish side-channel signals.
 - Include mentor chat monitor and passive Id/Superego/Memory observers.
 
 ### Forge (authoring plane)
@@ -127,9 +128,15 @@ flowchart LR
     Hive[Hive Control Plane] --> Registry[skills/registry.toml]
     Registry --> Topics[Persistent Skill Topics]
     Topics --> Entity[Entity Subscriber]
-    Entity --> Monitors[Out-of-Band Monitors]
-    Monitors --> ChatTopic[entity/chat-topic]
-    ChatTopic --> Entity
+    Entity --> ChatReq[entity/chat-topic request]
+    ChatReq --> Mentor[Mentor Chat Monitor republish]
+    Mentor --> ChatEnriched[entity/chat-topic enriched]
+    ChatEnriched --> Entity
+    ChatEnriched --> MemoryOob[Memory out-of-band monitor]
+    ChatEnriched --> IdOob[Id out-of-band monitor]
+    ChatEnriched --> SuperegoOob[Superego out-of-band monitor]
+    IdOob --> IdSignals[entity/id-signals]
+    SuperegoOob --> EthicalSignals[entity/ethical-signals]
     Entity --> ForgeReq[topic.skill.forge.request]
     ForgeReq --> ForgeWorker[DevOps Forge Worker]
     ForgeWorker --> Dynamic[skills/dynamic]
