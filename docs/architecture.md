@@ -7,6 +7,9 @@ flowchart LR
     Hive[Hive] --> Registry[Registry]
     Registry --> Topics[Persistent Topics]
     Topics --> Entity[Entity Subscriber]
+    Entity --> Monitors[Out-of-Band Monitors]
+    Monitors --> ChatTopic["entity/chat-topic"]
+    ChatTopic --> Entity
     Entity --> ForgeReq["topic.skill.forge.request"]
     ForgeReq --> ForgeWorker["DevOps Forge Worker<br/>(sandbox + superego gate)"]
     ForgeWorker --> Dynamic["skills/dynamic/*"]

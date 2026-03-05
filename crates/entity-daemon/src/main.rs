@@ -468,12 +468,13 @@ async fn main() -> anyhow::Result<()> {
         .await
         .map_err(|e| tracing::warn!("Failed to start id monitor: {}", e))
         .ok();
-    let _devops_forge_worker_handle =
-        soul_forge::DevopsForgeWorker::new(stream_broker.clone(), shared_skills_base.clone())
-            .spawn()
-            .await
-            .map_err(|e| tracing::warn!("Failed to start DevOps forge worker: {}", e))
-            .ok();
+    let _devops_forge_worker_handle = soul_forge::worker::spawn_persistent_worker(
+        stream_broker.clone(),
+        shared_skills_base.clone(),
+    )
+    .await
+    .map_err(|e| tracing::warn!("Failed to start DevOps forge worker: {}", e))
+    .ok();
     let _memory_chat_topic_handle =
         abigail_memory::spawn_chat_topic_subscriber(stream_broker.clone(), memory.clone())
             .await
@@ -486,8 +487,11 @@ async fn main() -> anyhow::Result<()> {
         None::<abigail_skills::ProvisionedSkillTopology>,
     ));
     if shared_registry_path.exists() {
-        match abigail_skills::provision_all_skills(stream_broker.clone(), &shared_registry_path)
-            .await
+        match abigail_skills::provision_all_skills_from_registry_path(
+            stream_broker.clone(),
+            &shared_registry_path.to_string_lossy(),
+        )
+        .await
         {
             Ok(topology) => {
                 let count = topology.skill_count();
@@ -865,9 +869,9 @@ async fn main() -> anyhow::Result<()> {
                             }
                             abigail_skills::SkillFileEvent::RegistryChanged(path) => {
                                 tracing::info!("Skill watcher: registry changed at {:?}", path);
-                                match abigail_skills::provision_all_skills(
+                                match abigail_skills::provision_all_skills_from_registry_path(
                                     broker_for_watcher.clone(),
-                                    &registry_path_for_watcher,
+                                    &registry_path_for_watcher.to_string_lossy(),
                                 )
                                 .await
                                 {

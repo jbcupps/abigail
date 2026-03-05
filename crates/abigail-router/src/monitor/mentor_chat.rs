@@ -136,8 +136,7 @@ pub async fn request_enriched_preprompt(
     message: &str,
     model_override: Option<String>,
 ) -> Option<String> {
-    router.set_selected_chat_model(model_override.clone());
-    let group = router.entity_chat_subscriber_group(entity_id);
+    let group = router.register_selected_model_subscriber(entity_id, model_override.clone());
 
     if broker
         .ensure_topic(STREAM, CHAT_TOPIC, TopicConfig::default())

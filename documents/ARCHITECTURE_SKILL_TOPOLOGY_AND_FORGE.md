@@ -1,7 +1,7 @@
 # Architecture: Skill Topology and Forge
 
 **Status:** Canonical specification  
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-03-05
 
 This document is the single source of truth for skill topology provisioning and Forge orchestration across the Sovereign stack.
@@ -51,6 +51,12 @@ Provisioning is idempotent and safe to run repeatedly.
 - Provisions persistent skill topics from the registry at startup.
 - Runs skill workers as isolated subscribers.
 - Handles request/response message execution flow.
+
+### Monitors (out-of-band plane)
+
+- Subscribe to chat-topic envelopes without blocking completion path.
+- Inject monitor preprompt context and publish side-channel signals.
+- Include mentor chat monitor and passive Id/Superego/Memory observers.
 
 ### Forge (authoring plane)
 
@@ -120,7 +126,10 @@ On registry removal:
 flowchart LR
     Hive[Hive Control Plane] --> Registry[skills/registry.toml]
     Registry --> Topics[Persistent Skill Topics]
-    Topics --> Entity[Entity Subscriber Workers]
+    Topics --> Entity[Entity Subscriber]
+    Entity --> Monitors[Out-of-Band Monitors]
+    Monitors --> ChatTopic[entity/chat-topic]
+    ChatTopic --> Entity
     Entity --> ForgeReq[topic.skill.forge.request]
     ForgeReq --> ForgeWorker[DevOps Forge Worker]
     ForgeWorker --> Dynamic[skills/dynamic]

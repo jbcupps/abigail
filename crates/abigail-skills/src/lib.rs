@@ -21,6 +21,8 @@ pub mod topology;
 pub mod transport;
 pub mod watcher;
 
+use std::path::Path;
+
 /// Backward-compatible alias: `capability` now lives in `protocol`.
 pub use protocol as capability;
 
@@ -48,6 +50,14 @@ pub use topology::{
     SkillTopicBinding, SKILL_TOPOLOGY_STREAM,
 };
 pub use watcher::{SkillFileEvent, SkillsWatcher};
+
+/// Convenience helper: provision persistent topology from a registry path string.
+pub async fn provision_all_skills_from_registry_path(
+    broker: std::sync::Arc<dyn abigail_streaming::StreamBroker>,
+    registry_path: &str,
+) -> anyhow::Result<ProvisionedSkillTopology> {
+    topology::provision_all_skills(broker, Path::new(registry_path)).await
+}
 
 #[cfg(test)]
 mod tests {

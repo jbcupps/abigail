@@ -7,6 +7,8 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+pub mod worker;
+
 /// A soul forge scenario presenting an ethical dilemma.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForgeScenario {
@@ -434,6 +436,8 @@ pub struct ForgeRequestEnvelope {
     pub keywords: Vec<String>,
     #[serde(default)]
     pub topics: Vec<String>,
+    #[serde(default)]
+    pub mentor_approved: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -704,6 +708,12 @@ pub fn process_forge_request(
         return Err(ForgePipelineError::Blocked {
             rule: v.rule.to_string(),
             reason: v.reason.to_string(),
+        });
+    }
+    if !request.mentor_approved {
+        return Err(ForgePipelineError::Blocked {
+            rule: "require_mentor_approval".to_string(),
+            reason: "Forge request requires explicit mentor approval".to_string(),
         });
     }
 
@@ -1177,6 +1187,7 @@ mod forge_worker_tests {
             markdown_filename: Some("how_to_use.md".to_string()),
             keywords: vec!["ping".to_string(), "devops".to_string()],
             topics: vec!["forge".to_string()],
+            mentor_approved: true,
         }
     }
 
@@ -1210,6 +1221,21 @@ mod forge_worker_tests {
                 assert_eq!(rule, "destructive-pattern");
             }
             other => panic!("expected blocked error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn process_forge_request_requires_mentor_approval() {
+        let root = temp_skills_root("approval_gate");
+        let mut request = sample_request();
+        request.mentor_approved = false;
+
+        let err = process_forge_request(&request, &root).unwrap_err();
+        match err {
+            ForgePipelineError::Blocked { rule, .. } => {
+                assert_eq!(rule, "require_mentor_approval");
+            }
+            other => panic!("expected approval gate, got {:?}", other),
         }
     }
 

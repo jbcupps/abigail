@@ -251,6 +251,17 @@ impl IdEgoRouter {
         self.selected_chat_model.read().ok().and_then(|g| g.clone())
     }
 
+    /// Register the selected model as the active entity subscriber identity and
+    /// return the derived subscriber group for chat-topic monitor flows.
+    pub fn register_selected_model_subscriber(
+        &self,
+        entity_id: &str,
+        model: Option<String>,
+    ) -> String {
+        self.set_selected_chat_model(model);
+        self.entity_chat_subscriber_group(entity_id)
+    }
+
     /// Build the entity subscriber group name for mentor chat topic flows.
     pub fn entity_chat_subscriber_group(&self, entity_id: &str) -> String {
         let model = self
