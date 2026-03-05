@@ -9,18 +9,30 @@
 
 Use these artifacts in order:
 
-1. `documents/GUI_ENTITY_STABILITY_ROADMAP.md`  
+1. `documents/ARCHITECTURE_SKILL_TOPOLOGY_AND_FORGE.md`  
+   Canonical topology + Forge contract (persistent topics, registry authority, Superego gates, watcher re-provision).
+2. `documents/GUI_ENTITY_STABILITY_ROADMAP.md`  
    Sprint backlog, goals, and program gates.
-2. `documents/tests/SPRINT_*_KICKOFF_CHECKLIST.md`  
+3. `documents/tests/SPRINT_*_KICKOFF_CHECKLIST.md`  
    Sprint entry criteria and execution checklist.
-3. `documents/tests/SPRINT_*_REPORT.md`  
+4. `documents/tests/SPRINT_*_REPORT.md`  
    Sprint closure evidence and residual risks.
-4. `documents/tests/VALIDATION_AND_GATE_REPORT.md`  
+5. `documents/tests/VALIDATION_AND_GATE_REPORT.md`  
    Consolidated gate status.
-5. `documents/RELEASE.md`  
+6. `documents/RELEASE.md`  
    Release posture, release workflow, and release gating requirements.
-6. `CHANGELOG.md`  
+7. `CHANGELOG.md`  
    User-facing versioned change history.
+
+---
+
+## Topology Planning Note
+
+The previous dynamic-only skill model is deprecated. All planning and execution must assume:
+
+- persistent startup provisioning from `skills/registry.toml`
+- request/response topic topology per enabled skill
+- Forge outputs that are registry-backed and watcher-reprovisioned
 
 ---
 

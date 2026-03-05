@@ -117,6 +117,13 @@ keywords = ["queue", "job", "sub-agent", "delegate", "topic results", "async tas
 enabled = true
 
 [[skill]]
+id = "builtin.skill_factory"
+instruction_file = "skill_forge.md"
+keywords = ["forge", "skill forge", "author skill", "create skill", "synthesize capability", "skill topology"]
+topics = ["forge", "skill creation", "topology"]
+enabled = true
+
+[[skill]]
 id = "com.abigail.skills.troubleshooting"
 instruction_file = "skill_troubleshooting.md"
 keywords = ["troubleshoot", "troubleshooting", "diagnose", "diagnostic", "diagnostics", "debug", "status", "health check", "what is wrong", "not working"]

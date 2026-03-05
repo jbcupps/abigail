@@ -60,19 +60,35 @@ pub async fn chat(
         .session_id
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let model_override = body.model_override.clone();
+
+    // Wire selected model as the entity subscriber identity for mentor chat topic.
+    state.router.set_selected_chat_model(model_override.clone());
+
+    // Request monitor-enriched preprompt context over the chat topic.
+    let enriched_preprompt = abigail_router::request_enriched_preprompt(
+        state.stream_broker.clone(),
+        state.router.clone(),
+        &state.entity_id,
+        &session_id,
+        &body.message,
+        model_override.clone(),
+    )
+    .await;
 
     // Archive the user turn (async, fire-and-forget via StreamBroker).
     let user_turn = abigail_memory::ConversationTurn::new(&session_id, "user", &body.message);
     crate::memory_consumer::publish_turn(state.stream_broker.clone(), user_turn);
 
     let system_prompt = if status.mode == abigail_core::RoutingMode::CliOrchestrator {
-        entity_chat::build_cli_system_prompt(
+        let prompt = entity_chat::build_cli_system_prompt(
             &state.docs_dir,
             &state.config.agent_name,
             &state.registry,
             &state.instruction_registry,
             &body.message,
-        )
+        );
+        abigail_router::inject_preprompt(&prompt, enriched_preprompt.clone())
     } else {
         let base_prompt = abigail_core::system_prompt::build_system_prompt(
             &state.docs_dir,
@@ -89,14 +105,15 @@ pub async fn chat(
             has_local_llm: status.has_local_http,
             last_provider_change_at: None,
         };
-        entity_chat::augment_system_prompt(
+        let prompt = entity_chat::augment_system_prompt(
             &base_prompt,
             &state.registry,
             &state.instruction_registry,
             &body.message,
             &runtime_ctx,
             entity_chat::PromptMode::Full,
-        )
+        );
+        abigail_router::inject_preprompt(&prompt, enriched_preprompt.clone())
     };
 
     let messages = entity_chat::build_contextual_messages(
@@ -107,7 +124,6 @@ pub async fn chat(
 
     let tools = entity_chat::build_tool_definitions(&state.registry);
 
-    let model_override = body.model_override.clone();
     let result = if tools.is_empty() {
         let resp = state
             .router
@@ -190,6 +206,21 @@ pub async fn chat_stream(
         .session_id
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let model_override = body.model_override.clone();
+
+    // Wire selected model as the entity subscriber identity for mentor chat topic.
+    state.router.set_selected_chat_model(model_override.clone());
+
+    // Request monitor-enriched preprompt context over the chat topic.
+    let enriched_preprompt = abigail_router::request_enriched_preprompt(
+        state.stream_broker.clone(),
+        state.router.clone(),
+        &state.entity_id,
+        &session_id,
+        &body.message,
+        model_override.clone(),
+    )
+    .await;
 
     // Archive user turn (async, fire-and-forget via StreamBroker).
     let user_turn = abigail_memory::ConversationTurn::new(&session_id, "user", &body.message);
@@ -219,6 +250,7 @@ pub async fn chat_stream(
         &runtime_ctx,
         entity_chat::PromptMode::Full,
     );
+    let system_prompt = abigail_router::inject_preprompt(&system_prompt, enriched_preprompt);
 
     let messages = entity_chat::build_contextual_messages(
         &system_prompt,
@@ -246,8 +278,6 @@ pub async fn chat_stream(
     let turns_since_archive = state.turns_since_archive.clone();
     let cancel_state = state.active_stream_cancel.clone();
     let sid = session_id.clone();
-    let model_override = body.model_override.clone();
-
     tokio::spawn(async move {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
         let sse_fwd = sse_tx.clone();
@@ -926,13 +956,12 @@ mod tests {
     }
 
     fn build_state() -> EntityDaemonState {
-        let router = IdEgoRouter {
-            id: Arc::new(MockProvider),
-            ego: None,
-            ego_provider: None,
-            local_http: None,
-            mode: RoutingMode::EgoPrimary,
-        };
+        let mut router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
+        router.id = Arc::new(MockProvider);
+        router.ego = None;
+        router.ego_provider = None;
+        router.local_http = None;
+        router.mode = RoutingMode::EgoPrimary;
 
         let registry = Arc::new(SkillRegistry::new());
         let executor = Arc::new(SkillExecutor::new(registry.clone()));
