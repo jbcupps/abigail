@@ -45,6 +45,7 @@ impl SkillsWatcher {
     ) -> anyhow::Result<(Self, broadcast::Receiver<SkillFileEvent>)> {
         let (tx, rx) = broadcast::channel::<SkillFileEvent>(64);
         let tx_clone = tx.clone();
+        let runtime_handle = tokio::runtime::Handle::try_current().ok();
 
         let (notify_tx, notify_rx) = mpsc::channel::<notify::Result<Event>>();
 
@@ -100,6 +101,20 @@ impl SkillsWatcher {
                                             "Skill registry changed: {}",
                                             path.display()
                                         );
+                                        tracing::info!(
+                                            "registry.toml changed -> hot-reloading skill topology"
+                                        );
+                                        if let Some(handle) = &runtime_handle {
+                                            let registry_path = path.to_string_lossy().to_string();
+                                            std::mem::drop(handle.spawn(async move {
+                                                crate::provision_all_skills(&registry_path).await;
+                                            }));
+                                        } else {
+                                            tracing::debug!(
+                                                "No active tokio runtime; skipping auto-reload for {}",
+                                                path.display()
+                                            );
+                                        }
                                         SkillFileEvent::RegistryChanged(path)
                                     } else {
                                         tracing::info!("Skill file changed: {}", path.display());
@@ -112,6 +127,7 @@ impl SkillsWatcher {
                                             "Skill registry removed: {}",
                                             path.display()
                                         );
+                                        crate::cancel_provisioned_skill_topology();
                                         SkillFileEvent::RegistryRemoved(path)
                                     } else {
                                         tracing::info!("Skill file removed: {}", path.display());

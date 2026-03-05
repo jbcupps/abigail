@@ -153,3 +153,8 @@ id = "dynamic.jira"
 instruction_file = "skill_jira.md"
 keywords = ["jira", "jira issue", "jql", "atlassian", "sprint", "backlog"]
 enabled = true
+
+[[skills]]
+name = "forge"
+runtime = "wasm"
+enabled = true
