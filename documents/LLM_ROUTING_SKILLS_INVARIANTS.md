@@ -5,6 +5,7 @@ execution correctness across chat, birth, forge, CLI, and skills commands.
 
 Canonical architecture reference:
 `documents/ARCHITECTURE_SKILL_TOPOLOGY_AND_FORGE.md`
+Forge topology contract reference: `documents/ARCHITECTURE_SKILL_TOPOLOGY_AND_FORGE.md`.
 
 ## Entry Invariants
 
