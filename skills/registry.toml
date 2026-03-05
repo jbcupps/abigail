@@ -158,3 +158,8 @@ enabled = true
 name = "forge"
 runtime = "wasm"
 enabled = true
+
+[[skills]]
+name = "postgres_vector_graph"
+runtime = "wasm"
+enabled = true

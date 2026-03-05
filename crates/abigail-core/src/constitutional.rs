@@ -43,6 +43,33 @@ pub async fn load_preprompt_context(user_message: &str) -> anyhow::Result<String
     ))
 }
 
+/// Build a minimal constitutional preprompt context sourced from templates only.
+///
+/// This omits runtime signal inference and keeps output deterministic so monitors
+/// can inject a lightweight scaffold without blocking the chat path.
+pub async fn load_minimal_preprompt(user_message: &str) -> anyhow::Result<String> {
+    let soul = read_template_or_fallback("soul.md", templates::SOUL_MD);
+    let ethics = read_template_or_fallback("ethics.md", templates::ETHICS_MD);
+    let instincts = read_template_or_fallback("instincts.md", templates::INSTINCTS_MD);
+
+    let soul_excerpt = first_paragraph_after_title(&soul);
+    let ethics_excerpt = first_n_bullets(&ethics, 3);
+    let instincts_excerpt = first_n_bullets(&instincts, 3);
+
+    Ok(format!(
+        "## Constitutional Monitor Context (Minimal)\n\
+         User prompt: {user}\n\
+         Soul: {soul}\n\
+         Ethics anchors: {ethics}\n\
+         Instinct anchors: {instincts}\n\
+         Superego decisions are tracked in Hive/documents for review.",
+        user = clamp(user_message, 220),
+        soul = clamp(&soul_excerpt, MAX_SNIPPET_LEN),
+        ethics = clamp(&ethics_excerpt, MAX_SNIPPET_LEN),
+        instincts = clamp(&instincts_excerpt, MAX_SNIPPET_LEN),
+    ))
+}
+
 pub fn infer_id_context(lower_message: &str) -> &'static str {
     if contains_any(
         lower_message,
@@ -197,5 +224,12 @@ mod tests {
     fn superego_context_detects_destructive_signals() {
         let got = infer_superego_context("please run rm -rf now");
         assert!(got.contains("high-risk pattern"));
+    }
+
+    #[tokio::test]
+    async fn minimal_preprompt_contains_templates_context() {
+        let out = load_minimal_preprompt("hello").await.unwrap();
+        assert!(out.contains("Constitutional Monitor Context (Minimal)"));
+        assert!(out.contains("Superego decisions are tracked in Hive/documents"));
     }
 }
