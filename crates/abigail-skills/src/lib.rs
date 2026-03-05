@@ -105,12 +105,10 @@ fn normalize_runtime(runtime: &str) -> &'static str {
 fn load_persistent_topology_entries(
     registry_path: &str,
 ) -> anyhow::Result<Vec<RegistryTopologySkillEntry>> {
-    let bytes = std::fs::read_to_string(registry_path).map_err(|e| {
-        anyhow::anyhow!("failed to read registry at {}: {}", registry_path, e)
-    })?;
-    let parsed: PersistentTopologyRegistry = toml::from_str(&bytes).map_err(|e| {
-        anyhow::anyhow!("failed to parse registry at {}: {}", registry_path, e)
-    })?;
+    let bytes = std::fs::read_to_string(registry_path)
+        .map_err(|e| anyhow::anyhow!("failed to read registry at {}: {}", registry_path, e))?;
+    let parsed: PersistentTopologyRegistry = toml::from_str(&bytes)
+        .map_err(|e| anyhow::anyhow!("failed to parse registry at {}: {}", registry_path, e))?;
 
     let mut deduped = std::collections::BTreeMap::<String, RegistryTopologySkillEntry>::new();
     for skill in parsed.skill {
