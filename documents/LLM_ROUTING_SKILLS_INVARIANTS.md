@@ -108,3 +108,5 @@ Canonical architecture reference:
   workers, rebuild topic bindings, re-subscribe).
 - Forge-authored capability changes are valid only when reflected in
   `skills/registry.toml`.
+- Mentor/id/superego/memory monitor subscribers remain out-of-band and must not
+  add synchronous latency to the completion path.

@@ -32,6 +32,7 @@ The previous dynamic-only skill model is deprecated. All planning and execution 
 
 - persistent startup provisioning from `skills/registry.toml`
 - request/response topic topology per enabled skill
+- out-of-band monitor layer on chat-topic (mentor, id, superego, memory observers)
 - Forge outputs that are registry-backed and watcher-reprovisioned
 
 ---

@@ -91,6 +91,7 @@ The documentation on *how* to use a skill (`how-to-use.md`) must survive LLM pro
 - Every enabled skill gets deterministic request/response topics and a dedicated subscriber worker.
 - Forge-generated or updated skills are not considered active architecture until represented in the registry contract.
 - Watcher updates (`skill.toml`, `*.json`, and `registry.toml`) trigger safe runtime refresh behavior, including topology re-provision on registry changes.
+- Chat-topic monitors are out-of-band and must not block the forge or completion path.
 
 ### The Decision: Markdown First
 *   We will store the instructional legacy as physical Markdown files (`how-to-use.md`) alongside the `skill.toml` in the filesystem.

@@ -259,6 +259,7 @@ Model availability comes from the dynamic registry (`get_model_registry`) backed
 
 ```
 Entity (LLM generates code+md)
+  -> out-of-band monitor enrichment on entity/chat-topic
   -> publish entity/topic.skill.forge.request
   -> DevOps Forge Worker (sandbox + superego scan)
   -> writes skills/dynamic/* + updates skills/registry.toml
