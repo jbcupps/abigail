@@ -47,13 +47,12 @@ impl LlmProvider for MockProvider {
 // ---------------------------------------------------------------------------
 
 fn build_daemon_state() -> entity_daemon_test_state::EntityDaemonState {
-    let router = IdEgoRouter {
-        id: Arc::new(MockProvider::new()),
-        ego: None,
-        ego_provider: None,
-        local_http: None,
-        mode: RoutingMode::EgoPrimary,
-    };
+    let mut router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
+    router.id = Arc::new(MockProvider::new());
+    router.ego = None;
+    router.ego_provider = None;
+    router.local_http = None;
+    router.mode = RoutingMode::EgoPrimary;
 
     let registry = Arc::new(SkillRegistry::new());
     let executor = Arc::new(SkillExecutor::new(registry.clone()));

@@ -5,6 +5,7 @@ pub mod graph;
 pub mod postgres;
 pub mod schema;
 pub mod store;
+pub mod subscriber;
 
 pub use archive::ArchiveExporter;
 pub use backup_import::{
@@ -18,3 +19,4 @@ pub use store::{
     ConversationTurn, Memory, MemoryStore, MemoryWeight, Result as MemoryResult, SessionSummary,
     StoreError,
 };
+pub use subscriber::{spawn_chat_topic_subscriber, ChatTopicEnvelope};

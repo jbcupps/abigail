@@ -200,6 +200,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "abigail-id"
+version = "0.0.1"
+dependencies = [
+ "abigail-streaming",
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "abigail-identity"
 version = "0.0.1"
 dependencies = [
@@ -232,6 +244,7 @@ name = "abigail-memory"
 version = "0.0.1"
 dependencies = [
  "abigail-core",
+ "abigail-streaming",
  "aes-gcm",
  "anyhow",
  "async-trait",
@@ -355,6 +368,18 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "abigail-superego"
+version = "0.0.1"
+dependencies = [
+ "abigail-streaming",
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -2801,11 +2826,13 @@ dependencies = [
  "abigail-capabilities",
  "abigail-core",
  "abigail-hive",
+ "abigail-id",
  "abigail-memory",
  "abigail-queue",
  "abigail-router",
  "abigail-skills",
  "abigail-streaming",
+ "abigail-superego",
  "anyhow",
  "async-trait",
  "axum",

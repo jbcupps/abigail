@@ -96,7 +96,10 @@ impl SkillsWatcher {
                             let ev = match event.kind {
                                 EventKind::Create(_) | EventKind::Modify(_) => {
                                     if is_registry {
-                                        tracing::info!("Skill registry changed: {}", path.display());
+                                        tracing::info!(
+                                            "Skill registry changed: {}",
+                                            path.display()
+                                        );
                                         SkillFileEvent::RegistryChanged(path)
                                     } else {
                                         tracing::info!("Skill file changed: {}", path.display());
@@ -105,7 +108,10 @@ impl SkillsWatcher {
                                 }
                                 EventKind::Remove(_) => {
                                     if is_registry {
-                                        tracing::info!("Skill registry removed: {}", path.display());
+                                        tracing::info!(
+                                            "Skill registry removed: {}",
+                                            path.display()
+                                        );
                                         SkillFileEvent::RegistryRemoved(path)
                                     } else {
                                         tracing::info!("Skill file removed: {}", path.display());

@@ -168,13 +168,12 @@ impl Skill for EchoSkill {
 fn build_test_env(
     provider: impl LlmProvider + 'static,
 ) -> (IdEgoRouter, Arc<SkillRegistry>, Arc<SkillExecutor>) {
-    let router = IdEgoRouter {
-        id: Arc::new(provider),
-        ego: None,
-        ego_provider: None,
-        local_http: None,
-        mode: RoutingMode::EgoPrimary,
-    };
+    let mut router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
+    router.id = Arc::new(provider);
+    router.ego = None;
+    router.ego_provider = None;
+    router.local_http = None;
+    router.mode = RoutingMode::EgoPrimary;
     let registry = Arc::new(SkillRegistry::new());
     registry
         .register(SkillId("test.echo".into()), Arc::new(EchoSkill::new()))

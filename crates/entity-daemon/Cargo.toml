@@ -14,6 +14,8 @@ hive-core = { path = "../hive-core" }
 abigail-core = { path = "../abigail-core" }
 abigail-hive = { path = "../abigail-hive" }
 abigail-router = { path = "../abigail-router" }
+abigail-id = { path = "../abigail-id" }
+abigail-superego = { path = "../abigail-superego" }
 abigail-capabilities = { path = "../abigail-capabilities" }
 abigail-skills = { path = "../abigail-skills" }
 abigail-memory = { path = "../abigail-memory" }

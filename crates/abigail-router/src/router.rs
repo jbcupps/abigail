@@ -11,7 +11,7 @@ use abigail_capabilities::cognitive::{
 };
 use abigail_hive::{BuiltProviders, ProviderKind, ProviderRegistry};
 use entity_core::{ExecutionTrace, SelectionReason};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 // Re-export RoutingMode from abigail-core for convenience
 pub use abigail_core::RoutingMode;
@@ -202,6 +202,7 @@ pub struct IdEgoRouter {
     pub ego_provider: Option<EgoProvider>,
     pub local_http: Option<Arc<LocalHttpProvider>>,
     pub mode: RoutingMode,
+    selected_chat_model: Arc<RwLock<Option<String>>>,
 }
 
 impl IdEgoRouter {
@@ -214,6 +215,60 @@ impl IdEgoRouter {
         }
         FastPathTarget::Id
     }
+
+    fn normalize_model_name(model: Option<String>) -> Option<String> {
+        model.and_then(|m| {
+            let trimmed = m.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(
+                    trimmed
+                        .chars()
+                        .map(|c| {
+                            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                                c
+                            } else {
+                                '_'
+                            }
+                        })
+                        .collect::<String>(),
+                )
+            }
+        })
+    }
+
+    /// Update the currently selected chat model (typically from UI dropdown model_override).
+    pub fn set_selected_chat_model(&self, model: Option<String>) {
+        let normalized = Self::normalize_model_name(model);
+        if let Ok(mut guard) = self.selected_chat_model.write() {
+            *guard = normalized;
+        }
+    }
+
+    /// Return the current selected chat model used for subscriber identity.
+    pub fn selected_chat_model(&self) -> Option<String> {
+        self.selected_chat_model.read().ok().and_then(|g| g.clone())
+    }
+
+    /// Build the entity subscriber group name for mentor chat topic flows.
+    pub fn entity_chat_subscriber_group(&self, entity_id: &str) -> String {
+        let model = self
+            .selected_chat_model()
+            .unwrap_or_else(|| "default".to_string());
+        let entity = entity_id
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
+        format!("entity-subscriber.{}.{}", entity, model)
+    }
+
     /// Create a new router with optional local LLM URL and Ego cloud provider.
     pub fn new(
         local_llm_base_url: Option<String>,
@@ -231,6 +286,7 @@ impl IdEgoRouter {
             ego_provider: ego_result.kind.map(EgoProvider::from),
             local_http: id_result.local_http,
             mode,
+            selected_chat_model: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -251,6 +307,7 @@ impl IdEgoRouter {
             ego_provider: ego_result.kind.map(EgoProvider::from),
             local_http: id_result.local_http,
             mode,
+            selected_chat_model: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -284,6 +341,7 @@ impl IdEgoRouter {
             ego_provider,
             local_http: providers.local_http,
             mode,
+            selected_chat_model: Arc::new(RwLock::new(None)),
         }
     }
 

@@ -1,0 +1,13 @@
+[package]
+name = "abigail-superego"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+abigail-streaming = { path = "../abigail-streaming" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+

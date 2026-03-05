@@ -452,7 +452,29 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(MemoryBroker::default())
     };
 
-    // 10a. Provision persistent skill request/response topology from
+    // 10a. Register out-of-band monitor layer at startup.
+    let _mentor_chat_monitor_handle = abigail_router::MentorChatMonitor::new(stream_broker.clone())
+        .spawn()
+        .await
+        .map_err(|e| tracing::warn!("Failed to start mentor chat monitor: {}", e))
+        .ok();
+    let _superego_monitor_handle = abigail_superego::SuperegoMonitor::new(stream_broker.clone())
+        .spawn()
+        .await
+        .map_err(|e| tracing::warn!("Failed to start superego monitor: {}", e))
+        .ok();
+    let _id_monitor_handle = abigail_id::IdMonitor::new(stream_broker.clone())
+        .spawn()
+        .await
+        .map_err(|e| tracing::warn!("Failed to start id monitor: {}", e))
+        .ok();
+    let _memory_chat_topic_handle =
+        abigail_memory::spawn_chat_topic_subscriber(stream_broker.clone(), memory.clone())
+            .await
+            .map_err(|e| tracing::warn!("Failed to start memory chat-topic subscriber: {}", e))
+            .ok();
+
+    // 10b. Provision persistent skill request/response topology from
     // shared `skills/registry.toml` at startup.
     let skill_topology = Arc::new(tokio::sync::Mutex::new(
         None::<abigail_skills::ProvisionedSkillTopology>,
