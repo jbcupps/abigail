@@ -62,8 +62,10 @@ pub async fn chat(
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let model_override = body.model_override.clone();
 
-    // Wire selected model as the entity subscriber identity for mentor chat topic.
-    state.router.set_selected_chat_model(model_override.clone());
+    // Register selected model as the entity subscriber identity for mentor chat topic.
+    let _subscriber_group = state
+        .router
+        .register_selected_model_subscriber(&state.entity_id, model_override.clone());
 
     // Request monitor-enriched preprompt context over the chat topic.
     let enriched_preprompt = abigail_router::request_enriched_preprompt(
@@ -208,8 +210,10 @@ pub async fn chat_stream(
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let model_override = body.model_override.clone();
 
-    // Wire selected model as the entity subscriber identity for mentor chat topic.
-    state.router.set_selected_chat_model(model_override.clone());
+    // Register selected model as the entity subscriber identity for mentor chat topic.
+    let _subscriber_group = state
+        .router
+        .register_selected_model_subscriber(&state.entity_id, model_override.clone());
 
     // Request monitor-enriched preprompt context over the chat topic.
     let enriched_preprompt = abigail_router::request_enriched_preprompt(
