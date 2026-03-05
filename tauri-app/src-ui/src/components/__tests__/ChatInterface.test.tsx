@@ -13,6 +13,7 @@ function renderWithTheme(ui: React.ReactElement) {
 
 const mockInvoke = invoke as unknown as Mock;
 const mockListen = listen as unknown as Mock;
+let listeners: Record<string, (event: { payload: unknown }) => void> = {};
 
 const defaultRouterStatus = {
   id_provider: "local_http",
@@ -28,7 +29,7 @@ beforeEach(() => {
   mockInvoke.mockReset();
   mockListen.mockReset();
 
-  const listeners: Record<string, (event: { payload: unknown }) => void> = {};
+  listeners = {};
   mockListen.mockImplementation(
     (eventName: string, callback: (event: { payload: unknown }) => void) => {
       listeners[eventName] = callback;
@@ -112,6 +113,24 @@ describe("ChatInterface", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/assistant fallback reply/i)).toBeInTheDocument();
+    });
+  });
+
+  it("refreshes router status and model registry after provider-config-changed", async () => {
+    renderWithTheme(<ChatInterface />);
+    await screen.findByPlaceholderText(/type|message|ask/i);
+
+    const routerCallsBefore = mockInvoke.mock.calls.filter(([cmd]) => cmd === "get_router_status").length;
+    const registryCallsBefore = mockInvoke.mock.calls.filter(([cmd]) => cmd === "get_model_registry").length;
+
+    expect(listeners["provider-config-changed"]).toBeDefined();
+    listeners["provider-config-changed"]({ payload: null });
+
+    await waitFor(() => {
+      const routerCallsAfter = mockInvoke.mock.calls.filter(([cmd]) => cmd === "get_router_status").length;
+      const registryCallsAfter = mockInvoke.mock.calls.filter(([cmd]) => cmd === "get_model_registry").length;
+      expect(routerCallsAfter).toBeGreaterThan(routerCallsBefore);
+      expect(registryCallsAfter).toBeGreaterThan(registryCallsBefore);
     });
   });
 
