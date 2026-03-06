@@ -222,13 +222,21 @@ impl BirthOrchestrator {
         self.conversation_history.clear();
     }
 
-    /// Crystallization: write personalized soul.md and growth.md, advance to Emergence.
+    /// Finalize soul documents and advance to Emergence.
+    ///
+    /// The newer Genesis/Soul Preview flow can reach this method directly from
+    /// Connectivity without ever issuing the legacy explicit
+    /// `advance_to_crystallization()` transition. Accept both stages so the
+    /// finalization step matches the user-visible flow.
     pub fn crystallize_soul(
         &mut self,
         soul_content: &str,
         growth_content: &str,
     ) -> anyhow::Result<()> {
-        if self.stage != BirthStage::Crystallization {
+        if !matches!(
+            self.stage,
+            BirthStage::Connectivity | BirthStage::Crystallization
+        ) {
             return Err(BirthError::StageGuard(self.stage.name().to_string()).into());
         }
 
@@ -531,6 +539,29 @@ mod tests {
         assert!(soul.contains("I am Test."));
         let growth = fs::read_to_string(docs_dir.join("growth.md")).unwrap();
         assert!(growth.contains("Growing."));
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_crystallize_soul_from_connectivity() {
+        let tmp = std::env::temp_dir().join("abigail_birth_crystallize_connectivity");
+        let _ = fs::remove_dir_all(&tmp);
+        let config = test_config(&tmp);
+        let docs_dir = config.docs_dir.clone();
+        fs::create_dir_all(&docs_dir).unwrap();
+
+        let mut orch = BirthOrchestrator::new(config).unwrap();
+        orch.generate_identity(&docs_dir).unwrap();
+        orch.advance_past_darkness().unwrap();
+        orch.advance_to_connectivity().unwrap();
+
+        orch.crystallize_soul("# Soul\nI am Test.", "# Growth\nGrowing.")
+            .unwrap();
+        assert_eq!(orch.current_stage(), BirthStage::Emergence);
+
+        let soul = fs::read_to_string(docs_dir.join("soul.md")).unwrap();
+        assert!(soul.contains("I am Test."));
 
         let _ = fs::remove_dir_all(&tmp);
     }

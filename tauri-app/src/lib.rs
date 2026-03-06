@@ -176,9 +176,9 @@ pub fn skill_audit_log(data_dir: &Path, action: &str, detail: &str) {
 }
 
 /// Build and optionally initialize the Email skill from current vault.
-/// Used at startup and after storing IMAP-related secrets so the skill picks up new credentials.
-/// Returns the skill (initialized or not) for the caller to register.
-pub fn create_email_skill_for_registry(state: &AppState) -> Result<Arc<dyn Skill>, String> {
+/// Used after secret updates so the skill picks up new credentials without
+/// blocking the active Tokio runtime thread.
+pub async fn create_email_skill_for_registry(state: &AppState) -> Result<Arc<dyn Skill>, String> {
     use skill_email::EmailSkill;
     let manifest = EmailSkill::default_manifest();
     let mut skill = EmailSkill::new(manifest);
@@ -247,13 +247,12 @@ pub fn create_email_skill_for_registry(state: &AppState) -> Result<Arc<dyn Skill
             stream_broker: Some(state.stream_broker.clone()),
         };
 
-        match tauri::async_runtime::block_on(async {
-            tokio::time::timeout(
-                std::time::Duration::from_secs(15),
-                skill.initialize(skill_config),
-            )
-            .await
-        }) {
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            skill.initialize(skill_config),
+        )
+        .await
+        {
             Ok(Ok(())) => {
                 tracing::info!("Email skill initialized successfully");
             }
@@ -269,6 +268,14 @@ pub fn create_email_skill_for_registry(state: &AppState) -> Result<Arc<dyn Skill
     }
 
     Ok(Arc::new(skill))
+}
+
+/// Blocking startup helper for sync setup paths that need the Email skill
+/// before the app event loop is fully running.
+pub fn create_email_skill_for_registry_blocking(
+    state: &AppState,
+) -> Result<Arc<dyn Skill>, String> {
+    tauri::async_runtime::block_on(create_email_skill_for_registry(state))
 }
 
 fn get_config() -> AppConfig {
@@ -697,7 +704,7 @@ fn try_run() -> Result<(), String> {
             // initializes the IMAP transport only when credentials are present.
             {
                 let skill_id = skill_email::EmailSkill::default_manifest().id.clone();
-                match create_email_skill_for_registry(&state) {
+                match create_email_skill_for_registry_blocking(&state) {
                     Ok(skill) => {
                         if let Err(e) = state.registry.register(skill_id, skill) {
                             tracing::warn!("Failed to register Email skill: {}", e);

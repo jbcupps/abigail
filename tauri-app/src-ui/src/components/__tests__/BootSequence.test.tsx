@@ -1,5 +1,5 @@
 import "../../test/tauri-mock";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import BootSequence from "../BootSequence";
@@ -65,6 +65,24 @@ describe("BootSequence", () => {
     await waitFor(() => {
       expect(onComplete).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("moves from key presentation into genesis without forcing crystallization stage", async () => {
+    mockBootInvoke("Clean");
+    const onComplete = vi.fn();
+
+    render(<BootSequence onComplete={onComplete} />);
+
+    const checkbox = await screen.findByRole("checkbox");
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("advance_past_darkness");
+      expect(mockInvoke).toHaveBeenCalledWith("advance_to_connectivity");
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("advance_to_crystallization");
+    expect(onComplete).not.toHaveBeenCalled();
   });
 });
 
