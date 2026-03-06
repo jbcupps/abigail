@@ -28,6 +28,7 @@ members = [
     "crates/daemon-test-harness",
     "crates/daemon-client",
     "skills/skill-web-search",
+    "skills/skill-browser",
     "skills/skill-filesystem",
     "skills/skill-shell",
     "skills/skill-http",

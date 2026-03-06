@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 24;
+pub const CONFIG_SCHEMA_VERSION: u32 = 25;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 ///
@@ -57,6 +57,25 @@ pub enum RuntimeMode {
     InProcess,
     /// Tauri delegates to hive-daemon + entity-daemon over HTTP.
     Daemon,
+}
+
+/// Controls how much ordinary desktop authority the entity has by default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AutonomyProfile {
+    /// Preserve the legacy conservative behaviour.
+    Strict,
+    /// Allow routine desktop work while still gating higher-risk actions.
+    Balanced,
+    /// Treat the entity like a trusted desktop operator for normal work.
+    #[default]
+    DesktopOperator,
+}
+
+impl AutonomyProfile {
+    pub fn allows_local_network_access(self) -> bool {
+        matches!(self, Self::DesktopOperator)
+    }
 }
 
 fn default_schema_version() -> u32 {
@@ -477,6 +496,11 @@ pub struct AppConfig {
     /// Inherited from hive default at creation, independently changeable.
     #[serde(default)]
     pub theme_id: Option<String>,
+
+    // ── v25 fields ─────────────────────────────────────────────────
+    /// Runtime autonomy policy for ordinary desktop actions.
+    #[serde(default)]
+    pub autonomy_profile: AutonomyProfile,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -541,6 +565,7 @@ impl AppConfig {
             entity_daemon_url: default_entity_daemon_url(),
             iggy_connection: None,
             theme_id: None,
+            autonomy_profile: AutonomyProfile::default(),
         }
     }
 
@@ -821,6 +846,13 @@ impl AppConfig {
             tracing::debug!("Migrated config from v23 to v24 (theme engine: theme_id field)");
         }
 
+        if self.schema_version < 25 {
+            // v25: Desktop autonomy profiles (defaults via serde).
+            self.schema_version = 25;
+            migrated = true;
+            tracing::debug!("Migrated config from v24 to v25 (desktop autonomy profile field)");
+        }
+
         migrated
     }
     /// Check if birth was interrupted (birth_stage set but birth_complete is false).
@@ -902,6 +934,7 @@ mod tests {
             entity_daemon_url: default_entity_daemon_url(),
             iggy_connection: None,
             theme_id: None,
+            autonomy_profile: AutonomyProfile::default(),
         }
     }
 
@@ -1055,6 +1088,11 @@ mod tests {
     }
 
     #[test]
+    fn test_default_autonomy_profile_is_desktop_operator() {
+        assert_eq!(AutonomyProfile::default(), AutonomyProfile::DesktopOperator);
+    }
+
+    #[test]
     fn test_ego_primary_routing_mode_serde() {
         let mode = RoutingMode::EgoPrimary;
         let json = serde_json::to_string(&mode).unwrap();
@@ -1115,6 +1153,26 @@ mod tests {
         assert!(config.migrate());
         assert_eq!(config.schema_version, CONFIG_SCHEMA_VERSION);
         assert_eq!(config.cli_permission_mode, CliPermissionMode::default());
+    }
+
+    #[test]
+    fn test_migrate_v24_to_v25_sets_autonomy_profile() {
+        let mut config = AppConfig::default_paths();
+        config.schema_version = 24;
+        config.autonomy_profile = AutonomyProfile::Strict;
+
+        assert!(config.migrate());
+        assert_eq!(config.schema_version, CONFIG_SCHEMA_VERSION);
+        assert_eq!(config.autonomy_profile, AutonomyProfile::Strict);
+    }
+
+    #[test]
+    fn test_autonomy_profile_serde_roundtrip() {
+        let profile = AutonomyProfile::DesktopOperator;
+        let json = serde_json::to_string(&profile).unwrap();
+        assert_eq!(json, "\"desktop_operator\"");
+        let parsed: AutonomyProfile = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, AutonomyProfile::DesktopOperator);
     }
 
     #[test]

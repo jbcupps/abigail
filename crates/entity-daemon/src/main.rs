@@ -259,6 +259,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 8b. Register native Rust skills (matching Tauri in-process registration).
     {
+        let allow_local_network = config.autonomy_profile.allows_local_network_access();
         let mut allowed_roots = vec![entity_dir.clone()];
         allowed_roots.push(std::env::temp_dir());
         if let Some(docs_dir) =
@@ -292,8 +293,13 @@ async fn main() -> anyhow::Result<()> {
         register_skill!(skill_system_monitor::SystemMonitorSkill::new(
             skill_system_monitor::SystemMonitorSkill::default_manifest()
         ));
-        register_skill!(skill_http::HttpSkill::new(
-            skill_http::HttpSkill::default_manifest()
+        register_skill!(skill_http::HttpSkill::new_with_local_network(
+            skill_http::HttpSkill::default_manifest(),
+            allow_local_network
+        ));
+        register_skill!(skill_browser::BrowserSkill::new_with_local_network(
+            skill_browser::BrowserSkill::default_manifest(),
+            allow_local_network
         ));
         register_skill!(skill_calendar::CalendarSkill::new(
             skill_calendar::CalendarSkill::default_manifest(),

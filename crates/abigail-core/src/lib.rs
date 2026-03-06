@@ -22,9 +22,9 @@ pub use capability_envelope::{
     evaluate_gate, CapabilityEnvelope, CapabilityGateResult, RequestedCapability,
 };
 pub use config::{
-    AppConfig, CliPermissionMode, EmailAccountConfig, EmailConfig, McpServerDefinition,
-    McpTrustPolicy, ProviderCatalogEntry, RoutingMode, RuntimeMode, TrinityConfig,
-    CONFIG_SCHEMA_VERSION,
+    AppConfig, AutonomyProfile, CliPermissionMode, EmailAccountConfig, EmailConfig,
+    McpServerDefinition, McpTrustPolicy, ProviderCatalogEntry, RoutingMode, RuntimeMode,
+    TrinityConfig, CONFIG_SCHEMA_VERSION,
 };
 pub use constitutional::load_preprompt_context;
 pub use document::{CoreDocument, DocumentTier};

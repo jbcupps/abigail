@@ -32,6 +32,7 @@ const BLOCKED_HOSTS: &[&str] = &[
 pub struct HttpSkill {
     manifest: SkillManifest,
     client: reqwest::Client,
+    allow_local_network: bool,
 }
 
 impl HttpSkill {
@@ -43,6 +44,10 @@ impl HttpSkill {
 
     /// Create a new HTTP skill.
     pub fn new(manifest: SkillManifest) -> Self {
+        Self::new_with_local_network(manifest, false)
+    }
+
+    pub fn new_with_local_network(manifest: SkillManifest, allow_local_network: bool) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
             .connect_timeout(Duration::from_secs(10))
@@ -50,12 +55,16 @@ impl HttpSkill {
             .build()
             .expect("Failed to create HTTP client");
 
-        Self { manifest, client }
+        Self {
+            manifest,
+            client,
+            allow_local_network,
+        }
     }
 
     /// Validate a URL for SSRF safety.
     /// Blocks private IPs, loopback, link-local, and cloud metadata endpoints.
-    fn validate_url(url_str: &str) -> Result<url::Url, String> {
+    fn validate_url(&self, url_str: &str) -> Result<url::Url, String> {
         let url = url::Url::parse(url_str).map_err(|e| format!("Invalid URL: {}", e))?;
 
         // Only allow http and https
@@ -75,40 +84,42 @@ impl HttpSkill {
         }
 
         // Check for private/internal IPs
-        match url.host() {
-            Some(url::Host::Ipv4(ip)) => {
-                let addr = IpAddr::V4(ip);
-                if is_private_ip(&addr) {
-                    return Err(format!(
-                        "Private/internal IP '{}' is blocked (SSRF protection)",
-                        ip
-                    ));
+        if !self.allow_local_network {
+            match url.host() {
+                Some(url::Host::Ipv4(ip)) => {
+                    let addr = IpAddr::V4(ip);
+                    if is_private_ip(&addr) {
+                        return Err(format!(
+                            "Private/internal IP '{}' is blocked (SSRF protection)",
+                            ip
+                        ));
+                    }
                 }
-            }
-            Some(url::Host::Ipv6(ip)) => {
-                let addr = IpAddr::V6(ip);
-                if is_private_ip(&addr) {
-                    return Err(format!(
-                        "Private/internal IP '{}' is blocked (SSRF protection)",
-                        ip
-                    ));
+                Some(url::Host::Ipv6(ip)) => {
+                    let addr = IpAddr::V6(ip);
+                    if is_private_ip(&addr) {
+                        return Err(format!(
+                            "Private/internal IP '{}' is blocked (SSRF protection)",
+                            ip
+                        ));
+                    }
                 }
-            }
-            Some(url::Host::Domain(d)) => {
-                // Block localhost/loopback domains
-                let d_lower = d.to_lowercase();
-                if d_lower == "localhost"
-                    || d_lower == "0.0.0.0"
-                    || d_lower.ends_with(".local")
-                    || d_lower.ends_with(".internal")
-                {
-                    return Err(format!(
-                        "Local/internal domain '{}' is blocked (SSRF protection)",
-                        d
-                    ));
+                Some(url::Host::Domain(d)) => {
+                    // Block localhost/loopback domains
+                    let d_lower = d.to_lowercase();
+                    if d_lower == "localhost"
+                        || d_lower == "0.0.0.0"
+                        || d_lower.ends_with(".local")
+                        || d_lower.ends_with(".internal")
+                    {
+                        return Err(format!(
+                            "Local/internal domain '{}' is blocked (SSRF protection)",
+                            d
+                        ));
+                    }
                 }
+                None => return Err("URL must have a host".to_string()),
             }
-            None => return Err("URL must have a host".to_string()),
         }
 
         Ok(url)
@@ -120,7 +131,7 @@ impl HttpSkill {
         url_str: &str,
         headers: Option<HashMap<String, String>>,
     ) -> SkillResult<ToolOutput> {
-        let url = Self::validate_url(url_str).map_err(SkillError::ToolFailed)?;
+        let url = self.validate_url(url_str).map_err(SkillError::ToolFailed)?;
 
         let mut request = self.client.get(url.as_str());
 
@@ -141,7 +152,7 @@ impl HttpSkill {
         content_type: Option<&str>,
         headers: Option<HashMap<String, String>>,
     ) -> SkillResult<ToolOutput> {
-        let url = Self::validate_url(url_str).map_err(SkillError::ToolFailed)?;
+        let url = self.validate_url(url_str).map_err(SkillError::ToolFailed)?;
 
         let mut request = self.client.post(url.as_str());
 
@@ -441,42 +452,60 @@ mod tests {
 
     #[test]
     fn test_ssrf_blocks_localhost() {
-        assert!(HttpSkill::validate_url("http://localhost:8080/api").is_err());
-        assert!(HttpSkill::validate_url("http://127.0.0.1:1234").is_err());
-        assert!(HttpSkill::validate_url("http://0.0.0.0").is_err());
+        let skill = HttpSkill::new(HttpSkill::default_manifest());
+        assert!(skill.validate_url("http://localhost:8080/api").is_err());
+        assert!(skill.validate_url("http://127.0.0.1:1234").is_err());
+        assert!(skill.validate_url("http://0.0.0.0").is_err());
     }
 
     #[test]
     fn test_ssrf_blocks_private_ips() {
-        assert!(HttpSkill::validate_url("http://10.0.0.1/admin").is_err());
-        assert!(HttpSkill::validate_url("http://172.16.0.1/").is_err());
-        assert!(HttpSkill::validate_url("http://192.168.1.1/").is_err());
+        let skill = HttpSkill::new(HttpSkill::default_manifest());
+        assert!(skill.validate_url("http://10.0.0.1/admin").is_err());
+        assert!(skill.validate_url("http://172.16.0.1/").is_err());
+        assert!(skill.validate_url("http://192.168.1.1/").is_err());
     }
 
     #[test]
     fn test_ssrf_blocks_metadata() {
-        assert!(HttpSkill::validate_url("http://169.254.169.254/latest/meta-data/").is_err());
-        assert!(HttpSkill::validate_url("http://metadata.google.internal/").is_err());
+        let skill = HttpSkill::new(HttpSkill::default_manifest());
+        assert!(skill
+            .validate_url("http://169.254.169.254/latest/meta-data/")
+            .is_err());
+        assert!(skill
+            .validate_url("http://metadata.google.internal/")
+            .is_err());
     }
 
     #[test]
     fn test_ssrf_blocks_internal_domains() {
-        assert!(HttpSkill::validate_url("http://service.local/api").is_err());
-        assert!(HttpSkill::validate_url("http://db.internal/").is_err());
+        let skill = HttpSkill::new(HttpSkill::default_manifest());
+        assert!(skill.validate_url("http://service.local/api").is_err());
+        assert!(skill.validate_url("http://db.internal/").is_err());
     }
 
     #[test]
     fn test_ssrf_allows_public_urls() {
-        assert!(HttpSkill::validate_url("https://api.github.com/repos").is_ok());
-        assert!(HttpSkill::validate_url("https://example.com/page").is_ok());
-        assert!(HttpSkill::validate_url("http://httpbin.org/get").is_ok());
+        let skill = HttpSkill::new(HttpSkill::default_manifest());
+        assert!(skill.validate_url("https://api.github.com/repos").is_ok());
+        assert!(skill.validate_url("https://example.com/page").is_ok());
+        assert!(skill.validate_url("http://httpbin.org/get").is_ok());
     }
 
     #[test]
     fn test_ssrf_blocks_non_http() {
-        assert!(HttpSkill::validate_url("file:///etc/passwd").is_err());
-        assert!(HttpSkill::validate_url("ftp://ftp.example.com/").is_err());
-        assert!(HttpSkill::validate_url("gopher://evil.com/").is_err());
+        let skill = HttpSkill::new(HttpSkill::default_manifest());
+        assert!(skill.validate_url("file:///etc/passwd").is_err());
+        assert!(skill.validate_url("ftp://ftp.example.com/").is_err());
+        assert!(skill.validate_url("gopher://evil.com/").is_err());
+    }
+
+    #[test]
+    fn test_desktop_operator_mode_allows_local_network() {
+        let skill = HttpSkill::new_with_local_network(HttpSkill::default_manifest(), true);
+        assert!(skill.validate_url("http://localhost:8080/api").is_ok());
+        assert!(skill.validate_url("http://127.0.0.1:1234").is_ok());
+        assert!(skill.validate_url("http://192.168.1.10/api").is_ok());
     }
 
     #[test]

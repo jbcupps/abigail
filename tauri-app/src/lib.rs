@@ -531,9 +531,20 @@ fn try_run() -> Result<(), String> {
     let auth_manager = Arc::new(AuthManager::new(secrets.clone()));
     let subagent_manager = RwLock::new(SubagentManager::new(Arc::new(router.clone())));
 
+    let browser_security_policy = if config.autonomy_profile.allows_local_network_access() {
+        abigail_capabilities::sensory::url_security::UrlSecurityPolicy {
+            block_private_ips: false,
+            ..abigail_capabilities::sensory::url_security::UrlSecurityPolicy::default()
+        }
+    } else {
+        abigail_capabilities::sensory::url_security::UrlSecurityPolicy::default()
+    };
     let browser_config = abigail_capabilities::sensory::browser::BrowserCapabilityConfig::default();
     let browser = Arc::new(tokio::sync::RwLock::new(
-        abigail_capabilities::sensory::browser::BrowserCapability::new(browser_config),
+        abigail_capabilities::sensory::browser::BrowserCapability::new_with_security_policy(
+            browser_config,
+            browser_security_policy,
+        ),
     ));
     let http_client = Arc::new(tokio::sync::RwLock::new(
         abigail_capabilities::sensory::http_client::HttpClientCapability::new(
@@ -755,9 +766,12 @@ fn try_run() -> Result<(), String> {
 
             // Register native Rust skills (compiled into the binary).
             {
-                let data_dir = {
+                let (data_dir, allow_local_network) = {
                     let cfg = state.config.read().map_err(|e| e.to_string())?;
-                    cfg.data_dir.clone()
+                    (
+                        cfg.data_dir.clone(),
+                        cfg.autonomy_profile.allows_local_network_access(),
+                    )
                 };
                 let skills_secrets = state.skills_secrets.clone();
                 let mut allowed_roots = vec![data_dir.clone()];
@@ -795,8 +809,13 @@ fn try_run() -> Result<(), String> {
                 register_skill!(skill_system_monitor::SystemMonitorSkill::new(
                     skill_system_monitor::SystemMonitorSkill::default_manifest()
                 ));
-                register_skill!(skill_http::HttpSkill::new(
-                    skill_http::HttpSkill::default_manifest()
+                register_skill!(skill_http::HttpSkill::new_with_local_network(
+                    skill_http::HttpSkill::default_manifest(),
+                    allow_local_network
+                ));
+                register_skill!(skill_browser::BrowserSkill::new_with_local_network(
+                    skill_browser::BrowserSkill::default_manifest(),
+                    allow_local_network
                 ));
                 register_skill!(skill_calendar::CalendarSkill::new(
                     skill_calendar::CalendarSkill::default_manifest(),

@@ -67,10 +67,17 @@ impl BrowserCapability {
     /// Create a new browser capability with the given config.
     /// The browser process is NOT launched until first use (lazy init).
     pub fn new(config: BrowserCapabilityConfig) -> Self {
+        Self::new_with_security_policy(config, UrlSecurityPolicy::default())
+    }
+
+    pub fn new_with_security_policy(
+        config: BrowserCapabilityConfig,
+        security_policy: UrlSecurityPolicy,
+    ) -> Self {
         Self {
             config,
             state: Arc::new(RwLock::new(None)),
-            security_policy: UrlSecurityPolicy::default(),
+            security_policy,
         }
     }
 
