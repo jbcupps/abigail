@@ -4,6 +4,7 @@ mod transport;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::RwLock as StdRwLock;
 use tokio::sync::RwLock;
 
 use abigail_skills::capability::email::{
@@ -33,6 +34,54 @@ pub struct EmailSkill {
     manifest: SkillManifest,
     transport: Option<Arc<RwLock<EmailTransport>>>,
     stream_broker: Option<Arc<dyn abigail_streaming::StreamBroker>>,
+    health_state: StdRwLock<SkillHealth>,
+}
+
+impl EmailSkill {
+    fn set_health(&self, status: HealthStatus, message: Option<String>) {
+        if let Ok(mut guard) = self.health_state.write() {
+            *guard = SkillHealth {
+                status,
+                message,
+                last_check: chrono::Utc::now(),
+                metrics: HashMap::new(),
+            };
+        }
+    }
+
+    fn current_health_message(&self) -> String {
+        self.health_state
+            .read()
+            .ok()
+            .and_then(|health| health.message.clone())
+            .unwrap_or_else(|| "Skill not initialized".to_string())
+    }
+
+    fn parse_imap_tls_mode(raw: &str) -> ImapTlsMode {
+        match raw.to_uppercase().as_str() {
+            "STARTTLS" => ImapTlsMode::StartTls,
+            _ => ImapTlsMode::Implicit,
+        }
+    }
+
+    fn parse_smtp_tls_mode(
+        raw: Option<&str>,
+        imap_mode: ImapTlsMode,
+        smtp_port: u16,
+    ) -> SmtpTlsMode {
+        if let Some(mode) = raw {
+            match mode.to_uppercase().as_str() {
+                "IMPLICIT" => return SmtpTlsMode::Implicit,
+                _ => return SmtpTlsMode::StartTls,
+            }
+        }
+
+        if imap_mode == ImapTlsMode::Implicit && smtp_port == 465 {
+            SmtpTlsMode::Implicit
+        } else {
+            SmtpTlsMode::StartTls
+        }
+    }
 }
 
 impl EmailSkill {
@@ -59,11 +108,38 @@ impl EmailSkill {
                 version: "1.0".to_string(),
             }],
             permissions: vec![Permission::Network(NetworkPermission::Full)],
-            secrets: vec![abigail_skills::SecretDescriptor {
-                name: "imap_password".to_string(),
-                description: "App password for IMAP".to_string(),
-                required: true,
-            }],
+            secrets: vec![
+                abigail_skills::SecretDescriptor {
+                    name: "imap_password".to_string(),
+                    description: "App password for IMAP".to_string(),
+                    required: true,
+                },
+                abigail_skills::SecretDescriptor {
+                    name: "imap_user".to_string(),
+                    description: "IMAP username / email address".to_string(),
+                    required: true,
+                },
+                abigail_skills::SecretDescriptor {
+                    name: "imap_host".to_string(),
+                    description: "IMAP server hostname".to_string(),
+                    required: true,
+                },
+                abigail_skills::SecretDescriptor {
+                    name: "smtp_host".to_string(),
+                    description: "SMTP server hostname".to_string(),
+                    required: false,
+                },
+                abigail_skills::SecretDescriptor {
+                    name: "smtp_user".to_string(),
+                    description: "SMTP username / email address".to_string(),
+                    required: false,
+                },
+                abigail_skills::SecretDescriptor {
+                    name: "smtp_password".to_string(),
+                    description: "SMTP password".to_string(),
+                    required: false,
+                },
+            ],
             config_defaults: HashMap::new(),
         }
     }
@@ -73,6 +149,12 @@ impl EmailSkill {
             manifest,
             transport: None,
             stream_broker: None,
+            health_state: StdRwLock::new(SkillHealth {
+                status: HealthStatus::Unknown,
+                message: Some("Email skill not initialized yet".to_string()),
+                last_check: chrono::Utc::now(),
+                metrics: HashMap::new(),
+            }),
         }
     }
 
@@ -137,25 +219,6 @@ impl EmailSkill {
             requires_confirmation: false,
         }
     }
-
-    fn tool_create_filter() -> ToolDescriptor {
-        ToolDescriptor {
-            name: "create_filter".to_string(),
-            description: "Create a filter rule (stub; not yet implemented).".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "name": { "type": "string" },
-                    "criteria": { "type": "object" }
-                }
-            }),
-            returns: serde_json::json!({ "type": "object" }),
-            cost_estimate: CostEstimate::default(),
-            required_permissions: vec![],
-            autonomous: false,
-            requires_confirmation: true,
-        }
-    }
 }
 
 #[async_trait::async_trait]
@@ -166,19 +229,23 @@ impl Skill for EmailSkill {
 
     async fn initialize(&mut self, config: SkillConfig) -> SkillResult<()> {
         self.stream_broker = config.stream_broker.clone();
+        self.transport = None;
         let host = config
             .values
             .get("imap_host")
             .and_then(|v| v.as_str())
             .map(String::from)
-            .or_else(|| config.secrets.get("imap_host").cloned())
-            .ok_or_else(|| {
-                SkillError::InitFailed("imap_host is required (no default)".to_string())
-            })?;
+            .or_else(|| config.secrets.get("imap_host").cloned());
         let port = config
             .values
             .get("imap_port")
             .and_then(|v| v.as_u64())
+            .or_else(|| {
+                config
+                    .secrets
+                    .get("imap_port")
+                    .and_then(|v| v.parse::<u64>().ok())
+            })
             .unwrap_or(993) as u16;
         let user = config
             .values
@@ -186,33 +253,50 @@ impl Skill for EmailSkill {
             .and_then(|v| v.as_str())
             .map(String::from)
             .or_else(|| config.secrets.get("imap_user").cloned())
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .trim()
+            .to_string();
         let password = config
             .secrets
             .get("imap_password")
             .cloned()
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .trim()
+            .to_string();
 
-        if user.is_empty() || password.is_empty() {
-            return Err(SkillError::InitFailed(
-                "imap_user and imap_password (secret) required".to_string(),
-            ));
+        let mut missing = Vec::new();
+        let host = match host.map(|h| h.trim().to_string()).filter(|h| !h.is_empty()) {
+            Some(host) => host,
+            None => {
+                missing.push("imap_host");
+                String::new()
+            }
+        };
+        if user.is_empty() {
+            missing.push("imap_user");
+        }
+        if password.is_empty() {
+            missing.push("imap_password");
+        }
+        if !missing.is_empty() {
+            let msg = format!("Missing IMAP configuration: {}", missing.join(", "));
+            self.set_health(HealthStatus::Unhealthy, Some(msg.clone()));
+            return Err(SkillError::InitFailed(msg));
         }
 
         let tls_mode = config
             .values
             .get("imap_tls_mode")
             .and_then(|v| v.as_str())
-            .map(|s| match s.to_uppercase().as_str() {
-                "STARTTLS" => ImapTlsMode::StartTls,
-                _ => ImapTlsMode::Implicit,
-            })
+            .map(Self::parse_imap_tls_mode)
             .unwrap_or(ImapTlsMode::Implicit);
 
         let imap = ImapClient::new(&host, port, &user, &password).with_tls_mode(tls_mode);
-        imap.test_connection()
-            .await
-            .map_err(|e| SkillError::InitFailed(e.to_string()))?;
+        if let Err(err) = imap.test_connection().await {
+            let msg = format!("IMAP connection failed: {}", err);
+            self.set_health(HealthStatus::Unhealthy, Some(msg.clone()));
+            return Err(SkillError::InitFailed(msg));
+        }
 
         let smtp_host = config
             .values
@@ -220,9 +304,9 @@ impl Skill for EmailSkill {
             .and_then(|v| v.as_str())
             .map(String::from)
             .or_else(|| config.secrets.get("smtp_host").cloned())
-            .ok_or_else(|| {
-                SkillError::InitFailed("smtp_host is required (no default)".to_string())
-            })?;
+            .unwrap_or_default()
+            .trim()
+            .to_string();
         let smtp_port = config
             .values
             .get("smtp_port")
@@ -234,37 +318,77 @@ impl Skill for EmailSkill {
                     .and_then(|s| s.parse::<u64>().ok())
             })
             .unwrap_or(587) as u16;
+        let smtp_user = config
+            .values
+            .get("smtp_user")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .or_else(|| config.secrets.get("smtp_user").cloned())
+            .unwrap_or_else(|| user.clone())
+            .trim()
+            .to_string();
+        let smtp_password = config
+            .secrets
+            .get("smtp_password")
+            .cloned()
+            .or_else(|| config.secrets.get("imap_password").cloned())
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let smtp_tls_mode = config
+            .values
+            .get("smtp_tls_mode")
+            .and_then(|v| v.as_str())
+            .map(|raw| Self::parse_smtp_tls_mode(Some(raw), tls_mode, smtp_port))
+            .unwrap_or_else(|| Self::parse_smtp_tls_mode(None, tls_mode, smtp_port));
 
-        let smtp_tls_mode = if tls_mode == ImapTlsMode::StartTls {
-            SmtpTlsMode::StartTls
+        let mut smtp = None;
+        let mut health_status = HealthStatus::Healthy;
+        let mut health_message = Some("Email skill initialized (IMAP + SMTP ready)".to_string());
+        if smtp_host.is_empty() {
+            health_status = HealthStatus::Degraded;
+            health_message = Some("IMAP ready, but SMTP disabled: missing smtp_host".to_string());
+        } else if smtp_user.is_empty() || smtp_password.is_empty() {
+            health_status = HealthStatus::Degraded;
+            health_message = Some(
+                "IMAP ready, but SMTP disabled: missing smtp_user or smtp_password".to_string(),
+            );
         } else {
-            SmtpTlsMode::Implicit
-        };
-        let smtp =
-            SmtpClient::new(&smtp_host, smtp_port, &user, &password).with_tls_mode(smtp_tls_mode);
+            let smtp_client = SmtpClient::new(&smtp_host, smtp_port, &smtp_user, &smtp_password)
+                .with_tls_mode(smtp_tls_mode);
+            if let Err(err) = smtp_client.test_connection().await {
+                health_status = HealthStatus::Degraded;
+                health_message = Some(format!("IMAP ready, SMTP connection failed: {}", err));
+            } else {
+                smtp = Some(smtp_client);
+            }
+        }
 
-        let transport = EmailTransport::new(Some(imap), Some(smtp), &user);
+        let transport = EmailTransport::new(Some(imap), smtp, &smtp_user);
         self.transport = Some(Arc::new(RwLock::new(transport)));
+        self.set_health(health_status, health_message);
         Ok(())
     }
 
     async fn shutdown(&mut self) -> SkillResult<()> {
         self.transport = None;
+        self.set_health(
+            HealthStatus::Unknown,
+            Some("Email skill shut down".to_string()),
+        );
         Ok(())
     }
 
     fn health(&self) -> SkillHealth {
-        let status = if self.transport.is_some() {
-            HealthStatus::Healthy
-        } else {
-            HealthStatus::Unknown
-        };
-        SkillHealth {
-            status,
-            message: None,
-            last_check: chrono::Utc::now(),
-            metrics: HashMap::new(),
-        }
+        self.health_state
+            .read()
+            .map(|health| health.clone())
+            .unwrap_or(SkillHealth {
+                status: HealthStatus::Unknown,
+                message: Some("Email skill health state unavailable".to_string()),
+                last_check: chrono::Utc::now(),
+                metrics: HashMap::new(),
+            })
     }
 
     fn tools(&self) -> Vec<ToolDescriptor> {
@@ -272,7 +396,6 @@ impl Skill for EmailSkill {
             Self::tool_fetch_emails(),
             Self::tool_send_email(),
             Self::tool_classify_importance(),
-            Self::tool_create_filter(),
         ]
     }
 
@@ -285,7 +408,7 @@ impl Skill for EmailSkill {
         let transport = self
             .transport
             .as_ref()
-            .ok_or_else(|| SkillError::InitFailed("Skill not initialized".to_string()))?;
+            .ok_or_else(|| SkillError::InitFailed(self.current_health_message()))?;
 
         match tool_name {
             "fetch_emails" => {
@@ -366,7 +489,6 @@ impl Skill for EmailSkill {
                 let _email_id = params.get::<String>("email_id").unwrap_or_default();
                 Ok(ToolOutput::success(serde_json::json!("normal")))
             }
-            "create_filter" => Ok(ToolOutput::error("create_filter not yet implemented")),
             _ => Err(SkillError::ToolFailed(format!(
                 "Unknown tool: {}",
                 tool_name
@@ -439,7 +561,7 @@ impl EmailTransportCapability for EmailSkill {
         let transport = self
             .transport
             .as_ref()
-            .ok_or_else(|| SkillError::InitFailed("Skill not initialized".to_string()))?;
+            .ok_or_else(|| SkillError::InitFailed(self.current_health_message()))?;
         let guard = transport.read().await;
         guard.fetch_emails(options).await
     }
@@ -451,7 +573,7 @@ impl EmailTransportCapability for EmailSkill {
         let transport = self
             .transport
             .as_ref()
-            .ok_or_else(|| SkillError::InitFailed("Skill not initialized".to_string()))?;
+            .ok_or_else(|| SkillError::InitFailed(self.current_health_message()))?;
         let guard = transport.read().await;
         guard.send_email(email).await
     }

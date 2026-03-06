@@ -87,10 +87,8 @@ impl ImapClient {
             anyhow::bail!("STARTTLS rejected by server: {}", resp_str.trim());
         }
 
-        // Upgrade to TLS (accept self-signed certs for local bridges).
-        let mut builder = native_tls::TlsConnector::builder();
-        builder.danger_accept_invalid_certs(true);
-        builder.danger_accept_invalid_hostnames(true);
+        // STARTTLS always requires a valid certificate and hostname match.
+        let builder = native_tls::TlsConnector::builder();
         let connector = TlsConnector::from(builder);
         let tls = connector.connect(&self.host, stream.compat()).await?;
 
@@ -202,6 +200,34 @@ impl ImapClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn placeholder_client(host: &str) -> ImapClient {
+        ImapClient {
+            host: host.to_string(),
+            port: 143,
+            user: String::new(),
+            password: String::new(),
+            tls_mode: ImapTlsMode::default(),
+        }
+    }
+
+    #[test]
+    fn default_tls_mode_is_implicit() {
+        assert_eq!(
+            placeholder_client("localhost").tls_mode,
+            ImapTlsMode::Implicit
+        );
+    }
+
+    #[test]
+    fn with_tls_mode_overrides_default() {
+        assert_eq!(
+            placeholder_client("mail.example.com")
+                .with_tls_mode(ImapTlsMode::StartTls)
+                .tls_mode,
+            ImapTlsMode::StartTls
+        );
+    }
 
     #[tokio::test]
     async fn test_imap_connection() {

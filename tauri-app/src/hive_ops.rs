@@ -141,6 +141,9 @@ impl HiveOperations for TauriHiveOps {
             "imap_tls_mode",
             "smtp_host",
             "smtp_port",
+            "smtp_user",
+            "smtp_password",
+            "smtp_tls_mode",
         ];
 
         if IMAP_SECRET_KEYS.contains(&key) {

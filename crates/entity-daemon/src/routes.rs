@@ -118,10 +118,14 @@ pub async fn chat(
         abigail_router::inject_preprompt(&prompt, enriched_preprompt.clone())
     };
 
-    let messages = entity_chat::build_contextual_messages(
+    let budget = entity_chat::ContextBudget::default();
+    let messages = entity_chat::build_contextual_messages_with_memory(
+        &state.memory,
+        &session_id,
         &system_prompt,
         body.session_messages,
         &body.message,
+        &budget,
     );
 
     let tools = entity_chat::build_tool_definitions(&state.registry);
@@ -256,10 +260,14 @@ pub async fn chat_stream(
     );
     let system_prompt = abigail_router::inject_preprompt(&system_prompt, enriched_preprompt);
 
-    let messages = entity_chat::build_contextual_messages(
+    let budget = entity_chat::ContextBudget::default();
+    let messages = entity_chat::build_contextual_messages_with_memory(
+        &state.memory,
+        &session_id,
         &system_prompt,
         body.session_messages,
         &body.message,
+        &budget,
     );
     let tools = entity_chat::build_tool_definitions(&state.registry);
 

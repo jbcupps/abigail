@@ -19,17 +19,7 @@ pub struct TaskStatus;
 
 #[async_trait]
 pub trait AgentCooperationCapability: Send + Sync {
-    async fn discover_agents(&self) -> anyhow::Result<Vec<AgentInfo>> {
-        Ok(vec![])
-    }
-    async fn send_message(&self, _agent_id: &str, _message: AgentMessage) -> anyhow::Result<()> {
-        Err(anyhow::anyhow!("stub: not implemented"))
-    }
-    async fn delegate_task(
-        &self,
-        _agent_id: &str,
-        _task: TaskRequest,
-    ) -> anyhow::Result<TaskHandle> {
-        Err(anyhow::anyhow!("stub: not implemented"))
-    }
+    async fn discover_agents(&self) -> anyhow::Result<Vec<AgentInfo>>;
+    async fn send_message(&self, agent_id: &str, message: AgentMessage) -> anyhow::Result<()>;
+    async fn delegate_task(&self, agent_id: &str, task: TaskRequest) -> anyhow::Result<TaskHandle>;
 }

@@ -56,5 +56,20 @@ name = "smtp_port"
 description = "SMTP server port (default: 587)"
 required = false
 
+[[secrets]]
+name = "smtp_user"
+description = "SMTP username / email address (defaults to imap_user when omitted)"
+required = false
+
+[[secrets]]
+name = "smtp_password"
+description = "SMTP password (defaults to imap_password when omitted)"
+required = false
+
+[[secrets]]
+name = "smtp_tls_mode"
+description = "TLS mode: STARTTLS (default) or IMPLICIT"
+required = false
+
 [config]
 defaults = { imap_port = 993, smtp_port = 587 }

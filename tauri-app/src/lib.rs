@@ -182,89 +182,98 @@ pub async fn create_email_skill_for_registry(state: &AppState) -> Result<Arc<dyn
     use skill_email::EmailSkill;
     let manifest = EmailSkill::default_manifest();
     let mut skill = EmailSkill::new(manifest);
-
-    let has_creds = state
-        .skills_secrets
-        .lock()
-        .map_err(|e| e.to_string())?
-        .get_secret("imap_password")
-        .is_some();
-
-    if has_creds {
-        let (imap_user, imap_password, imap_host, imap_port, imap_tls_mode, smtp_host, smtp_port) = {
-            let v = state.skills_secrets.lock().map_err(|e| e.to_string())?;
-            (
-                v.get_secret("imap_user").unwrap_or("").to_string(),
-                v.get_secret("imap_password").unwrap_or("").to_string(),
-                v.get_secret("imap_host").unwrap_or("").to_string(),
-                v.get_secret("imap_port").unwrap_or("993").to_string(),
-                v.get_secret("imap_tls_mode")
-                    .unwrap_or("IMPLICIT")
-                    .to_string(),
-                v.get_secret("smtp_host").unwrap_or("").to_string(),
-                v.get_secret("smtp_port").unwrap_or("587").to_string(),
-            )
-        };
-
-        let mut values = HashMap::new();
-        values.insert(
-            "imap_host".to_string(),
-            serde_json::Value::String(imap_host),
-        );
-        values.insert(
-            "imap_port".to_string(),
-            serde_json::json!(imap_port.parse::<u64>().unwrap_or(993)),
-        );
-        values.insert(
-            "imap_user".to_string(),
-            serde_json::Value::String(imap_user),
-        );
-        values.insert(
-            "imap_tls_mode".to_string(),
-            serde_json::Value::String(imap_tls_mode),
-        );
-        if !smtp_host.is_empty() {
-            values.insert(
-                "smtp_host".to_string(),
-                serde_json::Value::String(smtp_host),
-            );
-        }
-        if !smtp_port.is_empty() {
-            values.insert(
-                "smtp_port".to_string(),
-                serde_json::json!(smtp_port.parse::<u64>().unwrap_or(587)),
-            );
-        }
-
-        let mut secrets = HashMap::new();
-        secrets.insert("imap_password".to_string(), imap_password);
-
-        let skill_config = SkillConfig {
-            values,
-            secrets,
-            limits: ResourceLimits::default(),
-            permissions: vec![],
-            stream_broker: Some(state.stream_broker.clone()),
-        };
-
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(15),
-            skill.initialize(skill_config),
+    let (
+        imap_user,
+        imap_password,
+        imap_host,
+        imap_port,
+        imap_tls_mode,
+        smtp_host,
+        smtp_port,
+        smtp_user,
+        smtp_password,
+        smtp_tls_mode,
+    ) = {
+        let v = state.skills_secrets.lock().map_err(|e| e.to_string())?;
+        (
+            v.get_secret("imap_user").unwrap_or("").to_string(),
+            v.get_secret("imap_password").unwrap_or("").to_string(),
+            v.get_secret("imap_host").unwrap_or("").to_string(),
+            v.get_secret("imap_port").unwrap_or("993").to_string(),
+            v.get_secret("imap_tls_mode")
+                .unwrap_or("IMPLICIT")
+                .to_string(),
+            v.get_secret("smtp_host").unwrap_or("").to_string(),
+            v.get_secret("smtp_port").unwrap_or("587").to_string(),
+            v.get_secret("smtp_user").unwrap_or("").to_string(),
+            v.get_secret("smtp_password").unwrap_or("").to_string(),
+            v.get_secret("smtp_tls_mode")
+                .unwrap_or("STARTTLS")
+                .to_string(),
         )
-        .await
-        {
-            Ok(Ok(())) => {
-                tracing::info!("Email skill initialized successfully");
-            }
-            Ok(Err(e)) => {
-                tracing::warn!("Email skill init failed (registered uninitialized): {}", e);
-            }
-            Err(_) => {
-                tracing::warn!("Email skill init timed out after 15s (IMAP server unreachable?)");
-            }
+    };
+
+    let mut values = HashMap::new();
+    values.insert(
+        "imap_host".to_string(),
+        serde_json::Value::String(imap_host),
+    );
+    values.insert(
+        "imap_port".to_string(),
+        serde_json::json!(imap_port.parse::<u64>().unwrap_or(993)),
+    );
+    values.insert(
+        "imap_user".to_string(),
+        serde_json::Value::String(imap_user),
+    );
+    values.insert(
+        "imap_tls_mode".to_string(),
+        serde_json::Value::String(imap_tls_mode),
+    );
+    values.insert(
+        "smtp_host".to_string(),
+        serde_json::Value::String(smtp_host),
+    );
+    values.insert(
+        "smtp_port".to_string(),
+        serde_json::json!(smtp_port.parse::<u64>().unwrap_or(587)),
+    );
+    values.insert(
+        "smtp_user".to_string(),
+        serde_json::Value::String(smtp_user),
+    );
+    values.insert(
+        "smtp_tls_mode".to_string(),
+        serde_json::Value::String(smtp_tls_mode),
+    );
+
+    let mut secrets = HashMap::new();
+    secrets.insert("imap_password".to_string(), imap_password);
+    secrets.insert("smtp_password".to_string(), smtp_password);
+
+    let skill_config = SkillConfig {
+        values,
+        secrets,
+        limits: ResourceLimits::default(),
+        permissions: vec![],
+        stream_broker: Some(state.stream_broker.clone()),
+    };
+
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        skill.initialize(skill_config),
+    )
+    .await
+    {
+        Ok(Ok(())) => {
+            tracing::info!("Email skill initialized successfully");
         }
-    } else {
-        tracing::info!("Email skill created without credentials (no imap_password in vault)");
+        Ok(Err(e)) => {
+            tracing::warn!("Email skill init failed (registered uninitialized): {}", e);
+        }
+        Err(_) => {
+            tracing::warn!("Email skill init timed out after 15s (IMAP server unreachable?)");
+        }
     }
 
     Ok(Arc::new(skill))
@@ -1084,7 +1093,9 @@ fn try_run() -> Result<(), String> {
             list_discovered_skills,
             list_missing_skill_secrets,
             list_skills_vault_entries,
+            get_skill_runtime_statuses,
             store_secret,
+            reload_skill,
             list_tools,
             execute_tool,
             get_mcp_servers,
@@ -1141,6 +1152,7 @@ fn try_run() -> Result<(), String> {
             optimize_sqlite,
             reset_memories,
             search_memories,
+            search_conversation_turns,
             list_sessions,
             get_session_turns,
             recent_memories,

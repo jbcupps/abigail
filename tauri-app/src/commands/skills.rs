@@ -3,10 +3,11 @@ use abigail_core::config::SignedSkillAllowlistEntry;
 use abigail_core::{McpServerDefinition, RuntimeMode};
 use abigail_skills::protocol::mcp::{HttpMcpClient, McpTool};
 use abigail_skills::{
-    FileSystemPermission, HealthStatus, Permission, SkillExecutionPolicy, SkillId, SkillManifest,
-    ToolDescriptor, ToolOutput, ToolParams,
+    FileSystemPermission, HealthStatus, Permission, Skill, SkillExecutionPolicy, SkillId,
+    SkillManifest, ToolDescriptor, ToolOutput, ToolParams,
 };
 use std::collections::HashMap;
+use std::sync::Arc;
 use tauri::State;
 
 pub use abigail_core::RESERVED_PROVIDER_KEYS;
@@ -210,7 +211,39 @@ const EMAIL_SECRET_KEYS: &[&str] = &[
     "imap_tls_mode",
     "smtp_host",
     "smtp_port",
+    "smtp_user",
+    "smtp_password",
+    "smtp_tls_mode",
 ];
+
+#[derive(serde::Serialize)]
+pub struct SkillSecretStatus {
+    pub name: String,
+    pub required: bool,
+    pub is_set: bool,
+}
+
+#[derive(serde::Serialize)]
+pub struct SkillRuntimeStatus {
+    pub id: String,
+    pub name: String,
+    pub origin: String,
+    pub health_status: String,
+    pub health_message: Option<String>,
+    pub loaded: bool,
+    pub tool_names: Vec<String>,
+    pub secrets: Vec<SkillSecretStatus>,
+}
+
+fn skill_origin(skill_id: &str) -> String {
+    if skill_id == skill_email::EMAIL_SKILL_ID {
+        "native_email".to_string()
+    } else if skill_id.starts_with("builtin.") || skill_id.starts_with("com.abigail.skills.") {
+        "native".to_string()
+    } else {
+        "dynamic".to_string()
+    }
+}
 
 #[tauri::command]
 pub async fn store_secret(
@@ -279,6 +312,193 @@ pub async fn store_secret(
     }
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn get_skill_runtime_statuses(
+    state: State<'_, AppState>,
+) -> Result<Vec<SkillRuntimeStatus>, String> {
+    let mode = { state.config.read().map_err(|e| e.to_string())?.runtime_mode };
+    if mode == RuntimeMode::Daemon {
+        let entity_url = {
+            state
+                .config
+                .read()
+                .map_err(|e| e.to_string())?
+                .entity_daemon_url
+                .clone()
+        };
+        let client = daemon_client::EntityClient::new(&entity_url);
+        let skills = client.list_skills().await.map_err(|e| e.to_string())?;
+        return Ok(skills
+            .into_iter()
+            .map(|skill| SkillRuntimeStatus {
+                id: skill.id,
+                name: skill.name,
+                origin: "daemon".to_string(),
+                health_status: "unknown".to_string(),
+                health_message: Some(
+                    "Daemon mode currently exposes tool inventory but not per-skill health."
+                        .to_string(),
+                ),
+                loaded: true,
+                tool_names: skill.tools.into_iter().map(|tool| tool.name).collect(),
+                secrets: Vec::new(),
+            })
+            .collect());
+    }
+
+    let manifests = state.registry.list().map_err(|e| e.to_string())?;
+    let vault = state.skills_secrets.lock().map_err(|e| e.to_string())?;
+    let mut statuses = manifests
+        .into_iter()
+        .map(|manifest| {
+            let (tool_names, health_status, health_message, loaded) =
+                match state.registry.get_skill(&manifest.id) {
+                    Ok((skill, _)) => {
+                        let health = skill.health();
+                        (
+                            skill.tools().into_iter().map(|tool| tool.name).collect(),
+                            format!("{:?}", health.status).to_lowercase(),
+                            health.message,
+                            true,
+                        )
+                    }
+                    Err(err) => (
+                        Vec::new(),
+                        "unknown".to_string(),
+                        Some(err.to_string()),
+                        false,
+                    ),
+                };
+
+            let secrets = manifest
+                .secrets
+                .iter()
+                .map(|secret| SkillSecretStatus {
+                    name: secret.name.clone(),
+                    required: secret.required,
+                    is_set: vault.exists(&secret.name),
+                })
+                .collect::<Vec<_>>();
+
+            SkillRuntimeStatus {
+                id: manifest.id.0.clone(),
+                name: manifest.name,
+                origin: skill_origin(&manifest.id.0),
+                health_status,
+                health_message,
+                loaded,
+                tool_names,
+                secrets,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    statuses.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(statuses)
+}
+
+#[tauri::command]
+pub async fn reload_skill(
+    state: State<'_, AppState>,
+    skill_id: String,
+) -> Result<SkillRuntimeStatus, String> {
+    let mode = { state.config.read().map_err(|e| e.to_string())?.runtime_mode };
+    if mode == RuntimeMode::Daemon {
+        return Err("reload_skill is not yet exposed in daemon mode".to_string());
+    }
+
+    let skill_id = skill_id.trim().to_string();
+    if skill_id.is_empty() {
+        return Err("skill_id is required".to_string());
+    }
+
+    if skill_id == skill_email::EMAIL_SKILL_ID {
+        let skill = crate::create_email_skill_for_registry(&state).await?;
+        let health = skill.health();
+        let manifest = skill.manifest().clone();
+        let _ = state.registry.unregister(&manifest.id);
+        state
+            .registry
+            .register(manifest.id.clone(), skill)
+            .map_err(|e| e.to_string())?;
+
+        let vault = state.skills_secrets.lock().map_err(|e| e.to_string())?;
+        return Ok(SkillRuntimeStatus {
+            id: manifest.id.0.clone(),
+            name: manifest.name,
+            origin: skill_origin(&manifest.id.0),
+            health_status: format!("{:?}", health.status).to_lowercase(),
+            health_message: health.message,
+            loaded: true,
+            tool_names: state
+                .registry
+                .get_skill(&manifest.id)
+                .map_err(|e| e.to_string())?
+                .0
+                .tools()
+                .into_iter()
+                .map(|tool| tool.name)
+                .collect(),
+            secrets: manifest
+                .secrets
+                .iter()
+                .map(|secret| SkillSecretStatus {
+                    name: secret.name.clone(),
+                    required: secret.required,
+                    is_set: vault.exists(&secret.name),
+                })
+                .collect(),
+        });
+    }
+
+    let (skills_dir, target_id) = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        (config.data_dir.join("skills"), skill_id.clone())
+    };
+    let discovered =
+        abigail_skills::DynamicApiSkill::discover(&skills_dir, Some(state.skills_secrets.clone()));
+    let skill = discovered
+        .into_iter()
+        .find(|skill| skill.manifest().id.0 == target_id)
+        .ok_or_else(|| format!("No reloadable dynamic skill found for '{}'", skill_id))?;
+
+    let manifest = skill.manifest().clone();
+    let health = skill.health();
+    let _ = state.registry.unregister(&manifest.id);
+    state
+        .registry
+        .register(manifest.id.clone(), Arc::new(skill))
+        .map_err(|e| e.to_string())?;
+
+    let vault = state.skills_secrets.lock().map_err(|e| e.to_string())?;
+    Ok(SkillRuntimeStatus {
+        id: manifest.id.0.clone(),
+        name: manifest.name,
+        origin: skill_origin(&manifest.id.0),
+        health_status: format!("{:?}", health.status).to_lowercase(),
+        health_message: health.message,
+        loaded: true,
+        tool_names: state
+            .registry
+            .get_skill(&manifest.id)
+            .map_err(|e| e.to_string())?
+            .0
+            .tools()
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect(),
+        secrets: manifest
+            .secrets
+            .iter()
+            .map(|secret| SkillSecretStatus {
+                name: secret.name.clone(),
+                required: secret.required,
+                is_set: vault.exists(&secret.name),
+            })
+            .collect(),
+    })
 }
 
 #[tauri::command]
@@ -492,6 +712,9 @@ mod tests {
             "imap_tls_mode",
             "smtp_host",
             "smtp_port",
+            "smtp_user",
+            "smtp_password",
+            "smtp_tls_mode",
         ] {
             assert!(
                 validate_secret_namespace_with(&registry, &tmp, key).is_ok(),
@@ -525,5 +748,8 @@ mod tests {
         assert!(names.contains(&"imap_tls_mode"), "missing imap_tls_mode");
         assert!(names.contains(&"smtp_host"), "missing smtp_host");
         assert!(names.contains(&"smtp_port"), "missing smtp_port");
+        assert!(names.contains(&"smtp_user"), "missing smtp_user");
+        assert!(names.contains(&"smtp_password"), "missing smtp_password");
+        assert!(names.contains(&"smtp_tls_mode"), "missing smtp_tls_mode");
     }
 }

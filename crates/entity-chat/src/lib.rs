@@ -171,6 +171,34 @@ pub fn build_contextual_messages(
     messages
 }
 
+fn dedupe_latest_user_message(history: &mut Vec<Message>, latest_user_message: &str) {
+    if let Some(last) = history.last() {
+        if last.role == "user" && last.content == latest_user_message.trim() {
+            history.pop();
+        }
+    }
+}
+
+fn recall_queries(user_message: &str) -> Vec<String> {
+    let mut queries = Vec::new();
+    let mut seen = HashSet::new();
+    let trimmed = user_message.trim();
+    if !trimmed.is_empty() {
+        queries.push(trimmed.to_string());
+    }
+    for token in trimmed.split(|c: char| !c.is_alphanumeric()) {
+        let token = token.to_lowercase();
+        if token.len() < 4 || !seen.insert(token.clone()) {
+            continue;
+        }
+        queries.push(token);
+        if queries.len() >= 6 {
+            break;
+        }
+    }
+    queries
+}
+
 // ---------------------------------------------------------------------------
 // Memory context (ContextBudget + build_memory_context)
 // ---------------------------------------------------------------------------
@@ -196,7 +224,7 @@ impl Default for ContextBudget {
 /// the full session_messages array.
 ///
 /// Returns a Vec<Message> with recent turns from the current session
-/// plus keyword-matched memories from older sessions.
+/// plus matched prior conversation turns and memories from older sessions.
 pub fn build_memory_context(
     store: &abigail_memory::MemoryStore,
     session_id: &str,
@@ -205,6 +233,8 @@ pub fn build_memory_context(
 ) -> Vec<Message> {
     let mut context = Vec::new();
     let mut total_chars = 0usize;
+    let mut recalled_sections = Vec::new();
+    let recall_queries = recall_queries(user_message);
 
     // Layer 1: Recent turns from the current session.
     if let Ok(recent) = store.recent_turns(session_id, budget.recent_turns_limit) {
@@ -218,26 +248,131 @@ pub fn build_memory_context(
         }
     }
 
-    // Layer 2: Keyword search across all memories.
+    // Layer 2: Search prior raw turns from older sessions so exact setup details
+    // can be recalled even when they were never distilled into memories.
     if total_chars < budget.max_total_chars {
-        if let Ok(memories) = store.search_memories(user_message, budget.memory_search_limit) {
-            let mut mem_lines = Vec::new();
-            for m in &memories {
-                let line = format!("[{}] {}", m.created_at.format("%Y-%m-%d"), m.content);
-                if total_chars + line.len() > budget.max_total_chars {
-                    break;
+        let mut turn_lines = Vec::new();
+        let mut seen_turn_ids = HashSet::new();
+        for query in &recall_queries {
+            if let Ok(turns) = store.search_turns(query, budget.memory_search_limit * 4) {
+                for turn in turns
+                    .into_iter()
+                    .filter(|turn| turn.session_id != session_id)
+                    .take(budget.memory_search_limit * 2)
+                {
+                    if !seen_turn_ids.insert(turn.id.clone()) {
+                        continue;
+                    }
+                    let snippet = if turn.content.chars().count() > 220 {
+                        format!("{}...", turn.content.chars().take(220).collect::<String>())
+                    } else {
+                        turn.content.clone()
+                    };
+                    let line = format!(
+                        "[prior_turn {} session={} role={}] {}",
+                        turn.created_at.format("%Y-%m-%d"),
+                        turn.session_id,
+                        turn.role,
+                        snippet
+                    );
+                    if total_chars + line.len() > budget.max_total_chars {
+                        break;
+                    }
+                    total_chars += line.len();
+                    turn_lines.push(line);
+                    if turn_lines.len() >= budget.memory_search_limit {
+                        break;
+                    }
                 }
-                total_chars += line.len();
-                mem_lines.push(line);
             }
-            if !mem_lines.is_empty() {
-                let section = format!("## Recalled Memories\n\n{}", mem_lines.join("\n"));
-                context.insert(0, Message::new("system", &section));
+            if turn_lines.len() >= budget.memory_search_limit {
+                break;
             }
+        }
+        if !turn_lines.is_empty() {
+            recalled_sections.push(format!(
+                "## Recalled Prior Conversation\n\n{}",
+                turn_lines.join("\n")
+            ));
         }
     }
 
+    // Layer 3: Keyword search across structured memories.
+    if total_chars < budget.max_total_chars {
+        let mut mem_lines = Vec::new();
+        let mut seen_memory_ids = HashSet::new();
+        for query in &recall_queries {
+            if let Ok(memories) = store.search_memories(query, budget.memory_search_limit) {
+                for m in &memories {
+                    if !seen_memory_ids.insert(m.id.clone()) {
+                        continue;
+                    }
+                    let line = format!(
+                        "[memory {} weight={}] {}",
+                        m.created_at.format("%Y-%m-%d"),
+                        m.weight.as_str(),
+                        m.content
+                    );
+                    if total_chars + line.len() > budget.max_total_chars {
+                        break;
+                    }
+                    total_chars += line.len();
+                    mem_lines.push(line);
+                    if mem_lines.len() >= budget.memory_search_limit {
+                        break;
+                    }
+                }
+            }
+            if mem_lines.len() >= budget.memory_search_limit {
+                break;
+            }
+        }
+        if !mem_lines.is_empty() {
+            recalled_sections.push(format!("## Recalled Memories\n\n{}", mem_lines.join("\n")));
+        }
+    }
+
+    if !recalled_sections.is_empty() {
+        context.insert(0, Message::new("system", recalled_sections.join("\n\n")));
+    }
+
     context
+}
+
+/// Assemble `[system_prompt, recalled_context, history, user_message]`.
+///
+/// Uses explicit `session_messages` when provided, otherwise pulls recent turns
+/// from the memory store. In both cases it also injects matched prior turns and
+/// structured memories so earlier setup details remain retrievable.
+pub fn build_contextual_messages_with_memory(
+    store: &abigail_memory::MemoryStore,
+    session_id: &str,
+    system_prompt: &str,
+    session_messages: Option<Vec<SessionMessage>>,
+    latest_user_message: &str,
+    budget: &ContextBudget,
+) -> Vec<Message> {
+    let mut messages = vec![Message::new("system", system_prompt)];
+    let memory_context = build_memory_context(store, session_id, latest_user_message, budget);
+
+    let used_explicit_history = session_messages.as_ref().is_some_and(|h| !h.is_empty());
+    if used_explicit_history {
+        if let Some(recalled) = memory_context.first() {
+            if recalled.role == "system" {
+                messages.push(recalled.clone());
+            }
+        }
+        let mut history = sanitize_session_history(session_messages);
+        dedupe_latest_user_message(&mut history, latest_user_message);
+        messages.extend(history);
+    } else {
+        let mut history = memory_context;
+        dedupe_latest_user_message(&mut history, latest_user_message);
+        messages.extend(history);
+    }
+
+    messages.push(Message::new("user", latest_user_message));
+    messages
 }
 
 // ---------------------------------------------------------------------------
@@ -1646,6 +1781,78 @@ mod tests {
         assert!(result.contains("anthropic"));
         assert!(result.contains("claude-sonnet-4-6"));
         assert!(result.contains("Adam"));
+    }
+
+    #[test]
+    fn build_memory_context_recalls_prior_turns_and_memories() {
+        let store = abigail_memory::MemoryStore::open_in_memory().unwrap();
+        store
+            .insert_turn(&abigail_memory::ConversationTurn::new(
+                "current-session",
+                "user",
+                "Current session question",
+            ))
+            .unwrap();
+        store
+            .insert_turn(&abigail_memory::ConversationTurn::new(
+                "older-session",
+                "assistant",
+                "Email bridge details: host 127.0.0.1 port 7654 STARTTLS auth required",
+            ))
+            .unwrap();
+        store
+            .insert_memory(&abigail_memory::Memory::distilled(
+                "Email bridge host is 127.0.0.1 and uses STARTTLS".to_string(),
+            ))
+            .unwrap();
+
+        let messages = build_memory_context(
+            &store,
+            "current-session",
+            "use the email bridge details from earlier",
+            &ContextBudget::default(),
+        );
+
+        let recalled = messages
+            .iter()
+            .find(|message| message.role == "system")
+            .expect("expected recalled system context");
+        assert!(recalled.content.contains("Recalled Prior Conversation"));
+        assert!(recalled.content.contains("older-session"));
+        assert!(recalled.content.contains("Recalled Memories"));
+        assert!(recalled.content.contains("127.0.0.1"));
+    }
+
+    #[test]
+    fn build_contextual_messages_with_memory_prefers_explicit_history_and_injects_recall() {
+        let store = abigail_memory::MemoryStore::open_in_memory().unwrap();
+        store
+            .insert_turn(&abigail_memory::ConversationTurn::new(
+                "older-session",
+                "assistant",
+                "SMTP bridge is on port 2525",
+            ))
+            .unwrap();
+
+        let messages = build_contextual_messages_with_memory(
+            &store,
+            "current-session",
+            "system prompt",
+            Some(vec![SessionMessage {
+                role: "assistant".to_string(),
+                content: "Explicit session history".to_string(),
+            }]),
+            "use the bridge details",
+            &ContextBudget::default(),
+        );
+
+        assert_eq!(messages[0].role, "system");
+        assert!(messages
+            .iter()
+            .any(|message| message.content == "Explicit session history"));
+        assert!(messages
+            .iter()
+            .any(|message| message.content.contains("Recalled Prior Conversation")));
     }
 
     // ── RuntimeContext ────────────────────────────────────────────
