@@ -67,6 +67,13 @@ impl SkillRegistry {
         Ok(())
     }
 
+    pub fn execution_policy(&self) -> SkillResult<SkillExecutionPolicy> {
+        self.execution_policy
+            .read()
+            .map(|policy| policy.clone())
+            .map_err(|e| SkillError::InitFailed(e.to_string()))
+    }
+
     pub fn enforce_skill_activation(&self, skill_id: &SkillId) -> SkillResult<()> {
         let policy = self
             .execution_policy

@@ -1,0 +1,23 @@
+[skill]
+id = "com.abigail.skills.browser"
+name = "Browser"
+version = "0.1.0"
+description = "Browse websites, extract content, click elements, and fill forms with desktop browser automation"
+category = "Sensory"
+keywords = ["browser", "browse", "web", "website", "navigate", "click", "form"]
+
+[author]
+name = "Abigail Team"
+
+[runtime]
+runtime = "Native"
+min_abigail_version = "0.1.0"
+platforms = ["Windows", "macOS", "Linux"]
+
+[[capabilities]]
+capability = "browser_automation"
+version = "1.0"
+
+[[permissions]]
+permission = { Network = "Full" }
+reason = "Open and interact with websites and web applications"

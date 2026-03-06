@@ -3,8 +3,8 @@ use abigail_core::config::SignedSkillAllowlistEntry;
 use abigail_core::{McpServerDefinition, RuntimeMode};
 use abigail_skills::protocol::mcp::{HttpMcpClient, McpTool};
 use abigail_skills::{
-    FileSystemPermission, HealthStatus, Permission, Skill, SkillExecutionPolicy, SkillId,
-    SkillManifest, ToolDescriptor, ToolOutput, ToolParams,
+    HealthStatus, Skill, SkillExecutionPolicy, SkillId, SkillManifest, ToolDescriptor, ToolOutput,
+    ToolParams,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,23 +20,6 @@ fn refresh_skill_policy(
         .registry
         .set_execution_policy(SkillExecutionPolicy::from_app_config(config))
         .map_err(|e| e.to_string())
-}
-
-fn is_dangerous_tool(td: &ToolDescriptor) -> bool {
-    let name = td.name.to_lowercase();
-    let destructive_name = [
-        "delete", "remove", "drop", "wipe", "truncate", "reset", "kill",
-    ]
-    .iter()
-    .any(|k| name.contains(k));
-    let destructive_permission = td.required_permissions.iter().any(|perm| {
-        matches!(
-            perm,
-            Permission::FileSystem(FileSystemPermission::Write(_))
-                | Permission::FileSystem(FileSystemPermission::Full)
-        )
-    });
-    td.requires_confirmation || destructive_name || destructive_permission
 }
 
 fn resolve_mcp_server_url(
@@ -520,13 +503,24 @@ pub async fn execute_tool(
         .registry
         .enforce_skill_execution(&id)
         .map_err(|e| e.to_string())?;
+    let mentor_confirmed = params
+        .get("mentor_confirmed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let mut tool_params = ToolParams::new();
+    for (k, v) in params {
+        if k != "mentor_confirmed" {
+            tool_params.values.insert(k, v);
+        }
+    }
+
     if let Ok((skill, _)) = state.registry.get_skill(&id) {
         if let Some(td) = skill.tools().into_iter().find(|t| t.name == tool_name) {
-            let mentor_confirmed = params
-                .get("mentor_confirmed")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            if is_dangerous_tool(&td) && !mentor_confirmed {
+            let policy = state
+                .registry
+                .execution_policy()
+                .map_err(|e| e.to_string())?;
+            if policy.requires_mentor_confirmation(&id.0, &td) && !mentor_confirmed {
                 return Err(
                     "This tool requires explicit mentor confirmation. Re-run with `mentor_confirmed: true`."
                         .to_string(),
@@ -534,10 +528,9 @@ pub async fn execute_tool(
             }
         }
     }
-    let tool_params = ToolParams { values: params };
     state
         .executor
-        .execute(&id, &tool_name, tool_params)
+        .execute_with_confirmation(&id, &tool_name, tool_params, mentor_confirmed)
         .await
         .map_err(|e| e.to_string())
 }

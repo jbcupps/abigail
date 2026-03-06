@@ -24,6 +24,7 @@ abigail-memory = { path = "../abigail-memory" }
 abigail-queue = { path = "../abigail-queue" }
 abigail-streaming = { path = "../abigail-streaming" }
 skill-email = { path = "../../skills/skill-email" }
+skill-browser = { path = "../../skills/skill-browser" }
 skill-clipboard = { path = "../../skills/skill-clipboard" }
 skill-shell = { path = "../../skills/skill-shell" }
 skill-git = { path = "../../skills/skill-git" }

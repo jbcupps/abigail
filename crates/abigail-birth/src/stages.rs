@@ -432,6 +432,7 @@ mod tests {
             entity_daemon_url: "http://127.0.0.1:3142".to_string(),
             iggy_connection: None,
             theme_id: None,
+            autonomy_profile: Default::default(),
         }
     }
 

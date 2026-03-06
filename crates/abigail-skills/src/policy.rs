@@ -12,17 +12,40 @@
 
 use std::collections::{HashMap, HashSet};
 
-use abigail_core::{config::SignedSkillAllowlistEntry, AppConfig};
+use abigail_core::{config::SignedSkillAllowlistEntry, AppConfig, AutonomyProfile};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use ed25519_dalek::{Signature, Verifier as _, VerifyingKey};
 
-#[derive(Debug, Clone, Default)]
+use crate::{FileSystemPermission, Permission, ToolDescriptor};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolRiskClass {
+    Ordinary,
+    Sensitive,
+    Irreversible,
+}
+
+#[derive(Debug, Clone)]
 pub struct SkillExecutionPolicy {
     approved_skill_ids: HashSet<String>,
     active_signed_entries: HashMap<String, SignedSkillAllowlistEntry>,
     trusted_signers: HashMap<String, VerifyingKey>,
     strict_signed_external: bool,
     configuration_error: Option<String>,
+    autonomy_profile: AutonomyProfile,
+}
+
+impl Default for SkillExecutionPolicy {
+    fn default() -> Self {
+        Self {
+            approved_skill_ids: HashSet::new(),
+            active_signed_entries: HashMap::new(),
+            trusted_signers: HashMap::new(),
+            strict_signed_external: false,
+            configuration_error: None,
+            autonomy_profile: AutonomyProfile::Strict,
+        }
+    }
 }
 
 impl SkillExecutionPolicy {
@@ -71,7 +94,12 @@ impl SkillExecutionPolicy {
             // a valid signed allowlist entry.
             strict_signed_external: !config.trusted_skill_signers.is_empty(),
             configuration_error,
+            autonomy_profile: config.autonomy_profile,
         }
+    }
+
+    pub fn autonomy_profile(&self) -> AutonomyProfile {
+        self.autonomy_profile
     }
 
     pub fn evaluate_activation(&self, skill_id: &str) -> Result<(), String> {
@@ -140,6 +168,70 @@ impl SkillExecutionPolicy {
 
         Ok(true)
     }
+
+    pub fn requires_mentor_confirmation(&self, skill_id: &str, tool: &ToolDescriptor) -> bool {
+        let risk = classify_tool_risk(skill_id, tool);
+        match self.autonomy_profile {
+            AutonomyProfile::Strict => {
+                tool.requires_confirmation || risk != ToolRiskClass::Ordinary
+            }
+            AutonomyProfile::Balanced | AutonomyProfile::DesktopOperator => {
+                matches!(risk, ToolRiskClass::Irreversible)
+                    || (tool.requires_confirmation
+                        && !is_ordinary_desktop_tool(skill_id, &tool.name))
+            }
+        }
+    }
+}
+
+fn classify_tool_risk(skill_id: &str, tool: &ToolDescriptor) -> ToolRiskClass {
+    if is_irreversible_name(&tool.name)
+        || tool
+            .required_permissions
+            .iter()
+            .any(|perm| matches!(perm, Permission::FileSystem(FileSystemPermission::Full)))
+    {
+        return ToolRiskClass::Irreversible;
+    }
+
+    if is_ordinary_desktop_tool(skill_id, &tool.name) {
+        return ToolRiskClass::Ordinary;
+    }
+
+    if tool.requires_confirmation {
+        return ToolRiskClass::Sensitive;
+    }
+
+    ToolRiskClass::Ordinary
+}
+
+fn is_irreversible_name(name: &str) -> bool {
+    let lowered = name.to_ascii_lowercase();
+    [
+        "delete", "remove", "drop", "wipe", "truncate", "reset", "kill", "destroy", "purge",
+        "revoke",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle))
+}
+
+fn is_ordinary_desktop_tool(skill_id: &str, tool_name: &str) -> bool {
+    if skill_id == "com.abigail.skills.browser" || tool_name.starts_with("browser_") {
+        return true;
+    }
+
+    matches!(
+        tool_name,
+        "run_command"
+            | "write_file"
+            | "mkdir"
+            | "http_post"
+            | "send_email"
+            | "clipboard_write"
+            | "calendar_add_event"
+            | "calendar_update_event"
+            | "git_commit"
+    )
 }
 
 fn decode_signer_key(raw: &str) -> Result<VerifyingKey, String> {
@@ -219,6 +311,57 @@ mod tests {
 
         let policy = SkillExecutionPolicy::from_app_config(&config);
         assert!(policy.evaluate_execution("dynamic.github_api").is_ok());
+    }
+
+    fn tool(
+        name: &str,
+        requires_confirmation: bool,
+        permissions: Vec<crate::Permission>,
+    ) -> ToolDescriptor {
+        ToolDescriptor {
+            name: name.to_string(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            returns: serde_json::json!({}),
+            cost_estimate: crate::CostEstimate::default(),
+            required_permissions: permissions,
+            autonomous: !requires_confirmation,
+            requires_confirmation,
+        }
+    }
+
+    #[test]
+    fn desktop_operator_allows_ordinary_side_effect_tools() {
+        let config = base_config();
+        let policy = SkillExecutionPolicy::from_app_config(&config);
+        let tool = tool("run_command", true, vec![crate::Permission::ShellExecute]);
+
+        assert!(!policy.requires_mentor_confirmation("com.abigail.skills.shell", &tool));
+    }
+
+    #[test]
+    fn strict_profile_preserves_confirmation_for_shell() {
+        let mut config = base_config();
+        config.autonomy_profile = AutonomyProfile::Strict;
+        let policy = SkillExecutionPolicy::from_app_config(&config);
+        let tool = tool("run_command", true, vec![crate::Permission::ShellExecute]);
+
+        assert!(policy.requires_mentor_confirmation("com.abigail.skills.shell", &tool));
+    }
+
+    #[test]
+    fn desktop_operator_still_requires_confirmation_for_destructive_tools() {
+        let config = base_config();
+        let policy = SkillExecutionPolicy::from_app_config(&config);
+        let tool = tool(
+            "delete_file",
+            false,
+            vec![crate::Permission::FileSystem(
+                crate::FileSystemPermission::Write(vec!["~".to_string()]),
+            )],
+        );
+
+        assert!(policy.requires_mentor_confirmation("com.abigail.skills.filesystem", &tool));
     }
 
     #[test]

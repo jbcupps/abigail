@@ -39,6 +39,13 @@ pub mod browser {
             Self { _config: config }
         }
 
+        pub fn new_with_security_policy(
+            config: BrowserCapabilityConfig,
+            _policy: super::url_security::UrlSecurityPolicy,
+        ) -> Self {
+            Self { _config: config }
+        }
+
         pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
             Vec::new()
         }

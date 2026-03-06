@@ -25,6 +25,7 @@ abigail-identity = { path = "../crates/abigail-identity" }
 abigail-cli = { path = "../crates/abigail-cli" }
 soul-forge = { path = "../crates/soul-forge" }
 skill-web-search = { path = "../skills/skill-web-search" }
+skill-browser = { path = "../skills/skill-browser" }
 skill-filesystem = { path = "../skills/skill-filesystem" }
 skill-shell = { path = "../skills/skill-shell" }
 skill-http = { path = "../skills/skill-http" }

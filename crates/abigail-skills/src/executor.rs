@@ -118,7 +118,8 @@ impl SkillExecutor {
             .find(|t| t.name == tool_name)
             .ok_or_else(|| SkillError::ToolFailed(format!("Unknown tool: {}", tool_name)))?;
 
-        if tool.requires_confirmation && !confirmed {
+        let policy = self.registry.execution_policy()?;
+        if policy.requires_mentor_confirmation(&skill_id.0, &tool) && !confirmed {
             tracing::warn!(
                 skill_id = %skill_id,
                 tool_name = tool_name,

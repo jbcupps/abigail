@@ -1,0 +1,14 @@
+[package]
+name = "skill-browser"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+abigail-capabilities = { path = "../../crates/abigail-capabilities" }
+abigail-skills = { path = "../../crates/abigail-skills" }
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+tracing.workspace = true

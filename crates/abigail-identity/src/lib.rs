@@ -333,6 +333,7 @@ impl IdentityManager {
                 let gc = self.global_config.read().map_err(|e| e.to_string())?;
                 Some(gc.default_theme.clone())
             },
+            autonomy_profile: Default::default(),
         };
         let config_path = agent_dir.join("config.json");
         config.save(&config_path).map_err(|e| e.to_string())?;
