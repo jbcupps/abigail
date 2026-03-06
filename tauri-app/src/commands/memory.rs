@@ -17,6 +17,16 @@ pub struct MemoryInfo {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationTurnInfo {
+    pub id: String,
+    pub session_id: String,
+    pub role: String,
+    pub content: String,
+    pub created_at: String,
+    pub source: String,
+}
+
 #[tauri::command]
 pub fn get_sqlite_stats(state: State<AppState>) -> Result<SqliteStats, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
@@ -137,6 +147,61 @@ pub fn search_memories(
             content: m.content,
             weight: m.weight.as_str().to_string(),
             created_at: m.created_at.to_rfc3339(),
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn search_conversation_turns(
+    state: State<AppState>,
+    query: String,
+    session_id: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<ConversationTurnInfo>, String> {
+    let since = since
+        .as_deref()
+        .map(chrono::DateTime::parse_from_rfc3339)
+        .transpose()
+        .map_err(|e| format!("Invalid 'since' timestamp: {}", e))?
+        .map(|dt| dt.with_timezone(&chrono::Utc));
+    let until = until
+        .as_deref()
+        .map(chrono::DateTime::parse_from_rfc3339)
+        .transpose()
+        .map_err(|e| format!("Invalid 'until' timestamp: {}", e))?
+        .map(|dt| dt.with_timezone(&chrono::Utc));
+    let target_session = session_id.as_deref();
+    let requested_limit = limit.unwrap_or(20);
+
+    let turns = state
+        .memory
+        .read()
+        .map_err(|e| e.to_string())?
+        .search_turns(
+            &query,
+            requested_limit.saturating_mul(4).max(requested_limit),
+        )
+        .map_err(|e| e.to_string())?;
+
+    Ok(turns
+        .into_iter()
+        .filter(|turn| {
+            target_session
+                .map(|session| turn.session_id == session)
+                .unwrap_or(true)
+        })
+        .filter(|turn| since.map(|min| turn.created_at >= min).unwrap_or(true))
+        .filter(|turn| until.map(|max| turn.created_at <= max).unwrap_or(true))
+        .take(requested_limit)
+        .map(|turn| ConversationTurnInfo {
+            id: turn.id,
+            session_id: turn.session_id,
+            role: turn.role,
+            content: turn.content,
+            created_at: turn.created_at.to_rfc3339(),
+            source: "conversation_turn".to_string(),
         })
         .collect())
 }

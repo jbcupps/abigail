@@ -266,10 +266,15 @@ impl<'a> ChatCoordinator<'a> {
         archive_turn(self.state, &session_id, "user", &request.message, None).await;
 
         let (router, system_prompt) = build_router_and_prompt(self.state, &request.message)?;
-        let messages = entity_chat::build_contextual_messages(
+        let memory = self.state.memory.read().map_err(|e| e.to_string())?;
+        let budget = entity_chat::ContextBudget::default();
+        let messages = entity_chat::build_contextual_messages_with_memory(
+            &memory,
+            &session_id,
             &system_prompt,
             request.session_messages,
             &request.message,
+            &budget,
         );
         let tools = entity_chat::build_tool_definitions(&self.state.registry);
 

@@ -68,6 +68,20 @@ impl SmtpClient {
         }
     }
 
+    /// Test the SMTP connection using a NOOP after authentication.
+    pub async fn test_connection(&self) -> anyhow::Result<()> {
+        let transport = self.build_transport();
+        let ok = transport
+            .test_connection()
+            .await
+            .map_err(|e| anyhow::anyhow!("SMTP connection test failed: {}", e))?;
+        if ok {
+            Ok(())
+        } else {
+            anyhow::bail!("SMTP connection test returned false")
+        }
+    }
+
     /// Send an email. Returns the SMTP response string on success.
     pub async fn send(
         &self,

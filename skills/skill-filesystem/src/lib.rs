@@ -35,9 +35,7 @@ impl FilesystemSkill {
         }
     }
 
-    /// Validate that a path is within one of the allowed roots.
-    /// Returns the canonicalized path if valid, or an error.
-    fn validate_path(&self, path_str: &str) -> SkillResult<PathBuf> {
+    fn reject_malicious_path(path_str: &str) -> SkillResult<()> {
         let path = PathBuf::from(path_str);
 
         // Reject obviously malicious patterns
@@ -47,6 +45,19 @@ impl FilesystemSkill {
                 "Path traversal (../) is not allowed".to_string(),
             ));
         }
+        if path.components().count() == 0 {
+            return Err(SkillError::InvalidArguments(
+                "Path cannot be empty".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Validate that a path is within one of the allowed roots.
+    /// Returns the canonicalized path if valid, or an error.
+    fn validate_path(&self, path_str: &str) -> SkillResult<PathBuf> {
+        let path = PathBuf::from(path_str);
+        Self::reject_malicious_path(path_str)?;
 
         // For existing paths, canonicalize and check containment
         if path.exists() {
@@ -72,6 +83,42 @@ impl FilesystemSkill {
                     return Ok(canonical_parent.join(path.file_name().unwrap_or_default()));
                 }
             }
+        }
+
+        Err(SkillError::PermissionDenied(format!(
+            "Path '{}' is outside allowed directories",
+            path_str
+        )))
+    }
+
+    /// Validate a path for write/create operations, allowing nested paths whose
+    /// nearest existing ancestor is inside an allowed root.
+    fn validate_write_path(&self, path_str: &str) -> SkillResult<PathBuf> {
+        let path = PathBuf::from(path_str);
+        Self::reject_malicious_path(path_str)?;
+
+        if path.exists() {
+            return self.validate_path(path_str);
+        }
+
+        let mut cursor = path.as_path();
+        while let Some(parent) = cursor.parent() {
+            if parent.exists() {
+                let canonical_parent = parent.canonicalize().map_err(|e| {
+                    SkillError::ToolFailed(format!("Cannot resolve parent path: {}", e))
+                })?;
+                if self.is_within_allowed_roots(&canonical_parent) {
+                    let suffix = path.strip_prefix(parent).map_err(|_| {
+                        SkillError::ToolFailed("Failed to resolve requested path".to_string())
+                    })?;
+                    return Ok(canonical_parent.join(suffix));
+                }
+                return Err(SkillError::PermissionDenied(format!(
+                    "Path '{}' is outside allowed directories",
+                    path_str
+                )));
+            }
+            cursor = parent;
         }
 
         Err(SkillError::PermissionDenied(format!(
@@ -142,7 +189,7 @@ impl FilesystemSkill {
 
     /// Write content to a file.
     fn write_file(&self, path_str: &str, content: &str) -> SkillResult<ToolOutput> {
-        let path = self.validate_path(path_str)?;
+        let path = self.validate_write_path(path_str)?;
 
         // Create parent directories if needed
         if let Some(parent) = path.parent() {
@@ -160,6 +207,119 @@ impl FilesystemSkill {
             "formatted": format!("Written {} bytes to {}", size, path.display()),
             "path": path.display().to_string(),
             "size_bytes": size,
+        })))
+    }
+
+    fn describe_filesystem(&self) -> SkillResult<ToolOutput> {
+        let cwd = std::env::current_dir()
+            .map(|dir| Self::strip_unc_prefix(&dir))
+            .map_err(|e| {
+                SkillError::ToolFailed(format!("Cannot resolve current directory: {}", e))
+            })?;
+        let temp_dir = Self::strip_unc_prefix(&std::env::temp_dir());
+        let workspace_root = self
+            .allowed_roots
+            .first()
+            .cloned()
+            .unwrap_or_else(|| cwd.clone());
+        let workspace_root = Self::strip_unc_prefix(&workspace_root);
+        let recommended = ["handoff", "inbox", "outbox", "scratch", "logs"]
+            .into_iter()
+            .map(|name| {
+                let path = workspace_root.join(name);
+                serde_json::json!({
+                    "name": name,
+                    "path": path.display().to_string(),
+                    "exists": path.exists(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let allowed_roots = self
+            .allowed_roots
+            .iter()
+            .map(|root| {
+                let clean = Self::strip_unc_prefix(root);
+                serde_json::json!({
+                    "path": clean.display().to_string(),
+                    "exists": clean.exists(),
+                    "readable": clean.exists(),
+                    "writable": clean.exists(),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        Ok(ToolOutput::success(serde_json::json!({
+            "formatted": format!(
+                "cwd: {}\nworkspace: {}\ntemp: {}\nallowed roots:\n{}",
+                cwd.display(),
+                workspace_root.display(),
+                temp_dir.display(),
+                allowed_roots
+                    .iter()
+                    .map(|root| format!("- {}", root["path"].as_str().unwrap_or_default()))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ),
+            "current_working_directory": cwd.display().to_string(),
+            "workspace_root": workspace_root.display().to_string(),
+            "temp_directory": temp_dir.display().to_string(),
+            "read_roots": allowed_roots,
+            "write_roots": self.allowed_roots.iter().map(|root| Self::strip_unc_prefix(root).display().to_string()).collect::<Vec<_>>(),
+            "recommended_subdirectories": recommended,
+        })))
+    }
+
+    fn probe_path_access(&self, path_str: &str, mode: &str) -> ToolOutput {
+        let mode = mode.to_lowercase();
+        let result = match mode.as_str() {
+            "read" => self.validate_path(path_str),
+            "write" => self.validate_write_path(path_str),
+            other => {
+                return ToolOutput::error(format!(
+                    "Unsupported mode '{}'. Use 'read' or 'write'.",
+                    other
+                ));
+            }
+        };
+
+        match result {
+            Ok(path) => ToolOutput::success(serde_json::json!({
+                "formatted": format!("{} access allowed: {}", mode, path.display()),
+                "allowed": true,
+                "mode": mode,
+                "canonical_path": path.display().to_string(),
+                "exists": path.exists(),
+            })),
+            Err(err) => ToolOutput::success(serde_json::json!({
+                "formatted": format!("{} access denied for {}: {}", mode, path_str, err),
+                "allowed": false,
+                "mode": mode,
+                "canonical_path": serde_json::Value::Null,
+                "exists": PathBuf::from(path_str).exists(),
+                "reason": err.to_string(),
+            })),
+        }
+    }
+
+    fn mkdir(&self, path_str: &str) -> SkillResult<ToolOutput> {
+        let path = self.validate_write_path(path_str)?;
+        if path.is_file() {
+            return Ok(ToolOutput::error(format!(
+                "Cannot create directory '{}': a file already exists there",
+                path.display()
+            )));
+        }
+        std::fs::create_dir_all(&path).map_err(|e| {
+            SkillError::ToolFailed(format!(
+                "Cannot create directory '{}': {}",
+                path.display(),
+                e
+            ))
+        })?;
+        Ok(ToolOutput::success(serde_json::json!({
+            "formatted": format!("Created directory {}", path.display()),
+            "path": path.display().to_string(),
+            "created": true,
         })))
     }
 
@@ -309,6 +469,34 @@ impl Skill for FilesystemSkill {
     fn tools(&self) -> Vec<ToolDescriptor> {
         vec![
             ToolDescriptor {
+                name: "describe_filesystem".to_string(),
+                description: "Show authoritative filesystem boundaries for this runtime: current working directory, writable roots, temp directory, and recommended workspace subdirectories.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {}
+                }),
+                returns: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "current_working_directory": { "type": "string" },
+                        "workspace_root": { "type": "string" },
+                        "temp_directory": { "type": "string" },
+                        "read_roots": { "type": "array" },
+                        "write_roots": { "type": "array" }
+                    }
+                }),
+                cost_estimate: CostEstimate {
+                    latency_ms: 5,
+                    network_bound: false,
+                    token_cost: None,
+                },
+                required_permissions: vec![Permission::FileSystem(
+                    FileSystemPermission::Read(vec!["~".to_string()]),
+                )],
+                autonomous: true,
+                requires_confirmation: false,
+            },
+            ToolDescriptor {
                 name: "read_file".to_string(),
                 description: "Read the contents of a file. Returns the text content for files under 1MB.".to_string(),
                 parameters: serde_json::json!({
@@ -409,6 +597,74 @@ impl Skill for FilesystemSkill {
                 requires_confirmation: false,
             },
             ToolDescriptor {
+                name: "probe_path_access".to_string(),
+                description: "Validate whether a path is allowed before attempting to read or write it.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Absolute path to validate"
+                        },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["read", "write"],
+                            "description": "Whether to validate the path for reading or writing"
+                        }
+                    },
+                    "required": ["path", "mode"]
+                }),
+                returns: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "allowed": { "type": "boolean" },
+                        "canonical_path": { "type": ["string", "null"] },
+                        "reason": { "type": "string" }
+                    }
+                }),
+                cost_estimate: CostEstimate {
+                    latency_ms: 5,
+                    network_bound: false,
+                    token_cost: None,
+                },
+                required_permissions: vec![Permission::FileSystem(
+                    FileSystemPermission::Read(vec!["~".to_string()]),
+                )],
+                autonomous: true,
+                requires_confirmation: false,
+            },
+            ToolDescriptor {
+                name: "mkdir".to_string(),
+                description: "Create a directory recursively inside an allowed writable root.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Absolute directory path to create"
+                        }
+                    },
+                    "required": ["path"]
+                }),
+                returns: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string" },
+                        "created": { "type": "boolean" }
+                    }
+                }),
+                cost_estimate: CostEstimate {
+                    latency_ms: 10,
+                    network_bound: false,
+                    token_cost: None,
+                },
+                required_permissions: vec![Permission::FileSystem(
+                    FileSystemPermission::Write(vec!["~".to_string()]),
+                )],
+                autonomous: false,
+                requires_confirmation: true,
+            },
+            ToolDescriptor {
                 name: "search_files".to_string(),
                 description: "Search for files matching a glob pattern within a directory. Returns up to 100 matching paths.".to_string(),
                 parameters: serde_json::json!({
@@ -454,6 +710,7 @@ impl Skill for FilesystemSkill {
         _context: &ExecutionContext,
     ) -> SkillResult<ToolOutput> {
         match tool_name {
+            "describe_filesystem" => self.describe_filesystem(),
             "read_file" => {
                 let path: String = params.get("path").ok_or_else(|| {
                     SkillError::ToolFailed("Missing required parameter: path".to_string())
@@ -475,6 +732,21 @@ impl Skill for FilesystemSkill {
                     SkillError::ToolFailed("Missing required parameter: path".to_string())
                 })?;
                 self.list_directory(&path)
+            }
+            "probe_path_access" => {
+                let path: String = params.get("path").ok_or_else(|| {
+                    SkillError::ToolFailed("Missing required parameter: path".to_string())
+                })?;
+                let mode: String = params.get("mode").ok_or_else(|| {
+                    SkillError::ToolFailed("Missing required parameter: mode".to_string())
+                })?;
+                Ok(self.probe_path_access(&path, &mode))
+            }
+            "mkdir" => {
+                let path: String = params.get("path").ok_or_else(|| {
+                    SkillError::ToolFailed("Missing required parameter: path".to_string())
+                })?;
+                self.mkdir(&path)
             }
             "search_files" => {
                 let pattern: String = params.get("pattern").ok_or_else(|| {
@@ -521,11 +793,14 @@ mod tests {
     fn test_tools_list() {
         let skill = test_skill(vec![]);
         let tools = skill.tools();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 7);
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"describe_filesystem"));
         assert!(names.contains(&"read_file"));
         assert!(names.contains(&"write_file"));
         assert!(names.contains(&"list_directory"));
+        assert!(names.contains(&"probe_path_access"));
+        assert!(names.contains(&"mkdir"));
         assert!(names.contains(&"search_files"));
     }
 
@@ -596,6 +871,55 @@ mod tests {
         assert!(result.success);
         let content = fs::read_to_string(&out_path).unwrap();
         assert_eq!(content, "Written by Abigail");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_mkdir_nested_path() {
+        let tmp = std::env::temp_dir().join("abigail_fs_test_mkdir");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let skill = test_skill(vec![tmp.clone()]);
+        let nested = tmp.join("handoff").join("2026").join("notes");
+        let result = skill.mkdir(&nested.display().to_string()).unwrap();
+
+        assert!(result.success);
+        assert!(nested.is_dir());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_probe_path_access_denies_outside_root() {
+        let tmp = std::env::temp_dir().join("abigail_fs_test_probe");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let skill = test_skill(vec![tmp.clone()]);
+        let result = skill.probe_path_access("C:\\outside.txt", "write");
+
+        assert!(result.success);
+        let data = result.data.unwrap();
+        assert_eq!(data["allowed"], false);
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_describe_filesystem_reports_workspace() {
+        let tmp = std::env::temp_dir().join("abigail_fs_test_describe");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let skill = test_skill(vec![tmp.clone()]);
+        let result = skill.describe_filesystem().unwrap();
+
+        assert!(result.success);
+        let data = result.data.unwrap();
+        assert_eq!(data["workspace_root"], tmp.display().to_string());
+        assert!(data["recommended_subdirectories"].as_array().unwrap().len() >= 5);
 
         let _ = fs::remove_dir_all(&tmp);
     }
