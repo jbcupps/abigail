@@ -539,18 +539,31 @@ impl IdentityManager {
         let agent_dir = self.identities_dir().join(&uuid);
         std::fs::create_dir_all(&agent_dir).map_err(|e| e.to_string())?;
 
-        // Move legacy files to agent directory
-        let files_to_move = [
+        // Copy legacy files into the agent directory. Include both the older
+        // `.bin` payloads and the newer `.vault`/DB names so installs upgraded
+        // across multiple Abigail versions keep their working key material.
+        let files_to_copy = [
             "config.json",
             "keys.bin",
+            "keys.vault",
             "external_pubkey.bin",
             "secrets.bin",
+            "secrets.vault",
+            "skills.bin",
+            "skills.vault",
+            "vault.sentinel",
             "abigail_seed.db",
             "abigail_seed.db-wal",
             "abigail_seed.db-shm",
+            "abigail_memory.db",
+            "abigail_memory.db-wal",
+            "abigail_memory.db-shm",
+            "jobs.db",
+            "jobs.db-wal",
+            "jobs.db-shm",
         ];
 
-        for file in &files_to_move {
+        for file in &files_to_copy {
             let src = self.data_root.join(file);
             let dst = agent_dir.join(file);
             if src.exists() {
@@ -574,8 +587,12 @@ impl IdentityManager {
             config.data_dir = agent_dir.clone();
             config.models_dir = agent_dir.join("models");
             config.docs_dir = agent_dir.join("docs");
-            config.db_path = agent_dir.join("abigail_seed.db");
-            if legacy_pubkey.exists() {
+            config.db_path = if agent_dir.join("abigail_memory.db").exists() {
+                agent_dir.join("abigail_memory.db")
+            } else {
+                agent_dir.join("abigail_seed.db")
+            };
+            if legacy_pubkey.exists() && agent_dir.join("external_pubkey.bin").exists() {
                 config.external_pubkey_path = Some(agent_dir.join("external_pubkey.bin"));
             }
             config.save(&agent_config_path).map_err(|e| e.to_string())?;
@@ -999,5 +1016,75 @@ fn parse_backup_dir_name(dir_name: &str) -> (String, String, String) {
         (name, backup_type, created_at)
     } else {
         (dir_name.to_string(), "unknown".to_string(), String::new())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migrate_legacy_identity_copies_current_vault_and_db_files() {
+        let tmp = std::env::temp_dir().join(format!(
+            "abigail_identity_migrate_legacy_{}",
+            Uuid::new_v4()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("docs")).unwrap();
+
+        let manager = IdentityManager {
+            data_root: tmp.clone(),
+            global_config: RwLock::new(GlobalConfig::new(&tmp)),
+            master_key: SigningKey::from_bytes(&[9u8; 32]),
+        };
+
+        let mut legacy_config = AppConfig::default_paths();
+        legacy_config.data_dir = tmp.clone();
+        legacy_config.models_dir = tmp.join("models");
+        legacy_config.docs_dir = tmp.join("docs");
+        legacy_config.db_path = tmp.join("abigail_memory.db");
+        legacy_config.birth_complete = true;
+        legacy_config.agent_name = Some("Legacy Agent".to_string());
+        legacy_config.external_pubkey_path = Some(tmp.join("external_pubkey.bin"));
+        legacy_config.save(&tmp.join("config.json")).unwrap();
+
+        std::fs::write(tmp.join("abigail_memory.db"), b"memory").unwrap();
+        std::fs::write(tmp.join("abigail_memory.db-wal"), b"wal").unwrap();
+        std::fs::write(tmp.join("jobs.db"), b"jobs").unwrap();
+        std::fs::write(tmp.join("secrets.vault"), b"secrets").unwrap();
+        std::fs::write(tmp.join("skills.vault"), b"skills").unwrap();
+        std::fs::write(tmp.join("keys.vault"), b"keys").unwrap();
+        std::fs::write(tmp.join("vault.sentinel"), b"sentinel").unwrap();
+        std::fs::write(tmp.join("docs").join("soul.md"), b"legacy soul").unwrap();
+
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        std::fs::write(
+            tmp.join("external_pubkey.bin"),
+            signing_key.verifying_key().to_bytes(),
+        )
+        .unwrap();
+
+        let agent_id = manager.migrate_legacy_identity().unwrap().unwrap();
+        let agent_dir = manager.agent_dir(&agent_id).unwrap();
+
+        assert!(agent_dir.join("abigail_memory.db").exists());
+        assert!(agent_dir.join("abigail_memory.db-wal").exists());
+        assert!(agent_dir.join("jobs.db").exists());
+        assert!(agent_dir.join("secrets.vault").exists());
+        assert!(agent_dir.join("skills.vault").exists());
+        assert!(agent_dir.join("keys.vault").exists());
+        assert!(agent_dir.join("vault.sentinel").exists());
+        assert!(agent_dir.join("docs").join("soul.md").exists());
+        assert!(agent_dir.join("signature.sig").exists());
+
+        let migrated_config = AppConfig::load(&agent_dir.join("config.json")).unwrap();
+        assert_eq!(migrated_config.data_dir, agent_dir);
+        assert_eq!(migrated_config.db_path, agent_dir.join("abigail_memory.db"));
+        assert_eq!(
+            migrated_config.external_pubkey_path,
+            Some(agent_dir.join("external_pubkey.bin"))
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
