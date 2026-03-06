@@ -246,14 +246,16 @@ pub async fn store_secret(
     }
 
     validate_secret_namespace(&state, &key)?;
-    let mut vault = state.skills_secrets.lock().map_err(|e| e.to_string())?;
-    vault.set_secret(&key, &value);
-    vault.save().map_err(|e| e.to_string())?;
+    {
+        let mut vault = state.skills_secrets.lock().map_err(|e| e.to_string())?;
+        vault.set_secret(&key, &value);
+        vault.save().map_err(|e| e.to_string())?;
+    }
 
     // Re-initialize Email skill when email-related secrets change so the skill
     // picks up new credentials without requiring an app restart.
     if EMAIL_SECRET_KEYS.contains(&key.as_str()) {
-        match crate::create_email_skill_for_registry(&state) {
+        match crate::create_email_skill_for_registry(&state).await {
             Ok(skill) => {
                 let skill_id = skill_email::EmailSkill::default_manifest().id.clone();
                 // Check actual health before logging success

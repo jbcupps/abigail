@@ -131,7 +131,7 @@ impl HiveOperations for TauriHiveOps {
             vault.save().map_err(|e| e.to_string())?;
         }
 
-        // Re-initialize Email skill when IMAP-related secrets change,
+        // Re-initialize Email skill when IMAP/SMTP-related secrets change,
         // matching the same logic in the Tauri `store_secret` command.
         const IMAP_SECRET_KEYS: &[&str] = &[
             "imap_password",
@@ -139,10 +139,12 @@ impl HiveOperations for TauriHiveOps {
             "imap_host",
             "imap_port",
             "imap_tls_mode",
+            "smtp_host",
+            "smtp_port",
         ];
 
         if IMAP_SECRET_KEYS.contains(&key) {
-            match crate::create_email_skill_for_registry(&state) {
+            match crate::create_email_skill_for_registry(&state).await {
                 Ok(skill) => {
                     let skill_id = skill_email::EmailSkill::default_manifest().id.clone();
                     let _ = state.registry.unregister(&skill_id);

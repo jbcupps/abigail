@@ -58,6 +58,7 @@ pub async fn start_cli_server(
         config_path,
         data_dir,
         vault: state.secrets.clone(),
+        skills_vault: Some(state.skills_secrets.clone()),
         router: Some(Arc::new(tokio::sync::RwLock::new(
             state.router.read().map_err(|e| e.to_string())?.clone(),
         ))),
