@@ -30,7 +30,7 @@ fn write_encrypted_with_kek(
     data: &[u8],
     root_kek: &[u8; crate::vault::VAULT_KEK_LEN],
 ) -> Result<()> {
-    let dek = crypto::derive_scope_key(&root_kek, STORAGE_SCOPE);
+    let dek = crypto::derive_scope_key(root_kek, STORAGE_SCOPE);
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -44,7 +44,7 @@ fn read_encrypted_with_kek(
     path: &Path,
     root_kek: &[u8; crate::vault::VAULT_KEK_LEN],
 ) -> Result<Vec<u8>> {
-    let dek = crypto::derive_scope_key(&root_kek, STORAGE_SCOPE);
+    let dek = crypto::derive_scope_key(root_kek, STORAGE_SCOPE);
     let envelope = std::fs::read(path)?;
     crypto::open(&dek, &envelope)
 }
