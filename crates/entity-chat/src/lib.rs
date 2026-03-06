@@ -333,7 +333,7 @@ pub fn build_memory_context(
     }
 
     if !recalled_sections.is_empty() {
-        context.insert(0, Message::new("system", &recalled_sections.join("\n\n")));
+        context.insert(0, Message::new("system", recalled_sections.join("\n\n")));
     }
 
     context
