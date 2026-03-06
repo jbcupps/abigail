@@ -187,9 +187,10 @@ pub fn test_vault(data_dir: PathBuf) -> SecretsVault {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
-    fn make_test_vault(dir: &PathBuf) -> SecretsVault {
-        test_vault(dir.clone())
+    fn make_test_vault(dir: &Path) -> SecretsVault {
+        test_vault(dir.to_path_buf())
     }
 
     #[test]

@@ -93,6 +93,7 @@ pub fn set_email_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::secrets::test_vault;
     use std::fs;
 
     #[test]
@@ -101,7 +102,7 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 
-        let mut vault = SecretsVault::new(tmp.clone());
+        let mut vault = test_vault(tmp.clone());
         let result = store_vault_secret(&mut vault, "", "value");
         assert!(result.is_err());
 
@@ -114,7 +115,7 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 
-        let mut vault = SecretsVault::new(tmp.clone());
+        let mut vault = test_vault(tmp.clone());
         let result = store_vault_secret(&mut vault, "key", "");
         assert!(result.is_err());
 
@@ -127,7 +128,7 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 
-        let mut vault = SecretsVault::new(tmp.clone());
+        let mut vault = test_vault(tmp.clone());
         store_vault_secret(&mut vault, "test_key", "test_value").unwrap();
         assert!(check_vault_secret(&vault, "test_key"));
         assert!(!check_vault_secret(&vault, "nonexistent"));
