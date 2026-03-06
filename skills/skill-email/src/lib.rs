@@ -194,24 +194,6 @@ impl EmailSkill {
         }
     }
 
-    fn tool_create_filter() -> ToolDescriptor {
-        ToolDescriptor {
-            name: "create_filter".to_string(),
-            description: "Create a filter rule (stub; not yet implemented).".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "name": { "type": "string" },
-                    "criteria": { "type": "object" }
-                }
-            }),
-            returns: serde_json::json!({ "type": "object" }),
-            cost_estimate: CostEstimate::default(),
-            required_permissions: vec![],
-            autonomous: false,
-            requires_confirmation: true,
-        }
-    }
 }
 
 #[async_trait::async_trait]
@@ -403,7 +385,6 @@ impl Skill for EmailSkill {
             Self::tool_fetch_emails(),
             Self::tool_send_email(),
             Self::tool_classify_importance(),
-            Self::tool_create_filter(),
         ]
     }
 
@@ -497,7 +478,6 @@ impl Skill for EmailSkill {
                 let _email_id = params.get::<String>("email_id").unwrap_or_default();
                 Ok(ToolOutput::success(serde_json::json!("normal")))
             }
-            "create_filter" => Ok(ToolOutput::error("create_filter not yet implemented")),
             _ => Err(SkillError::ToolFailed(format!(
                 "Unknown tool: {}",
                 tool_name

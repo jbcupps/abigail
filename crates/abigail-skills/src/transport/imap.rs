@@ -52,6 +52,13 @@ impl ImapClient {
         self
     }
 
+    fn allows_insecure_starttls(&self) -> bool {
+        matches!(
+            self.host.to_ascii_lowercase().as_str(),
+            "localhost" | "127.0.0.1" | "::1"
+        )
+    }
+
     async fn connect_implicit(&self) -> anyhow::Result<Session<TlsStream>> {
         let addr = format!("{}:{}", self.host, self.port);
         let stream = TcpStream::connect(&addr).await?;
@@ -87,10 +94,12 @@ impl ImapClient {
             anyhow::bail!("STARTTLS rejected by server: {}", resp_str.trim());
         }
 
-        // Upgrade to TLS (accept self-signed certs for local bridges).
+        // Only relax certificate checks for explicit localhost bridges.
         let mut builder = native_tls::TlsConnector::builder();
-        builder.danger_accept_invalid_certs(true);
-        builder.danger_accept_invalid_hostnames(true);
+        if self.allows_insecure_starttls() {
+            builder.danger_accept_invalid_certs(true);
+            builder.danger_accept_invalid_hostnames(true);
+        }
         let connector = TlsConnector::from(builder);
         let tls = connector.connect(&self.host, stream.compat()).await?;
 
@@ -202,6 +211,14 @@ impl ImapClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn starttls_insecure_tls_is_localhost_only() {
+        assert!(ImapClient::new("localhost", 143, "u", "p").allows_insecure_starttls());
+        assert!(ImapClient::new("127.0.0.1", 143, "u", "p").allows_insecure_starttls());
+        assert!(ImapClient::new("::1", 143, "u", "p").allows_insecure_starttls());
+        assert!(!ImapClient::new("mail.example.com", 143, "u", "p").allows_insecure_starttls());
+    }
 
     #[tokio::test]
     async fn test_imap_connection() {

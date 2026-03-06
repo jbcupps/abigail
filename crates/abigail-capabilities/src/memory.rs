@@ -29,13 +29,7 @@ pub struct MemorySearchResult;
 #[async_trait]
 pub trait SpecializedMemoryCapability: Send + Sync {
     fn info(&self) -> MemorySystemInfo;
-    async fn store(&self, _entry: MemoryEntry) -> anyhow::Result<String> {
-        Err(anyhow::anyhow!("stub: not implemented"))
-    }
-    async fn retrieve(&self, _id: &str) -> anyhow::Result<Option<MemoryEntry>> {
-        Err(anyhow::anyhow!("stub: not implemented"))
-    }
-    async fn search(&self, _query: MemoryQuery) -> anyhow::Result<Vec<MemorySearchResult>> {
-        Err(anyhow::anyhow!("stub: not implemented"))
-    }
+    async fn store(&self, entry: MemoryEntry) -> anyhow::Result<String>;
+    async fn retrieve(&self, id: &str) -> anyhow::Result<Option<MemoryEntry>>;
+    async fn search(&self, query: MemoryQuery) -> anyhow::Result<Vec<MemorySearchResult>>;
 }
