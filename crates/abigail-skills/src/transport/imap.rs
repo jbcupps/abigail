@@ -52,13 +52,6 @@ impl ImapClient {
         self
     }
 
-    fn allows_insecure_starttls(&self) -> bool {
-        matches!(
-            self.host.to_ascii_lowercase().as_str(),
-            "localhost" | "127.0.0.1" | "::1"
-        )
-    }
-
     async fn connect_implicit(&self) -> anyhow::Result<Session<TlsStream>> {
         let addr = format!("{}:{}", self.host, self.port);
         let stream = TcpStream::connect(&addr).await?;
@@ -94,12 +87,8 @@ impl ImapClient {
             anyhow::bail!("STARTTLS rejected by server: {}", resp_str.trim());
         }
 
-        // Only relax certificate checks for explicit localhost bridges.
-        let mut builder = native_tls::TlsConnector::builder();
-        if self.allows_insecure_starttls() {
-            builder.danger_accept_invalid_certs(true);
-            builder.danger_accept_invalid_hostnames(true);
-        }
+        // STARTTLS always requires a valid certificate and hostname match.
+        let builder = native_tls::TlsConnector::builder();
         let connector = TlsConnector::from(builder);
         let tls = connector.connect(&self.host, stream.compat()).await?;
 
@@ -212,12 +201,26 @@ impl ImapClient {
 mod tests {
     use super::*;
 
+    fn placeholder_client(host: &str) -> ImapClient {
+        ImapClient::new(host, 143, "", "")
+    }
+
     #[test]
-    fn starttls_insecure_tls_is_localhost_only() {
-        assert!(ImapClient::new("localhost", 143, "u", "p").allows_insecure_starttls());
-        assert!(ImapClient::new("127.0.0.1", 143, "u", "p").allows_insecure_starttls());
-        assert!(ImapClient::new("::1", 143, "u", "p").allows_insecure_starttls());
-        assert!(!ImapClient::new("mail.example.com", 143, "u", "p").allows_insecure_starttls());
+    fn default_tls_mode_is_implicit() {
+        assert_eq!(
+            placeholder_client("localhost").tls_mode,
+            ImapTlsMode::Implicit
+        );
+    }
+
+    #[test]
+    fn with_tls_mode_overrides_default() {
+        assert_eq!(
+            placeholder_client("mail.example.com")
+                .with_tls_mode(ImapTlsMode::StartTls)
+                .tls_mode,
+            ImapTlsMode::StartTls
+        );
     }
 
     #[tokio::test]

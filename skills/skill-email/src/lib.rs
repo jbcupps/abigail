@@ -56,6 +56,32 @@ impl EmailSkill {
             .and_then(|health| health.message.clone())
             .unwrap_or_else(|| "Skill not initialized".to_string())
     }
+
+    fn parse_imap_tls_mode(raw: &str) -> ImapTlsMode {
+        match raw.to_uppercase().as_str() {
+            "STARTTLS" => ImapTlsMode::StartTls,
+            _ => ImapTlsMode::Implicit,
+        }
+    }
+
+    fn parse_smtp_tls_mode(
+        raw: Option<&str>,
+        imap_mode: ImapTlsMode,
+        smtp_port: u16,
+    ) -> SmtpTlsMode {
+        if let Some(mode) = raw {
+            match mode.to_uppercase().as_str() {
+                "IMPLICIT" => return SmtpTlsMode::Implicit,
+                _ => return SmtpTlsMode::StartTls,
+            }
+        }
+
+        if imap_mode == ImapTlsMode::Implicit && smtp_port == 465 {
+            SmtpTlsMode::Implicit
+        } else {
+            SmtpTlsMode::StartTls
+        }
+    }
 }
 
 impl EmailSkill {
@@ -262,11 +288,7 @@ impl Skill for EmailSkill {
             .values
             .get("imap_tls_mode")
             .and_then(|v| v.as_str())
-            .or_else(|| config.secrets.get("imap_tls_mode").map(|v| v.as_str()))
-            .map(|s| match s.to_uppercase().as_str() {
-                "STARTTLS" => ImapTlsMode::StartTls,
-                _ => ImapTlsMode::Implicit,
-            })
+            .map(Self::parse_imap_tls_mode)
             .unwrap_or(ImapTlsMode::Implicit);
 
         let imap = ImapClient::new(&host, port, &user, &password).with_tls_mode(tls_mode);
@@ -317,18 +339,8 @@ impl Skill for EmailSkill {
             .values
             .get("smtp_tls_mode")
             .and_then(|v| v.as_str())
-            .or_else(|| config.secrets.get("smtp_tls_mode").map(|v| v.as_str()))
-            .map(|s| match s.to_uppercase().as_str() {
-                "IMPLICIT" => SmtpTlsMode::Implicit,
-                _ => SmtpTlsMode::StartTls,
-            })
-            .unwrap_or_else(|| {
-                if tls_mode == ImapTlsMode::Implicit && smtp_port == 465 {
-                    SmtpTlsMode::Implicit
-                } else {
-                    SmtpTlsMode::StartTls
-                }
-            });
+            .map(|raw| Self::parse_smtp_tls_mode(Some(raw), tls_mode, smtp_port))
+            .unwrap_or_else(|| Self::parse_smtp_tls_mode(None, tls_mode, smtp_port));
 
         let mut smtp = None;
         let mut health_status = HealthStatus::Healthy;
