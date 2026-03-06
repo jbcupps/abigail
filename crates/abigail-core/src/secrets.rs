@@ -144,6 +144,13 @@ impl SecretsVault {
         self.secrets.get(provider).map(|s| s.as_str())
     }
 
+    pub fn with_secret<T, F>(&self, provider: &str, f: F) -> Option<T>
+    where
+        F: FnOnce(&str) -> T,
+    {
+        self.get_secret(provider).map(f)
+    }
+
     /// Set a secret for a provider. Call `save()` to persist.
     pub fn set_secret(&mut self, provider: &str, key: &str) {
         self.secrets.insert(provider.to_string(), key.to_string());

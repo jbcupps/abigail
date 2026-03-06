@@ -131,10 +131,8 @@ async fn validate_google(key: &str) -> anyhow::Result<()> {
         .build()?;
 
     let response = client
-        .get(format!(
-            "https://generativelanguage.googleapis.com/v1/models?key={}",
-            key
-        ))
+        .get("https://generativelanguage.googleapis.com/v1/models")
+        .header("x-goog-api-key", key)
         .send()
         .await?;
 
@@ -336,10 +334,8 @@ async fn discover_google_models(key: &str) -> Result<Vec<ModelInfo>, String> {
         .map_err(|e| e.to_string())?;
 
     let response = client
-        .get(format!(
-            "https://generativelanguage.googleapis.com/v1/models?key={}",
-            key
-        ))
+        .get("https://generativelanguage.googleapis.com/v1/models")
+        .header("x-goog-api-key", key)
         .send()
         .await
         .map_err(|e| format!("Google model discovery request failed: {}", e))?;

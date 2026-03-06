@@ -52,6 +52,19 @@ describe("OllamaDrawer", () => {
     });
   });
 
+  it("shows linked tooltip help for Ollama", async () => {
+    const user = userEvent.setup();
+    render(<OllamaDrawer onClose={() => {}} />);
+
+    const helpButton = await screen.findByRole("button", { name: /ollama help/i });
+    await user.hover(helpButton);
+
+    expect(await screen.findByRole("link", { name: /download ollama/i })).toHaveAttribute(
+      "href",
+      "https://ollama.com/download"
+    );
+  });
+
   it("fires onClose when backdrop is clicked", async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();

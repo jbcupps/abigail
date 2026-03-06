@@ -5,6 +5,7 @@
 use async_imap::Session;
 use async_native_tls::TlsConnector;
 use futures_util::StreamExt;
+use std::net::IpAddr;
 use tokio::net::TcpStream;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 
@@ -52,11 +53,21 @@ impl ImapClient {
         self
     }
 
+    fn tls_connector(&self) -> TlsConnector {
+        let mut connector = TlsConnector::new();
+        if allows_insecure_local_tls(&self.host) {
+            connector = connector
+                .danger_accept_invalid_certs(true)
+                .danger_accept_invalid_hostnames(true);
+        }
+        connector
+    }
+
     async fn connect_implicit(&self) -> anyhow::Result<Session<TlsStream>> {
         let addr = format!("{}:{}", self.host, self.port);
         let stream = TcpStream::connect(&addr).await?;
         let stream = stream.compat();
-        let tls = TlsConnector::new().connect(&self.host, stream).await?;
+        let tls = self.tls_connector().connect(&self.host, stream).await?;
         let mut client = async_imap::Client::new(tls);
         let _ = client.read_response().await;
         let session = client
@@ -67,33 +78,15 @@ impl ImapClient {
     }
 
     async fn connect_starttls(&self) -> anyhow::Result<Session<TlsStream>> {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
         let addr = format!("{}:{}", self.host, self.port);
-        let mut stream = TcpStream::connect(&addr).await?;
-
-        // Read server greeting on the plain connection.
-        let mut greeting = vec![0u8; 1024];
-        let n = stream.read(&mut greeting).await?;
-        tracing::debug!("IMAP greeting: {}", String::from_utf8_lossy(&greeting[..n]));
-
-        // Send STARTTLS command.
-        stream.write_all(b"A01 STARTTLS\r\n").await?;
-        let mut resp = vec![0u8; 1024];
-        let n = stream.read(&mut resp).await?;
-        let resp_str = String::from_utf8_lossy(&resp[..n]);
-        tracing::debug!("STARTTLS response: {}", resp_str);
-        if !resp_str.contains("A01 OK") {
-            anyhow::bail!("STARTTLS rejected by server: {}", resp_str.trim());
-        }
-
-        // STARTTLS always requires a valid certificate and hostname match.
-        let builder = native_tls::TlsConnector::builder();
-        let connector = TlsConnector::from(builder);
-        let tls = connector.connect(&self.host, stream.compat()).await?;
-
-        let mut client = async_imap::Client::new(tls);
+        let stream = TcpStream::connect(&addr).await?.compat();
+        let mut client = async_imap::Client::new(stream);
         let _ = client.read_response().await;
+        client.run_command_and_check_ok("STARTTLS", None).await?;
+
+        let stream = client.into_inner();
+        let tls = self.tls_connector().connect(&self.host, stream).await?;
+        let client = async_imap::Client::new(tls);
         let session = client
             .login(&self.user, &self.password)
             .await
@@ -197,9 +190,18 @@ impl ImapClient {
     }
 }
 
+fn allows_insecure_local_tls(host: &str) -> bool {
+    let normalized = host.trim().trim_matches(['[', ']']);
+    normalized.eq_ignore_ascii_case("localhost")
+        || normalized
+            .parse::<IpAddr>()
+            .is_ok_and(|addr| addr.is_loopback())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     fn placeholder_client(host: &str) -> ImapClient {
         ImapClient {
@@ -229,6 +231,15 @@ mod tests {
         );
     }
 
+    #[test]
+    fn local_hosts_allow_insecure_tls() {
+        assert!(allows_insecure_local_tls("localhost"));
+        assert!(allows_insecure_local_tls("127.0.0.1"));
+        assert!(allows_insecure_local_tls("[::1]"));
+        assert!(!allows_insecure_local_tls("mail.example.com"));
+        assert!(!allows_insecure_local_tls("192.168.1.10"));
+    }
+
     #[tokio::test]
     async fn test_imap_connection() {
         if std::env::var("ABIGAIL_IMAP_TEST").is_err() {
@@ -253,6 +264,11 @@ mod tests {
             _ => ImapTlsMode::Implicit,
         };
         let client = ImapClient::new(&host, port, &user, &pass).with_tls_mode(tls_mode);
-        assert!(client.test_connection().await.is_ok());
+        assert!(
+            tokio::time::timeout(Duration::from_secs(30), client.test_connection())
+                .await
+                .expect("timed out testing IMAP connection")
+                .is_ok()
+        );
     }
 }

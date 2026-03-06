@@ -1,0 +1,4 @@
+interface:
+  display_name: "Abigail Dev Loop"
+  short_description: "Inspect, verify, and drive Abigail locally"
+  default_prompt: "Use $abigail-dev-loop to inspect this Abigail workspace, verify the local GUI and daemon loop, and give me the exact next commands."

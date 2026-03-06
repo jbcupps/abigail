@@ -106,8 +106,13 @@ async fn main() -> anyhow::Result<()> {
 
     let hive_config = abigail_hive::HiveConfig {
         local_llm_base_url: provider_config.local_llm_base_url,
-        ego_provider_name: provider_config.ego_provider_name,
-        ego_api_key: provider_config.ego_api_key,
+        ego_provider: provider_config.ego_provider_name.map(|provider| {
+            let auth = provider_config
+                .ego_api_key
+                .map(abigail_hive::ProviderAuth::ApiKey)
+                .unwrap_or(abigail_hive::ProviderAuth::System);
+            abigail_hive::ProviderSelection { provider, auth }
+        }),
         ego_model: provider_config.ego_model,
         routing_mode: parse_routing_mode(&provider_config.routing_mode),
         cli_permission_mode,
@@ -122,8 +127,14 @@ async fn main() -> anyhow::Result<()> {
 
     // 3b. Background model discovery (non-blocking diagnostic)
     {
-        let ego_provider = hive_config.ego_provider_name.clone();
-        let ego_key = hive_config.ego_api_key.clone();
+        let ego_provider = hive_config
+            .ego_provider
+            .as_ref()
+            .map(|selection| selection.provider.clone());
+        let ego_key = hive_config
+            .ego_provider
+            .as_ref()
+            .and_then(|selection| selection.api_key());
         tokio::spawn(async move {
             if let (Some(provider), Some(key)) = (ego_provider, ego_key) {
                 match abigail_capabilities::cognitive::validation::discover_models(&provider, &key)

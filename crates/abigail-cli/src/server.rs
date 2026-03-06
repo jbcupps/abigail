@@ -25,7 +25,6 @@ use tower_http::cors::{Any, CorsLayer};
 #[derive(Clone)]
 pub struct AppServerState {
     pub auth: AuthState,
-    pub config_path: std::path::PathBuf,
     pub data_dir: std::path::PathBuf,
     pub vault: Arc<Mutex<SecretsVault>>,
     /// Skills vault for operational secrets (IMAP, Jira, GitHub, etc.)
@@ -42,6 +41,12 @@ pub struct AppServerState {
     pub docs_dir: Option<PathBuf>,
     /// Agent name for system prompt
     pub agent_name: Option<String>,
+}
+
+impl AppServerState {
+    fn trusted_config_path(&self) -> PathBuf {
+        AppConfig::trusted_config_path(&self.data_dir)
+    }
 }
 
 #[derive(Serialize)]
@@ -126,7 +131,6 @@ pub struct SecretCheckResponse {
 /// Start the REST API server.
 pub async fn serve(port: u16) -> anyhow::Result<()> {
     let defaults = AppConfig::default_paths();
-    let config_path = defaults.config_path();
     let data_dir = defaults.data_dir.clone();
 
     let vault = if data_dir.exists() {
@@ -145,7 +149,6 @@ pub async fn serve(port: u16) -> anyhow::Result<()> {
 
     let state = AppServerState {
         auth: auth.clone(),
-        config_path,
         data_dir,
         vault: Arc::new(Mutex::new(vault)),
         skills_vault: Some(Arc::new(Mutex::new(skills_vault))),
@@ -625,8 +628,9 @@ async fn rotate_key(State(state): State<AppServerState>) -> Json<TokenResponse> 
 }
 
 fn load_config(state: &AppServerState) -> anyhow::Result<AppConfig> {
-    if state.config_path.exists() {
-        AppConfig::load(&state.config_path)
+    let config_path = state.trusted_config_path();
+    if config_path.exists() {
+        AppConfig::load(&config_path)
     } else {
         Ok(AppConfig::default_paths())
     }
@@ -642,7 +646,6 @@ mod tests {
         fs::create_dir_all(&data_dir).unwrap();
         AppServerState {
             auth: AuthState::new(),
-            config_path: data_dir.join("config.json"),
             data_dir: data_dir.clone(),
             vault: Arc::new(Mutex::new(SecretsVault::new(data_dir.clone()))),
             skills_vault: Some(Arc::new(Mutex::new(SecretsVault::new_custom(

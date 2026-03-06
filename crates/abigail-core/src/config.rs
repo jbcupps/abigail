@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Current config schema version. Increment when making breaking changes.
 pub const CONFIG_SCHEMA_VERSION: u32 = 25;
@@ -574,6 +574,10 @@ impl AppConfig {
         self.data_dir.join("config.json")
     }
 
+    pub fn trusted_config_path(data_dir: &Path) -> PathBuf {
+        data_dir.join("config.json")
+    }
+
     /// Returns the effective external pubkey path.
     ///
     /// Priority:
@@ -596,7 +600,7 @@ impl AppConfig {
     }
 
     pub fn load(path: &PathBuf) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(path)?;
+        let content = crate::path_guard::load_string_from_expected_file(path, "config.json")?;
         let mut config: Self = serde_json::from_str(&content)?;
 
         // Auto-migrate if needed
@@ -614,10 +618,7 @@ impl AppConfig {
 
     pub fn save(&self, path: &PathBuf) -> anyhow::Result<()> {
         let content = serde_json::to_string_pretty(self)?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(path, content)?;
+        crate::path_guard::write_string_to_expected_file(path, "config.json", &content)?;
         Ok(())
     }
 

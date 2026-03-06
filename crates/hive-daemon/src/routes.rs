@@ -135,8 +135,14 @@ pub async fn get_provider_config(
     match state.hive.resolve_config(&config) {
         Ok(hive_config) => Json(ApiEnvelope::success(ProviderConfig {
             local_llm_base_url: hive_config.local_llm_base_url,
-            ego_provider_name: hive_config.ego_provider_name,
-            ego_api_key: hive_config.ego_api_key,
+            ego_provider_name: hive_config
+                .ego_provider
+                .as_ref()
+                .map(|selection| selection.provider.clone()),
+            ego_api_key: hive_config
+                .ego_provider
+                .as_ref()
+                .and_then(|selection| selection.api_key()),
             ego_model: hive_config.ego_model,
             routing_mode: format!("{:?}", hive_config.routing_mode),
             cli_permission_mode: serde_json::to_value(hive_config.cli_permission_mode)

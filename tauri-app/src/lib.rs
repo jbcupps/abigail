@@ -393,8 +393,14 @@ pub async fn rebuild_router(state: &AppState) -> Result<(), String> {
 
     // Background model discovery via ModelRegistry (non-blocking).
     // Refreshes the active ego provider's model list and persists to config.
-    let ego_provider = hive_config.ego_provider_name.clone();
-    let ego_key = hive_config.ego_api_key.clone();
+    let ego_provider = hive_config
+        .ego_provider
+        .as_ref()
+        .map(|selection| selection.provider.clone());
+    let ego_key = hive_config
+        .ego_provider
+        .as_ref()
+        .and_then(|selection| selection.api_key());
     let registry_handle = state.model_registry.clone();
     tokio::spawn(async move {
         if let (Some(provider), Some(key)) = (ego_provider, ego_key) {

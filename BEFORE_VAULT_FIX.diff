@@ -1,0 +1,12 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 47ab820..9798635 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2827,6 +2827,7 @@ dependencies = [
+  "abigail-core",
+  "abigail-hive",
+  "abigail-id",
++ "abigail-identity",
+  "abigail-memory",
+  "abigail-queue",
+  "abigail-router",

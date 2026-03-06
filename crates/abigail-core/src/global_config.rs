@@ -52,19 +52,20 @@ impl GlobalConfig {
     /// Load GlobalConfig from disk.
     pub fn load(data_root: &Path) -> anyhow::Result<Self> {
         let path = Self::config_path(data_root);
-        let content = std::fs::read_to_string(&path)?;
-        let config: Self = serde_json::from_str(&content)?;
+        let content =
+            crate::path_guard::load_string_from_expected_file(&path, "global_settings.json")?;
+        let mut config: Self = serde_json::from_str(&content)?;
+        config.normalize_agent_directories()?;
         Ok(config)
     }
 
     /// Save GlobalConfig to disk.
     pub fn save(&self, data_root: &Path) -> anyhow::Result<()> {
         let path = Self::config_path(data_root);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let content = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, content)?;
+        let mut normalized = self.clone();
+        normalized.normalize_agent_directories()?;
+        let content = serde_json::to_string_pretty(&normalized)?;
+        crate::path_guard::write_string_to_expected_file(&path, "global_settings.json", &content)?;
         Ok(())
     }
 
@@ -88,6 +89,37 @@ impl GlobalConfig {
         self.agents.retain(|a| a.id != id);
         self.agents.len() < len_before
     }
+
+    pub fn normalize_agent_directories(&mut self) -> anyhow::Result<()> {
+        for agent in &mut self.agents {
+            agent.directory = normalize_agent_directory(&agent.directory)?;
+        }
+        Ok(())
+    }
+}
+
+pub fn normalize_agent_directory(directory: &Path) -> anyhow::Result<PathBuf> {
+    let normalized = crate::path_guard::normalize_path(directory);
+    crate::path_guard::ensure_relative_no_traversal(&normalized, "agent directory")?;
+
+    let mut components = normalized.components();
+    match (
+        components.next(),
+        components.next(),
+        components.next(),
+        components.next(),
+    ) {
+        (
+            Some(std::path::Component::Normal(first)),
+            Some(std::path::Component::Normal(second)),
+            None,
+            None,
+        ) if first == "identities" => Ok(PathBuf::from(first).join(second)),
+        _ => anyhow::bail!(
+            "Agent directory '{}' must match 'identities/<id>'",
+            directory.display()
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -106,7 +138,7 @@ mod tests {
             .register_agent(AgentEntry {
                 id: "test-uuid-1".to_string(),
                 name: "Agent Alpha".to_string(),
-                directory: tmp.join("identities/test-uuid-1"),
+                directory: PathBuf::from("identities/test-uuid-1"),
             })
             .unwrap();
 
@@ -115,6 +147,10 @@ mod tests {
         let loaded = GlobalConfig::load(&tmp).unwrap();
         assert_eq!(loaded.agents.len(), 1);
         assert_eq!(loaded.agents[0].name, "Agent Alpha");
+        assert_eq!(
+            loaded.agents[0].directory,
+            PathBuf::from("identities/test-uuid-1")
+        );
 
         let _ = fs::remove_dir_all(&tmp);
     }
@@ -170,5 +206,16 @@ mod tests {
         assert_eq!(config.agents.len(), 1);
 
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_normalize_agent_directory_rejects_absolute_paths() {
+        let absolute = std::env::temp_dir().join("identities/test");
+        assert!(normalize_agent_directory(&absolute).is_err());
+    }
+
+    #[test]
+    fn test_normalize_agent_directory_rejects_traversal() {
+        assert!(normalize_agent_directory(Path::new("identities/../evil")).is_err());
     }
 }

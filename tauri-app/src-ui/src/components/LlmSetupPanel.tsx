@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useState, useEffect } from "react";
 import { isBrowserHarnessRuntime } from "../runtimeMode";
+import HelpTooltip from "./HelpTooltip";
+import { getCliProviderHelp, OLLAMA_HELP } from "./providerHelp";
 import type {
   OllamaDetection,
   RecommendedModel,
@@ -440,6 +442,15 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
 
           {ollama.status === "not_found" && (
             <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-theme-text text-sm">Install the local runtime.</span>
+                <HelpTooltip
+                  label="Ollama help"
+                  title={OLLAMA_HELP.title}
+                  description={OLLAMA_HELP.description}
+                  links={OLLAMA_HELP.links}
+                />
+              </div>
               <button
                 disabled={installing || pullingModel || connecting}
                 className="px-4 py-2 border border-theme-primary rounded hover:bg-theme-primary-glow disabled:opacity-50"
@@ -675,6 +686,7 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
             <div className="space-y-2">
               {cliDetections.filter(d => d.on_path).map((d) => {
                 const ready = d.is_official && d.is_authenticated;
+                const help = getCliProviderHelp(d.provider_name);
                 return (
                   <div
                     key={d.provider_name}
@@ -686,9 +698,19 @@ export default function LlmSetupPanel({ onConnected, onSkip, showSkip = false }:
                   >
                     <div className="flex items-center justify-between">
                       <div>
-                        <span className="text-theme-text-bright font-bold text-sm uppercase">
-                          {d.provider_name.replace("-cli", "")}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-theme-text-bright font-bold text-sm uppercase">
+                            {d.provider_name.replace("-cli", "")}
+                          </span>
+                          {help && (
+                            <HelpTooltip
+                              label={`${d.provider_name} help`}
+                              title={help.title}
+                              description={help.description}
+                              links={help.links}
+                            />
+                          )}
+                        </div>
                         {d.version && (
                           <span className="text-theme-text-dim text-xs ml-2">{d.version}</span>
                         )}

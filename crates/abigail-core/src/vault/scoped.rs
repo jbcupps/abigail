@@ -96,6 +96,13 @@ impl ScopedVault {
         self.secrets.get(key).map(|s| s.as_str())
     }
 
+    pub fn with_secret<T, F>(&self, key: &str, f: F) -> Option<T>
+    where
+        F: FnOnce(&str) -> T,
+    {
+        self.get_secret(key).map(f)
+    }
+
     pub fn set_secret(&mut self, key: &str, value: &str) {
         self.secrets.insert(key.to_string(), value.to_string());
     }

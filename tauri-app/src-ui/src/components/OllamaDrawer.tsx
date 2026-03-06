@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
+import HelpTooltip from "./HelpTooltip";
+import { OLLAMA_HELP } from "./providerHelp";
 import type {
   OllamaDetection,
   RecommendedModel,
@@ -187,9 +189,18 @@ export default function OllamaDrawer({ onClose }: OllamaDrawerProps) {
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-theme-border shrink-0">
           <div>
-            <h1 className="text-theme-primary-dim text-lg font-bold font-mono tracking-widest uppercase">
-              Ollama
-            </h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-theme-primary-dim text-lg font-bold font-mono tracking-widest uppercase">
+                Ollama
+              </h1>
+              <HelpTooltip
+                label="Ollama help"
+                title={OLLAMA_HELP.title}
+                description={OLLAMA_HELP.description}
+                links={OLLAMA_HELP.links}
+                align="start"
+              />
+            </div>
             <p className="text-theme-text-dim text-[10px] uppercase tracking-tighter">
               Local Model Management
             </p>

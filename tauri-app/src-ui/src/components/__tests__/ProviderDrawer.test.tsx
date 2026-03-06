@@ -57,6 +57,20 @@ describe("ProviderDrawer", () => {
     });
   });
 
+  it("shows linked tooltip help for API providers", async () => {
+    const user = userEvent.setup();
+    render(<ProviderDrawer onClose={() => {}} />);
+
+    const helpButton = await screen.findByRole("button", { name: /openai help/i });
+    await user.hover(helpButton);
+
+    expect(await screen.findByRole("tooltip")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /openai api docs/i })).toHaveAttribute(
+      "href",
+      "https://platform.openai.com/docs/overview"
+    );
+  });
+
   it("fires onClose when backdrop is clicked", async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();
@@ -89,6 +103,22 @@ describe("ProviderDrawer", () => {
       expect(screen.getByText("Official")).toBeInTheDocument();
       expect(screen.getByText("Authed")).toBeInTheDocument();
     });
+  });
+
+  it("shows linked tooltip help for CLI providers", async () => {
+    const user = userEvent.setup();
+    render(<ProviderDrawer onClose={() => {}} />);
+
+    const cliTab = await screen.findByRole("tab", { name: /cli tools/i });
+    await user.click(cliTab);
+
+    const helpButton = await screen.findByRole("button", { name: /claude-cli help/i });
+    await user.hover(helpButton);
+
+    expect(await screen.findByRole("link", { name: /claude code docs/i })).toHaveAttribute(
+      "href",
+      "https://docs.anthropic.com/en/docs/claude-code/overview"
+    );
   });
 
   it("shows active provider indicator", async () => {

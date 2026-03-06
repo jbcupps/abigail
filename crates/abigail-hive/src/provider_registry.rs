@@ -8,6 +8,7 @@ use abigail_capabilities::cognitive::{
     AnthropicProvider, CandleProvider, CliLlmProvider, CliPermissionMode, CliVariant,
     CompatibleProvider, LlmProvider, LocalHttpProvider, OpenAiCompatibleProvider, OpenAiProvider,
 };
+use crate::hive::ProviderSelection;
 use std::sync::Arc;
 
 /// Which cloud provider backs the Ego slot (mirrors `EgoProvider` in the router).
@@ -68,20 +69,27 @@ impl ProviderRegistry {
         api_key: Option<String>,
         ego_model: Option<String>,
     ) -> EgoProviderResult {
+        let selection = provider_name.map(|provider| ProviderSelection {
+            provider: provider.to_string(),
+            auth: api_key
+                .filter(|key| !key.trim().is_empty())
+                .map(crate::hive::ProviderAuth::ApiKey)
+                .unwrap_or(crate::hive::ProviderAuth::System),
+        });
         Self::build_ego_with_cli_mode(
-            provider_name,
-            api_key,
+            selection.as_ref(),
             ego_model,
             CliPermissionMode::default(),
         )
     }
 
     pub fn build_ego_with_cli_mode(
-        provider_name: Option<&str>,
-        api_key: Option<String>,
+        selection: Option<&ProviderSelection>,
         ego_model: Option<String>,
         cli_permission_mode: CliPermissionMode,
     ) -> EgoProviderResult {
+        let provider_name = selection.map(|selection| selection.provider_name());
+        let api_key = selection.and_then(|selection| selection.api_key());
         let is_cli = matches!(
             provider_name,
             Some("claude-cli" | "gemini-cli" | "codex-cli" | "grok-cli")

@@ -98,12 +98,7 @@ pub fn status() -> anyhow::Result<()> {
     // Secrets vault summary
     match load_vault(&config) {
         Ok(vault) => {
-            let providers = vault.list_providers();
-            println!(
-                "Secrets vault: {} keys stored ({})",
-                providers.len(),
-                providers.join(", ")
-            );
+            println!("Secrets vault: {} keys stored", vault.list_providers().len());
         }
         Err(e) => println!("Secrets vault: error loading — {}", e),
     }
