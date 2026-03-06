@@ -282,19 +282,16 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
 
   const handleContinueFromKeyPresentation = async () => {
     setPrivateKey(""); // Clear from memory
-    await invoke("advance_past_darkness");
-
-    // Skip Ignition and Connectivity entirely — the bundled Ollama serves as
-    // the Hive agent (already warmed up before reaching boot).  Cloud model
-    // acquisition for the Entity happens as a birth step, not a separate
-    // configuration screen.
     try {
+      await invoke("advance_past_darkness");
+
+      // New birth flow enters Genesis directly from Connectivity. The final
+      // soul commit step now handles the legacy Crystallization transition.
       await invoke("advance_to_connectivity");
-      await invoke("advance_to_crystallization");
+      setStage("Genesis");
     } catch (e) {
-      console.error("Failed to advance birth stages:", e);
+      setError(String(e));
     }
-    setStage("Genesis");
   };
 
   interface StoreKeyResult {

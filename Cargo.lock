@@ -2827,6 +2827,7 @@ dependencies = [
  "abigail-core",
  "abigail-hive",
  "abigail-id",
+ "abigail-identity",
  "abigail-memory",
  "abigail-queue",
  "abigail-router",

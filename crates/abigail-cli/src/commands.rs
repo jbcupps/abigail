@@ -3,7 +3,7 @@
 //! Each function loads AppConfig from the standard data directory,
 //! opens the SecretsVault, and performs operations directly.
 
-use abigail_core::{AppConfig, SecretsVault};
+use abigail_core::{ops::is_reserved_provider_key, AppConfig, SecretsVault};
 
 /// Load AppConfig from the default data directory.
 fn load_config() -> anyhow::Result<AppConfig> {
@@ -21,8 +21,19 @@ fn load_vault(config: &AppConfig) -> anyhow::Result<SecretsVault> {
     SecretsVault::load(config.data_dir.clone()).map_err(Into::into)
 }
 
+fn load_skills_vault(config: &AppConfig) -> anyhow::Result<SecretsVault> {
+    SecretsVault::load_custom(config.data_dir.clone(), "skills.bin").map_err(Into::into)
+}
+
+fn email_bridge_configured(skills_vault: &SecretsVault) -> bool {
+    ["imap_user", "imap_password", "imap_host", "smtp_host"]
+        .iter()
+        .all(|key| skills_vault.exists(key))
+}
+
 pub fn status() -> anyhow::Result<()> {
     let config = load_config()?;
+    let skills_vault = load_skills_vault(&config).ok();
     println!("=== Abigail Agent Status ===");
     println!("Data directory: {}", config.data_dir.display());
     println!("Birth complete: {}", config.birth_complete);
@@ -60,11 +71,27 @@ pub fn status() -> anyhow::Result<()> {
             "Email: {} (IMAP {}:{})",
             email.address, email.imap_host, email.imap_port
         );
+    } else if skills_vault
+        .as_ref()
+        .map(email_bridge_configured)
+        .unwrap_or(false)
+    {
+        println!("Email: configured via Skills Vault bridge secrets");
     } else {
         println!("Email: not configured");
     }
 
-    println!("Email accounts: {}", config.email_accounts.len());
+    let email_accounts = config
+        .email_accounts
+        .len()
+        .max(usize::from(config.email.is_some()))
+        .max(usize::from(
+            skills_vault
+                .as_ref()
+                .map(email_bridge_configured)
+                .unwrap_or(false),
+        ));
+    println!("Email accounts: {}", email_accounts);
     println!("MCP servers: {}", config.mcp_servers.len());
     println!("Approved skills: {}", config.approved_skill_ids.len());
 
@@ -86,7 +113,11 @@ pub fn status() -> anyhow::Result<()> {
 
 pub fn store_secret(key: &str, value: &str) -> anyhow::Result<()> {
     let config = load_config()?;
-    let mut vault = load_vault(&config)?;
+    let mut vault = if is_reserved_provider_key(key) {
+        load_vault(&config)?
+    } else {
+        load_skills_vault(&config)?
+    };
     abigail_core::ops::store_vault_secret(&mut vault, key, value)?;
     println!("Secret '{}' stored successfully.", key);
     Ok(())
@@ -94,8 +125,11 @@ pub fn store_secret(key: &str, value: &str) -> anyhow::Result<()> {
 
 pub fn check_secret(key: &str) -> anyhow::Result<()> {
     let config = load_config()?;
-    let vault = load_vault(&config)?;
-    if abigail_core::ops::check_vault_secret(&vault, key) {
+    let provider = load_vault(&config)?;
+    let skills = load_skills_vault(&config)?;
+    if abigail_core::ops::check_vault_secret(&provider, key)
+        || abigail_core::ops::check_vault_secret(&skills, key)
+    {
         println!("Secret '{}': EXISTS", key);
     } else {
         println!("Secret '{}': NOT FOUND", key);
@@ -106,8 +140,11 @@ pub fn check_secret(key: &str) -> anyhow::Result<()> {
 pub fn list_secrets() -> anyhow::Result<()> {
     let config = load_config()?;
     let vault = load_vault(&config)?;
+    let skills_vault = load_skills_vault(&config)?;
     let mut providers = vault.list_providers();
+    providers.extend(skills_vault.list_providers());
     providers.sort();
+    providers.dedup();
     if providers.is_empty() {
         println!("No secrets stored.");
     } else {
@@ -147,6 +184,7 @@ pub fn configure_email(
 pub fn integration_status() -> anyhow::Result<()> {
     let config = load_config()?;
     let vault = load_vault(&config)?;
+    let skills_vault = load_skills_vault(&config)?;
     let integrations = abigail_skills::preloaded_integration_skills();
 
     println!("=== Integration Status ===");
@@ -159,7 +197,7 @@ pub fn integration_status() -> anyhow::Result<()> {
         let secret_keys = abigail_skills::dynamic::extract_secret_keys(skill_config);
         let missing: Vec<&str> = secret_keys
             .iter()
-            .filter(|k| vault.get_secret(k).is_none())
+            .filter(|k| vault.get_secret(k).is_none() && skills_vault.get_secret(k).is_none())
             .map(|s| s.as_str())
             .collect();
 

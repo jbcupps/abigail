@@ -4,7 +4,7 @@
 //! startup, printed to stdout, and can be rotated via `/rotate-key`.
 
 use crate::auth::{auth_middleware, AuthState};
-use abigail_core::{AppConfig, SecretsVault};
+use abigail_core::{ops::is_reserved_provider_key, AppConfig, SecretsVault};
 use abigail_router::IdEgoRouter;
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use axum::{
@@ -28,6 +28,8 @@ pub struct AppServerState {
     pub config_path: std::path::PathBuf,
     pub data_dir: std::path::PathBuf,
     pub vault: Arc<Mutex<SecretsVault>>,
+    /// Skills vault for operational secrets (IMAP, Jira, GitHub, etc.)
+    pub skills_vault: Option<Arc<Mutex<SecretsVault>>>,
     /// Router for handling chat requests (optional, provided when run from Tauri)
     pub router: Option<Arc<tokio::sync::RwLock<IdEgoRouter>>>,
     /// Skill registry (optional, provided when run from Tauri)
@@ -132,6 +134,11 @@ pub async fn serve(port: u16) -> anyhow::Result<()> {
     } else {
         SecretsVault::new(data_dir.clone())
     };
+    let skills_vault = if data_dir.exists() {
+        SecretsVault::load_custom(data_dir.clone(), "skills.bin")?
+    } else {
+        SecretsVault::new_custom(data_dir.clone(), "skills.bin")
+    };
 
     let auth = AuthState::new();
     let token = auth.token.read().await.clone();
@@ -141,6 +148,7 @@ pub async fn serve(port: u16) -> anyhow::Result<()> {
         config_path,
         data_dir,
         vault: Arc::new(Mutex::new(vault)),
+        skills_vault: Some(Arc::new(Mutex::new(skills_vault))),
         router: None,
         registry: None,
         executor: None,
@@ -224,6 +232,7 @@ async fn get_status(
         .and_then(|r| r.list().ok())
         .map(|s| s.len())
         .unwrap_or(0);
+    let (email_configured, email_accounts) = email_status(&config, &state);
 
     Ok(Json(StatusResponse {
         birth_complete: config.birth_complete,
@@ -233,12 +242,66 @@ async fn get_status(
         ego_provider,
         ego_key_set,
         has_ego,
-        email_configured: config.email.is_some(),
-        email_accounts: config.email_accounts.len(),
+        email_configured,
+        email_accounts,
         mcp_servers: config.mcp_servers.len(),
         secrets_count,
         skills_count,
     }))
+}
+
+fn email_status(config: &AppConfig, state: &AppServerState) -> (bool, usize) {
+    let legacy_accounts = config
+        .email_accounts
+        .len()
+        .max(usize::from(config.email.is_some()));
+
+    let bridge_ready = state
+        .skills_vault
+        .as_ref()
+        .and_then(|vault| vault.lock().ok())
+        .map(|vault| {
+            ["imap_user", "imap_password", "imap_host", "smtp_host"]
+                .iter()
+                .all(|key| vault.exists(key))
+        })
+        .unwrap_or(false);
+
+    let inferred_accounts = legacy_accounts.max(usize::from(bridge_ready));
+    (inferred_accounts > 0, inferred_accounts)
+}
+
+fn target_vault_for_key(state: &AppServerState, key: &str) -> Arc<Mutex<SecretsVault>> {
+    if is_reserved_provider_key(key) {
+        state.vault.clone()
+    } else if let Some(skills_vault) = &state.skills_vault {
+        skills_vault.clone()
+    } else {
+        state.vault.clone()
+    }
+}
+
+fn secret_exists_anywhere(state: &AppServerState, key: &str) -> Result<bool, StatusCode> {
+    let provider_exists = state
+        .vault
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .exists(key);
+    if provider_exists {
+        return Ok(true);
+    }
+    let skills_exists = state
+        .skills_vault
+        .as_ref()
+        .map(|vault| {
+            vault
+                .lock()
+                .map(|v| v.exists(key))
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+        })
+        .transpose()?
+        .unwrap_or(false);
+    Ok(skills_exists)
 }
 
 /// Extract provider info from config.trinity (fallback when router is unavailable).
@@ -257,12 +320,8 @@ async fn check_secret(
     State(state): State<AppServerState>,
     Path(key): Path<String>,
 ) -> Result<Json<SecretCheckResponse>, StatusCode> {
-    let vault = state
-        .vault
-        .lock()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(SecretCheckResponse {
-        exists: vault.exists(&key),
+        exists: secret_exists_anywhere(&state, &key)?,
         key,
     }))
 }
@@ -271,7 +330,8 @@ async fn store_secret(
     State(state): State<AppServerState>,
     Json(body): Json<StoreSecretRequest>,
 ) -> Result<Json<MessageResponse>, (StatusCode, Json<MessageResponse>)> {
-    let mut vault = state.vault.lock().map_err(|_| {
+    let target_vault = target_vault_for_key(&state, &body.key);
+    let mut vault = target_vault.lock().map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(MessageResponse {
@@ -296,8 +356,8 @@ async fn remove_secret(
     State(state): State<AppServerState>,
     Path(key): Path<String>,
 ) -> Result<Json<MessageResponse>, StatusCode> {
-    let mut vault = state
-        .vault
+    let target_vault = target_vault_for_key(&state, &key);
+    let mut vault = target_vault
         .lock()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let removed = vault.remove_secret(&key);
@@ -318,10 +378,6 @@ async fn remove_secret(
 async fn get_integrations(
     State(state): State<AppServerState>,
 ) -> Result<Json<Vec<IntegrationStatusItem>>, StatusCode> {
-    let vault = state
-        .vault
-        .lock()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let integrations = abigail_skills::preloaded_integration_skills();
 
     let items: Vec<IntegrationStatusItem> = integrations
@@ -330,7 +386,7 @@ async fn get_integrations(
             let secret_keys = abigail_skills::dynamic::extract_secret_keys(config);
             let missing: Vec<String> = secret_keys
                 .into_iter()
-                .filter(|k| vault.get_secret(k).is_none())
+                .filter(|k| !secret_exists_anywhere(&state, k).unwrap_or(false))
                 .collect();
             IntegrationStatusItem {
                 service_id: auth.service_id.clone(),
@@ -573,5 +629,78 @@ fn load_config(state: &AppServerState) -> anyhow::Result<AppConfig> {
         AppConfig::load(&state.config_path)
     } else {
         Ok(AppConfig::default_paths())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn test_state(tmp: &std::path::Path) -> AppServerState {
+        let data_dir = tmp.join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        AppServerState {
+            auth: AuthState::new(),
+            config_path: data_dir.join("config.json"),
+            data_dir: data_dir.clone(),
+            vault: Arc::new(Mutex::new(SecretsVault::new(data_dir.clone()))),
+            skills_vault: Some(Arc::new(Mutex::new(SecretsVault::new_custom(
+                data_dir,
+                "skills.bin",
+            )))),
+            router: None,
+            registry: None,
+            executor: None,
+            instruction_registry: None,
+            docs_dir: None,
+            agent_name: None,
+        }
+    }
+
+    #[test]
+    fn email_status_infers_skill_bridge_configuration() {
+        let tmp = std::env::temp_dir().join("abigail_cli_server_email_status");
+        let _ = fs::remove_dir_all(&tmp);
+        let config = AppConfig::default_paths();
+        let state = test_state(&tmp);
+
+        {
+            let mut vault = state.skills_vault.as_ref().unwrap().lock().unwrap();
+            vault.set_secret("imap_user", "mentor@example.com");
+            vault.set_secret("imap_password", "secret");
+            vault.set_secret("imap_host", "127.0.0.1");
+            vault.set_secret("smtp_host", "127.0.0.1");
+        }
+
+        let (configured, accounts) = email_status(&config, &state);
+        assert!(configured);
+        assert_eq!(accounts, 1);
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn target_vault_routes_skill_secret_to_skills_vault() {
+        let tmp = std::env::temp_dir().join("abigail_cli_server_secret_route");
+        let _ = fs::remove_dir_all(&tmp);
+        let state = test_state(&tmp);
+
+        let vault = target_vault_for_key(&state, "imap_password");
+        {
+            let mut guard = vault.lock().unwrap();
+            guard.set_secret("imap_password", "secret");
+        }
+
+        assert!(state
+            .skills_vault
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .exists("imap_password"));
+        assert!(!state.vault.lock().unwrap().exists("imap_password"));
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 }

@@ -12,6 +12,12 @@ interface SkillsVaultEntry {
   is_set: boolean;
 }
 
+interface SkillsVaultGroup {
+  title: string;
+  description: string;
+  entries: SkillsVaultEntry[];
+}
+
 type Tab = "identity" | "appearance" | "keys" | "llm" | "data" | "repair";
 
 interface RouterStatus {
@@ -103,6 +109,57 @@ const THEME_PREVIEWS: Record<string, { bg: string; fg: string; accent: string }>
   phosphor: { bg: "#0a0a0a", fg: "#33ff33", accent: "#33ff33" },
   classic: { bg: "#c0c0c0", fg: "#000000", accent: "#000080" },
 };
+
+function buildSkillsVaultGroups(entries: SkillsVaultEntry[]): SkillsVaultGroup[] {
+  const bySkill = new Map<string, SkillsVaultEntry[]>();
+  const shared: SkillsVaultEntry[] = [];
+  const unscoped: SkillsVaultEntry[] = [];
+
+  const sortEntries = (items: SkillsVaultEntry[]) =>
+    [...items].sort((a, b) => a.secret_name.localeCompare(b.secret_name));
+
+  for (const entry of entries) {
+    if (entry.skill_names.length === 0) {
+      unscoped.push(entry);
+      continue;
+    }
+    if (entry.skill_names.length > 1) {
+      shared.push(entry);
+      continue;
+    }
+
+    const skillName = entry.skill_names[0];
+    const existing = bySkill.get(skillName) ?? [];
+    existing.push(entry);
+    bySkill.set(skillName, existing);
+  }
+
+  const groups: SkillsVaultGroup[] = [...bySkill.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([title, items]) => ({
+      title,
+      description: "Secrets used only by this skill.",
+      entries: sortEntries(items),
+    }));
+
+  if (shared.length > 0) {
+    groups.push({
+      title: "Shared Across Skills",
+      description: "Reusable credentials referenced by more than one skill.",
+      entries: sortEntries(shared),
+    });
+  }
+
+  if (unscoped.length > 0) {
+    groups.push({
+      title: "Unassigned",
+      description: "Declared secrets that are not currently attributed to a specific skill.",
+      entries: sortEntries(unscoped),
+    });
+  }
+
+  return groups;
+}
 
 function AppearanceTab() {
   const { themeId, setThemeId, primaryColor, refreshTheme } = useTheme();
@@ -242,6 +299,7 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
   const [repairMessage, setRepairMessage] = useState("");
   const [repairError, setRepairError] = useState("");
   const mountedRef = useRef(true);
+  const skillsVaultGroups = buildSkillsVaultGroups(skillsVaultEntries);
 
   useEffect(() => {
     if (initialTab) setTab(initialTab);
@@ -543,31 +601,58 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
                 <p className="text-theme-text-dim text-xs italic">No skill secrets declared. Install skills that require credentials (e.g. Proton Mail) to see entries here.</p>
               ) : (
                 <div className="space-y-2">
-                  {skillsVaultEntries.map((e) => (
-                    <div key={e.secret_name} className="flex items-center justify-between px-4 py-3 border border-theme-border rounded bg-theme-bg-inset">
-                      <div>
-                        <span className="text-theme-text-bright font-mono text-[10px] tracking-wider">{e.secret_name}</span>
-                        {e.is_set && (
-                          <span className="text-theme-primary text-[10px] ml-2 font-bold">[SET]</span>
-                        )}
-                        {e.skill_names.length > 0 && (
-                          <p className="text-theme-text-dim text-[9px] mt-0.5">{e.skill_names.join(", ")}</p>
-                        )}
-                        {e.description && (
-                          <p className="text-theme-primary-faint text-[9px] mt-0.5">{e.description}</p>
-                        )}
+                  {skillsVaultGroups.map((group) => (
+                    <section
+                      key={group.title}
+                      className="border border-theme-border rounded bg-theme-bg-elevated overflow-hidden"
+                    >
+                      <div className="px-4 py-3 border-b border-theme-border-dim bg-theme-bg-inset">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <h3 className="text-theme-text-bright text-[11px] font-bold uppercase tracking-widest">
+                              {group.title}
+                            </h3>
+                            <p className="text-theme-text-dim text-[9px] mt-1">
+                              {group.description}
+                            </p>
+                          </div>
+                          <span className="text-[9px] uppercase tracking-widest text-theme-primary">
+                            {group.entries.length} {group.entries.length === 1 ? "secret" : "secrets"}
+                          </span>
+                        </div>
                       </div>
-                      <button
-                        className="text-[10px] border border-theme-primary px-3 py-1 rounded hover:bg-theme-primary-glow uppercase tracking-widest"
-                        onClick={() => {
-                          setSkillsVaultEditing(e.secret_name);
-                          setSkillsVaultValue("");
-                          setSkillsVaultError("");
-                        }}
-                      >
-                        {e.is_set ? "Update" : "Add"}
-                      </button>
-                    </div>
+                      <div className="divide-y divide-theme-border-dim">
+                        {group.entries.map((e) => (
+                          <div
+                            key={`${group.title}-${e.secret_name}`}
+                            className="flex items-center justify-between px-4 py-3 bg-theme-bg-elevated"
+                          >
+                            <div>
+                              <span className="text-theme-text-bright font-mono text-[10px] tracking-wider">{e.secret_name}</span>
+                              {e.is_set && (
+                                <span className="text-theme-primary text-[10px] ml-2 font-bold">[SET]</span>
+                              )}
+                              {e.skill_names.length > 1 && (
+                                <p className="text-theme-text-dim text-[9px] mt-0.5">{e.skill_names.join(", ")}</p>
+                              )}
+                              {e.description && (
+                                <p className="text-theme-primary-faint text-[9px] mt-0.5">{e.description}</p>
+                              )}
+                            </div>
+                            <button
+                              className="text-[10px] border border-theme-primary px-3 py-1 rounded hover:bg-theme-primary-glow uppercase tracking-widest"
+                              onClick={() => {
+                                setSkillsVaultEditing(e.secret_name);
+                                setSkillsVaultValue("");
+                                setSkillsVaultError("");
+                              }}
+                            >
+                              {e.is_set ? "Update" : "Add"}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
                   ))}
                 </div>
               )}

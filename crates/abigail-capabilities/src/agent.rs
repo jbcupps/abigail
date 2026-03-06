@@ -21,9 +21,5 @@ pub struct TaskStatus;
 pub trait AgentCooperationCapability: Send + Sync {
     async fn discover_agents(&self) -> anyhow::Result<Vec<AgentInfo>>;
     async fn send_message(&self, agent_id: &str, message: AgentMessage) -> anyhow::Result<()>;
-    async fn delegate_task(
-        &self,
-        agent_id: &str,
-        task: TaskRequest,
-    ) -> anyhow::Result<TaskHandle>;
+    async fn delegate_task(&self, agent_id: &str, task: TaskRequest) -> anyhow::Result<TaskHandle>;
 }

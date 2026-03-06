@@ -193,7 +193,6 @@ impl EmailSkill {
             requires_confirmation: false,
         }
     }
-
 }
 
 #[async_trait::async_trait]
