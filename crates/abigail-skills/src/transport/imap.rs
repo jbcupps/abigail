@@ -202,7 +202,13 @@ mod tests {
     use super::*;
 
     fn placeholder_client(host: &str) -> ImapClient {
-        ImapClient::new(host, 143, "", "")
+        ImapClient {
+            host: host.to_string(),
+            port: 143,
+            user: String::new(),
+            password: String::new(),
+            tls_mode: ImapTlsMode::default(),
+        }
     }
 
     #[test]
