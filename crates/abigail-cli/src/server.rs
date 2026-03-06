@@ -294,7 +294,8 @@ fn secret_exists_anywhere(state: &AppServerState, key: &str) -> Result<bool, Sta
         .skills_vault
         .as_ref()
         .map(|vault| {
-            vault.lock()
+            vault
+                .lock()
                 .map(|v| v.exists(key))
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
         })
