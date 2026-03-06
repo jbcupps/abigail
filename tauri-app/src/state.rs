@@ -105,6 +105,13 @@ pub struct AppState {
     pub force_override: RwLock<ForceOverride>,
 }
 
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct VaultState {
+    pub healthy: bool,
+    pub verified_at_utc: Option<String>,
+    pub sentinel_timestamp_utc: Option<String>,
+}
+
 /// User-selected model override from the ChatInterface dropdown.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ForceOverride {
