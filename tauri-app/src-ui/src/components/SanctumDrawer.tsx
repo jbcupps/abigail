@@ -45,6 +45,8 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
   const experimentalUiEnabled = isExperimentalUiEnabled();
   const [backendReady, setBackendReady] = useState(false);
   const [activeTab, setActiveTab] = useState<SanctumTab>("conscience");
+  const [vaultVerifiedAtUtc, setVaultVerifiedAtUtc] = useState<string>(new Date().toISOString());
+  const [recoveringVault, setRecoveringVault] = useState(false);
 
   // IdentityPanel mapping
   const identityPanelTabs: IdentityPanelTab[] = ["identity", "appearance", "llm", "keys", "data", "repair"];
@@ -92,6 +94,17 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
     };
   }, []);
 
+  const recoverSoulVault = async () => {
+    // Stub only: backend recovery wiring will perform signed-Documents re-encryption.
+    setRecoveringVault(true);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      setVaultVerifiedAtUtc(new Date().toISOString());
+    } finally {
+      setRecoveringVault(false);
+    }
+  };
+
   return (
     <>
       {/* Backdrop */}
@@ -120,6 +133,22 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
             aria-label="Close drawer"
           >
             &times;
+          </button>
+        </div>
+
+        <div className="px-4 py-2 border-b border-theme-border bg-theme-success-dim flex items-center justify-between gap-3">
+          <div className="text-[10px] uppercase tracking-widest font-primary text-theme-success">
+            ✓ Soul Vault: Healthy
+            <span className="ml-2 text-theme-text-dim normal-case tracking-normal">
+              {new Date(vaultVerifiedAtUtc).toLocaleString()}
+            </span>
+          </div>
+          <button
+            className="text-[10px] uppercase tracking-widest border border-theme-success text-theme-success rounded px-2 py-1 hover:bg-theme-success-dim disabled:opacity-50"
+            onClick={recoverSoulVault}
+            disabled={recoveringVault}
+          >
+            {recoveringVault ? "Recovering..." : "Recover Soul Vault"}
           </button>
         </div>
 

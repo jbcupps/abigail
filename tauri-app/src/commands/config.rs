@@ -66,26 +66,24 @@ pub async fn use_stored_provider(
     provider: String,
 ) -> Result<(), String> {
     let provider = provider.trim().to_lowercase();
+    if provider.is_empty() {
+        return Err("Provider is required".to_string());
+    }
 
     let is_cli = matches!(
         provider.as_str(),
         "claude-cli" | "gemini-cli" | "codex-cli" | "grok-cli"
     );
 
-    let key_str = {
-        let vault = state.secrets.lock().map_err(|e| e.to_string())?;
-        match vault.get_secret(&provider) {
-            Some(key) => key.to_string(),
-            None if is_cli => "system".to_string(),
-            None => return Err(format!("Provider '{}' not found in vault", provider)),
-        }
-    };
-
     {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
         let trinity = config.trinity.get_or_insert_with(TrinityConfig::default);
         trinity.ego_provider = Some(provider.clone());
-        trinity.ego_api_key = Some(key_str);
+        // paper Sections 22-27 runtime verification:
+        // provider switching must never trigger vault re-unlock. Keep key material untouched.
+        if is_cli {
+            trinity.ego_api_key = Some("system".to_string());
+        }
         config.active_provider_preference = Some(provider);
         config
             .save(&config.config_path())

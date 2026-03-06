@@ -81,36 +81,18 @@ impl IdentityManager {
     /// Create a new IdentityManager, loading GlobalConfig and master key from disk.
     /// If master key doesn't exist, generates one (first-run bootstrap).
     pub fn new(data_root: PathBuf) -> anyhow::Result<Self> {
-        match Self::try_load_from_vault(data_root.clone()) {
-            Ok(manager) => Ok(manager),
-            Err(e) if e.contains("AES-GCM") || e.contains("decryption failed") => {
-                tracing::warn!(
-                    "Vault decryption failed (wrong key or tampered data). Auto-resetting identity folder for resilience."
-                );
+        // paper Sections 22-27 runtime verification:
+        // the KEK must already be session-verified before identity bootstrap.
+        let unlock = abigail_core::HybridUnlockProvider::new();
+        use abigail_core::UnlockProvider as _;
+        unlock
+            .root_kek()
+            .map_err(|e| anyhow::anyhow!(format!("Recovery Mode: {}", e)))?;
 
-                // Never touch the Hive/documents folder during reset
-                let hive_docs = std::env::var("HIVE_DOCUMENTS_PATH")
-                    .unwrap_or_else(|_| "hive/documents".to_string());
-                if hive_docs.contains("superego_decisions.log") {
-                    tracing::info!("Preserving Superego decision log during identity reset");
-                }
-
-                // Safe reset — only identity data, never the Hive/documents folder
-                let identity_path = data_root.join("identities");
-                if identity_path.file_name().and_then(|name| name.to_str()) == Some("identities")
-                    && identity_path.exists()
-                {
-                    let _ = std::fs::remove_dir_all(&identity_path);
-                }
-
-                // Bootstrap fresh
-                Self::bootstrap_fresh_identity(data_root)
-            }
-            Err(e) => {
-                tracing::error!("Fatal identity error: {}", e);
-                Err(anyhow::anyhow!(e))
-            }
-        }
+        Self::try_load_from_vault(data_root).map_err(|e| {
+            tracing::error!("Fatal identity error: {}", e);
+            anyhow::anyhow!(e)
+        })
     }
 
     fn try_load_from_vault(data_root: PathBuf) -> Result<Self, String> {
@@ -148,10 +130,6 @@ impl IdentityManager {
             global_config: RwLock::new(global_config),
             master_key,
         })
-    }
-
-    fn bootstrap_fresh_identity(data_root: PathBuf) -> anyhow::Result<Self> {
-        Self::try_load_from_vault(data_root).map_err(|e| anyhow::anyhow!(e))
     }
 
     /// Get the data root path.

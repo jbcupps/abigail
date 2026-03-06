@@ -386,6 +386,7 @@ export default function ChatInterface({
   // -- Header model/provider dropdown logic --
 
   const isCliMode = routerStatus?.routing_mode === "cli_orchestrator";
+  const isCliProviderSelected = headerProvider.endsWith("-cli");
 
   // Sync headerProvider with the active ego provider from the router.
   // When the backend provider changes (e.g. after use_stored_provider or startup),
@@ -428,6 +429,12 @@ export default function ChatInterface({
       setHeaderProvider(knownProviders[0]);
     }
   }, [headerProvider, knownProviders]);
+
+  useEffect(() => {
+    if (isCliProviderSelected && selectedModel) {
+      setSelectedModel("");
+    }
+  }, [isCliProviderSelected, selectedModel]);
 
   const applyChatError = (errorMsg: string) => {
     const interrupted = isInterruptedByUserMessage(errorMsg);
@@ -544,7 +551,7 @@ export default function ChatInterface({
           message: userMessage.content,
           sessionMessages: sessionBeforeTurn,
           sessionId,
-          modelOverride: (!isCliMode && selectedModel) ? selectedModel : undefined,
+          modelOverride: (!isCliMode && !isCliProviderSelected && selectedModel) ? selectedModel : undefined,
         },
         {
           onToken: (token) => {
@@ -679,7 +686,7 @@ export default function ChatInterface({
           Memory disclosure: {memoryDisclosureEnabled ? "On" : "Off"}
         </button>
         <span className="mx-1 text-theme-border">|</span>
-        {isCliMode ? (
+        {(isCliMode || isCliProviderSelected) ? (
           <span className="text-[11px] text-theme-text-dim px-1 font-mono">
             {headerProvider || "cli"}
           </span>
@@ -704,9 +711,12 @@ export default function ChatInterface({
             <select
               className="bg-transparent text-[11px] text-theme-text-dim border border-theme-border rounded px-1 cursor-pointer"
               value={selectedModel}
+              disabled={isCliProviderSelected}
               onChange={(e) => setSelectedModel(e.target.value)}
             >
-              <option value="">Auto</option>
+              <option value="">
+                {isCliProviderSelected ? "Auto (CLI ignores model override)" : "Auto"}
+              </option>
               {headerModels.map((m) => (
                 <option key={m} value={m}>{m}</option>
               ))}

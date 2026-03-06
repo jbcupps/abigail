@@ -10,10 +10,11 @@
 
 use crate::error::{CoreError, Result};
 use rand::RngCore;
+use std::path::Path;
 
-const KEK_LEN: usize = 32;
+const KEK_LEN: usize = super::VAULT_KEK_LEN;
 const KEYRING_SERVICE: &str = "com.abigail.vault";
-const KEYRING_ACCOUNT: &str = "root-kek";
+const KEYRING_ACCOUNT: &str = "abigail.hive.master-kek-v1";
 const PASSPHRASE_ENV: &str = "ABIGAIL_VAULT_PASSPHRASE";
 const PASSPHRASE_SALT: &[u8] = b"abigail-vault-passphrase-salt-v1";
 
@@ -40,41 +41,51 @@ impl Default for HybridUnlockProvider {
 
 impl UnlockProvider for HybridUnlockProvider {
     fn root_kek(&self) -> Result<[u8; KEK_LEN]> {
-        // 1. Try OS credential store
-        match os_keyring_load() {
-            Ok(kek) => return Ok(kek),
-            Err(e) => {
-                tracing::debug!("OS keyring load failed (will try alternatives): {}", e);
-            }
+        if let Some(kek) = super::cached_session_root_kek() {
+            return Ok(kek);
         }
 
-        // 2. Try passphrase from environment
+        let data_root = crate::AppConfig::default_paths().data_dir;
+        std::fs::create_dir_all(&data_root)?;
+        let sentinel_path = super::sentinel_path(&data_root);
+        let has_sentinel = sentinel_path.exists();
+
+        // paper Sections 22-27 runtime verification:
+        // stable KEK + sentinel check must succeed before runtime unlock is accepted.
+        if let Some(kek) = os_keyring_load_optional()? {
+            let sentinel_value = verify_or_create_sentinel(&data_root, &kek)?;
+            super::cache_session_root_kek(kek, sentinel_value);
+            return Ok(kek);
+        }
+
         if let Ok(passphrase) = std::env::var(PASSPHRASE_ENV) {
-            if !passphrase.is_empty() {
-                tracing::info!("Using vault passphrase from {} env var", PASSPHRASE_ENV);
-                return Ok(super::crypto::derive_key_from_passphrase(
-                    &passphrase,
-                    PASSPHRASE_SALT,
-                ));
+            if !passphrase.trim().is_empty() {
+                let kek = super::crypto::derive_key_from_passphrase(&passphrase, PASSPHRASE_SALT);
+                let sentinel_value = verify_or_create_sentinel(&data_root, &kek)?;
+                super::cache_session_root_kek(kek, sentinel_value);
+                return Ok(kek);
             }
         }
 
-        // 3. Bootstrap: generate a fresh KEK and try to persist it
-        tracing::info!("No vault KEK found — bootstrapping new root key");
-        let kek = generate_random_kek();
-        match os_keyring_store(&kek) {
-            Ok(()) => {
-                tracing::info!("Root KEK stored in OS credential store");
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "Could not store KEK in OS credential store: {}. \
-                     Set {} to use passphrase-based vault unlock.",
-                    e,
-                    PASSPHRASE_ENV
-                );
-            }
+        if has_sentinel {
+            return Err(CoreError::Vault(
+                "Recovery Mode: vault sentinel exists but stable KEK could not be loaded. \
+                 Refusing to auto-create a new key to avoid wrong-key AES-GCM corruption."
+                    .to_string(),
+            ));
         }
+
+        // First boot only (no sentinel exists): create stable KEK once.
+        tracing::info!("No stable vault KEK found; bootstrapping initial root key");
+        let kek = generate_random_kek();
+        os_keyring_store(&kek).map_err(|e| {
+            CoreError::Vault(format!(
+                "Recovery Mode: failed to persist stable KEK '{}': {}",
+                KEYRING_ACCOUNT, e
+            ))
+        })?;
+        let sentinel_value = super::write_encrypted_sentinel(&data_root, &kek)?;
+        super::cache_session_root_kek(kek, sentinel_value);
         Ok(kek)
     }
 }
@@ -127,6 +138,25 @@ fn os_keyring_load() -> Result<[u8; KEK_LEN]> {
     Ok(kek)
 }
 
+fn os_keyring_load_optional() -> Result<Option<[u8; KEK_LEN]>> {
+    match os_keyring_load() {
+        Ok(kek) => Ok(Some(kek)),
+        Err(e) => {
+            let msg = e.to_string().to_ascii_lowercase();
+            if msg.contains("no entry")
+                || msg.contains("no matching entry")
+                || msg.contains("not found")
+                || msg.contains("no password")
+                || msg.contains("platform secure storage")
+            {
+                Ok(None)
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
 fn os_keyring_store(kek: &[u8; KEK_LEN]) -> Result<()> {
     use base64::Engine as _;
     let encoded = base64::engine::general_purpose::STANDARD.encode(kek);
@@ -136,6 +166,22 @@ fn os_keyring_store(kek: &[u8; KEK_LEN]) -> Result<()> {
         .set_password(&encoded)
         .map_err(|e| CoreError::Keyring(format!("keyring store failed: {}", e)))?;
     Ok(())
+}
+
+fn verify_or_create_sentinel(data_root: &Path, kek: &[u8; KEK_LEN]) -> Result<String> {
+    let sentinel_path = super::sentinel_path(data_root);
+    if sentinel_path.exists() {
+        super::decrypt_sentinel(data_root, kek).map_err(|e| {
+            CoreError::Vault(format!(
+                "Recovery Mode: failed to decrypt {} with stable KEK '{}': {}",
+                sentinel_path.display(),
+                KEYRING_ACCOUNT,
+                e
+            ))
+        })
+    } else {
+        super::write_encrypted_sentinel(data_root, kek)
+    }
 }
 
 use base64::Engine as _;
