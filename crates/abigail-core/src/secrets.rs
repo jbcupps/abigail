@@ -6,8 +6,9 @@
 //! unlocked via `vault::unlock::HybridUnlockProvider` (OS keychain + passphrase fallback).
 //! File extension: `.vault` (e.g. `secrets.vault`).
 //!
-//! **Legacy format:** DPAPI-encrypted JSON blob (`.bin`). Detected and rejected with
-//! explicit remediation instructions (fresh-start policy — no auto-migration).
+//! **Legacy format:** DPAPI-encrypted JSON blob (`.bin`). When detected, Abigail will
+//! attempt a one-time migration into the current `.vault` format so installer-based
+//! upgrades keep working.
 
 use crate::error::{CoreError, Result};
 use crate::vault::crypto;
@@ -58,14 +59,12 @@ impl SecretsVault {
         let file_path = data_dir.join(&vault_filename);
         let unlock: Arc<dyn UnlockProvider> = Arc::new(HybridUnlockProvider::new());
 
-        // Check for legacy `.bin` files and give a clear error
-        let legacy_bin = data_dir.join(filename.replace(".vault", ".bin"));
-        if !file_path.exists() && legacy_bin.exists() {
-            tracing::warn!(
-                "Legacy DPAPI vault detected at {}. \
-                 The new cross-platform vault format uses {}. \
-                 Re-enter your secrets to populate the new vault.",
-                legacy_bin.display(),
+        if !file_path.exists()
+            && migrate_legacy_file_with_provider(data_dir.clone(), filename, unlock.clone())?
+        {
+            tracing::info!(
+                "Secrets vault auto-migrated from legacy {} to {}",
+                filename,
                 file_path.display()
             );
         }
@@ -88,6 +87,13 @@ impl SecretsVault {
             unlock,
             secrets,
         })
+    }
+
+    /// Attempt a one-time migration from a legacy DPAPI/plaintext `.bin` vault
+    /// into the current `.vault` format. Returns `true` when a new `.vault` file
+    /// was created.
+    pub fn migrate_legacy_custom(data_dir: PathBuf, filename: &str) -> Result<bool> {
+        migrate_legacy_file_with_provider(data_dir, filename, Arc::new(HybridUnlockProvider::new()))
     }
 
     /// Open a vault with an explicit unlock provider (for tests or daemon mode).
@@ -170,6 +176,48 @@ fn force_vault_extension(filename: &str) -> String {
 fn scope_from_filename(filename: &str) -> String {
     let stem = filename.strip_suffix(".vault").unwrap_or(filename);
     format!("secrets:{}", stem)
+}
+
+fn migrate_legacy_file_with_provider(
+    data_dir: PathBuf,
+    filename: &str,
+    unlock: Arc<dyn UnlockProvider>,
+) -> Result<bool> {
+    let vault_filename = force_vault_extension(filename);
+    let file_path = data_dir.join(&vault_filename);
+    if file_path.exists() {
+        return Ok(false);
+    }
+
+    let legacy_bin = data_dir.join(filename.replace(".vault", ".bin"));
+    if !legacy_bin.exists() {
+        return Ok(false);
+    }
+
+    let encrypted = std::fs::read(&legacy_bin)?;
+    let decrypted = crate::dpapi::dpapi_decrypt(&encrypted)?;
+    let secrets: HashMap<String, String> = serde_json::from_slice(&decrypted).map_err(|e| {
+        CoreError::Keyring(format!(
+            "legacy vault payload parse failed for {}: {}",
+            legacy_bin.display(),
+            e
+        ))
+    })?;
+
+    let migrated = SecretsVault {
+        file_path,
+        scope_label: scope_from_filename(&vault_filename),
+        unlock,
+        secrets,
+    };
+    migrated.save()?;
+
+    tracing::info!(
+        "Migrated legacy secrets vault {} -> {}",
+        legacy_bin.display(),
+        migrated.file_path.display()
+    );
+    Ok(true)
 }
 
 /// Create a test-friendly vault using the passphrase provider (no OS keychain needed).
@@ -269,5 +317,81 @@ mod tests {
         assert_eq!(force_vault_extension("secrets.vault"), "secrets.vault");
         assert_eq!(force_vault_extension("skills"), "skills.vault");
         assert_eq!(force_vault_extension("custom.bin"), "custom.vault");
+    }
+
+    #[test]
+    fn test_migrate_legacy_vault_to_new_format() {
+        let tmp = std::env::temp_dir().join("abigail_secrets_v2_test_migrate_legacy");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let legacy_payload = serde_json::to_vec(&HashMap::from([(
+            "openai".to_string(),
+            "sk-legacy".to_string(),
+        )]))
+        .unwrap();
+        let encrypted = crate::dpapi::dpapi_encrypt(&legacy_payload).unwrap();
+        std::fs::write(tmp.join("secrets.bin"), encrypted).unwrap();
+
+        let migrated = migrate_legacy_file_with_provider(
+            tmp.clone(),
+            "secrets.bin",
+            Arc::new(PassphraseUnlockProvider::new("test-passphrase")),
+        )
+        .unwrap();
+        assert!(migrated);
+        assert!(tmp.join("secrets.vault").exists());
+
+        let loaded = SecretsVault::open_with_provider(
+            tmp.clone(),
+            "secrets.vault",
+            Arc::new(PassphraseUnlockProvider::new("test-passphrase")),
+        )
+        .unwrap();
+        assert_eq!(loaded.get_secret("openai"), Some("sk-legacy"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_migrate_legacy_vault_is_noop_when_new_file_exists() {
+        let tmp = std::env::temp_dir().join("abigail_secrets_v2_test_migrate_noop");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let current = SecretsVault {
+            file_path: tmp.join("secrets.vault"),
+            scope_label: "secrets:secrets".to_string(),
+            unlock: Arc::new(PassphraseUnlockProvider::new("test-passphrase")),
+            secrets: HashMap::from([("anthropic".to_string(), "sk-current".to_string())]),
+        };
+        current.save().unwrap();
+
+        let legacy_payload = serde_json::to_vec(&HashMap::from([(
+            "openai".to_string(),
+            "sk-legacy".to_string(),
+        )]))
+        .unwrap();
+        let encrypted = crate::dpapi::dpapi_encrypt(&legacy_payload).unwrap();
+        std::fs::write(tmp.join("secrets.bin"), encrypted).unwrap();
+
+        let migrated = migrate_legacy_file_with_provider(
+            tmp.clone(),
+            "secrets.bin",
+            Arc::new(PassphraseUnlockProvider::new("test-passphrase")),
+        )
+        .unwrap();
+        assert!(!migrated);
+
+        let loaded = SecretsVault::open_with_provider(
+            tmp.clone(),
+            "secrets.vault",
+            Arc::new(PassphraseUnlockProvider::new("test-passphrase")),
+        )
+        .unwrap();
+        assert_eq!(loaded.get_secret("anthropic"), Some("sk-current"));
+        assert_eq!(loaded.get_secret("openai"), None);
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

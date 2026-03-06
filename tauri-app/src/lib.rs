@@ -7,6 +7,7 @@ pub mod commands;
 pub mod daemon_manager;
 pub mod hive_ops;
 pub mod identity_manager;
+mod install_upgrade;
 pub mod log_capture;
 pub mod ollama_manager;
 pub mod rate_limit;
@@ -447,7 +448,39 @@ fn try_run() -> Result<(), String> {
     let log_buffer = log_capture::new_log_buffer();
     log_capture::init_tracing(log_buffer.clone());
 
-    let config = get_config();
+    let current_version = env!("CARGO_PKG_VERSION");
+    let hive_data_dir = abigail_core::AppConfig::default_paths().data_dir;
+    install_upgrade::run_preflight(&hive_data_dir, current_version)?;
+
+    let identity_manager = Arc::new(
+        IdentityManager::new(hive_data_dir.clone())
+            .map_err(|e| format!("Failed to init IdentityManager: {e}"))?,
+    );
+    let startup_agent_id =
+        install_upgrade::run_identity_upgrade(&hive_data_dir, current_version, &identity_manager)?;
+
+    let mut config = get_config();
+    let mut active_agent_id = None;
+    if let Some(agent_id) = startup_agent_id.as_ref() {
+        match identity_manager.load_agent(agent_id) {
+            Ok(agent_config) => {
+                tracing::info!(
+                    "Startup upgrade: booting migrated agent {} using its identity config",
+                    agent_id
+                );
+                config = agent_config;
+                active_agent_id = Some(agent_id.clone());
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "Startup upgrade: failed to load migrated agent {}: {}",
+                    agent_id,
+                    err
+                );
+            }
+        }
+    }
+
     let data_dir = config.data_dir.clone();
     let iggy_connection = config.iggy_connection.clone();
     let secrets = Arc::new(Mutex::new(
@@ -466,7 +499,6 @@ fn try_run() -> Result<(), String> {
     let executor = Arc::new(SkillExecutor::new(registry.clone()));
     let stream_broker: Arc<dyn abigail_streaming::StreamBroker> = Arc::new(MemoryBroker::default());
 
-    let hive_data_dir = abigail_core::AppConfig::default_paths().data_dir;
     let hive_secrets = Arc::new(Mutex::new(
         SecretsVault::load(hive_data_dir.clone())
             .unwrap_or_else(|_| SecretsVault::new(hive_data_dir.clone())),
@@ -497,10 +529,6 @@ fn try_run() -> Result<(), String> {
     };
 
     let auth_manager = Arc::new(AuthManager::new(secrets.clone()));
-    let identity_manager = Arc::new(
-        IdentityManager::new(hive_data_dir)
-            .map_err(|e| format!("Failed to init IdentityManager: {e}"))?,
-    );
     let subagent_manager = RwLock::new(SubagentManager::new(Arc::new(router.clone())));
 
     let browser_config = abigail_capabilities::sensory::browser::BrowserCapabilityConfig::default();
@@ -578,7 +606,7 @@ fn try_run() -> Result<(), String> {
         auth_manager,
         identity_manager,
         memory,
-        active_agent_id: RwLock::new(None),
+        active_agent_id: RwLock::new(active_agent_id),
         subagent_manager,
         agentic_runtime,
         orchestration_scheduler,
