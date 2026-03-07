@@ -25,15 +25,8 @@ fn load_skills_vault(config: &AppConfig) -> anyhow::Result<SecretsVault> {
     SecretsVault::load_custom(config.data_dir.clone(), "skills.bin").map_err(Into::into)
 }
 
-fn email_bridge_configured(skills_vault: &SecretsVault) -> bool {
-    ["imap_user", "imap_password", "imap_host", "smtp_host"]
-        .iter()
-        .all(|key| skills_vault.exists(key))
-}
-
 pub fn status() -> anyhow::Result<()> {
     let config = load_config()?;
-    let skills_vault = load_skills_vault(&config).ok();
     println!("=== Abigail Agent Status ===");
     println!("Data directory: {}", config.data_dir.display());
     println!("Birth complete: {}", config.birth_complete);
@@ -71,12 +64,6 @@ pub fn status() -> anyhow::Result<()> {
             "Email: {} (IMAP {}:{})",
             email.address, email.imap_host, email.imap_port
         );
-    } else if skills_vault
-        .as_ref()
-        .map(email_bridge_configured)
-        .unwrap_or(false)
-    {
-        println!("Email: configured via Skills Vault bridge secrets");
     } else {
         println!("Email: not configured");
     }
@@ -84,13 +71,7 @@ pub fn status() -> anyhow::Result<()> {
     let email_accounts = config
         .email_accounts
         .len()
-        .max(usize::from(config.email.is_some()))
-        .max(usize::from(
-            skills_vault
-                .as_ref()
-                .map(email_bridge_configured)
-                .unwrap_or(false),
-        ));
+        .max(usize::from(config.email.is_some()));
     println!("Email accounts: {}", email_accounts);
     println!("MCP servers: {}", config.mcp_servers.len());
     println!("Approved skills: {}", config.approved_skill_ids.len());
@@ -98,11 +79,9 @@ pub fn status() -> anyhow::Result<()> {
     // Secrets vault summary
     match load_vault(&config) {
         Ok(vault) => {
-            let providers = vault.list_providers();
             println!(
-                "Secrets vault: {} keys stored ({})",
-                providers.len(),
-                providers.join(", ")
+                "Secrets vault: {} keys stored",
+                vault.list_providers().len()
             );
         }
         Err(e) => println!("Secrets vault: error loading — {}", e),

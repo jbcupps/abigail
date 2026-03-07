@@ -12,6 +12,7 @@ type SanctumTab =
   | "forge"
   | "staff"
   | "jobs"
+  | "browser"
   | "identity"
   | "appearance"
   | "keys"
@@ -28,11 +29,23 @@ interface SanctumDrawerProps {
   onDisconnect: () => void;
 }
 
+interface BrowserSessionInfo {
+  entity_id: string | null;
+  profile_dir: string;
+  active_in_process: boolean;
+  last_used_at_utc: string;
+  last_action: string | null;
+  current_url: string | null;
+  page_title: string | null;
+  cookie_count: number | null;
+}
+
 const TABS: { id: SanctumTab; label: string }[] = [
   { id: "conscience", label: "Conscience" },
   { id: "forge", label: "Nerve Center" },
   { id: "staff", label: "Staff" },
   { id: "jobs", label: "Registry" },
+  { id: "browser", label: "Browser Session" },
   { id: "identity", label: "Soul" },
   { id: "appearance", label: "Look" },
   { id: "keys", label: "Secrets" },
@@ -58,6 +71,10 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
   const [activeTab, setActiveTab] = useState<SanctumTab>("conscience");
   const [vaultVerifiedAtUtc, setVaultVerifiedAtUtc] = useState<string>(new Date().toISOString());
   const [recoveringVault, setRecoveringVault] = useState(false);
+  const [browserSessions, setBrowserSessions] = useState<BrowserSessionInfo[]>([]);
+  const [browserLoading, setBrowserLoading] = useState(false);
+  const [browserError, setBrowserError] = useState<string | null>(null);
+  const [clearingSession, setClearingSession] = useState<string | null>(null);
 
   // IdentityPanel mapping
   const identityPanelTabs: IdentityPanelTab[] = ["identity", "appearance", "llm", "keys", "data", "repair"];
@@ -73,6 +90,19 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
   const handleDiagnosticsNavigate = (tab: string) => {
     if (isVisibleTab(tab)) {
       setActiveTab(tab);
+    }
+  };
+
+  const loadBrowserSessions = async () => {
+    setBrowserLoading(true);
+    setBrowserError(null);
+    try {
+      const sessions = await invoke<BrowserSessionInfo[]>("list_browser_sessions");
+      setBrowserSessions(sessions ?? []);
+    } catch (error) {
+      setBrowserError(error instanceof Error ? error.message : "Unable to load browser sessions");
+    } finally {
+      setBrowserLoading(false);
     }
   };
 
@@ -105,6 +135,12 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
     };
   }, []);
 
+  useEffect(() => {
+    if (open && activeTab === "browser") {
+      void loadBrowserSessions();
+    }
+  }, [open, activeTab]);
+
   const recoverSoulVault = async () => {
     // Stub only: backend recovery wiring will perform signed-Documents re-encryption.
     setRecoveringVault(true);
@@ -113,6 +149,19 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
       setVaultVerifiedAtUtc(new Date().toISOString());
     } finally {
       setRecoveringVault(false);
+    }
+  };
+
+  const clearBrowserSession = async (profileDir: string) => {
+    setClearingSession(profileDir);
+    setBrowserError(null);
+    try {
+      await invoke("clear_browser_session", { profileDir });
+      await loadBrowserSessions();
+    } catch (error) {
+      setBrowserError(error instanceof Error ? error.message : "Unable to clear browser session");
+    } finally {
+      setClearingSession(null);
     }
   };
 
@@ -207,6 +256,74 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
           {staffJobsEnabled && activeTab === "staff" && <AgenticPanel />}
 
           {staffJobsEnabled && activeTab === "jobs" && <OrchestrationPanel />}
+
+          {activeTab === "browser" && (
+            <div className="p-6 space-y-4">
+              <div>
+                <h2 className="text-theme-primary-dim text-lg font-bold uppercase tracking-widest">Browser Session</h2>
+                <p className="text-theme-text-dim text-xs mt-2">
+                  Persistent Playwright profiles stay aligned to each Entity so OAuth, cookies, and webmail sessions can be cleared intentionally.
+                </p>
+              </div>
+
+              {browserError && (
+                <div className="border border-theme-danger rounded px-3 py-2 text-xs text-theme-danger">
+                  {browserError}
+                </div>
+              )}
+
+              {browserLoading ? (
+                <div className="border border-theme-border-dim rounded p-4 text-xs text-theme-text-dim uppercase tracking-widest">
+                  Scanning browser profiles...
+                </div>
+              ) : browserSessions.length === 0 ? (
+                <div className="border border-theme-border-dim rounded p-4 bg-theme-bg-inset text-sm text-theme-text-dim">
+                  No persistent browser sessions have been created yet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {browserSessions.map((session) => (
+                    <div
+                      key={session.profile_dir}
+                      className="border border-theme-border-dim rounded p-4 bg-theme-bg-inset space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-[10px] uppercase tracking-widest text-theme-text-dim">
+                            {session.entity_id ? `Entity ${session.entity_id}` : "Shared Profile"}
+                          </div>
+                          <div className="text-sm text-theme-text break-all">{session.profile_dir}</div>
+                        </div>
+                        <span className={`text-[10px] uppercase tracking-widest px-2 py-1 rounded border ${
+                          session.active_in_process
+                            ? "border-theme-success text-theme-success"
+                            : "border-theme-border text-theme-text-dim"
+                        }`}>
+                          {session.active_in_process ? "Active" : "Stored"}
+                        </span>
+                      </div>
+
+                      <div className="text-xs text-theme-text-dim space-y-1">
+                        <div>Last used: {new Date(session.last_used_at_utc).toLocaleString()}</div>
+                        {session.last_action && <div>Last action: {session.last_action}</div>}
+                        {session.page_title && <div>Title: {session.page_title}</div>}
+                        {session.current_url && <div className="break-all">URL: {session.current_url}</div>}
+                        {typeof session.cookie_count === "number" && <div>Cookies: {session.cookie_count}</div>}
+                      </div>
+
+                      <button
+                        className="text-[10px] uppercase tracking-widest border border-theme-danger text-theme-danger rounded px-3 py-2 hover:bg-theme-danger/10 disabled:opacity-50"
+                        onClick={() => void clearBrowserSession(session.profile_dir)}
+                        disabled={clearingSession === session.profile_dir}
+                      >
+                        {clearingSession === session.profile_dir ? "Clearing..." : "Clear Session"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {isIdentityPanelTab(activeTab) && (
             <IdentityPanel

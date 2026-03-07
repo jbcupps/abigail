@@ -176,116 +176,36 @@ pub fn skill_audit_log(data_dir: &Path, action: &str, detail: &str) {
         .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
 }
 
-/// Build and optionally initialize the Email skill from current vault.
-/// Used after secret updates so the skill picks up new credentials without
-/// blocking the active Tokio runtime thread.
-pub async fn create_email_skill_for_registry(state: &AppState) -> Result<Arc<dyn Skill>, String> {
-    use skill_email::EmailSkill;
-    let manifest = EmailSkill::default_manifest();
-    let mut skill = EmailSkill::new(manifest);
-    let (
-        imap_user,
-        imap_password,
-        imap_host,
-        imap_port,
-        imap_tls_mode,
-        smtp_host,
-        smtp_port,
-        smtp_user,
-        smtp_password,
-        smtp_tls_mode,
-    ) = {
-        let v = state.skills_secrets.lock().map_err(|e| e.to_string())?;
+pub fn create_browser_skill_for_registry(state: &AppState) -> Result<Arc<dyn Skill>, String> {
+    let (data_dir, allow_local_network, entity_id) = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let entity_id = state
+            .active_agent_id
+            .read()
+            .map_err(|e| e.to_string())?
+            .clone();
         (
-            v.get_secret("imap_user").unwrap_or("").to_string(),
-            v.get_secret("imap_password").unwrap_or("").to_string(),
-            v.get_secret("imap_host").unwrap_or("").to_string(),
-            v.get_secret("imap_port").unwrap_or("993").to_string(),
-            v.get_secret("imap_tls_mode")
-                .unwrap_or("IMPLICIT")
-                .to_string(),
-            v.get_secret("smtp_host").unwrap_or("").to_string(),
-            v.get_secret("smtp_port").unwrap_or("587").to_string(),
-            v.get_secret("smtp_user").unwrap_or("").to_string(),
-            v.get_secret("smtp_password").unwrap_or("").to_string(),
-            v.get_secret("smtp_tls_mode")
-                .unwrap_or("STARTTLS")
-                .to_string(),
+            config.data_dir.clone(),
+            config.autonomy_profile.allows_local_network_access(),
+            entity_id,
         )
     };
-
-    let mut values = HashMap::new();
-    values.insert(
-        "imap_host".to_string(),
-        serde_json::Value::String(imap_host),
-    );
-    values.insert(
-        "imap_port".to_string(),
-        serde_json::json!(imap_port.parse::<u64>().unwrap_or(993)),
-    );
-    values.insert(
-        "imap_user".to_string(),
-        serde_json::Value::String(imap_user),
-    );
-    values.insert(
-        "imap_tls_mode".to_string(),
-        serde_json::Value::String(imap_tls_mode),
-    );
-    values.insert(
-        "smtp_host".to_string(),
-        serde_json::Value::String(smtp_host),
-    );
-    values.insert(
-        "smtp_port".to_string(),
-        serde_json::json!(smtp_port.parse::<u64>().unwrap_or(587)),
-    );
-    values.insert(
-        "smtp_user".to_string(),
-        serde_json::Value::String(smtp_user),
-    );
-    values.insert(
-        "smtp_tls_mode".to_string(),
-        serde_json::Value::String(smtp_tls_mode),
-    );
-
-    let mut secrets = HashMap::new();
-    secrets.insert("imap_password".to_string(), imap_password);
-    secrets.insert("smtp_password".to_string(), smtp_password);
-
-    let skill_config = SkillConfig {
-        values,
-        secrets,
-        limits: ResourceLimits::default(),
-        permissions: vec![],
-        stream_broker: Some(state.stream_broker.clone()),
-    };
-
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        skill.initialize(skill_config),
-    )
-    .await
-    {
-        Ok(Ok(())) => {
-            tracing::info!("Email skill initialized successfully");
-        }
-        Ok(Err(e)) => {
-            tracing::warn!("Email skill init failed (registered uninitialized): {}", e);
-        }
-        Err(_) => {
-            tracing::warn!("Email skill init timed out after 15s (IMAP server unreachable?)");
-        }
-    }
-
-    Ok(Arc::new(skill))
+    Ok(Arc::new(skill_browser::BrowserSkill::new_for_entity(
+        skill_browser::BrowserSkill::default_manifest(),
+        allow_local_network,
+        data_dir,
+        entity_id,
+    )))
 }
 
-/// Blocking startup helper for sync setup paths that need the Email skill
-/// before the app event loop is fully running.
-pub fn create_email_skill_for_registry_blocking(
-    state: &AppState,
-) -> Result<Arc<dyn Skill>, String> {
-    tauri::async_runtime::block_on(create_email_skill_for_registry(state))
+pub fn install_identity_bound_skills(state: &AppState) -> Result<(), String> {
+    let browser_skill_id = skill_browser::BrowserSkill::default_manifest().id.clone();
+    let browser_skill = create_browser_skill_for_registry(state)?;
+    let _ = state.registry.unregister(&browser_skill_id);
+    state
+        .registry
+        .register(browser_skill_id, browser_skill)
+        .map_err(|e| e.to_string())
 }
 
 fn get_config() -> AppConfig {
@@ -746,23 +666,10 @@ fn try_run() -> Result<(), String> {
                 }
             }
 
-            // Register and initialize Email (IMAP/SMTP) skill.
-            // Mirrors entity-daemon: always registers the skill (so its manifest
-            // declares imap_*/smtp_* secrets for namespace validation), and
-            // initializes the IMAP transport only when credentials are present.
-            {
-                let skill_id = skill_email::EmailSkill::default_manifest().id.clone();
-                match create_email_skill_for_registry_blocking(&state) {
-                    Ok(skill) => {
-                        if let Err(e) = state.registry.register(skill_id, skill) {
-                            tracing::warn!("Failed to register Email skill: {}", e);
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("Email skill creation failed: {}", e);
-                    }
-                }
-            }
+            // Register identity-bound skills that need the active entity data_dir:
+            // Email for browser fallback profile routing, and Browser for
+            // persistent auth/session parity.
+            install_identity_bound_skills(&state)?;
 
             // Register native Rust skills (compiled into the binary).
             {
@@ -811,10 +718,6 @@ fn try_run() -> Result<(), String> {
                 ));
                 register_skill!(skill_http::HttpSkill::new_with_local_network(
                     skill_http::HttpSkill::default_manifest(),
-                    allow_local_network
-                ));
-                register_skill!(skill_browser::BrowserSkill::new_with_local_network(
-                    skill_browser::BrowserSkill::default_manifest(),
                     allow_local_network
                 ));
                 register_skill!(skill_calendar::CalendarSkill::new(
@@ -1227,6 +1130,8 @@ fn try_run() -> Result<(), String> {
             upload_chat_attachment,
             get_entity_documents_path,
             save_to_entity_docs,
+            list_browser_sessions,
+            clear_browser_session,
             get_forge_scenarios,
             crystallize_forge,
             preview_forge_primary_intelligence,

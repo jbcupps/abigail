@@ -78,6 +78,19 @@ pub struct IdentityManager {
 }
 
 impl IdentityManager {
+    fn normalize_agent_directory(&self, directory: &Path) -> Result<PathBuf, String> {
+        abigail_core::global_config::normalize_agent_directory(directory).map_err(|e| e.to_string())
+    }
+
+    fn resolve_agent_dir(&self, directory: &Path) -> Result<PathBuf, String> {
+        let relative = self.normalize_agent_directory(directory)?;
+        abigail_core::path_guard::resolve_within_root(&self.data_root, &relative, "agent directory")
+            .map_err(|e| e.to_string())
+    }
+
+    fn registry_directory_for(&self, agent_id: &str) -> PathBuf {
+        PathBuf::from("identities").join(agent_id)
+    }
     /// Create a new IdentityManager, loading GlobalConfig and master key from disk.
     /// If master key doesn't exist, generates one (first-run bootstrap).
     pub fn new(data_root: PathBuf) -> anyhow::Result<Self> {

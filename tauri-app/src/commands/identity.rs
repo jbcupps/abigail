@@ -117,6 +117,8 @@ pub async fn load_agent(state: State<'_, AppState>, agent_id: String) -> Result<
         *active = Some(agent_id.clone());
     }
 
+    crate::install_identity_bound_skills(&state)?;
+
     Ok(())
 }
 

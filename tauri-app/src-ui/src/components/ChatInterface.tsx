@@ -431,10 +431,10 @@ export default function ChatInterface({
   }, [headerProvider, knownProviders]);
 
   useEffect(() => {
-    if (isCliProviderSelected && selectedModel) {
+    if (selectedModel && (isCliProviderSelected || !headerModels.includes(selectedModel))) {
       setSelectedModel("");
     }
-  }, [isCliProviderSelected, selectedModel]);
+  }, [headerModels, isCliProviderSelected, selectedModel]);
 
   const applyChatError = (errorMsg: string) => {
     const interrupted = isInterruptedByUserMessage(errorMsg);

@@ -3,6 +3,7 @@
 mod transport;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
 use tokio::sync::RwLock;
@@ -23,11 +24,21 @@ use abigail_skills::skill::{
 use abigail_skills::transport::imap::ImapTlsMode;
 use abigail_skills::transport::smtp::SmtpTlsMode;
 use abigail_skills::transport::{ImapClient, SmtpClient};
+use skill_browser::{webmail_send, WebmailSendRequest};
 
 use crate::transport::EmailTransport;
 
 /// Default skill ID for the generic email skill.
 pub const EMAIL_SKILL_ID: &str = "com.abigail.skills.email";
+
+#[derive(Debug, Clone, Default)]
+struct EmailFallbackConfig {
+    data_dir: Option<PathBuf>,
+    entity_id: Option<String>,
+    imap_host: Option<String>,
+    smtp_host: Option<String>,
+    sender_address: Option<String>,
+}
 
 /// Generic email skill: Skill + EmailTransportCapability.
 pub struct EmailSkill {
@@ -35,6 +46,7 @@ pub struct EmailSkill {
     transport: Option<Arc<RwLock<EmailTransport>>>,
     stream_broker: Option<Arc<dyn abigail_streaming::StreamBroker>>,
     health_state: StdRwLock<SkillHealth>,
+    fallback_config: StdRwLock<EmailFallbackConfig>,
 }
 
 impl EmailSkill {
@@ -155,6 +167,7 @@ impl EmailSkill {
                 last_check: chrono::Utc::now(),
                 metrics: HashMap::new(),
             }),
+            fallback_config: StdRwLock::new(EmailFallbackConfig::default()),
         }
     }
 
@@ -219,6 +232,43 @@ impl EmailSkill {
             requires_confirmation: false,
         }
     }
+
+    async fn browser_fallback_send(
+        &self,
+        to_addrs: &[abigail_skills::capability::email::EmailAddress],
+        subject: &str,
+        body: &str,
+    ) -> SkillResult<ToolOutput> {
+        let fallback = self
+            .fallback_config
+            .read()
+            .map_err(|err| SkillError::InitFailed(err.to_string()))?
+            .clone();
+        let data_dir = fallback.data_dir.ok_or_else(|| {
+            SkillError::InitFailed(
+                "Browser fallback is unavailable: email skill has no entity data_dir".to_string(),
+            )
+        })?;
+        let request = WebmailSendRequest {
+            profile_dir: data_dir.join("browser_profile"),
+            entity_id: fallback.entity_id,
+            smtp_host: fallback.smtp_host,
+            imap_host: fallback.imap_host,
+            sender_address: fallback.sender_address,
+            to: to_addrs.iter().map(|addr| addr.email.clone()).collect(),
+            subject: subject.to_string(),
+            body: body.to_string(),
+        };
+        let result = webmail_send(request)
+            .await
+            .map_err(|err| SkillError::ToolFailed(format!("Webmail fallback failed: {err}")))?;
+        Ok(ToolOutput::success(serde_json::json!({
+            "success": true,
+            "fallback": "browser_webmail",
+            "provider": result.provider,
+            "compose_url": result.compose_url,
+        })))
+    }
 }
 
 #[async_trait::async_trait]
@@ -230,6 +280,16 @@ impl Skill for EmailSkill {
     async fn initialize(&mut self, config: SkillConfig) -> SkillResult<()> {
         self.stream_broker = config.stream_broker.clone();
         self.transport = None;
+        let data_dir = config
+            .values
+            .get("data_dir")
+            .and_then(|v| v.as_str())
+            .map(PathBuf::from);
+        let entity_id = config
+            .values
+            .get("entity_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
         let host = config
             .values
             .get("imap_host")
@@ -263,6 +323,16 @@ impl Skill for EmailSkill {
             .unwrap_or_default()
             .trim()
             .to_string();
+
+        if let Ok(mut fallback) = self.fallback_config.write() {
+            *fallback = EmailFallbackConfig {
+                data_dir,
+                entity_id,
+                imap_host: host.clone(),
+                smtp_host: None,
+                sender_address: Some(user.clone()),
+            };
+        }
 
         let mut missing = Vec::new();
         let host = match host.map(|h| h.trim().to_string()).filter(|h| !h.is_empty()) {
@@ -342,6 +412,15 @@ impl Skill for EmailSkill {
             .map(|raw| Self::parse_smtp_tls_mode(Some(raw), tls_mode, smtp_port))
             .unwrap_or_else(|| Self::parse_smtp_tls_mode(None, tls_mode, smtp_port));
 
+        if let Ok(mut fallback) = self.fallback_config.write() {
+            fallback.smtp_host = Some(smtp_host.clone());
+            fallback.sender_address = Some(if smtp_user.is_empty() {
+                user.clone()
+            } else {
+                smtp_user.clone()
+            });
+        }
+
         let mut smtp = None;
         let mut health_status = HealthStatus::Healthy;
         let mut health_message = Some("Email skill initialized (IMAP + SMTP ready)".to_string());
@@ -405,13 +484,12 @@ impl Skill for EmailSkill {
         params: ToolParams,
         _context: &ExecutionContext,
     ) -> SkillResult<ToolOutput> {
-        let transport = self
-            .transport
-            .as_ref()
-            .ok_or_else(|| SkillError::InitFailed(self.current_health_message()))?;
-
         match tool_name {
             "fetch_emails" => {
+                let transport = self
+                    .transport
+                    .as_ref()
+                    .ok_or_else(|| SkillError::InitFailed(self.current_health_message()))?;
                 let limit = params.get::<u64>("limit").unwrap_or(50);
                 let unread_only = params.get::<bool>("unread_only").unwrap_or(true);
                 let options = FetchOptions {
@@ -474,16 +552,34 @@ impl Skill for EmailSkill {
                 }
 
                 let outgoing = OutgoingEmail {
-                    to: to_addrs,
-                    subject,
-                    body,
+                    to: to_addrs.clone(),
+                    subject: subject.clone(),
+                    body: body.clone(),
                 };
-                let guard = transport.write().await;
-                let result = guard.send_email(outgoing).await?;
-                Ok(ToolOutput::success(serde_json::json!({
-                    "success": true,
-                    "message_id": result.message_id,
-                })))
+                if let Some(transport) = self.transport.as_ref() {
+                    let guard = transport.write().await;
+                    match guard.send_email(outgoing).await {
+                        Ok(result) => {
+                            return Ok(ToolOutput::success(serde_json::json!({
+                                "success": true,
+                                "message_id": result.message_id,
+                            })));
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                "Email SMTP send failed, delegating to browser fallback: {}",
+                                err
+                            );
+                        }
+                    }
+                } else {
+                    tracing::warn!(
+                        "Email transport is unavailable ({}), delegating to browser fallback",
+                        self.current_health_message()
+                    );
+                }
+
+                self.browser_fallback_send(&to_addrs, &subject, &body).await
             }
             "classify_importance" => {
                 let _email_id = params.get::<String>("email_id").unwrap_or_default();

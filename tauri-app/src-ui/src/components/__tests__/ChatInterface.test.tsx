@@ -134,6 +134,61 @@ describe("ChatInterface", () => {
     });
   });
 
+  it("clears a stale model override when the active provider changes", async () => {
+    let routerStatus = { ...defaultRouterStatus, ego_provider: "openai" };
+    const registry = {
+      providers: ["openai", "google"],
+      total_models: 4,
+      models: [
+        { provider: "openai", model_id: "gpt-4.1", display_name: null },
+        { provider: "openai", model_id: "gpt-4.1-mini", display_name: null },
+        { provider: "google", model_id: "gemini-2.5-pro", display_name: null },
+        { provider: "google", model_id: "gemini-2.5-flash", display_name: null },
+      ],
+    };
+
+    mockInvoke.mockImplementation((cmd: string) => {
+      switch (cmd) {
+        case "get_router_status":
+          return Promise.resolve(routerStatus);
+        case "get_ollama_status":
+          return Promise.resolve({
+            managed: false,
+            running: false,
+            port: 11434,
+            model_ready: false,
+          });
+        case "list_missing_skill_secrets":
+          return Promise.resolve([]);
+        case "get_force_override":
+          return Promise.resolve({ pinned_model: null, pinned_tier: null, pinned_provider: null });
+        case "get_model_registry":
+          return Promise.resolve(registry);
+        default:
+          return Promise.resolve(null);
+      }
+    });
+
+    const user = userEvent.setup();
+    renderWithTheme(<ChatInterface />);
+    await screen.findByPlaceholderText(/type|message|ask/i);
+
+    let [providerSelect, modelSelect] = screen.getAllByRole("combobox") as HTMLSelectElement[];
+    expect(providerSelect.value).toBe("openai");
+
+    await user.selectOptions(modelSelect, "gpt-4.1");
+    expect(modelSelect.value).toBe("gpt-4.1");
+
+    routerStatus = { ...routerStatus, ego_provider: "google" };
+    listeners["provider-config-changed"]({ payload: null });
+
+    await waitFor(() => {
+      [providerSelect, modelSelect] = screen.getAllByRole("combobox") as HTMLSelectElement[];
+      expect(providerSelect.value).toBe("google");
+      expect(modelSelect.value).toBe("");
+    });
+  });
+
   it("shows execution trace attribution with configured+executed when routing details enabled", async () => {
     const tracePayload = {
       turn_id: "test-turn-1",

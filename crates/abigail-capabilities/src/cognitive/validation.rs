@@ -186,6 +186,29 @@ pub async fn discover_models(provider: &str, api_key: &str) -> Result<Vec<ModelI
     }
 }
 
+/// Return true when a model ID belongs to the given provider's chat-capable set.
+///
+/// Unknown providers default to `true` so newer providers are not blocked by
+/// stale validation logic, but incompatible known-provider overrides can be
+/// stripped before they reach the wrong API.
+pub fn is_model_compatible_with_provider(provider: &str, model: &str) -> bool {
+    let provider = provider.trim().to_lowercase();
+    let model = model.trim();
+    if model.is_empty() {
+        return false;
+    }
+
+    match provider.as_str() {
+        "openai" => is_chat_openai_model(model),
+        "google" => is_chat_google_model(model),
+        "xai" => is_chat_xai_model(model),
+        "anthropic" => model.starts_with("claude-"),
+        "perplexity" => model.starts_with("sonar"),
+        "claude-cli" | "gemini-cli" | "codex-cli" | "grok-cli" => false,
+        _ => true,
+    }
+}
+
 /// Whitelist of OpenAI model prefixes that are chat-completion capable.
 /// Everything else (embeddings, TTS, DALL-E, Sora, Whisper, moderation,
 /// realtime, audio, search-preview, instruct, legacy completions) is excluded.
@@ -542,5 +565,38 @@ mod tests {
 
         assert!(!is_chat_xai_model("some-embedding-model"));
         assert!(!is_chat_xai_model("grok-image-gen"));
+    }
+
+    #[test]
+    fn test_model_provider_compatibility_guard() {
+        assert!(is_model_compatible_with_provider("openai", "gpt-4.1"));
+        assert!(is_model_compatible_with_provider(
+            "google",
+            "gemini-2.5-pro"
+        ));
+        assert!(is_model_compatible_with_provider(
+            "xai",
+            "grok-4-1-fast-reasoning"
+        ));
+        assert!(is_model_compatible_with_provider(
+            "anthropic",
+            "claude-sonnet-4-6"
+        ));
+        assert!(is_model_compatible_with_provider("perplexity", "sonar-pro"));
+
+        assert!(!is_model_compatible_with_provider(
+            "openai",
+            "gemini-2.5-pro"
+        ));
+        assert!(!is_model_compatible_with_provider("google", "gpt-4.1"));
+        assert!(!is_model_compatible_with_provider("xai", "gpt-4.1"));
+        assert!(!is_model_compatible_with_provider(
+            "claude-cli",
+            "claude-sonnet-4-6"
+        ));
+        assert!(is_model_compatible_with_provider(
+            "openrouter",
+            "google/gemini-2.5-pro"
+        ));
     }
 }

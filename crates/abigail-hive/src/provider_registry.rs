@@ -4,6 +4,7 @@
 //! the router nor the Tauri app need to know how to build providers from raw
 //! API keys.
 
+use crate::hive::ProviderSelection;
 use abigail_capabilities::cognitive::{
     AnthropicProvider, CandleProvider, CliLlmProvider, CliPermissionMode, CliVariant,
     CompatibleProvider, LlmProvider, LocalHttpProvider, OpenAiCompatibleProvider, OpenAiProvider,
@@ -68,12 +69,14 @@ impl ProviderRegistry {
         api_key: Option<String>,
         ego_model: Option<String>,
     ) -> EgoProviderResult {
-        Self::build_ego_with_cli_mode(
-            provider_name,
-            api_key,
-            ego_model,
-            CliPermissionMode::default(),
-        )
+        let selection = provider_name.map(|provider| ProviderSelection {
+            provider: provider.to_string(),
+            auth: api_key
+                .filter(|key| !key.trim().is_empty())
+                .map(crate::hive::ProviderAuth::ApiKey)
+                .unwrap_or(crate::hive::ProviderAuth::System),
+        });
+        Self::build_ego_with_cli_mode(selection.as_ref(), ego_model, CliPermissionMode::default())
     }
 
     pub fn build_ego_with_cli_mode(
