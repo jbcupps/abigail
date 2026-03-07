@@ -15,6 +15,7 @@ type SanctumTab =
   | "identity"
   | "appearance"
   | "keys"
+  | "secretVault"
   | "llm"
   | "data"
   | "diagnostics"
@@ -35,10 +36,20 @@ const TABS: { id: SanctumTab; label: string }[] = [
   { id: "identity", label: "Soul" },
   { id: "appearance", label: "Look" },
   { id: "keys", label: "Secrets" },
+  { id: "secretVault", label: "Secrets Vault" },
   { id: "llm", label: "Mind" },
   { id: "data", label: "Archives" },
   { id: "diagnostics", label: "Insights" },
   { id: "repair", label: "Recovery" },
+];
+
+const PROTECTED_TOPIC_STUBS = [
+  {
+    topicName: "secrets-[entity-uuid]",
+    access: "Entity read/write",
+    visibility: "Mentor read-only",
+    note: "Protected secret moves land here after the TriangleEthic 5D preview.",
+  },
 ];
 
 export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDrawerProps) {
@@ -202,6 +213,35 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
               initialTab={activeTab}
               embedded
             />
+          )}
+
+          {activeTab === "secretVault" && (
+            <div className="p-6 space-y-4">
+              <div>
+                <h2 className="text-theme-primary-dim text-lg font-bold mb-2 uppercase tracking-widest">Secrets Vault</h2>
+                <p className="text-theme-text-dim text-sm">
+                  Protected topics keep sensitive credentials outside mentor and superego review. This tab is read-only for the user.
+                </p>
+              </div>
+
+              {PROTECTED_TOPIC_STUBS.map((topic) => (
+                <div
+                  key={topic.topicName}
+                  className="border border-theme-border-dim rounded p-4 bg-theme-bg-inset"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-theme-text text-sm font-semibold">{topic.topicName}</span>
+                    <span className="text-[10px] uppercase tracking-widest text-theme-success border border-theme-success rounded px-2 py-1">
+                      Protected
+                    </span>
+                  </div>
+                  <div className="mt-3 text-xs text-theme-text-dim space-y-1">
+                    <p>{topic.note}</p>
+                    <p>{topic.access} | {topic.visibility}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
           
           {activeTab === "diagnostics" && (

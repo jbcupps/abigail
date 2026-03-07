@@ -42,7 +42,7 @@ impl ProbeResult {
 /// Returns `true` if the probe env var is set and the probe should run
 /// instead of the normal GUI.
 pub fn should_run() -> bool {
-    std::env::var("ABIGAIL_E2E_PROBE").map_or(false, |v| v == "1")
+    std::env::var("ABIGAIL_E2E_PROBE").is_ok_and(|v| v == "1")
 }
 
 /// Run the probe and call `std::process::exit` with the result.

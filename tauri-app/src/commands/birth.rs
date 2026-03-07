@@ -266,7 +266,7 @@ pub fn advance_to_crystallization(state: State<AppState>) -> Result<(), String> 
         config
             .local_llm_base_url
             .as_deref()
-            .map_or(false, |u| !u.is_empty())
+            .is_some_and(|u| !u.is_empty())
     };
 
     let has_cli_provider = if !has_vault_provider && !has_local_llm {
@@ -565,6 +565,7 @@ fn parse_identity_json(text: &str) -> CrystallizationIdentity {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn crystallize_soul(
     state: State<AppState>,
     name: String,
