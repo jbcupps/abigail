@@ -122,6 +122,17 @@ impl Hive {
         config: &AppConfig,
         vault: &SecretsVault,
     ) -> Option<ProviderSelection> {
+        // Helper to avoid propagating full secrets into logs or debug output.
+        fn redact_secret(secret: &str) -> String {
+            let trimmed = secret.trim();
+            if trimmed.len() <= 4 {
+                "***redacted***".to_string()
+            } else {
+                let suffix = &trimmed[trimmed.len() - 4..];
+                format!("***{}", suffix)
+            }
+        }
+
         // 1. Explicit preference from Mentor menu (Forge)
         if let Some(pref) = &config.active_provider_preference {
             // CLI providers work without a stored key (OAuth / built-in auth)
@@ -133,7 +144,7 @@ impl Hive {
                         .filter(|k| !k.is_empty())
                         // Do not propagate the actual secret to avoid accidental logging.
                         .map(|_key| ProviderSelection {
-                            provider: pref.clone(),
+                            auth: ProviderAuth::ApiKey(redact_secret(key)),
                             auth: ProviderAuth::ApiKey("<redacted>".to_string()),
                         })
                         .unwrap_or_else(|| ProviderSelection {
@@ -147,7 +158,7 @@ impl Hive {
                 .map(str::trim)
                 .filter(|key| !key.is_empty())
                 .map(|key| ProviderSelection {
-                    provider: pref.clone(),
+                    auth: ProviderAuth::ApiKey(redact_secret(key)),
                     auth: ProviderAuth::ApiKey(key.to_string()),
                 })
             {
@@ -173,7 +184,7 @@ impl Hive {
                 .map(str::trim)
                 .filter(|key| !key.is_empty())
                 .map(|key| ProviderSelection {
-                    provider: (*name).to_string(),
+                    auth: ProviderAuth::ApiKey(redact_secret(key)),
                     auth: ProviderAuth::ApiKey(key.to_string()),
                 })
             {
@@ -187,7 +198,7 @@ impl Hive {
                 if let Some(k) = &trinity.ego_api_key {
                     if !k.is_empty() {
                         return Some(ProviderSelection {
-                            provider: p.clone(),
+                            auth: ProviderAuth::ApiKey(redact_secret(k)),
                             auth: ProviderAuth::ApiKey(k.clone()),
                         });
                     }
@@ -199,7 +210,7 @@ impl Hive {
         if let Some(k) = &config.openai_api_key {
             if !k.is_empty() {
                 return Some(ProviderSelection {
-                    provider: "openai".to_string(),
+                    auth: ProviderAuth::ApiKey(redact_secret(k)),
                     auth: ProviderAuth::ApiKey(k.clone()),
                 });
             }
