@@ -43,10 +43,9 @@ pub async fn start_cli_server(
     let auth = AuthState::new();
     let token: String = auth.token.read().await.clone();
 
-    let (config_path, data_dir, agent_name, docs_dir) = {
+    let (data_dir, agent_name, docs_dir) = {
         let config = state.config.read().map_err(|e| e.to_string())?;
         (
-            config.config_path(),
             config.data_dir.clone(),
             config.agent_name.clone(),
             config.data_dir.join("docs"),
@@ -55,7 +54,6 @@ pub async fn start_cli_server(
 
     let server_state = AppServerState {
         auth: auth.clone(),
-        config_path,
         data_dir,
         vault: state.secrets.clone(),
         skills_vault: Some(state.skills_secrets.clone()),

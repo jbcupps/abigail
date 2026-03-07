@@ -308,9 +308,11 @@ async fn main() -> anyhow::Result<()> {
             skill_http::HttpSkill::default_manifest(),
             allow_local_network
         ));
-        register_skill!(skill_browser::BrowserSkill::new_with_local_network(
+        register_skill!(skill_browser::BrowserSkill::new_for_entity(
             skill_browser::BrowserSkill::default_manifest(),
-            allow_local_network
+            allow_local_network,
+            config.data_dir.clone(),
+            Some(cli.entity_id.clone())
         ));
         register_skill!(skill_calendar::CalendarSkill::new(
             skill_calendar::CalendarSkill::default_manifest(),
@@ -733,6 +735,14 @@ async fn main() -> anyhow::Result<()> {
         values.insert(
             "smtp_tls_mode".to_string(),
             serde_json::Value::String(smtp_tls_mode),
+        );
+        values.insert(
+            "data_dir".to_string(),
+            serde_json::Value::String(config.data_dir.to_string_lossy().to_string()),
+        );
+        values.insert(
+            "entity_id".to_string(),
+            serde_json::Value::String(cli.entity_id.clone()),
         );
 
         let mut secrets = HashMap::new();

@@ -8,6 +8,7 @@ description = "Generic IMAP/SMTP email skill wrapping abigail-skills transport l
 abigail-skills = { path = "../../crates/abigail-skills" }
 abigail-core = { path = "../../crates/abigail-core" }
 abigail-streaming = { path = "../../crates/abigail-streaming" }
+skill-browser = { path = "../skill-browser" }
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true

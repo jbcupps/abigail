@@ -45,7 +45,7 @@ enabled = true
 [[skill]]
 id = "com.abigail.skills.browser"
 instruction_file = "skill_browser.md"
-keywords = ["browser", "browse", "webpage", "website", "navigate", "click", "screenshot"]
+keywords = ["browser", "browse", "webpage", "website", "navigate", "click", "screenshot", "oauth", "login", "session", "persistent session", "webmail", "execute js"]
 enabled = true
 
 [[skill]]

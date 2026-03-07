@@ -183,6 +183,15 @@ pub async fn create_email_skill_for_registry(state: &AppState) -> Result<Arc<dyn
     use skill_email::EmailSkill;
     let manifest = EmailSkill::default_manifest();
     let mut skill = EmailSkill::new(manifest);
+    let (data_dir, entity_id) = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let entity_id = state
+            .active_agent_id
+            .read()
+            .map_err(|e| e.to_string())?
+            .clone();
+        (config.data_dir.clone(), entity_id)
+    };
     let (
         imap_user,
         imap_password,
@@ -247,6 +256,13 @@ pub async fn create_email_skill_for_registry(state: &AppState) -> Result<Arc<dyn
         "smtp_tls_mode".to_string(),
         serde_json::Value::String(smtp_tls_mode),
     );
+    values.insert(
+        "data_dir".to_string(),
+        serde_json::Value::String(data_dir.to_string_lossy().to_string()),
+    );
+    if let Some(entity_id) = entity_id {
+        values.insert("entity_id".to_string(), serde_json::Value::String(entity_id));
+    }
 
     let mut secrets = HashMap::new();
     secrets.insert("imap_password".to_string(), imap_password);
@@ -286,6 +302,51 @@ pub fn create_email_skill_for_registry_blocking(
     state: &AppState,
 ) -> Result<Arc<dyn Skill>, String> {
     tauri::async_runtime::block_on(create_email_skill_for_registry(state))
+}
+
+pub fn create_browser_skill_for_registry(state: &AppState) -> Result<Arc<dyn Skill>, String> {
+    let (data_dir, allow_local_network, entity_id) = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let entity_id = state
+            .active_agent_id
+            .read()
+            .map_err(|e| e.to_string())?
+            .clone();
+        (
+            config.data_dir.clone(),
+            config.autonomy_profile.allows_local_network_access(),
+            entity_id,
+        )
+    };
+    Ok(Arc::new(skill_browser::BrowserSkill::new_for_entity(
+        skill_browser::BrowserSkill::default_manifest(),
+        allow_local_network,
+        data_dir,
+        entity_id,
+    )))
+}
+
+pub fn install_identity_bound_skills(state: &AppState) -> Result<(), String> {
+    let email_skill_id = skill_email::EmailSkill::default_manifest().id.clone();
+    match create_email_skill_for_registry_blocking(state) {
+        Ok(skill) => {
+            let _ = state.registry.unregister(&email_skill_id);
+            if let Err(e) = state.registry.register(email_skill_id, skill) {
+                tracing::warn!("Failed to register Email skill: {}", e);
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Email skill creation failed: {}", e);
+        }
+    }
+
+    let browser_skill_id = skill_browser::BrowserSkill::default_manifest().id.clone();
+    let browser_skill = create_browser_skill_for_registry(state)?;
+    let _ = state.registry.unregister(&browser_skill_id);
+    state
+        .registry
+        .register(browser_skill_id, browser_skill)
+        .map_err(|e| e.to_string())
 }
 
 fn get_config() -> AppConfig {
@@ -752,23 +813,10 @@ fn try_run() -> Result<(), String> {
                 }
             }
 
-            // Register and initialize Email (IMAP/SMTP) skill.
-            // Mirrors entity-daemon: always registers the skill (so its manifest
-            // declares imap_*/smtp_* secrets for namespace validation), and
-            // initializes the IMAP transport only when credentials are present.
-            {
-                let skill_id = skill_email::EmailSkill::default_manifest().id.clone();
-                match create_email_skill_for_registry_blocking(&state) {
-                    Ok(skill) => {
-                        if let Err(e) = state.registry.register(skill_id, skill) {
-                            tracing::warn!("Failed to register Email skill: {}", e);
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("Email skill creation failed: {}", e);
-                    }
-                }
-            }
+            // Register identity-bound skills that need the active entity data_dir:
+            // Email for browser fallback profile routing, and Browser for
+            // persistent auth/session parity.
+            install_identity_bound_skills(&state)?;
 
             // Register native Rust skills (compiled into the binary).
             {
@@ -817,10 +865,6 @@ fn try_run() -> Result<(), String> {
                 ));
                 register_skill!(skill_http::HttpSkill::new_with_local_network(
                     skill_http::HttpSkill::default_manifest(),
-                    allow_local_network
-                ));
-                register_skill!(skill_browser::BrowserSkill::new_with_local_network(
-                    skill_browser::BrowserSkill::default_manifest(),
                     allow_local_network
                 ));
                 register_skill!(skill_calendar::CalendarSkill::new(
@@ -1233,6 +1277,8 @@ fn try_run() -> Result<(), String> {
             upload_chat_attachment,
             get_entity_documents_path,
             save_to_entity_docs,
+            list_browser_sessions,
+            clear_browser_session,
             get_forge_scenarios,
             crystallize_forge,
             preview_forge_primary_intelligence,
