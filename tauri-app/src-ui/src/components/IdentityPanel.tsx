@@ -191,13 +191,8 @@ function AppearanceTab() {
         themeId: null,
       });
       await refreshTheme();
-    } catch {
-      try {
-        await invoke("set_config_value", { key: "primary_color", value: accentColor.trim() });
-        await refreshTheme();
-      } catch (e2) {
-        console.warn("[AppearanceTab] accent save failed:", e2);
-      }
+    } catch (e) {
+      console.warn("[AppearanceTab] accent save failed:", e);
     }
   };
 
@@ -591,14 +586,14 @@ export default function IdentityPanel({ initialTab, embedded }: IdentityPanelPro
               />
             )}
 
-            {/* Skills Vault: skill passwords (IMAP, Jira, GitHub, etc.) */}
+            {/* Skills Vault: skill passwords (browser fallback, Jira, GitHub, etc.) */}
             <div className="border-t border-theme-border pt-6">
               <h2 className="text-theme-primary-dim text-lg font-bold uppercase tracking-widest mb-2">Skills Vault</h2>
               <p className="text-theme-text-dim text-[10px] uppercase tracking-tighter mb-4">
-                Passwords and API keys for skills (e.g. mail, Jira, GitHub). Encrypted on device.
+                Passwords and API keys for skills (e.g. browser fallback, Jira, GitHub). Encrypted on device.
               </p>
               {skillsVaultEntries.length === 0 ? (
-                <p className="text-theme-text-dim text-xs italic">No skill secrets declared. Install skills that require credentials (e.g. Proton Mail) to see entries here.</p>
+                <p className="text-theme-text-dim text-xs italic">No skill secrets declared. Install skills that require credentials (e.g. GitHub or Browser fallback helpers) to see entries here.</p>
               ) : (
                 <div className="space-y-2">
                   {skillsVaultGroups.map((group) => (

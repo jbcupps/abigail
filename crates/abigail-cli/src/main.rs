@@ -34,7 +34,7 @@ enum Commands {
     },
     /// List all registered secret key names
     ListSecrets,
-    /// Configure IMAP/SMTP credentials
+    /// Deprecated compatibility command for removed IMAP/SMTP email transport
     ConfigureEmail {
         /// Email address
         #[arg(long)]

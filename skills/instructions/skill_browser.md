@@ -54,7 +54,7 @@ Recommended pattern:
 
 ## Webmail fallback
 
-The Email skill can delegate to this Browser skill when native IMAP/SMTP delivery is degraded.
+Browser skill is the supported path for auth-heavy web workflows, including webmail.
 
 Current provider heuristics:
 

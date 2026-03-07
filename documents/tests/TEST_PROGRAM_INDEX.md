@@ -1,6 +1,6 @@
 # Abigail Test Program Index (Current)
 
-Date: 2026-03-02
+Date: 2026-03-07
 
 ## Scope
 
@@ -8,8 +8,9 @@ This is the canonical test-program index for the current architecture:
 
 - Hive/Entity split daemons
 - Gateway-based desktop chat flow
-- Tier-based routing with `tier_based`, `ego_primary`, `council`, and `cli_orchestrator`
+- Simplified routing with `ego_primary` and `cli_orchestrator`
 - Skill trust and signed allowlist enforcement
+- Browser fallback for authenticated web workflows
 
 ## Canonical Program Documents
 
@@ -33,7 +34,8 @@ This is the canonical test-program index for the current architecture:
 - `Gate-X1`: `cd tauri-app/src-ui && npm run build` passes.
 - `Gate-X2`: `cd tauri-app/src-ui && npm run test:coverage` passes.
 - `Gate-E1`: command-contract check passes (`npm run check:command-contract`).
-- `Gate-E2`: env-gated live E2E suites pass when enabled (email + Tauri probe).
+- `Gate-E2`: env-gated live E2E suites pass when enabled (browser persistent auth + Tauri probe).
+- `Gate-S1`: `node scripts/check_stability.mjs` passes.
 
 ## Legacy Suite Status
 
@@ -46,11 +48,12 @@ The following documents remain for historical traceability but are no longer the
 - `documents/tests/AGENT_SPAWNING_TEST_PLAN.md`
 - `documents/tests/MESSAGE_FLOW_STABILITY_TEST_PLAN.md`
 
-Legacy IDs (`BIRTH-*`, `CRYS-*`, `OPER-*`, `SKILL-*`, `SPAWN-*`, `STAB-*`) are consolidated into the new `UNIT-*`, `UX-*`, and `E2E-*` tracks.
+Legacy IDs are consolidated into the `UNIT-*`, `UX-*`, and `E2E-*` tracks.
 
 ## Execution Order
 
 1. Unit gates (`Gate-U1`..`Gate-U3`)
 2. UX gates (`Gate-X1`..`Gate-X2`)
 3. E2E gates (`Gate-E1`..`Gate-E2`)
-4. Release decision from `documents/tests/VALIDATION_AND_GATE_REPORT.md`
+4. Stability gate (`Gate-S1`)
+5. Release decision from `documents/tests/VALIDATION_AND_GATE_REPORT.md`

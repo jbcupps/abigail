@@ -25,6 +25,7 @@ members = [
     "crates/entity-cli",
     "crates/abigail-streaming",
     "crates/abigail-queue",
+    "crates/abigail-runtime",
     "crates/daemon-test-harness",
     "crates/daemon-client",
     "skills/skill-web-search",
@@ -43,7 +44,6 @@ members = [
     "skills/skill-image",
     "skills/skill-clipboard",
     "skills/skill-system-monitor",
-    "skills/skill-email",
     "tauri-app",
 ]
 

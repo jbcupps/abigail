@@ -19,6 +19,11 @@ use abigail_identity::IdentityManager;
 use abigail_memory::MemoryStore;
 use abigail_queue::JobQueue;
 use abigail_router::IdEgoRouter;
+use abigail_runtime::{
+    collect_declared_secret_keys, register_dynamic_api_skills, register_hive_management_skill,
+    register_identity_bound_skills, register_preloaded_skills, register_skill_factory,
+    register_supported_native_skills,
+};
 use abigail_skills::{Skill, SkillExecutionPolicy, SkillExecutor, SkillRegistry};
 use abigail_streaming::{IggyBroker, MemoryBroker, StreamBroker, TopicConfig};
 use axum::routing::{get, post};
@@ -215,48 +220,22 @@ async fn main() -> anyhow::Result<()> {
 
     // 6. Register HiveManagementSkill (built-in)
     let http_hive_ops = Arc::new(hive_client::HttpHiveOps::new(&cli.hive_url));
-    let hive_skill = abigail_skills::HiveManagementSkill::new(http_hive_ops);
-    let _ = registry.register(
-        abigail_skills::manifest::SkillId("builtin.hive_management".to_string()),
-        Arc::new(hive_skill),
-    );
+    register_hive_management_skill(&registry, http_hive_ops);
 
     // 6b. Register SkillFactory (allows entity to author skills via chat)
     //     Attach registry + secrets so newly created dynamic_api skills are
     //     immediately registered and usable within the same session.
-    {
-        let factory_skill = abigail_skills::SkillFactory::new(skills_dir.clone())
-            .with_registry(registry.clone())
-            .with_secrets(skill_vault.clone());
-        let _ = registry.register(
-            abigail_skills::manifest::SkillId("builtin.skill_factory".to_string()),
-            Arc::new(factory_skill),
-        );
-    }
+    register_skill_factory(&registry, skills_dir.clone(), skill_vault.clone());
 
     // 7. Load preloaded integration skills (GitHub, Slack, Jira)
     {
-        let preloaded = abigail_skills::build_preloaded_skills(Some(skill_vault.clone()));
-        for skill in preloaded {
-            let skill_id = skill.manifest().id.clone();
-            if let Err(e) = registry.register(skill_id.clone(), Arc::new(skill)) {
-                tracing::warn!("Failed to register preloaded skill {}: {}", skill_id.0, e);
-            }
-        }
+        register_preloaded_skills(&registry, skill_vault.clone());
         tracing::info!("Preloaded integration skills registered (secrets resolved at call time)");
     }
 
     // 8. Discover dynamic API skills from {entity_dir}/skills/*.json
     {
-        let dynamic_skills =
-            abigail_skills::DynamicApiSkill::discover(&skills_dir, Some(skill_vault.clone()));
-        let count = dynamic_skills.len();
-        for skill in dynamic_skills {
-            let skill_id = skill.manifest().id.clone();
-            if let Err(e) = registry.register(skill_id.clone(), Arc::new(skill)) {
-                tracing::warn!("Failed to register dynamic skill {}: {}", skill_id.0, e);
-            }
-        }
+        let count = register_dynamic_api_skills(&registry, &skills_dir, skill_vault.clone());
         if count > 0 {
             tracing::info!(
                 "Discovered {} dynamic skill(s) from {:?}",
@@ -269,86 +248,17 @@ async fn main() -> anyhow::Result<()> {
     // 8b. Register native Rust skills (matching Tauri in-process registration).
     {
         let allow_local_network = config.autonomy_profile.allows_local_network_access();
-        let mut allowed_roots = vec![entity_dir.clone()];
-        allowed_roots.push(std::env::temp_dir());
-        if let Some(docs_dir) =
-            directories::UserDirs::new().and_then(|u| u.document_dir().map(|d| d.to_path_buf()))
-        {
-            allowed_roots.push(docs_dir.join("Abigail"));
-        }
-
-        macro_rules! register_skill {
-            ($skill:expr) => {{
-                let s = $skill;
-                let id = s.manifest().id.clone();
-                if let Err(e) = registry.register(id.clone(), Arc::new(s)) {
-                    tracing::warn!("Failed to register {}: {}", id.0, e);
-                }
-            }};
-        }
-
-        register_skill!(skill_clipboard::ClipboardSkill::new(
-            skill_clipboard::ClipboardSkill::default_manifest()
-        ));
-        register_skill!(skill_shell::ShellSkill::new(
-            skill_shell::ShellSkill::default_manifest()
-        ));
-        register_skill!(skill_git::GitSkill::new(
-            skill_git::GitSkill::default_manifest()
-        ));
-        register_skill!(skill_notification::NotificationSkill::new(
-            skill_notification::NotificationSkill::default_manifest()
-        ));
-        register_skill!(skill_system_monitor::SystemMonitorSkill::new(
-            skill_system_monitor::SystemMonitorSkill::default_manifest()
-        ));
-        register_skill!(skill_http::HttpSkill::new_with_local_network(
-            skill_http::HttpSkill::default_manifest(),
-            allow_local_network
-        ));
-        register_skill!(skill_browser::BrowserSkill::new_for_entity(
-            skill_browser::BrowserSkill::default_manifest(),
-            allow_local_network,
+        register_identity_bound_skills(
+            &registry,
             config.data_dir.clone(),
-            Some(cli.entity_id.clone())
-        ));
-        register_skill!(skill_calendar::CalendarSkill::new(
-            skill_calendar::CalendarSkill::default_manifest(),
-            entity_dir.clone()
-        ));
-        register_skill!(skill_knowledge_base::KnowledgeBaseSkill::new(
-            skill_knowledge_base::KnowledgeBaseSkill::default_manifest(),
-            entity_dir.clone()
-        ));
-        register_skill!(skill_filesystem::FilesystemSkill::new(
-            skill_filesystem::FilesystemSkill::default_manifest(),
-            allowed_roots.clone()
-        ));
-        register_skill!(skill_database::DatabaseSkill::new(
-            skill_database::DatabaseSkill::default_manifest(),
-            allowed_roots.clone()
-        ));
-        register_skill!(skill_code_analysis::CodeAnalysisSkill::new(
-            skill_code_analysis::CodeAnalysisSkill::default_manifest(),
-            allowed_roots.clone()
-        ));
-        register_skill!(skill_document::DocumentSkill::new(
-            skill_document::DocumentSkill::default_manifest(),
-            allowed_roots.clone()
-        ));
-        register_skill!(skill_image::ImageSkill::new(
-            skill_image::ImageSkill::default_manifest(),
-            allowed_roots.clone()
-        ));
-        register_skill!(skill_web_search::WebSearchSkill::with_secrets(
-            skill_web_search::WebSearchSkill::default_manifest(),
-            skill_vault.clone()
-        ));
-        register_skill!(
-            skill_perplexity_search::PerplexitySearchSkill::with_secrets(
-                skill_perplexity_search::PerplexitySearchSkill::default_manifest(),
-                skill_vault.clone()
-            )
+            Some(cli.entity_id.clone()),
+            allow_local_network,
+        );
+        register_supported_native_skills(
+            &registry,
+            &entity_dir,
+            allow_local_network,
+            skill_vault.clone(),
         );
 
         tracing::info!("Native skills registered for entity-daemon");
@@ -358,31 +268,10 @@ async fn main() -> anyhow::Result<()> {
     //    Collects secret names from: registered skills, discovered manifests,
     //    preloaded integrations, and reserved provider keys.
     {
-        let mut all_secret_keys: Vec<String> = Vec::new();
-
-        if let Ok(manifests) = registry.list() {
-            for m in &manifests {
-                for s in &m.secrets {
-                    all_secret_keys.push(s.name.clone());
-                }
-            }
-        }
-
-        let discovered = abigail_skills::SkillRegistry::discover(std::slice::from_ref(&skills_dir));
-        for m in &discovered {
-            for s in &m.secrets {
-                all_secret_keys.push(s.name.clone());
-            }
-        }
-
-        all_secret_keys.extend(abigail_skills::preloaded_secret_keys());
-
-        for key in abigail_core::RESERVED_PROVIDER_KEYS {
-            all_secret_keys.push(key.to_string());
-        }
-
-        all_secret_keys.sort();
-        all_secret_keys.dedup();
+        let all_secret_keys: Vec<String> =
+            collect_declared_secret_keys(&registry, std::slice::from_ref(&skills_dir))
+                .map(|keys| keys.into_iter().collect())
+                .map_err(|e| anyhow::anyhow!("Failed to collect declared secret keys: {}", e))?;
 
         let mut synced_count = 0u32;
         for key in &all_secret_keys {

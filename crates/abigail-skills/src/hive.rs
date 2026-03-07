@@ -179,7 +179,7 @@ impl Skill for HiveManagementSkill {
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "key": { "type": "string", "description": "The secret identifier (e.g., 'proton_mail_password')" },
+                        "key": { "type": "string", "description": "The secret identifier (e.g., 'github_token')" },
                         "value": { "type": "string", "description": "The secret value to store" }
                     },
                     "required": ["key", "value"]

@@ -179,6 +179,9 @@ pub async fn store_secret(
     if let Err(e) = abigail_core::ops::validate_secret_basic(&body.key, &body.value) {
         return Json(ApiEnvelope::error(e.to_string()));
     }
+    if let Err(e) = abigail_runtime::validate_hive_secret_key(&body.key) {
+        return Json(ApiEnvelope::error(e));
+    }
 
     if !abigail_core::is_reserved_provider_key(&body.key) {
         let preloaded = abigail_skills::preloaded_secret_keys();

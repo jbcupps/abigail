@@ -6,8 +6,7 @@
 .DESCRIPTION
     Builds the Tauri app in release mode, then launches the binary with
     ABIGAIL_E2E_PROBE=1 to exercise the production wiring against a temp
-    data directory.  Optionally includes a live IMAP bridge check when
-    ABIGAIL_IMAP_* env vars are set.
+    data directory.
 
     Exit codes:
       0  = all probe checks passed
@@ -17,19 +16,8 @@
 .PARAMETER SkipBuild
     Skip the cargo build step (reuse an existing release binary).
 
-.PARAMETER LiveImap
-    Prompt for IMAP bridge env vars and include live connectivity check.
-
 .EXAMPLE
     # Deterministic-only (no external deps):
-    .\scripts\tests\live_tauri_skill_secrets_e2e.ps1
-
-    # With live IMAP bridge:
-    $env:ABIGAIL_IMAP_HOST = "127.0.0.1"
-    $env:ABIGAIL_IMAP_PORT = "7654"
-    $env:ABIGAIL_IMAP_USER = "user@pm.me"
-    $env:ABIGAIL_IMAP_PASS = "bridge-password"
-    $env:ABIGAIL_IMAP_TLS_MODE = "STARTTLS"
     .\scripts\tests\live_tauri_skill_secrets_e2e.ps1
 #>
 
@@ -77,7 +65,7 @@ Write-Host "[PROBE] Binary: $binary"
 
 # ── Run probe ──────────────────────────────────────────────────────
 $env:ABIGAIL_E2E_PROBE = "1"
-$env:RUST_LOG = "abigail_app=debug,abigail_skills=debug,skill_proton_mail=debug"
+$env:RUST_LOG = "abigail_app=debug,abigail_skills=debug"
 
 Write-Host "[PROBE] Launching probe mode ...`n" -ForegroundColor Yellow
 

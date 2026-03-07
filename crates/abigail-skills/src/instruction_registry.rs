@@ -346,9 +346,9 @@ mod tests {
     fn test_registry_loads_and_injects_instructions() {
         let toml = r#"
 [[skill]]
-id = "test.email"
-instruction_file = "email.md"
-keywords = ["email", "inbox"]
+id = "test.tasks"
+instruction_file = "tasks.md"
+keywords = ["tasks", "queue"]
 enabled = true
 
 [[skill]]
@@ -361,16 +361,16 @@ enabled = true
             "loads_and_injects",
             toml,
             &[
-                ("email.md", "# Email Instructions\nUse fetch_emails."),
+                ("tasks.md", "# Tasks Instructions\nUse list_tasks."),
                 ("search.md", "# Search Instructions\nUse web_search."),
             ],
         );
 
-        // Should match email
-        let matches = reg.select_instructions("check my email");
+        // Should match tasks
+        let matches = reg.select_instructions("check my tasks");
         assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].0, "test.email");
-        assert!(matches[0].1.contains("fetch_emails"));
+        assert_eq!(matches[0].0, "test.tasks");
+        assert!(matches[0].1.contains("list_tasks"));
 
         // Should match search
         let matches = reg.select_instructions("search for Rust tutorials");
@@ -378,13 +378,13 @@ enabled = true
         assert_eq!(matches[0].0, "test.search");
 
         // Should match both
-        let matches = reg.select_instructions("search my email inbox");
+        let matches = reg.select_instructions("search my tasks queue");
         assert_eq!(matches.len(), 2);
 
         // format_for_prompt should include section header
-        let prompt = reg.format_for_prompt("check my email");
+        let prompt = reg.format_for_prompt("check my tasks");
         assert!(prompt.contains("## Skill-Specific Instructions"));
-        assert!(prompt.contains("test.email"));
+        assert!(prompt.contains("test.tasks"));
 
         // No match should return empty
         let prompt = reg.format_for_prompt("tell me a joke");
@@ -403,32 +403,32 @@ enabled = true
     fn test_format_for_prompt_filtered_drops_unregistered() {
         let toml = r#"
 [[skill]]
-id = "test.email"
-instruction_file = "email.md"
-keywords = ["email"]
+id = "test.tasks"
+instruction_file = "tasks.md"
+keywords = ["tasks"]
 enabled = true
 
 [[skill]]
 id = "test.search"
 instruction_file = "search.md"
-keywords = ["email"]
+keywords = ["tasks"]
 enabled = true
 "#;
         let (_dir, reg) = setup_registry(
             "filtered_drops_unregistered",
             toml,
             &[
-                ("email.md", "# Email\nUse fetch_emails."),
+                ("tasks.md", "# Tasks\nUse list_tasks."),
                 ("search.md", "# Search\nUse web_search."),
             ],
         );
 
-        // Both match on "email", but only test.email is registered
+        // Both match on "tasks", but only test.tasks is registered
         let mut registered = HashSet::new();
-        registered.insert("test.email".to_string());
+        registered.insert("test.tasks".to_string());
 
-        let prompt = reg.format_for_prompt_filtered("check email", &registered);
-        assert!(prompt.contains("test.email"));
+        let prompt = reg.format_for_prompt_filtered("check tasks", &registered);
+        assert!(prompt.contains("test.tasks"));
         assert!(!prompt.contains("test.search"));
     }
 
@@ -436,22 +436,22 @@ enabled = true
     fn test_format_for_prompt_filtered_passes_registered() {
         let toml = r#"
 [[skill]]
-id = "test.email"
-instruction_file = "email.md"
-keywords = ["email"]
+id = "test.tasks"
+instruction_file = "tasks.md"
+keywords = ["tasks"]
 enabled = true
 "#;
         let (_dir, reg) = setup_registry(
             "filtered_passes_registered",
             toml,
-            &[("email.md", "# Email\nUse fetch_emails.")],
+            &[("tasks.md", "# Tasks\nUse list_tasks.")],
         );
 
         let mut registered = HashSet::new();
-        registered.insert("test.email".to_string());
+        registered.insert("test.tasks".to_string());
 
-        let prompt = reg.format_for_prompt_filtered("check email", &registered);
-        assert!(prompt.contains("test.email"));
+        let prompt = reg.format_for_prompt_filtered("check tasks", &registered);
+        assert!(prompt.contains("test.tasks"));
         assert!(prompt.contains("## Skill-Specific Instructions"));
     }
 
@@ -459,19 +459,19 @@ enabled = true
     fn test_format_for_prompt_filtered_empty_registry() {
         let toml = r#"
 [[skill]]
-id = "test.email"
-instruction_file = "email.md"
-keywords = ["email"]
+id = "test.tasks"
+instruction_file = "tasks.md"
+keywords = ["tasks"]
 enabled = true
 "#;
         let (_dir, reg) = setup_registry(
             "filtered_empty_registry",
             toml,
-            &[("email.md", "# Email\nUse fetch_emails.")],
+            &[("tasks.md", "# Tasks\nUse list_tasks.")],
         );
 
         let registered = HashSet::new();
-        let prompt = reg.format_for_prompt_filtered("check email", &registered);
+        let prompt = reg.format_for_prompt_filtered("check tasks", &registered);
         assert!(prompt.is_empty());
     }
 
@@ -479,40 +479,40 @@ enabled = true
     fn test_format_for_prompt_budgeted_limits_count() {
         let toml = r#"
 [[skill]]
-id = "test.email"
-instruction_file = "email.md"
-keywords = ["email"]
+id = "test.tasks"
+instruction_file = "tasks.md"
+keywords = ["tasks"]
 enabled = true
 
 [[skill]]
 id = "test.calendar"
 instruction_file = "calendar.md"
-keywords = ["email"]
+keywords = ["tasks"]
 enabled = true
 
 [[skill]]
 id = "test.search"
 instruction_file = "search.md"
-keywords = ["email"]
+keywords = ["tasks"]
 enabled = true
 "#;
         let (_dir, reg) = setup_registry(
             "budgeted_limits_count",
             toml,
             &[
-                ("email.md", "# Email\nUse fetch_emails."),
+                ("tasks.md", "# Tasks\nUse list_tasks."),
                 ("calendar.md", "# Calendar\nUse list_events."),
                 ("search.md", "# Search\nUse web_search."),
             ],
         );
 
         let mut registered = HashSet::new();
-        registered.insert("test.email".to_string());
+        registered.insert("test.tasks".to_string());
         registered.insert("test.calendar".to_string());
         registered.insert("test.search".to_string());
 
-        // All 3 match on "email", but budget limits to 1
-        let prompt = reg.format_for_prompt_budgeted("check email", &registered, 1, 8192);
+        // All 3 match on "tasks", but budget limits to 1
+        let prompt = reg.format_for_prompt_budgeted("check tasks", &registered, 1, 8192);
         assert!(prompt.contains("## Skill-Specific Instructions"));
         // Should contain exactly 1 skill
         let skill_count = prompt.matches("<!-- skill:").count();
@@ -561,13 +561,13 @@ enabled = true
 [[skill]]
 id = "test.generic"
 instruction_file = "generic.md"
-keywords = ["email"]
+keywords = ["tasks"]
 enabled = true
 
 [[skill]]
 id = "test.specific"
 instruction_file = "specific.md"
-keywords = ["check email inbox"]
+keywords = ["check tasks queue"]
 enabled = true
 "#;
         let (_dir, reg) = setup_registry(
@@ -584,7 +584,7 @@ enabled = true
         registered.insert("test.specific".to_string());
 
         // Both match, but limit to 1 — the multi-word keyword should win
-        let prompt = reg.format_for_prompt_budgeted("check email inbox", &registered, 1, 8192);
+        let prompt = reg.format_for_prompt_budgeted("check tasks queue", &registered, 1, 8192);
         assert!(
             prompt.contains("test.specific"),
             "Multi-word keyword should rank higher"
@@ -595,22 +595,22 @@ enabled = true
     fn test_format_for_prompt_budgeted_zero_limits() {
         let toml = r#"
 [[skill]]
-id = "test.email"
-instruction_file = "email.md"
-keywords = ["email"]
+id = "test.tasks"
+instruction_file = "tasks.md"
+keywords = ["tasks"]
 enabled = true
 "#;
         let (_dir, reg) =
-            setup_registry("budgeted_zero", toml, &[("email.md", "# Email\nContent.")]);
+            setup_registry("budgeted_zero", toml, &[("tasks.md", "# Tasks\nContent.")]);
 
         let mut registered = HashSet::new();
-        registered.insert("test.email".to_string());
+        registered.insert("test.tasks".to_string());
 
         assert!(reg
-            .format_for_prompt_budgeted("email", &registered, 0, 8192)
+            .format_for_prompt_budgeted("tasks", &registered, 0, 8192)
             .is_empty());
         assert!(reg
-            .format_for_prompt_budgeted("email", &registered, 10, 0)
+            .format_for_prompt_budgeted("tasks", &registered, 10, 0)
             .is_empty());
     }
 
@@ -642,9 +642,9 @@ enabled = true
     fn test_select_instructions_for_delegation_keyword_match() {
         let toml = r#"
 [[skill]]
-id = "test.email"
-instruction_file = "email.md"
-keywords = ["email", "inbox"]
+id = "test.tasks"
+instruction_file = "tasks.md"
+keywords = ["tasks", "queue"]
 enabled = true
 
 [[skill]]
@@ -657,28 +657,28 @@ enabled = true
             "delegation_keyword",
             toml,
             &[
-                ("email.md", "# Email\nUse fetch_emails."),
+                ("tasks.md", "# Tasks\nUse list_tasks."),
                 ("search.md", "# Search\nUse web_search."),
             ],
         );
 
         let mut registered = HashSet::new();
-        registered.insert("test.email".to_string());
+        registered.insert("test.tasks".to_string());
         registered.insert("test.search".to_string());
 
-        let matched = reg.select_instructions_for_delegation("check email", &registered);
+        let matched = reg.select_instructions_for_delegation("check tasks", &registered);
         assert_eq!(matched.len(), 1);
-        assert_eq!(matched[0].0, "test.email");
+        assert_eq!(matched[0].0, "test.tasks");
     }
 
     #[test]
     fn test_select_instructions_for_delegation_topic_match() {
         let toml = r#"
 [[skill]]
-id = "test.email"
-instruction_file = "email.md"
-keywords = ["email"]
-topics = ["communication", "messaging"]
+id = "test.tasks"
+instruction_file = "tasks.md"
+keywords = ["tasks"]
+topics = ["workflow", "operations"]
 enabled = true
 
 [[skill]]
@@ -692,77 +692,77 @@ enabled = true
             "delegation_topic",
             toml,
             &[
-                ("email.md", "# Email\nUse fetch_emails."),
+                ("tasks.md", "# Tasks\nUse list_tasks."),
                 ("search.md", "# Search\nUse web_search."),
             ],
         );
 
         let mut registered = HashSet::new();
-        registered.insert("test.email".to_string());
+        registered.insert("test.tasks".to_string());
         registered.insert("test.search".to_string());
 
-        // "communication" should match via topics even though "communication" isn't a keyword
+        // "workflow" should match via topics even though it isn't a keyword
         let matched =
-            reg.select_instructions_for_delegation("handle communication tasks", &registered);
+            reg.select_instructions_for_delegation("handle workflow coordination", &registered);
         assert_eq!(matched.len(), 1);
-        assert_eq!(matched[0].0, "test.email");
+        assert_eq!(matched[0].0, "test.tasks");
     }
 
     #[test]
     fn test_select_instructions_for_delegation_filters_unregistered() {
         let toml = r#"
 [[skill]]
-id = "test.email"
-instruction_file = "email.md"
-keywords = ["email"]
+id = "test.tasks"
+instruction_file = "tasks.md"
+keywords = ["tasks"]
 enabled = true
 
 [[skill]]
 id = "test.search"
 instruction_file = "search.md"
-keywords = ["email"]
+keywords = ["tasks"]
 enabled = true
 "#;
         let (_dir, reg) = setup_registry(
             "delegation_filters",
             toml,
             &[
-                ("email.md", "# Email\nContent."),
+                ("tasks.md", "# Tasks\nContent."),
                 ("search.md", "# Search\nContent."),
             ],
         );
 
-        // Only register test.email
+        // Only register test.tasks
         let mut registered = HashSet::new();
-        registered.insert("test.email".to_string());
+        registered.insert("test.tasks".to_string());
 
-        let matched = reg.select_instructions_for_delegation("email stuff", &registered);
+        let matched = reg.select_instructions_for_delegation("tasks stuff", &registered);
         assert_eq!(matched.len(), 1);
-        assert_eq!(matched[0].0, "test.email");
+        assert_eq!(matched[0].0, "test.tasks");
     }
 
     #[test]
     fn test_format_for_delegation() {
         let toml = r#"
 [[skill]]
-id = "test.email"
-instruction_file = "email.md"
-keywords = ["email"]
+id = "test.tasks"
+instruction_file = "tasks.md"
+keywords = ["tasks"]
 enabled = true
 "#;
         let (_dir, reg) = setup_registry(
             "format_delegation",
             toml,
-            &[("email.md", "# Email\nUse fetch_emails.")],
+            &[("tasks.md", "# Tasks\nUse list_tasks.")],
         );
 
         let mut registered = HashSet::new();
-        registered.insert("test.email".to_string());
+        registered.insert("test.tasks".to_string());
 
-        let section = reg.format_for_delegation("check email", &registered);
+        let section = reg.format_for_delegation("check tasks", &registered);
         assert!(section.contains("## Skill-Specific Instructions"));
-        assert!(section.contains("test.email"));
-        assert!(section.contains("fetch_emails"));
+        assert!(section.contains("test.tasks"));
+        assert!(section.contains("list_tasks"));
 
         // No match returns empty
         let section = reg.format_for_delegation("unrelated query", &registered);

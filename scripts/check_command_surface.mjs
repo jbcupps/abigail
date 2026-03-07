@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tauriLibPath = path.join(repoRoot, "tauri-app", "src", "lib.rs");
 const uiSrcPath = path.join(repoRoot, "tauri-app", "src-ui", "src");
 const harnessPath = path.join(uiSrcPath, "browserTauriHarness.ts");

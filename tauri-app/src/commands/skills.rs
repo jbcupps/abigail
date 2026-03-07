@@ -1,6 +1,7 @@
 use crate::state::AppState;
 use abigail_core::config::SignedSkillAllowlistEntry;
 use abigail_core::{McpServerDefinition, RuntimeMode};
+use abigail_runtime::validate_secret_namespace as validate_runtime_secret_namespace;
 use abigail_skills::protocol::mcp::{HttpMcpClient, McpTool};
 use abigail_skills::{
     Skill, SkillExecutionPolicy, SkillId, SkillManifest, ToolDescriptor, ToolOutput, ToolParams,
@@ -154,28 +155,7 @@ pub fn validate_secret_namespace_with(
     data_dir: &std::path::Path,
     key: &str,
 ) -> Result<(), String> {
-    if RESERVED_PROVIDER_KEYS.contains(&key) {
-        return Ok(());
-    }
-    let skills = registry.list().map_err(|e| e.to_string())?;
-    if skills
-        .iter()
-        .any(|m| m.secrets.iter().any(|s| s.name == key))
-    {
-        return Ok(());
-    }
-    let discovered = abigail_skills::SkillRegistry::discover(&[data_dir.join("skills")]);
-    if discovered
-        .iter()
-        .any(|m| m.secrets.iter().any(|s| s.name == key))
-    {
-        return Ok(());
-    }
-    Err(format!(
-        "Secret key '{}' is not in the allowed namespace. Keys must be a reserved provider name ({}) or declared in a skill manifest.",
-        key,
-        RESERVED_PROVIDER_KEYS.join(", ")
-    ))
+    validate_runtime_secret_namespace(registry, &[data_dir.join("skills")], key)
 }
 
 fn validate_secret_namespace(state: &State<AppState>, key: &str) -> Result<(), String> {
@@ -569,6 +549,7 @@ pub fn revoke_signed_skill_allowlist_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use abigail_runtime::REMOVED_EMAIL_SECRET_KEYS;
     use abigail_skills::SkillRegistry;
 
     fn tmp_dir(name: &str) -> std::path::PathBuf {
@@ -604,14 +585,13 @@ mod tests {
     }
 
     #[test]
-    fn legacy_imap_keys_rejected_when_email_skill_is_removed() {
+    fn removed_email_keys_are_rejected() {
         let tmp = tmp_dir("no_email");
         let registry = SkillRegistry::new();
-        let result = validate_secret_namespace_with(&registry, &tmp, "imap_password");
-        assert!(
-            result.is_err(),
-            "imap_password should be rejected after EmailSkill removal"
-        );
+        for key in REMOVED_EMAIL_SECRET_KEYS {
+            let result = validate_secret_namespace_with(&registry, &tmp, key);
+            assert!(result.is_err(), "removed key '{}' should be rejected", key);
+        }
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

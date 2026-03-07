@@ -52,8 +52,8 @@ pub struct TriangleEthicPreview {
 pub struct WebmailSendRequest {
     pub profile_dir: PathBuf,
     pub entity_id: Option<String>,
-    pub smtp_host: Option<String>,
-    pub imap_host: Option<String>,
+    pub provider_hint: Option<String>,
+    pub account_hint: Option<String>,
     pub sender_address: Option<String>,
     pub to: Vec<String>,
     pub subject: String,
@@ -1216,15 +1216,15 @@ fn storage_state_path(profile_dir: &Path) -> PathBuf {
 }
 
 fn infer_webmail_profile(request: &WebmailSendRequest) -> Option<WebmailProfile> {
-    let host_hint = request
-        .smtp_host
+    let hint = request
+        .provider_hint
         .as_deref()
-        .or(request.imap_host.as_deref())
+        .or(request.account_hint.as_deref())
         .or(request.sender_address.as_deref())
         .unwrap_or_default()
         .to_ascii_lowercase();
 
-    if host_hint.contains("gmail") || host_hint.ends_with("@gmail.com") {
+    if hint.contains("gmail") || hint.ends_with("@gmail.com") {
         return Some(WebmailProfile {
             provider: "gmail",
             compose_url: "https://mail.google.com/mail/u/0/#inbox?compose=new",
@@ -1236,10 +1236,10 @@ fn infer_webmail_profile(request: &WebmailSendRequest) -> Option<WebmailProfile>
         });
     }
 
-    if host_hint.contains("outlook")
-        || host_hint.contains("office365")
-        || host_hint.contains("hotmail")
-        || host_hint.contains("live.com")
+    if hint.contains("outlook")
+        || hint.contains("office365")
+        || hint.contains("hotmail")
+        || hint.contains("live.com")
     {
         return Some(WebmailProfile {
             provider: "outlook",
@@ -1524,5 +1524,39 @@ mod tests {
         let sessions = discover_browser_sessions(temp_dir.path()).unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].entity_id.as_deref(), Some("entity-123"));
+    }
+
+    #[test]
+    fn infers_gmail_webmail_profile_from_sender_address() {
+        let request = WebmailSendRequest {
+            profile_dir: PathBuf::from("C:/tmp/browser_profile"),
+            entity_id: None,
+            provider_hint: None,
+            account_hint: None,
+            sender_address: Some("mentor@gmail.com".to_string()),
+            to: vec!["family@example.com".to_string()],
+            subject: "Hello".to_string(),
+            body: "World".to_string(),
+        };
+
+        let profile = infer_webmail_profile(&request).expect("gmail profile");
+        assert_eq!(profile.provider, "gmail");
+    }
+
+    #[test]
+    fn infers_outlook_webmail_profile_from_provider_hint() {
+        let request = WebmailSendRequest {
+            profile_dir: PathBuf::from("C:/tmp/browser_profile"),
+            entity_id: None,
+            provider_hint: Some("outlook.office.com".to_string()),
+            account_hint: None,
+            sender_address: None,
+            to: vec!["family@example.com".to_string()],
+            subject: "Hello".to_string(),
+            body: "World".to_string(),
+        };
+
+        let profile = infer_webmail_profile(&request).expect("outlook profile");
+        assert_eq!(profile.provider, "outlook");
     }
 }

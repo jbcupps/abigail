@@ -50,7 +50,7 @@ pub struct AppState {
     /// Stream broker for topic-based event publishing (replaces EventBus).
     pub stream_broker: Arc<dyn StreamBroker>,
     pub secrets: Arc<Mutex<SecretsVault>>,
-    /// Operational secrets for Ego/Skills (IMAP, Jira, etc.)
+    /// Operational secrets for Ego/Skills (browser fallback, Jira, etc.)
     pub skills_secrets: Arc<Mutex<SecretsVault>>,
     /// Hive-level secrets vault (shared API keys across all agents)
     pub hive_secrets: Arc<Mutex<SecretsVault>>,
