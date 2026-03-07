@@ -131,9 +131,10 @@ impl Hive {
                         .get_secret(pref)
                         .map(str::trim)
                         .filter(|k| !k.is_empty())
-                        .map(|key| ProviderSelection {
+                        // Do not propagate the actual secret to avoid accidental logging.
+                        .map(|_key| ProviderSelection {
                             provider: pref.clone(),
-                            auth: ProviderAuth::ApiKey(key.to_string()),
+                            auth: ProviderAuth::ApiKey("<redacted>".to_string()),
                         })
                         .unwrap_or_else(|| ProviderSelection {
                             provider: pref.clone(),
