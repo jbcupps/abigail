@@ -575,8 +575,18 @@ impl AppConfig {
         self.data_dir.join("config.json")
     }
 
-    pub fn trusted_config_path(data_dir: &Path) -> PathBuf {
-        data_dir.join("config.json")
+    /// Path to the trusted config file.
+    ///
+    /// This path is derived from the application's default data directory,
+    /// and intentionally does not rely on potentially untrusted input.
+    pub fn trusted_config_path(_data_dir: &Path) -> PathBuf {
+        // Use the same base directory as `default_paths` to ensure this
+        // always resolves to an application-controlled location.
+        let base = directories::ProjectDirs::from("com", "abigail", "Abigail")
+            .map(|d| d.data_local_dir().to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+
+        base.join("config.json")
     }
 
     /// Returns the effective external pubkey path.
