@@ -19,7 +19,6 @@ pub mod runtime;
 pub mod sandbox;
 pub mod skill;
 pub mod topology;
-pub mod transport;
 pub mod watcher;
 
 use std::path::Path;

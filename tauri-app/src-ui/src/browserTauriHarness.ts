@@ -662,37 +662,6 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
       return null;
     }
 
-    // Legacy non-streaming chat (kept for backwards compatibility).
-    case "chat": {
-      if (faultMode === "chat_timeout") {
-        trace("fault", "chat_timeout");
-        await sleep(1500);
-        throw new Error("Synthetic chat timeout injected by harness");
-      }
-      if (faultMode === "chat_error") {
-        trace("fault", "chat_error");
-        throw new Error("Synthetic chat failure injected by harness");
-      }
-      const message = String(args.message ?? "").toLowerCase();
-      const provider = preferredProvider();
-      if (message.includes("clipboard")) {
-        return JSON.stringify({
-          reply: "Clipboard skill result: read succeeded. Current clipboard text is 'sample clipboard value'.",
-          provider,
-          tool_calls_made: [{ skill_id: "builtin.clipboard", tool_name: "read_clipboard", success: true }],
-        });
-      }
-      if (message.includes("create a skill") || message.includes("author skill")) {
-        return JSON.stringify({
-          reply: "I've created the skill 'custom.greeter' with an author_skill tool call. The skill directory has been set up.",
-          provider,
-          tool_calls_made: [{ skill_id: "builtin.skill_factory", tool_name: "author_skill", success: true }],
-        });
-      }
-      const replyText = `Harness reply via ${provider}: acknowledged "${String(args.message ?? "")}".`;
-      return JSON.stringify({ reply: replyText, provider, tool_calls_made: [] });
-    }
-
     default:
       return null;
   }

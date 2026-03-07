@@ -7,10 +7,15 @@
 //! - build_tool_definitions produces correct qualified names
 //! - SkillExecutor handles success and failure paths
 
+use abigail_core::SecretsVault;
+use abigail_runtime::{
+    register_identity_bound_skills, register_preloaded_skills, register_skill_factory,
+    register_supported_native_skills, supported_native_skill_ids,
+};
 use abigail_skills::manifest::SkillId;
 use abigail_skills::skill::ToolParams;
 use abigail_skills::{DynamicApiSkill, Skill, SkillExecutor, SkillFactory, SkillRegistry};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 fn sample_dynamic_config() -> serde_json::Value {
     serde_json::json!({
@@ -257,6 +262,38 @@ fn empty_skills_dir_yields_no_dynamic_skills() {
 
     let skills = DynamicApiSkill::discover(&tmp, None);
     assert!(skills.is_empty(), "empty dir should yield no skills");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn shared_runtime_bootstrap_matches_supported_native_inventory() {
+    let tmp = std::env::temp_dir().join("abigail_daemon_integ_supported_inventory");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    let registry = Arc::new(SkillRegistry::new());
+    let skills_secrets = Arc::new(Mutex::new(SecretsVault::new_custom(
+        tmp.clone(),
+        "skills.bin",
+    )));
+
+    register_skill_factory(&registry, tmp.join("skills"), skills_secrets.clone());
+    register_preloaded_skills(&registry, skills_secrets.clone());
+    register_identity_bound_skills(&registry, tmp.clone(), Some("entity-1".into()), false);
+    register_supported_native_skills(&registry, &tmp, false, skills_secrets);
+
+    let listed = registry.list().unwrap();
+    let listed_ids: std::collections::BTreeSet<String> =
+        listed.into_iter().map(|manifest| manifest.id.0).collect();
+
+    for skill_id in supported_native_skill_ids() {
+        assert!(
+            listed_ids.contains(&skill_id),
+            "shared runtime bootstrap omitted supported native skill '{}'",
+            skill_id
+        );
+    }
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

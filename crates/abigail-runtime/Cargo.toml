@@ -1,0 +1,32 @@
+[package]
+name = "abigail-runtime"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+abigail-core = { path = "../abigail-core" }
+abigail-skills = { path = "../abigail-skills" }
+skill-browser = { path = "../../skills/skill-browser" }
+skill-web-search = { path = "../../skills/skill-web-search" }
+skill-filesystem = { path = "../../skills/skill-filesystem" }
+skill-shell = { path = "../../skills/skill-shell" }
+skill-http = { path = "../../skills/skill-http" }
+skill-perplexity-search = { path = "../../skills/skill-perplexity-search" }
+skill-knowledge-base = { path = "../../skills/skill-knowledge-base" }
+skill-git = { path = "../../skills/skill-git" }
+skill-code-analysis = { path = "../../skills/skill-code-analysis" }
+skill-database = { path = "../../skills/skill-database" }
+skill-calendar = { path = "../../skills/skill-calendar" }
+skill-document = { path = "../../skills/skill-document" }
+skill-notification = { path = "../../skills/skill-notification" }
+skill-image = { path = "../../skills/skill-image" }
+skill-clipboard = { path = "../../skills/skill-clipboard" }
+skill-system-monitor = { path = "../../skills/skill-system-monitor" }
+directories = "5"
+tracing.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+serde_json.workspace = true
+tempfile = "3"
+toml = "0.8"

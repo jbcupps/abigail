@@ -26,7 +26,7 @@ To allow the Entity to autonomously perform actions currently restricted to the 
 The Entity will transition from being a static consumer of tools to an active synthesizer of capabilities.
 
 ### The Decision Path
-When the Entity encounters a requirement (e.g., "Set up an IMAP email account"), it will evaluate the persistence of the need:
+When the Entity encounters a requirement (e.g., "Automate a browser-authenticated family workflow"), it will evaluate the persistence of the need:
 
 1.  **The Routine (Persistent Capabilities):**
     *   If the task is common, repeatable, or frequently requested (based on memory), the Entity will use a **Skill Factory** approach.
@@ -74,7 +74,7 @@ Credential management must be strictly compartmentalized.
 *   **Access:** Strictly limited to the Rust backend (`IdEgoRouter` and Core). The Ego *cannot* read from this vault.
 
 ### 2. The Skills Vault (Entity Level)
-*   Stores operational credentials (e.g., the IMAP password requested by the Mentor, API keys for third-party services like weather or Jira).
+*   Stores operational credentials (e.g., browser-session helpers requested by the Mentor, API keys for third-party services like weather or Jira).
 *   **Access:** The Ego can request the Backend to *inject* these secrets into a skill execution context, but it cannot extract the plaintext.
 *   **Protection:** Managed via DPAPI encryption, with strict prompt-level guidelines enforcing secure usage.
 

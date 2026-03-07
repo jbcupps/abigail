@@ -4,6 +4,7 @@
 //! opens the SecretsVault, and performs operations directly.
 
 use abigail_core::{ops::is_reserved_provider_key, AppConfig, SecretsVault};
+use abigail_runtime::validate_secret_namespace_from_manifests;
 
 /// Load AppConfig from the default data directory.
 fn load_config() -> anyhow::Result<AppConfig> {
@@ -59,20 +60,8 @@ pub fn status() -> anyhow::Result<()> {
         config.local_llm_base_url.as_deref().unwrap_or("(not set)")
     );
 
-    if let Some(ref email) = config.email {
-        println!(
-            "Email: {} (IMAP {}:{})",
-            email.address, email.imap_host, email.imap_port
-        );
-    } else {
-        println!("Email: not configured");
-    }
-
-    let email_accounts = config
-        .email_accounts
-        .len()
-        .max(usize::from(config.email.is_some()));
-    println!("Email accounts: {}", email_accounts);
+    println!("Email transport: removed from mainline Abigail");
+    println!("Email accounts: 0 (deprecated compatibility field)");
     println!("MCP servers: {}", config.mcp_servers.len());
     println!("Approved skills: {}", config.approved_skill_ids.len());
 
@@ -92,6 +81,8 @@ pub fn status() -> anyhow::Result<()> {
 
 pub fn store_secret(key: &str, value: &str) -> anyhow::Result<()> {
     let config = load_config()?;
+    validate_secret_namespace_from_manifests(&[], &[config.data_dir.join("skills")], key)
+        .map_err(anyhow::Error::msg)?;
     let mut vault = if is_reserved_provider_key(key) {
         load_vault(&config)?
     } else {
@@ -153,10 +144,6 @@ pub fn configure_email(
         smtp_port,
         password,
     )?;
-    println!(
-        "Email configured for {} (IMAP {}:{}, SMTP {}:{})",
-        address, imap_host, imap_port, smtp_host, smtp_port
-    );
     Ok(())
 }
 

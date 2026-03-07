@@ -42,11 +42,14 @@ use abigail_memory::MemoryStore;
 use abigail_router::{
     IdEgoRouter, OrchestrationScheduler, SubagentDefinition, SubagentManager, SubagentProvider,
 };
+use abigail_runtime::{
+    create_browser_skill, register_dynamic_api_skills, register_hive_management_skill,
+    register_preloaded_skills, register_skill_factory, register_supported_native_skills,
+};
 use abigail_skills::protocol::mcp::McpSkillRuntime;
 use abigail_skills::{
-    build_preloaded_skills, DynamicApiSkill, InstructionRegistry, ResourceLimits, Skill,
-    SkillConfig, SkillExecutionPolicy, SkillExecutor, SkillRegistry, SkillsWatcher,
-    PRELOADED_SKILLS_VERSION,
+    DynamicApiSkill, InstructionRegistry, ResourceLimits, Skill, SkillConfig, SkillExecutionPolicy,
+    SkillExecutor, SkillRegistry, SkillsWatcher, PRELOADED_SKILLS_VERSION,
 };
 use abigail_streaming::MemoryBroker;
 use identity_manager::IdentityManager;
@@ -190,18 +193,17 @@ pub fn create_browser_skill_for_registry(state: &AppState) -> Result<Arc<dyn Ski
             entity_id,
         )
     };
-    Ok(Arc::new(skill_browser::BrowserSkill::new_for_entity(
-        skill_browser::BrowserSkill::default_manifest(),
-        allow_local_network,
+    Ok(create_browser_skill(
         data_dir,
         entity_id,
-    )))
+        allow_local_network,
+    ))
 }
 
 pub fn install_identity_bound_skills(state: &AppState) -> Result<(), String> {
     let browser_skill_id = skill_browser::BrowserSkill::default_manifest().id.clone();
-    let browser_skill = create_browser_skill_for_registry(state)?;
     let _ = state.registry.unregister(&browser_skill_id);
+    let browser_skill = create_browser_skill_for_registry(state)?;
     state
         .registry
         .register(browser_skill_id, browser_skill)
@@ -590,14 +592,7 @@ fn try_run() -> Result<(), String> {
 
             // Register Hive Management Skill
             let hive_ops = Arc::new(crate::hive_ops::TauriHiveOps::new(handle.clone()));
-            let hive_skill = Arc::new(abigail_skills::hive::HiveManagementSkill::new(hive_ops));
-            state
-                .registry
-                .register(
-                    abigail_skills::manifest::SkillId("builtin.hive_management".to_string()),
-                    hive_skill,
-                )
-                .map_err(|e| e.to_string())?;
+            register_hive_management_skill(&state.registry, hive_ops);
 
             // Register Backup Management Skill
             let backup_ops = Arc::new(crate::backup_ops::TauriBackupOps::new(handle.clone()));
@@ -614,29 +609,11 @@ fn try_run() -> Result<(), String> {
 
             // Register Skill Factory with registry + secrets for immediate re-registration
             let skills_dir = state.config.read().unwrap().data_dir.join("skills");
-            let factory_skill = Arc::new(
-                abigail_skills::factory::SkillFactory::new(skills_dir)
-                    .with_registry(state.registry.clone())
-                    .with_secrets(state.skills_secrets.clone()),
-            );
-            state
-                .registry
-                .register(
-                    abigail_skills::manifest::SkillId("builtin.skill_factory".to_string()),
-                    factory_skill,
-                )
-                .map_err(|e| e.to_string())?;
+            register_skill_factory(&state.registry, skills_dir.clone(), state.skills_secrets.clone());
 
             // Bootstrap preloaded dynamic skills when embedded version advances.
             {
-                let preloaded = build_preloaded_skills(Some(state.skills_secrets.clone()));
-                for skill in preloaded {
-                    let skill_id = skill.manifest().id.clone();
-                    state
-                        .registry
-                        .register(skill_id, Arc::new(skill))
-                        .map_err(|e| e.to_string())?;
-                }
+                register_preloaded_skills(&state.registry, state.skills_secrets.clone());
 
                 let needs_bootstrap = {
                     let cfg = state.config.read().map_err(|e| e.to_string())?;
@@ -652,23 +629,18 @@ fn try_run() -> Result<(), String> {
             // Discover runtime dynamic API skills from data_dir/skills/*.json
             {
                 let cfg = state.config.read().map_err(|e| e.to_string())?;
-                let dynamic_skills = DynamicApiSkill::discover(
+                let count = register_dynamic_api_skills(
+                    &state.registry,
                     &cfg.data_dir.join("skills"),
-                    Some(state.skills_secrets.clone()),
+                    state.skills_secrets.clone(),
                 );
                 drop(cfg);
-                for skill in dynamic_skills {
-                    let skill_id = skill.manifest().id.clone();
-                    state
-                        .registry
-                        .register(skill_id, Arc::new(skill))
-                        .map_err(|e| e.to_string())?;
+                if count > 0 {
+                    tracing::info!("Registered {} dynamic skill(s) in Tauri runtime", count);
                 }
             }
 
-            // Register identity-bound skills that need the active entity data_dir:
-            // Email for browser fallback profile routing, and Browser for
-            // persistent auth/session parity.
+            // Register identity-bound skills that need the active entity data dir.
             install_identity_bound_skills(&state)?;
 
             // Register native Rust skills (compiled into the binary).
@@ -680,83 +652,11 @@ fn try_run() -> Result<(), String> {
                         cfg.autonomy_profile.allows_local_network_access(),
                     )
                 };
-                let skills_secrets = state.skills_secrets.clone();
-                let mut allowed_roots = vec![data_dir.clone()];
-                // Allow scratch work in system temp dir
-                allowed_roots.push(std::env::temp_dir());
-                // Allow user-facing outputs in Documents/Abigail/
-                if let Some(docs_dir) = directories::UserDirs::new()
-                    .and_then(|u| u.document_dir().map(|d| d.to_path_buf()))
-                {
-                    allowed_roots.push(docs_dir.join("Abigail"));
-                }
-
-                macro_rules! register_skill {
-                    ($skill:expr) => {{
-                        let s = $skill;
-                        let id = s.manifest().id.clone();
-                        if let Err(e) = state.registry.register(id.clone(), Arc::new(s)) {
-                            tracing::warn!("Failed to register {}: {}", id.0, e);
-                        }
-                    }};
-                }
-
-                register_skill!(skill_clipboard::ClipboardSkill::new(
-                    skill_clipboard::ClipboardSkill::default_manifest()
-                ));
-                register_skill!(skill_shell::ShellSkill::new(
-                    skill_shell::ShellSkill::default_manifest()
-                ));
-                register_skill!(skill_git::GitSkill::new(
-                    skill_git::GitSkill::default_manifest()
-                ));
-                register_skill!(skill_notification::NotificationSkill::new(
-                    skill_notification::NotificationSkill::default_manifest()
-                ));
-                register_skill!(skill_system_monitor::SystemMonitorSkill::new(
-                    skill_system_monitor::SystemMonitorSkill::default_manifest()
-                ));
-                register_skill!(skill_http::HttpSkill::new_with_local_network(
-                    skill_http::HttpSkill::default_manifest(),
-                    allow_local_network
-                ));
-                register_skill!(skill_calendar::CalendarSkill::new(
-                    skill_calendar::CalendarSkill::default_manifest(),
-                    data_dir.clone()
-                ));
-                register_skill!(skill_knowledge_base::KnowledgeBaseSkill::new(
-                    skill_knowledge_base::KnowledgeBaseSkill::default_manifest(),
-                    data_dir.clone()
-                ));
-                register_skill!(skill_filesystem::FilesystemSkill::new(
-                    skill_filesystem::FilesystemSkill::default_manifest(),
-                    allowed_roots.clone()
-                ));
-                register_skill!(skill_database::DatabaseSkill::new(
-                    skill_database::DatabaseSkill::default_manifest(),
-                    allowed_roots.clone()
-                ));
-                register_skill!(skill_code_analysis::CodeAnalysisSkill::new(
-                    skill_code_analysis::CodeAnalysisSkill::default_manifest(),
-                    allowed_roots.clone()
-                ));
-                register_skill!(skill_document::DocumentSkill::new(
-                    skill_document::DocumentSkill::default_manifest(),
-                    allowed_roots.clone()
-                ));
-                register_skill!(skill_image::ImageSkill::new(
-                    skill_image::ImageSkill::default_manifest(),
-                    allowed_roots.clone()
-                ));
-                register_skill!(skill_web_search::WebSearchSkill::with_secrets(
-                    skill_web_search::WebSearchSkill::default_manifest(),
-                    skills_secrets.clone()
-                ));
-                register_skill!(
-                    skill_perplexity_search::PerplexitySearchSkill::with_secrets(
-                        skill_perplexity_search::PerplexitySearchSkill::default_manifest(),
-                        skills_secrets.clone()
-                    )
+                register_supported_native_skills(
+                    &state.registry,
+                    &data_dir,
+                    allow_local_network,
+                    state.skills_secrets.clone(),
                 );
             }
 

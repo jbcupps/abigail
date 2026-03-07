@@ -6,6 +6,7 @@
 use crate::auth::{auth_middleware, AuthState};
 use abigail_core::{ops::is_reserved_provider_key, AppConfig, SecretsVault};
 use abigail_router::IdEgoRouter;
+use abigail_runtime::validate_secret_namespace_from_manifests;
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use axum::{
     extract::Path,
@@ -28,7 +29,7 @@ pub struct AppServerState {
     pub config_path: std::path::PathBuf,
     pub data_dir: std::path::PathBuf,
     pub vault: Arc<Mutex<SecretsVault>>,
-    /// Skills vault for operational secrets (IMAP, Jira, GitHub, etc.)
+    /// Skills vault for operational secrets (Jira, GitHub, Browser fallback, etc.)
     pub skills_vault: Option<Arc<Mutex<SecretsVault>>>,
     /// Router for handling chat requests (optional, provided when run from Tauri)
     pub router: Option<Arc<tokio::sync::RwLock<IdEgoRouter>>>,
@@ -112,7 +113,7 @@ pub struct TokenResponse {
     pub token: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct MessageResponse {
     pub message: String,
 }
@@ -251,11 +252,8 @@ async fn get_status(
 }
 
 fn email_status(config: &AppConfig) -> (bool, usize) {
-    let configured_accounts = config
-        .email_accounts
-        .len()
-        .max(usize::from(config.email.is_some()));
-    (configured_accounts > 0, configured_accounts)
+    let _ = config;
+    (false, 0)
 }
 
 fn target_vault_for_key(state: &AppServerState, key: &str) -> Arc<Mutex<SecretsVault>> {
@@ -317,6 +315,8 @@ async fn store_secret(
     State(state): State<AppServerState>,
     Json(body): Json<StoreSecretRequest>,
 ) -> Result<Json<MessageResponse>, (StatusCode, Json<MessageResponse>)> {
+    validate_secret_namespace_from_manifests(&[], &[state.data_dir.join("skills")], &body.key)
+        .map_err(|message| (StatusCode::BAD_REQUEST, Json(MessageResponse { message })))?;
     let target_vault = target_vault_for_key(&state, &body.key);
     let mut vault = target_vault.lock().map_err(|_| {
         (
@@ -411,7 +411,7 @@ async fn configure_email_endpoint(
     )
     .map_err(|e| {
         (
-            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::GONE,
             Json(MessageResponse {
                 message: e.to_string(),
             }),
@@ -646,7 +646,7 @@ mod tests {
     }
 
     #[test]
-    fn email_status_uses_legacy_config_only() {
+    fn email_status_reports_removed_transport() {
         let tmp = std::env::temp_dir().join("abigail_cli_server_email_status");
         let _ = fs::remove_dir_all(&tmp);
         let mut config = AppConfig::default_paths();
@@ -660,8 +660,8 @@ mod tests {
         });
 
         let (configured, accounts) = email_status(&config);
-        assert!(configured);
-        assert_eq!(accounts, 1);
+        assert!(!configured);
+        assert_eq!(accounts, 0);
 
         let _ = fs::remove_dir_all(&tmp);
     }
@@ -686,6 +686,58 @@ mod tests {
             .unwrap()
             .exists("custom_service_token"));
         assert!(!state.vault.lock().unwrap().exists("custom_service_token"));
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn configure_email_endpoint_returns_gone() {
+        let tmp = std::env::temp_dir().join("abigail_cli_server_configure_email_removed");
+        let _ = fs::remove_dir_all(&tmp);
+        let state = test_state(&tmp);
+
+        let result = configure_email_endpoint(
+            State(state),
+            Json(ConfigureEmailRequest {
+                address: "mentor@example.com".to_string(),
+                imap_host: "imap.example.com".to_string(),
+                imap_port: 993,
+                smtp_host: "smtp.example.com".to_string(),
+                smtp_port: 587,
+                password: "secret".to_string(),
+            }),
+        )
+        .await
+        .expect_err("configure email should be tombstoned");
+
+        assert_eq!(result.0, StatusCode::GONE);
+        assert!(result
+            .1
+             .0
+            .message
+            .contains("removed from mainline Abigail"));
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn store_secret_rejects_removed_email_key() {
+        let tmp = std::env::temp_dir().join("abigail_cli_server_removed_secret_key");
+        let _ = fs::remove_dir_all(&tmp);
+        let state = test_state(&tmp);
+
+        let result = store_secret(
+            State(state),
+            Json(StoreSecretRequest {
+                key: "imap_password".to_string(),
+                value: "secret".to_string(),
+            }),
+        )
+        .await
+        .expect_err("removed email keys should be rejected");
+
+        assert_eq!(result.0, StatusCode::BAD_REQUEST);
+        assert!(result.1 .0.message.contains("email_transport"));
 
         let _ = fs::remove_dir_all(&tmp);
     }

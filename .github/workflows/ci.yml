@@ -23,6 +23,33 @@ concurrency:
 
 jobs:
 
+  stability:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: stable
+
+      - name: Setup Node
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: tauri-app/src-ui/package-lock.json
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+
+      - name: Install frontend dependencies
+        run: cd tauri-app/src-ui && npm ci
+
+      - name: Run stability gates
+        run: node scripts/check_stability.mjs
+
   # -- Lint ----------------------------------------------------------------
   # Checks formatting, clippy, and abigail-app compilation.
   lint:
@@ -206,13 +233,14 @@ jobs:
   # advisory (warn but don't block). This is the single required status
   # check for branch protection.
   gate:
-    needs: [lint, test, frontend, audit, codeql]
+    needs: [stability, lint, test, frontend, audit, codeql]
     if: always()
     runs-on: ubuntu-22.04
     steps:
       - name: Evaluate upstream results
         shell: bash
         run: |
+          echo "stability:${{ needs.stability.result }}"
           echo "lint:     ${{ needs.lint.result }}"
           echo "test:     ${{ needs.test.result }}"
           echo "frontend: ${{ needs.frontend.result }}"
@@ -222,8 +250,9 @@ jobs:
           failed=false
 
           # Critical jobs -- must succeed
-          for job in lint test frontend; do
+          for job in stability lint test frontend; do
             case "$job" in
+              stability) result="${{ needs.stability.result }}" ;;
               lint)     result="${{ needs.lint.result }}" ;;
               test)     result="${{ needs.test.result }}" ;;
               frontend) result="${{ needs.frontend.result }}" ;;

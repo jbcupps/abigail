@@ -7,6 +7,10 @@
 //! bootstrap are caught before the installer ever ships.
 
 use abigail_core::SecretsVault;
+use abigail_runtime::{
+    register_identity_bound_skills, register_supported_native_skills, supported_native_skill_ids,
+    REMOVED_EMAIL_SECRET_KEYS,
+};
 use abigail_skills::manifest::SkillId;
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use std::collections::HashMap;
@@ -83,7 +87,7 @@ pub fn run_and_exit() -> ! {
         );
     }
 
-    // 3. Build skill registry with BrowserSkill registered
+    // 3. Build skill registry with shared runtime skill registration
     let vault = Arc::new(Mutex::new(SecretsVault::new_custom(
         tmp.clone(),
         "skills.bin",
@@ -96,17 +100,25 @@ pub fn run_and_exit() -> ! {
         Arc::new(hive_skill),
     );
 
-    let browser_manifest = skill_browser::BrowserSkill::default_manifest();
-    let browser_id = browser_manifest.id.clone();
-    let browser_skill =
-        skill_browser::BrowserSkill::new_for_entity(browser_manifest, false, tmp.clone(), None);
-    let _ = registry.register(browser_id.clone(), Arc::new(browser_skill));
+    register_identity_bound_skills(&registry, tmp.clone(), None, false);
+    register_supported_native_skills(&registry, &tmp, false, vault.clone());
 
     let skills = registry.list().unwrap_or_default();
-    if skills.iter().any(|m| m.id == browser_id) {
-        result.pass("browser_skill_registered");
+    let supported_ids = supported_native_skill_ids();
+    let registered_ids: std::collections::BTreeSet<String> = skills
+        .iter()
+        .map(|manifest| manifest.id.0.clone())
+        .collect();
+    if supported_ids
+        .iter()
+        .all(|skill_id| registered_ids.contains(skill_id))
+    {
+        result.pass("supported_native_skills_registered");
     } else {
-        result.fail("browser_skill_registered", "BrowserSkill not in registry");
+        result.fail(
+            "supported_native_skills_registered",
+            "shared native skill inventory did not fully register",
+        );
     }
 
     // 4. Secret namespace validation
@@ -124,12 +136,15 @@ pub fn run_and_exit() -> ! {
     } else {
         result.fail("namespace_reserved_openai", "openai rejected");
     }
-    if check("imap_password").is_err() {
-        result.pass("namespace_rejects_removed_imap");
+    if REMOVED_EMAIL_SECRET_KEYS
+        .iter()
+        .all(|key| check(key).is_err())
+    {
+        result.pass("namespace_rejects_removed_email");
     } else {
         result.fail(
-            "namespace_rejects_removed_imap",
-            "imap_password accepted after email skill removal",
+            "namespace_rejects_removed_email",
+            "a removed email secret key was accepted",
         );
     }
     if check("totally_bogus_key_xyz").is_err() {

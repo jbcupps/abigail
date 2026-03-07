@@ -326,7 +326,8 @@ pub struct AppConfig {
     /// OpenAI API key (optional - enables Ego)
     pub openai_api_key: Option<String>,
 
-    /// Email configuration for Abigail's account
+    /// Legacy IMAP/SMTP email configuration kept only for compatibility loads.
+    #[serde(default, skip_serializing)]
     pub email: Option<EmailConfig>,
 
     /// Whether birth sequence has completed
@@ -395,8 +396,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub active_provider_preference: Option<String>,
 
-    /// Multiple email account configurations (replaces single `email` field).
-    #[serde(default)]
+    /// Legacy multi-account email config kept only for compatibility loads.
+    #[serde(default, skip_serializing)]
     pub email_accounts: Vec<EmailAccountConfig>,
 
     // ── v10 fields ─────────────────────────────────────────────────
@@ -1099,6 +1100,53 @@ mod tests {
         assert_eq!(json, "\"ego_primary\"");
         let parsed: RoutingMode = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, RoutingMode::EgoPrimary);
+    }
+
+    #[test]
+    fn test_legacy_email_fields_are_not_serialized_on_save() {
+        let tmp = std::env::temp_dir().join("abigail_config_email_compat_save");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let config_path = tmp.join("config.json");
+        let legacy_json = r#"{
+            "schema_version": 7,
+            "data_dir": ".",
+            "models_dir": "./models",
+            "docs_dir": "./docs",
+            "db_path": "./test.db",
+            "openai_api_key": null,
+            "email": {
+                "address": "mentor@example.com",
+                "imap_host": "imap.example.com",
+                "imap_port": 993,
+                "smtp_host": "smtp.example.com",
+                "smtp_port": 587,
+                "password_encrypted": [1, 2, 3]
+            },
+            "birth_complete": false,
+            "routing_mode": "ego_primary"
+        }"#;
+        fs::write(&config_path, legacy_json).unwrap();
+
+        let config = AppConfig::load(&config_path).unwrap();
+        assert!(
+            config.email.is_some(),
+            "legacy email should still deserialize"
+        );
+        assert_eq!(config.email_accounts.len(), 1);
+
+        let rewritten = fs::read_to_string(&config_path).unwrap();
+        assert!(
+            !rewritten.contains("\"email\""),
+            "legacy email field should not be serialized back out"
+        );
+        assert!(
+            !rewritten.contains("\"email_accounts\""),
+            "legacy email_accounts field should not be serialized back out"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]

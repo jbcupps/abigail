@@ -643,18 +643,15 @@ mod tests {
     #[test]
     fn test_convert_tools_round_trip() {
         let tools = vec![ToolDefinition {
-            name: "com.abigail.skills.proton-mail::fetch_emails".to_string(),
-            description: "Fetch emails".to_string(),
+            name: "dynamic.example-tool::lookup_records".to_string(),
+            description: "Look up records".to_string(),
             parameters: serde_json::json!({"type": "object"}),
         }];
         let (result, map) = convert_tools(&tools);
+        assert_eq!(result[0].name, "dynamic_example-tool__lookup_records");
         assert_eq!(
-            result[0].name,
-            "com_abigail_skills_proton-mail__fetch_emails"
-        );
-        assert_eq!(
-            map["com_abigail_skills_proton-mail__fetch_emails"],
-            "com.abigail.skills.proton-mail::fetch_emails"
+            map["dynamic_example-tool__lookup_records"],
+            "dynamic.example-tool::lookup_records"
         );
     }
 

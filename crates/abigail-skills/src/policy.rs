@@ -226,7 +226,6 @@ fn is_ordinary_desktop_tool(skill_id: &str, tool_name: &str) -> bool {
             | "write_file"
             | "mkdir"
             | "http_post"
-            | "send_email"
             | "clipboard_write"
             | "calendar_add_event"
             | "calendar_update_event"

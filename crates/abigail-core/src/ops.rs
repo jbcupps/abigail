@@ -3,8 +3,7 @@
 //! These functions are used by both the Tauri app and the CLI to avoid
 //! duplicating credential storage and email configuration logic.
 
-use crate::config::{AppConfig, EmailConfig};
-use crate::keyring::Keyring;
+use crate::config::AppConfig;
 use crate::secrets::SecretsVault;
 
 /// Provider names that are always accepted as secret keys (no skill manifest needed).
@@ -60,34 +59,19 @@ pub fn check_vault_secret(vault: &SecretsVault, key: &str) -> bool {
     vault.exists(key)
 }
 
-/// Get the current email configuration from AppConfig.
-pub fn get_email_config(config: &AppConfig) -> Option<&EmailConfig> {
-    config.email.as_ref()
-}
-
-/// Configure email credentials, encrypting the password via DPAPI.
+/// Compatibility tombstone for removed IMAP/SMTP email transport.
 pub fn set_email_config(
-    config: &mut AppConfig,
-    address: String,
-    imap_host: String,
-    imap_port: u16,
-    smtp_host: String,
-    smtp_port: u16,
-    password: &str,
+    _config: &mut AppConfig,
+    _address: String,
+    _imap_host: String,
+    _imap_port: u16,
+    _smtp_host: String,
+    _smtp_port: u16,
+    _password: &str,
 ) -> crate::Result<()> {
-    let password_encrypted = Keyring::encrypt_bytes(password.as_bytes())?;
-    config.email = Some(EmailConfig {
-        address,
-        imap_host,
-        imap_port,
-        smtp_host,
-        smtp_port,
-        password_encrypted,
-    });
-    config
-        .save(&config.config_path())
-        .map_err(|e| crate::CoreError::Config(e.to_string()))?;
-    Ok(())
+    Err(crate::CoreError::Config(
+        "Email transport removed from mainline Abigail. Use Browser skill fallback instead.".into(),
+    ))
 }
 
 #[cfg(test)]
@@ -137,8 +121,18 @@ mod tests {
     }
 
     #[test]
-    fn test_get_email_config_none() {
-        let config = AppConfig::default_paths();
-        assert!(get_email_config(&config).is_none());
+    fn test_set_email_config_returns_removed_error() {
+        let mut config = AppConfig::default_paths();
+        let err = set_email_config(
+            &mut config,
+            "mentor@example.com".into(),
+            "imap.example.com".into(),
+            993,
+            "smtp.example.com".into(),
+            587,
+            "secret",
+        )
+        .expect_err("email transport should be removed");
+        assert!(err.to_string().contains("removed from mainline Abigail"));
     }
 }

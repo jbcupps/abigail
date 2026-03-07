@@ -35,15 +35,15 @@ describe("IdentityPanel", () => {
         case "list_skills_vault_entries":
           return Promise.resolve([
             {
-              secret_name: "imap_password",
-              skill_names: ["Proton Mail"],
-              description: "Application password for mailbox access.",
+              secret_name: "github_token",
+              skill_names: ["GitHub API"],
+              description: "Access token for GitHub API calls.",
               is_set: false,
             },
             {
-              secret_name: "imap_user",
-              skill_names: ["Proton Mail"],
-              description: "Mailbox login user.",
+              secret_name: "github_owner",
+              skill_names: ["GitHub API"],
+              description: "Default GitHub owner or organization.",
               is_set: true,
             },
             {
@@ -78,12 +78,12 @@ describe("IdentityPanel", () => {
       expect(mockInvoke).toHaveBeenCalledWith("list_skills_vault_entries");
     });
 
-    expect(await screen.findByRole("heading", { name: "Proton Mail" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "GitHub API" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Jira" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Shared Across Skills" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Unassigned" })).toBeInTheDocument();
 
-    expect(screen.getByText("imap_password")).toBeInTheDocument();
+    expect(screen.getByText("github_token")).toBeInTheDocument();
     expect(screen.getByText("jira_api_token")).toBeInTheDocument();
     expect(screen.getByText("shared_search_key")).toBeInTheDocument();
     expect(screen.getByText("Perplexity Search, Web Search")).toBeInTheDocument();
