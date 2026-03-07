@@ -19,7 +19,6 @@ use abigail_identity::IdentityManager;
 use abigail_memory::MemoryStore;
 use abigail_queue::JobQueue;
 use abigail_router::IdEgoRouter;
-use abigail_skills::skill::SkillConfig;
 use abigail_skills::{Skill, SkillExecutionPolicy, SkillExecutor, SkillRegistry};
 use abigail_streaming::{IggyBroker, MemoryBroker, StreamBroker, TopicConfig};
 use axum::routing::{get, post};
@@ -30,7 +29,6 @@ use hive_client::HiveClient;
 use job_scheduler::JobScheduler;
 use queue_ops::LocalQueueOperations;
 use state::EntityDaemonState;
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use subagent_runner::SubagentRunner;
 use tower_http::cors::{Any, CorsLayer};
@@ -630,156 +628,6 @@ async fn main() -> anyhow::Result<()> {
             abigail_skills::manifest::SkillId("builtin.backup_management".to_string()),
             Arc::new(backup_skill),
         );
-    }
-
-    // 12. Register and initialize Email (IMAP/SMTP) skill if credentials are available.
-    //     Must come after stream_broker creation so the skill can publish events.
-    {
-        let manifest = skill_email::EmailSkill::default_manifest();
-        let skill_id = manifest.id.clone();
-        let mut skill = skill_email::EmailSkill::new(manifest);
-
-        let (
-            imap_user,
-            imap_password,
-            imap_host,
-            imap_port,
-            imap_tls_mode,
-            smtp_host,
-            smtp_port,
-            smtp_user,
-            smtp_password,
-            smtp_tls_mode,
-        ) = tokio::task::spawn_blocking({
-            let skill_vault = skill_vault.clone();
-            move || {
-                if let Ok(v) = skill_vault.lock() {
-                    (
-                        v.get_secret("imap_user").unwrap_or("").to_string(),
-                        v.get_secret("imap_password").unwrap_or("").to_string(),
-                        v.get_secret("imap_host").unwrap_or("").to_string(),
-                        v.get_secret("imap_port").unwrap_or("993").to_string(),
-                        v.get_secret("imap_tls_mode")
-                            .unwrap_or("IMPLICIT")
-                            .to_string(),
-                        v.get_secret("smtp_host").unwrap_or("").to_string(),
-                        v.get_secret("smtp_port").unwrap_or("587").to_string(),
-                        v.get_secret("smtp_user").unwrap_or("").to_string(),
-                        v.get_secret("smtp_password").unwrap_or("").to_string(),
-                        v.get_secret("smtp_tls_mode")
-                            .unwrap_or("STARTTLS")
-                            .to_string(),
-                    )
-                } else {
-                    (
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                        "993".to_string(),
-                        "IMPLICIT".to_string(),
-                        String::new(),
-                        "587".to_string(),
-                        String::new(),
-                        String::new(),
-                        "STARTTLS".to_string(),
-                    )
-                }
-            }
-        })
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!("Failed to join vault read task for email skill: {}", e);
-            (
-                String::new(),
-                String::new(),
-                String::new(),
-                "993".to_string(),
-                "IMPLICIT".to_string(),
-                String::new(),
-                "587".to_string(),
-                String::new(),
-                String::new(),
-                "STARTTLS".to_string(),
-            )
-        });
-
-        let mut values = HashMap::new();
-        values.insert(
-            "imap_host".to_string(),
-            serde_json::Value::String(imap_host),
-        );
-        values.insert(
-            "imap_port".to_string(),
-            serde_json::json!(imap_port.parse::<u64>().unwrap_or(993)),
-        );
-        values.insert(
-            "imap_user".to_string(),
-            serde_json::Value::String(imap_user),
-        );
-        values.insert(
-            "imap_tls_mode".to_string(),
-            serde_json::Value::String(imap_tls_mode),
-        );
-        values.insert(
-            "smtp_host".to_string(),
-            serde_json::Value::String(smtp_host),
-        );
-        values.insert(
-            "smtp_port".to_string(),
-            serde_json::json!(smtp_port.parse::<u64>().unwrap_or(587)),
-        );
-        values.insert(
-            "smtp_user".to_string(),
-            serde_json::Value::String(smtp_user),
-        );
-        values.insert(
-            "smtp_tls_mode".to_string(),
-            serde_json::Value::String(smtp_tls_mode),
-        );
-        values.insert(
-            "data_dir".to_string(),
-            serde_json::Value::String(config.data_dir.to_string_lossy().to_string()),
-        );
-        values.insert(
-            "entity_id".to_string(),
-            serde_json::Value::String(cli.entity_id.clone()),
-        );
-
-        let mut secrets = HashMap::new();
-        secrets.insert("imap_password".to_string(), imap_password);
-        secrets.insert("smtp_password".to_string(), smtp_password);
-
-        let skill_config = SkillConfig {
-            values,
-            secrets,
-            limits: abigail_skills::sandbox::ResourceLimits::default(),
-            permissions: vec![],
-            stream_broker: Some(stream_broker.clone()),
-        };
-
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(15),
-            skill.initialize(skill_config),
-        )
-        .await
-        {
-            Ok(Ok(())) => {
-                tracing::info!("Email skill initialized successfully");
-            }
-            Ok(Err(e)) => {
-                tracing::warn!(
-                    "Email skill init failed (will register uninitialized): {}",
-                    e
-                );
-            }
-            Err(_) => {
-                tracing::warn!("Email skill init timed out after 15s (IMAP server unreachable?)");
-            }
-        }
-
-        if let Err(e) = registry.register(skill_id.clone(), Arc::new(skill)) {
-            tracing::warn!("Failed to register Email skill: {}", e);
-        }
     }
 
     // Log total skills loaded

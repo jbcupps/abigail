@@ -40,7 +40,6 @@ skill-notification = { path = "../skills/skill-notification" }
 skill-image = { path = "../skills/skill-image" }
 skill-clipboard = { path = "../skills/skill-clipboard" }
 skill-system-monitor = { path = "../skills/skill-system-monitor" }
-skill-email = { path = "../skills/skill-email" }
 abigail-queue = { path = "../crates/abigail-queue" }
 abigail-streaming = { path = "../crates/abigail-streaming" }
 daemon-client = { path = "../crates/daemon-client" }

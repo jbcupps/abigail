@@ -235,7 +235,7 @@ async fn get_status(
         .and_then(|r| r.list().ok())
         .map(|s| s.len())
         .unwrap_or(0);
-    let (email_configured, email_accounts) = email_status(&config, &state);
+    let (email_configured, email_accounts) = email_status(&config);
 
     Ok(Json(StatusResponse {
         birth_complete: config.birth_complete,
@@ -253,25 +253,12 @@ async fn get_status(
     }))
 }
 
-fn email_status(config: &AppConfig, state: &AppServerState) -> (bool, usize) {
-    let legacy_accounts = config
+fn email_status(config: &AppConfig) -> (bool, usize) {
+    let configured_accounts = config
         .email_accounts
         .len()
         .max(usize::from(config.email.is_some()));
-
-    let bridge_ready = state
-        .skills_vault
-        .as_ref()
-        .and_then(|vault| vault.lock().ok())
-        .map(|vault| {
-            ["imap_user", "imap_password", "imap_host", "smtp_host"]
-                .iter()
-                .all(|key| vault.exists(key))
-        })
-        .unwrap_or(false);
-
-    let inferred_accounts = legacy_accounts.max(usize::from(bridge_ready));
-    (inferred_accounts > 0, inferred_accounts)
+    (configured_accounts > 0, configured_accounts)
 }
 
 fn target_vault_for_key(state: &AppServerState, key: &str) -> Arc<Mutex<SecretsVault>> {
@@ -662,21 +649,20 @@ mod tests {
     }
 
     #[test]
-    fn email_status_infers_skill_bridge_configuration() {
+    fn email_status_uses_legacy_config_only() {
         let tmp = std::env::temp_dir().join("abigail_cli_server_email_status");
         let _ = fs::remove_dir_all(&tmp);
-        let config = AppConfig::default_paths();
-        let state = test_state(&tmp);
+        let mut config = AppConfig::default_paths();
+        config.email = Some(abigail_core::EmailConfig {
+            address: "mentor@example.com".to_string(),
+            imap_host: "imap.example.com".to_string(),
+            imap_port: 993,
+            smtp_host: "smtp.example.com".to_string(),
+            smtp_port: 587,
+            password_encrypted: vec![],
+        });
 
-        {
-            let mut vault = state.skills_vault.as_ref().unwrap().lock().unwrap();
-            vault.set_secret("imap_user", "mentor@example.com");
-            vault.set_secret("imap_password", "secret");
-            vault.set_secret("imap_host", "127.0.0.1");
-            vault.set_secret("smtp_host", "127.0.0.1");
-        }
-
-        let (configured, accounts) = email_status(&config, &state);
+        let (configured, accounts) = email_status(&config);
         assert!(configured);
         assert_eq!(accounts, 1);
 
@@ -684,15 +670,15 @@ mod tests {
     }
 
     #[test]
-    fn target_vault_routes_skill_secret_to_skills_vault() {
+    fn target_vault_routes_non_reserved_secret_to_skills_vault() {
         let tmp = std::env::temp_dir().join("abigail_cli_server_secret_route");
         let _ = fs::remove_dir_all(&tmp);
         let state = test_state(&tmp);
 
-        let vault = target_vault_for_key(&state, "imap_password");
+        let vault = target_vault_for_key(&state, "custom_service_token");
         {
             let mut guard = vault.lock().unwrap();
-            guard.set_secret("imap_password", "secret");
+            guard.set_secret("custom_service_token", "secret");
         }
 
         assert!(state
@@ -701,8 +687,8 @@ mod tests {
             .unwrap()
             .lock()
             .unwrap()
-            .exists("imap_password"));
-        assert!(!state.vault.lock().unwrap().exists("imap_password"));
+            .exists("custom_service_token"));
+        assert!(!state.vault.lock().unwrap().exists("custom_service_token"));
 
         let _ = fs::remove_dir_all(&tmp);
     }

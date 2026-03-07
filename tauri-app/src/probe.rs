@@ -1,6 +1,6 @@
 //! Live E2E probe — validates the desktop runtime skill/secrets/instruction
-//! pipeline against a real (isolated) data directory and optional live IMAP
-//! bridge.  Activated by setting `ABIGAIL_E2E_PROBE=1`.
+//! pipeline against a real (isolated) data directory. Activated by setting
+//! `ABIGAIL_E2E_PROBE=1`.
 //!
 //! The probe reuses the *exact same* wiring code that `lib::run()` uses so
 //! regressions in startup registration, namespace validation, or instruction
@@ -8,9 +8,7 @@
 
 use abigail_core::SecretsVault;
 use abigail_skills::manifest::SkillId;
-use abigail_skills::{
-    InstructionRegistry, ResourceLimits, Skill, SkillConfig, SkillExecutor, SkillRegistry,
-};
+use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -64,7 +62,7 @@ pub fn run_and_exit() -> ! {
         result.fail("instruction_bootstrap", "registry.toml not created");
     }
 
-    // 2. Load instruction registry and check email keyword match
+    // 2. Load instruction registry and check browser keyword match
     let instr_reg = {
         let skills_dir = tmp.join("skills");
         let reg_path = skills_dir.join("registry.toml");
@@ -75,17 +73,17 @@ pub fn run_and_exit() -> ! {
             InstructionRegistry::empty()
         }
     };
-    let email_matches = instr_reg.select_instructions("connect my email inbox");
-    if !email_matches.is_empty() {
-        result.pass("instruction_email_keyword");
+    let browser_matches = instr_reg.select_instructions("open a browser session for oauth login");
+    if !browser_matches.is_empty() {
+        result.pass("instruction_browser_keyword");
     } else {
         result.fail(
-            "instruction_email_keyword",
-            "no instruction matched 'email' keyword after bootstrap",
+            "instruction_browser_keyword",
+            "no instruction matched 'browser' keyword after bootstrap",
         );
     }
 
-    // 3. Build skill registry with EmailSkill registered
+    // 3. Build skill registry with BrowserSkill registered
     let vault = Arc::new(Mutex::new(SecretsVault::new_custom(
         tmp.clone(),
         "skills.bin",
@@ -98,16 +96,17 @@ pub fn run_and_exit() -> ! {
         Arc::new(hive_skill),
     );
 
-    let email_manifest = skill_email::EmailSkill::default_manifest();
-    let email_id = email_manifest.id.clone();
-    let email_skill = skill_email::EmailSkill::new(email_manifest);
-    let _ = registry.register(email_id.clone(), Arc::new(email_skill));
+    let browser_manifest = skill_browser::BrowserSkill::default_manifest();
+    let browser_id = browser_manifest.id.clone();
+    let browser_skill =
+        skill_browser::BrowserSkill::new_for_entity(browser_manifest, false, tmp.clone(), None);
+    let _ = registry.register(browser_id.clone(), Arc::new(browser_skill));
 
     let skills = registry.list().unwrap_or_default();
-    if skills.iter().any(|m| m.id == email_id) {
-        result.pass("email_skill_registered");
+    if skills.iter().any(|m| m.id == browser_id) {
+        result.pass("browser_skill_registered");
     } else {
-        result.fail("email_skill_registered", "EmailSkill not in registry");
+        result.fail("browser_skill_registered", "BrowserSkill not in registry");
     }
 
     // 4. Secret namespace validation
@@ -120,25 +119,18 @@ pub fn run_and_exit() -> ! {
         )
     };
 
-    if check("imap_password").is_ok() {
-        result.pass("namespace_imap_password");
-    } else {
-        result.fail("namespace_imap_password", "imap_password rejected");
-    }
-    if check("imap_user").is_ok() {
-        result.pass("namespace_imap_user");
-    } else {
-        result.fail("namespace_imap_user", "imap_user rejected");
-    }
-    if check("smtp_host").is_ok() {
-        result.pass("namespace_smtp_host");
-    } else {
-        result.fail("namespace_smtp_host", "smtp_host rejected");
-    }
     if check("openai").is_ok() {
         result.pass("namespace_reserved_openai");
     } else {
         result.fail("namespace_reserved_openai", "openai rejected");
+    }
+    if check("imap_password").is_err() {
+        result.pass("namespace_rejects_removed_imap");
+    } else {
+        result.fail(
+            "namespace_rejects_removed_imap",
+            "imap_password accepted after email skill removal",
+        );
     }
     if check("totally_bogus_key_xyz").is_err() {
         result.pass("namespace_rejects_unknown");
@@ -152,10 +144,10 @@ pub fn run_and_exit() -> ! {
         let mut params = abigail_skills::skill::ToolParams::new();
         params
             .values
-            .insert("key".into(), serde_json::json!("imap_password"));
+            .insert("key".into(), serde_json::json!("openai"));
         params
             .values
-            .insert("value".into(), serde_json::json!("probe_test_pw"));
+            .insert("value".into(), serde_json::json!("probe_test_key"));
         executor
             .execute(
                 &SkillId("builtin.hive_management".to_string()),
@@ -171,13 +163,6 @@ pub fn run_and_exit() -> ! {
             &format!("returned success=false: {:?}", output.error),
         ),
         Err(e) => result.fail("store_secret_roundtrip", &e.to_string()),
-    }
-
-    // 6. Optional live IMAP bridge check (only when env vars are set)
-    if std::env::var("ABIGAIL_IMAP_HOST").is_ok() {
-        probe_live_imap(&mut result, &vault);
-    } else {
-        eprintln!("  [SKIP] live_imap (ABIGAIL_IMAP_HOST not set)");
     }
 
     // Cleanup
@@ -198,59 +183,6 @@ pub fn run_and_exit() -> ! {
         }
         eprintln!("RESULT: FAIL");
         std::process::exit(1);
-    }
-}
-
-fn probe_live_imap(result: &mut ProbeResult, vault: &Arc<Mutex<SecretsVault>>) {
-    let host = std::env::var("ABIGAIL_IMAP_HOST").unwrap_or_default();
-    let port = std::env::var("ABIGAIL_IMAP_PORT").unwrap_or_else(|_| "993".into());
-    let user = std::env::var("ABIGAIL_IMAP_USER").unwrap_or_default();
-    let pass = std::env::var("ABIGAIL_IMAP_PASS").unwrap_or_default();
-    let tls = std::env::var("ABIGAIL_IMAP_TLS_MODE").unwrap_or_else(|_| "IMPLICIT".into());
-
-    if host.is_empty() || user.is_empty() || pass.is_empty() {
-        eprintln!("  [SKIP] live_imap (incomplete IMAP env vars)");
-        return;
-    }
-
-    // Populate vault so EmailSkill can init
-    {
-        let mut v = vault.lock().unwrap();
-        v.set_secret("imap_host", &host);
-        v.set_secret("imap_port", &port);
-        v.set_secret("imap_user", &user);
-        v.set_secret("imap_password", &pass);
-        v.set_secret("imap_tls_mode", &tls);
-    }
-
-    let mut skill = skill_email::EmailSkill::new(skill_email::EmailSkill::default_manifest());
-
-    let mut values = HashMap::new();
-    values.insert("imap_host".to_string(), serde_json::Value::String(host));
-    values.insert(
-        "imap_port".to_string(),
-        serde_json::json!(port.parse::<u64>().unwrap_or(993)),
-    );
-    values.insert("imap_user".to_string(), serde_json::Value::String(user));
-    values.insert("imap_tls_mode".to_string(), serde_json::Value::String(tls));
-
-    let mut secrets = HashMap::new();
-    secrets.insert("imap_password".to_string(), pass);
-
-    let config = SkillConfig {
-        values,
-        secrets,
-        limits: ResourceLimits::default(),
-        permissions: vec![],
-        stream_broker: None,
-    };
-
-    match tokio_block(async {
-        tokio::time::timeout(std::time::Duration::from_secs(15), skill.initialize(config)).await
-    }) {
-        Ok(Ok(())) => result.pass("live_imap_init"),
-        Ok(Err(e)) => result.fail("live_imap_init", &e.to_string()),
-        Err(_) => result.fail("live_imap_init", "timed out after 15s"),
     }
 }
 

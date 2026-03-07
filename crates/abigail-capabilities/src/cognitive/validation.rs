@@ -566,15 +566,33 @@ mod tests {
     #[test]
     fn test_model_provider_compatibility_guard() {
         assert!(is_model_compatible_with_provider("openai", "gpt-4.1"));
-        assert!(is_model_compatible_with_provider("google", "gemini-2.5-pro"));
-        assert!(is_model_compatible_with_provider("xai", "grok-4-1-fast-reasoning"));
-        assert!(is_model_compatible_with_provider("anthropic", "claude-sonnet-4-6"));
+        assert!(is_model_compatible_with_provider(
+            "google",
+            "gemini-2.5-pro"
+        ));
+        assert!(is_model_compatible_with_provider(
+            "xai",
+            "grok-4-1-fast-reasoning"
+        ));
+        assert!(is_model_compatible_with_provider(
+            "anthropic",
+            "claude-sonnet-4-6"
+        ));
         assert!(is_model_compatible_with_provider("perplexity", "sonar-pro"));
 
-        assert!(!is_model_compatible_with_provider("openai", "gemini-2.5-pro"));
+        assert!(!is_model_compatible_with_provider(
+            "openai",
+            "gemini-2.5-pro"
+        ));
         assert!(!is_model_compatible_with_provider("google", "gpt-4.1"));
         assert!(!is_model_compatible_with_provider("xai", "gpt-4.1"));
-        assert!(!is_model_compatible_with_provider("claude-cli", "claude-sonnet-4-6"));
-        assert!(is_model_compatible_with_provider("openrouter", "google/gemini-2.5-pro"));
+        assert!(!is_model_compatible_with_provider(
+            "claude-cli",
+            "claude-sonnet-4-6"
+        ));
+        assert!(is_model_compatible_with_provider(
+            "openrouter",
+            "google/gemini-2.5-pro"
+        ));
     }
 }

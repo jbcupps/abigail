@@ -8,8 +8,8 @@ pub mod model_registry;
 pub mod provider_registry;
 
 pub use hive::{
-    detect_cli_providers_full, is_binary_on_path, BuiltProviders, Hive, HiveConfig,
-    ProviderAuth, ProviderSelection,
+    detect_cli_providers_full, is_binary_on_path, BuiltProviders, Hive, HiveConfig, ProviderAuth,
+    ProviderSelection,
 };
 pub use model_registry::ModelRegistry;
 pub use provider_registry::{ProviderKind, ProviderRegistry};

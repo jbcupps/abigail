@@ -4,11 +4,11 @@
 //! the router nor the Tauri app need to know how to build providers from raw
 //! API keys.
 
+use crate::hive::ProviderSelection;
 use abigail_capabilities::cognitive::{
     AnthropicProvider, CandleProvider, CliLlmProvider, CliPermissionMode, CliVariant,
     CompatibleProvider, LlmProvider, LocalHttpProvider, OpenAiCompatibleProvider, OpenAiProvider,
 };
-use crate::hive::ProviderSelection;
 use std::sync::Arc;
 
 /// Which cloud provider backs the Ego slot (mirrors `EgoProvider` in the router).
@@ -76,11 +76,7 @@ impl ProviderRegistry {
                 .map(crate::hive::ProviderAuth::ApiKey)
                 .unwrap_or(crate::hive::ProviderAuth::System),
         });
-        Self::build_ego_with_cli_mode(
-            selection.as_ref(),
-            ego_model,
-            CliPermissionMode::default(),
-        )
+        Self::build_ego_with_cli_mode(selection.as_ref(), ego_model, CliPermissionMode::default())
     }
 
     pub fn build_ego_with_cli_mode(

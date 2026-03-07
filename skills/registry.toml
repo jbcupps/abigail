@@ -5,13 +5,6 @@
 # the corresponding instruction file is injected into the system prompt.
 
 [[skill]]
-id = "com.abigail.skills.email"
-instruction_file = "skill_email_imap.md"
-keywords = ["email", "mail", "inbox", "imap", "smtp", "send mail"]
-topics = ["communication", "messaging"]
-enabled = true
-
-[[skill]]
 id = "com.abigail.skills.web-search"
 instruction_file = "skill_web_search.md"
 keywords = ["search", "look up", "find online", "google", "tavily", "web search"]

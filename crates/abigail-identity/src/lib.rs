@@ -84,12 +84,8 @@ impl IdentityManager {
 
     fn resolve_agent_dir(&self, directory: &Path) -> Result<PathBuf, String> {
         let relative = self.normalize_agent_directory(directory)?;
-        abigail_core::path_guard::resolve_within_root(
-            &self.data_root,
-            &relative,
-            "agent directory",
-        )
-        .map_err(|e| e.to_string())
+        abigail_core::path_guard::resolve_within_root(&self.data_root, &relative, "agent directory")
+            .map_err(|e| e.to_string())
     }
 
     fn registry_directory_for(&self, agent_id: &str) -> PathBuf {
