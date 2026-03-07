@@ -95,6 +95,7 @@ pub fn derive_key_from_passphrase(passphrase: &str, salt: &[u8]) -> [u8; KEY_LEN
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aes_gcm::aead::rand_core::RngCore;
 
     fn test_key() -> [u8; KEY_LEN] {
         let mut k = [0u8; KEY_LEN];
@@ -155,15 +156,15 @@ mod tests {
         assert_ne!(k_hive, k_entity);
     }
 
-    fn test_salt(seed: u8) -> [u8; 16] {
+    fn test_salt() -> [u8; 16] {
         let mut salt = [0u8; 16];
-        salt.fill(seed);
+        OsRng.fill_bytes(&mut salt);
         salt
     }
 
     #[test]
     fn passphrase_derivation_deterministic() {
-        let salt = test_salt(0x11);
+        let salt = test_salt();
         let k1 = derive_key_from_passphrase("my-passphrase", &salt);
         let k2 = derive_key_from_passphrase("my-passphrase", &salt);
         assert_eq!(k1, k2);
@@ -171,7 +172,7 @@ mod tests {
 
     #[test]
     fn different_passphrases_produce_different_keys() {
-        let salt = test_salt(0x22);
+        let salt = test_salt();
         let k1 = derive_key_from_passphrase("pass-a", &salt);
         let k2 = derive_key_from_passphrase("pass-b", &salt);
         assert_ne!(k1, k2);

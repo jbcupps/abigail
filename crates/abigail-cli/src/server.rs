@@ -630,7 +630,7 @@ async fn rotate_key(State(state): State<AppServerState>) -> Json<TokenResponse> 
 fn load_config(state: &AppServerState) -> anyhow::Result<AppConfig> {
     let config_path = state.trusted_config_path();
     if config_path.exists() {
-        AppConfig::load(&config_path)
+        AppConfig::load_from_data_dir(&state.data_dir)
     } else {
         Ok(AppConfig::default_paths())
     }

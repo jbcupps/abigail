@@ -123,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
     // 3. Build the router from pre-built providers
     let router = IdEgoRouter::from_built_providers(built);
     let router = Arc::new(router);
-    tracing::info!("Router built: {:?}", router.status());
+    tracing::info!("Router built");
 
     // 3b. Background model discovery (non-blocking diagnostic)
     {

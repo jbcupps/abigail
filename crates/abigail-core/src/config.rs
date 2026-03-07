@@ -600,13 +600,24 @@ impl AppConfig {
     }
 
     pub fn load(path: &Path) -> anyhow::Result<Self> {
-        let content = crate::path_guard::load_string_from_expected_file(path, "config.json")?;
+        crate::path_guard::ensure_expected_filename(path, "config.json")?;
+        let data_dir = path.parent().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Config path '{}' is missing a parent directory",
+                path.display()
+            )
+        })?;
+        Self::load_from_data_dir(data_dir)
+    }
+
+    pub fn load_from_data_dir(data_dir: &Path) -> anyhow::Result<Self> {
+        let content = crate::path_guard::load_string_from_root(data_dir, "config.json")?;
         let mut config: Self = serde_json::from_str(&content)?;
 
         // Auto-migrate if needed
         if config.migrate() {
             // Save migrated config back to disk
-            config.save(path)?;
+            config.save_to_data_dir(data_dir)?;
             tracing::info!(
                 "Config migrated to schema version {}",
                 config.schema_version
@@ -617,8 +628,19 @@ impl AppConfig {
     }
 
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+        crate::path_guard::ensure_expected_filename(path, "config.json")?;
+        let data_dir = path.parent().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Config path '{}' is missing a parent directory",
+                path.display()
+            )
+        })?;
+        self.save_to_data_dir(data_dir)
+    }
+
+    pub fn save_to_data_dir(&self, data_dir: &Path) -> anyhow::Result<()> {
         let content = serde_json::to_string_pretty(self)?;
-        crate::path_guard::write_string_to_expected_file(path, "config.json", &content)?;
+        crate::path_guard::write_string_to_root(data_dir, "config.json", &content)?;
         Ok(())
     }
 

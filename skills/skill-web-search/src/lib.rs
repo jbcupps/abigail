@@ -143,7 +143,8 @@ impl Skill for WebSearchSkill {
                 .lock()
                 .map_err(|e| SkillError::ToolFailed(format!("Vault lock error: {}", e)))?;
             vault
-                .with_secret("tavily", |secret| secret.to_string())
+                .get_secret("tavily")
+                .map(str::to_string)
                 .ok_or_else(|| {
                     SkillError::MissingSecret(
                         "Tavily API key not configured. Add it in The Forge > API Keys."

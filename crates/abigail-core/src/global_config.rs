@@ -51,9 +51,7 @@ impl GlobalConfig {
 
     /// Load GlobalConfig from disk.
     pub fn load(data_root: &Path) -> anyhow::Result<Self> {
-        let path = Self::config_path(data_root);
-        let content =
-            crate::path_guard::load_string_from_expected_file(&path, "global_settings.json")?;
+        let content = crate::path_guard::load_string_from_root(data_root, "global_settings.json")?;
         let mut config: Self = serde_json::from_str(&content)?;
         config.normalize_agent_directories()?;
         Ok(config)
@@ -61,11 +59,10 @@ impl GlobalConfig {
 
     /// Save GlobalConfig to disk.
     pub fn save(&self, data_root: &Path) -> anyhow::Result<()> {
-        let path = Self::config_path(data_root);
         let mut normalized = self.clone();
         normalized.normalize_agent_directories()?;
         let content = serde_json::to_string_pretty(&normalized)?;
-        crate::path_guard::write_string_to_expected_file(&path, "global_settings.json", &content)?;
+        crate::path_guard::write_string_to_root(data_root, "global_settings.json", &content)?;
         Ok(())
     }
 

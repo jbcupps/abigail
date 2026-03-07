@@ -29,7 +29,10 @@ pub fn ensure_relative_no_traversal(path: &Path, label: &str) -> Result<()> {
             Component::CurDir | Component::Normal(_) => {}
             Component::ParentDir => bail!("{label} must not contain '..': '{}'", path.display()),
             Component::RootDir | Component::Prefix(_) => {
-                bail!("{label} must not contain rooted components: '{}'", path.display())
+                bail!(
+                    "{label} must not contain rooted components: '{}'",
+                    path.display()
+                )
             }
         }
     }
@@ -75,17 +78,34 @@ pub fn normalize_path(path: &Path) -> PathBuf {
     normalized
 }
 
-pub fn load_string_from_expected_file(path: &Path, expected: &str) -> Result<String> {
-    ensure_expected_filename(path, expected)?;
-    std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read '{}'", path.display()))
+fn ensure_simple_filename(expected: &str) -> Result<()> {
+    let expected_path = Path::new(expected);
+    let file_name = expected_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow!("Expected file name '{}' is invalid", expected))?;
+    if file_name != expected || expected_path.components().count() != 1 {
+        bail!(
+            "Expected file name '{}' must be a single path segment",
+            expected
+        );
+    }
+    Ok(())
 }
 
-pub fn write_string_to_expected_file(path: &Path, expected: &str, content: &str) -> Result<()> {
-    ensure_expected_filename(path, expected)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create '{}'", parent.display()))?;
-    }
-    std::fs::write(path, content).with_context(|| format!("Failed to write '{}'", path.display()))
+pub fn trusted_file_path(root: &Path, expected: &str) -> Result<PathBuf> {
+    ensure_simple_filename(expected)?;
+    resolve_within_root(root, Path::new(expected), expected)
+}
+
+pub fn load_string_from_root(root: &Path, expected: &str) -> Result<String> {
+    let path = trusted_file_path(root, expected)?;
+    std::fs::read_to_string(&path).with_context(|| format!("Failed to read '{}'", path.display()))
+}
+
+pub fn write_string_to_root(root: &Path, expected: &str, content: &str) -> Result<()> {
+    let path = trusted_file_path(root, expected)?;
+    std::fs::create_dir_all(root)
+        .with_context(|| format!("Failed to create '{}'", root.display()))?;
+    std::fs::write(&path, content).with_context(|| format!("Failed to write '{}'", path.display()))
 }

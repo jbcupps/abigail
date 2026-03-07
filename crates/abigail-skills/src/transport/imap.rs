@@ -5,7 +5,6 @@
 use async_imap::Session;
 use async_native_tls::TlsConnector;
 use futures_util::StreamExt;
-use std::net::IpAddr;
 use tokio::net::TcpStream;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 
@@ -54,13 +53,7 @@ impl ImapClient {
     }
 
     fn tls_connector(&self) -> TlsConnector {
-        let mut connector = TlsConnector::new();
-        if allows_insecure_local_tls(&self.host) {
-            connector = connector
-                .danger_accept_invalid_certs(true)
-                .danger_accept_invalid_hostnames(true);
-        }
-        connector
+        TlsConnector::new()
     }
 
     async fn connect_implicit(&self) -> anyhow::Result<Session<TlsStream>> {
@@ -188,14 +181,6 @@ impl ImapClient {
         session.logout().await?;
         Ok(summaries)
     }
-}
-
-fn allows_insecure_local_tls(host: &str) -> bool {
-    let normalized = host.trim().trim_matches(['[', ']']);
-    normalized.eq_ignore_ascii_case("localhost")
-        || normalized
-            .parse::<IpAddr>()
-            .is_ok_and(|addr| addr.is_loopback())
 }
 
 #[cfg(test)]

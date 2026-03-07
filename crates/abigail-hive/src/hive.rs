@@ -128,11 +128,12 @@ impl Hive {
             if Self::is_cli_provider(pref) {
                 return Some(
                     vault
-                        .with_secret(pref, |k| k.trim().to_string())
+                        .get_secret(pref)
+                        .map(str::trim)
                         .filter(|k| !k.is_empty())
                         .map(|key| ProviderSelection {
                             provider: pref.clone(),
-                            auth: ProviderAuth::ApiKey(key),
+                            auth: ProviderAuth::ApiKey(key.to_string()),
                         })
                         .unwrap_or_else(|| ProviderSelection {
                             provider: pref.clone(),
@@ -141,11 +142,12 @@ impl Hive {
                 );
             }
             if let Some(selection) = vault
-                .with_secret(pref, |key| key.trim().to_string())
+                .get_secret(pref)
+                .map(str::trim)
                 .filter(|key| !key.is_empty())
                 .map(|key| ProviderSelection {
                     provider: pref.clone(),
-                    auth: ProviderAuth::ApiKey(key),
+                    auth: ProviderAuth::ApiKey(key.to_string()),
                 })
             {
                 return Some(selection);
@@ -166,11 +168,12 @@ impl Hive {
         ];
         for name in &provider_names {
             if let Some(selection) = vault
-                .with_secret(name, |key| key.trim().to_string())
+                .get_secret(name)
+                .map(str::trim)
                 .filter(|key| !key.is_empty())
                 .map(|key| ProviderSelection {
                     provider: (*name).to_string(),
-                    auth: ProviderAuth::ApiKey(key),
+                    auth: ProviderAuth::ApiKey(key.to_string()),
                 })
             {
                 return Some(selection);
