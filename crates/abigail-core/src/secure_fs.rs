@@ -1,10 +1,33 @@
 use crate::error::{CoreError, Result};
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    // Basic safety: reject absolute paths and traversal outside the intended root.
+    if path.is_absolute() {
+        return Err(CoreError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Absolute paths are not allowed: '{}'", path.display()),
+        )));
+    }
+
+    for component in path.components() {
+        match component {
+            Component::CurDir | Component::Normal(_) => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(CoreError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "Path '{}' contains disallowed traversal or root components",
+                        path.display()
+                    ),
+                )));
+            }
+        }
+    }
+
     let parent = path.parent().ok_or_else(|| {
         CoreError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
