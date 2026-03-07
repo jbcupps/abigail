@@ -167,16 +167,15 @@ impl Hive {
         }
 
         // 2. Local Vault (keys pasted in chat or added in Connectivity)
-        let provider_names = [
-            "openai",
-            "google",
-            "xai",
-            "perplexity",
-            "anthropic",
-            "claude-cli",
-            "gemini-cli",
-            "codex-cli",
-            "grok-cli",
+            if let Some(raw_key) = vault.get_secret(name) {
+                let key = raw_key.trim();
+                if !key.is_empty() {
+                    let selection = ProviderSelection {
+                        provider: (*name).to_string(),
+                        auth: ProviderAuth::ApiKey(key.to_string()),
+                    };
+                    return Some(selection);
+                }
         ];
         for name in &provider_names {
             if let Some(selection) = vault
