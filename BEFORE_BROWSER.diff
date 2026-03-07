@@ -1,0 +1,28 @@
+## codex/desktop-operator-autonomy...origin/codex/desktop-operator-autonomy
+ m .claude/worktrees/bold-hellman
+ m .claude/worktrees/distracted-clarke
+ M CHANGELOG.md
+ M Cargo.lock
+ M abigail/documents/DECENTRALIZED_TRUST_PAPER_ALIGNMENT.md
+ M crates/abigail-capabilities/src/cognitive/validation.rs
+ M crates/abigail-router/src/router.rs
+ M crates/abigail-skills/Cargo.toml
+ M crates/entity-daemon/src/main.rs
+ M documents/Feature_Gap_Analysis.md
+ M skills/instructions/skill_browser.md
+ M skills/registry.toml
+ M skills/skill-browser/Cargo.toml
+ M skills/skill-browser/src/lib.rs
+ M skills/skill-email/Cargo.toml
+ M skills/skill-email/src/lib.rs
+ M tauri-app/src-ui/src/components/ChatInterface.tsx
+ M tauri-app/src-ui/src/components/SanctumDrawer.tsx
+ M tauri-app/src-ui/src/components/__tests__/ChatInterface.test.tsx
+ M tauri-app/src-ui/src/components/__tests__/SanctumDrawer.test.tsx
+ M tauri-app/src/commands/cli.rs
+ M tauri-app/src/commands/identity.rs
+ M tauri-app/src/commands/sensory.rs
+ M tauri-app/src/lib.rs
+?? BEFORE_BROWSER.diff
+?? crates/abigail-skills/tests/
+?? skills/skill-browser/src/browser.rs

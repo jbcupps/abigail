@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-03-06 Skills strategy: Email fix path + Browser skill Playwright upgrade for universal fallback (paper-aligned authx parity).
 - 2026-03-05 [VAULT] Sentinel + isolated KEK + model-switch safety (eliminates AES-GCM wrong-key error forever)
 - 2026-03-05 23:50 EST: Add dedicated soul-forge worker module entrypoint and enforce forge mentor-approval gate before artifact persistence, with prompt/template updates reflecting approval requirement
 - 2026-03-05 23:35 EST: Add `abigail-router::monitors::mentor_chat` compatibility module and explicit selected-model subscriber registration API, wiring entity-daemon chat routes to register model subscriber identity on chat-topic

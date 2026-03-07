@@ -24,7 +24,17 @@ That roadmap prioritizes command-surface reliability, GUI/Entity chat decoupling
 
 > **Historical Reference Notice (2026-03-01):** Most detailed "current state" snapshots in this document were captured on 2026-02-06 and are preserved for parity context. For implementation truth, prefer `README.md`, `CLAUDE.md`, and the GUI/Entity stability roadmap.
 
----
+### Updated Skills Strategy — 06 Mar 2026
+
+Selected direction from the 2026-03-06 skills strategy review:
+
+- Option 2: upgrade Abigail's Browser skill to a production-grade Playwright runtime with persistent per-Entity browser contexts stored under `data/identities/[uuid]/browser_profile`.
+- Expose high-level browser commands (`navigate`, `click`, `type`, `screenshot`, `execute_js`, `login_with_oauth`) so auth-heavy flows can be driven without credential duplication.
+- Use the Browser skill as the universal fallback path for webmail and other OAuth/session-first integrations when direct protocol access fails.
+- Gate every browser mutation behind TriangleEthic preview and preserve one-click session clearing in Sanctum so persistent auth remains visible and reversible.
+- Treat this as the paper-aligned bridge between runtime enforcement (Sections 7-11) and verifiable memory/session continuity (Sections 22-27).
+
+--- 
 
 ## Table of Contents
 
