@@ -71,13 +71,8 @@ async fn execute_with_triangle_preview(
         .execute_tool(tool_name, params.clone(), &context)
         .await
         .map_err(|err| err.to_string())?;
-    let data = first
-        .data
-        .clone()
-        .unwrap_or_default();
-    if data
-        .get("status")
-        .and_then(|value| value.as_str())
+    let data = first.data.clone().unwrap_or_default();
+    if data.get("status").and_then(|value| value.as_str())
         == Some("triangle_ethic_preview_required")
     {
         let token = data
@@ -121,7 +116,8 @@ async fn login_survives_browser_restart() {
         )
         .await?;
 
-        skill.execute_tool("browser_close", ToolParams::new(), &execution_context())
+        skill
+            .execute_tool("browser_close", ToolParams::new(), &execution_context())
             .await
             .map_err(|err| err.to_string())?;
 
@@ -155,7 +151,9 @@ async fn login_survives_browser_restart() {
             .unwrap_or_default()
             .to_string();
         if !page_text.contains("Logged In") {
-            return Err(format!("expected persisted login, got page text: {page_text}"));
+            return Err(format!(
+                "expected persisted login, got page text: {page_text}"
+            ));
         }
 
         let session = restarted

@@ -261,7 +261,10 @@ pub async fn create_email_skill_for_registry(state: &AppState) -> Result<Arc<dyn
         serde_json::Value::String(data_dir.to_string_lossy().to_string()),
     );
     if let Some(entity_id) = entity_id {
-        values.insert("entity_id".to_string(), serde_json::Value::String(entity_id));
+        values.insert(
+            "entity_id".to_string(),
+            serde_json::Value::String(entity_id),
+        );
     }
 
     let mut secrets = HashMap::new();

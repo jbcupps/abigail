@@ -599,7 +599,7 @@ impl AppConfig {
         None
     }
 
-    pub fn load(path: &PathBuf) -> anyhow::Result<Self> {
+    pub fn load(path: &Path) -> anyhow::Result<Self> {
         let content = crate::path_guard::load_string_from_expected_file(path, "config.json")?;
         let mut config: Self = serde_json::from_str(&content)?;
 
@@ -616,7 +616,7 @@ impl AppConfig {
         Ok(config)
     }
 
-    pub fn save(&self, path: &PathBuf) -> anyhow::Result<()> {
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         let content = serde_json::to_string_pretty(self)?;
         crate::path_guard::write_string_to_expected_file(path, "config.json", &content)?;
         Ok(())
