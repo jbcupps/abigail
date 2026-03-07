@@ -1,12 +1,16 @@
+use crate::protected_topics::{
+    decrypt_secret_payload, encrypt_secret_payload, plan_secret_move, ProtectedTopicEntry,
+    ProtectedTopicSummary, SecretKind, SecretMovePlan,
+};
 use crate::schema::{
     CREATE_BIRTH, CREATE_MEMORIES, CREATE_SCHEMA_VERSIONS, MIGRATION_V2_CONVERSATION_TURNS,
-    MIGRATION_V3_JOB_QUEUE,
+    MIGRATION_V3_JOB_QUEUE, MIGRATION_V4_PROTECTED_TOPICS, MIGRATION_V5_CONVERSATION_TURN_ROLES,
 };
-use abigail_core::AppConfig;
+use abigail_core::{AppConfig, HybridUnlockProvider, PassphraseUnlockProvider, UnlockProvider};
 use chrono::Utc;
 use rusqlite::Connection;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -127,28 +131,46 @@ pub enum StoreError {
     BirthAlreadyRecorded,
     #[error("Invalid data: {0}")]
     InvalidData(String),
+    #[error("Protected topic error: {0}")]
+    ProtectedTopic(String),
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
 
 pub struct MemoryStore {
     conn: Mutex<Connection>,
+    unlock: Arc<dyn UnlockProvider>,
+    entity_id: Option<String>,
 }
 
 impl MemoryStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_unlock(path, Arc::new(HybridUnlockProvider::new()))
+    }
+
+    pub fn open_with_unlock(
+        path: impl AsRef<Path>,
+        unlock: Arc<dyn UnlockProvider>,
+    ) -> Result<Self> {
+        let path = path.as_ref();
         let conn = Connection::open(path)?;
         Self::init_conn(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            unlock,
+            entity_id: infer_entity_id(path),
         })
     }
 
     pub fn open_in_memory() -> Result<Self> {
+        let unlock: Arc<dyn UnlockProvider> =
+            Arc::new(PassphraseUnlockProvider::new("abigail-memory-in-memory"));
         let conn = Connection::open_in_memory()?;
         Self::init_conn(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            unlock,
+            entity_id: None,
         })
     }
 
@@ -168,6 +190,8 @@ impl MemoryStore {
             (1, ""),
             (2, MIGRATION_V2_CONVERSATION_TURNS),
             (3, MIGRATION_V3_JOB_QUEUE),
+            (4, MIGRATION_V4_PROTECTED_TOPICS),
+            (5, MIGRATION_V5_CONVERSATION_TURN_ROLES),
         ];
 
         for &(version, sql) in migrations {
@@ -208,7 +232,103 @@ impl MemoryStore {
             std::fs::create_dir_all(parent)
                 .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         }
-        Self::open(&config.db_path)
+        Self::open_with_unlock(&config.db_path, Arc::new(HybridUnlockProvider::new()))
+    }
+
+    pub fn capture_secret_message(
+        &self,
+        entity_id: &str,
+        session_id: &str,
+        role: &str,
+        content: &str,
+        source: &str,
+    ) -> Result<Option<SecretMovePlan>> {
+        let Some(secret) =
+            self.prepare_secret_capture(entity_id, session_id, role, content, source, Utc::now())?
+        else {
+            return Ok(None);
+        };
+
+        let mut conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        let tx = conn.transaction()?;
+        persist_protected_secret_tx(&tx, entity_id, &secret)?;
+        tx.commit()?;
+        Ok(Some(secret.plan))
+    }
+
+    pub fn list_protected_topics(&self, limit: usize) -> Result<Vec<ProtectedTopicSummary>> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT topic_name, entity_id, entry_count, updated_at, last_secret_kind, \
+                    last_redacted_excerpt, last_preview_json \
+             FROM protected_topics ORDER BY updated_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit as i64], |row| {
+            let updated_at: String = row.get(3)?;
+            let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_at)
+                .map(|dt| dt.with_timezone(&Utc))
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            let secret_kind =
+                parse_secret_kind(&row.get::<_, String>(4)?).map_err(sqlite_invalid_data)?;
+            let last_preview =
+                parse_preview_json(&row.get::<_, String>(6)?).map_err(sqlite_invalid_data)?;
+            Ok(ProtectedTopicSummary {
+                topic_name: row.get(0)?,
+                entity_id: row.get(1)?,
+                entry_count: row.get::<_, i64>(2)? as u64,
+                updated_at,
+                last_secret_kind: secret_kind,
+                last_redacted_excerpt: row.get(5)?,
+                last_preview,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    pub fn protected_topic_entries(
+        &self,
+        topic_name: &str,
+        limit: usize,
+    ) -> Result<Vec<ProtectedTopicEntry>> {
+        let conn = self.conn.lock().map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT id, topic_name, session_id, role, source, secret_kind, redacted_excerpt, \
+                    preview_json, ciphertext, created_at \
+             FROM protected_topic_entries WHERE topic_name = ?1 \
+             ORDER BY created_at DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![topic_name, limit as i64], |row| {
+            let preview =
+                parse_preview_json(&row.get::<_, String>(7)?).map_err(sqlite_invalid_data)?;
+            let secret_kind =
+                parse_secret_kind(&row.get::<_, String>(5)?).map_err(sqlite_invalid_data)?;
+            let ciphertext: Vec<u8> = row.get(8)?;
+            let payload = decrypt_secret_payload(&self.unlock, topic_name, &ciphertext)
+                .map_err(sqlite_invalid_data)?;
+            let created_at: String = row.get(9)?;
+            let created_at = chrono::DateTime::parse_from_rfc3339(&created_at)
+                .map(|dt| dt.with_timezone(&Utc))
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            Ok(ProtectedTopicEntry {
+                id: row.get(0)?,
+                topic_name: row.get(1)?,
+                session_id: row.get(2)?,
+                role: row.get(3)?,
+                source: payload.source,
+                secret_kind,
+                redacted_excerpt: row.get(6)?,
+                preview,
+                content: payload.content,
+                created_at,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
     pub fn has_birth(&self) -> Result<bool> {
@@ -325,28 +445,21 @@ impl MemoryStore {
     // ── Conversation Turns ──────────────────────────────────────────
 
     pub fn insert_turn(&self, turn: &ConversationTurn) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| {
+        let (persisted_turn, protected_secret) =
+            self.prepare_turn_for_storage(turn, "conversation_turn")?;
+        let mut conn = self.conn.lock().map_err(|e| {
             rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
         })?;
-        conn.execute(
-            "INSERT INTO conversation_turns \
-             (id, session_id, turn_number, role, content, provider, model, tier, \
-              complexity_score, token_estimate, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            rusqlite::params![
-                turn.id,
-                turn.session_id,
-                turn.turn_number,
-                turn.role,
-                turn.content,
-                turn.provider,
-                turn.model,
-                turn.tier,
-                turn.complexity_score.map(|v| v as i64),
-                turn.token_estimate.map(|v| v as i64),
-                turn.created_at.to_rfc3339(),
-            ],
-        )?;
+        let tx = conn.transaction()?;
+        if let Some(secret) = protected_secret.as_ref() {
+            let entity_id = self
+                .entity_id
+                .as_deref()
+                .ok_or_else(|| StoreError::ProtectedTopic("missing entity id".to_string()))?;
+            persist_protected_secret_tx(&tx, entity_id, secret)?;
+        }
+        insert_turn_tx(&tx, &persisted_turn, false)?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -513,31 +626,85 @@ impl MemoryStore {
 
     // ── Idempotent inserts (for backup import) ────────────────────
 
+    fn prepare_turn_for_storage(
+        &self,
+        turn: &ConversationTurn,
+        source: &str,
+    ) -> Result<(ConversationTurn, Option<PreparedProtectedSecret>)> {
+        let Some(entity_id) = self.entity_id.as_deref() else {
+            return Ok((turn.clone(), None));
+        };
+        let Some(secret) = self.prepare_secret_capture(
+            entity_id,
+            &turn.session_id,
+            &turn.role,
+            &turn.content,
+            source,
+            turn.created_at,
+        )?
+        else {
+            return Ok((turn.clone(), None));
+        };
+
+        let mut persisted_turn = turn.clone();
+        // paper Sections 22-27 runtime verification + self-sufficient entity via protected topics:
+        // move secret-bearing chat content into encrypted topics before normal turn persistence.
+        persisted_turn.content = secret.plan.redacted_excerpt.clone();
+        Ok((persisted_turn, Some(secret)))
+    }
+
+    fn prepare_secret_capture(
+        &self,
+        entity_id: &str,
+        session_id: &str,
+        role: &str,
+        content: &str,
+        source: &str,
+        created_at: chrono::DateTime<Utc>,
+    ) -> Result<Option<PreparedProtectedSecret>> {
+        let Some(plan) = plan_secret_move(Some(entity_id), content) else {
+            return Ok(None);
+        };
+        let ciphertext = encrypt_secret_payload(
+            &self.unlock,
+            &plan,
+            session_id,
+            role,
+            source,
+            content,
+            created_at,
+        )
+        .map_err(StoreError::ProtectedTopic)?;
+
+        Ok(Some(PreparedProtectedSecret {
+            id: Uuid::new_v4().to_string(),
+            plan,
+            session_id: session_id.to_string(),
+            role: role.to_string(),
+            source: source.to_string(),
+            ciphertext,
+            created_at,
+        }))
+    }
+
     /// Insert a conversation turn, ignoring if the ID already exists.
     /// Returns `true` if a new row was inserted.
     pub fn insert_turn_or_ignore(&self, turn: &ConversationTurn) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|e| {
+        let (persisted_turn, protected_secret) =
+            self.prepare_turn_for_storage(turn, "conversation_turn")?;
+        let mut conn = self.conn.lock().map_err(|e| {
             rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
         })?;
-        let changed = conn.execute(
-            "INSERT OR IGNORE INTO conversation_turns \
-             (id, session_id, turn_number, role, content, provider, model, tier, \
-              complexity_score, token_estimate, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            rusqlite::params![
-                turn.id,
-                turn.session_id,
-                turn.turn_number,
-                turn.role,
-                turn.content,
-                turn.provider,
-                turn.model,
-                turn.tier,
-                turn.complexity_score.map(|v| v as i64),
-                turn.token_estimate.map(|v| v as i64),
-                turn.created_at.to_rfc3339(),
-            ],
-        )?;
+        let tx = conn.transaction()?;
+        if let Some(secret) = protected_secret.as_ref() {
+            let entity_id = self
+                .entity_id
+                .as_deref()
+                .ok_or_else(|| StoreError::ProtectedTopic("missing entity id".to_string()))?;
+            persist_protected_secret_tx(&tx, entity_id, secret)?;
+        }
+        let changed = insert_turn_tx(&tx, &persisted_turn, true)?;
+        tx.commit()?;
         Ok(changed > 0)
     }
 
@@ -599,6 +766,130 @@ impl MemoryStore {
         }
         Ok(out)
     }
+}
+
+struct PreparedProtectedSecret {
+    id: String,
+    plan: SecretMovePlan,
+    session_id: String,
+    role: String,
+    source: String,
+    ciphertext: Vec<u8>,
+    created_at: chrono::DateTime<Utc>,
+}
+
+fn infer_entity_id(path: &Path) -> Option<String> {
+    path.parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+        .filter(|candidate| Uuid::parse_str(candidate).is_ok())
+        .map(str::to_string)
+}
+
+fn insert_turn_tx(
+    tx: &rusqlite::Transaction<'_>,
+    turn: &ConversationTurn,
+    ignore_conflicts: bool,
+) -> rusqlite::Result<usize> {
+    let sql = if ignore_conflicts {
+        "INSERT OR IGNORE INTO conversation_turns \
+         (id, session_id, turn_number, role, content, provider, model, tier, \
+          complexity_score, token_estimate, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
+    } else {
+        "INSERT INTO conversation_turns \
+         (id, session_id, turn_number, role, content, provider, model, tier, \
+          complexity_score, token_estimate, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
+    };
+
+    tx.execute(
+        sql,
+        rusqlite::params![
+            turn.id,
+            turn.session_id,
+            turn.turn_number,
+            turn.role,
+            turn.content,
+            turn.provider,
+            turn.model,
+            turn.tier,
+            turn.complexity_score.map(|v| v as i64),
+            turn.token_estimate.map(|v| v as i64),
+            turn.created_at.to_rfc3339(),
+        ],
+    )
+}
+
+fn persist_protected_secret_tx(
+    tx: &rusqlite::Transaction<'_>,
+    entity_id: &str,
+    secret: &PreparedProtectedSecret,
+) -> Result<()> {
+    let preview_json = serde_json::to_string(&secret.plan.preview)
+        .map_err(|e| StoreError::ProtectedTopic(e.to_string()))?;
+    let created_at = secret.created_at.to_rfc3339();
+
+    tx.execute(
+        "INSERT INTO protected_topics \
+         (topic_name, entity_id, protection_kind, entry_count, last_secret_kind, \
+          last_redacted_excerpt, last_preview_json, created_at, updated_at) \
+         VALUES (?1, ?2, 'secret', 1, ?3, ?4, ?5, ?6, ?7) \
+         ON CONFLICT(topic_name) DO UPDATE SET \
+            entry_count = protected_topics.entry_count + 1, \
+            last_secret_kind = excluded.last_secret_kind, \
+            last_redacted_excerpt = excluded.last_redacted_excerpt, \
+            last_preview_json = excluded.last_preview_json, \
+            updated_at = excluded.updated_at",
+        rusqlite::params![
+            secret.plan.topic_name,
+            entity_id,
+            secret.plan.secret_kind.as_str(),
+            secret.plan.redacted_excerpt,
+            preview_json,
+            created_at,
+            created_at,
+        ],
+    )?;
+
+    tx.execute(
+        "INSERT INTO protected_topic_entries \
+         (id, topic_name, session_id, role, source, secret_kind, redacted_excerpt, \
+          preview_json, ciphertext, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        rusqlite::params![
+            secret.id,
+            secret.plan.topic_name,
+            secret.session_id,
+            secret.role,
+            secret.source,
+            secret.plan.secret_kind.as_str(),
+            secret.plan.redacted_excerpt,
+            preview_json,
+            secret.ciphertext,
+            created_at,
+        ],
+    )?;
+
+    Ok(())
+}
+
+fn parse_secret_kind(raw: &str) -> std::result::Result<SecretKind, String> {
+    match raw {
+        "api_key" => Ok(SecretKind::ApiKey),
+        "password" => Ok(SecretKind::Password),
+        "token" => Ok(SecretKind::Token),
+        "credential" => Ok(SecretKind::Credential),
+        other => Err(format!("unknown secret kind: {}", other)),
+    }
+}
+
+fn parse_preview_json(raw: &str) -> std::result::Result<crate::TriangleEthicPreview, String> {
+    serde_json::from_str(raw).map_err(|e| e.to_string())
+}
+
+fn sqlite_invalid_data(message: String) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(message)))
 }
 
 #[cfg(test)]

@@ -38,7 +38,7 @@ fn env_or_skip(key: &str) -> String {
 }
 
 fn is_live_test_enabled() -> bool {
-    std::env::var("ABIGAIL_IMAP_TEST").map_or(false, |v| v == "1")
+    std::env::var("ABIGAIL_IMAP_TEST").is_ok_and(|v| v == "1")
 }
 
 struct TestEnv {
