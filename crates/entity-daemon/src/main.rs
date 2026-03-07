@@ -110,10 +110,7 @@ async fn main() -> anyhow::Result<()> {
     let hive_config = abigail_hive::HiveConfig {
         local_llm_base_url: provider_config.local_llm_base_url,
         ego_provider: provider_config.ego_provider_name.map(|provider| {
-            let auth = provider_config
-                .ego_api_key
-                .map(abigail_hive::ProviderAuth::ApiKey)
-                .unwrap_or(abigail_hive::ProviderAuth::System);
+            let auth = abigail_hive::ProviderAuth::System;
             abigail_hive::ProviderSelection { provider, auth }
         }),
         ego_model: provider_config.ego_model,
