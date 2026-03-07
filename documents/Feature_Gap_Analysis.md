@@ -24,6 +24,8 @@ That roadmap prioritizes command-surface reliability, GUI/Entity chat decoupling
 
 > **Historical Reference Notice (2026-03-01):** Most detailed "current state" snapshots in this document were captured on 2026-02-06 and are preserved for parity context. For implementation truth, prefer `README.md`, `CLAUDE.md`, and the GUI/Entity stability roadmap.
 
+2026-03-07 Cryptographic excision complete + topic-model secret autonomy implemented (self-sufficient Entity achieved).
+
 ---
 
 ## Table of Contents
