@@ -141,6 +141,34 @@ jobs:
             fs.writeFileSync(path, JSON.stringify(data, null, 2) + '\n');
           "
 
+      - name: Enforce fast-release signing prerequisites
+        if: matrix.platform == 'windows-latest' && github.event.inputs.create_github_release == 'true'
+        shell: bash
+        env:
+          ABIGAIL_OFFICIAL_RELEASE: "true"
+          ABIGAIL_REQUIRE_WINDOWS_SIGNING: "true"
+          ABIGAIL_REQUIRE_MAC_SIGNING: "false"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
+          WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          bash scripts/enforce_release_prereqs.sh
+
+      - name: Configure updater and signing fields in tauri.conf.json
+        shell: bash
+        env:
+          ABIGAIL_REQUIRE_UPDATER_PUBKEY: ${{ matrix.platform == 'windows-latest' && github.event.inputs.create_github_release == 'true' }}
+          ABIGAIL_ENABLE_UPDATER_ARTIFACTS: ${{ matrix.platform == 'windows-latest' && github.event.inputs.create_github_release == 'true' }}
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          node scripts/prepare_tauri_bundle_config.mjs tauri-app/tauri.conf.json
+
       - name: Generate Cargo.lock
         run: cargo generate-lockfile
 
@@ -193,7 +221,25 @@ jobs:
             exit 1
           fi
 
+      - name: Import Windows code signing certificate
+        if: matrix.platform == 'windows-latest' && github.event.inputs.create_github_release == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
+          WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP 'abigail-fast-signing-cert.pfx'
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERT_BASE64))
+          $password = ConvertTo-SecureString -String $env:WINDOWS_SIGNING_CERT_PASSWORD -AsPlainText -Force
+          Import-PfxCertificate -FilePath $certPath -Password $password -CertStoreLocation Cert:\CurrentUser\My | Out-Null
+          $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Thumbprint -eq $env:WINDOWS_CERTIFICATE_THUMBPRINT }
+          if (-not $cert) {
+            throw "Imported Windows signing certificate with thumbprint $env:WINDOWS_CERTIFICATE_THUMBPRINT was not found in Cert:\CurrentUser\My"
+          }
+
       - name: Validate updater signing key preflight
+        if: matrix.platform == 'windows-latest' && github.event.inputs.create_github_release == 'true'
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -209,12 +255,24 @@ jobs:
         run: |
           cd tauri-app
 
-          if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+          if [[ "${{ matrix.platform }}" == "windows-latest" && "${{ github.event.inputs.create_github_release }}" == "true" ]]; then
+            tauri build
+          elif [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
             echo "Signing key detected: building signed artifacts"
             tauri build
           else
             echo "WARNING: TAURI_SIGNING_PRIVATE_KEY is not configured; building unsigned artifacts"
             TAURI_SKIP_SIGNING=true tauri build
+          fi
+
+      - name: Verify updater artifacts
+        if: matrix.platform == 'windows-latest' && github.event.inputs.create_github_release == 'true'
+        shell: bash
+        run: |
+          mapfile -t UPDATER_FILES < <(find target -type f \( -name "*.nsis.zip" -o -name "*.nsis.zip.sig" -o -name "*.msi.zip" -o -name "*.msi.zip.sig" \))
+          if [[ "${#UPDATER_FILES[@]}" -eq 0 ]]; then
+            echo "ERROR: No updater artifacts were produced."
+            exit 1
           fi
 
       - name: Upload installers (Artifacts)
@@ -232,9 +290,21 @@ jobs:
           path: target/release/bundle/msi/*.msi
           if-no-files-found: warn
 
+      - name: Upload updater artifacts
+        if: matrix.platform == 'windows-latest' && github.event.inputs.create_github_release == 'true'
+        uses: actions/upload-artifact@47309c993abb98030a35d55ef7ff34b7fa1074b5 # v4
+        with:
+          name: abigail-fast-updater-windows-latest
+          path: |
+            target/**/bundle/**/*.nsis.zip
+            target/**/bundle/**/*.nsis.zip.sig
+            target/**/bundle/**/*.msi.zip
+            target/**/bundle/**/*.msi.zip.sig
+          if-no-files-found: error
+
   publish:
     needs: build
-    if: github.event.inputs.create_github_release == 'true' && (needs.build.result == 'success' || needs.build.result == 'failure')
+    if: github.event.inputs.create_github_release == 'true' && needs.build.result == 'success'
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -257,6 +327,14 @@ jobs:
         with:
           path: artifacts
           pattern: abigail-fast-msi-*
+          merge-multiple: false
+        continue-on-error: true
+
+      - name: Download updater artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+          pattern: abigail-fast-updater-*
           merge-multiple: false
         continue-on-error: true
 
@@ -291,6 +369,15 @@ jobs:
           find artifacts -type f -name '*.exe' -print -quit | while read -r f; do cp "$f" Abigail-windows-x64-setup-fast.exe; done
           find artifacts -type f -name '*.deb' -print -quit | while read -r f; do cp "$f" Abigail-linux-x64-fast.deb; done
           find artifacts -type f -name '*.msi' -print -quit | while read -r f; do cp "$f" Abigail-windows-x64-fast.msi; done
+          find artifacts/abigail-fast-updater-windows-latest -type f -name '*.nsis.zip' -print -quit | while read -r f; do cp "$f" Abigail-updater-windows-x64.nsis.zip; done
+          find artifacts/abigail-fast-updater-windows-latest -type f -name '*.nsis.zip.sig' -print -quit | while read -r f; do cp "$f" Abigail-updater-windows-x64.nsis.zip.sig; done
+          find artifacts/abigail-fast-updater-windows-latest -type f -name '*.msi.zip' -print -quit | while read -r f; do cp "$f" Abigail-updater-windows-x64.msi.zip; done
+          find artifacts/abigail-fast-updater-windows-latest -type f -name '*.msi.zip.sig' -print -quit | while read -r f; do cp "$f" Abigail-updater-windows-x64.msi.zip.sig; done
+          node scripts/generate_tauri_latest_manifest.mjs \
+            --version "${{ needs.build.outputs.version }}" \
+            --assets-dir . \
+            --base-url "https://github.com/${{ github.repository }}/releases/download/${{ needs.build.outputs.tag }}" \
+            --output latest.json
 
       - name: Create GitHub Pre-release
         if: steps.artifacts.outputs.count != '0'
@@ -301,6 +388,11 @@ jobs:
           [[ -f Abigail-windows-x64-setup-fast.exe ]] && assets+=(Abigail-windows-x64-setup-fast.exe)
           [[ -f Abigail-linux-x64-fast.deb ]] && assets+=(Abigail-linux-x64-fast.deb)
           [[ -f Abigail-windows-x64-fast.msi ]] && assets+=(Abigail-windows-x64-fast.msi)
+          [[ -f Abigail-updater-windows-x64.nsis.zip ]] && assets+=(Abigail-updater-windows-x64.nsis.zip)
+          [[ -f Abigail-updater-windows-x64.nsis.zip.sig ]] && assets+=(Abigail-updater-windows-x64.nsis.zip.sig)
+          [[ -f Abigail-updater-windows-x64.msi.zip ]] && assets+=(Abigail-updater-windows-x64.msi.zip)
+          [[ -f Abigail-updater-windows-x64.msi.zip.sig ]] && assets+=(Abigail-updater-windows-x64.msi.zip.sig)
+          [[ -f latest.json ]] && assets+=(latest.json)
 
           gh release create "${{ needs.build.outputs.tag }}" \
             --title "Abigail Fast ${{ needs.build.outputs.version }}" \

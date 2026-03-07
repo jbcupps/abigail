@@ -24,6 +24,11 @@ const steps = [
     args: ["test", "--workspace", "--exclude", "abigail-app", "--no-run"],
   },
   {
+    label: "node scripts/check_crypto_claims.mjs",
+    command: process.execPath,
+    args: ["scripts/check_crypto_claims.mjs"],
+  },
+  {
     label: "npm run check:command-contract",
     command: npmCommand,
     args: ["run", "check:command-contract"],

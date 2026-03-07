@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import ApiKeyModal from "./ApiKeyModal";
+import HelpTooltip from "./HelpTooltip";
+import { API_PROVIDER_HELP, getCliProviderHelp } from "./providerHelp";
 import type { CliDetection } from "../types/llm";
 
 interface RouterStatus {
@@ -13,13 +15,6 @@ interface ProviderDrawerProps {
 }
 
 type Tab = "api" | "cli";
-
-const API_PROVIDERS = [
-  { id: "openai", label: "OpenAI" },
-  { id: "anthropic", label: "Anthropic" },
-  { id: "google", label: "Google (Gemini)" },
-  { id: "xai", label: "X.AI (Grok)" },
-];
 
 export default function ProviderDrawer({ onClose }: ProviderDrawerProps) {
   const [tab, setTab] = useState<Tab>("api");
@@ -163,7 +158,7 @@ export default function ProviderDrawer({ onClose }: ProviderDrawerProps) {
           {/* API Keys tab */}
           {tab === "api" && (
             <div className="space-y-2">
-              {API_PROVIDERS.map((p) => {
+              {API_PROVIDER_HELP.map((p) => {
                 const hasKey = storedProviders.includes(p.id);
                 const active = isActiveProvider(p.id);
                 return (
@@ -177,6 +172,12 @@ export default function ProviderDrawer({ onClose }: ProviderDrawerProps) {
                       <span className="text-theme-text-bright font-bold uppercase text-[10px] tracking-widest">
                         {p.label}
                       </span>
+                      <HelpTooltip
+                        label={`${p.label} help`}
+                        title={p.title}
+                        description={p.description}
+                        links={p.links}
+                      />
                       {hasKey && (
                         <span className="text-theme-primary text-[10px] font-bold">[READY]</span>
                       )}
@@ -224,6 +225,7 @@ export default function ProviderDrawer({ onClose }: ProviderDrawerProps) {
                   {onPathCli.map((d) => {
                     const ready = d.is_official && d.is_authenticated;
                     const active = isActiveProvider(d.provider_name);
+                    const help = getCliProviderHelp(d.provider_name);
                     return (
                       <div
                         key={d.provider_name}
@@ -235,9 +237,19 @@ export default function ProviderDrawer({ onClose }: ProviderDrawerProps) {
                       >
                         <div className="flex items-center justify-between">
                           <div>
-                            <span className="text-theme-text-bright font-bold text-sm uppercase">
-                              {d.provider_name.replace("-cli", "")}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-theme-text-bright font-bold text-sm uppercase">
+                                {d.provider_name.replace("-cli", "")}
+                              </span>
+                              {help && (
+                                <HelpTooltip
+                                  label={`${d.provider_name} help`}
+                                  title={help.title}
+                                  description={help.description}
+                                  links={help.links}
+                                />
+                              )}
+                            </div>
                             {d.version && (
                               <span className="text-theme-text-dim text-xs ml-2">{d.version}</span>
                             )}

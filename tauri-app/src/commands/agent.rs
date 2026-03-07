@@ -74,7 +74,7 @@ pub fn get_governor_status(state: State<AppState>) -> Result<serde_json::Value, 
 #[tauri::command]
 pub fn get_constraint_store(state: State<AppState>) -> Result<serde_json::Value, String> {
     let store = state.constraints.read().map_err(|e| e.to_string())?;
-    serde_json::to_value(store.all()).map_err(|e| e.to_string())
+    Ok(serde_json::to_value(store.all()).map_err(|e| e.to_string())?)
 }
 
 #[tauri::command]

@@ -4,6 +4,7 @@
 //! Uses AES-256-GCM via the vault envelope format (cross-platform).
 
 use crate::error::Result;
+use crate::secure_fs;
 use crate::vault::crypto;
 use crate::vault::unlock::HybridUnlockProvider;
 use crate::vault::unlock::UnlockProvider;
@@ -36,7 +37,7 @@ fn write_encrypted_with_kek(
         std::fs::create_dir_all(parent)?;
     }
     let envelope = crypto::seal(&dek, data)?;
-    std::fs::write(path, &envelope)?;
+    secure_fs::write_bytes_atomic(path, &envelope)?;
     Ok(())
 }
 

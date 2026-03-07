@@ -26,6 +26,12 @@ That roadmap prioritizes command-surface reliability, GUI/Entity chat decoupling
 
 2026-03-07 Cryptographic excision complete + topic-model secret autonomy implemented (self-sufficient Entity achieved).
 
+### Updated Skills Strategy - 06 Mar 2026
+
+- Browser skill upgraded to a production-grade Playwright runtime with persistent per-Entity browser contexts under `data/identities/[uuid]/browser_profile`.
+- High-level browser commands and OAuth-aware flows now provide the universal fallback path for webmail and other session-first integrations.
+- Browser mutations remain gated by TriangleEthic preview, while Sanctum exposes browser session management separately from the protected-topic Secrets Vault.
+
 ---
 
 ## Table of Contents

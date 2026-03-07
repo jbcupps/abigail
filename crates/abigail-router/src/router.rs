@@ -5,11 +5,11 @@
 //! - **EgoPrimary**: All user-facing requests go to Ego; Id is failsafe only.
 //! - **CliOrchestrator**: Auto-detected when Ego is a CLI provider (Claude CLI, etc.).
 
+use abigail_capabilities::cognitive::validation::is_model_compatible_with_provider;
 use abigail_capabilities::cognitive::{
     stub_heartbeat, CompletionRequest, CompletionResponse, LlmProvider, LocalHttpProvider, Message,
     StreamEvent, ToolDefinition,
 };
-use abigail_capabilities::cognitive::validation::is_model_compatible_with_provider;
 use abigail_hive::{BuiltProviders, ProviderKind, ProviderRegistry};
 use entity_core::{ExecutionTrace, SelectionReason};
 use std::sync::{Arc, RwLock};
@@ -263,9 +263,7 @@ impl IdEgoRouter {
             return normalized;
         }
 
-        let Some(model) = normalized else {
-            return None;
-        };
+        let model = normalized?;
 
         let Some(provider) = self.ego_provider_key() else {
             tracing::warn!(

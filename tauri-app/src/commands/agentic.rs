@@ -58,7 +58,6 @@ pub async fn start_agentic_run(
 }
 
 #[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn start_entity_initiated_agentic_run(
     app: tauri::AppHandle,
     state: State<'_, AppState>,

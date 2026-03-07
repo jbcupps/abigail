@@ -267,7 +267,7 @@ pub fn set_hive_theme(state: State<AppState>, theme_id: String) -> Result<(), St
     let im = &state.identity_manager;
     let mut gc = im.global_config().write().map_err(|e| e.to_string())?;
     gc.default_theme = theme_id;
-    gc.save(im.data_root()).map_err(|e| e.to_string())?;
+    gc.save(&im.data_root()).map_err(|e| e.to_string())?;
     Ok(())
 }
 

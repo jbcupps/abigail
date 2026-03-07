@@ -1,54 +1,40 @@
 # Security Policy
 
-## Supported Versions
+## Supported versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.0.x   | Yes                |
+| Version | Supported |
+| --- | --- |
+| 0.0.x | Yes |
 
-## Reporting a Vulnerability
+## Reporting a vulnerability
 
-If you discover a security vulnerability in Abigail, please report it responsibly.
+Do not open a public GitHub issue for a security vulnerability.
 
-**Do NOT open a public GitHub issue for security vulnerabilities.**
+Use GitHub private vulnerability reporting and include:
 
-### How to Report
+1. A clear description of the issue.
+2. Reproduction steps.
+3. Expected impact.
+4. Any suggested mitigation.
 
-1. **Email**: Send a detailed report to the repository owner via GitHub private vulnerability reporting (Settings > Security > Advisories > "Report a vulnerability").
-2. **Include**:
-   - Description of the vulnerability
-   - Steps to reproduce
-   - Potential impact
-   - Suggested fix (if any)
+## Scope
 
-### What to Expect
+The following are in scope:
 
-- **Acknowledgment**: Within 48 hours of your report.
-- **Assessment**: We will evaluate the severity and impact within 7 days.
-- **Fix timeline**: Critical vulnerabilities will be patched as soon as possible. Non-critical issues will be addressed in the next scheduled release.
-- **Disclosure**: We will coordinate disclosure timing with you. We ask that you do not publicly disclose the vulnerability until a fix is available.
+- Abigail desktop application and daemons
+- Vault unlock and sealed local storage
+- Hive identity signing and constitutional verification
+- Portable archive and recovery export handling
+- Signed skill allowlist enforcement
+- Updater signing, release-signing, or `latest.json` generation issues
+- Skill sandbox escape or trust-policy bypass
+- Local-only HTTP boundary issues, including SSRF validation regressions
 
-### Scope
+## Security practices
 
-The following are in scope for security reports:
-
-- Abigail desktop application (Tauri backend and React frontend)
-- Ed25519 signature verification and key management
-- DPAPI secrets handling (Windows)
-- Skill sandbox escape or permission bypass
-- Local LLM endpoint SSRF or injection
-
-### Out of Scope
-
-- Vulnerabilities in third-party dependencies (report these upstream; we monitor via Dependabot and `cargo audit`)
-- Social engineering
-- Denial of service on local-only interfaces
-
-## Security Practices
-
-- All constitutional documents are signed with Ed25519 and verified at every boot
-- Secrets are encrypted via Windows DPAPI (user scope) and never stored in plaintext
-- Skills run in a permission-checked sandbox with declared manifests
-- Local LLM URLs are validated to prevent SSRF (localhost/loopback only)
-- GitHub Actions use pinned commit SHAs to prevent supply chain attacks
-- Dependency audits run automatically via `cargo audit` and `npm audit` in CI
+- Abigail enforces a fail-closed trust chain: stable KEK -> Hive master key -> Hive signature over `external_pubkey.bin` -> constitutional document signatures.
+- Local vault storage uses AES-256-GCM with atomic writes.
+- Passphrase fallback uses Argon2id with per-install metadata for new vaults.
+- Portable archive v2 uses X25519 + HKDF-SHA256 + AES-256-GCM with authenticated headers.
+- Signed skill allowlist entries are verified against `trusted_skill_signers` and fail closed on malformed or untrusted input.
+- Official release workflows require updater signing inputs, Windows code signing inputs, and macOS signing/notarization inputs.

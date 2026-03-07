@@ -235,11 +235,13 @@ pub async fn start_managed_ollama(
                             .and_then(|m| m.as_array())
                             .map(|models| {
                                 models.iter().any(|m| {
-                                    m.get("name").and_then(|n| n.as_str()).is_some_and(|name| {
-                                        name == model_name
-                                            || name == format!("{}:latest", model_name)
-                                            || name.starts_with(&format!("{}:", model_name))
-                                    })
+                                    m.get("name")
+                                        .and_then(|n| n.as_str())
+                                        .map_or(false, |name| {
+                                            name == model_name
+                                                || name == format!("{}:latest", model_name)
+                                                || name.starts_with(&format!("{}:", model_name))
+                                        })
                                 })
                             })
                             .unwrap_or(false)
@@ -309,7 +311,7 @@ pub async fn start_managed_ollama(
                     || config
                         .local_llm_base_url
                         .as_deref()
-                        .is_none_or(|u| u.is_empty());
+                        .map_or(true, |u| u.is_empty());
                 if should_set {
                     config.local_llm_base_url = Some(base_url.clone());
                 }
@@ -347,7 +349,7 @@ pub async fn start_managed_ollama(
             || config
                 .local_llm_base_url
                 .as_deref()
-                .is_none_or(|u| u.is_empty());
+                .map_or(true, |u| u.is_empty());
         if should_set {
             config.local_llm_base_url = Some(base_url);
         }

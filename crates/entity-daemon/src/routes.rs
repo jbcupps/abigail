@@ -987,19 +987,19 @@ mod tests {
         for stmt in MIGRATION_V4_ORCHESTRATION.split(';') {
             let trimmed = stmt.trim();
             if !trimmed.is_empty() {
-                let _ = conn.execute_batch(trimmed);
+                conn.execute_batch(trimmed).unwrap_or_else(|_| {});
             }
         }
         for stmt in MIGRATION_V5_DEPENDS_ON.split(';') {
             let trimmed = stmt.trim();
             if !trimmed.is_empty() {
-                let _ = conn.execute_batch(trimmed);
+                conn.execute_batch(trimmed).unwrap_or_else(|_| {});
             }
         }
         for stmt in MIGRATION_V6_EXECUTION_MODE.split(';') {
             let trimmed = stmt.trim();
             if !trimmed.is_empty() {
-                let _ = conn.execute_batch(trimmed);
+                conn.execute_batch(trimmed).unwrap_or_else(|_| {});
             }
         }
         let stream_broker: Arc<dyn abigail_streaming::StreamBroker> =

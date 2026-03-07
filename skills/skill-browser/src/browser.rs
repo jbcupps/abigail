@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::Utc;
 use playwright_rs::protocol::{
-    BrowserContextOptions, BrowserContext as PlaywrightBrowserContext, Page, Playwright,
+    BrowserContext as PlaywrightBrowserContext, BrowserContextOptions, Page, Playwright,
     ScreenshotOptions, StorageState,
 };
 use serde::{Deserialize, Serialize};
@@ -101,7 +101,12 @@ impl BrowserSkill {
 
     pub fn new(manifest: SkillManifest) -> Self {
         let default_data_dir = abigail_core::AppConfig::default_paths().data_dir;
-        Self::new_with_profile(manifest, false, default_data_dir.join("browser_profile"), None)
+        Self::new_with_profile(
+            manifest,
+            false,
+            default_data_dir.join("browser_profile"),
+            None,
+        )
     }
 
     pub fn new_with_local_network(manifest: SkillManifest, allow_local_network: bool) -> Self {
@@ -505,7 +510,10 @@ impl BrowserSkill {
             hydrate_context_from_snapshot(&context, storage_state).await?;
         }
 
-        *runtime = Some(BrowserRuntime { playwright, context });
+        *runtime = Some(BrowserRuntime {
+            playwright,
+            context,
+        });
         drop(runtime);
         self.refresh_session_record(Some("launch")).await?;
         Ok(self.runtime.lock().await)
@@ -585,11 +593,7 @@ impl BrowserSkill {
         })
     }
 
-    fn triangle_ethic_preview(
-        &self,
-        tool_name: &str,
-        params: &ToolParams,
-    ) -> TriangleEthicPreview {
+    fn triangle_ethic_preview(&self, tool_name: &str, params: &ToolParams) -> TriangleEthicPreview {
         let target = params
             .get::<String>("url")
             .or_else(|| params.get::<String>("start_url"))
@@ -739,9 +743,9 @@ impl BrowserSkill {
         let selector = params.get::<String>("selector").ok_or_else(|| {
             SkillError::ToolFailed("Missing required parameter: selector".to_string())
         })?;
-        let text = params
-            .get::<String>("text")
-            .ok_or_else(|| SkillError::ToolFailed("Missing required parameter: text".to_string()))?;
+        let text = params.get::<String>("text").ok_or_else(|| {
+            SkillError::ToolFailed("Missing required parameter: text".to_string())
+        })?;
         let press_enter = params.get::<bool>("press_enter").unwrap_or(false);
         let page = self.current_page().await.map_err(SkillError::ToolFailed)?;
         let locator = page.locator(&selector).await;
@@ -885,14 +889,18 @@ impl BrowserSkill {
     async fn handle_fill_form(&self, params: ToolParams) -> SkillResult<ToolOutput> {
         let fields = params
             .get::<HashMap<String, String>>("fields")
-            .ok_or_else(|| SkillError::ToolFailed("Missing required parameter: fields".to_string()))?;
+            .ok_or_else(|| {
+                SkillError::ToolFailed("Missing required parameter: fields".to_string())
+            })?;
         let page = self.current_page().await.map_err(SkillError::ToolFailed)?;
         for (selector, value) in &fields {
             page.locator(selector)
                 .await
                 .fill(value, None)
                 .await
-                .map_err(|err| SkillError::ToolFailed(format!("Form fill failed for {selector}: {err}")))?;
+                .map_err(|err| {
+                    SkillError::ToolFailed(format!("Form fill failed for {selector}: {err}"))
+                })?;
         }
         self.build_result(
             "browser_fill_form",
@@ -995,8 +1003,7 @@ impl BrowserSkill {
         }
         if let Some(mut record) = load_session_record(&self.profile_dir) {
             record.active_in_process = false;
-            persist_session_record(&self.profile_dir, &record)
-                .map_err(SkillError::ToolFailed)?;
+            persist_session_record(&self.profile_dir, &record).map_err(SkillError::ToolFailed)?;
         }
         Ok(ToolOutput::success(json!({
             "status": "closed",
@@ -1077,7 +1084,8 @@ impl Skill for BrowserSkill {
         params: ToolParams,
         context: &ExecutionContext,
     ) -> SkillResult<ToolOutput> {
-        self.execute_browser_action(tool_name, params, context).await
+        self.execute_browser_action(tool_name, params, context)
+            .await
     }
 
     fn capabilities(&self) -> Vec<CapabilityDescriptor> {
@@ -1128,13 +1136,18 @@ pub fn clear_browser_profile_dir(profile_dir: &Path) -> Result<(), String> {
     if !profile_dir.exists() {
         return Ok(());
     }
-    std::fs::remove_dir_all(profile_dir)
-        .map_err(|err| format!("failed clearing browser profile {}: {err}", profile_dir.display()))
+    std::fs::remove_dir_all(profile_dir).map_err(|err| {
+        format!(
+            "failed clearing browser profile {}: {err}",
+            profile_dir.display()
+        )
+    })
 }
 
 pub async fn webmail_send(request: WebmailSendRequest) -> Result<WebmailSendResult, String> {
-    let profile = infer_webmail_profile(&request)
-        .ok_or_else(|| "no supported webmail fallback was inferred from the configured account".to_string())?;
+    let profile = infer_webmail_profile(&request).ok_or_else(|| {
+        "no supported webmail fallback was inferred from the configured account".to_string()
+    })?;
     let browser = BrowserSkill::new_for_entity(
         BrowserSkill::default_manifest(),
         false,
@@ -1273,12 +1286,12 @@ fn detect_browser_executable() -> Option<PathBuf> {
 fn candidate_msedge_paths() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(program_files) = std::env::var_os("ProgramFiles") {
-        candidates.push(PathBuf::from(&program_files).join("Microsoft/Edge/Application/msedge.exe"));
+        candidates
+            .push(PathBuf::from(&program_files).join("Microsoft/Edge/Application/msedge.exe"));
     }
     if let Some(program_files_x86) = std::env::var_os("ProgramFiles(x86)") {
-        candidates.push(
-            PathBuf::from(&program_files_x86).join("Microsoft/Edge/Application/msedge.exe"),
-        );
+        candidates
+            .push(PathBuf::from(&program_files_x86).join("Microsoft/Edge/Application/msedge.exe"));
     }
     candidates
 }
@@ -1289,9 +1302,8 @@ fn candidate_chrome_paths() -> Vec<PathBuf> {
         candidates.push(PathBuf::from(&program_files).join("Google/Chrome/Application/chrome.exe"));
     }
     if let Some(program_files_x86) = std::env::var_os("ProgramFiles(x86)") {
-        candidates.push(
-            PathBuf::from(&program_files_x86).join("Google/Chrome/Application/chrome.exe"),
-        );
+        candidates
+            .push(PathBuf::from(&program_files_x86).join("Google/Chrome/Application/chrome.exe"));
     }
     candidates
 }

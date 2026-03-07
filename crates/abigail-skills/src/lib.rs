@@ -37,7 +37,7 @@ pub use factory::SkillFactory;
 pub use hive::{HiveAgentInfo, HiveManagementSkill, HiveOperations};
 pub use instruction_registry::{InstructionRegistry, PromptInjectionMode};
 pub use manifest::*;
-pub use policy::{build_allowlist_payload, SkillExecutionPolicy};
+pub use policy::{build_allowlist_payload, normalize_trusted_signer_key, SkillExecutionPolicy};
 pub use preloaded::{
     build_preloaded_skills, preloaded_integration_skills, preloaded_secret_keys,
     PreloadedSkillAuth, PRELOADED_SKILLS_VERSION,

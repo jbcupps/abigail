@@ -4,7 +4,8 @@ use abigail_core::{McpServerDefinition, RuntimeMode};
 use abigail_runtime::validate_secret_namespace as validate_runtime_secret_namespace;
 use abigail_skills::protocol::mcp::{HttpMcpClient, McpTool};
 use abigail_skills::{
-    Skill, SkillExecutionPolicy, SkillId, SkillManifest, ToolDescriptor, ToolOutput, ToolParams,
+    normalize_trusted_signer_key, Skill, SkillExecutionPolicy, SkillId, SkillManifest,
+    ToolDescriptor, ToolOutput, ToolParams,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,6 +21,41 @@ fn refresh_skill_policy(
         .registry
         .set_execution_policy(SkillExecutionPolicy::from_app_config(config))
         .map_err(|e| e.to_string())
+}
+
+fn normalize_existing_trusted_signers(signers: &[String]) -> Result<Vec<String>, String> {
+    let mut normalized = Vec::new();
+    for signer in signers {
+        let canonical = normalize_trusted_signer_key(signer)?;
+        if !normalized.contains(&canonical) {
+            normalized.push(canonical);
+        }
+    }
+    normalized.sort();
+    Ok(normalized)
+}
+
+fn add_trusted_signer_entry(signers: &mut Vec<String>, signer: &str) -> Result<String, String> {
+    let canonical = normalize_trusted_signer_key(signer)?;
+    let mut normalized = normalize_existing_trusted_signers(signers)?;
+    if !normalized.contains(&canonical) {
+        normalized.push(canonical.clone());
+        normalized.sort();
+    }
+    *signers = normalized;
+    Ok(canonical)
+}
+
+fn remove_trusted_signer_entry(signers: &mut Vec<String>, signer: &str) -> Result<String, String> {
+    let canonical = normalize_trusted_signer_key(signer)?;
+    let mut normalized = normalize_existing_trusted_signers(signers)?;
+    let before = normalized.len();
+    normalized.retain(|existing| existing != &canonical);
+    if normalized.len() == before {
+        return Err(format!("Trusted signer not found: {}", canonical));
+    }
+    *signers = normalized;
+    Ok(canonical)
 }
 
 fn resolve_mcp_server_url(
@@ -456,6 +492,37 @@ pub fn list_approved_skills(state: State<AppState>) -> Result<Vec<String>, Strin
 }
 
 #[tauri::command]
+pub fn list_trusted_skill_signers(state: State<AppState>) -> Result<Vec<String>, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    Ok(config.trusted_skill_signers.clone())
+}
+
+#[tauri::command]
+pub fn add_trusted_skill_signer(state: State<AppState>, signer: String) -> Result<String, String> {
+    let mut config = state.config.write().map_err(|e| e.to_string())?;
+    let canonical = add_trusted_signer_entry(&mut config.trusted_skill_signers, &signer)?;
+    config
+        .save(&config.config_path())
+        .map_err(|e| e.to_string())?;
+    refresh_skill_policy(&state, &config)?;
+    Ok(canonical)
+}
+
+#[tauri::command]
+pub fn remove_trusted_skill_signer(
+    state: State<AppState>,
+    signer: String,
+) -> Result<String, String> {
+    let mut config = state.config.write().map_err(|e| e.to_string())?;
+    let canonical = remove_trusted_signer_entry(&mut config.trusted_skill_signers, &signer)?;
+    config
+        .save(&config.config_path())
+        .map_err(|e| e.to_string())?;
+    refresh_skill_policy(&state, &config)?;
+    Ok(canonical)
+}
+
+#[tauri::command]
 pub fn approve_skill(state: State<AppState>, skill_id: String) -> Result<(), String> {
     let mut config = state.config.write().map_err(|e| e.to_string())?;
     if !config.approved_skill_ids.contains(&skill_id) {
@@ -487,24 +554,25 @@ pub fn upsert_signed_skill_allowlist_entry(
     if signer.trim().is_empty() || signature.trim().is_empty() || source.trim().is_empty() {
         return Err("signer, signature, and source are required.".to_string());
     }
+    let canonical_signer = normalize_trusted_signer_key(&signer)?;
     let mut config = state.config.write().map_err(|e| e.to_string())?;
     if let Some(entry) = config
         .signed_skill_allowlist
         .iter_mut()
         .find(|e| e.skill_id == skill_id)
     {
-        entry.signer = signer;
-        entry.signature = signature;
-        entry.source = source;
+        entry.signer = canonical_signer;
+        entry.signature = signature.trim().to_string();
+        entry.source = source.trim().to_string();
         entry.active = true;
     } else {
         config
             .signed_skill_allowlist
             .push(SignedSkillAllowlistEntry {
                 skill_id,
-                signer,
-                signature,
-                source,
+                signer: canonical_signer,
+                signature: signature.trim().to_string(),
+                source: source.trim().to_string(),
                 added_at: chrono::Utc::now().to_rfc3339(),
                 active: true,
             });
@@ -551,6 +619,8 @@ mod tests {
     use super::*;
     use abigail_runtime::REMOVED_EMAIL_SECRET_KEYS;
     use abigail_skills::SkillRegistry;
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    use ed25519_dalek::SigningKey;
 
     fn tmp_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir()
@@ -593,5 +663,31 @@ mod tests {
             assert!(result.is_err(), "removed key '{}' should be rejected", key);
         }
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn trusted_signer_helpers_canonicalize_and_dedup() {
+        let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
+        let signer = BASE64.encode(signing_key.verifying_key().to_bytes());
+        let mut signers = vec![format!("  {}  ", signer)];
+
+        let inserted = add_trusted_signer_entry(&mut signers, &signer).unwrap();
+
+        assert_eq!(inserted, signer);
+        assert_eq!(signers, vec![signer]);
+    }
+
+    #[test]
+    fn trusted_signer_remove_requires_existing_signer() {
+        let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
+        let signer = BASE64.encode(signing_key.verifying_key().to_bytes());
+        let mut signers = vec![signer.clone()];
+
+        let removed = remove_trusted_signer_entry(&mut signers, &signer).unwrap();
+        assert_eq!(removed, signer);
+        assert!(signers.is_empty());
+
+        let err = remove_trusted_signer_entry(&mut signers, &removed).unwrap_err();
+        assert!(err.contains("Trusted signer not found"));
     }
 }

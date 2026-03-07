@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Current config schema version. Increment when making breaking changes.
 pub const CONFIG_SCHEMA_VERSION: u32 = 25;
@@ -575,6 +575,20 @@ impl AppConfig {
         self.data_dir.join("config.json")
     }
 
+    /// Path to the trusted config file.
+    ///
+    /// This path is derived from the application's default data directory,
+    /// and intentionally does not rely on potentially untrusted input.
+    pub fn trusted_config_path(_data_dir: &Path) -> PathBuf {
+        // Use the same base directory as `default_paths` to ensure this
+        // always resolves to an application-controlled location.
+        let base = directories::ProjectDirs::from("com", "abigail", "Abigail")
+            .map(|d| d.data_local_dir().to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+
+        base.join("config.json")
+    }
+
     /// Returns the effective external pubkey path.
     ///
     /// Priority:
@@ -596,14 +610,25 @@ impl AppConfig {
         None
     }
 
-    pub fn load(path: &PathBuf) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(path)?;
+    pub fn load(path: &Path) -> anyhow::Result<Self> {
+        crate::path_guard::ensure_expected_filename(path, "config.json")?;
+        let data_dir = path.parent().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Config path '{}' is missing a parent directory",
+                path.display()
+            )
+        })?;
+        Self::load_from_data_dir(data_dir)
+    }
+
+    pub fn load_from_data_dir(data_dir: &Path) -> anyhow::Result<Self> {
+        let content = crate::path_guard::load_string_from_root(data_dir, "config.json")?;
         let mut config: Self = serde_json::from_str(&content)?;
 
         // Auto-migrate if needed
         if config.migrate() {
             // Save migrated config back to disk
-            config.save(path)?;
+            config.save_to_data_dir(data_dir)?;
             tracing::info!(
                 "Config migrated to schema version {}",
                 config.schema_version
@@ -613,12 +638,20 @@ impl AppConfig {
         Ok(config)
     }
 
-    pub fn save(&self, path: &PathBuf) -> anyhow::Result<()> {
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+        crate::path_guard::ensure_expected_filename(path, "config.json")?;
+        let data_dir = path.parent().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Config path '{}' is missing a parent directory",
+                path.display()
+            )
+        })?;
+        self.save_to_data_dir(data_dir)
+    }
+
+    pub fn save_to_data_dir(&self, data_dir: &Path) -> anyhow::Result<()> {
         let content = serde_json::to_string_pretty(self)?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(path, content)?;
+        crate::path_guard::write_string_to_root(data_dir, "config.json", &content)?;
         Ok(())
     }
 

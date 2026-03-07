@@ -80,11 +80,12 @@ impl ProviderRegistry {
     }
 
     pub fn build_ego_with_cli_mode(
-        provider_name: Option<&str>,
-        api_key: Option<String>,
+        selection: Option<&ProviderSelection>,
         ego_model: Option<String>,
         cli_permission_mode: CliPermissionMode,
     ) -> EgoProviderResult {
+        let provider_name = selection.map(|selection| selection.provider_name());
+        let api_key = selection.and_then(|selection| selection.api_key());
         let is_cli = matches!(
             provider_name,
             Some("claude-cli" | "gemini-cli" | "codex-cli" | "grok-cli")

@@ -59,10 +59,17 @@ impl SkillExecutionPolicy {
                 continue;
             }
 
-            match decode_signer_key(trimmed) {
-                Ok(key) => {
-                    trusted_signers.insert(trimmed.to_string(), key);
-                }
+            match normalize_trusted_signer_key(trimmed) {
+                Ok(canonical) => match decode_signer_key(&canonical) {
+                    Ok(key) => {
+                        trusted_signers.insert(canonical, key);
+                    }
+                    Err(e) => {
+                        configuration_error =
+                            Some(format!("Invalid trusted signer key '{}': {}", trimmed, e));
+                        break;
+                    }
+                },
                 Err(e) => {
                     configuration_error =
                         Some(format!("Invalid trusted signer key '{}': {}", trimmed, e));
@@ -249,6 +256,16 @@ fn decode_signer_key(raw: &str) -> Result<VerifyingKey, String> {
     VerifyingKey::from_bytes(&bytes).map_err(|e| e.to_string())
 }
 
+pub fn normalize_trusted_signer_key(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("signer key cannot be empty".to_string());
+    }
+
+    let verifying_key = decode_signer_key(trimmed)?;
+    Ok(BASE64.encode(verifying_key.to_bytes()))
+}
+
 /// Build the canonical payload string for a signed skill allowlist entry.
 ///
 /// This is the exact format that must be Ed25519-signed to create a valid
@@ -381,6 +398,40 @@ mod tests {
         let policy = SkillExecutionPolicy::from_app_config(&config);
         let err = policy.evaluate_execution("dynamic.github_api").unwrap_err();
         assert!(err.contains("verification failed"));
+    }
+
+    #[test]
+    fn invalid_trusted_signer_configuration_fails_closed() {
+        let mut config = base_config();
+        config.trusted_skill_signers = vec!["not-base64".to_string()];
+
+        let policy = SkillExecutionPolicy::from_app_config(&config);
+        let err = policy.evaluate_execution("dynamic.github_api").unwrap_err();
+        assert!(err.contains("configuration error"));
+    }
+
+    #[test]
+    fn trusted_signer_rotation_accepts_any_active_trusted_signer() {
+        let mut config = base_config();
+        let old_signer = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+        let new_signer = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+        let old_pubkey = BASE64.encode(old_signer.verifying_key().to_bytes());
+        let new_pubkey = BASE64.encode(new_signer.verifying_key().to_bytes());
+        config.trusted_skill_signers = vec![old_pubkey, new_pubkey.clone()];
+
+        let mut entry = SignedSkillAllowlistEntry {
+            skill_id: "dynamic.github_api".to_string(),
+            signer: new_pubkey.clone(),
+            signature: String::new(),
+            source: "rotation-test".to_string(),
+            added_at: "2026-03-07T00:00:00Z".to_string(),
+            active: true,
+        };
+        entry.signature = sign_payload(&new_signer, &entry);
+        config.signed_skill_allowlist = vec![entry];
+
+        let policy = SkillExecutionPolicy::from_app_config(&config);
+        assert!(policy.evaluate_execution("dynamic.github_api").is_ok());
     }
 
     #[test]
