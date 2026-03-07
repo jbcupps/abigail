@@ -287,7 +287,23 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
     case "get_birth_complete":
       return state.birthComplete;
     case "run_startup_checks":
-      return { heartbeat_ok: true, verification_ok: true, error: null };
+      return {
+        heartbeat_ok: true,
+        verification_ok: true,
+        integrity: {
+          status: "ok",
+          summary: "Harness integrity checks passed.",
+          details: [],
+        },
+        allow_continue: false,
+        error: null,
+      };
+    case "inspect_identity_integrity":
+      return {
+        status: "ok",
+        summary: "Harness integrity checks passed.",
+        details: [],
+      };
     case "get_agent_name": {
       const active = state.identities.find((i) => i.id === state.activeAgentId);
       return active?.name ?? null;
@@ -315,7 +331,9 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
         newly_generated: true,
       };
     case "save_recovery_key":
-      return "E:/Agents/abigail/Recovery/abigail-recovery.key";
+      return "E:/Agents/abigail/Recovery/RECOVERY_BUNDLE.abigail-recovery";
+    case "save_recovery_key_plaintext":
+      return "E:/Agents/abigail/Recovery/RECOVERY_KEY.txt";
     case "advance_past_darkness":
       return null;
     case "advance_to_connectivity":

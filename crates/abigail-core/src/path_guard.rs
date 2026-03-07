@@ -107,5 +107,6 @@ pub fn write_string_to_root(root: &Path, expected: &str, content: &str) -> Resul
     let path = trusted_file_path(root, expected)?;
     std::fs::create_dir_all(root)
         .with_context(|| format!("Failed to create '{}'", root.display()))?;
-    std::fs::write(&path, content).with_context(|| format!("Failed to write '{}'", path.display()))
+    crate::secure_fs::write_string_atomic(&path, content)
+        .with_context(|| format!("Failed to write '{}'", path.display()))
 }

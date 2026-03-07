@@ -9,6 +9,7 @@
 
 use aes_gcm::aead::{Aead, KeyInit, OsRng};
 use aes_gcm::{AeadCore, Aes256Gcm, Key, Nonce};
+use argon2::{Algorithm, Argon2, Params, Version};
 use hkdf::Hkdf;
 use sha2::Sha256;
 
@@ -90,6 +91,23 @@ pub fn derive_key_from_passphrase(passphrase: &str, salt: &[u8]) -> [u8; KEY_LEN
     hk.expand(b"abigail-vault-kek", &mut okm)
         .expect("HKDF-SHA256 expand with 32-byte output cannot fail");
     okm
+}
+
+pub fn derive_key_from_passphrase_argon2(
+    passphrase: &str,
+    salt: &[u8],
+    memory_cost_kib: u32,
+    time_cost: u32,
+    parallelism: u32,
+) -> Result<[u8; KEY_LEN]> {
+    let params = Params::new(memory_cost_kib, time_cost, parallelism, Some(KEY_LEN))
+        .map_err(|e| CoreError::Crypto(format!("Invalid Argon2 parameters: {}", e)))?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut okm = [0u8; KEY_LEN];
+    argon2
+        .hash_password_into(passphrase.as_bytes(), salt, &mut okm)
+        .map_err(|e| CoreError::Crypto(format!("Argon2id derivation failed: {}", e)))?;
+    Ok(okm)
 }
 
 #[cfg(test)]
@@ -176,5 +194,15 @@ mod tests {
         let k1 = derive_key_from_passphrase("pass-a", &salt);
         let k2 = derive_key_from_passphrase("pass-b", &salt);
         assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn argon2_derivation_is_deterministic() {
+        let salt = test_salt();
+        let k1 = derive_key_from_passphrase_argon2("my-passphrase", &salt, 64 * 1024, 3, 1)
+            .unwrap();
+        let k2 = derive_key_from_passphrase_argon2("my-passphrase", &salt, 64 * 1024, 3, 1)
+            .unwrap();
+        assert_eq!(k1, k2);
     }
 }

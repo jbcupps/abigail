@@ -170,6 +170,55 @@ jobs:
             fs.writeFileSync(path, JSON.stringify(data, null, 2) + '\n');
           "
 
+      - name: Enforce release signing prerequisites
+        shell: bash
+        env:
+          ABIGAIL_OFFICIAL_RELEASE: "true"
+          ABIGAIL_REQUIRE_WINDOWS_SIGNING: ${{ matrix.platform == 'windows-latest' }}
+          ABIGAIL_REQUIRE_MAC_SIGNING: ${{ matrix.platform == 'macos-latest' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
+          WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          bash scripts/enforce_release_prereqs.sh
+
+      - name: Configure updater and signing fields in tauri.conf.json
+        shell: bash
+        env:
+          ABIGAIL_REQUIRE_UPDATER_PUBKEY: "true"
+          ABIGAIL_ENABLE_UPDATER_ARTIFACTS: "true"
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          node scripts/prepare_tauri_bundle_config.mjs tauri-app/tauri.conf.json
+
+      - name: Assert updater config injection
+        shell: bash
+        env:
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const conf = JSON.parse(fs.readFileSync('tauri-app/tauri.conf.json', 'utf8'));
+            if (!conf.bundle?.createUpdaterArtifacts) {
+              throw new Error('createUpdaterArtifacts must be true for release builds');
+            }
+            if (conf.plugins?.updater?.pubkey !== process.env.TAURI_UPDATER_PUBKEY) {
+              throw new Error('Updater pubkey injection mismatch');
+            }
+          "
+
       - name: Generate Cargo.lock
         run: cargo generate-lockfile
 
@@ -234,6 +283,24 @@ jobs:
             echo "ERROR: Downloaded Ollama binary is too small (${FILE_SIZE} bytes)"
             exit 1
           fi
+
+      - name: Import Windows code signing certificate
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
+          WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP 'abigail-signing-cert.pfx'
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERT_BASE64))
+          $password = ConvertTo-SecureString -String $env:WINDOWS_SIGNING_CERT_PASSWORD -AsPlainText -Force
+          Import-PfxCertificate -FilePath $certPath -Password $password -CertStoreLocation Cert:\CurrentUser\My | Out-Null
+          $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Thumbprint -eq $env:WINDOWS_CERTIFICATE_THUMBPRINT }
+          if (-not $cert) {
+            throw "Imported Windows signing certificate with thumbprint $env:WINDOWS_CERTIFICATE_THUMBPRINT was not found in Cert:\CurrentUser\My"
+          }
+          $cert | Select-Object Thumbprint, Subject | Format-Table -AutoSize
 
       - name: Import Apple Developer ID certificate (macOS)
         if: matrix.platform == 'macos-latest'
@@ -328,17 +395,18 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           cd tauri-app
+          tauri build ${{ matrix.args }}
 
-          if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
-            echo "Signing key detected: building signed artifacts"
-            if [[ "${{ matrix.platform }}" == "macos-latest" && -n "${APPLE_CERTIFICATE:-}" ]]; then
-              echo "Apple Developer ID certificate detected: code signing + notarization enabled"
-            fi
-            tauri build ${{ matrix.args }}
-          else
-            echo "WARNING: TAURI_SIGNING_PRIVATE_KEY is not configured; building unsigned artifacts"
-            TAURI_SKIP_SIGNING=true tauri build ${{ matrix.args }}
+      - name: Verify updater artifacts
+        if: matrix.platform != 'ubuntu-22.04'
+        shell: bash
+        run: |
+          mapfile -t UPDATER_FILES < <(find target -type f \( -name "*.nsis.zip" -o -name "*.nsis.zip.sig" -o -name "*.msi.zip" -o -name "*.msi.zip.sig" -o -name "*.app.tar.gz" -o -name "*.app.tar.gz.sig" \))
+          if [[ "${#UPDATER_FILES[@]}" -eq 0 ]]; then
+            echo "ERROR: No updater artifacts were produced."
+            exit 1
           fi
+          printf '%s\n' "${UPDATER_FILES[@]}"
 
       - name: Cleanup Apple keychain (macOS)
         if: always() && matrix.platform == 'macos-latest' && env.KEYCHAIN_PATH != ''
@@ -360,10 +428,24 @@ jobs:
           path: target/release/bundle/msi/*.msi
           if-no-files-found: warn
 
+      - name: Upload updater artifacts
+        if: matrix.platform != 'ubuntu-22.04'
+        uses: actions/upload-artifact@47309c993abb98030a35d55ef7ff34b7fa1074b5 # v4
+        with:
+          name: abigail-updater-${{ matrix.platform }}
+          path: |
+            target/**/bundle/**/*.nsis.zip
+            target/**/bundle/**/*.nsis.zip.sig
+            target/**/bundle/**/*.msi.zip
+            target/**/bundle/**/*.msi.zip.sig
+            target/**/bundle/**/*.app.tar.gz
+            target/**/bundle/**/*.app.tar.gz.sig
+          if-no-files-found: error
+
   # -- Stage 2: Create GitHub Release + publish npm package -------------------
   publish:
     needs: build
-    if: always() && (needs.build.result == 'success' || needs.build.result == 'failure')
+    if: needs.build.result == 'success'
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -387,6 +469,14 @@ jobs:
         with:
           path: artifacts
           pattern: abigail-msi-*
+          merge-multiple: false
+        continue-on-error: true
+
+      - name: Download updater artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+          pattern: abigail-updater-*
           merge-multiple: false
         continue-on-error: true
 
@@ -452,8 +542,49 @@ jobs:
             cp "$DMG" release-assets/Abigail-macos-universal.dmg
           fi
 
+          WINDOWS_UPDATER=$(find artifacts/abigail-updater-windows-latest -name "*.nsis.zip" -type f 2>/dev/null | head -1 || true)
+          WINDOWS_UPDATER_SIG=$(find artifacts/abigail-updater-windows-latest -name "*.nsis.zip.sig" -type f 2>/dev/null | head -1 || true)
+          if [ -n "$WINDOWS_UPDATER" ] && [ -n "$WINDOWS_UPDATER_SIG" ]; then
+            cp "$WINDOWS_UPDATER" release-assets/Abigail-updater-windows-x64.nsis.zip
+            cp "$WINDOWS_UPDATER_SIG" release-assets/Abigail-updater-windows-x64.nsis.zip.sig
+          fi
+
+          WINDOWS_MSI_UPDATER=$(find artifacts/abigail-updater-windows-latest -name "*.msi.zip" -type f 2>/dev/null | head -1 || true)
+          WINDOWS_MSI_UPDATER_SIG=$(find artifacts/abigail-updater-windows-latest -name "*.msi.zip.sig" -type f 2>/dev/null | head -1 || true)
+          if [ -n "$WINDOWS_MSI_UPDATER" ] && [ -n "$WINDOWS_MSI_UPDATER_SIG" ]; then
+            cp "$WINDOWS_MSI_UPDATER" release-assets/Abigail-updater-windows-x64.msi.zip
+            cp "$WINDOWS_MSI_UPDATER_SIG" release-assets/Abigail-updater-windows-x64.msi.zip.sig
+          fi
+
+          MAC_UPDATER=$(find artifacts/abigail-updater-macos-latest -name "*.app.tar.gz" -type f 2>/dev/null | head -1 || true)
+          MAC_UPDATER_SIG=$(find artifacts/abigail-updater-macos-latest -name "*.app.tar.gz.sig" -type f 2>/dev/null | head -1 || true)
+          if [ -n "$MAC_UPDATER" ] && [ -n "$MAC_UPDATER_SIG" ]; then
+            cp "$MAC_UPDATER" release-assets/Abigail-updater-macos-universal.app.tar.gz
+            cp "$MAC_UPDATER_SIG" release-assets/Abigail-updater-macos-universal.app.tar.gz.sig
+          fi
+
+          node scripts/generate_tauri_latest_manifest.mjs \
+            --version "${{ needs.build.outputs.version }}" \
+            --assets-dir release-assets \
+            --base-url "https://github.com/${{ github.repository }}/releases/download/${{ needs.build.outputs.tag }}" \
+            --output release-assets/latest.json
+
           echo "Release assets:"
           ls -la release-assets/ 2>/dev/null || echo "No assets found"
+
+      - name: Validate latest.json
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('release-assets/latest.json', 'utf8'));
+            if (manifest.version !== '${{ needs.build.outputs.version }}') {
+              throw new Error('latest.json version mismatch');
+            }
+            if (!manifest.platforms || Object.keys(manifest.platforms).length === 0) {
+              throw new Error('latest.json must contain at least one platform entry');
+            }
+          "
 
       - name: Count release assets
         id: assets

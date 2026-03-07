@@ -4,14 +4,23 @@
 //! Zero Tauri imports — only uses `abigail_core`, `ed25519_dalek`, `serde`, `uuid`, `std`.
 
 use abigail_core::{
-    generate_master_key, load_master_key, sign_agent_key, verify_agent_signature, AgentEntry,
-    AppConfig, GlobalConfig, SecretsVault,
+    encrypted_storage, generate_master_key, load_master_key, sign_agent_key,
+    verify_agent_signature, AgentEntry, AppConfig, GlobalConfig, SecretsVault,
 };
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RecoveryBundle {
+    format: String,
+    agent_id: String,
+    agent_name: Option<String>,
+    created_at: String,
+    private_key_base64: String,
+}
 
 /// Information about an agent identity for the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -391,7 +400,8 @@ impl IdentityManager {
         // Sign with master key and write signature
         let signature = sign_agent_key(&self.master_key, &agent_pubkey);
         let sig_path = agent_dir.join("signature.sig");
-        std::fs::write(&sig_path, &signature).map_err(|e| e.to_string())?;
+        abigail_core::secure_fs::write_bytes_atomic(&sig_path, &signature)
+            .map_err(|e| e.to_string())?;
 
         tracing::info!(
             "Signed agent {} with Hive master key (post-birth)",
@@ -473,8 +483,42 @@ impl IdentityManager {
         Ok(agent_docs)
     }
 
-    /// Save the recovery key to a text file in the agent's Documents folder.
+    /// Save an encrypted recovery bundle in the agent's Documents folder.
     pub fn save_recovery_key(&self, agent_id: &str, private_key: &str) -> Result<String, String> {
+        let docs_dir = self.create_documents_folder(agent_id)?;
+        let file_path = docs_dir.join("RECOVERY_BUNDLE.abigail-recovery");
+        let agent_name = {
+            let gc = self.global_config.read().map_err(|e| e.to_string())?;
+            gc.find_agent(agent_id).map(|entry| entry.name.clone())
+        };
+        let bundle = RecoveryBundle {
+            format: "abigail-recovery-bundle-v1".to_string(),
+            agent_id: agent_id.to_string(),
+            agent_name,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            private_key_base64: private_key.to_string(),
+        };
+        let content = serde_json::to_vec_pretty(&bundle).map_err(|e| e.to_string())?;
+        encrypted_storage::write_encrypted(&file_path, &content).map_err(|e| {
+            format!(
+                "Failed to write encrypted recovery bundle '{}': {}",
+                file_path.display(),
+                e
+            )
+        })?;
+        self.append_crypto_audit(
+            "recovery_bundle_saved",
+            &format!("agent_id={} path={}", agent_id, file_path.display()),
+        )?;
+        Ok(file_path.to_string_lossy().to_string())
+    }
+
+    /// Explicit plaintext export for offline storage and cross-device recovery.
+    pub fn save_recovery_key_plaintext(
+        &self,
+        agent_id: &str,
+        private_key: &str,
+    ) -> Result<String, String> {
         let docs_dir = self.create_documents_folder(agent_id)?;
         let file_path = docs_dir.join("RECOVERY_KEY.txt");
 
@@ -491,10 +535,34 @@ impl IdentityManager {
             chrono::Utc::now().to_rfc3339()
         );
 
-        std::fs::write(&file_path, content)
+        abigail_core::secure_fs::write_string_atomic(&file_path, &content)
             .map_err(|e| format!("Failed to write recovery key file: {}", e))?;
+        self.append_crypto_audit(
+            "recovery_key_plaintext_saved",
+            &format!("agent_id={} path={}", agent_id, file_path.display()),
+        )?;
 
         Ok(file_path.to_string_lossy().to_string())
+    }
+
+    fn append_crypto_audit(&self, action: &str, detail: &str) -> Result<(), String> {
+        use std::io::Write as _;
+
+        let audit_path = self.data_root.join("crypto_audit.log");
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&audit_path)
+            .map_err(|e| format!("Failed to open crypto audit log: {}", e))?;
+        writeln!(
+            file,
+            "{} {} {}",
+            chrono::Utc::now().to_rfc3339(),
+            action,
+            detail
+        )
+        .map_err(|e| format!("Failed to write crypto audit log: {}", e))?;
+        Ok(())
     }
 
     /// Check if any agents exist.
@@ -602,7 +670,8 @@ impl IdentityManager {
                 if let Ok(agent_pubkey) = VerifyingKey::from_bytes(&pubkey_array) {
                     let signature = sign_agent_key(&self.master_key, &agent_pubkey);
                     let sig_path = agent_dir.join("signature.sig");
-                    std::fs::write(&sig_path, &signature).map_err(|e| e.to_string())?;
+                    abigail_core::secure_fs::write_bytes_atomic(&sig_path, &signature)
+                        .map_err(|e| e.to_string())?;
                 }
             }
         }
@@ -897,7 +966,8 @@ impl IdentityManager {
                 if let Ok(agent_pubkey) = VerifyingKey::from_bytes(&pubkey_array) {
                     let signature = sign_agent_key(&self.master_key, &agent_pubkey);
                     let sig_path = agent_dir.join("signature.sig");
-                    std::fs::write(&sig_path, &signature).map_err(|e| e.to_string())?;
+                    abigail_core::secure_fs::write_bytes_atomic(&sig_path, &signature)
+                        .map_err(|e| e.to_string())?;
                 }
             }
         }

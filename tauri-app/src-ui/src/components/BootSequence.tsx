@@ -70,6 +70,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
   const [keySaved, setKeySaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const [autoSavedPath, setAutoSavedPath] = useState("");
+  const [plaintextSavedPath, setPlaintextSavedPath] = useState("");
   const [repairKey, setRepairKey] = useState("");
   const [activeApiKeyProvider, setActiveApiKeyProvider] = useState<string | null>(null);
   const [storedProviders, setStoredProviders] = useState<string[]>([]);
@@ -160,8 +161,20 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         setStage("KeyPresentation");
         return;
       } else if (status === "Broken") {
+        try {
+          const integrity = await invokeWithTimeout<{
+            status: "ok" | "repairable" | "blocked";
+            summary: string;
+            details: string[];
+          }>("inspect_identity_integrity");
+          const detailMessage = [integrity.summary, ...integrity.details]
+            .filter(Boolean)
+            .join("\n");
+          setError(detailMessage || "Identity verification failed. Signatures are missing or invalid.");
+        } catch {
+          setError("Identity verification failed. Signatures are missing or invalid.");
+        }
         setStage("Repair");
-        setError("Identity verification failed. Signatures are missing or invalid.");
         return;
       }
 
@@ -274,6 +287,23 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     try {
       const path = await invoke<string>("save_recovery_key", { privateKey });
       setAutoSavedPath(path);
+      setKeySaved(true);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const handleSavePlaintextKey = async () => {
+    const confirmed = window.confirm(
+      "This writes your recovery key to a plaintext file on disk. Only continue if you are creating an intentional offline backup that you will store securely."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const path = await invoke<string>("save_recovery_key_plaintext", { privateKey });
+      setPlaintextSavedPath(path);
       setKeySaved(true);
     } catch (e) {
       setError(String(e));
@@ -548,16 +578,29 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                   {copied ? "Copied!" : "Copy"}
                 </button>
               </div>
-              <button
-                onClick={handleAutoSaveKey}
-                className="mt-3 text-xs border border-theme-primary-faint px-3 py-1.5 rounded hover:bg-theme-surface flex items-center gap-2"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
-                Auto-save to Documents
-              </button>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  onClick={handleAutoSaveKey}
+                  className="text-xs border border-theme-primary-faint px-3 py-1.5 rounded hover:bg-theme-surface flex items-center gap-2"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                  Save encrypted recovery bundle
+                </button>
+                <button
+                  onClick={handleSavePlaintextKey}
+                  className="text-xs border border-theme-warning/50 px-3 py-1.5 rounded hover:bg-theme-warning-dim text-theme-warning"
+                >
+                  Save plaintext key (advanced)
+                </button>
+              </div>
               {autoSavedPath && (
                 <p className="mt-2 text-[10px] text-theme-success bg-theme-success-dim p-2 rounded border border-theme-success">
                   ✓ Saved to: <span className="select-all">{autoSavedPath}</span>
+                </p>
+              )}
+              {plaintextSavedPath && (
+                <p className="mt-2 text-[10px] text-theme-warning bg-theme-warning-dim p-2 rounded border border-theme-warning/50">
+                  Plaintext recovery key saved to: <span className="select-all">{plaintextSavedPath}</span>
                 </p>
               )}
             </div>
@@ -578,6 +621,9 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                 <li>
                   - <strong>Store it securely</strong> (password manager, encrypted
                   drive, offline backup).
+                </li>
+                <li>
+                  - Abigail can save an encrypted recovery bundle for this device; plaintext export is an explicit advanced action for offline recovery only.
                 </li>
                 <li>
                   - <strong>Never share this key</strong> with anyone or any

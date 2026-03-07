@@ -1,5 +1,6 @@
 use crate::document::DocumentTier;
 use crate::error::{CoreError, Result};
+use crate::secure_fs;
 use crate::vault::crypto;
 use crate::vault::unlock::{HybridUnlockProvider, UnlockProvider};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -132,7 +133,7 @@ impl Keyring {
 
         let keys_file = self.storage_path.join("keys.vault");
         std::fs::create_dir_all(&self.storage_path)?;
-        std::fs::write(keys_file, envelope)?;
+        secure_fs::write_bytes_atomic(&keys_file, &envelope)?;
         Ok(())
     }
 
@@ -188,7 +189,7 @@ pub fn generate_master_key(data_dir: &Path) -> Result<MasterKeyResult> {
     let root_kek = unlock.root_kek()?;
     let dek = crypto::derive_scope_key(&root_kek, "keyring:master");
     let envelope = crypto::seal(&dek, &serialized)?;
-    std::fs::write(&master_key_path, envelope)?;
+    secure_fs::write_bytes_atomic(&master_key_path, &envelope)?;
     Ok(MasterKeyResult {
         master_key_path,
         signing_key,
@@ -272,7 +273,7 @@ pub fn generate_external_keypair(data_dir: &Path) -> Result<ExternalKeypairResul
     let verifying_key = signing_key.verifying_key();
     std::fs::create_dir_all(data_dir)?;
     let pubkey_path = data_dir.join("external_pubkey.bin");
-    std::fs::write(&pubkey_path, verifying_key.to_bytes())?;
+    secure_fs::write_bytes_atomic(&pubkey_path, &verifying_key.to_bytes())?;
     let private_key_base64 = BASE64.encode(signing_key.to_bytes());
     Ok(ExternalKeypairResult {
         private_key_base64,
@@ -314,7 +315,7 @@ pub fn sign_constitutional_documents(signing_key: &SigningKey, docs_dir: &Path) 
         );
         let sig_path = docs_dir.join(format!("{}.sig", doc_name));
         let json = serde_json::to_string_pretty(&sig_meta)?;
-        std::fs::write(&sig_path, json)?;
+        secure_fs::write_string_atomic(&sig_path, &json)?;
     }
     Ok(())
 }

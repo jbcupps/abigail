@@ -907,6 +907,7 @@ fn try_run() -> Result<(), String> {
         .manage(log_buffer)
         .invoke_handler(tauri::generate_handler![
             run_startup_checks,
+            inspect_identity_integrity,
             check_hive_status,
             get_identities,
             get_active_agent,
@@ -922,6 +923,7 @@ fn try_run() -> Result<(), String> {
             disconnect_agent,
             suspend_agent,
             save_recovery_key,
+            save_recovery_key_plaintext,
             migrate_legacy_identity,
             check_existing_identity,
             archive_identity,
@@ -957,6 +959,9 @@ fn try_run() -> Result<(), String> {
             get_mcp_servers,
             mcp_list_tools,
             list_approved_skills,
+            list_trusted_skill_signers,
+            add_trusted_skill_signer,
+            remove_trusted_skill_signer,
             approve_skill,
             list_signed_skill_allowlist,
             upsert_signed_skill_allowlist_entry,

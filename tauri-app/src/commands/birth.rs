@@ -4,7 +4,7 @@ use crate::{chat_coordinator, rate_limit::format_cooldown_error};
 use abigail_birth::BirthOrchestrator;
 use abigail_core::{
     generate_external_keypair, sign_constitutional_documents, CoreError, ExternalVault,
-    ReadOnlyFileVault,
+    ReadOnlyFileVault, verify_constitutional_integrity,
 };
 use abigail_soul_crystallization::DepthLevel;
 use base64::Engine;
@@ -148,24 +148,18 @@ pub fn check_interrupted_birth(state: State<AppState>) -> Result<InterruptedBirt
 #[tauri::command]
 pub fn check_identity_status(state: State<AppState>) -> Result<IdentityStatus, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
-    let data_dir = config.data_dir.clone();
-    let docs_dir = config.docs_dir.clone();
-
-    let pubkey_path = data_dir.join("external_pubkey.bin");
-    let pubkey_exists = pubkey_path.exists();
-
-    let sigs_exist = docs_dir.join("soul.md.sig").exists()
-        && docs_dir.join("ethics.md.sig").exists()
-        && docs_dir.join("instincts.md.sig").exists();
+    let pubkey_exists = config
+        .effective_external_pubkey_path()
+        .map(|p| p.exists())
+        .unwrap_or(false);
 
     if !pubkey_exists {
         return Ok(IdentityStatus::Clean);
     }
 
-    if sigs_exist {
-        Ok(IdentityStatus::Complete)
-    } else {
-        Ok(IdentityStatus::Broken)
+    match verify_constitutional_integrity(&config) {
+        Ok(_) => Ok(IdentityStatus::Complete),
+        Err(_) => Ok(IdentityStatus::Broken),
     }
 }
 
@@ -199,10 +193,8 @@ pub fn start_birth(state: State<AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn verify_crypto(state: State<AppState>) -> Result<(), String> {
-    let mut birth = state.birth.write().map_err(|e| e.to_string())?;
-    let b = birth.as_mut().ok_or("Birth not started")?;
-    let docs_path = b.config().docs_dir.clone();
-    b.generate_identity(&docs_path).map_err(|e| e.to_string())
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    verify_constitutional_integrity(&config).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
