@@ -44,8 +44,14 @@ const steps = [
 
 function resolveCommand(step) {
   if (process.platform === "win32" && step.command.toLowerCase().endsWith(".cmd")) {
+    // Use the well-known system shell path; avoid injecting arbitrary env values.
+    const comSpec = process.env.ComSpec;
+    const shell =
+      comSpec && /^[A-Za-z]:\\[\w\\ .-]+\\cmd\.exe$/i.test(comSpec)
+        ? comSpec
+        : "cmd.exe";
     return {
-      command: process.env.ComSpec || "cmd.exe",
+      command: shell,
       args: ["/d", "/s", "/c", step.command, ...step.args],
     };
   }

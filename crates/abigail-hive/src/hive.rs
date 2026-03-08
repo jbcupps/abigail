@@ -50,10 +50,19 @@ pub struct HiveConfig {
     pub cli_permission_mode: CliPermissionMode,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum ProviderAuth {
     ApiKey(String),
     System,
+}
+
+impl std::fmt::Debug for ProviderAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ApiKey(_) => f.write_str("ApiKey(REDACTED)"),
+            Self::System => f.write_str("System"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
