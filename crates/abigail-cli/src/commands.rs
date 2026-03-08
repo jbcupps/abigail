@@ -4,6 +4,7 @@
 //! opens the SecretsVault, and performs operations directly.
 
 use abigail_core::{ops::is_reserved_provider_key, AppConfig, SecretsVault};
+use abigail_runtime::validate_secret_namespace_from_manifests;
 
 /// Load AppConfig from the default data directory.
 fn load_config() -> anyhow::Result<AppConfig> {
@@ -25,15 +26,8 @@ fn load_skills_vault(config: &AppConfig) -> anyhow::Result<SecretsVault> {
     SecretsVault::load_custom(config.data_dir.clone(), "skills.bin").map_err(Into::into)
 }
 
-fn email_bridge_configured(skills_vault: &SecretsVault) -> bool {
-    ["imap_user", "imap_password", "imap_host", "smtp_host"]
-        .iter()
-        .all(|key| skills_vault.exists(key))
-}
-
 pub fn status() -> anyhow::Result<()> {
     let config = load_config()?;
-    let skills_vault = load_skills_vault(&config).ok();
     println!("=== Abigail Agent Status ===");
     println!("Data directory: {}", config.data_dir.display());
     println!("Birth complete: {}", config.birth_complete);
@@ -66,43 +60,17 @@ pub fn status() -> anyhow::Result<()> {
         config.local_llm_base_url.as_deref().unwrap_or("(not set)")
     );
 
-    if let Some(ref email) = config.email {
-        println!(
-            "Email: {} (IMAP {}:{})",
-            email.address, email.imap_host, email.imap_port
-        );
-    } else if skills_vault
-        .as_ref()
-        .map(email_bridge_configured)
-        .unwrap_or(false)
-    {
-        println!("Email: configured via Skills Vault bridge secrets");
-    } else {
-        println!("Email: not configured");
-    }
-
-    let email_accounts = config
-        .email_accounts
-        .len()
-        .max(usize::from(config.email.is_some()))
-        .max(usize::from(
-            skills_vault
-                .as_ref()
-                .map(email_bridge_configured)
-                .unwrap_or(false),
-        ));
-    println!("Email accounts: {}", email_accounts);
+    println!("Email transport: removed from mainline Abigail");
+    println!("Email accounts: 0 (deprecated compatibility field)");
     println!("MCP servers: {}", config.mcp_servers.len());
     println!("Approved skills: {}", config.approved_skill_ids.len());
 
     // Secrets vault summary
     match load_vault(&config) {
         Ok(vault) => {
-            let providers = vault.list_providers();
             println!(
-                "Secrets vault: {} keys stored ({})",
-                providers.len(),
-                providers.join(", ")
+                "Secrets vault: {} keys stored",
+                vault.list_providers().len()
             );
         }
         Err(e) => println!("Secrets vault: error loading — {}", e),
@@ -113,6 +81,8 @@ pub fn status() -> anyhow::Result<()> {
 
 pub fn store_secret(key: &str, value: &str) -> anyhow::Result<()> {
     let config = load_config()?;
+    validate_secret_namespace_from_manifests(&[], &[config.data_dir.join("skills")], key)
+        .map_err(anyhow::Error::msg)?;
     let mut vault = if is_reserved_provider_key(key) {
         load_vault(&config)?
     } else {
@@ -174,10 +144,6 @@ pub fn configure_email(
         smtp_port,
         password,
     )?;
-    println!(
-        "Email configured for {} (IMAP {}:{}, SMTP {}:{})",
-        address, imap_host, imap_port, smtp_host, smtp_port
-    );
     Ok(())
 }
 

@@ -10,10 +10,6 @@ const REGISTRY_TOML: &str = include_str!("../../skills/registry.toml");
 
 const INSTRUCTIONS: &[(&str, &str)] = &[
     (
-        "skill_email_imap.md",
-        include_str!("../../skills/instructions/skill_email_imap.md"),
-    ),
-    (
         "skill_web_search.md",
         include_str!("../../skills/instructions/skill_web_search.md"),
     ),
@@ -203,10 +199,10 @@ mod tests {
             &skills_dir.join("instructions"),
         );
 
-        let email_matches = reg.select_instructions("check my email inbox");
+        let browser_matches = reg.select_instructions("open a browser session for oauth login");
         assert!(
-            !email_matches.is_empty(),
-            "email keyword should match after bootstrap"
+            !browser_matches.is_empty(),
+            "browser keyword should match after bootstrap"
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -219,8 +215,8 @@ mod tests {
             "embedded registry.toml should not be empty"
         );
         assert!(
-            REGISTRY_TOML.contains("com.abigail.skills.email"),
-            "embedded registry.toml should contain email skill"
+            REGISTRY_TOML.contains("com.abigail.skills.browser"),
+            "embedded registry.toml should contain browser skill"
         );
     }
 }

@@ -4,8 +4,8 @@
 
 .DESCRIPTION
     Runs a full tabula-rasa UAT: build, start Hive, create entity, seed secrets,
-    start Entity, validate chat (hello + 3 questions), verify weather currentness,
-    configure email skill, and verify IMAP inbox.
+    start Entity, validate chat (hello + 3 questions), and verify weather
+    currentness.
 
     Exit codes:
       0  = PASS
@@ -24,8 +24,6 @@
 .PARAMETER SkipBuild
     Skip the build stage (useful for rapid re-runs after a hard-failure fix).
 
-.PARAMETER SkipEmail
-    Skip the email/IMAP stage.
 #>
 
 [CmdletBinding()]
@@ -33,8 +31,7 @@ param(
     [string]$KeysetFile,
     [int]$HivePort = 3141,
     [int]$EntityPort = 3142,
-    [switch]$SkipBuild,
-    [switch]$SkipEmail
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -153,19 +150,6 @@ Invoke-StageWithRetry 'preflight' {
         }
     }
 
-    # IMAP bridge reachability (optional - only fail if keys are present)
-    $imapHost = $Keys['UAT_IMAP_HOST']
-    $imapPort = $Keys['UAT_IMAP_PORT']
-    if ($imapHost -and $imapPort -and -not $SkipEmail) {
-        $tcp = New-Object System.Net.Sockets.TcpClient
-        try {
-            $tcp.Connect($imapHost, [int]$imapPort)
-            $tcp.Close()
-        } catch {
-            Write-Warning "IMAP bridge not reachable at ${imapHost}:${imapPort} - email stage will likely fail."
-        }
-    }
-
     Write-Host "[PREFLIGHT] All checks passed."
 } -MaxRetries 1
 
@@ -243,25 +227,6 @@ Invoke-StageWithRetry 'secret_seed' {
     $resp = Invoke-UatRequest -Method POST -Uri "$HiveUrl/v1/secrets" `
         -Body @{ key = 'openai'; value = $providerKey }
     if (-not $resp.ok) { throw "Failed to store openai secret: $($resp.error)" }
-
-    # Seed IMAP credentials (if present, for email stage)
-    if ($Keys['UAT_IMAP_PASSWORD'] -and -not $SkipEmail) {
-        foreach ($mapping in @(
-            @{ hiveKey = 'imap_password'; envKey = 'UAT_IMAP_PASSWORD' },
-            @{ hiveKey = 'imap_user';     envKey = 'UAT_IMAP_USER' },
-            @{ hiveKey = 'imap_host';     envKey = 'UAT_IMAP_HOST' },
-            @{ hiveKey = 'imap_port';     envKey = 'UAT_IMAP_PORT' },
-            @{ hiveKey = 'imap_tls_mode'; envKey = 'UAT_IMAP_SECURITY' }
-        )) {
-            $val = $Keys[$mapping.envKey]
-            if ($val) {
-                Write-Host "[SECRETS] Seeding $($mapping.hiveKey)..."
-                $r = Invoke-UatRequest -Method POST -Uri "$HiveUrl/v1/secrets" `
-                    -Body @{ key = $mapping.hiveKey; value = $val }
-                if (-not $r.ok) { throw "Failed to store $($mapping.hiveKey): $($r.error)" }
-            }
-        }
-    }
 
     # Verify secrets list
     $list = Invoke-UatRequest -Uri "$HiveUrl/v1/secrets/list"
@@ -377,53 +342,6 @@ Invoke-StageWithRetry 'weather' {
     }
 
     Write-Host "[WEATHER] Weather validation passed. Reply excerpt: $($reply.Substring(0, [Math]::Min(120, $reply.Length)))..."
-}
-
-# ===================================================================
-# STAGE 8: EMAIL SKILL + INBOX
-# ===================================================================
-if (-not $SkipEmail -and $Keys['UAT_IMAP_PASSWORD']) {
-    Invoke-StageWithRetry 'email_inbox' {
-        # Verify email skill is registered
-        Write-Host "[EMAIL] Checking skill registration..."
-        $skills = Invoke-UatRequest -Uri "$EntityUrl/v1/skills"
-        if (-not $skills.ok) { throw "Skills list failed: $($skills.error)" }
-
-        $emailSkill = $skills.data | Where-Object { $_.id -match 'proton' -or $_.id -match 'email' }
-        if (-not $emailSkill) {
-            throw "Email skill not registered. Available: $($skills.data | ForEach-Object { $_.id } | Out-String)"
-        }
-        $skillId = $emailSkill.id
-        Write-Host "[EMAIL] Found email skill: $skillId"
-
-        # Execute fetch_emails tool
-        Write-Host "[EMAIL] Executing fetch_emails..."
-        $execResp = Invoke-UatRequest -Method POST -Uri "$EntityUrl/v1/tools/execute" `
-            -Body @{
-                skill_id  = $skillId
-                tool_name = 'fetch_emails'
-                params    = @{ limit = 10; unread_only = $false }
-            } -TimeoutSec 30
-        Write-HttpTrace $RunRoot 'email_inbox' 'fetch_emails' @{skill_id=$skillId} $execResp
-
-        if (-not $execResp.ok) { throw "Tool execute envelope failed: $($execResp.error)" }
-        if (-not $execResp.data.success) {
-            $toolErr = $execResp.data.error
-            if ($toolErr -match 'not initialized') {
-                throw "Email skill not initialized - IMAP credentials may be missing from skill vault."
-            }
-            throw "fetch_emails failed: $toolErr"
-        }
-
-        Write-Host "[EMAIL] Inbox fetch succeeded."
-        $emails = $execResp.data.output
-        if ($emails -is [array]) {
-            Write-Host "[EMAIL] Retrieved $($emails.Count) message(s)."
-        }
-    } -MaxRetries 1
-} else {
-    Write-Timeline $RunRoot "STAGE email_inbox SKIPPED"
-    Write-Host "[EMAIL] Skipped (no IMAP credentials or --SkipEmail)."
 }
 
 # ===================================================================

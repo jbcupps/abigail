@@ -6,7 +6,7 @@
 use abigail_capabilities::cognitive::{CompletionRequest, CompletionResponse, LlmProvider};
 use abigail_core::{AppConfig, RoutingMode};
 use abigail_memory::MemoryStore;
-use abigail_router::IdEgoRouter;
+use abigail_router::{IdEgoRouter, RoutingRequest};
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use async_trait::async_trait;
 use axum::routing::{get, post};
@@ -89,6 +89,7 @@ mod entity_daemon_test_state {
     use std::path::PathBuf;
     use std::sync::Arc;
 
+    #[allow(dead_code)]
     #[derive(Clone)]
     pub struct EntityDaemonState {
         pub entity_id: String,
@@ -128,11 +129,20 @@ async fn chat_handler(
     let tools = entity_chat::build_tool_definitions(&state.registry);
     let target = body.target.as_deref().unwrap_or("AUTO");
     let result = if tools.is_empty() || target == "ID" {
-        let traced = state.router.route_traced(messages).await;
-        traced.map(|(r, trace)| entity_chat::ToolUseResult {
-            content: r.content,
+        let routed = state
+            .router
+            .route_unified(RoutingRequest {
+                messages,
+                tools: None,
+                model_override: None,
+                stream_tx: None,
+                force_id_only: target == "ID",
+            })
+            .await;
+        routed.map(|response| entity_chat::ToolUseResult {
+            content: response.completion.content,
             tool_calls_made: Vec::new(),
-            execution_trace: Some(trace),
+            execution_trace: response.trace,
         })
     } else {
         entity_chat::run_tool_use_loop(&state.router, &state.executor, messages, tools).await

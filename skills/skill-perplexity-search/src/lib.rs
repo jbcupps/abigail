@@ -91,7 +91,7 @@ impl PerplexitySearchSkill {
             .map_err(|e| SkillError::ToolFailed(format!("Failed to lock vault: {}", e)))?;
         vault
             .get_secret("perplexity")
-            .map(|s| s.to_string())
+            .map(str::to_string)
             .ok_or_else(|| {
                 SkillError::MissingSecret(
                     "Perplexity API key not configured. Store it with key name 'perplexity'."

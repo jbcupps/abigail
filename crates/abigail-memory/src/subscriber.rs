@@ -1,6 +1,6 @@
 //! Out-of-band chat-topic subscriber for memory correlation persistence.
 
-use crate::{ConversationTurn, MemoryStore};
+use crate::{plan_secret_move, ConversationTurn, MemoryStore};
 use abigail_streaming::{StreamBroker, SubscriptionHandle, TopicConfig};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -87,6 +87,23 @@ pub async fn spawn_chat_topic_subscriber(
                 return;
             }
 
+            let api_key_secret =
+                !abigail_core::key_detection::detect_api_keys(&env.message).is_empty();
+            if api_key_secret {
+                if let Err(e) = memory.capture_secret_message(
+                    &env.entity_id,
+                    &env.session_id,
+                    "user",
+                    &env.message,
+                    "entity/chat-topic",
+                ) {
+                    tracing::warn!(
+                        "memory chat-topic subscriber: failed to capture protected secret: {}",
+                        e
+                    );
+                }
+            }
+
             append_memory_superego_log(&format!(
                 "{} | source=memory_subscriber | correlation_id={} | session_id={} | id_context={} | superego_context={} | message={} | enriched={}",
                 chrono::Utc::now().to_rfc3339(),
@@ -102,6 +119,9 @@ pub async fn spawn_chat_topic_subscriber(
                 .enriched_preprompt
                 .clone()
                 .unwrap_or_else(|| env.message.clone());
+            let content = plan_secret_move(Some(&env.entity_id), &env.message)
+                .map(|plan| plan.redacted_excerpt)
+                .unwrap_or(content);
             let id_ctx = env.id_context.unwrap_or_else(|| "unknown".to_string());
             let superego_ctx = env
                 .superego_context

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Current config schema version. Increment when making breaking changes.
 pub const CONFIG_SCHEMA_VERSION: u32 = 25;
@@ -326,7 +326,8 @@ pub struct AppConfig {
     /// OpenAI API key (optional - enables Ego)
     pub openai_api_key: Option<String>,
 
-    /// Email configuration for Abigail's account
+    /// Legacy IMAP/SMTP email configuration kept only for compatibility loads.
+    #[serde(default, skip_serializing)]
     pub email: Option<EmailConfig>,
 
     /// Whether birth sequence has completed
@@ -395,8 +396,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub active_provider_preference: Option<String>,
 
-    /// Multiple email account configurations (replaces single `email` field).
-    #[serde(default)]
+    /// Legacy multi-account email config kept only for compatibility loads.
+    #[serde(default, skip_serializing)]
     pub email_accounts: Vec<EmailAccountConfig>,
 
     // ── v10 fields ─────────────────────────────────────────────────
@@ -574,6 +575,20 @@ impl AppConfig {
         self.data_dir.join("config.json")
     }
 
+    /// Path to the trusted config file.
+    ///
+    /// This path is derived from the application's default data directory,
+    /// and intentionally does not rely on potentially untrusted input.
+    pub fn trusted_config_path(_data_dir: &Path) -> PathBuf {
+        // Use the same base directory as `default_paths` to ensure this
+        // always resolves to an application-controlled location.
+        let base = directories::ProjectDirs::from("com", "abigail", "Abigail")
+            .map(|d| d.data_local_dir().to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+
+        base.join("config.json")
+    }
+
     /// Returns the effective external pubkey path.
     ///
     /// Priority:
@@ -595,14 +610,25 @@ impl AppConfig {
         None
     }
 
-    pub fn load(path: &PathBuf) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(path)?;
+    pub fn load(path: &Path) -> anyhow::Result<Self> {
+        crate::path_guard::ensure_expected_filename(path, "config.json")?;
+        let data_dir = path.parent().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Config path '{}' is missing a parent directory",
+                path.display()
+            )
+        })?;
+        Self::load_from_data_dir(data_dir)
+    }
+
+    pub fn load_from_data_dir(data_dir: &Path) -> anyhow::Result<Self> {
+        let content = crate::path_guard::load_string_from_root(data_dir, "config.json")?;
         let mut config: Self = serde_json::from_str(&content)?;
 
         // Auto-migrate if needed
         if config.migrate() {
             // Save migrated config back to disk
-            config.save(path)?;
+            config.save_to_data_dir(data_dir)?;
             tracing::info!(
                 "Config migrated to schema version {}",
                 config.schema_version
@@ -612,12 +638,20 @@ impl AppConfig {
         Ok(config)
     }
 
-    pub fn save(&self, path: &PathBuf) -> anyhow::Result<()> {
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+        crate::path_guard::ensure_expected_filename(path, "config.json")?;
+        let data_dir = path.parent().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Config path '{}' is missing a parent directory",
+                path.display()
+            )
+        })?;
+        self.save_to_data_dir(data_dir)
+    }
+
+    pub fn save_to_data_dir(&self, data_dir: &Path) -> anyhow::Result<()> {
         let content = serde_json::to_string_pretty(self)?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(path, content)?;
+        crate::path_guard::write_string_to_root(data_dir, "config.json", &content)?;
         Ok(())
     }
 
@@ -1099,6 +1133,53 @@ mod tests {
         assert_eq!(json, "\"ego_primary\"");
         let parsed: RoutingMode = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, RoutingMode::EgoPrimary);
+    }
+
+    #[test]
+    fn test_legacy_email_fields_are_not_serialized_on_save() {
+        let tmp = std::env::temp_dir().join("abigail_config_email_compat_save");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let config_path = tmp.join("config.json");
+        let legacy_json = r#"{
+            "schema_version": 7,
+            "data_dir": ".",
+            "models_dir": "./models",
+            "docs_dir": "./docs",
+            "db_path": "./test.db",
+            "openai_api_key": null,
+            "email": {
+                "address": "mentor@example.com",
+                "imap_host": "imap.example.com",
+                "imap_port": 993,
+                "smtp_host": "smtp.example.com",
+                "smtp_port": 587,
+                "password_encrypted": [1, 2, 3]
+            },
+            "birth_complete": false,
+            "routing_mode": "ego_primary"
+        }"#;
+        fs::write(&config_path, legacy_json).unwrap();
+
+        let config = AppConfig::load(&config_path).unwrap();
+        assert!(
+            config.email.is_some(),
+            "legacy email should still deserialize"
+        );
+        assert_eq!(config.email_accounts.len(), 1);
+
+        let rewritten = fs::read_to_string(&config_path).unwrap();
+        assert!(
+            !rewritten.contains("\"email\""),
+            "legacy email field should not be serialized back out"
+        );
+        assert!(
+            !rewritten.contains("\"email_accounts\""),
+            "legacy email_accounts field should not be serialized back out"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]

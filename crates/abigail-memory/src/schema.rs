@@ -87,3 +87,91 @@ CREATE INDEX IF NOT EXISTS idx_job_queue_running
     ON job_queue(status)
     WHERE status = 'running';
 "#;
+
+pub const MIGRATION_V4_PROTECTED_TOPICS: &str = r#"
+CREATE TABLE IF NOT EXISTS protected_topics (
+    topic_name TEXT PRIMARY KEY,
+    entity_id TEXT NOT NULL,
+    protection_kind TEXT NOT NULL DEFAULT 'secret'
+        CHECK (protection_kind IN ('secret')),
+    entry_count INTEGER NOT NULL DEFAULT 0,
+    last_secret_kind TEXT NOT NULL,
+    last_redacted_excerpt TEXT NOT NULL,
+    last_preview_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS protected_topic_entries (
+    id TEXT PRIMARY KEY,
+    topic_name TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    source TEXT NOT NULL,
+    secret_kind TEXT NOT NULL,
+    redacted_excerpt TEXT NOT NULL,
+    preview_json TEXT NOT NULL,
+    ciphertext BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (topic_name) REFERENCES protected_topics(topic_name) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_protected_topic_entries_topic
+    ON protected_topic_entries(topic_name, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_protected_topic_entries_session
+    ON protected_topic_entries(session_id, created_at DESC);
+"#;
+
+pub const MIGRATION_V5_CONVERSATION_TURN_ROLES: &str = r#"
+DROP INDEX IF EXISTS idx_turns_session;
+DROP INDEX IF EXISTS idx_turns_time;
+
+ALTER TABLE conversation_turns RENAME TO conversation_turns_v2_old;
+
+CREATE TABLE conversation_turns (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    turn_number INTEGER NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'mentor_monitor')),
+    content TEXT NOT NULL,
+    provider TEXT,
+    model TEXT,
+    tier TEXT,
+    complexity_score INTEGER,
+    token_estimate INTEGER,
+    created_at TEXT NOT NULL
+);
+
+INSERT INTO conversation_turns (
+    id,
+    session_id,
+    turn_number,
+    role,
+    content,
+    provider,
+    model,
+    tier,
+    complexity_score,
+    token_estimate,
+    created_at
+)
+SELECT
+    id,
+    session_id,
+    turn_number,
+    role,
+    content,
+    provider,
+    model,
+    tier,
+    complexity_score,
+    token_estimate,
+    created_at
+FROM conversation_turns_v2_old;
+
+DROP TABLE conversation_turns_v2_old;
+
+CREATE INDEX IF NOT EXISTS idx_turns_session ON conversation_turns(session_id, turn_number);
+CREATE INDEX IF NOT EXISTS idx_turns_time ON conversation_turns(created_at DESC);
+"#;

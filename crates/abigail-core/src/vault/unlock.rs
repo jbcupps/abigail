@@ -9,14 +9,58 @@
 //! the OS credential store. Subsequent runs retrieve it.
 
 use crate::error::{CoreError, Result};
+use crate::secure_fs;
 use rand::RngCore;
-use std::path::Path;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 const KEK_LEN: usize = super::VAULT_KEK_LEN;
 const KEYRING_SERVICE: &str = "com.abigail.vault";
 const KEYRING_ACCOUNT: &str = "abigail.hive.master-kek-v1";
 const PASSPHRASE_ENV: &str = "ABIGAIL_VAULT_PASSPHRASE";
+const RAW_KEK_ENV: &str = "ABIGAIL_VAULT_RAW_KEY";
 const PASSPHRASE_SALT: &[u8] = b"abigail-vault-passphrase-salt-v1";
+const KDF_METADATA_FILE: &str = "vault.kdf.json";
+const ARGON2_MEMORY_COST_KIB: u32 = 64 * 1024;
+const ARGON2_TIME_COST: u32 = 3;
+const ARGON2_PARALLELISM: u32 = 1;
+const ARGON2_SALT_LEN: usize = 16;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct PassphraseKdfMetadata {
+    version: u8,
+    algorithm: String,
+    salt_base64: Option<String>,
+    memory_cost_kib: Option<u32>,
+    time_cost: Option<u32>,
+    parallelism: Option<u32>,
+}
+
+impl PassphraseKdfMetadata {
+    fn fresh_argon2() -> Self {
+        let mut salt = [0u8; ARGON2_SALT_LEN];
+        rand::rngs::OsRng.fill_bytes(&mut salt);
+        Self {
+            version: 1,
+            algorithm: "argon2id".to_string(),
+            salt_base64: Some(base64::engine::general_purpose::STANDARD.encode(salt)),
+            memory_cost_kib: Some(ARGON2_MEMORY_COST_KIB),
+            time_cost: Some(ARGON2_TIME_COST),
+            parallelism: Some(ARGON2_PARALLELISM),
+        }
+    }
+
+    fn legacy_hkdf() -> Self {
+        Self {
+            version: 1,
+            algorithm: "legacy_hkdf_v1".to_string(),
+            salt_base64: None,
+            memory_cost_kib: None,
+            time_cost: None,
+            parallelism: None,
+        }
+    }
+}
 
 /// Trait for obtaining the root KEK that protects all vault data.
 pub trait UnlockProvider: Send + Sync {
@@ -58,9 +102,18 @@ impl UnlockProvider for HybridUnlockProvider {
             return Ok(kek);
         }
 
+        if let Ok(raw_secret) = std::env::var(RAW_KEK_ENV) {
+            if !raw_secret.trim().is_empty() {
+                let kek = decode_raw_kek(&raw_secret)?;
+                let sentinel_value = verify_or_create_sentinel(&data_root, &kek)?;
+                super::cache_session_root_kek(kek, sentinel_value);
+                return Ok(kek);
+            }
+        }
+
         if let Ok(passphrase) = std::env::var(PASSPHRASE_ENV) {
             if !passphrase.trim().is_empty() {
-                let kek = super::crypto::derive_key_from_passphrase(&passphrase, PASSPHRASE_SALT);
+                let kek = derive_passphrase_kek(&data_root, &passphrase, has_sentinel)?;
                 let sentinel_value = verify_or_create_sentinel(&data_root, &kek)?;
                 super::cache_session_root_kek(kek, sentinel_value);
                 return Ok(kek);
@@ -117,6 +170,122 @@ fn generate_random_kek() -> [u8; KEK_LEN] {
     let mut kek = [0u8; KEK_LEN];
     rand::rngs::OsRng.fill_bytes(&mut kek);
     kek
+}
+
+fn derive_passphrase_kek(
+    data_root: &Path,
+    passphrase: &str,
+    has_sentinel: bool,
+) -> Result<[u8; KEK_LEN]> {
+    if let Some(metadata) = load_kdf_metadata(data_root)? {
+        return derive_with_kdf_metadata(passphrase, &metadata);
+    }
+
+    if has_sentinel {
+        let legacy = PassphraseKdfMetadata::legacy_hkdf();
+        let kek = derive_with_kdf_metadata(passphrase, &legacy)?;
+        super::decrypt_sentinel(data_root, &kek).map_err(|e| {
+            CoreError::Vault(format!(
+                "Recovery Mode: passphrase metadata is missing and legacy HKDF compatibility could not decrypt {}: {}",
+                super::sentinel_path(data_root).display(),
+                e
+            ))
+        })?;
+        save_kdf_metadata(data_root, &legacy)?;
+        return Ok(kek);
+    }
+
+    let metadata = PassphraseKdfMetadata::fresh_argon2();
+    save_kdf_metadata(data_root, &metadata)?;
+    derive_with_kdf_metadata(passphrase, &metadata)
+}
+
+fn derive_with_kdf_metadata(
+    passphrase: &str,
+    metadata: &PassphraseKdfMetadata,
+) -> Result<[u8; KEK_LEN]> {
+    match metadata.algorithm.as_str() {
+        "argon2id" => {
+            let salt = decode_metadata_salt(metadata)?;
+            super::crypto::derive_key_from_passphrase_argon2(
+                passphrase,
+                &salt,
+                metadata.memory_cost_kib.unwrap_or(ARGON2_MEMORY_COST_KIB),
+                metadata.time_cost.unwrap_or(ARGON2_TIME_COST),
+                metadata.parallelism.unwrap_or(ARGON2_PARALLELISM),
+            )
+        }
+        "legacy_hkdf_v1" => Ok(super::crypto::derive_key_from_passphrase(
+            passphrase,
+            PASSPHRASE_SALT,
+        )),
+        other => Err(CoreError::Vault(format!(
+            "Unsupported vault KDF algorithm '{}' in {}",
+            other, KDF_METADATA_FILE
+        ))),
+    }
+}
+
+fn decode_metadata_salt(metadata: &PassphraseKdfMetadata) -> Result<Vec<u8>> {
+    let encoded = metadata.salt_base64.as_ref().ok_or_else(|| {
+        CoreError::Vault(format!(
+            "Vault KDF metadata '{}' is missing a salt for Argon2id",
+            KDF_METADATA_FILE
+        ))
+    })?;
+    base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|e| CoreError::Vault(format!("Invalid KDF metadata salt: {}", e)))
+}
+
+fn kdf_metadata_path(data_root: &Path) -> PathBuf {
+    data_root.join(KDF_METADATA_FILE)
+}
+
+fn load_kdf_metadata(data_root: &Path) -> Result<Option<PassphraseKdfMetadata>> {
+    let path = kdf_metadata_path(data_root);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(&path)?;
+    let metadata = serde_json::from_str(&content).map_err(|e| {
+        CoreError::Vault(format!("Invalid KDF metadata at {}: {}", path.display(), e))
+    })?;
+    Ok(Some(metadata))
+}
+
+fn save_kdf_metadata(data_root: &Path, metadata: &PassphraseKdfMetadata) -> Result<()> {
+    let path = kdf_metadata_path(data_root);
+    let content = serde_json::to_string_pretty(metadata)?;
+    secure_fs::write_string_atomic(&path, &content)
+}
+
+fn decode_raw_kek(raw_secret: &str) -> Result<[u8; KEK_LEN]> {
+    let trimmed = raw_secret.trim();
+    let bytes = if trimmed.len() == KEK_LEN * 2 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+        let mut out = Vec::with_capacity(KEK_LEN);
+        for idx in (0..trimmed.len()).step_by(2) {
+            let byte = u8::from_str_radix(&trimmed[idx..idx + 2], 16).map_err(|e| {
+                CoreError::Vault(format!("Invalid hex raw KEK in {}: {}", RAW_KEK_ENV, e))
+            })?;
+            out.push(byte);
+        }
+        out
+    } else {
+        base64::engine::general_purpose::STANDARD
+            .decode(trimmed)
+            .map_err(|e| {
+                CoreError::Vault(format!("Invalid base64 raw KEK in {}: {}", RAW_KEK_ENV, e))
+            })?
+    };
+
+    let kek: [u8; KEK_LEN] = bytes.try_into().map_err(|_| {
+        CoreError::Vault(format!(
+            "{} must decode to exactly {} bytes",
+            RAW_KEK_ENV, KEK_LEN
+        ))
+    })?;
+    Ok(kek)
 }
 
 // ---------------------------------------------------------------------------
@@ -203,5 +372,39 @@ mod tests {
         let a = PassphraseUnlockProvider::new("alpha");
         let b = PassphraseUnlockProvider::new("beta");
         assert_ne!(a.root_kek().unwrap(), b.root_kek().unwrap());
+    }
+
+    #[test]
+    fn fresh_passphrase_bootstrap_creates_argon2_metadata() {
+        let dir = std::env::temp_dir().join("abigail_unlock_argon2_metadata");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let kek = derive_passphrase_kek(&dir, "strong-passphrase", false).unwrap();
+        assert_ne!(kek, [0u8; KEK_LEN]);
+
+        let metadata = load_kdf_metadata(&dir).unwrap().unwrap();
+        assert_eq!(metadata.algorithm, "argon2id");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_passphrase_without_metadata_remains_readable() {
+        let dir = std::env::temp_dir().join("abigail_unlock_legacy_metadata");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let legacy_kek =
+            super::super::crypto::derive_key_from_passphrase("legacy-pass", PASSPHRASE_SALT);
+        super::super::write_encrypted_sentinel(&dir, &legacy_kek).unwrap();
+
+        let derived = derive_passphrase_kek(&dir, "legacy-pass", true).unwrap();
+        assert_eq!(derived, legacy_kek);
+
+        let metadata = load_kdf_metadata(&dir).unwrap().unwrap();
+        assert_eq!(metadata.algorithm, "legacy_hkdf_v1");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

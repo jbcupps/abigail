@@ -1,6 +1,7 @@
 use crate::document::{CoreDocument, DocumentTier};
 use crate::error::{CoreError, Result};
 use crate::keyring::Keyring;
+use crate::secure_fs;
 use crate::vault::ExternalVault;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use ed25519_dalek::{Signature, VerifyingKey};
@@ -121,8 +122,19 @@ pub fn write_sig_file(docs_path: &Path, doc_name: &str, doc: &CoreDocument) -> R
     };
     let path = docs_path.join(format!("{}.sig", doc_name));
     let json = serde_json::to_string_pretty(&meta)?;
-    std::fs::write(path, json)?;
+    secure_fs::write_string_atomic(&path, &json)?;
     Ok(())
+}
+
+pub fn verify_constitutional_integrity(config: &crate::AppConfig) -> Result<()> {
+    let pubkey_path = config.effective_external_pubkey_path().ok_or_else(|| {
+        CoreError::Vault(
+            "No external public key is configured for constitutional verification".into(),
+        )
+    })?;
+    let vault = crate::vault::ReadOnlyFileVault::new(pubkey_path);
+    let mut verifier = Verifier::from_vault(&vault)?;
+    verifier.verify_soul(&config.docs_dir)
 }
 
 #[cfg(test)]

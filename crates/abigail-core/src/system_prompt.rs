@@ -258,7 +258,17 @@ pub fn build_subagent_system_context(docs_dir: &Path) -> String {
 }
 
 fn read_or_fallback(docs_dir: &Path, filename: &str, fallback: &str) -> String {
+    if crate::path_guard::ensure_relative_no_traversal(Path::new(filename), "system prompt file")
+        .is_err()
+    {
+        return fallback.to_string();
+    }
+
     let path = docs_dir.join(filename);
+    if crate::path_guard::ensure_path_within_root(docs_dir, &path, "system prompt file").is_err() {
+        return fallback.to_string();
+    }
+
     std::fs::read_to_string(&path).unwrap_or_else(|_| fallback.to_string())
 }
 
@@ -466,6 +476,18 @@ mod tests {
         assert!(doc.contains("Be good."));
         assert!(doc.contains("Think first."));
         assert!(doc.contains("Constitutional Documents"));
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_read_or_fallback_rejects_traversal_filename() {
+        let tmp = std::env::temp_dir().join("abigail_sysprompt_traversal");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let content = read_or_fallback(&tmp, "../soul.md", "fallback");
+        assert_eq!(content, "fallback");
 
         let _ = fs::remove_dir_all(&tmp);
     }

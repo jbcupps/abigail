@@ -57,4 +57,46 @@ describe("SanctumDrawer", () => {
       expect(screen.getByText(/ethical reflection/i)).toBeInTheDocument();
     });
   });
+
+  it("shows browser sessions and clear controls in the Browser Session tab", async () => {
+    const user = userEvent.setup();
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_orchestration_backend_status") {
+        return Promise.resolve({ healthy: false });
+      }
+      if (cmd === "list_browser_sessions") {
+        return Promise.resolve([
+          {
+            entity_id: "entity-123",
+            profile_dir: "E:/Agents/abigail/data/identities/entity-123/browser_profile",
+            active_in_process: true,
+            last_used_at_utc: "2026-03-06T15:00:00.000Z",
+            last_action: "login_with_oauth",
+            current_url: "https://mail.google.com",
+            page_title: "Inbox",
+            cookie_count: 6,
+          },
+        ]);
+      }
+      if (cmd === "clear_browser_session") {
+        return Promise.resolve(null);
+      }
+      return Promise.resolve(null);
+    });
+
+    render(
+      <SanctumDrawer
+        open
+        onClose={() => {}}
+        onDisconnect={() => {}}
+      />
+    );
+
+    await user.click(screen.getByRole("tab", { name: /browser session/i }));
+
+    expect(await screen.findByText(/persistent playwright profiles/i)).toBeInTheDocument();
+    expect(await screen.findByText(/entity entity-123/i)).toBeInTheDocument();
+    expect(await screen.findByText(/https:\/\/mail\.google\.com/i)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /clear session/i })).toBeInTheDocument();
+  });
 });

@@ -1,18 +1,21 @@
-//! Encrypted portable archive — export/restore memory data that survives
+//! Encrypted portable archive - export/restore memory data that survives
 //! reinstalls. Uses hybrid encryption: AES-256-GCM for data, X25519 for
 //! key wrapping (derived from the Ed25519 keypair generated at first run).
 
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{Aead, KeyInit, OsRng, Payload},
     Aes256Gcm, Nonce,
 };
+use hkdf::Hkdf;
 use rand::RngCore;
 use std::path::{Path, PathBuf};
 use x25519_dalek::{EphemeralSecret, PublicKey as X25519Public, StaticSecret};
 
 use crate::store::MemoryStore;
 
-const ARCHIVE_VERSION: u32 = 1;
+const ARCHIVE_VERSION_V1: u32 = 1;
+const ARCHIVE_VERSION_V2: u32 = 2;
+const ARCHIVE_VERSION: u32 = ARCHIVE_VERSION_V2;
 const NONCE_LEN: usize = 12;
 
 /// Convert an Ed25519 public key (32 bytes) to an X25519 public key.
@@ -50,6 +53,17 @@ struct SerializableMemory {
     content: String,
     weight: String,
     created_at: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ArchiveHeaderV2 {
+    version: u32,
+    key_exchange: String,
+    key_derivation: String,
+    cipher: String,
+    ephemeral_public_key_base64: String,
+    nonce_base64: String,
+    exported_at: String,
 }
 
 /// Archive exporter/importer.
@@ -100,43 +114,66 @@ impl ArchiveExporter {
             })
             .collect();
 
+        let exported_at = chrono::Utc::now().to_rfc3339();
         let payload = ArchivePayload {
             version: ARCHIVE_VERSION,
-            exported_at: chrono::Utc::now().to_rfc3339(),
+            exported_at: exported_at.clone(),
             turns,
             memories,
         };
 
         let json = serde_json::to_vec(&payload)?;
-
-        // Hybrid encrypt: generate ephemeral X25519 keypair, derive shared
-        // secret, use it as AES-256-GCM key.
         let eph_secret = EphemeralSecret::random_from_rng(OsRng);
         let eph_public = x25519_dalek::PublicKey::from(&eph_secret);
         let shared = eph_secret.diffie_hellman(&x_pub);
+        let aead_key = derive_archive_key(shared.as_bytes())?;
 
-        let cipher = Aes256Gcm::new_from_slice(shared.as_bytes())?;
+        let cipher = Aes256Gcm::new_from_slice(&aead_key)?;
         let mut nonce_bytes = [0u8; NONCE_LEN];
         rand::thread_rng().fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
 
-        let ciphertext = cipher
-            .encrypt(nonce, json.as_ref())
-            .map_err(|e| anyhow::anyhow!("AES-GCM encrypt failed: {}", e))?;
+        let header = ArchiveHeaderV2 {
+            version: ARCHIVE_VERSION_V2,
+            key_exchange: "x25519".to_string(),
+            key_derivation: "hkdf-sha256".to_string(),
+            cipher: "aes-256-gcm".to_string(),
+            ephemeral_public_key_base64: base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                eph_public.as_bytes(),
+            ),
+            nonce_base64: base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                nonce_bytes,
+            ),
+            exported_at,
+        };
+        let header_bytes = serde_json::to_vec(&header)?;
+        let header_len = u32::try_from(header_bytes.len())
+            .map_err(|_| anyhow::anyhow!("Archive header is too large"))?;
 
-        // File format: [version:4][eph_pub:32][nonce:12][ciphertext...]
+        let mut out = Vec::with_capacity(8 + header_bytes.len() + json.len() + 16);
+        out.extend_from_slice(&ARCHIVE_VERSION_V2.to_le_bytes());
+        out.extend_from_slice(&header_len.to_le_bytes());
+        out.extend_from_slice(&header_bytes);
+
+        let ciphertext = cipher
+            .encrypt(
+                nonce,
+                Payload {
+                    msg: json.as_ref(),
+                    aad: &out,
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("AES-GCM encrypt failed: {}", e))?;
+        out.extend_from_slice(&ciphertext);
+
         let _ = std::fs::create_dir_all(&self.archive_dir);
         let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
         let filename = format!("abigail_{}.abigail", ts);
         let path = self.archive_dir.join(&filename);
 
-        let mut out = Vec::new();
-        out.extend_from_slice(&ARCHIVE_VERSION.to_le_bytes());
-        out.extend_from_slice(eph_public.as_bytes());
-        out.extend_from_slice(&nonce_bytes);
-        out.extend_from_slice(&ciphertext);
-
-        std::fs::write(&path, &out)?;
+        abigail_core::secure_fs::write_bytes_atomic(&path, &out)?;
         tracing::info!("Archive exported to {}", path.display());
         Ok(path)
     }
@@ -148,26 +185,12 @@ impl ArchiveExporter {
         store: &MemoryStore,
     ) -> anyhow::Result<(usize, usize)> {
         let data = std::fs::read(archive_path)?;
-        if data.len() < 4 + 32 + NONCE_LEN {
+        if data.len() < 4 {
             anyhow::bail!("Archive file too short");
         }
 
         let version = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-        if version != ARCHIVE_VERSION {
-            anyhow::bail!("Unsupported archive version: {}", version);
-        }
 
-        let mut eph_pub_bytes = [0u8; 32];
-        eph_pub_bytes.copy_from_slice(&data[4..36]);
-        let eph_public = X25519Public::from(eph_pub_bytes);
-
-        let mut nonce_bytes = [0u8; NONCE_LEN];
-        nonce_bytes.copy_from_slice(&data[36..36 + NONCE_LEN]);
-        let nonce = Nonce::from_slice(&nonce_bytes);
-
-        let ciphertext = &data[36 + NONCE_LEN..];
-
-        // Derive X25519 secret from recovery key.
         let priv_bytes = base64::Engine::decode(
             &base64::engine::general_purpose::STANDARD,
             recovery_key_base64.trim(),
@@ -177,12 +200,12 @@ impl ArchiveExporter {
         }
         let signing_key = ed25519_dalek::SigningKey::from_bytes(priv_bytes.as_slice().try_into()?);
         let x_secret = ed25519_priv_to_x25519(&signing_key);
-        let shared = x_secret.diffie_hellman(&eph_public);
 
-        let cipher = Aes256Gcm::new_from_slice(shared.as_bytes())?;
-        let plaintext = cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|_| anyhow::anyhow!("Decryption failed — wrong recovery key?"))?;
+        let plaintext = match version {
+            ARCHIVE_VERSION_V1 => decrypt_archive_v1(&data, &x_secret)?,
+            ARCHIVE_VERSION_V2 => decrypt_archive_v2(&data, &x_secret)?,
+            other => anyhow::bail!("Unsupported archive version: {}", other),
+        };
 
         let payload: ArchivePayload = serde_json::from_slice(&plaintext)?;
 
@@ -222,6 +245,95 @@ impl ArchiveExporter {
     }
 }
 
+fn derive_archive_key(shared_secret: &[u8; 32]) -> anyhow::Result<[u8; 32]> {
+    use sha2::Sha256;
+
+    let hk = Hkdf::<Sha256>::new(Some(b"abigail-archive-v2"), shared_secret);
+    let mut key = [0u8; 32];
+    hk.expand(b"archive:aead-key", &mut key)
+        .map_err(|e| anyhow::anyhow!("HKDF expand failed: {}", e))?;
+    Ok(key)
+}
+
+fn decrypt_archive_v1(data: &[u8], x_secret: &StaticSecret) -> anyhow::Result<Vec<u8>> {
+    if data.len() < 4 + 32 + NONCE_LEN {
+        anyhow::bail!("Archive file too short");
+    }
+
+    let mut eph_pub_bytes = [0u8; 32];
+    eph_pub_bytes.copy_from_slice(&data[4..36]);
+    let eph_public = X25519Public::from(eph_pub_bytes);
+
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    nonce_bytes.copy_from_slice(&data[36..36 + NONCE_LEN]);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = &data[36 + NONCE_LEN..];
+
+    let shared = x_secret.diffie_hellman(&eph_public);
+    let cipher = Aes256Gcm::new_from_slice(shared.as_bytes())?;
+    cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|_| anyhow::anyhow!("Decryption failed - wrong recovery key?"))
+}
+
+fn decrypt_archive_v2(data: &[u8], x_secret: &StaticSecret) -> anyhow::Result<Vec<u8>> {
+    if data.len() < 8 {
+        anyhow::bail!("Archive v2 file too short");
+    }
+    let header_len = u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize;
+    let header_end = 8 + header_len;
+    if data.len() <= header_end {
+        anyhow::bail!("Archive v2 header truncated");
+    }
+
+    let header_bytes = &data[8..header_end];
+    let header: ArchiveHeaderV2 = serde_json::from_slice(header_bytes)?;
+    if header.version != ARCHIVE_VERSION_V2 {
+        anyhow::bail!("Archive header version mismatch: {}", header.version);
+    }
+    if header.key_exchange != "x25519"
+        || header.key_derivation != "hkdf-sha256"
+        || header.cipher != "aes-256-gcm"
+    {
+        anyhow::bail!("Unsupported archive v2 algorithm suite");
+    }
+
+    let eph_bytes = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        header.ephemeral_public_key_base64.trim(),
+    )?;
+    let eph_array: [u8; 32] = eph_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Archive v2 ephemeral public key must be 32 bytes"))?;
+    let eph_public = X25519Public::from(eph_array);
+
+    let nonce_vec = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        header.nonce_base64.trim(),
+    )?;
+    let nonce_bytes: [u8; NONCE_LEN] = nonce_vec
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Archive v2 nonce must be {} bytes", NONCE_LEN))?;
+    let nonce = Nonce::from_slice(&nonce_bytes);
+
+    let shared = x_secret.diffie_hellman(&eph_public);
+    let aead_key = derive_archive_key(shared.as_bytes())?;
+    let cipher = Aes256Gcm::new_from_slice(&aead_key)?;
+    let ciphertext = &data[header_end..];
+
+    cipher
+        .decrypt(
+            nonce,
+            Payload {
+                msg: ciphertext,
+                aad: &data[..header_end],
+            },
+        )
+        .map_err(|_| anyhow::anyhow!("Decryption failed - wrong recovery key or tampered archive"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,11 +366,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
 
-        // Write public key file.
         let pk_path = tmp.join("external_pubkey.bin");
         std::fs::write(&pk_path, verifying.to_bytes()).unwrap();
 
-        // Create source store and insert data.
         let src = MemoryStore::open_in_memory().unwrap();
         let turn = ConversationTurn::new("sess1", "user", "hello world");
         src.insert_turn(&turn).unwrap();
@@ -269,7 +379,6 @@ mod tests {
         let exporter = ArchiveExporter::new(pk_path, archive_dir);
         let archive_path = exporter.export(&src).unwrap();
 
-        // Restore into a fresh store.
         let dst = MemoryStore::open_in_memory().unwrap();
         let recovery_key = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
@@ -281,6 +390,98 @@ mod tests {
         assert_eq!(mems, 1);
         assert_eq!(dst.session_turn_count("sess1").unwrap(), 1);
         assert_eq!(dst.count_memories().unwrap(), 1);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_restore_legacy_v1_archive() {
+        use ed25519_dalek::SigningKey;
+        use rand::rngs::OsRng;
+
+        let signing = SigningKey::generate(&mut OsRng);
+        let verifying = signing.verifying_key();
+
+        let tmp = std::env::temp_dir().join("abigail_archive_test_v1");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let src = MemoryStore::open_in_memory().unwrap();
+        src.insert_turn(&ConversationTurn::new("sess1", "user", "legacy"))
+            .unwrap();
+
+        let payload = ArchivePayload {
+            version: ARCHIVE_VERSION_V1,
+            exported_at: chrono::Utc::now().to_rfc3339(),
+            turns: src.all_turns().unwrap(),
+            memories: Vec::new(),
+        };
+        let json = serde_json::to_vec(&payload).unwrap();
+
+        let mut pk = [0u8; 32];
+        pk.copy_from_slice(&verifying.to_bytes());
+        let x_pub = ed25519_pub_to_x25519(&pk);
+        let eph_secret = EphemeralSecret::random_from_rng(OsRng);
+        let eph_public = x25519_dalek::PublicKey::from(&eph_secret);
+        let shared = eph_secret.diffie_hellman(&x_pub);
+        let cipher = Aes256Gcm::new_from_slice(shared.as_bytes()).unwrap();
+        let nonce_bytes = [7u8; NONCE_LEN];
+        let ciphertext = cipher
+            .encrypt(Nonce::from_slice(&nonce_bytes), json.as_ref())
+            .unwrap();
+
+        let archive_path = tmp.join("legacy.abigail");
+        let mut out = Vec::new();
+        out.extend_from_slice(&ARCHIVE_VERSION_V1.to_le_bytes());
+        out.extend_from_slice(eph_public.as_bytes());
+        out.extend_from_slice(&nonce_bytes);
+        out.extend_from_slice(&ciphertext);
+        std::fs::write(&archive_path, out).unwrap();
+
+        let dst = MemoryStore::open_in_memory().unwrap();
+        let recovery_key = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            signing.to_bytes(),
+        );
+        let (turns, mems) = ArchiveExporter::restore(&archive_path, &recovery_key, &dst).unwrap();
+
+        assert_eq!(turns, 1);
+        assert_eq!(mems, 0);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_archive_v2_tampered_header_fails() {
+        use ed25519_dalek::SigningKey;
+        use rand::rngs::OsRng;
+
+        let signing = SigningKey::generate(&mut OsRng);
+        let verifying = signing.verifying_key();
+
+        let tmp = std::env::temp_dir().join("abigail_archive_test_v2_tamper");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let pk_path = tmp.join("external_pubkey.bin");
+        std::fs::write(&pk_path, verifying.to_bytes()).unwrap();
+
+        let src = MemoryStore::open_in_memory().unwrap();
+        src.insert_turn(&ConversationTurn::new("sess1", "user", "hello"))
+            .unwrap();
+
+        let exporter = ArchiveExporter::new(pk_path, tmp.join("archives"));
+        let archive_path = exporter.export(&src).unwrap();
+        let mut bytes = std::fs::read(&archive_path).unwrap();
+        bytes[12] ^= 0x01;
+        std::fs::write(&archive_path, &bytes).unwrap();
+
+        let dst = MemoryStore::open_in_memory().unwrap();
+        let recovery_key = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            signing.to_bytes(),
+        );
+        assert!(ArchiveExporter::restore(&archive_path, &recovery_key, &dst).is_err());
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

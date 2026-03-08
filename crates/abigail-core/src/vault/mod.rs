@@ -7,6 +7,7 @@
 //! - `external` — read-only external pubkey vault (document signing, legacy)
 
 use crate::error::{CoreError, Result};
+use crate::secure_fs;
 use chrono::Utc;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -70,7 +71,7 @@ pub(crate) fn write_encrypted_sentinel(
     let sentinel_value = format!("{}{}", SENTINEL_PREFIX, Utc::now().to_rfc3339());
     let dek = crypto::derive_scope_key(root_kek, SENTINEL_SCOPE);
     let envelope = crypto::seal(&dek, sentinel_value.as_bytes())?;
-    std::fs::write(sentinel_path(data_root), envelope)?;
+    secure_fs::write_bytes_atomic(&sentinel_path(data_root), &envelope)?;
     Ok(sentinel_value)
 }
 

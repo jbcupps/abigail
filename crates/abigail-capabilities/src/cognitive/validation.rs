@@ -131,10 +131,8 @@ async fn validate_google(key: &str) -> anyhow::Result<()> {
         .build()?;
 
     let response = client
-        .get(format!(
-            "https://generativelanguage.googleapis.com/v1/models?key={}",
-            key
-        ))
+        .get("https://generativelanguage.googleapis.com/v1/models")
+        .header("x-goog-api-key", key)
         .send()
         .await?;
 
@@ -183,6 +181,29 @@ pub async fn discover_models(provider: &str, api_key: &str) -> Result<Vec<ModelI
         "anthropic" => Ok(curated_anthropic_models()),
         "perplexity" => Ok(curated_perplexity_models()),
         _ => Ok(vec![]), // Unknown providers: no discovery
+    }
+}
+
+/// Return true when a model ID belongs to the given provider's chat-capable set.
+///
+/// Unknown providers default to `true` so newer providers are not blocked by
+/// stale validation logic, but incompatible known-provider overrides can be
+/// stripped before they reach the wrong API.
+pub fn is_model_compatible_with_provider(provider: &str, model: &str) -> bool {
+    let provider = provider.trim().to_lowercase();
+    let model = model.trim();
+    if model.is_empty() {
+        return false;
+    }
+
+    match provider.as_str() {
+        "openai" => is_chat_openai_model(model),
+        "google" => is_chat_google_model(model),
+        "xai" => is_chat_xai_model(model),
+        "anthropic" => model.starts_with("claude-"),
+        "perplexity" => model.starts_with("sonar"),
+        "claude-cli" | "gemini-cli" | "codex-cli" | "grok-cli" => false,
+        _ => true,
     }
 }
 
@@ -336,10 +357,8 @@ async fn discover_google_models(key: &str) -> Result<Vec<ModelInfo>, String> {
         .map_err(|e| e.to_string())?;
 
     let response = client
-        .get(format!(
-            "https://generativelanguage.googleapis.com/v1/models?key={}",
-            key
-        ))
+        .get("https://generativelanguage.googleapis.com/v1/models")
+        .header("x-goog-api-key", key)
         .send()
         .await
         .map_err(|e| format!("Google model discovery request failed: {}", e))?;
@@ -542,5 +561,38 @@ mod tests {
 
         assert!(!is_chat_xai_model("some-embedding-model"));
         assert!(!is_chat_xai_model("grok-image-gen"));
+    }
+
+    #[test]
+    fn test_model_provider_compatibility_guard() {
+        assert!(is_model_compatible_with_provider("openai", "gpt-4.1"));
+        assert!(is_model_compatible_with_provider(
+            "google",
+            "gemini-2.5-pro"
+        ));
+        assert!(is_model_compatible_with_provider(
+            "xai",
+            "grok-4-1-fast-reasoning"
+        ));
+        assert!(is_model_compatible_with_provider(
+            "anthropic",
+            "claude-sonnet-4-6"
+        ));
+        assert!(is_model_compatible_with_provider("perplexity", "sonar-pro"));
+
+        assert!(!is_model_compatible_with_provider(
+            "openai",
+            "gemini-2.5-pro"
+        ));
+        assert!(!is_model_compatible_with_provider("google", "gpt-4.1"));
+        assert!(!is_model_compatible_with_provider("xai", "gpt-4.1"));
+        assert!(!is_model_compatible_with_provider(
+            "claude-cli",
+            "claude-sonnet-4-6"
+        ));
+        assert!(is_model_compatible_with_provider(
+            "openrouter",
+            "google/gemini-2.5-pro"
+        ));
     }
 }

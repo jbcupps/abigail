@@ -21,7 +21,7 @@ pub enum VaultScope {
     Hive,
     /// Per-entity secrets.
     Entity(String),
-    /// Skills operational secrets (IMAP, Jira tokens, etc.).
+    /// Skills operational secrets (browser fallback sessions, Jira tokens, etc.).
     Skills,
     /// Arbitrary custom scope (for tests or future use).
     Custom(String),

@@ -43,12 +43,45 @@ pub fn detect_cli_providers_full() -> Vec<CliDetectionResult> {
 #[derive(Debug, Clone)]
 pub struct HiveConfig {
     pub local_llm_base_url: Option<String>,
-    pub ego_provider_name: Option<String>,
-    pub ego_api_key: Option<String>,
+    pub ego_provider: Option<ProviderSelection>,
     pub ego_model: Option<String>,
     pub routing_mode: RoutingMode,
     /// Permission mode for CLI tool invocations.
     pub cli_permission_mode: CliPermissionMode,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum ProviderAuth {
+    ApiKey(String),
+    System,
+}
+
+impl std::fmt::Debug for ProviderAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ApiKey(_) => f.write_str("ApiKey(REDACTED)"),
+            Self::System => f.write_str("System"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderSelection {
+    pub provider: String,
+    pub auth: ProviderAuth,
+}
+
+impl ProviderSelection {
+    pub fn provider_name(&self) -> &str {
+        &self.provider
+    }
+
+    pub fn api_key(&self) -> Option<String> {
+        match &self.auth {
+            ProviderAuth::ApiKey(key) => Some(key.clone()),
+            ProviderAuth::System => None,
+        }
+    }
 }
 
 /// All providers built and ready to be injected into a router.
@@ -97,23 +130,36 @@ impl Hive {
     pub fn determine_ego_provider(
         config: &AppConfig,
         vault: &SecretsVault,
-    ) -> (Option<String>, Option<String>) {
+    ) -> Option<ProviderSelection> {
         // 1. Explicit preference from Mentor menu (Forge)
         if let Some(pref) = &config.active_provider_preference {
-            // CLI providers work without a stored key (OAuth / built-in auth)
             if Self::is_cli_provider(pref) {
-                let key = vault
-                    .get_secret(pref)
-                    .map(|k| k.to_string())
-                    .filter(|k| !k.is_empty())
-                    .unwrap_or_else(|| "system".to_string());
-                return (Some(pref.clone()), Some(key));
+                return Some(
+                    vault
+                        .get_secret(pref)
+                        .map(str::trim)
+                        .filter(|key| !key.is_empty())
+                        .map(|key| ProviderSelection {
+                            provider: pref.clone(),
+                            auth: ProviderAuth::ApiKey(key.to_string()),
+                        })
+                        .unwrap_or_else(|| ProviderSelection {
+                            provider: pref.clone(),
+                            auth: ProviderAuth::System,
+                        }),
+                );
             }
-            if let Some(key) = vault.get_secret(pref) {
-                let k = key.to_string();
-                if !k.is_empty() {
-                    return (Some(pref.clone()), Some(k));
-                }
+
+            if let Some(selection) = vault
+                .get_secret(pref)
+                .map(str::trim)
+                .filter(|key| !key.is_empty())
+                .map(|key| ProviderSelection {
+                    provider: pref.clone(),
+                    auth: ProviderAuth::ApiKey(key.to_string()),
+                })
+            {
+                return Some(selection);
             }
         }
 
@@ -130,11 +176,16 @@ impl Hive {
             "grok-cli",
         ];
         for name in &provider_names {
-            if let Some(key) = vault.get_secret(name) {
-                let k = key.to_string();
-                if !k.is_empty() {
-                    return (Some(name.to_string()), Some(k));
-                }
+            if let Some(selection) = vault
+                .get_secret(name)
+                .map(str::trim)
+                .filter(|key| !key.is_empty())
+                .map(|key| ProviderSelection {
+                    provider: (*name).to_string(),
+                    auth: ProviderAuth::ApiKey(key.to_string()),
+                })
+            {
+                return Some(selection);
             }
         }
 
@@ -143,7 +194,10 @@ impl Hive {
             if let Some(p) = &trinity.ego_provider {
                 if let Some(k) = &trinity.ego_api_key {
                     if !k.is_empty() {
-                        return (Some(p.clone()), Some(k.clone()));
+                        return Some(ProviderSelection {
+                            provider: p.clone(),
+                            auth: ProviderAuth::ApiKey(k.clone()),
+                        });
                     }
                 }
             }
@@ -152,16 +206,19 @@ impl Hive {
         // 4. Environment variables (last resort)
         if let Some(k) = &config.openai_api_key {
             if !k.is_empty() {
-                return (Some("openai".to_string()), Some(k.clone()));
+                return Some(ProviderSelection {
+                    provider: "openai".to_string(),
+                    auth: ProviderAuth::ApiKey(k.clone()),
+                });
             }
         }
 
-        (None, None)
+        None
     }
 
     /// Detect CLI tools installed on PATH that can serve as Ego providers
     /// via their own authentication (OAuth / `claude auth login`).
-    fn detect_cli_on_path() -> (Option<String>, Option<String>) {
+    fn detect_cli_on_path() -> Option<ProviderSelection> {
         let cli_binaries = [
             ("claude-cli", "claude"),
             ("gemini-cli", "gemini"),
@@ -175,29 +232,38 @@ impl Hive {
                     binary,
                     provider
                 );
-                return (Some(provider.to_string()), Some("system".to_string()));
+                return Some(ProviderSelection {
+                    provider: provider.to_string(),
+                    auth: ProviderAuth::System,
+                });
             }
         }
-        (None, None)
+        None
     }
 
     /// Resolve the full provider configuration from AppConfig + vaults.
     ///
     /// Acquires locks on `secrets` then `hive_secrets` (in documented order).
     pub fn resolve_config(&self, config: &AppConfig) -> Result<HiveConfig, String> {
-        let (ego_name, ego_key) = {
+        let ego_provider = {
             let vault = self.secrets.lock().map_err(|e| e.to_string())?;
-            let (name, key) = Self::determine_ego_provider(config, &vault);
-            if name.is_some() {
-                tracing::info!("Using Ego provider from preference/vault: {:?}", name);
-                (name, key)
+            let selection = Self::determine_ego_provider(config, &vault);
+            if selection.is_some() {
+                tracing::info!(
+                    "Using Ego provider from preference/vault: {:?}",
+                    selection.as_ref().map(|s| s.provider_name())
+                );
+                selection
             } else {
                 drop(vault);
                 let hive = self.hive_secrets.lock().map_err(|e| e.to_string())?;
-                let (h_name, h_key) = Self::determine_ego_provider(config, &hive);
-                if h_name.is_some() {
-                    tracing::info!("Using Ego provider from Hive vault: {:?}", h_name);
-                    (h_name, h_key)
+                let selection = Self::determine_ego_provider(config, &hive);
+                if selection.is_some() {
+                    tracing::info!(
+                        "Using Ego provider from Hive vault: {:?}",
+                        selection.as_ref().map(|s| s.provider_name())
+                    );
+                    selection
                 } else {
                     // Last resort: auto-detect CLI tools on PATH (OAuth auth)
                     Self::detect_cli_on_path()
@@ -208,15 +274,17 @@ impl Hive {
         tracing::debug!(
             "Resolved config: local_url={:?}, ego_name={:?}, has_ego_key={}, mode={:?}",
             config.local_llm_base_url,
-            ego_name,
-            ego_key.is_some(),
+            ego_provider.as_ref().map(|s| s.provider_name()),
+            ego_provider
+                .as_ref()
+                .map(|selection| matches!(selection.auth, ProviderAuth::ApiKey(_)))
+                .unwrap_or(false),
             config.routing_mode
         );
 
         Ok(HiveConfig {
             local_llm_base_url: config.local_llm_base_url.clone(),
-            ego_provider_name: ego_name,
-            ego_api_key: ego_key,
+            ego_provider,
             ego_model: None,
             routing_mode: config.routing_mode,
             cli_permission_mode: config.cli_permission_mode,
@@ -226,8 +294,7 @@ impl Hive {
     /// Build all providers from a resolved HiveConfig (no locking).
     pub async fn build_providers(hive_config: &HiveConfig) -> BuiltProviders {
         let ego_result = ProviderRegistry::build_ego_with_cli_mode(
-            hive_config.ego_provider_name.as_deref(),
-            hive_config.ego_api_key.clone(),
+            hive_config.ego_provider.as_ref(),
             hive_config.ego_model.clone(),
             hive_config.cli_permission_mode,
         );
@@ -284,9 +351,9 @@ mod tests {
             .set_secret("anthropic", "anthro-key-123");
         vault.lock().unwrap().set_secret("openai", "openai-key-456");
 
-        let (name, key) = Hive::determine_ego_provider(&config, &vault.lock().unwrap());
-        assert_eq!(name.as_deref(), Some("anthropic"));
-        assert_eq!(key.as_deref(), Some("anthro-key-123"));
+        let selection = Hive::determine_ego_provider(&config, &vault.lock().unwrap()).unwrap();
+        assert_eq!(selection.provider_name(), "anthropic");
+        assert_eq!(selection.api_key().as_deref(), Some("anthro-key-123"));
     }
 
     #[test]
@@ -296,8 +363,8 @@ mod tests {
         // Only xai has a key
         vault.lock().unwrap().set_secret("xai", "xai-key");
 
-        let (name, _key) = Hive::determine_ego_provider(&config, &vault.lock().unwrap());
-        assert_eq!(name.as_deref(), Some("xai"));
+        let selection = Hive::determine_ego_provider(&config, &vault.lock().unwrap()).unwrap();
+        assert_eq!(selection.provider_name(), "xai");
     }
 
     #[test]
@@ -310,9 +377,9 @@ mod tests {
         });
         let vault = temp_vault();
 
-        let (name, key) = Hive::determine_ego_provider(&config, &vault.lock().unwrap());
-        assert_eq!(name.as_deref(), Some("google"));
-        assert_eq!(key.as_deref(), Some("google-key"));
+        let selection = Hive::determine_ego_provider(&config, &vault.lock().unwrap()).unwrap();
+        assert_eq!(selection.provider_name(), "google");
+        assert_eq!(selection.api_key().as_deref(), Some("google-key"));
     }
 
     #[test]
@@ -321,9 +388,9 @@ mod tests {
         config.openai_api_key = Some("env-key".to_string());
         let vault = temp_vault();
 
-        let (name, key) = Hive::determine_ego_provider(&config, &vault.lock().unwrap());
-        assert_eq!(name.as_deref(), Some("openai"));
-        assert_eq!(key.as_deref(), Some("env-key"));
+        let selection = Hive::determine_ego_provider(&config, &vault.lock().unwrap()).unwrap();
+        assert_eq!(selection.provider_name(), "openai");
+        assert_eq!(selection.api_key().as_deref(), Some("env-key"));
     }
 
     #[test]
@@ -331,9 +398,8 @@ mod tests {
         let config = default_config();
         let vault = temp_vault();
 
-        let (name, key) = Hive::determine_ego_provider(&config, &vault.lock().unwrap());
-        assert!(name.is_none());
-        assert!(key.is_none());
+        let selection = Hive::determine_ego_provider(&config, &vault.lock().unwrap());
+        assert!(selection.is_none());
     }
 
     #[test]
@@ -356,8 +422,9 @@ mod tests {
         let hive = Hive::new(entity_vault, hive_vault);
         let resolved = hive.resolve_config(&config).unwrap();
 
-        assert_eq!(resolved.ego_provider_name.as_deref(), Some("openai"));
-        assert_eq!(resolved.ego_api_key.as_deref(), Some("entity-key"));
+        let selection = resolved.ego_provider.unwrap();
+        assert_eq!(selection.provider_name(), "openai");
+        assert_eq!(selection.api_key().as_deref(), Some("entity-key"));
     }
 
     #[test]
@@ -374,8 +441,9 @@ mod tests {
         let hive = Hive::new(entity_vault, hive_vault);
         let resolved = hive.resolve_config(&config).unwrap();
 
-        assert_eq!(resolved.ego_provider_name.as_deref(), Some("anthropic"));
-        assert_eq!(resolved.ego_api_key.as_deref(), Some("hive-key"));
+        let selection = resolved.ego_provider.unwrap();
+        assert_eq!(selection.provider_name(), "anthropic");
+        assert_eq!(selection.api_key().as_deref(), Some("hive-key"));
     }
 
     #[tokio::test]

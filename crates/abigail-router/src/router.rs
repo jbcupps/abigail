@@ -5,6 +5,7 @@
 //! - **EgoPrimary**: All user-facing requests go to Ego; Id is failsafe only.
 //! - **CliOrchestrator**: Auto-detected when Ego is a CLI provider (Claude CLI, etc.).
 
+use abigail_capabilities::cognitive::validation::is_model_compatible_with_provider;
 use abigail_capabilities::cognitive::{
     stub_heartbeat, CompletionRequest, CompletionResponse, LlmProvider, LocalHttpProvider, Message,
     StreamEvent, ToolDefinition,
@@ -238,6 +239,53 @@ impl IdEgoRouter {
         })
     }
 
+    fn ego_provider_key(&self) -> Option<&'static str> {
+        match self.ego_provider.as_ref()? {
+            EgoProvider::OpenAi => Some("openai"),
+            EgoProvider::Anthropic => Some("anthropic"),
+            EgoProvider::Perplexity => Some("perplexity"),
+            EgoProvider::Xai => Some("xai"),
+            EgoProvider::Google => Some("google"),
+            EgoProvider::ClaudeCli
+            | EgoProvider::GeminiCli
+            | EgoProvider::CodexCli
+            | EgoProvider::GrokCli => None,
+        }
+    }
+
+    fn sanitize_model_override_for_target(
+        &self,
+        target: FastPathTarget,
+        model: Option<String>,
+    ) -> Option<String> {
+        let normalized = Self::normalize_model_name(model);
+        if target != FastPathTarget::Ego {
+            return normalized;
+        }
+
+        let model = normalized?;
+
+        let Some(provider) = self.ego_provider_key() else {
+            tracing::warn!(
+                model_override = %model,
+                ego_provider = ?self.ego_provider,
+                "Dropping model override because the active Ego provider does not accept direct model overrides"
+            );
+            return None;
+        };
+
+        if is_model_compatible_with_provider(provider, &model) {
+            Some(model)
+        } else {
+            tracing::warn!(
+                model_override = %model,
+                provider = %provider,
+                "Dropping model override because it does not belong to the active Ego provider"
+            );
+            None
+        }
+    }
+
     /// Update the currently selected chat model (typically from UI dropdown model_override).
     pub fn set_selected_chat_model(&self, model: Option<String>) {
         let normalized = Self::normalize_model_name(model);
@@ -262,7 +310,8 @@ impl IdEgoRouter {
         entity_id: &str,
         model: Option<String>,
     ) -> String {
-        self.set_selected_chat_model(model);
+        let selected = self.sanitize_model_override_for_target(self.target_for_mode(""), model);
+        self.set_selected_chat_model(selected);
         self.entity_chat_subscriber_group(entity_id)
     }
 
@@ -497,10 +546,16 @@ impl IdEgoRouter {
         let last_msg = req.messages.last().map_or("", |m| &m.content).to_string();
 
         let (target, model_override) = if req.force_id_only {
-            (FastPathTarget::Id, None)
+            (
+                FastPathTarget::Id,
+                self.sanitize_model_override_for_target(FastPathTarget::Id, req.model_override),
+            )
         } else {
             let target = self.target_for_mode(&last_msg);
-            (target, req.model_override)
+            (
+                target,
+                self.sanitize_model_override_for_target(target, req.model_override),
+            )
         };
 
         let mut trace = self.begin_trace(&last_msg, &model_override);
@@ -1411,6 +1466,35 @@ mod tests {
         assert_eq!(diag.mode, "egoprimary");
         assert_eq!(diag.target, "ego");
         assert_eq!(diag.selection_reason, "ego_primary");
+    }
+
+    #[test]
+    fn test_sanitize_model_override_drops_cross_provider_model() {
+        let router = IdEgoRouter::new(
+            None,
+            Some("openai"),
+            Some("test-key".to_string()),
+            None,
+            RoutingMode::EgoPrimary,
+        );
+        let sanitized = router
+            .sanitize_model_override_for_target(FastPathTarget::Ego, Some("gemini-2.5-pro".into()));
+        assert!(sanitized.is_none());
+    }
+
+    #[test]
+    fn test_register_selected_model_subscriber_uses_default_for_invalid_ego_model() {
+        let router = IdEgoRouter::new(
+            None,
+            Some("openai"),
+            Some("test-key".to_string()),
+            None,
+            RoutingMode::EgoPrimary,
+        );
+        let group =
+            router.register_selected_model_subscriber("entity-123", Some("gemini-2.5-pro".into()));
+        assert_eq!(group, "entity-subscriber.entity-123.default");
+        assert_eq!(router.selected_chat_model(), None);
     }
 
     // ── Trace final_tier tests ────────────────────────────────────

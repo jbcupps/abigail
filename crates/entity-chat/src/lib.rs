@@ -1797,19 +1797,19 @@ mod tests {
             .insert_turn(&abigail_memory::ConversationTurn::new(
                 "older-session",
                 "assistant",
-                "Email bridge details: host 127.0.0.1 port 7654 STARTTLS auth required",
+                "Legacy bridge details: host 127.0.0.1 port 7654 secure auth required",
             ))
             .unwrap();
         store
             .insert_memory(&abigail_memory::Memory::distilled(
-                "Email bridge host is 127.0.0.1 and uses STARTTLS".to_string(),
+                "Legacy bridge host is 127.0.0.1 and uses secure transport".to_string(),
             ))
             .unwrap();
 
         let messages = build_memory_context(
             &store,
             "current-session",
-            "use the email bridge details from earlier",
+            "use the bridge details from earlier",
             &ContextBudget::default(),
         );
 
@@ -1830,7 +1830,7 @@ mod tests {
             .insert_turn(&abigail_memory::ConversationTurn::new(
                 "older-session",
                 "assistant",
-                "SMTP bridge is on port 2525",
+                "The bridge listener is on port 2525",
             ))
             .unwrap();
 

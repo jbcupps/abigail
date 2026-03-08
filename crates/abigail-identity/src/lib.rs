@@ -4,14 +4,23 @@
 //! Zero Tauri imports — only uses `abigail_core`, `ed25519_dalek`, `serde`, `uuid`, `std`.
 
 use abigail_core::{
-    generate_master_key, load_master_key, sign_agent_key, verify_agent_signature, AgentEntry,
-    AppConfig, GlobalConfig, SecretsVault,
+    encrypted_storage, generate_master_key, load_master_key, sign_agent_key,
+    verify_agent_signature, AgentEntry, AppConfig, GlobalConfig, SecretsVault,
 };
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RecoveryBundle {
+    format: String,
+    agent_id: String,
+    agent_name: Option<String>,
+    created_at: String,
+    private_key_base64: String,
+}
 
 /// Information about an agent identity for the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +87,20 @@ pub struct IdentityManager {
 }
 
 impl IdentityManager {
+    fn normalize_agent_directory(&self, directory: &Path) -> Result<PathBuf, String> {
+        abigail_core::global_config::normalize_agent_directory(directory).map_err(|e| e.to_string())
+    }
+
+    fn resolve_agent_dir(&self, directory: &Path) -> Result<PathBuf, String> {
+        let relative = self.normalize_agent_directory(directory)?;
+        abigail_core::path_guard::resolve_within_root(&self.data_root, &relative, "agent directory")
+            .map_err(|e| e.to_string())
+    }
+
+    fn registry_directory_for(&self, agent_id: &str) -> PathBuf {
+        PathBuf::from("identities").join(agent_id)
+    }
+
     /// Create a new IdentityManager, loading GlobalConfig and master key from disk.
     /// If master key doesn't exist, generates one (first-run bootstrap).
     pub fn new(data_root: PathBuf) -> anyhow::Result<Self> {
@@ -153,11 +176,7 @@ impl IdentityManager {
         let mut agents = Vec::new();
 
         for entry in &gc.agents {
-            let agent_dir = if entry.directory.is_absolute() {
-                entry.directory.clone()
-            } else {
-                self.data_root.join(&entry.directory)
-            };
+            let agent_dir = self.resolve_agent_dir(&entry.directory)?;
 
             let config_path = agent_dir.join("config.json");
             let (birth_complete, birth_date) = if config_path.exists() {
@@ -189,11 +208,7 @@ impl IdentityManager {
             .find_agent(agent_id)
             .ok_or_else(|| format!("Agent {} not registered", agent_id))?;
 
-        let agent_dir = if entry.directory.is_absolute() {
-            entry.directory.clone()
-        } else {
-            self.data_root.join(&entry.directory)
-        };
+        let agent_dir = self.resolve_agent_dir(&entry.directory)?;
 
         // Read the agent's public key
         let pubkey_path = agent_dir.join("external_pubkey.bin");
@@ -242,11 +257,7 @@ impl IdentityManager {
             .find_agent(agent_id)
             .ok_or_else(|| format!("Agent {} not registered", agent_id))?;
 
-        let agent_dir = if entry.directory.is_absolute() {
-            entry.directory.clone()
-        } else {
-            self.data_root.join(&entry.directory)
-        };
+        let agent_dir = self.resolve_agent_dir(&entry.directory)?;
 
         let config_path = agent_dir.join("config.json");
         if !config_path.exists() {
@@ -344,7 +355,7 @@ impl IdentityManager {
             gc.register_agent(AgentEntry {
                 id: uuid.clone(),
                 name: name.to_string(),
-                directory: PathBuf::from(format!("identities/{}", uuid)),
+                directory: self.registry_directory_for(&uuid),
             })
             .map_err(|e| e.to_string())?;
             gc.save(&self.data_root).map_err(|e| e.to_string())?;
@@ -366,11 +377,7 @@ impl IdentityManager {
             .find_agent(agent_id)
             .ok_or_else(|| format!("Agent {} not registered", agent_id))?;
 
-        let agent_dir = if entry.directory.is_absolute() {
-            entry.directory.clone()
-        } else {
-            self.data_root.join(&entry.directory)
-        };
+        let agent_dir = self.resolve_agent_dir(&entry.directory)?;
         drop(gc);
 
         // Read the agent's public key (generated during birth)
@@ -393,7 +400,8 @@ impl IdentityManager {
         // Sign with master key and write signature
         let signature = sign_agent_key(&self.master_key, &agent_pubkey);
         let sig_path = agent_dir.join("signature.sig");
-        std::fs::write(&sig_path, &signature).map_err(|e| e.to_string())?;
+        abigail_core::secure_fs::write_bytes_atomic(&sig_path, &signature)
+            .map_err(|e| e.to_string())?;
 
         tracing::info!(
             "Signed agent {} with Hive master key (post-birth)",
@@ -409,11 +417,7 @@ impl IdentityManager {
             .find_agent(agent_id)
             .ok_or_else(|| format!("Agent {} not registered", agent_id))?;
 
-        let agent_dir = if entry.directory.is_absolute() {
-            entry.directory.clone()
-        } else {
-            self.data_root.join(&entry.directory)
-        };
+        let agent_dir = self.resolve_agent_dir(&entry.directory)?;
         Ok(agent_dir)
     }
 
@@ -479,8 +483,42 @@ impl IdentityManager {
         Ok(agent_docs)
     }
 
-    /// Save the recovery key to a text file in the agent's Documents folder.
+    /// Save an encrypted recovery bundle in the agent's Documents folder.
     pub fn save_recovery_key(&self, agent_id: &str, private_key: &str) -> Result<String, String> {
+        let docs_dir = self.create_documents_folder(agent_id)?;
+        let file_path = docs_dir.join("RECOVERY_BUNDLE.abigail-recovery");
+        let agent_name = {
+            let gc = self.global_config.read().map_err(|e| e.to_string())?;
+            gc.find_agent(agent_id).map(|entry| entry.name.clone())
+        };
+        let bundle = RecoveryBundle {
+            format: "abigail-recovery-bundle-v1".to_string(),
+            agent_id: agent_id.to_string(),
+            agent_name,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            private_key_base64: private_key.to_string(),
+        };
+        let content = serde_json::to_vec_pretty(&bundle).map_err(|e| e.to_string())?;
+        encrypted_storage::write_encrypted(&file_path, &content).map_err(|e| {
+            format!(
+                "Failed to write encrypted recovery bundle '{}': {}",
+                file_path.display(),
+                e
+            )
+        })?;
+        self.append_crypto_audit(
+            "recovery_bundle_saved",
+            &format!("agent_id={} path={}", agent_id, file_path.display()),
+        )?;
+        Ok(file_path.to_string_lossy().to_string())
+    }
+
+    /// Explicit plaintext export for offline storage and cross-device recovery.
+    pub fn save_recovery_key_plaintext(
+        &self,
+        agent_id: &str,
+        private_key: &str,
+    ) -> Result<String, String> {
         let docs_dir = self.create_documents_folder(agent_id)?;
         let file_path = docs_dir.join("RECOVERY_KEY.txt");
 
@@ -497,10 +535,34 @@ impl IdentityManager {
             chrono::Utc::now().to_rfc3339()
         );
 
-        std::fs::write(&file_path, content)
+        abigail_core::secure_fs::write_string_atomic(&file_path, &content)
             .map_err(|e| format!("Failed to write recovery key file: {}", e))?;
+        self.append_crypto_audit(
+            "recovery_key_plaintext_saved",
+            &format!("agent_id={} path={}", agent_id, file_path.display()),
+        )?;
 
         Ok(file_path.to_string_lossy().to_string())
+    }
+
+    fn append_crypto_audit(&self, action: &str, detail: &str) -> Result<(), String> {
+        use std::io::Write as _;
+
+        let audit_path = self.data_root.join("crypto_audit.log");
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&audit_path)
+            .map_err(|e| format!("Failed to open crypto audit log: {}", e))?;
+        writeln!(
+            file,
+            "{} {} {}",
+            chrono::Utc::now().to_rfc3339(),
+            action,
+            detail
+        )
+        .map_err(|e| format!("Failed to write crypto audit log: {}", e))?;
+        Ok(())
     }
 
     /// Check if any agents exist.
@@ -608,7 +670,8 @@ impl IdentityManager {
                 if let Ok(agent_pubkey) = VerifyingKey::from_bytes(&pubkey_array) {
                     let signature = sign_agent_key(&self.master_key, &agent_pubkey);
                     let sig_path = agent_dir.join("signature.sig");
-                    std::fs::write(&sig_path, &signature).map_err(|e| e.to_string())?;
+                    abigail_core::secure_fs::write_bytes_atomic(&sig_path, &signature)
+                        .map_err(|e| e.to_string())?;
                 }
             }
         }
@@ -619,7 +682,7 @@ impl IdentityManager {
             gc.register_agent(AgentEntry {
                 id: uuid.clone(),
                 name: agent_name.clone(),
-                directory: PathBuf::from(format!("identities/{}", uuid)),
+                directory: self.registry_directory_for(&uuid),
             })
             .map_err(|e| e.to_string())?;
             gc.save(&self.data_root).map_err(|e| e.to_string())?;
@@ -642,11 +705,7 @@ impl IdentityManager {
                 .ok_or_else(|| format!("Agent {} not registered", agent_id))?
                 .clone();
 
-            let dir = if entry.directory.is_absolute() {
-                entry.directory.clone()
-            } else {
-                self.data_root.join(&entry.directory)
-            };
+            let dir = self.resolve_agent_dir(&entry.directory)?;
 
             gc.remove_agent(agent_id);
             gc.save(&self.data_root).map_err(|e| e.to_string())?;
@@ -672,11 +731,7 @@ impl IdentityManager {
                 .ok_or_else(|| format!("Agent {} not registered", agent_id))?
                 .clone();
 
-            let dir = if entry.directory.is_absolute() {
-                entry.directory.clone()
-            } else {
-                self.data_root.join(&entry.directory)
-            };
+            let dir = self.resolve_agent_dir(&entry.directory)?;
 
             gc.remove_agent(agent_id);
             gc.save(&self.data_root).map_err(|e| e.to_string())?;
@@ -729,11 +784,7 @@ impl IdentityManager {
                 .ok_or_else(|| format!("Agent {} not registered", agent_id))?
                 .clone();
 
-            let dir = if entry.directory.is_absolute() {
-                entry.directory.clone()
-            } else {
-                self.data_root.join(&entry.directory)
-            };
+            let dir = self.resolve_agent_dir(&entry.directory)?;
             (entry.name, dir)
         };
 
@@ -915,7 +966,8 @@ impl IdentityManager {
                 if let Ok(agent_pubkey) = VerifyingKey::from_bytes(&pubkey_array) {
                     let signature = sign_agent_key(&self.master_key, &agent_pubkey);
                     let sig_path = agent_dir.join("signature.sig");
-                    std::fs::write(&sig_path, &signature).map_err(|e| e.to_string())?;
+                    abigail_core::secure_fs::write_bytes_atomic(&sig_path, &signature)
+                        .map_err(|e| e.to_string())?;
                 }
             }
         }
@@ -929,7 +981,7 @@ impl IdentityManager {
             gc.register_agent(AgentEntry {
                 id: new_uuid.clone(),
                 name: agent_name.clone(),
-                directory: PathBuf::from(format!("identities/{}", new_uuid)),
+                directory: self.registry_directory_for(&new_uuid),
             })
             .map_err(|e| e.to_string())?;
             gc.save(&self.data_root).map_err(|e| e.to_string())?;
@@ -1023,6 +1075,35 @@ fn parse_backup_dir_name(dir_name: &str) -> (String, String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_manager() -> IdentityManager {
+        let tmp = std::env::temp_dir().join(format!("abigail_identity_test_{}", Uuid::new_v4()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        IdentityManager {
+            data_root: tmp.clone(),
+            global_config: RwLock::new(GlobalConfig::new(&tmp)),
+            master_key: SigningKey::from_bytes(&[9u8; 32]),
+        }
+    }
+
+    #[test]
+    fn resolve_agent_dir_rejects_absolute_registry_paths() {
+        let manager = test_manager();
+        let absolute = std::env::temp_dir().join("identities/absolute-agent");
+        assert!(manager.resolve_agent_dir(&absolute).is_err());
+        let _ = std::fs::remove_dir_all(manager.data_root());
+    }
+
+    #[test]
+    fn resolve_agent_dir_accepts_relative_registry_paths() {
+        let manager = test_manager();
+        let resolved = manager
+            .resolve_agent_dir(Path::new("identities/test-agent"))
+            .unwrap();
+        assert_eq!(resolved, manager.data_root().join("identities/test-agent"));
+        let _ = std::fs::remove_dir_all(manager.data_root());
+    }
 
     #[test]
     fn migrate_legacy_identity_copies_current_vault_and_db_files() {

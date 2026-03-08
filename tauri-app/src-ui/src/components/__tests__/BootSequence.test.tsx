@@ -23,6 +23,16 @@ function mockBootInvoke(identityStatus: "Clean" | "Broken" | "Complete") {
           public_key_path: "C:/tmp/external_pubkey.bin",
           newly_generated: true,
         });
+      case "inspect_identity_integrity":
+        return Promise.resolve({
+          status: "repairable",
+          summary: "Constitutional verification failed for soul.md.",
+          details: ["Signature mismatch detected for soul.md"],
+        });
+      case "save_recovery_key":
+        return Promise.resolve("C:/tmp/RECOVERY_BUNDLE.abigail-recovery");
+      case "save_recovery_key_plaintext":
+        return Promise.resolve("C:/tmp/RECOVERY_KEY.txt");
       default:
         return Promise.resolve(null);
     }
@@ -53,6 +63,9 @@ describe("BootSequence", () => {
     expect(
       await screen.findByRole("heading", { name: /identity verification failed/i })
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(/constitutional verification failed for soul\.md/i)
+    ).toBeInTheDocument();
     expect(onComplete).not.toHaveBeenCalled();
   });
 
@@ -82,6 +95,21 @@ describe("BootSequence", () => {
       expect(mockInvoke).toHaveBeenCalledWith("advance_to_connectivity");
     });
     expect(mockInvoke).not.toHaveBeenCalledWith("advance_to_crystallization");
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it("shows both encrypted and explicit plaintext recovery export actions", async () => {
+    mockBootInvoke("Clean");
+    const onComplete = vi.fn();
+
+    render(<BootSequence onComplete={onComplete} />);
+
+    expect(
+      await screen.findByRole("button", { name: /save encrypted recovery bundle/i })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /save plaintext key \(advanced\)/i })
+    ).toBeInTheDocument();
     expect(onComplete).not.toHaveBeenCalled();
   });
 });

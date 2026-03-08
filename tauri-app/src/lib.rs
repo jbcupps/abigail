@@ -42,11 +42,14 @@ use abigail_memory::MemoryStore;
 use abigail_router::{
     IdEgoRouter, OrchestrationScheduler, SubagentDefinition, SubagentManager, SubagentProvider,
 };
+use abigail_runtime::{
+    create_browser_skill, register_dynamic_api_skills, register_hive_management_skill,
+    register_preloaded_skills, register_skill_factory, register_supported_native_skills,
+};
 use abigail_skills::protocol::mcp::McpSkillRuntime;
 use abigail_skills::{
-    build_preloaded_skills, DynamicApiSkill, InstructionRegistry, ResourceLimits, Skill,
-    SkillConfig, SkillExecutionPolicy, SkillExecutor, SkillRegistry, SkillsWatcher,
-    PRELOADED_SKILLS_VERSION,
+    DynamicApiSkill, InstructionRegistry, ResourceLimits, Skill, SkillConfig, SkillExecutionPolicy,
+    SkillExecutor, SkillRegistry, SkillsWatcher, PRELOADED_SKILLS_VERSION,
 };
 use abigail_streaming::MemoryBroker;
 use identity_manager::IdentityManager;
@@ -176,116 +179,35 @@ pub fn skill_audit_log(data_dir: &Path, action: &str, detail: &str) {
         .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
 }
 
-/// Build and optionally initialize the Email skill from current vault.
-/// Used after secret updates so the skill picks up new credentials without
-/// blocking the active Tokio runtime thread.
-pub async fn create_email_skill_for_registry(state: &AppState) -> Result<Arc<dyn Skill>, String> {
-    use skill_email::EmailSkill;
-    let manifest = EmailSkill::default_manifest();
-    let mut skill = EmailSkill::new(manifest);
-    let (
-        imap_user,
-        imap_password,
-        imap_host,
-        imap_port,
-        imap_tls_mode,
-        smtp_host,
-        smtp_port,
-        smtp_user,
-        smtp_password,
-        smtp_tls_mode,
-    ) = {
-        let v = state.skills_secrets.lock().map_err(|e| e.to_string())?;
+pub fn create_browser_skill_for_registry(state: &AppState) -> Result<Arc<dyn Skill>, String> {
+    let (data_dir, allow_local_network, entity_id) = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let entity_id = state
+            .active_agent_id
+            .read()
+            .map_err(|e| e.to_string())?
+            .clone();
         (
-            v.get_secret("imap_user").unwrap_or("").to_string(),
-            v.get_secret("imap_password").unwrap_or("").to_string(),
-            v.get_secret("imap_host").unwrap_or("").to_string(),
-            v.get_secret("imap_port").unwrap_or("993").to_string(),
-            v.get_secret("imap_tls_mode")
-                .unwrap_or("IMPLICIT")
-                .to_string(),
-            v.get_secret("smtp_host").unwrap_or("").to_string(),
-            v.get_secret("smtp_port").unwrap_or("587").to_string(),
-            v.get_secret("smtp_user").unwrap_or("").to_string(),
-            v.get_secret("smtp_password").unwrap_or("").to_string(),
-            v.get_secret("smtp_tls_mode")
-                .unwrap_or("STARTTLS")
-                .to_string(),
+            config.data_dir.clone(),
+            config.autonomy_profile.allows_local_network_access(),
+            entity_id,
         )
     };
-
-    let mut values = HashMap::new();
-    values.insert(
-        "imap_host".to_string(),
-        serde_json::Value::String(imap_host),
-    );
-    values.insert(
-        "imap_port".to_string(),
-        serde_json::json!(imap_port.parse::<u64>().unwrap_or(993)),
-    );
-    values.insert(
-        "imap_user".to_string(),
-        serde_json::Value::String(imap_user),
-    );
-    values.insert(
-        "imap_tls_mode".to_string(),
-        serde_json::Value::String(imap_tls_mode),
-    );
-    values.insert(
-        "smtp_host".to_string(),
-        serde_json::Value::String(smtp_host),
-    );
-    values.insert(
-        "smtp_port".to_string(),
-        serde_json::json!(smtp_port.parse::<u64>().unwrap_or(587)),
-    );
-    values.insert(
-        "smtp_user".to_string(),
-        serde_json::Value::String(smtp_user),
-    );
-    values.insert(
-        "smtp_tls_mode".to_string(),
-        serde_json::Value::String(smtp_tls_mode),
-    );
-
-    let mut secrets = HashMap::new();
-    secrets.insert("imap_password".to_string(), imap_password);
-    secrets.insert("smtp_password".to_string(), smtp_password);
-
-    let skill_config = SkillConfig {
-        values,
-        secrets,
-        limits: ResourceLimits::default(),
-        permissions: vec![],
-        stream_broker: Some(state.stream_broker.clone()),
-    };
-
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        skill.initialize(skill_config),
-    )
-    .await
-    {
-        Ok(Ok(())) => {
-            tracing::info!("Email skill initialized successfully");
-        }
-        Ok(Err(e)) => {
-            tracing::warn!("Email skill init failed (registered uninitialized): {}", e);
-        }
-        Err(_) => {
-            tracing::warn!("Email skill init timed out after 15s (IMAP server unreachable?)");
-        }
-    }
-
-    Ok(Arc::new(skill))
+    Ok(create_browser_skill(
+        data_dir,
+        entity_id,
+        allow_local_network,
+    ))
 }
 
-/// Blocking startup helper for sync setup paths that need the Email skill
-/// before the app event loop is fully running.
-pub fn create_email_skill_for_registry_blocking(
-    state: &AppState,
-) -> Result<Arc<dyn Skill>, String> {
-    tauri::async_runtime::block_on(create_email_skill_for_registry(state))
+pub fn install_identity_bound_skills(state: &AppState) -> Result<(), String> {
+    let browser_skill_id = skill_browser::BrowserSkill::default_manifest().id.clone();
+    let _ = state.registry.unregister(&browser_skill_id);
+    let browser_skill = create_browser_skill_for_registry(state)?;
+    state
+        .registry
+        .register(browser_skill_id, browser_skill)
+        .map_err(|e| e.to_string())
 }
 
 fn get_config() -> AppConfig {
@@ -393,8 +315,14 @@ pub async fn rebuild_router(state: &AppState) -> Result<(), String> {
 
     // Background model discovery via ModelRegistry (non-blocking).
     // Refreshes the active ego provider's model list and persists to config.
-    let ego_provider = hive_config.ego_provider_name.clone();
-    let ego_key = hive_config.ego_api_key.clone();
+    let ego_provider = hive_config
+        .ego_provider
+        .as_ref()
+        .map(|selection| selection.provider.clone());
+    let ego_key = hive_config
+        .ego_provider
+        .as_ref()
+        .and_then(|selection| selection.api_key());
     let registry_handle = state.model_registry.clone();
     tokio::spawn(async move {
         if let (Some(provider), Some(key)) = (ego_provider, ego_key) {
@@ -670,14 +598,7 @@ fn try_run() -> Result<(), String> {
 
             // Register Hive Management Skill
             let hive_ops = Arc::new(crate::hive_ops::TauriHiveOps::new(handle.clone()));
-            let hive_skill = Arc::new(abigail_skills::hive::HiveManagementSkill::new(hive_ops));
-            state
-                .registry
-                .register(
-                    abigail_skills::manifest::SkillId("builtin.hive_management".to_string()),
-                    hive_skill,
-                )
-                .map_err(|e| e.to_string())?;
+            register_hive_management_skill(&state.registry, hive_ops);
 
             // Register Backup Management Skill
             let backup_ops = Arc::new(crate::backup_ops::TauriBackupOps::new(handle.clone()));
@@ -694,29 +615,11 @@ fn try_run() -> Result<(), String> {
 
             // Register Skill Factory with registry + secrets for immediate re-registration
             let skills_dir = state.config.read().unwrap().data_dir.join("skills");
-            let factory_skill = Arc::new(
-                abigail_skills::factory::SkillFactory::new(skills_dir)
-                    .with_registry(state.registry.clone())
-                    .with_secrets(state.skills_secrets.clone()),
-            );
-            state
-                .registry
-                .register(
-                    abigail_skills::manifest::SkillId("builtin.skill_factory".to_string()),
-                    factory_skill,
-                )
-                .map_err(|e| e.to_string())?;
+            register_skill_factory(&state.registry, skills_dir.clone(), state.skills_secrets.clone());
 
             // Bootstrap preloaded dynamic skills when embedded version advances.
             {
-                let preloaded = build_preloaded_skills(Some(state.skills_secrets.clone()));
-                for skill in preloaded {
-                    let skill_id = skill.manifest().id.clone();
-                    state
-                        .registry
-                        .register(skill_id, Arc::new(skill))
-                        .map_err(|e| e.to_string())?;
-                }
+                register_preloaded_skills(&state.registry, state.skills_secrets.clone());
 
                 let needs_bootstrap = {
                     let cfg = state.config.read().map_err(|e| e.to_string())?;
@@ -732,37 +635,19 @@ fn try_run() -> Result<(), String> {
             // Discover runtime dynamic API skills from data_dir/skills/*.json
             {
                 let cfg = state.config.read().map_err(|e| e.to_string())?;
-                let dynamic_skills = DynamicApiSkill::discover(
+                let count = register_dynamic_api_skills(
+                    &state.registry,
                     &cfg.data_dir.join("skills"),
-                    Some(state.skills_secrets.clone()),
+                    state.skills_secrets.clone(),
                 );
                 drop(cfg);
-                for skill in dynamic_skills {
-                    let skill_id = skill.manifest().id.clone();
-                    state
-                        .registry
-                        .register(skill_id, Arc::new(skill))
-                        .map_err(|e| e.to_string())?;
+                if count > 0 {
+                    tracing::info!("Registered {} dynamic skill(s) in Tauri runtime", count);
                 }
             }
 
-            // Register and initialize Email (IMAP/SMTP) skill.
-            // Mirrors entity-daemon: always registers the skill (so its manifest
-            // declares imap_*/smtp_* secrets for namespace validation), and
-            // initializes the IMAP transport only when credentials are present.
-            {
-                let skill_id = skill_email::EmailSkill::default_manifest().id.clone();
-                match create_email_skill_for_registry_blocking(&state) {
-                    Ok(skill) => {
-                        if let Err(e) = state.registry.register(skill_id, skill) {
-                            tracing::warn!("Failed to register Email skill: {}", e);
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("Email skill creation failed: {}", e);
-                    }
-                }
-            }
+            // Register identity-bound skills that need the active entity data dir.
+            install_identity_bound_skills(&state)?;
 
             // Register native Rust skills (compiled into the binary).
             {
@@ -773,87 +658,11 @@ fn try_run() -> Result<(), String> {
                         cfg.autonomy_profile.allows_local_network_access(),
                     )
                 };
-                let skills_secrets = state.skills_secrets.clone();
-                let mut allowed_roots = vec![data_dir.clone()];
-                // Allow scratch work in system temp dir
-                allowed_roots.push(std::env::temp_dir());
-                // Allow user-facing outputs in Documents/Abigail/
-                if let Some(docs_dir) = directories::UserDirs::new()
-                    .and_then(|u| u.document_dir().map(|d| d.to_path_buf()))
-                {
-                    allowed_roots.push(docs_dir.join("Abigail"));
-                }
-
-                macro_rules! register_skill {
-                    ($skill:expr) => {{
-                        let s = $skill;
-                        let id = s.manifest().id.clone();
-                        if let Err(e) = state.registry.register(id.clone(), Arc::new(s)) {
-                            tracing::warn!("Failed to register {}: {}", id.0, e);
-                        }
-                    }};
-                }
-
-                register_skill!(skill_clipboard::ClipboardSkill::new(
-                    skill_clipboard::ClipboardSkill::default_manifest()
-                ));
-                register_skill!(skill_shell::ShellSkill::new(
-                    skill_shell::ShellSkill::default_manifest()
-                ));
-                register_skill!(skill_git::GitSkill::new(
-                    skill_git::GitSkill::default_manifest()
-                ));
-                register_skill!(skill_notification::NotificationSkill::new(
-                    skill_notification::NotificationSkill::default_manifest()
-                ));
-                register_skill!(skill_system_monitor::SystemMonitorSkill::new(
-                    skill_system_monitor::SystemMonitorSkill::default_manifest()
-                ));
-                register_skill!(skill_http::HttpSkill::new_with_local_network(
-                    skill_http::HttpSkill::default_manifest(),
-                    allow_local_network
-                ));
-                register_skill!(skill_browser::BrowserSkill::new_with_local_network(
-                    skill_browser::BrowserSkill::default_manifest(),
-                    allow_local_network
-                ));
-                register_skill!(skill_calendar::CalendarSkill::new(
-                    skill_calendar::CalendarSkill::default_manifest(),
-                    data_dir.clone()
-                ));
-                register_skill!(skill_knowledge_base::KnowledgeBaseSkill::new(
-                    skill_knowledge_base::KnowledgeBaseSkill::default_manifest(),
-                    data_dir.clone()
-                ));
-                register_skill!(skill_filesystem::FilesystemSkill::new(
-                    skill_filesystem::FilesystemSkill::default_manifest(),
-                    allowed_roots.clone()
-                ));
-                register_skill!(skill_database::DatabaseSkill::new(
-                    skill_database::DatabaseSkill::default_manifest(),
-                    allowed_roots.clone()
-                ));
-                register_skill!(skill_code_analysis::CodeAnalysisSkill::new(
-                    skill_code_analysis::CodeAnalysisSkill::default_manifest(),
-                    allowed_roots.clone()
-                ));
-                register_skill!(skill_document::DocumentSkill::new(
-                    skill_document::DocumentSkill::default_manifest(),
-                    allowed_roots.clone()
-                ));
-                register_skill!(skill_image::ImageSkill::new(
-                    skill_image::ImageSkill::default_manifest(),
-                    allowed_roots.clone()
-                ));
-                register_skill!(skill_web_search::WebSearchSkill::with_secrets(
-                    skill_web_search::WebSearchSkill::default_manifest(),
-                    skills_secrets.clone()
-                ));
-                register_skill!(
-                    skill_perplexity_search::PerplexitySearchSkill::with_secrets(
-                        skill_perplexity_search::PerplexitySearchSkill::default_manifest(),
-                        skills_secrets.clone()
-                    )
+                register_supported_native_skills(
+                    &state.registry,
+                    &data_dir,
+                    allow_local_network,
+                    state.skills_secrets.clone(),
                 );
             }
 
@@ -1098,6 +907,7 @@ fn try_run() -> Result<(), String> {
         .manage(log_buffer)
         .invoke_handler(tauri::generate_handler![
             run_startup_checks,
+            inspect_identity_integrity,
             check_hive_status,
             get_identities,
             get_active_agent,
@@ -1113,6 +923,7 @@ fn try_run() -> Result<(), String> {
             disconnect_agent,
             suspend_agent,
             save_recovery_key,
+            save_recovery_key_plaintext,
             migrate_legacy_identity,
             check_existing_identity,
             archive_identity,
@@ -1148,6 +959,9 @@ fn try_run() -> Result<(), String> {
             get_mcp_servers,
             mcp_list_tools,
             list_approved_skills,
+            list_trusted_skill_signers,
+            add_trusted_skill_signer,
+            remove_trusted_skill_signer,
             approve_skill,
             list_signed_skill_allowlist,
             upsert_signed_skill_allowlist_entry,
@@ -1227,6 +1041,8 @@ fn try_run() -> Result<(), String> {
             upload_chat_attachment,
             get_entity_documents_path,
             save_to_entity_docs,
+            list_browser_sessions,
+            clear_browser_session,
             get_forge_scenarios,
             crystallize_forge,
             preview_forge_primary_intelligence,

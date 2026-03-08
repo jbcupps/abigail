@@ -1,13 +1,32 @@
 use crate::identity_manager::{AgentIdentityInfo, BackupInfo, IdentitySummary};
 use crate::state::AppState;
-use abigail_core::SecretsVault;
+use abigail_core::{
+    verify_constitutional_integrity, CoreError, HybridUnlockProvider, SecretsVault,
+};
 use serde::{Deserialize, Serialize};
 use tauri::State;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum IntegrityStatus {
+    Ok,
+    Repairable,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdentityIntegrityReport {
+    pub status: IntegrityStatus,
+    pub summary: String,
+    pub details: Vec<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StartupCheckResult {
     pub heartbeat_ok: bool,
     pub verification_ok: bool,
+    pub integrity: IdentityIntegrityReport,
+    pub allow_continue: bool,
     pub error: Option<String>,
 }
 
@@ -16,6 +35,12 @@ pub async fn run_startup_checks(state: State<'_, AppState>) -> Result<StartupChe
     let mut result = StartupCheckResult {
         heartbeat_ok: false,
         verification_ok: false,
+        integrity: IdentityIntegrityReport {
+            status: IntegrityStatus::Ok,
+            summary: "Integrity checks not run yet.".to_string(),
+            details: Vec::new(),
+        },
+        allow_continue: false,
         error: None,
     };
 
@@ -32,33 +57,137 @@ pub async fn run_startup_checks(state: State<'_, AppState>) -> Result<StartupChe
         Err(e) => {
             result.heartbeat_ok = false;
             result.error = Some(format!("LLM Heartbeat failed: {}", e));
+            result.allow_continue = true;
             return Ok(result);
         }
     }
 
     // 2. Identity verification
-    let active_id = {
-        let active = state.active_agent_id.read().map_err(|e| e.to_string())?;
-        active.clone()
-    };
-
-    if let Some(agent_id) = active_id {
-        match state.identity_manager.verify_agent(&agent_id) {
-            Ok(_) => {
-                result.verification_ok = true;
-            }
-            Err(e) => {
-                result.verification_ok = false;
-                result.error = Some(format!("Identity verification failed: {}", e));
-                return Ok(result);
-            }
-        }
-    } else {
-        // If no active agent, verification is skipped but not failed
-        result.verification_ok = true;
+    let integrity = inspect_identity_integrity_inner(&state)?;
+    result.verification_ok = integrity.status == IntegrityStatus::Ok;
+    result.integrity = integrity.clone();
+    if integrity.status != IntegrityStatus::Ok {
+        result.error = Some(integrity.summary.clone());
+        return Ok(result);
     }
 
     Ok(result)
+}
+
+#[tauri::command]
+pub fn inspect_identity_integrity(
+    state: State<AppState>,
+) -> Result<IdentityIntegrityReport, String> {
+    inspect_identity_integrity_inner(&state)
+}
+
+fn inspect_identity_integrity_inner(
+    state: &State<'_, AppState>,
+) -> Result<IdentityIntegrityReport, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?.clone();
+    let active_id = state
+        .active_agent_id
+        .read()
+        .map_err(|e| e.to_string())?
+        .clone();
+    Ok(evaluate_identity_integrity(
+        state,
+        active_id.as_deref(),
+        &config,
+    ))
+}
+
+fn evaluate_identity_integrity(
+    state: &State<'_, AppState>,
+    agent_id: Option<&str>,
+    config: &abigail_core::AppConfig,
+) -> IdentityIntegrityReport {
+    use abigail_core::UnlockProvider as _;
+
+    let unlock = HybridUnlockProvider::new();
+    if let Err(e) = unlock.root_kek() {
+        return blocked_report(
+            "Vault trust root could not be recovered. Abigail is refusing to start with an unverified KEK.".to_string(),
+            vec![e.to_string()],
+        );
+    }
+
+    if !config.birth_complete {
+        return ok_report(
+            "Birth is not complete yet; constitutional integrity is not required.".to_string(),
+        );
+    }
+
+    if let Some(id) = agent_id {
+        if let Err(e) = state.identity_manager.verify_agent(id) {
+            return blocked_report(
+                "Hive identity verification failed. The agent public key is no longer trusted by the current Hive master key.".to_string(),
+                vec![e],
+            );
+        }
+    }
+
+    match verify_constitutional_integrity(config) {
+        Ok(_) => ok_report(
+            "Integrity verified: stable KEK, Hive signature, and constitutional signatures are all valid.".to_string(),
+        ),
+        Err(err) => classify_constitutional_error(err),
+    }
+}
+
+fn classify_constitutional_error(err: CoreError) -> IdentityIntegrityReport {
+    match err {
+        CoreError::SignatureInvalid { document } => repairable_report(
+            format!(
+                "Constitutional verification failed for {}. Abigail will not run until the document set is re-signed or reset.",
+                document
+            ),
+            vec![format!("Signature mismatch detected for {}", document)],
+        ),
+        CoreError::DocumentNotFound(document) => repairable_report(
+            format!(
+                "Required constitutional artifact '{}' is missing. Abigail needs repair before chat can continue.",
+                document
+            ),
+            vec![format!("Missing constitutional artifact: {}", document)],
+        ),
+        CoreError::Config(message) | CoreError::Crypto(message) => repairable_report(
+            "Constitutional metadata is malformed or tampered. Abigail needs repair before chat can continue.".to_string(),
+            vec![message],
+        ),
+        CoreError::Vault(message) => blocked_report(
+            "The constitutional public key is unavailable or unreadable, so the trust chain cannot be re-established automatically.".to_string(),
+            vec![message],
+        ),
+        other => blocked_report(
+            "Identity integrity verification failed in a non-repairable state.".to_string(),
+            vec![other.to_string()],
+        ),
+    }
+}
+
+fn ok_report(summary: String) -> IdentityIntegrityReport {
+    IdentityIntegrityReport {
+        status: IntegrityStatus::Ok,
+        summary,
+        details: Vec::new(),
+    }
+}
+
+fn repairable_report(summary: String, details: Vec<String>) -> IdentityIntegrityReport {
+    IdentityIntegrityReport {
+        status: IntegrityStatus::Repairable,
+        summary,
+        details,
+    }
+}
+
+fn blocked_report(summary: String, details: Vec<String>) -> IdentityIntegrityReport {
+    IdentityIntegrityReport {
+        status: IntegrityStatus::Blocked,
+        summary,
+        details,
+    }
 }
 
 #[tauri::command]
@@ -87,6 +216,16 @@ pub async fn load_agent(state: State<'_, AppState>, agent_id: String) -> Result<
     tracing::info!("load_agent: loading agent {}", agent_id);
 
     let agent_config = state.identity_manager.load_agent(&agent_id)?;
+    if agent_config.birth_complete {
+        let integrity = evaluate_identity_integrity(&state, Some(&agent_id), &agent_config);
+        if integrity.status != IntegrityStatus::Ok {
+            return Err(
+                format!("{} {}", integrity.summary, integrity.details.join(" | "))
+                    .trim()
+                    .to_string(),
+            );
+        }
+    }
 
     {
         let mut config = state.config.write().map_err(|e| e.to_string())?;
@@ -116,6 +255,8 @@ pub async fn load_agent(state: State<'_, AppState>, agent_id: String) -> Result<
         let mut active = state.active_agent_id.write().map_err(|e| e.to_string())?;
         *active = Some(agent_id.clone());
     }
+
+    crate::install_identity_bound_skills(&state)?;
 
     Ok(())
 }
@@ -223,6 +364,19 @@ pub fn save_recovery_key(state: State<AppState>, private_key: String) -> Result<
     state
         .identity_manager
         .save_recovery_key(agent_id, &private_key)
+}
+
+#[tauri::command]
+pub fn save_recovery_key_plaintext(
+    state: State<AppState>,
+    private_key: String,
+) -> Result<String, String> {
+    let active = state.active_agent_id.read().map_err(|e| e.to_string())?;
+    let agent_id = active.as_ref().ok_or("No active agent loaded")?;
+
+    state
+        .identity_manager
+        .save_recovery_key_plaintext(agent_id, &private_key)
 }
 
 #[tauri::command]

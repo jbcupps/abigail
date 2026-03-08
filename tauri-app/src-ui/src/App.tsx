@@ -34,6 +34,12 @@ type AppState =
 interface StartupCheckResult {
   heartbeat_ok: boolean;
   verification_ok: boolean;
+  integrity: {
+    status: "ok" | "repairable" | "blocked";
+    summary: string;
+    details: string[];
+  };
+  allow_continue: boolean;
   error: string | null;
 }
 
@@ -97,6 +103,7 @@ function SkillToastContainer({ toasts }: { toasts: SkillToast[] }) {
 function AppInner() {
   const [appState, setAppState] = useState<AppState>("splash");
   const [startupError, setStartupError] = useState<string | null>(null);
+  const [startupAllowContinue, setStartupAllowContinue] = useState(false);
   const [existingIdentity, setExistingIdentity] = useState<IdentitySummary | null>(null);
   const [forgeOpen, setForgeOpen] = useState(false);
   const [activeSoulId, setActiveSoulId] = useState<string | null>(null);
@@ -232,20 +239,28 @@ function AppInner() {
 
       if (!result.heartbeat_ok) {
         setStartupError(result.error || "LLM heartbeat failed. Is the local LLM server running?");
+        setStartupAllowContinue(result.allow_continue);
         setAppState("startup_failed");
         return;
       }
 
       if (!result.verification_ok && result.error) {
-        setStartupError(result.error);
+        const detailSuffix =
+          result.integrity.details.length > 0
+            ? `\n\n${result.integrity.details.join("\n")}`
+            : "";
+        setStartupError(`${result.error}${detailSuffix}`);
+        setStartupAllowContinue(result.allow_continue);
         setAppState("startup_failed");
         return;
       }
 
       // All checks passed — go to chat (ego mode already set)
+      setStartupAllowContinue(false);
       setAppState("chat");
     } catch (e) {
       setStartupError(String(e));
+      setStartupAllowContinue(false);
       setAppState("startup_failed");
     }
   };
@@ -257,6 +272,7 @@ function AppInner() {
 
   const handleRetry = () => {
     setStartupError(null);
+    setStartupAllowContinue(false);
     setAppState("startup_check");
     runStartupChecks();
   };
@@ -421,12 +437,14 @@ function AppInner() {
             >
               Retry
             </button>
-            <button
-              className="border border-theme-warning text-theme-warning px-4 py-2 rounded hover:bg-theme-warning-dim"
-              onClick={handleContinueAnyway}
-            >
-              Continue anyway
-            </button>
+            {startupAllowContinue && (
+              <button
+                className="border border-theme-warning text-theme-warning px-4 py-2 rounded hover:bg-theme-warning-dim"
+                onClick={handleContinueAnyway}
+              >
+                Continue anyway
+              </button>
+            )}
           </div>
         </div>
       );

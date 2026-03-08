@@ -1,10 +1,11 @@
 use crate::state::AppState;
 use abigail_core::config::SignedSkillAllowlistEntry;
 use abigail_core::{McpServerDefinition, RuntimeMode};
+use abigail_runtime::validate_secret_namespace as validate_runtime_secret_namespace;
 use abigail_skills::protocol::mcp::{HttpMcpClient, McpTool};
 use abigail_skills::{
-    HealthStatus, Skill, SkillExecutionPolicy, SkillId, SkillManifest, ToolDescriptor, ToolOutput,
-    ToolParams,
+    normalize_trusted_signer_key, Skill, SkillExecutionPolicy, SkillId, SkillManifest,
+    ToolDescriptor, ToolOutput, ToolParams,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,6 +21,41 @@ fn refresh_skill_policy(
         .registry
         .set_execution_policy(SkillExecutionPolicy::from_app_config(config))
         .map_err(|e| e.to_string())
+}
+
+fn normalize_existing_trusted_signers(signers: &[String]) -> Result<Vec<String>, String> {
+    let mut normalized = Vec::new();
+    for signer in signers {
+        let canonical = normalize_trusted_signer_key(signer)?;
+        if !normalized.contains(&canonical) {
+            normalized.push(canonical);
+        }
+    }
+    normalized.sort();
+    Ok(normalized)
+}
+
+fn add_trusted_signer_entry(signers: &mut Vec<String>, signer: &str) -> Result<String, String> {
+    let canonical = normalize_trusted_signer_key(signer)?;
+    let mut normalized = normalize_existing_trusted_signers(signers)?;
+    if !normalized.contains(&canonical) {
+        normalized.push(canonical.clone());
+        normalized.sort();
+    }
+    *signers = normalized;
+    Ok(canonical)
+}
+
+fn remove_trusted_signer_entry(signers: &mut Vec<String>, signer: &str) -> Result<String, String> {
+    let canonical = normalize_trusted_signer_key(signer)?;
+    let mut normalized = normalize_existing_trusted_signers(signers)?;
+    let before = normalized.len();
+    normalized.retain(|existing| existing != &canonical);
+    if normalized.len() == before {
+        return Err(format!("Trusted signer not found: {}", canonical));
+    }
+    *signers = normalized;
+    Ok(canonical)
 }
 
 fn resolve_mcp_server_url(
@@ -155,49 +191,13 @@ pub fn validate_secret_namespace_with(
     data_dir: &std::path::Path,
     key: &str,
 ) -> Result<(), String> {
-    if RESERVED_PROVIDER_KEYS.contains(&key) {
-        return Ok(());
-    }
-    let skills = registry.list().map_err(|e| e.to_string())?;
-    if skills
-        .iter()
-        .any(|m| m.secrets.iter().any(|s| s.name == key))
-    {
-        return Ok(());
-    }
-    let discovered = abigail_skills::SkillRegistry::discover(&[data_dir.join("skills")]);
-    if discovered
-        .iter()
-        .any(|m| m.secrets.iter().any(|s| s.name == key))
-    {
-        return Ok(());
-    }
-    Err(format!(
-        "Secret key '{}' is not in the allowed namespace. Keys must be a reserved provider name ({}) or declared in a skill manifest.",
-        key,
-        RESERVED_PROVIDER_KEYS.join(", ")
-    ))
+    validate_runtime_secret_namespace(registry, &[data_dir.join("skills")], key)
 }
 
 fn validate_secret_namespace(state: &State<AppState>, key: &str) -> Result<(), String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     validate_secret_namespace_with(&state.registry, &config.data_dir, key)
 }
-
-/// Keys that, when stored, should trigger re-initialization of the Email skill
-/// so it picks up new credentials without an app restart.
-const EMAIL_SECRET_KEYS: &[&str] = &[
-    "imap_password",
-    "imap_user",
-    "imap_host",
-    "imap_port",
-    "imap_tls_mode",
-    "smtp_host",
-    "smtp_port",
-    "smtp_user",
-    "smtp_password",
-    "smtp_tls_mode",
-];
 
 #[derive(serde::Serialize)]
 pub struct SkillSecretStatus {
@@ -219,9 +219,7 @@ pub struct SkillRuntimeStatus {
 }
 
 fn skill_origin(skill_id: &str) -> String {
-    if skill_id == skill_email::EMAIL_SKILL_ID {
-        "native_email".to_string()
-    } else if skill_id.starts_with("builtin.") || skill_id.starts_with("com.abigail.skills.") {
+    if skill_id.starts_with("builtin.") || skill_id.starts_with("com.abigail.skills.") {
         "native".to_string()
     } else {
         "dynamic".to_string()
@@ -266,32 +264,6 @@ pub async fn store_secret(
         let mut vault = state.skills_secrets.lock().map_err(|e| e.to_string())?;
         vault.set_secret(&key, &value);
         vault.save().map_err(|e| e.to_string())?;
-    }
-
-    // Re-initialize Email skill when email-related secrets change so the skill
-    // picks up new credentials without requiring an app restart.
-    if EMAIL_SECRET_KEYS.contains(&key.as_str()) {
-        match crate::create_email_skill_for_registry(&state).await {
-            Ok(skill) => {
-                let skill_id = skill_email::EmailSkill::default_manifest().id.clone();
-                // Check actual health before logging success
-                let health = skill.health();
-                let _ = state.registry.unregister(&skill_id);
-                if let Err(e) = state.registry.register(skill_id, skill) {
-                    tracing::warn!("Email skill re-register after secret store failed: {}", e);
-                } else if health.status == HealthStatus::Healthy {
-                    tracing::info!("Email skill re-initialized after secret update");
-                } else {
-                    tracing::warn!(
-                        "Email skill re-registered but not fully initialized: {:?}",
-                        health.message
-                    );
-                }
-            }
-            Err(e) => {
-                tracing::warn!("Email skill reinit after secret store failed: {}", e);
-            }
-        }
     }
 
     Ok(())
@@ -395,45 +367,6 @@ pub async fn reload_skill(
     let skill_id = skill_id.trim().to_string();
     if skill_id.is_empty() {
         return Err("skill_id is required".to_string());
-    }
-
-    if skill_id == skill_email::EMAIL_SKILL_ID {
-        let skill = crate::create_email_skill_for_registry(&state).await?;
-        let health = skill.health();
-        let manifest = skill.manifest().clone();
-        let _ = state.registry.unregister(&manifest.id);
-        state
-            .registry
-            .register(manifest.id.clone(), skill)
-            .map_err(|e| e.to_string())?;
-
-        let vault = state.skills_secrets.lock().map_err(|e| e.to_string())?;
-        return Ok(SkillRuntimeStatus {
-            id: manifest.id.0.clone(),
-            name: manifest.name,
-            origin: skill_origin(&manifest.id.0),
-            health_status: format!("{:?}", health.status).to_lowercase(),
-            health_message: health.message,
-            loaded: true,
-            tool_names: state
-                .registry
-                .get_skill(&manifest.id)
-                .map_err(|e| e.to_string())?
-                .0
-                .tools()
-                .into_iter()
-                .map(|tool| tool.name)
-                .collect(),
-            secrets: manifest
-                .secrets
-                .iter()
-                .map(|secret| SkillSecretStatus {
-                    name: secret.name.clone(),
-                    required: secret.required,
-                    is_set: vault.exists(&secret.name),
-                })
-                .collect(),
-        });
     }
 
     let (skills_dir, target_id) = {
@@ -559,6 +492,37 @@ pub fn list_approved_skills(state: State<AppState>) -> Result<Vec<String>, Strin
 }
 
 #[tauri::command]
+pub fn list_trusted_skill_signers(state: State<AppState>) -> Result<Vec<String>, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    Ok(config.trusted_skill_signers.clone())
+}
+
+#[tauri::command]
+pub fn add_trusted_skill_signer(state: State<AppState>, signer: String) -> Result<String, String> {
+    let mut config = state.config.write().map_err(|e| e.to_string())?;
+    let canonical = add_trusted_signer_entry(&mut config.trusted_skill_signers, &signer)?;
+    config
+        .save(&config.config_path())
+        .map_err(|e| e.to_string())?;
+    refresh_skill_policy(&state, &config)?;
+    Ok(canonical)
+}
+
+#[tauri::command]
+pub fn remove_trusted_skill_signer(
+    state: State<AppState>,
+    signer: String,
+) -> Result<String, String> {
+    let mut config = state.config.write().map_err(|e| e.to_string())?;
+    let canonical = remove_trusted_signer_entry(&mut config.trusted_skill_signers, &signer)?;
+    config
+        .save(&config.config_path())
+        .map_err(|e| e.to_string())?;
+    refresh_skill_policy(&state, &config)?;
+    Ok(canonical)
+}
+
+#[tauri::command]
 pub fn approve_skill(state: State<AppState>, skill_id: String) -> Result<(), String> {
     let mut config = state.config.write().map_err(|e| e.to_string())?;
     if !config.approved_skill_ids.contains(&skill_id) {
@@ -590,24 +554,25 @@ pub fn upsert_signed_skill_allowlist_entry(
     if signer.trim().is_empty() || signature.trim().is_empty() || source.trim().is_empty() {
         return Err("signer, signature, and source are required.".to_string());
     }
+    let canonical_signer = normalize_trusted_signer_key(&signer)?;
     let mut config = state.config.write().map_err(|e| e.to_string())?;
     if let Some(entry) = config
         .signed_skill_allowlist
         .iter_mut()
         .find(|e| e.skill_id == skill_id)
     {
-        entry.signer = signer;
-        entry.signature = signature;
-        entry.source = source;
+        entry.signer = canonical_signer;
+        entry.signature = signature.trim().to_string();
+        entry.source = source.trim().to_string();
         entry.active = true;
     } else {
         config
             .signed_skill_allowlist
             .push(SignedSkillAllowlistEntry {
                 skill_id,
-                signer,
-                signature,
-                source,
+                signer: canonical_signer,
+                signature: signature.trim().to_string(),
+                source: source.trim().to_string(),
                 added_at: chrono::Utc::now().to_rfc3339(),
                 active: true,
             });
@@ -652,8 +617,10 @@ pub fn revoke_signed_skill_allowlist_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use abigail_runtime::REMOVED_EMAIL_SECRET_KEYS;
     use abigail_skills::SkillRegistry;
-    use std::sync::Arc;
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    use ed25519_dalek::SigningKey;
 
     fn tmp_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir()
@@ -688,61 +655,39 @@ mod tests {
     }
 
     #[test]
-    fn imap_keys_accepted_when_email_skill_registered() {
-        let tmp = tmp_dir("imap");
+    fn removed_email_keys_are_rejected() {
+        let tmp = tmp_dir("no_email");
         let registry = SkillRegistry::new();
-        let manifest = skill_email::EmailSkill::default_manifest();
-        let skill = skill_email::EmailSkill::new(manifest.clone());
-        registry
-            .register(manifest.id.clone(), Arc::new(skill))
-            .unwrap();
-
-        for key in &[
-            "imap_password",
-            "imap_user",
-            "imap_host",
-            "imap_port",
-            "imap_tls_mode",
-            "smtp_host",
-            "smtp_port",
-            "smtp_user",
-            "smtp_password",
-            "smtp_tls_mode",
-        ] {
-            assert!(
-                validate_secret_namespace_with(&registry, &tmp, key).is_ok(),
-                "IMAP key '{}' should be accepted with EmailSkill registered",
-                key
-            );
+        for key in REMOVED_EMAIL_SECRET_KEYS {
+            let result = validate_secret_namespace_with(&registry, &tmp, key);
+            assert!(result.is_err(), "removed key '{}' should be rejected", key);
         }
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
-    fn imap_keys_rejected_without_email_skill() {
-        let tmp = tmp_dir("no_email");
-        let registry = SkillRegistry::new();
-        let result = validate_secret_namespace_with(&registry, &tmp, "imap_password");
-        assert!(
-            result.is_err(),
-            "imap_password should be rejected when EmailSkill is NOT registered"
-        );
-        let _ = std::fs::remove_dir_all(&tmp);
+    fn trusted_signer_helpers_canonicalize_and_dedup() {
+        let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
+        let signer = BASE64.encode(signing_key.verifying_key().to_bytes());
+        let mut signers = vec![format!("  {}  ", signer)];
+
+        let inserted = add_trusted_signer_entry(&mut signers, &signer).unwrap();
+
+        assert_eq!(inserted, signer);
+        assert_eq!(signers, vec![signer]);
     }
 
     #[test]
-    fn email_manifest_declares_expected_secrets() {
-        let manifest = skill_email::EmailSkill::default_manifest();
-        let names: Vec<&str> = manifest.secrets.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"imap_password"), "missing imap_password");
-        assert!(names.contains(&"imap_user"), "missing imap_user");
-        assert!(names.contains(&"imap_host"), "missing imap_host");
-        assert!(names.contains(&"imap_port"), "missing imap_port");
-        assert!(names.contains(&"imap_tls_mode"), "missing imap_tls_mode");
-        assert!(names.contains(&"smtp_host"), "missing smtp_host");
-        assert!(names.contains(&"smtp_port"), "missing smtp_port");
-        assert!(names.contains(&"smtp_user"), "missing smtp_user");
-        assert!(names.contains(&"smtp_password"), "missing smtp_password");
-        assert!(names.contains(&"smtp_tls_mode"), "missing smtp_tls_mode");
+    fn trusted_signer_remove_requires_existing_signer() {
+        let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
+        let signer = BASE64.encode(signing_key.verifying_key().to_bytes());
+        let mut signers = vec![signer.clone()];
+
+        let removed = remove_trusted_signer_entry(&mut signers, &signer).unwrap();
+        assert_eq!(removed, signer);
+        assert!(signers.is_empty());
+
+        let err = remove_trusted_signer_entry(&mut signers, &removed).unwrap_err();
+        assert!(err.contains("Trusted signer not found"));
     }
 }

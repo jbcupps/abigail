@@ -3,6 +3,7 @@ pub mod backup_import;
 pub mod embeddings;
 pub mod graph;
 pub mod postgres;
+pub mod protected_topics;
 pub mod schema;
 pub mod store;
 pub mod subscriber;
@@ -14,6 +15,10 @@ pub use backup_import::{
 };
 pub use embeddings::cosine_similarity;
 pub use graph::{EdgeType, MemoryEdge, MemoryGraph};
+pub use protected_topics::{
+    plan_secret_move, ProtectedTopicEntry, ProtectedTopicSummary, SecretKind, SecretMovePlan,
+    TriangleEthicPreview,
+};
 pub use schema::*;
 pub use store::{
     ConversationTurn, Memory, MemoryStore, MemoryWeight, Result as MemoryResult, SessionSummary,

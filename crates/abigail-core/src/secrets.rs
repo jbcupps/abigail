@@ -11,6 +11,7 @@
 //! upgrades keep working.
 
 use crate::error::{CoreError, Result};
+use crate::secure_fs;
 use crate::vault::crypto;
 use crate::vault::unlock::{HybridUnlockProvider, PassphraseUnlockProvider, UnlockProvider};
 use std::collections::HashMap;
@@ -135,7 +136,7 @@ impl SecretsVault {
         if let Some(parent) = self.file_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&self.file_path, envelope)?;
+        secure_fs::write_bytes_atomic(&self.file_path, &envelope)?;
         Ok(())
     }
 

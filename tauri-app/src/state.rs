@@ -41,6 +41,7 @@ use tokio_util::sync::CancellationToken;
 /// - Never hold a sync lock (1-7) across an `.await` boundary.
 /// - Drop earlier locks before acquiring later ones when possible.
 /// - Scoped blocks `{ let guard = lock.write(); ... }` are preferred to limit hold duration.
+#[allow(clippy::doc_lazy_continuation)]
 pub struct AppState {
     pub config: RwLock<AppConfig>,
     pub birth: RwLock<Option<BirthOrchestrator>>,
@@ -50,7 +51,7 @@ pub struct AppState {
     /// Stream broker for topic-based event publishing (replaces EventBus).
     pub stream_broker: Arc<dyn StreamBroker>,
     pub secrets: Arc<Mutex<SecretsVault>>,
-    /// Operational secrets for Ego/Skills (IMAP, Jira, etc.)
+    /// Operational secrets for Ego/Skills (browser fallback, Jira, etc.)
     pub skills_secrets: Arc<Mutex<SecretsVault>>,
     /// Hive-level secrets vault (shared API keys across all agents)
     pub hive_secrets: Arc<Mutex<SecretsVault>>,

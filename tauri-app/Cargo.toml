@@ -18,29 +18,14 @@ abigail-hive = { path = "../crates/abigail-hive" }
 abigail-birth = { path = "../crates/abigail-birth" }
 abigail-soul-crystallization = { path = "../crates/abigail-soul-crystallization" }
 abigail-skills = { path = "../crates/abigail-skills" }
+abigail-runtime = { path = "../crates/abigail-runtime" }
 entity-core = { path = "../crates/entity-core" }
 entity-chat = { path = "../crates/entity-chat" }
 abigail-auth = { path = "../crates/abigail-auth" }
 abigail-identity = { path = "../crates/abigail-identity" }
 abigail-cli = { path = "../crates/abigail-cli" }
 soul-forge = { path = "../crates/soul-forge" }
-skill-web-search = { path = "../skills/skill-web-search" }
 skill-browser = { path = "../skills/skill-browser" }
-skill-filesystem = { path = "../skills/skill-filesystem" }
-skill-shell = { path = "../skills/skill-shell" }
-skill-http = { path = "../skills/skill-http" }
-skill-perplexity-search = { path = "../skills/skill-perplexity-search" }
-skill-knowledge-base = { path = "../skills/skill-knowledge-base" }
-skill-git = { path = "../skills/skill-git" }
-skill-code-analysis = { path = "../skills/skill-code-analysis" }
-skill-database = { path = "../skills/skill-database" }
-skill-calendar = { path = "../skills/skill-calendar" }
-skill-document = { path = "../skills/skill-document" }
-skill-notification = { path = "../skills/skill-notification" }
-skill-image = { path = "../skills/skill-image" }
-skill-clipboard = { path = "../skills/skill-clipboard" }
-skill-system-monitor = { path = "../skills/skill-system-monitor" }
-skill-email = { path = "../skills/skill-email" }
 abigail-queue = { path = "../crates/abigail-queue" }
 abigail-streaming = { path = "../crates/abigail-streaming" }
 daemon-client = { path = "../crates/daemon-client" }
@@ -66,3 +51,6 @@ axum = "0.7"
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dev-dependencies]
+rand.workspace = true
