@@ -246,10 +246,10 @@ impl IdEgoRouter {
             EgoProvider::Perplexity => Some("perplexity"),
             EgoProvider::Xai => Some("xai"),
             EgoProvider::Google => Some("google"),
-            EgoProvider::ClaudeCli
-            | EgoProvider::GeminiCli
-            | EgoProvider::CodexCli
-            | EgoProvider::GrokCli => None,
+            EgoProvider::ClaudeCli => Some("claude-cli"),
+            EgoProvider::GeminiCli => Some("gemini-cli"),
+            EgoProvider::CodexCli => Some("codex-cli"),
+            EgoProvider::GrokCli => Some("grok-cli"),
         }
     }
 
@@ -1495,6 +1495,24 @@ mod tests {
             router.register_selected_model_subscriber("entity-123", Some("gemini-2.5-pro".into()));
         assert_eq!(group, "entity-subscriber.entity-123.default");
         assert_eq!(router.selected_chat_model(), None);
+    }
+
+    #[test]
+    fn test_register_selected_model_subscriber_keeps_cli_compatible_model() {
+        let router = IdEgoRouter::new(
+            None,
+            Some("claude-cli"),
+            Some("system".to_string()),
+            None,
+            RoutingMode::EgoPrimary,
+        );
+        let group = router
+            .register_selected_model_subscriber("entity-123", Some("claude-sonnet-4-6".into()));
+        assert_eq!(group, "entity-subscriber.entity-123.claude-sonnet-4-6");
+        assert_eq!(
+            router.selected_chat_model(),
+            Some("claude-sonnet-4-6".to_string())
+        );
     }
 
     // ── Trace final_tier tests ────────────────────────────────────

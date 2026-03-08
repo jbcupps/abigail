@@ -5,6 +5,7 @@
 //! Ego queries through any installed CLI tool using their existing API keys.
 
 use crate::cognitive::provider::{CompletionRequest, CompletionResponse, LlmProvider};
+use crate::cognitive::validation::is_model_compatible_with_provider;
 use abigail_core::CliPermissionMode;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,15 @@ impl CliVariant {
             Self::GeminiCli => "GOOGLE_API_KEY",
             Self::OpenAiCodex => "OPENAI_API_KEY",
             Self::XaiGrokCli => "XAI_API_KEY",
+        }
+    }
+
+    fn model_override_provider(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude-cli",
+            Self::GeminiCli => "gemini-cli",
+            Self::OpenAiCodex => "codex-cli",
+            Self::XaiGrokCli => "grok-cli",
         }
     }
 
@@ -400,6 +410,27 @@ impl CliLlmProvider {
         cmd.arg("--dangerously-skip-permissions");
     }
 
+    fn apply_model_override(&self, cmd: &mut Command, model_override: Option<&str>) {
+        let Some(model) = model_override.map(str::trim).filter(|m| !m.is_empty()) else {
+            return;
+        };
+
+        if is_model_compatible_with_provider(self.variant.model_override_provider(), model) {
+            tracing::info!(
+                variant = %self.variant,
+                model_override = %model,
+                "Applying provider-native model override to CLI request"
+            );
+            cmd.arg("--model").arg(model);
+        } else {
+            tracing::warn!(
+                variant = %self.variant,
+                model_override = %model,
+                "Dropping incompatible model override for CLI provider"
+            );
+        }
+    }
+
     /// Build the full CLI command with rich flags per variant.
     ///
     /// Returns `(Command, Option<stdin_content>)`. When the second value is
@@ -409,6 +440,7 @@ impl CliLlmProvider {
         &self,
         prompt: &str,
         system_prompt: Option<&str>,
+        model_override: Option<&str>,
     ) -> (Command, Option<String>) {
         let mut cmd = Command::new(self.variant.binary_name());
 
@@ -422,6 +454,7 @@ impl CliLlmProvider {
 
         match self.variant {
             CliVariant::ClaudeCode => {
+                self.apply_model_override(&mut cmd, model_override);
                 let has_session = self.active_session_id.read().ok().and_then(|g| g.clone());
 
                 if let Some(ref sid) = has_session {
@@ -453,6 +486,7 @@ impl CliLlmProvider {
                 }
             }
             CliVariant::GeminiCli => {
+                self.apply_model_override(&mut cmd, model_override);
                 cmd.arg("--prompt");
                 if let Some(sp) = system_prompt {
                     let tmp = std::env::temp_dir().join("abigail_gemini_system.md");
@@ -464,6 +498,7 @@ impl CliLlmProvider {
             }
             CliVariant::OpenAiCodex => {
                 cmd.arg("exec");
+                self.apply_model_override(&mut cmd, model_override);
                 cmd.arg("--full-auto");
                 let full_prompt = if let Some(sp) = system_prompt {
                     format!("[System Instructions]\n{}\n\n{}", sp, prompt)
@@ -474,6 +509,7 @@ impl CliLlmProvider {
                 stdin_content = Some(full_prompt);
             }
             CliVariant::XaiGrokCli => {
+                self.apply_model_override(&mut cmd, model_override);
                 let full_prompt = if let Some(sp) = system_prompt {
                     format!("[System Instructions]\n{}\n\n{}", sp, prompt)
                 } else {
@@ -489,6 +525,50 @@ impl CliLlmProvider {
         #[cfg(windows)]
         hide_console_window_async(&mut cmd);
         (cmd, stdin_content)
+    }
+
+    async fn complete_via_cli(
+        &self,
+        request: &CompletionRequest,
+    ) -> anyhow::Result<CompletionResponse> {
+        let system_prompt = Self::extract_system_prompt(&request.messages);
+        let prompt = Self::build_prompt(&request.messages);
+
+        tracing::info!(
+            "CliLlmProvider::complete variant={}, binary={}, prompt_len={}, has_system_prompt={}, has_tools={}, configured_permission_mode={:?}, runtime_permission_posture={}",
+            self.variant,
+            self.variant.binary_name(),
+            prompt.len(),
+            system_prompt.is_some(),
+            request.tools.is_some(),
+            self.permission_mode,
+            self.runtime_permission_posture(),
+        );
+
+        let (cmd, stdin_content) = self.build_command(
+            &prompt,
+            system_prompt.as_deref(),
+            request.model_override.as_deref(),
+        );
+
+        tracing::info!(
+            "CLI stdin payload: system_prompt={} bytes, user_prompt={} bytes, total_stdin={} bytes",
+            system_prompt.as_ref().map(|s| s.len()).unwrap_or(0),
+            prompt.len(),
+            stdin_content.as_ref().map(|s| s.len()).unwrap_or(0),
+        );
+
+        let content = self.run_and_collect(cmd, 300, stdin_content).await?;
+
+        tracing::info!(
+            "CLI subprocess completed. Output size: {} bytes",
+            content.len()
+        );
+
+        Ok(CompletionResponse {
+            content,
+            tool_calls: None,
+        })
     }
 
     /// Spawn the CLI process and wait for completion with timeout.
@@ -546,6 +626,10 @@ impl CliLlmProvider {
 #[async_trait]
 impl LlmProvider for CliLlmProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
+        if request.model_override.is_some() {
+            return self.complete_via_cli(request).await;
+        }
+
         if let Some(ref override_model) = request.model_override {
             tracing::warn!(
                 "CliLlmProvider ignoring model_override='{}' — CLI variant {} uses its own model selection",
@@ -568,7 +652,11 @@ impl LlmProvider for CliLlmProvider {
             self.runtime_permission_posture(),
         );
 
-        let (cmd, stdin_content) = self.build_command(&prompt, system_prompt.as_deref());
+        let (cmd, stdin_content) = self.build_command(
+            &prompt,
+            system_prompt.as_deref(),
+            request.model_override.as_deref(),
+        );
 
         tracing::info!(
             "CLI stdin payload: system_prompt={} bytes, user_prompt={} bytes, total_stdin={} bytes",
@@ -615,6 +703,7 @@ impl LlmProvider for CliLlmProvider {
         if self.api_key != "system" {
             cmd.env(self.variant.api_key_env_var(), &self.api_key);
         }
+        self.apply_model_override(&mut cmd, request.model_override.as_deref());
 
         let piped: String;
         if let Some(ref sid) = has_session {
@@ -719,6 +808,13 @@ impl LlmProvider for CliLlmProvider {
 mod tests {
     use super::*;
     use crate::cognitive::provider::Message;
+
+    fn command_args(cmd: &Command) -> Vec<String> {
+        cmd.as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
 
     #[test]
     fn test_cli_variant_from_name() {
@@ -826,5 +922,25 @@ mod tests {
         let messages = vec![Message::new("user", "Hello")];
         let sys = CliLlmProvider::extract_system_prompt(&messages);
         assert!(sys.is_none());
+    }
+
+    #[test]
+    fn test_build_command_applies_cli_model_override() {
+        let provider = CliLlmProvider::new(CliVariant::ClaudeCode, "system".to_string()).unwrap();
+        let (cmd, _) = provider.build_command("Hello", None, Some("claude-sonnet-4-6"));
+        let args = command_args(&cmd);
+
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--model", "claude-sonnet-4-6"]));
+    }
+
+    #[test]
+    fn test_build_command_drops_incompatible_cli_model_override() {
+        let provider = CliLlmProvider::new(CliVariant::ClaudeCode, "system".to_string()).unwrap();
+        let (cmd, _) = provider.build_command("Hello", None, Some("gemini-2.5-pro"));
+        let args = command_args(&cmd);
+
+        assert!(!args.iter().any(|arg| arg == "--model"));
     }
 }

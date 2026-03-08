@@ -10,6 +10,7 @@ Every install also provisions an immortal local coordinator identity called `Abi
 ### Why Families Love Abigail
 - **Complete privacy** - everything stays on your computer. No accounts with big tech companies.
 - **Real power when you want it** - connect any Entity to the strongest cloud models with one click. You are never locked to one provider.
+- **Provider switches stay safe** - model changes propagate across direct APIs and supported CLI tools without forcing families to rebuild shared Abigail data.
 - **Grows with your family** - teach Entities new skills, memories, and preferences over time.
 - **Simple for everyone** - kids, parents, and partners just chat naturally while you control the advanced settings.
 - **Handles real-world sites safely** - for authenticated flows like webmail, Abigail uses Browser skill fallback instead of fragile IMAP/SMTP plumbing.
