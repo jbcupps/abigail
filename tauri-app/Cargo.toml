@@ -45,7 +45,7 @@ regex = "1"
 chrono.workspace = true
 uuid.workspace = true
 rusqlite.workspace = true
-which = "7"
+which = "8"
 directories.workspace = true
 axum = "0.7"
 
