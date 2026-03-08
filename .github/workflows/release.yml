@@ -210,11 +210,21 @@ jobs:
         run: |
           node -e "
             const fs = require('fs');
+            const normalize = (value) => {
+              const input = String(value || '').trim();
+              if (!input) return '';
+              const normalized = input.replace(/\s+/g, '');
+              const decoded = input.startsWith('untrusted comment:')
+                ? input
+                : Buffer.from(normalized, 'base64').toString('utf8').trim();
+              const lines = decoded.split(/\r?\n/).filter(Boolean);
+              return Buffer.from(lines[0] + '\n' + lines[1], 'utf8').toString('base64');
+            };
             const conf = JSON.parse(fs.readFileSync('tauri-app/tauri.conf.json', 'utf8'));
             if (!conf.bundle?.createUpdaterArtifacts) {
               throw new Error('createUpdaterArtifacts must be true for release builds');
             }
-            if (conf.plugins?.updater?.pubkey !== process.env.TAURI_UPDATER_PUBKEY) {
+            if (conf.plugins?.updater?.pubkey !== normalize(process.env.TAURI_UPDATER_PUBKEY)) {
               throw new Error('Updater pubkey injection mismatch');
             }
           "

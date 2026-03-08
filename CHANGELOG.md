@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- 2026-03-07 22:35 EST: Harden alpha release signing flow - normalize Tauri updater minisign keys to the Tauri 2 base64 format, accept both raw and base64 updater secret inputs, and allow fast alpha pre-releases to ship signed updater metadata before Windows Authenticode secrets are available
 - 2026-03-07 fix(crypto+topics): email-induced damage fully excised + protected-topic secrets for mentor-independent self-sufficiency (paper 22-27).
 - 2026-03-06 Skills strategy: Browser skill Playwright upgrade with persistent auth fallback for webmail and other OAuth-heavy flows.
 - 2026-03-05 [VAULT] Sentinel + isolated KEK + model-switch safety (eliminates AES-GCM wrong-key error forever)
