@@ -174,7 +174,9 @@ jobs:
         shell: bash
         env:
           ABIGAIL_OFFICIAL_RELEASE: "true"
-          ABIGAIL_REQUIRE_WINDOWS_SIGNING: ${{ matrix.platform == 'windows-latest' }}
+          # Set repository variable ABIGAIL_REQUIRE_WINDOWS_SIGNING=true once the
+          # Windows EV/OV/IV certificate material is available.
+          ABIGAIL_REQUIRE_WINDOWS_SIGNING: ${{ matrix.platform == 'windows-latest' && vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true' }}
           ABIGAIL_REQUIRE_MAC_SIGNING: ${{ matrix.platform == 'macos-latest' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -295,7 +297,7 @@ jobs:
           fi
 
       - name: Import Windows code signing certificate
-        if: matrix.platform == 'windows-latest'
+        if: matrix.platform == 'windows-latest' && vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true'
         shell: pwsh
         env:
           WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
