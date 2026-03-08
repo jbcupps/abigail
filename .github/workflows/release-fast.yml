@@ -211,7 +211,7 @@ jobs:
                 ? input
                 : Buffer.from(normalized, 'base64').toString('utf8').trim();
               const lines = decoded.split(/\r?\n/).filter(Boolean);
-              return Buffer.from(`${lines[0]}\n${lines[1]}`, 'utf8').toString('base64');
+              return Buffer.from(lines[0] + '\n' + lines[1], 'utf8').toString('base64');
             };
             const conf = JSON.parse(fs.readFileSync('tauri-app/tauri.conf.json', 'utf8'));
             if (!conf.bundle?.createUpdaterArtifacts) {
