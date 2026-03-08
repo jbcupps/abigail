@@ -183,10 +183,13 @@ async fn main() -> anyhow::Result<()> {
     };
     config.agent_name = Some(entity_info.name.clone());
     config.birth_complete = entity_info.birth_complete;
+    config.is_hive = entity_info.is_hive;
     config.routing_mode = hive_config.routing_mode;
     config.data_dir = entity_dir.clone();
     config.docs_dir = docs_dir.clone();
-    config.db_path = entity_dir.join("abigail_memory.db");
+    if !config.is_hive {
+        config.db_path = entity_dir.join("abigail_memory.db");
+    }
     config.models_dir = entity_dir.join("models");
 
     // 5. Create skill registry with secrets vault and executor.

@@ -5,6 +5,7 @@
 Abigail is the smart, private manager that lives in your home. You, the mentor or family head, create and customize individual **Entities** - each one a unique AI companion tailored to a person or purpose.
 
 Your family talks directly to these Entities. Abigail coordinates everything behind the scenes: memory, skills, security, and growth.
+Every install also provisions an immortal local coordinator identity called `Abigail Hive` that owns the shared `memory.db` and starts before user-facing Entities.
 
 ### Why Families Love Abigail
 - **Complete privacy** - everything stays on your computer. No accounts with big tech companies.

@@ -47,6 +47,10 @@ pub struct EntityInfo {
     pub name: String,
     pub birth_complete: bool,
     pub birth_date: Option<String>,
+    #[serde(default)]
+    pub is_hive: bool,
+    #[serde(default)]
+    pub immortal: bool,
 }
 
 /// Request to create a new entity.

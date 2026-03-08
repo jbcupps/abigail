@@ -44,12 +44,6 @@ pub struct AppServerState {
     pub agent_name: Option<String>,
 }
 
-impl AppServerState {
-    fn trusted_config_path(&self) -> PathBuf {
-        AppConfig::trusted_config_path(&self.data_dir)
-    }
-}
-
 #[derive(Serialize)]
 pub struct StatusResponse {
     pub birth_complete: bool,
@@ -615,11 +609,16 @@ async fn rotate_key(State(state): State<AppServerState>) -> Json<TokenResponse> 
 }
 
 fn load_config(state: &AppServerState) -> anyhow::Result<AppConfig> {
-    let config_path = state.trusted_config_path();
+    let config_path = state.data_dir.join("config.json");
     if config_path.exists() {
         AppConfig::load_from_data_dir(&state.data_dir)
     } else {
-        Ok(AppConfig::default_paths())
+        let mut config = AppConfig::default_paths();
+        config.data_dir = state.data_dir.clone();
+        config.models_dir = state.data_dir.join("models");
+        config.docs_dir = state.data_dir.join("docs");
+        config.db_path = state.data_dir.join("abigail_seed.db");
+        Ok(config)
     }
 }
 

@@ -15,6 +15,8 @@ interface HarnessState {
     directory: string;
     birth_complete: boolean;
     birth_date: string | null;
+    is_hive: boolean;
+    immortal: boolean;
     primary_color?: string | null;
     avatar_url?: string | null;
   }>;
@@ -244,6 +246,8 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
         directory: `E:/Agents/abigail/.hive/${id}`,
         birth_complete: false,
         birth_date: null,
+        is_hive: false,
+        immortal: false,
         primary_color: "#00c2a8",
         avatar_url: null,
       });
@@ -264,6 +268,10 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
       if (state.activeAgentId === agentId) {
         throw new Error("Cannot archive active agent. Suspend first.");
       }
+      const target = state.identities.find((identity) => identity.id === agentId);
+      if (target?.immortal) {
+        throw new Error("Abigail Hive is immortal and cannot be archived.");
+      }
       state.identities = state.identities.filter((identity) => identity.id !== agentId);
       return true;
     }
@@ -272,6 +280,10 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
       if (!agentId) throw new Error("agentId is required");
       if (state.activeAgentId === agentId) {
         throw new Error("Cannot delete active agent. Suspend first.");
+      }
+      const target = state.identities.find((identity) => identity.id === agentId);
+      if (target?.immortal) {
+        throw new Error("Abigail Hive is immortal and cannot be deleted.");
       }
       state.identities = state.identities.filter((identity) => identity.id !== agentId);
       return true;

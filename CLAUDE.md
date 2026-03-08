@@ -7,6 +7,7 @@ Abigail manages multiple personal AI Entities that the user, mentor, or family h
 
 **Development Rules (Always Follow)**
 - The user creates and manages Entities - Abigail is the silent coordinator behind them.
+- Abigail itself is represented by an immortal local `Abigail Hive` Entity with elevated local privileges; it owns shared memory and must remain undeletable.
 - Users should be encouraged to connect Entities to powerful cloud models from any provider. This multi-provider freedom is a major advantage.
 - Privacy and local-first are non-negotiable. Cloud models are optional power-ups, never required.
 - Keep everything dead-simple for the family user. Delight and ease of use come first.

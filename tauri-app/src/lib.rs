@@ -407,6 +407,23 @@ fn try_run() -> Result<(), String> {
                 );
             }
         }
+    } else if let Ok(hive_agent_id) = identity_manager.hive_agent_id() {
+        match identity_manager.load_agent(&hive_agent_id) {
+            Ok(agent_config) => {
+                tracing::info!(
+                    "Startup bootstrap: loading Abigail Hive entity {} before user entities",
+                    hive_agent_id
+                );
+                config = agent_config;
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "Startup bootstrap: failed to load Abigail Hive entity {}: {}",
+                    hive_agent_id,
+                    err
+                );
+            }
+        }
     }
 
     let data_dir = config.data_dir.clone();
