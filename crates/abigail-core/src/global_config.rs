@@ -8,6 +8,9 @@ pub struct AgentEntry {
     pub id: String,
     /// Human-readable name for this agent.
     pub name: String,
+    /// True when this entry represents the persistent Abigail Hive identity.
+    #[serde(default)]
+    pub is_hive: bool,
     /// Path to this agent's data directory (relative to identities/).
     pub directory: PathBuf,
 }
@@ -135,6 +138,7 @@ mod tests {
             .register_agent(AgentEntry {
                 id: "test-uuid-1".to_string(),
                 name: "Agent Alpha".to_string(),
+                is_hive: false,
                 directory: PathBuf::from("identities/test-uuid-1"),
             })
             .unwrap();
@@ -162,6 +166,7 @@ mod tests {
             .register_agent(AgentEntry {
                 id: "dup-uuid".to_string(),
                 name: "Agent".to_string(),
+                is_hive: false,
                 directory: PathBuf::from("identities/dup-uuid"),
             })
             .unwrap();
@@ -169,6 +174,7 @@ mod tests {
         let result = config.register_agent(AgentEntry {
             id: "dup-uuid".to_string(),
             name: "Agent 2".to_string(),
+            is_hive: false,
             directory: PathBuf::from("identities/dup-uuid"),
         });
         assert!(result.is_err());
@@ -184,6 +190,7 @@ mod tests {
             .register_agent(AgentEntry {
                 id: "a1".to_string(),
                 name: "Alpha".to_string(),
+                is_hive: false,
                 directory: PathBuf::from("identities/a1"),
             })
             .unwrap();
@@ -191,6 +198,7 @@ mod tests {
             .register_agent(AgentEntry {
                 id: "a2".to_string(),
                 name: "Beta".to_string(),
+                is_hive: false,
                 directory: PathBuf::from("identities/a2"),
             })
             .unwrap();
