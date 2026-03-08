@@ -174,6 +174,9 @@ jobs:
         shell: bash
         env:
           ABIGAIL_OFFICIAL_RELEASE: "true"
+          # Set repository variable ABIGAIL_REQUIRE_UPDATER_SIGNING=true once the
+          # Tauri updater signing keys are available.
+          ABIGAIL_REQUIRE_UPDATER_SIGNING: ${{ vars.ABIGAIL_REQUIRE_UPDATER_SIGNING == 'true' }}
           # Set repository variable ABIGAIL_REQUIRE_WINDOWS_SIGNING=true once the
           # Windows EV/OV/IV certificate material is available.
           ABIGAIL_REQUIRE_WINDOWS_SIGNING: ${{ matrix.platform == 'windows-latest' && vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true' }}
@@ -197,8 +200,8 @@ jobs:
       - name: Configure updater and signing fields in tauri.conf.json
         shell: bash
         env:
-          ABIGAIL_REQUIRE_UPDATER_PUBKEY: "true"
-          ABIGAIL_ENABLE_UPDATER_ARTIFACTS: "true"
+          ABIGAIL_REQUIRE_UPDATER_PUBKEY: ${{ vars.ABIGAIL_REQUIRE_UPDATER_SIGNING == 'true' }}
+          ABIGAIL_ENABLE_UPDATER_ARTIFACTS: ${{ vars.ABIGAIL_REQUIRE_UPDATER_SIGNING == 'true' }}
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
           WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
@@ -206,6 +209,7 @@ jobs:
           node scripts/prepare_tauri_bundle_config.mjs tauri-app/tauri.conf.json
 
       - name: Assert updater config injection
+        if: vars.ABIGAIL_REQUIRE_UPDATER_SIGNING == 'true'
         shell: bash
         env:
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
@@ -383,6 +387,7 @@ jobs:
           done
 
       - name: Validate updater signing key preflight
+        if: vars.ABIGAIL_REQUIRE_UPDATER_SIGNING == 'true'
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -410,7 +415,7 @@ jobs:
           tauri build ${{ matrix.args }}
 
       - name: Verify updater artifacts
-        if: matrix.platform != 'ubuntu-22.04'
+        if: vars.ABIGAIL_REQUIRE_UPDATER_SIGNING == 'true' && matrix.platform != 'ubuntu-22.04'
         shell: bash
         run: |
           mapfile -t UPDATER_FILES < <(find target -type f \( -name "*.nsis.zip" -o -name "*.nsis.zip.sig" -o -name "*.msi.zip" -o -name "*.msi.zip.sig" -o -name "*.app.tar.gz" -o -name "*.app.tar.gz.sig" \))
@@ -441,7 +446,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload updater artifacts
-        if: matrix.platform != 'ubuntu-22.04'
+        if: vars.ABIGAIL_REQUIRE_UPDATER_SIGNING == 'true' && matrix.platform != 'ubuntu-22.04'
         uses: actions/upload-artifact@47309c993abb98030a35d55ef7ff34b7fa1074b5 # v4
         with:
           name: abigail-updater-${{ matrix.platform }}
@@ -485,6 +490,7 @@ jobs:
         continue-on-error: true
 
       - name: Download updater artifacts
+        if: vars.ABIGAIL_REQUIRE_UPDATER_SIGNING == 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
@@ -575,16 +581,21 @@ jobs:
             cp "$MAC_UPDATER_SIG" release-assets/Abigail-updater-macos-universal.app.tar.gz.sig
           fi
 
-          node scripts/generate_tauri_latest_manifest.mjs \
-            --version "${{ needs.build.outputs.version }}" \
-            --assets-dir release-assets \
-            --base-url "https://github.com/${{ github.repository }}/releases/download/${{ needs.build.outputs.tag }}" \
-            --output release-assets/latest.json
+          if [[ "${{ vars.ABIGAIL_REQUIRE_UPDATER_SIGNING }}" == "true" ]]; then
+            node scripts/generate_tauri_latest_manifest.mjs \
+              --version "${{ needs.build.outputs.version }}" \
+              --assets-dir release-assets \
+              --base-url "https://github.com/${{ github.repository }}/releases/download/${{ needs.build.outputs.tag }}" \
+              --output release-assets/latest.json
+          else
+            echo "Updater signing disabled; skipping latest.json generation"
+          fi
 
           echo "Release assets:"
           ls -la release-assets/ 2>/dev/null || echo "No assets found"
 
       - name: Validate latest.json
+        if: vars.ABIGAIL_REQUIRE_UPDATER_SIGNING == 'true'
         shell: bash
         run: |
           node -e "
