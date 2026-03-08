@@ -221,6 +221,8 @@ interface SoulIdentityInfo {
   directory: string;
   birth_complete: boolean;
   birth_date: string | null;
+  is_hive: boolean;
+  immortal: boolean;
   primary_color?: string | null;
   avatar_url?: string | null;
 }
@@ -705,6 +707,7 @@ export default function SoulRegistry({
                         e.stopPropagation();
                         setConfirmAction({ type: "archive", soul });
                       }}
+                      disabled={soul.immortal}
                       className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-primary hover:text-theme-text"
                       title="Archive Entity"
                     >
@@ -715,6 +718,7 @@ export default function SoulRegistry({
                         e.stopPropagation();
                         setConfirmAction({ type: "delete", soul });
                       }}
+                      disabled={soul.immortal}
                       className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-danger hover:text-theme-danger"
                       title="Delete Entity"
                     >
@@ -726,6 +730,11 @@ export default function SoulRegistry({
                   <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded border ${soul.birth_complete ? "border-theme-success text-theme-success bg-theme-success-dim" : "border-theme-warning text-theme-warning bg-theme-warning-dim"}`}>
                     {soul.birth_complete ? "Active" : "In-Utero"}
                   </span>
+                  {soul.immortal && (
+                    <span className="text-[10px] uppercase px-1.5 py-0.5 rounded border border-theme-primary text-theme-primary bg-theme-primary-glow">
+                      Immortal
+                    </span>
+                  )}
                   <span className="text-[10px] text-theme-text-dim font-mono">
                     ID: {soul.id.substring(0, 8)}
                   </span>

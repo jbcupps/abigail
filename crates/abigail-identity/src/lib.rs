@@ -13,6 +13,10 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use uuid::Uuid;
 
+mod hive;
+
+pub use hive::{HiveEntity, HIVE_ENTITY_NAME};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RecoveryBundle {
     format: String,
@@ -30,6 +34,8 @@ pub struct AgentIdentityInfo {
     pub directory: String,
     pub birth_complete: bool,
     pub birth_date: Option<String>,
+    pub is_hive: bool,
+    pub immortal: bool,
 }
 
 /// Summary of an existing identity for the conflict screen.
@@ -87,6 +93,37 @@ pub struct IdentityManager {
 }
 
 impl IdentityManager {
+    fn ensure_hive_entity(
+        data_root: &Path,
+        global_config: &mut GlobalConfig,
+    ) -> Result<(), String> {
+        if global_config.agents.iter().any(|entry| entry.is_hive) {
+            return Ok(());
+        }
+
+        let hive = HiveEntity::new(Uuid::new_v4().to_string());
+        let agent_dir = data_root.join("identities").join(&hive.id);
+        std::fs::create_dir_all(agent_dir.join("docs")).map_err(|e| e.to_string())?;
+
+        let config = hive.config(data_root, &global_config.default_theme);
+        config
+            .save(&agent_dir.join("config.json"))
+            .map_err(|e| e.to_string())?;
+
+        global_config
+            .register_agent(hive.registry_entry())
+            .map_err(|e| e.to_string())?;
+        global_config.save(data_root).map_err(|e| e.to_string())?;
+
+        tracing::info!(
+            "Provisioned '{}' with locked entitlements {:?}",
+            HIVE_ENTITY_NAME,
+            HiveEntity::locked_entitlements()
+        );
+
+        Ok(())
+    }
+
     fn normalize_agent_directory(&self, directory: &Path) -> Result<PathBuf, String> {
         abigail_core::global_config::normalize_agent_directory(directory).map_err(|e| e.to_string())
     }
@@ -147,6 +184,8 @@ impl IdentityManager {
             config.save(&data_root).map_err(|e| e.to_string())?;
             config
         };
+        let mut global_config = global_config;
+        Self::ensure_hive_entity(&data_root, &mut global_config)?;
 
         Ok(Self {
             data_root,
@@ -168,6 +207,15 @@ impl IdentityManager {
     /// Get the identities directory path.
     pub fn identities_dir(&self) -> PathBuf {
         self.data_root.join("identities")
+    }
+
+    pub fn hive_agent_id(&self) -> Result<String, String> {
+        let gc = self.global_config.read().map_err(|e| e.to_string())?;
+        gc.agents
+            .iter()
+            .find(|entry| entry.is_hive)
+            .map(|entry| entry.id.clone())
+            .ok_or_else(|| "Abigail Hive is not registered".to_string())
     }
 
     /// List all registered agents with their info.
@@ -194,8 +242,17 @@ impl IdentityManager {
                 directory: agent_dir.to_string_lossy().to_string(),
                 birth_complete,
                 birth_date,
+                is_hive: entry.is_hive,
+                immortal: entry.is_hive,
             });
         }
+
+        agents.sort_by(|left, right| {
+            right
+                .is_hive
+                .cmp(&left.is_hive)
+                .then_with(|| left.name.cmp(&right.name))
+        });
 
         Ok(agents)
     }
@@ -267,14 +324,11 @@ impl IdentityManager {
         let config = AppConfig::load(&config_path).map_err(|e| e.to_string())?;
 
         // Only verify signature for born agents (unborn agents don't have keys yet)
-        if config.birth_complete {
+        if config.birth_complete && !config.is_hive {
             drop(gc); // Release read lock before calling verify_agent
             self.verify_agent(agent_id)?;
         } else {
-            tracing::info!(
-                "Skipping signature verification for unborn agent {}",
-                agent_id
-            );
+            tracing::info!("Skipping signature verification for entity {}", agent_id);
         }
 
         // Ensure per-agent Documents folder exists
@@ -312,6 +366,7 @@ impl IdentityManager {
             trinity: None,
             agent_name: Some(name.to_string()),
             birth_timestamp: None,
+            is_hive: false,
             mcp_servers: Default::default(),
             mcp_trust_policy: Default::default(),
             approved_skill_ids: Default::default(),
@@ -355,6 +410,7 @@ impl IdentityManager {
             gc.register_agent(AgentEntry {
                 id: uuid.clone(),
                 name: name.to_string(),
+                is_hive: false,
                 directory: self.registry_directory_for(&uuid),
             })
             .map_err(|e| e.to_string())?;
@@ -425,6 +481,9 @@ impl IdentityManager {
     pub fn update_agent_name(&self, agent_id: &str, new_name: &str) -> Result<(), String> {
         let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
         if let Some(entry) = gc.agents.iter_mut().find(|a| a.id == agent_id) {
+            if entry.is_hive {
+                return Err("Abigail Hive is immortal and its identity is locked.".to_string());
+            }
             entry.name = new_name.to_string();
             gc.save(&self.data_root).map_err(|e| e.to_string())?;
             Ok(())
@@ -682,6 +741,7 @@ impl IdentityManager {
             gc.register_agent(AgentEntry {
                 id: uuid.clone(),
                 name: agent_name.clone(),
+                is_hive: false,
                 directory: self.registry_directory_for(&uuid),
             })
             .map_err(|e| e.to_string())?;
@@ -704,6 +764,9 @@ impl IdentityManager {
                 .find_agent(agent_id)
                 .ok_or_else(|| format!("Agent {} not registered", agent_id))?
                 .clone();
+            if entry.is_hive {
+                return Err("Abigail Hive is immortal and cannot be deleted.".to_string());
+            }
 
             let dir = self.resolve_agent_dir(&entry.directory)?;
 
@@ -730,6 +793,9 @@ impl IdentityManager {
                 .find_agent(agent_id)
                 .ok_or_else(|| format!("Agent {} not registered", agent_id))?
                 .clone();
+            if entry.is_hive {
+                return Err("Abigail Hive is immortal and cannot be archived.".to_string());
+            }
 
             let dir = self.resolve_agent_dir(&entry.directory)?;
 
@@ -981,6 +1047,7 @@ impl IdentityManager {
             gc.register_agent(AgentEntry {
                 id: new_uuid.clone(),
                 name: agent_name.clone(),
+                is_hive: false,
                 directory: self.registry_directory_for(&new_uuid),
             })
             .map_err(|e| e.to_string())?;
@@ -1166,6 +1233,61 @@ mod tests {
             migrated_config.external_pubkey_path,
             Some(agent_dir.join("external_pubkey.bin"))
         );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn bootstrap_creates_immortal_hive_entity() {
+        let tmp = std::env::temp_dir().join(format!("abigail_identity_hive_{}", Uuid::new_v4()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let mut global = GlobalConfig::new(&tmp);
+        IdentityManager::ensure_hive_entity(&tmp, &mut global).unwrap();
+        let manager = IdentityManager {
+            data_root: tmp.clone(),
+            global_config: RwLock::new(global.clone()),
+            master_key: SigningKey::from_bytes(&[9u8; 32]),
+        };
+
+        let hive = global
+            .agents
+            .iter()
+            .find(|entry| entry.is_hive)
+            .cloned()
+            .expect("hive entry");
+        let config = manager.load_agent(&hive.id).unwrap();
+
+        assert!(config.is_hive);
+        assert_eq!(config.agent_name.as_deref(), Some(HIVE_ENTITY_NAME));
+        assert_eq!(config.db_path, HiveEntity::memory_db_path(&tmp));
+
+        let listed = manager.list_agents().unwrap();
+        assert!(listed.iter().any(|agent| agent.is_hive && agent.immortal));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn hive_entity_cannot_be_deleted_or_archived() {
+        let tmp =
+            std::env::temp_dir().join(format!("abigail_identity_hive_guard_{}", Uuid::new_v4()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let mut global = GlobalConfig::new(&tmp);
+        IdentityManager::ensure_hive_entity(&tmp, &mut global).unwrap();
+
+        let manager = IdentityManager {
+            data_root: tmp.clone(),
+            global_config: RwLock::new(global),
+            master_key: SigningKey::from_bytes(&[9u8; 32]),
+        };
+
+        let hive_id = manager.hive_agent_id().unwrap();
+        assert!(manager.delete_agent(&hive_id).is_err());
+        assert!(manager.archive_agent(&hive_id).is_err());
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

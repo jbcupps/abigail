@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 25;
+pub const CONFIG_SCHEMA_VERSION: u32 = 26;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 ///
@@ -365,6 +365,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub birth_timestamp: Option<String>,
 
+    /// True when this config belongs to the persistent Abigail Hive entity.
+    #[serde(default)]
+    pub is_hive: bool,
+
     /// MCP servers to connect (Model Context Protocol).
     #[serde(default)]
     pub mcp_servers: Vec<McpServerDefinition>,
@@ -537,6 +541,7 @@ impl AppConfig {
             trinity: None,
             agent_name: None,
             birth_timestamp: None,
+            is_hive: false,
             mcp_servers: Vec::new(),
             mcp_trust_policy: McpTrustPolicy::default(),
             approved_skill_ids: Vec::new(),
@@ -887,6 +892,13 @@ impl AppConfig {
             tracing::debug!("Migrated config from v24 to v25 (desktop autonomy profile field)");
         }
 
+        if self.schema_version < 26 {
+            // v26: Persistent Abigail Hive entity marker (defaults via serde).
+            self.schema_version = 26;
+            migrated = true;
+            tracing::debug!("Migrated config from v25 to v26 (is_hive field)");
+        }
+
         migrated
     }
     /// Check if birth was interrupted (birth_stage set but birth_complete is false).
@@ -939,6 +951,7 @@ mod tests {
             trinity: None,
             agent_name: None,
             birth_timestamp: None,
+            is_hive: false,
             mcp_servers: Vec::new(),
             mcp_trust_policy: McpTrustPolicy::default(),
             approved_skill_ids: Vec::new(),

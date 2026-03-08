@@ -33,6 +33,8 @@ pub async fn get_status(State(state): State<HiveDaemonState>) -> Json<ApiEnvelop
                     name: a.name,
                     birth_complete: a.birth_complete,
                     birth_date: a.birth_date,
+                    is_hive: a.is_hive,
+                    immortal: a.immortal,
                 })
                 .collect();
             let status = HiveStatus {
@@ -62,6 +64,8 @@ pub async fn list_entities(
                     name: a.name,
                     birth_complete: a.birth_complete,
                     birth_date: a.birth_date,
+                    is_hive: a.is_hive,
+                    immortal: a.immortal,
                 })
                 .collect();
             Json(ApiEnvelope::success(entities))
@@ -103,6 +107,8 @@ pub async fn get_entity(
                     name: agent.name,
                     birth_complete: agent.birth_complete,
                     birth_date: agent.birth_date,
+                    is_hive: agent.is_hive,
+                    immortal: agent.immortal,
                 }))
             } else {
                 Json(ApiEnvelope::error(format!(
