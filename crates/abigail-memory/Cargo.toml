@@ -23,7 +23,7 @@ hkdf = "0.12"
 base64.workspace = true
 directories.workspace = true
 tokio = { workspace = true, optional = true }
-sqlx = { version = "0.8.1", features = ["runtime-tokio", "postgres", "chrono", "uuid"], optional = true }
+sqlx = { version = "0.8.1", features = ["runtime-tokio", "postgres", "chrono", "uuid", "macros"], optional = true }
 async-trait = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 
