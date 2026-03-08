@@ -951,6 +951,7 @@ mod tests {
             trinity: None,
             agent_name: None,
             birth_timestamp: None,
+            is_hive: false,
             mcp_servers: Vec::new(),
             mcp_trust_policy: McpTrustPolicy::default(),
             approved_skill_ids: Vec::new(),

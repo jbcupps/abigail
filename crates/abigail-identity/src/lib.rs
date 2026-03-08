@@ -93,7 +93,10 @@ pub struct IdentityManager {
 }
 
 impl IdentityManager {
-    fn ensure_hive_entity(data_root: &Path, global_config: &mut GlobalConfig) -> Result<(), String> {
+    fn ensure_hive_entity(
+        data_root: &Path,
+        global_config: &mut GlobalConfig,
+    ) -> Result<(), String> {
         if global_config.agents.iter().any(|entry| entry.is_hive) {
             return Ok(());
         }
@@ -325,10 +328,7 @@ impl IdentityManager {
             drop(gc); // Release read lock before calling verify_agent
             self.verify_agent(agent_id)?;
         } else {
-            tracing::info!(
-                "Skipping signature verification for entity {}",
-                agent_id
-            );
+            tracing::info!("Skipping signature verification for entity {}", agent_id);
         }
 
         // Ensure per-agent Documents folder exists
@@ -1271,10 +1271,8 @@ mod tests {
 
     #[test]
     fn hive_entity_cannot_be_deleted_or_archived() {
-        let tmp = std::env::temp_dir().join(format!(
-            "abigail_identity_hive_guard_{}",
-            Uuid::new_v4()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("abigail_identity_hive_guard_{}", Uuid::new_v4()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
 

@@ -403,6 +403,7 @@ mod tests {
             trinity: None,
             agent_name: None,
             birth_timestamp: None,
+            is_hive: false,
             mcp_servers: Default::default(),
             mcp_trust_policy: Default::default(),
             approved_skill_ids: Default::default(),
