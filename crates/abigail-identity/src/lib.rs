@@ -93,6 +93,57 @@ pub struct IdentityManager {
 }
 
 impl IdentityManager {
+    fn should_auto_reset_identity_state(error: &str) -> bool {
+        let error = error.to_ascii_lowercase();
+        error.contains("aes-gcm decryption failed")
+            || error.contains("wrong key or tampered data")
+            || error.contains("decryption failed")
+    }
+
+    fn recover_identity_state(data_root: &Path) -> Result<(), String> {
+        let candidates = [
+            data_root.join("master.key"),
+            GlobalConfig::config_path(data_root),
+            data_root.join("identities"),
+        ];
+
+        if !candidates.iter().any(|path| path.exists()) {
+            return Ok(());
+        }
+
+        let backups_dir = data_root.join("backups");
+        std::fs::create_dir_all(&backups_dir).map_err(|e| e.to_string())?;
+
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+        let recovery_dir = backups_dir.join(format!("identity_recovery_{}", timestamp));
+        std::fs::create_dir_all(&recovery_dir).map_err(|e| e.to_string())?;
+
+        for path in candidates {
+            if !path.exists() {
+                continue;
+            }
+
+            let file_name = path
+                .file_name()
+                .ok_or_else(|| format!("Invalid identity recovery path '{}'", path.display()))?;
+            let target = recovery_dir.join(file_name);
+            std::fs::rename(&path, &target).map_err(|e| {
+                format!(
+                    "Failed to archive '{}' during identity recovery: {}",
+                    path.display(),
+                    e
+                )
+            })?;
+        }
+
+        tracing::warn!(
+            recovery_dir = %recovery_dir.display(),
+            "Archived identity state after AES-GCM failure; shared Hive memory/docs remain untouched"
+        );
+
+        Ok(())
+    }
+
     fn ensure_hive_entity(
         data_root: &Path,
         global_config: &mut GlobalConfig,
@@ -149,10 +200,25 @@ impl IdentityManager {
             .root_kek()
             .map_err(|e| anyhow::anyhow!(format!("Recovery Mode: {}", e)))?;
 
-        Self::try_load_from_vault(data_root).map_err(|e| {
-            tracing::error!("Fatal identity error: {}", e);
-            anyhow::anyhow!(e)
-        })
+        match Self::try_load_from_vault(data_root.clone()) {
+            Ok(manager) => Ok(manager),
+            Err(error) if Self::should_auto_reset_identity_state(&error) => {
+                tracing::warn!(
+                    data_root = %data_root.display(),
+                    error = %error,
+                    "AES-GCM decryption failed while loading identity state; archiving identity material and bootstrapping fresh state"
+                );
+                Self::recover_identity_state(&data_root).map_err(anyhow::Error::msg)?;
+                Self::try_load_from_vault(data_root).map_err(|retry_error| {
+                    tracing::error!("Fatal identity error after auto-recovery: {}", retry_error);
+                    anyhow::anyhow!(retry_error)
+                })
+            }
+            Err(error) => {
+                tracing::error!("Fatal identity error: {}", error);
+                Err(anyhow::anyhow!(error))
+            }
+        }
     }
 
     fn try_load_from_vault(data_root: PathBuf) -> Result<Self, String> {
@@ -1170,6 +1236,67 @@ mod tests {
             .unwrap();
         assert_eq!(resolved, manager.data_root().join("identities/test-agent"));
         let _ = std::fs::remove_dir_all(manager.data_root());
+    }
+
+    #[test]
+    fn aes_gcm_errors_trigger_identity_auto_reset() {
+        assert!(IdentityManager::should_auto_reset_identity_state(
+            "AES-GCM decryption failed (wrong key or tampered data)"
+        ));
+        assert!(!IdentityManager::should_auto_reset_identity_state(
+            "permission denied while reading config"
+        ));
+    }
+
+    #[test]
+    fn recover_identity_state_archives_only_identity_material() {
+        let tmp =
+            std::env::temp_dir().join(format!("abigail_identity_recovery_{}", Uuid::new_v4()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("identities").join("adam").join("docs")).unwrap();
+        std::fs::create_dir_all(tmp.join("docs")).unwrap();
+
+        std::fs::write(tmp.join("master.key"), b"not-a-real-vault").unwrap();
+        std::fs::write(
+            GlobalConfig::config_path(&tmp),
+            br#"{"master_key_path":"master.key","agents":[],"default_theme":"modern"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.join("identities")
+                .join("adam")
+                .join("docs")
+                .join("journal.md"),
+            b"identity-doc",
+        )
+        .unwrap();
+        std::fs::write(tmp.join("memory.db"), b"hive-memory").unwrap();
+        std::fs::write(tmp.join("docs").join("family.md"), b"shared-doc").unwrap();
+
+        IdentityManager::recover_identity_state(&tmp).unwrap();
+
+        assert!(!tmp.join("master.key").exists());
+        assert!(!GlobalConfig::config_path(&tmp).exists());
+        assert!(!tmp.join("identities").exists());
+        assert!(tmp.join("memory.db").exists());
+        assert!(tmp.join("docs").join("family.md").exists());
+
+        let recovery_dir = std::fs::read_dir(tmp.join("backups"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        assert!(recovery_dir.join("master.key").exists());
+        assert!(recovery_dir.join("global_settings.json").exists());
+        assert!(recovery_dir
+            .join("identities")
+            .join("adam")
+            .join("docs")
+            .join("journal.md")
+            .exists());
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

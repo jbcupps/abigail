@@ -200,11 +200,18 @@ pub fn is_model_compatible_with_provider(provider: &str, model: &str) -> bool {
         "openai" => is_chat_openai_model(model),
         "google" => is_chat_google_model(model),
         "xai" => is_chat_xai_model(model),
-        "anthropic" => model.starts_with("claude-"),
+        "anthropic" => is_chat_anthropic_model(model),
         "perplexity" => model.starts_with("sonar"),
-        "claude-cli" | "gemini-cli" | "codex-cli" | "grok-cli" => false,
+        "claude-cli" => is_chat_anthropic_model(model),
+        "gemini-cli" => is_chat_google_model(model),
+        "codex-cli" => is_chat_openai_model(model),
+        "grok-cli" => is_chat_xai_model(model),
         _ => true,
     }
+}
+
+fn is_chat_anthropic_model(id: &str) -> bool {
+    matches!(id, "sonnet" | "opus" | "haiku") || id.starts_with("claude-")
 }
 
 /// Whitelist of OpenAI model prefixes that are chat-completion capable.
@@ -578,6 +585,20 @@ mod tests {
             "anthropic",
             "claude-sonnet-4-6"
         ));
+        assert!(is_model_compatible_with_provider(
+            "claude-cli",
+            "claude-sonnet-4-6"
+        ));
+        assert!(is_model_compatible_with_provider("claude-cli", "sonnet"));
+        assert!(is_model_compatible_with_provider(
+            "gemini-cli",
+            "gemini-2.5-pro"
+        ));
+        assert!(is_model_compatible_with_provider("codex-cli", "gpt-5"));
+        assert!(is_model_compatible_with_provider(
+            "grok-cli",
+            "grok-4-1-fast-reasoning"
+        ));
         assert!(is_model_compatible_with_provider("perplexity", "sonar-pro"));
 
         assert!(!is_model_compatible_with_provider(
@@ -588,7 +609,7 @@ mod tests {
         assert!(!is_model_compatible_with_provider("xai", "gpt-4.1"));
         assert!(!is_model_compatible_with_provider(
             "claude-cli",
-            "claude-sonnet-4-6"
+            "gemini-2.5-pro"
         ));
         assert!(is_model_compatible_with_provider(
             "openrouter",
