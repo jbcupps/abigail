@@ -31,6 +31,38 @@ function decodeBase64Text(value, label) {
   return text;
 }
 
+function encodeBase64Text(value) {
+  return Buffer.from(String(value ?? "").trim(), "utf8").toString("base64");
+}
+
+function normalizeMinisignBox(value, label) {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) {
+    return { decoded: "", encoded: "" };
+  }
+
+  const decoded = trimmed.startsWith("untrusted comment:")
+    ? trimmed
+    : decodeBase64Text(trimmed, label);
+  const lines = decoded.split(/\r?\n/).filter(Boolean);
+
+  if (lines[0] == null || !lines[0].startsWith("untrusted comment:")) {
+    throw new Error(
+      `${label} must resolve to a minisign key box that starts with 'untrusted comment:'.`
+    );
+  }
+
+  if (lines[1] == null || !lines[1].startsWith("RW")) {
+    throw new Error(`${label} must resolve to a minisign key box whose second line starts with 'RW'.`);
+  }
+
+  const normalizedDecoded = `${lines[0]}\n${lines[1]}`;
+  return {
+    decoded: normalizedDecoded,
+    encoded: encodeBase64Text(normalizedDecoded),
+  };
+}
+
 const requireUpdaterPubkey = isTruthy(process.env.ABIGAIL_REQUIRE_UPDATER_PUBKEY);
 const enableUpdaterArtifacts = isTruthy(process.env.ABIGAIL_ENABLE_UPDATER_ARTIFACTS);
 const updaterPubkey = String(process.env.TAURI_UPDATER_PUBKEY ?? "").trim();
@@ -45,14 +77,9 @@ if (requireUpdaterPubkey && !updaterPubkey) {
   throw new Error("TAURI_UPDATER_PUBKEY is required for this build.");
 }
 
-if (updaterPubkey) {
-  const decodedPubkey = decodeBase64Text(updaterPubkey, "TAURI_UPDATER_PUBKEY");
-  if (!decodedPubkey.startsWith("untrusted comment:")) {
-    throw new Error(
-      "TAURI_UPDATER_PUBKEY must decode to a minisign public key box that starts with 'untrusted comment:'."
-    );
-  }
-}
+const normalizedUpdaterPubkey = updaterPubkey
+  ? normalizeMinisignBox(updaterPubkey, "TAURI_UPDATER_PUBKEY")
+  : { decoded: "", encoded: "" };
 
 const raw = fs.readFileSync(configPath, "utf8");
 const config = JSON.parse(raw);
@@ -61,11 +88,11 @@ config.bundle.windows ??= {};
 config.plugins ??= {};
 config.plugins.updater ??= {};
 
-const createUpdaterArtifacts = Boolean(updaterPubkey) && enableUpdaterArtifacts;
+const createUpdaterArtifacts = Boolean(normalizedUpdaterPubkey.encoded) && enableUpdaterArtifacts;
 config.bundle.createUpdaterArtifacts = createUpdaterArtifacts;
 
-if (updaterPubkey) {
-  config.plugins.updater.pubkey = updaterPubkey;
+if (normalizedUpdaterPubkey.encoded) {
+  config.plugins.updater.pubkey = normalizedUpdaterPubkey.encoded;
 }
 
 if (windowsThumbprint) {
@@ -83,7 +110,7 @@ console.log(
     {
       configPath,
       createUpdaterArtifacts,
-      hasUpdaterPubkey: Boolean(updaterPubkey),
+      hasUpdaterPubkey: Boolean(normalizedUpdaterPubkey.encoded),
       windowsCertificateThumbprint: config.bundle.windows.certificateThumbprint ?? null,
       windowsTimestampUrl: config.bundle.windows.timestampUrl ?? "",
     },

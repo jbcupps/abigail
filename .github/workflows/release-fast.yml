@@ -1,4 +1,4 @@
-name: Release Fast (Windows + Linux)
+name: Release Fast (Alpha Windows + Linux)
 
 env:
   OLLAMA_VERSION: "v0.5.13"
@@ -141,12 +141,38 @@ jobs:
             fs.writeFileSync(path, JSON.stringify(data, null, 2) + '\n');
           "
 
+      - name: Resolve fast-release signing mode
+        if: matrix.platform == 'windows-latest' && github.event.inputs.create_github_release == 'true'
+        id: fast_signing
+        shell: bash
+        env:
+          WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
+          WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          has_windows_signing=false
+          if [[ -n "${WINDOWS_SIGNING_CERT_BASE64:-}" && \
+                -n "${WINDOWS_SIGNING_CERT_PASSWORD:-}" && \
+                -n "${WINDOWS_CERTIFICATE_THUMBPRINT:-}" && \
+                -n "${WINDOWS_TIMESTAMP_URL:-}" ]]; then
+            has_windows_signing=true
+          fi
+
+          echo "has_windows_signing=$has_windows_signing" >> "$GITHUB_OUTPUT"
+
+          if [[ "$has_windows_signing" == "true" ]]; then
+            echo "Windows Authenticode inputs detected for fast pre-release."
+          else
+            echo "Windows Authenticode inputs missing; fast pre-release will publish unsigned Windows installers."
+          fi
+
       - name: Enforce fast-release signing prerequisites
         if: matrix.platform == 'windows-latest' && github.event.inputs.create_github_release == 'true'
         shell: bash
         env:
-          ABIGAIL_OFFICIAL_RELEASE: "true"
-          ABIGAIL_REQUIRE_WINDOWS_SIGNING: "true"
+          ABIGAIL_REQUIRE_UPDATER_SIGNING: "true"
+          ABIGAIL_REQUIRE_WINDOWS_SIGNING: ${{ steps.fast_signing.outputs.has_windows_signing }}
           ABIGAIL_REQUIRE_MAC_SIGNING: "false"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -168,6 +194,32 @@ jobs:
           WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
         run: |
           node scripts/prepare_tauri_bundle_config.mjs tauri-app/tauri.conf.json
+
+      - name: Assert updater config injection
+        if: matrix.platform == 'windows-latest' && github.event.inputs.create_github_release == 'true'
+        shell: bash
+        env:
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const normalize = (value) => {
+              const input = String(value || '').trim();
+              if (!input) return '';
+              if (!input.startsWith('untrusted comment:')) {
+                return input.replace(/\s+/g, '');
+              }
+              const lines = input.split(/\r?\n/).filter(Boolean);
+              return Buffer.from(`${lines[0]}\n${lines[1]}`, 'utf8').toString('base64');
+            };
+            const conf = JSON.parse(fs.readFileSync('tauri-app/tauri.conf.json', 'utf8'));
+            if (!conf.bundle?.createUpdaterArtifacts) {
+              throw new Error('createUpdaterArtifacts must be true for fast prerelease builds');
+            }
+            if (conf.plugins?.updater?.pubkey !== normalize(process.env.TAURI_UPDATER_PUBKEY)) {
+              throw new Error('Updater pubkey injection mismatch');
+            }
+          "
 
       - name: Generate Cargo.lock
         run: cargo generate-lockfile
@@ -222,7 +274,7 @@ jobs:
           fi
 
       - name: Import Windows code signing certificate
-        if: matrix.platform == 'windows-latest' && github.event.inputs.create_github_release == 'true'
+        if: matrix.platform == 'windows-latest' && github.event.inputs.create_github_release == 'true' && steps.fast_signing.outputs.has_windows_signing == 'true'
         shell: pwsh
         env:
           WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
@@ -396,6 +448,6 @@ jobs:
 
           gh release create "${{ needs.build.outputs.tag }}" \
             --title "Abigail Fast ${{ needs.build.outputs.version }}" \
-            --notes "Fast validation release (Windows + Linux only)." \
+            --notes "Alpha validation release. Windows updater payloads remain signed; Windows Authenticode is included only when certificate secrets are configured." \
             --prerelease \
             "${assets[@]}"

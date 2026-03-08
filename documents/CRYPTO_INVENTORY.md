@@ -35,5 +35,5 @@ This document maps each cryptographic surface in Abigail to the actual runtime o
 ## Release controls
 
 - `scripts/enforce_release_prereqs.sh` blocks published release builds when updater signing keys, updater public key, Windows signing inputs, or macOS signing/notarization inputs are missing.
-- `scripts/prepare_tauri_bundle_config.mjs` injects the updater verification public key and signing-related bundle fields at build time.
+- `scripts/prepare_tauri_bundle_config.mjs` injects the updater verification public key and signing-related bundle fields at build time, normalizing minisign key boxes to the Tauri 2 base64 format.
 - `scripts/generate_tauri_latest_manifest.mjs` emits `latest.json` from the signed updater artifacts that are actually attached to the release.
