@@ -3,8 +3,8 @@ use crate::templates;
 use crate::{chat_coordinator, rate_limit::format_cooldown_error};
 use abigail_birth::BirthOrchestrator;
 use abigail_core::{
-    generate_external_keypair, sign_constitutional_documents, CoreError, ExternalVault,
-    ReadOnlyFileVault, verify_constitutional_integrity,
+    generate_external_keypair, sign_constitutional_documents, verify_constitutional_integrity,
+    CoreError, ExternalVault, ReadOnlyFileVault,
 };
 use abigail_soul_crystallization::DepthLevel;
 use base64::Engine;
@@ -258,7 +258,7 @@ pub fn advance_to_crystallization(state: State<AppState>) -> Result<(), String> 
         config
             .local_llm_base_url
             .as_deref()
-            .map_or(false, |u| !u.is_empty())
+            .is_some_and(|u| !u.is_empty())
     };
 
     let has_cli_provider = if !has_vault_provider && !has_local_llm {
@@ -557,6 +557,7 @@ fn parse_identity_json(text: &str) -> CrystallizationIdentity {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn crystallize_soul(
     state: State<AppState>,
     name: String,

@@ -5,24 +5,18 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    // Basic safety: reject absolute paths and traversal outside the intended root.
-    if path.is_absolute() {
-        return Err(CoreError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("Absolute paths are not allowed: '{}'", path.display()),
-        )));
-    }
-
+    // Allow trusted absolute paths from the app/runtime, but reject parent
+    // traversal so callers cannot smuggle `..` through relative inputs.
     for component in path.components() {
         match component {
-            Component::CurDir | Component::Normal(_) => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+            Component::CurDir
+            | Component::Normal(_)
+            | Component::RootDir
+            | Component::Prefix(_) => {}
+            Component::ParentDir => {
                 return Err(CoreError::Io(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    format!(
-                        "Path '{}' contains disallowed traversal or root components",
-                        path.display()
-                    ),
+                    format!("Path '{}' contains disallowed traversal", path.display()),
                 )));
             }
         }
@@ -78,7 +72,12 @@ fn unique_temp_path(path: &Path) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    path.with_file_name(format!(".{}.tmp-{}-{}", file_name, std::process::id(), suffix))
+    path.with_file_name(format!(
+        ".{}.tmp-{}-{}",
+        file_name,
+        std::process::id(),
+        suffix
+    ))
 }
 
 #[cfg(not(windows))]
@@ -89,10 +88,10 @@ fn replace_file_atomic(src: &Path, dest: &Path) -> Result<()> {
 
 #[cfg(windows)]
 fn replace_file_atomic(src: &Path, dest: &Path) -> Result<()> {
+    use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::{
         MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
-    use windows::core::PCWSTR;
 
     let src_wide = path_to_wide(src);
     let dest_wide = path_to_wide(dest);
@@ -102,12 +101,14 @@ fn replace_file_atomic(src: &Path, dest: &Path) -> Result<()> {
             PCWSTR(dest_wide.as_ptr()),
             MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
         )
-        .map_err(|e| CoreError::Io(std::io::Error::other(format!(
-            "Atomic replace failed for '{}' -> '{}': {}",
-            src.display(),
-            dest.display(),
-            e
-        ))))?;
+        .map_err(|e| {
+            CoreError::Io(std::io::Error::other(format!(
+                "Atomic replace failed for '{}' -> '{}': {}",
+                src.display(),
+                dest.display(),
+                e
+            )))
+        })?;
     }
     Ok(())
 }
@@ -116,7 +117,10 @@ fn replace_file_atomic(src: &Path, dest: &Path) -> Result<()> {
 fn path_to_wide(path: &Path) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
 
-    path.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
+    path.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 #[cfg(not(windows))]

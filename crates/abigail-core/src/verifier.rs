@@ -128,7 +128,9 @@ pub fn write_sig_file(docs_path: &Path, doc_name: &str, doc: &CoreDocument) -> R
 
 pub fn verify_constitutional_integrity(config: &crate::AppConfig) -> Result<()> {
     let pubkey_path = config.effective_external_pubkey_path().ok_or_else(|| {
-        CoreError::Vault("No external public key is configured for constitutional verification".into())
+        CoreError::Vault(
+            "No external public key is configured for constitutional verification".into(),
+        )
     })?;
     let vault = crate::vault::ReadOnlyFileVault::new(pubkey_path);
     let mut verifier = Verifier::from_vault(&vault)?;

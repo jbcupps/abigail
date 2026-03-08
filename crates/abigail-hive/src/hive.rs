@@ -122,30 +122,17 @@ impl Hive {
         config: &AppConfig,
         vault: &SecretsVault,
     ) -> Option<ProviderSelection> {
-        // Helper to avoid propagating full secrets into logs or debug output.
-        fn redact_secret(secret: &str) -> String {
-            let trimmed = secret.trim();
-            if trimmed.len() <= 4 {
-                "***redacted***".to_string()
-            } else {
-                let suffix = &trimmed[trimmed.len() - 4..];
-                format!("***{}", suffix)
-            }
-        }
-
         // 1. Explicit preference from Mentor menu (Forge)
         if let Some(pref) = &config.active_provider_preference {
-            // CLI providers work without a stored key (OAuth / built-in auth)
             if Self::is_cli_provider(pref) {
                 return Some(
                     vault
                         .get_secret(pref)
                         .map(str::trim)
-                        .filter(|k| !k.is_empty())
-                        // Do not propagate the actual secret to avoid accidental logging.
-                        .map(|_key| ProviderSelection {
-                            auth: ProviderAuth::ApiKey(redact_secret(key)),
-                            auth: ProviderAuth::ApiKey("<redacted>".to_string()),
+                        .filter(|key| !key.is_empty())
+                        .map(|key| ProviderSelection {
+                            provider: pref.clone(),
+                            auth: ProviderAuth::ApiKey(key.to_string()),
                         })
                         .unwrap_or_else(|| ProviderSelection {
                             provider: pref.clone(),
@@ -153,12 +140,13 @@ impl Hive {
                         }),
                 );
             }
+
             if let Some(selection) = vault
                 .get_secret(pref)
                 .map(str::trim)
                 .filter(|key| !key.is_empty())
                 .map(|key| ProviderSelection {
-                    auth: ProviderAuth::ApiKey(redact_secret(key)),
+                    provider: pref.clone(),
                     auth: ProviderAuth::ApiKey(key.to_string()),
                 })
             {
@@ -167,15 +155,16 @@ impl Hive {
         }
 
         // 2. Local Vault (keys pasted in chat or added in Connectivity)
-            if let Some(raw_key) = vault.get_secret(name) {
-                let key = raw_key.trim();
-                if !key.is_empty() {
-                    let selection = ProviderSelection {
-                        provider: (*name).to_string(),
-                        auth: ProviderAuth::ApiKey(key.to_string()),
-                    };
-                    return Some(selection);
-                }
+        let provider_names = [
+            "openai",
+            "google",
+            "xai",
+            "perplexity",
+            "anthropic",
+            "claude-cli",
+            "gemini-cli",
+            "codex-cli",
+            "grok-cli",
         ];
         for name in &provider_names {
             if let Some(selection) = vault
@@ -183,7 +172,7 @@ impl Hive {
                 .map(str::trim)
                 .filter(|key| !key.is_empty())
                 .map(|key| ProviderSelection {
-                    auth: ProviderAuth::ApiKey(redact_secret(key)),
+                    provider: (*name).to_string(),
                     auth: ProviderAuth::ApiKey(key.to_string()),
                 })
             {
@@ -197,7 +186,7 @@ impl Hive {
                 if let Some(k) = &trinity.ego_api_key {
                     if !k.is_empty() {
                         return Some(ProviderSelection {
-                            auth: ProviderAuth::ApiKey(redact_secret(k)),
+                            provider: p.clone(),
                             auth: ProviderAuth::ApiKey(k.clone()),
                         });
                     }
@@ -209,7 +198,7 @@ impl Hive {
         if let Some(k) = &config.openai_api_key {
             if !k.is_empty() {
                 return Some(ProviderSelection {
-                    auth: ProviderAuth::ApiKey(redact_secret(k)),
+                    provider: "openai".to_string(),
                     auth: ProviderAuth::ApiKey(k.clone()),
                 });
             }

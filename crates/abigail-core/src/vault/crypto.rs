@@ -199,10 +199,10 @@ mod tests {
     #[test]
     fn argon2_derivation_is_deterministic() {
         let salt = test_salt();
-        let k1 = derive_key_from_passphrase_argon2("my-passphrase", &salt, 64 * 1024, 3, 1)
-            .unwrap();
-        let k2 = derive_key_from_passphrase_argon2("my-passphrase", &salt, 64 * 1024, 3, 1)
-            .unwrap();
+        let k1 =
+            derive_key_from_passphrase_argon2("my-passphrase", &salt, 64 * 1024, 3, 1).unwrap();
+        let k2 =
+            derive_key_from_passphrase_argon2("my-passphrase", &salt, 64 * 1024, 3, 1).unwrap();
         assert_eq!(k1, k2);
     }
 }

@@ -248,8 +248,9 @@ fn load_kdf_metadata(data_root: &Path) -> Result<Option<PassphraseKdfMetadata>> 
         return Ok(None);
     }
     let content = std::fs::read_to_string(&path)?;
-    let metadata = serde_json::from_str(&content)
-        .map_err(|e| CoreError::Vault(format!("Invalid KDF metadata at {}: {}", path.display(), e)))?;
+    let metadata = serde_json::from_str(&content).map_err(|e| {
+        CoreError::Vault(format!("Invalid KDF metadata at {}: {}", path.display(), e))
+    })?;
     Ok(Some(metadata))
 }
 
@@ -274,10 +275,7 @@ fn decode_raw_kek(raw_secret: &str) -> Result<[u8; KEK_LEN]> {
         base64::engine::general_purpose::STANDARD
             .decode(trimmed)
             .map_err(|e| {
-                CoreError::Vault(format!(
-                    "Invalid base64 raw KEK in {}: {}",
-                    RAW_KEK_ENV, e
-                ))
+                CoreError::Vault(format!("Invalid base64 raw KEK in {}: {}", RAW_KEK_ENV, e))
             })?
     };
 
@@ -397,7 +395,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
-        let legacy_kek = super::super::crypto::derive_key_from_passphrase("legacy-pass", PASSPHRASE_SALT);
+        let legacy_kek =
+            super::super::crypto::derive_key_from_passphrase("legacy-pass", PASSPHRASE_SALT);
         super::super::write_encrypted_sentinel(&dir, &legacy_kek).unwrap();
 
         let derived = derive_passphrase_kek(&dir, "legacy-pass", true).unwrap();

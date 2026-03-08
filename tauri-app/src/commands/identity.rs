@@ -1,6 +1,8 @@
 use crate::identity_manager::{AgentIdentityInfo, BackupInfo, IdentitySummary};
 use crate::state::AppState;
-use abigail_core::{verify_constitutional_integrity, CoreError, HybridUnlockProvider, SecretsVault};
+use abigail_core::{
+    verify_constitutional_integrity, CoreError, HybridUnlockProvider, SecretsVault,
+};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -73,14 +75,26 @@ pub async fn run_startup_checks(state: State<'_, AppState>) -> Result<StartupChe
 }
 
 #[tauri::command]
-pub fn inspect_identity_integrity(state: State<AppState>) -> Result<IdentityIntegrityReport, String> {
+pub fn inspect_identity_integrity(
+    state: State<AppState>,
+) -> Result<IdentityIntegrityReport, String> {
     inspect_identity_integrity_inner(&state)
 }
 
-fn inspect_identity_integrity_inner(state: &State<'_, AppState>) -> Result<IdentityIntegrityReport, String> {
+fn inspect_identity_integrity_inner(
+    state: &State<'_, AppState>,
+) -> Result<IdentityIntegrityReport, String> {
     let config = state.config.read().map_err(|e| e.to_string())?.clone();
-    let active_id = state.active_agent_id.read().map_err(|e| e.to_string())?.clone();
-    Ok(evaluate_identity_integrity(state, active_id.as_deref(), &config))
+    let active_id = state
+        .active_agent_id
+        .read()
+        .map_err(|e| e.to_string())?
+        .clone();
+    Ok(evaluate_identity_integrity(
+        state,
+        active_id.as_deref(),
+        &config,
+    ))
 }
 
 fn evaluate_identity_integrity(
@@ -99,7 +113,9 @@ fn evaluate_identity_integrity(
     }
 
     if !config.birth_complete {
-        return ok_report("Birth is not complete yet; constitutional integrity is not required.".to_string());
+        return ok_report(
+            "Birth is not complete yet; constitutional integrity is not required.".to_string(),
+        );
     }
 
     if let Some(id) = agent_id {
@@ -203,7 +219,11 @@ pub async fn load_agent(state: State<'_, AppState>, agent_id: String) -> Result<
     if agent_config.birth_complete {
         let integrity = evaluate_identity_integrity(&state, Some(&agent_id), &agent_config);
         if integrity.status != IntegrityStatus::Ok {
-            return Err(format!("{} {}", integrity.summary, integrity.details.join(" | ")).trim().to_string());
+            return Err(
+                format!("{} {}", integrity.summary, integrity.details.join(" | "))
+                    .trim()
+                    .to_string(),
+            );
         }
     }
 

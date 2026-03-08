@@ -41,6 +41,7 @@ use tokio_util::sync::CancellationToken;
 /// - Never hold a sync lock (1-7) across an `.await` boundary.
 /// - Drop earlier locks before acquiring later ones when possible.
 /// - Scoped blocks `{ let guard = lock.write(); ... }` are preferred to limit hold duration.
+#[allow(clippy::doc_lazy_continuation)]
 pub struct AppState {
     pub config: RwLock<AppConfig>,
     pub birth: RwLock<Option<BirthOrchestrator>>,
