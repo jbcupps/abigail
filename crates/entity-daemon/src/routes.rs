@@ -940,16 +940,14 @@ mod tests {
     use abigail_capabilities::cognitive::{CompletionRequest, CompletionResponse, LlmProvider};
     use abigail_core::{AppConfig, RoutingMode};
     use abigail_memory::MemoryStore;
-    use abigail_queue::{
-        MIGRATION_V3_JOB_QUEUE, MIGRATION_V4_ORCHESTRATION, MIGRATION_V5_DEPENDS_ON,
-        MIGRATION_V6_EXECUTION_MODE,
-    };
+    use abigail_persistence::{EntityScope, PersistenceHandle};
     use abigail_router::IdEgoRouter;
     use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
     use abigail_streaming::MemoryBroker;
     use async_trait::async_trait;
     use axum::extract::{Path, Query, State};
     use axum::Json;
+    use std::path::PathBuf;
     use std::sync::Arc;
 
     struct MockProvider;
@@ -978,34 +976,14 @@ mod tests {
         let registry = Arc::new(SkillRegistry::new());
         let executor = Arc::new(SkillExecutor::new(registry.clone()));
         let memory = Arc::new(MemoryStore::open_in_memory().unwrap());
-        let docs_dir = std::env::temp_dir().join("abigail_routes_test_docs");
+        let docs_dir = test_scratch_dir("abigail_routes_test_docs");
         let _ = std::fs::create_dir_all(&docs_dir);
 
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
-        conn.execute_batch(MIGRATION_V3_JOB_QUEUE).unwrap();
-        for stmt in MIGRATION_V4_ORCHESTRATION.split(';') {
-            let trimmed = stmt.trim();
-            if !trimmed.is_empty() {
-                let _ = conn.execute_batch(trimmed);
-            }
-        }
-        for stmt in MIGRATION_V5_DEPENDS_ON.split(';') {
-            let trimmed = stmt.trim();
-            if !trimmed.is_empty() {
-                let _ = conn.execute_batch(trimmed);
-            }
-        }
-        for stmt in MIGRATION_V6_EXECUTION_MODE.split(';') {
-            let trimmed = stmt.trim();
-            if !trimmed.is_empty() {
-                let _ = conn.execute_batch(trimmed);
-            }
-        }
         let stream_broker: Arc<dyn abigail_streaming::StreamBroker> =
             Arc::new(MemoryBroker::new(128));
+        let queue_store = PersistenceHandle::open_ephemeral(EntityScope::Hive).unwrap();
         let job_queue = Arc::new(abigail_queue::JobQueue::new(
-            Arc::new(std::sync::Mutex::new(conn)),
+            queue_store,
             stream_broker.clone(),
         ));
 
@@ -1028,6 +1006,13 @@ mod tests {
                 abigail_router::ConstraintStore::new(),
             )),
         }
+    }
+
+    fn test_scratch_dir(prefix: &str) -> PathBuf {
+        std::env::current_dir()
+            .map(|dir| dir.join("target").join("test-data"))
+            .unwrap_or_else(|_| std::env::temp_dir())
+            .join(format!("{prefix}_{}", uuid::Uuid::new_v4()))
     }
 
     #[tokio::test]

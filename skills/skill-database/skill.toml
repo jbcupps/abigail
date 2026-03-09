@@ -2,9 +2,9 @@
 id = "com.abigail.skills.database"
 name = "Database"
 version = "0.1.0"
-description = "Query and manage SQLite databases: run queries, execute statements, inspect schemas"
+description = "Query and manage local embedded SurrealDB stores: run queries, execute statements, inspect schemas"
 category = "Developer"
-keywords = ["database", "sql", "sqlite", "query", "schema"]
+keywords = ["database", "sql", "surrealdb", "query", "schema"]
 
 [author]
 name = "Abigail Team"

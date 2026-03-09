@@ -23,6 +23,7 @@ abigail-skills = { path = "../abigail-skills" }
 abigail-runtime = { path = "../abigail-runtime" }
 abigail-memory = { path = "../abigail-memory" }
 abigail-queue = { path = "../abigail-queue" }
+abigail-persistence = { path = "../abigail-persistence" }
 abigail-streaming = { path = "../abigail-streaming" }
 directories = "5"
 axum.workspace = true
@@ -40,7 +41,6 @@ anyhow.workspace = true
 reqwest.workspace = true
 async-trait.workspace = true
 uuid.workspace = true
-rusqlite.workspace = true
 chrono.workspace = true
 cron = "0.15"
 

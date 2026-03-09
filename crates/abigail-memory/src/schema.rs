@@ -1,4 +1,4 @@
-// Schema and migrations for SQLite. sqlite-vec integration stubbed for MVP; retrieval by recency/weight.
+// Legacy schema helpers retained for compatibility with older memory layouts.
 
 pub const CREATE_MEMORIES: &str = r#"
 CREATE TABLE IF NOT EXISTS memories (

@@ -1,4 +1,4 @@
-//! SQLite migrations for the job queue.
+//! Legacy queue schema constants retained for compatibility.
 
 pub const MIGRATION_V3_JOB_QUEUE: &str = r#"
 CREATE TABLE IF NOT EXISTS job_queue (

@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+abigail-persistence = { path = "../abigail-persistence" }
 abigail-streaming = { path = "../abigail-streaming" }
 abigail-core = { path = "../abigail-core" }
 tokio.workspace = true
@@ -14,4 +15,3 @@ uuid.workspace = true
 async-trait.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
-rusqlite.workspace = true

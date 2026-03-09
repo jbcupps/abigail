@@ -530,7 +530,7 @@ impl AppConfig {
             data_dir: base.clone(),
             models_dir: base.join("models"),
             docs_dir: base.join("docs"),
-            db_path: base.join("abigail_seed.db"),
+            db_path: base.join("memory.db"),
             openai_api_key: None,
             email: None,
             birth_complete: false,

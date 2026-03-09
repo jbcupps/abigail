@@ -15,8 +15,9 @@ mod subagent_runner;
 
 use abigail_core::{AppConfig, SecretsVault};
 use abigail_hive::Hive;
-use abigail_identity::IdentityManager;
+use abigail_identity::{HiveEntity, IdentityManager};
 use abigail_memory::MemoryStore;
+use abigail_persistence::{EntityScope, PersistenceHandle};
 use abigail_queue::JobQueue;
 use abigail_router::IdEgoRouter;
 use abigail_runtime::{
@@ -187,9 +188,7 @@ async fn main() -> anyhow::Result<()> {
     config.routing_mode = hive_config.routing_mode;
     config.data_dir = entity_dir.clone();
     config.docs_dir = docs_dir.clone();
-    if !config.is_hive {
-        config.db_path = entity_dir.join("abigail_memory.db");
-    }
+    config.db_path = HiveEntity::memory_db_path(&data_root);
     config.models_dir = entity_dir.join("models");
 
     // 5. Create skill registry with secrets vault and executor.
@@ -319,7 +318,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // 9b. Open memory store (SQLite, auto-creates schema)
+    // 9b. Open shared memory store (Surreal-backed, auto-creates schema)
     let memory = Arc::new(
         MemoryStore::open_with_config(&config)
             .expect("Failed to open memory store — check db_path permissions"),
@@ -438,58 +437,10 @@ async fn main() -> anyhow::Result<()> {
             .map_err(|e| tracing::warn!("Failed to start memory chat-topic subscriber: {}", e))
             .ok();
 
-    let queue_conn = rusqlite::Connection::open(&config.db_path).map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to open queue SQLite DB {}: {}",
-            config.db_path.display(),
-            e
-        )
-    })?;
-    queue_conn
-        .execute_batch("PRAGMA journal_mode=WAL;")
-        .map_err(|e| anyhow::anyhow!("Failed to configure queue SQLite WAL mode: {}", e))?;
-    queue_conn
-        .execute_batch(abigail_queue::MIGRATION_V3_JOB_QUEUE)
-        .map_err(|e| anyhow::anyhow!("Failed to apply queue V3 migration: {}", e))?;
-    // V4 orchestration columns (cron, significance, etc.) — idempotent ALTER TABLE ADD COLUMN.
-    for stmt in abigail_queue::MIGRATION_V4_ORCHESTRATION.split(';') {
-        let trimmed = stmt.trim();
-        if !trimmed.is_empty() {
-            queue_conn.execute_batch(trimmed).unwrap_or_else(|e| {
-                tracing::debug!(
-                    "V4 migration statement skipped (likely already applied): {}",
-                    e
-                );
-            });
-        }
-    }
-    // V5 depends_on column for job dependency chains — idempotent ALTER TABLE ADD COLUMN.
-    for stmt in abigail_queue::MIGRATION_V5_DEPENDS_ON.split(';') {
-        let trimmed = stmt.trim();
-        if !trimmed.is_empty() {
-            queue_conn.execute_batch(trimmed).unwrap_or_else(|e| {
-                tracing::debug!(
-                    "V5 migration statement skipped (likely already applied): {}",
-                    e
-                );
-            });
-        }
-    }
-    for stmt in abigail_queue::MIGRATION_V6_EXECUTION_MODE.split(';') {
-        let trimmed = stmt.trim();
-        if !trimmed.is_empty() {
-            queue_conn.execute_batch(trimmed).unwrap_or_else(|e| {
-                tracing::debug!(
-                    "V6 migration statement skipped (likely already applied): {}",
-                    e
-                );
-            });
-        }
-    }
-    let job_queue = Arc::new(JobQueue::new(
-        Arc::new(Mutex::new(queue_conn)),
-        stream_broker.clone(),
-    ));
+    let queue_store =
+        PersistenceHandle::open(HiveEntity::memory_db_path(&data_root), EntityScope::Hive)
+            .map_err(|e| anyhow::anyhow!("Failed to open Hive queue store: {}", e))?;
+    let job_queue = Arc::new(JobQueue::new(queue_store, stream_broker.clone()));
     let recovered = job_queue.recover_running_jobs("entity-daemon restarted")?;
     if recovered > 0 {
         tracing::warn!("Recovered {} running jobs at startup", recovered);
@@ -773,3 +724,4 @@ fn parse_routing_mode(s: &str) -> abigail_core::RoutingMode {
         _ => abigail_core::RoutingMode::default(),
     }
 }
+

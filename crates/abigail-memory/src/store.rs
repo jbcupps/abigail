@@ -1,18 +1,21 @@
 use crate::protected_topics::{
     decrypt_secret_payload, encrypt_secret_payload, plan_secret_move, ProtectedTopicEntry,
-    ProtectedTopicSummary, SecretKind, SecretMovePlan,
-};
-use crate::schema::{
-    CREATE_BIRTH, CREATE_MEMORIES, CREATE_SCHEMA_VERSIONS, MIGRATION_V2_CONVERSATION_TURNS,
-    MIGRATION_V3_JOB_QUEUE, MIGRATION_V4_PROTECTED_TOPICS, MIGRATION_V5_CONVERSATION_TURN_ROLES,
+    ProtectedTopicSummary, SecretKind, SecretMovePlan, TriangleEthicPreview,
 };
 use abigail_core::{AppConfig, HybridUnlockProvider, PassphraseUnlockProvider, UnlockProvider};
+use abigail_persistence::{
+    migrate_legacy_layout, EntityScope, PersistenceError, PersistenceHandle, QueryBinding,
+};
 use chrono::Utc;
-use rusqlite::Connection;
-use std::path::Path;
-use std::sync::{Arc, Mutex};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
+
+const STORE_SCHEMA_VERSION: i64 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum MemoryWeight {
@@ -24,9 +27,9 @@ pub enum MemoryWeight {
 impl MemoryWeight {
     pub fn as_str(&self) -> &'static str {
         match self {
-            MemoryWeight::Ephemeral => "ephemeral",
-            MemoryWeight::Distilled => "distilled",
-            MemoryWeight::Crystallized => "crystallized",
+            Self::Ephemeral => "ephemeral",
+            Self::Distilled => "distilled",
+            Self::Crystallized => "crystallized",
         }
     }
 }
@@ -41,28 +44,22 @@ pub struct Memory {
 
 impl Memory {
     pub fn ephemeral(content: String) -> Self {
-        Self {
-            id: Uuid::new_v4().to_string(),
-            content,
-            weight: MemoryWeight::Ephemeral,
-            created_at: Utc::now(),
-        }
+        Self::new(content, MemoryWeight::Ephemeral)
     }
 
     pub fn distilled(content: String) -> Self {
-        Self {
-            id: Uuid::new_v4().to_string(),
-            content,
-            weight: MemoryWeight::Distilled,
-            created_at: Utc::now(),
-        }
+        Self::new(content, MemoryWeight::Distilled)
     }
 
     pub fn crystallized(content: String) -> Self {
+        Self::new(content, MemoryWeight::Crystallized)
+    }
+
+    fn new(content: String, weight: MemoryWeight) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
             content,
-            weight: MemoryWeight::Crystallized,
+            weight,
             created_at: Utc::now(),
         }
     }
@@ -125,22 +122,25 @@ pub struct SessionSummary {
 
 #[derive(Error, Debug)]
 pub enum StoreError {
-    #[error("SQLite error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
+    #[error("Persistence error: {0}")]
+    Persistence(#[from] PersistenceError),
     #[error("Birth already recorded")]
     BirthAlreadyRecorded,
     #[error("Invalid data: {0}")]
     InvalidData(String),
     #[error("Protected topic error: {0}")]
     ProtectedTopic(String),
+    #[error("Migration failed: {0}")]
+    Migration(String),
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
 
 pub struct MemoryStore {
-    conn: Mutex<Connection>,
+    persistence: PersistenceHandle,
     unlock: Arc<dyn UnlockProvider>,
     entity_id: Option<String>,
+    temp_root: Option<PathBuf>,
 }
 
 impl MemoryStore {
@@ -152,87 +152,47 @@ impl MemoryStore {
         path: impl AsRef<Path>,
         unlock: Arc<dyn UnlockProvider>,
     ) -> Result<Self> {
-        let path = path.as_ref();
-        let conn = Connection::open(path)?;
-        Self::init_conn(&conn)?;
-        Ok(Self {
-            conn: Mutex::new(conn),
-            unlock,
-            entity_id: infer_entity_id(path),
-        })
+        let path = path.as_ref().to_path_buf();
+        let entity_id = infer_entity_id(&path);
+        Self::open_internal(path, unlock, entity_id, None)
     }
 
     pub fn open_in_memory() -> Result<Self> {
         let unlock: Arc<dyn UnlockProvider> =
             Arc::new(PassphraseUnlockProvider::new("abigail-memory-in-memory"));
-        let conn = Connection::open_in_memory()?;
-        Self::init_conn(&conn)?;
         Ok(Self {
-            conn: Mutex::new(conn),
+            persistence: PersistenceHandle::open_ephemeral(EntityScope::Hive)?,
             unlock,
             entity_id: None,
+            temp_root: None,
         })
     }
 
-    fn init_conn(conn: &Connection) -> Result<()> {
-        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
-        conn.execute_batch(CREATE_MEMORIES)?;
-        conn.execute_batch(CREATE_BIRTH)?;
-        conn.execute_batch(CREATE_SCHEMA_VERSIONS)?;
-        Self::run_migrations(conn)?;
-        Ok(())
-    }
-
-    /// Run pending schema migrations in order. Each migration is applied once and
-    /// recorded in `schema_versions`. Version 1 is the baseline (no SQL changes).
-    fn run_migrations(conn: &Connection) -> Result<()> {
-        let migrations: &[(i64, &str)] = &[
-            (1, ""),
-            (2, MIGRATION_V2_CONVERSATION_TURNS),
-            (3, MIGRATION_V3_JOB_QUEUE),
-            (4, MIGRATION_V4_PROTECTED_TOPICS),
-            (5, MIGRATION_V5_CONVERSATION_TURN_ROLES),
-        ];
-
-        for &(version, sql) in migrations {
-            let already_applied: bool = conn.query_row(
-                "SELECT COUNT(*) > 0 FROM schema_versions WHERE version = ?1",
-                [version],
-                |row| row.get(0),
-            )?;
-            if already_applied {
-                continue;
-            }
-            if !sql.is_empty() {
-                conn.execute_batch(sql)?;
-            }
-            conn.execute(
-                "INSERT INTO schema_versions (version, applied_at) VALUES (?1, ?2)",
-                rusqlite::params![version, Utc::now().to_rfc3339()],
-            )?;
-        }
-        Ok(())
-    }
-
-    /// Return the latest applied schema version, or 0 if no migrations have run.
     pub fn schema_version(&self) -> Result<i64> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let version: i64 = conn.query_row(
-            "SELECT COALESCE(MAX(version), 0) FROM schema_versions",
-            [],
-            |row| row.get(0),
-        )?;
-        Ok(version)
+        Ok(STORE_SCHEMA_VERSION)
     }
 
     pub fn open_with_config(config: &AppConfig) -> Result<Self> {
-        if let Some(parent) = config.db_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        if uses_legacy_layout(config) {
+            migrate_legacy_layout(config).map_err(|error| StoreError::Migration(error.to_string()))?;
         }
-        Self::open_with_unlock(&config.db_path, Arc::new(HybridUnlockProvider::new()))
+
+        let shared_path = shared_db_path(config);
+        if let Some(parent) = shared_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| StoreError::Migration(error.to_string()))?;
+        }
+
+        let entity_id = if config.is_hive {
+            None
+        } else {
+            config
+                .data_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        };
+        Self::open_internal(shared_path, Arc::new(HybridUnlockProvider::new()), entity_id, None)
     }
 
     pub fn capture_secret_message(
@@ -248,45 +208,17 @@ impl MemoryStore {
         else {
             return Ok(None);
         };
-
-        let mut conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let tx = conn.transaction()?;
-        persist_protected_secret_tx(&tx, entity_id, &secret)?;
-        tx.commit()?;
+        self.persist_protected_secret(entity_id, &secret)?;
         Ok(Some(secret.plan))
     }
 
     pub fn list_protected_topics(&self, limit: usize) -> Result<Vec<ProtectedTopicSummary>> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let mut stmt = conn.prepare(
-            "SELECT topic_name, entity_id, entry_count, updated_at, last_secret_kind, \
-                    last_redacted_excerpt, last_preview_json \
-             FROM protected_topics ORDER BY updated_at DESC LIMIT ?1",
-        )?;
-        let rows = stmt.query_map([limit as i64], |row| {
-            let updated_at: String = row.get(3)?;
-            let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_at)
-                .map(|dt| dt.with_timezone(&Utc))
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-            let secret_kind =
-                parse_secret_kind(&row.get::<_, String>(4)?).map_err(sqlite_invalid_data)?;
-            let last_preview =
-                parse_preview_json(&row.get::<_, String>(6)?).map_err(sqlite_invalid_data)?;
-            Ok(ProtectedTopicSummary {
-                topic_name: row.get(0)?,
-                entity_id: row.get(1)?,
-                entry_count: row.get::<_, i64>(2)? as u64,
-                updated_at,
-                last_secret_kind: secret_kind,
-                last_redacted_excerpt: row.get(5)?,
-                last_preview,
-            })
-        })?;
-        Ok(rows.filter_map(|r| r.ok()).collect())
+        let sql = format!(
+            "SELECT * FROM protected_topic ORDER BY updated_at DESC LIMIT {}",
+            limit.max(1)
+        );
+        let docs: Vec<ProtectedTopicDoc> = self.persistence.query_vec(&sql, &[])?;
+        docs.into_iter().map(TryFrom::try_from).collect()
     }
 
     pub fn protected_topic_entries(
@@ -294,337 +226,330 @@ impl MemoryStore {
         topic_name: &str,
         limit: usize,
     ) -> Result<Vec<ProtectedTopicEntry>> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let mut stmt = conn.prepare(
-            "SELECT id, topic_name, session_id, role, source, secret_kind, redacted_excerpt, \
-                    preview_json, ciphertext, created_at \
-             FROM protected_topic_entries WHERE topic_name = ?1 \
-             ORDER BY created_at DESC LIMIT ?2",
-        )?;
-        let rows = stmt.query_map(rusqlite::params![topic_name, limit as i64], |row| {
-            let preview =
-                parse_preview_json(&row.get::<_, String>(7)?).map_err(sqlite_invalid_data)?;
-            let secret_kind =
-                parse_secret_kind(&row.get::<_, String>(5)?).map_err(sqlite_invalid_data)?;
-            let ciphertext: Vec<u8> = row.get(8)?;
-            let payload = decrypt_secret_payload(&self.unlock, topic_name, &ciphertext)
-                .map_err(sqlite_invalid_data)?;
-            let created_at: String = row.get(9)?;
-            let created_at = chrono::DateTime::parse_from_rfc3339(&created_at)
-                .map(|dt| dt.with_timezone(&Utc))
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-            Ok(ProtectedTopicEntry {
-                id: row.get(0)?,
-                topic_name: row.get(1)?,
-                session_id: row.get(2)?,
-                role: row.get(3)?,
-                source: payload.source,
-                secret_kind,
-                redacted_excerpt: row.get(6)?,
-                preview,
-                content: payload.content,
-                created_at,
+        let sql = format!(
+            "SELECT * FROM protected_topic_entry WHERE topic_name = $topic_name ORDER BY created_at DESC LIMIT {}",
+            limit.max(1)
+        );
+        let bindings = [binding("topic_name", topic_name)?];
+        let docs: Vec<ProtectedTopicEntryDoc> = self.persistence.query_vec(&sql, &bindings)?;
+        docs.into_iter()
+            .map(|doc| {
+                let payload = decrypt_secret_payload(&self.unlock, &doc.topic_name, &doc.ciphertext)
+                    .map_err(StoreError::ProtectedTopic)?;
+                Ok(ProtectedTopicEntry {
+                    id: doc.id,
+                    topic_name: doc.topic_name,
+                    session_id: doc.session_id,
+                    role: doc.role,
+                    source: payload.source,
+                    secret_kind: parse_secret_kind(&doc.secret_kind)?,
+                    redacted_excerpt: doc.redacted_excerpt,
+                    preview: doc.preview,
+                    content: payload.content,
+                    created_at: parse_timestamp(&doc.created_at)?,
+                })
             })
-        })?;
-        Ok(rows.filter_map(|r| r.ok()).collect())
+            .collect()
     }
 
     pub fn has_birth(&self) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM birth WHERE id = 1", [], |row| {
-            row.get(0)
-        })?;
-        Ok(count > 0)
+        Ok(self.birth_doc()?.is_some())
     }
 
     pub fn record_birth(&self, memory: &Memory) -> Result<()> {
         if self.has_birth()? {
             return Err(StoreError::BirthAlreadyRecorded);
         }
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        conn.execute(
-            "INSERT INTO birth (id, content, created_at) VALUES (1, ?1, ?2)",
-            [
-                memory.content.as_str(),
-                memory.created_at.to_rfc3339().as_str(),
-            ],
-        )?;
+        let doc = BirthDoc {
+            id: "primary".to_string(),
+            content: memory.content.clone(),
+            created_at: memory.created_at.to_rfc3339(),
+        };
+        self.persistence.create("birth", &doc.id, &doc)?;
         Ok(())
     }
 
     pub fn insert_memory(&self, memory: &Memory) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        conn.execute(
-            "INSERT INTO memories (id, content, weight, created_at) VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![
-                memory.id,
-                memory.content,
-                memory.weight.as_str(),
-                memory.created_at.to_rfc3339(),
-            ],
-        )?;
-        Ok(())
-    }
-
-    /// Count total memories in the store.
-    pub fn count_memories(&self) -> Result<u64> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))?;
-        Ok(count as u64)
-    }
-
-    /// Run VACUUM to reclaim space and optimize the database.
-    pub fn vacuum(&self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        conn.execute("VACUUM", [])?;
-        Ok(())
-    }
-
-    /// Clear all memories but keep the birth record.
-    pub fn clear_memories(&self) -> Result<u64> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let deleted = conn.execute("DELETE FROM memories", [])?;
-        Ok(deleted as u64)
-    }
-
-    /// Search memories by keyword (case-insensitive LIKE).
-    pub fn search_memories(&self, query: &str, limit: usize) -> Result<Vec<Memory>> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let mut stmt = conn.prepare(
-            "SELECT id, content, weight, created_at FROM memories \
-             WHERE content LIKE ?1 \
-             ORDER BY created_at DESC LIMIT ?2",
-        )?;
-        let pattern = format!("%{}%", query);
-        let rows = stmt.query_map(rusqlite::params![pattern, limit as i64], |row| {
-            let created_at: String = row.get(3)?;
-            let created_at = chrono::DateTime::parse_from_rfc3339(&created_at)
-                .map(|dt| dt.with_timezone(&Utc))
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-            let weight_str: String = row.get(2)?;
-            let weight = match weight_str.as_str() {
-                "ephemeral" => MemoryWeight::Ephemeral,
-                "distilled" => MemoryWeight::Distilled,
-                "crystallized" => MemoryWeight::Crystallized,
-                w => {
-                    return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                        StoreError::InvalidData(format!("unknown weight: {}", w)),
-                    )))
-                }
-            };
-            Ok(Memory {
-                id: row.get(0)?,
-                content: row.get(1)?,
-                weight,
-                created_at,
-            })
-        })?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row?);
+        if self.memory_exists(&memory.id)? {
+            return Err(StoreError::InvalidData(format!(
+                "memory '{}' already exists",
+                memory.id
+            )));
         }
+        self.persistence
+            .create("memory_entry", &memory.id, &MemoryDoc::from(memory))?;
+        Ok(())
+    }
+
+    pub fn count_memories(&self) -> Result<u64> {
+        Ok(self.all_memories()?.len() as u64)
+    }
+
+    pub fn vacuum(&self) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn clear_memories(&self) -> Result<u64> {
+        let memories = self.all_memories()?;
+        for memory in &memories {
+            self.persistence.delete_record("memory_entry", &memory.id)?;
+        }
+        Ok(memories.len() as u64)
+    }
+
+    pub fn search_memories(&self, query: &str, limit: usize) -> Result<Vec<Memory>> {
+        let query = query.to_ascii_lowercase();
+        let mut memories: Vec<Memory> = self
+            .all_memories()?
+            .into_iter()
+            .filter(|memory| contains_case_insensitive(&memory.content, &query))
+            .collect();
+        memories.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        memories.truncate(limit);
+        Ok(memories)
+    }
+
+    pub fn insert_turn(&self, turn: &ConversationTurn) -> Result<()> {
+        if self.turn_exists(&turn.id)? {
+            return Err(StoreError::InvalidData(format!(
+                "turn '{}' already exists",
+                turn.id
+            )));
+        }
+        self.persist_turn(turn)
+    }
+
+    pub fn session_turn_count(&self, session_id: &str) -> Result<u64> {
+        Ok(self
+            .all_turns()?
+            .into_iter()
+            .filter(|turn| turn.session_id == session_id)
+            .count() as u64)
+    }
+
+    pub fn total_turn_count(&self) -> Result<u64> {
+        Ok(self.all_turns()?.len() as u64)
+    }
+
+    pub fn recent_turns(&self, session_id: &str, limit: usize) -> Result<Vec<ConversationTurn>> {
+        let sql = format!(
+            "SELECT * FROM conversation_turn WHERE session_id = $session_id ORDER BY turn_number DESC, created_at DESC LIMIT {}",
+            limit.max(1)
+        );
+        let bindings = [binding("session_id", session_id)?];
+        let mut turns: Vec<ConversationTurn> = self
+            .persistence
+            .query_vec::<TurnDoc>(&sql, &bindings)?
+            .into_iter()
+            .map(TryFrom::try_from)
+            .collect::<Result<Vec<_>>>()?;
+        turns.sort_by(|left, right| left.turn_number.cmp(&right.turn_number));
+        Ok(turns)
+    }
+
+    pub fn recent_turns_all_sessions(&self, limit: usize) -> Result<Vec<ConversationTurn>> {
+        let sql = format!(
+            "SELECT * FROM conversation_turn ORDER BY created_at DESC LIMIT {}",
+            limit.max(1)
+        );
+        self.persistence
+            .query_vec::<TurnDoc>(&sql, &[])?
+            .into_iter()
+            .map(TryFrom::try_from)
+            .collect()
+    }
+
+    pub fn search_turns(&self, query: &str, limit: usize) -> Result<Vec<ConversationTurn>> {
+        let query = query.to_ascii_lowercase();
+        let mut turns: Vec<ConversationTurn> = self
+            .all_turns()?
+            .into_iter()
+            .filter(|turn| contains_case_insensitive(&turn.content, &query))
+            .collect();
+        turns.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        turns.truncate(limit);
+        Ok(turns)
+    }
+
+    pub fn list_sessions(&self, limit: usize) -> Result<Vec<SessionSummary>> {
+        let mut sessions = BTreeMap::<String, SessionAccumulator>::new();
+        for turn in self.all_turns()? {
+            let entry = sessions
+                .entry(turn.session_id.clone())
+                .or_insert_with(|| SessionAccumulator::new(turn.created_at.to_rfc3339()));
+            entry.turn_count += 1;
+            let timestamp = turn.created_at.to_rfc3339();
+            if timestamp < entry.first_at {
+                entry.first_at = timestamp.clone();
+            }
+            if timestamp > entry.last_at {
+                entry.last_at = timestamp;
+            }
+        }
+
+        let mut out: Vec<SessionSummary> = sessions
+            .into_iter()
+            .map(|(session_id, acc)| SessionSummary {
+                session_id,
+                turn_count: acc.turn_count,
+                first_at: acc.first_at,
+                last_at: acc.last_at,
+            })
+            .collect();
+        out.sort_by(|left, right| right.last_at.cmp(&left.last_at));
+        out.truncate(limit);
         Ok(out)
     }
 
-    // ── Conversation Turns ──────────────────────────────────────────
+    pub fn all_turns(&self) -> Result<Vec<ConversationTurn>> {
+        self.persistence
+            .query_vec::<TurnDoc>("SELECT * FROM conversation_turn ORDER BY created_at ASC", &[])?
+            .into_iter()
+            .map(TryFrom::try_from)
+            .collect()
+    }
 
-    pub fn insert_turn(&self, turn: &ConversationTurn) -> Result<()> {
+    pub fn all_memories(&self) -> Result<Vec<Memory>> {
+        self.persistence
+            .query_vec::<MemoryDoc>("SELECT * FROM memory_entry ORDER BY created_at ASC", &[])?
+            .into_iter()
+            .map(TryFrom::try_from)
+            .collect()
+    }
+
+    pub fn insert_turn_or_ignore(&self, turn: &ConversationTurn) -> Result<bool> {
+        if self.turn_exists(&turn.id)? {
+            return Ok(false);
+        }
+        self.persist_turn(turn)?;
+        Ok(true)
+    }
+
+    pub fn insert_memory_or_ignore(&self, memory: &Memory) -> Result<bool> {
+        if self.memory_exists(&memory.id)? {
+            return Ok(false);
+        }
+        self.persistence
+            .create("memory_entry", &memory.id, &MemoryDoc::from(memory))?;
+        Ok(true)
+    }
+
+    pub fn recent_memories(&self, limit: usize) -> Result<Vec<Memory>> {
+        let sql = format!(
+            "SELECT * FROM memory_entry ORDER BY created_at DESC LIMIT {}",
+            limit.max(1)
+        );
+        self.persistence
+            .query_vec::<MemoryDoc>(&sql, &[])?
+            .into_iter()
+            .map(TryFrom::try_from)
+            .collect()
+    }
+
+    fn open_internal(
+        path: PathBuf,
+        unlock: Arc<dyn UnlockProvider>,
+        entity_id: Option<String>,
+        temp_root: Option<PathBuf>,
+    ) -> Result<Self> {
+        let scope = match entity_id.as_ref() {
+            Some(entity_id) => EntityScope::Entity(entity_id.clone()),
+            None => EntityScope::Hive,
+        };
+        let persistence = PersistenceHandle::open(&path, scope)?;
+        Ok(Self {
+            persistence,
+            unlock,
+            entity_id,
+            temp_root,
+        })
+    }
+
+    fn persist_turn(&self, turn: &ConversationTurn) -> Result<()> {
         let (persisted_turn, protected_secret) =
             self.prepare_turn_for_storage(turn, "conversation_turn")?;
-        let mut conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let tx = conn.transaction()?;
         if let Some(secret) = protected_secret.as_ref() {
             let entity_id = self
                 .entity_id
                 .as_deref()
                 .ok_or_else(|| StoreError::ProtectedTopic("missing entity id".to_string()))?;
-            persist_protected_secret_tx(&tx, entity_id, secret)?;
+            self.persist_protected_secret(entity_id, secret)?;
         }
-        insert_turn_tx(&tx, &persisted_turn, false)?;
-        tx.commit()?;
+        self.persistence
+            .create("conversation_turn", &persisted_turn.id, &TurnDoc::from(&persisted_turn))?;
         Ok(())
     }
 
-    /// Number of turns recorded for a given session.
-    pub fn session_turn_count(&self, session_id: &str) -> Result<u64> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM conversation_turns WHERE session_id = ?1",
-            [session_id],
-            |row| row.get(0),
-        )?;
-        Ok(count as u64)
+    fn birth_doc(&self) -> Result<Option<BirthDoc>> {
+        self.persistence
+            .select_record("birth", "primary")
+            .map_err(StoreError::from)
     }
 
-    /// Total turns across all sessions (used for archive scheduling).
-    pub fn total_turn_count(&self) -> Result<u64> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM conversation_turns", [], |row| {
-            row.get(0)
-        })?;
-        Ok(count as u64)
+    fn memory_exists(&self, id: &str) -> Result<bool> {
+        self.persistence.record_exists("memory_entry", id).map_err(StoreError::from)
     }
 
-    /// Recent turns from a specific session, ordered oldest-first.
-    pub fn recent_turns(&self, session_id: &str, limit: usize) -> Result<Vec<ConversationTurn>> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let mut stmt = conn.prepare(
-            "SELECT id, session_id, turn_number, role, content, provider, model, \
-                    tier, complexity_score, token_estimate, created_at \
-             FROM conversation_turns WHERE session_id = ?1 \
-             ORDER BY turn_number DESC LIMIT ?2",
-        )?;
-        let rows = stmt.query_map(rusqlite::params![session_id, limit as i64], Self::map_turn)?;
-        let mut out: Vec<ConversationTurn> = rows.filter_map(|r| r.ok()).collect();
-        out.reverse();
-        Ok(out)
+    fn turn_exists(&self, id: &str) -> Result<bool> {
+        self.persistence
+            .record_exists("conversation_turn", id)
+            .map_err(StoreError::from)
     }
 
-    /// Recent turns across all sessions, most-recent first.
-    pub fn recent_turns_all_sessions(&self, limit: usize) -> Result<Vec<ConversationTurn>> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let mut stmt = conn.prepare(
-            "SELECT id, session_id, turn_number, role, content, provider, model, \
-                    tier, complexity_score, token_estimate, created_at \
-             FROM conversation_turns ORDER BY created_at DESC LIMIT ?1",
+    fn persist_protected_secret(
+        &self,
+        entity_id: &str,
+        secret: &PreparedProtectedSecret,
+    ) -> Result<()> {
+        let existing_topic: Option<ProtectedTopicDoc> = self.persistence.query_one(
+            "SELECT * FROM protected_topic WHERE topic_name = $topic_name LIMIT 1",
+            &[binding("topic_name", &secret.plan.topic_name)?],
         )?;
-        let rows = stmt.query_map([limit as i64], Self::map_turn)?;
-        Ok(rows.filter_map(|r| r.ok()).collect())
-    }
 
-    /// Full-text search across conversation turns (case-insensitive LIKE).
-    pub fn search_turns(&self, query: &str, limit: usize) -> Result<Vec<ConversationTurn>> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let pattern = format!("%{}%", query);
-        let mut stmt = conn.prepare(
-            "SELECT id, session_id, turn_number, role, content, provider, model, \
-                    tier, complexity_score, token_estimate, created_at \
-             FROM conversation_turns WHERE content LIKE ?1 \
-             ORDER BY created_at DESC LIMIT ?2",
-        )?;
-        let rows = stmt.query_map(rusqlite::params![pattern, limit as i64], Self::map_turn)?;
-        Ok(rows.filter_map(|r| r.ok()).collect())
-    }
+        let created_at = secret.created_at.to_rfc3339();
+        let updated = ProtectedTopicDoc {
+            id: secret.plan.topic_name.clone(),
+            topic_name: secret.plan.topic_name.clone(),
+            entity_id: entity_id.to_string(),
+            protection_kind: "secret".to_string(),
+            entry_count: existing_topic
+                .as_ref()
+                .map(|topic| topic.entry_count + 1)
+                .unwrap_or(1),
+            last_secret_kind: secret.plan.secret_kind.as_str().to_string(),
+            last_redacted_excerpt: secret.plan.redacted_excerpt.clone(),
+            last_preview: secret.plan.preview.clone(),
+            created_at: existing_topic
+                .as_ref()
+                .map(|topic| topic.created_at.clone())
+                .unwrap_or_else(|| created_at.clone()),
+            updated_at: created_at.clone(),
+        };
+        self.persistence
+            .upsert("protected_topic", &updated.id, &updated)?;
 
-    /// List distinct sessions with aggregated metadata.
-    pub fn list_sessions(&self, limit: usize) -> Result<Vec<SessionSummary>> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let mut stmt = conn.prepare(
-            "SELECT session_id, COUNT(*) as cnt, \
-                    MIN(created_at) as first_at, MAX(created_at) as last_at \
-             FROM conversation_turns GROUP BY session_id \
-             ORDER BY last_at DESC LIMIT ?1",
-        )?;
-        let rows = stmt.query_map([limit as i64], |row| {
-            Ok(SessionSummary {
-                session_id: row.get(0)?,
-                turn_count: row.get::<_, i64>(1)? as u64,
-                first_at: row.get(2)?,
-                last_at: row.get(3)?,
-            })
-        })?;
-        Ok(rows.filter_map(|r| r.ok()).collect())
-    }
-
-    /// Retrieve all turns (for archive export).
-    pub fn all_turns(&self) -> Result<Vec<ConversationTurn>> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let mut stmt = conn.prepare(
-            "SELECT id, session_id, turn_number, role, content, provider, model, \
-                    tier, complexity_score, token_estimate, created_at \
-             FROM conversation_turns ORDER BY created_at ASC",
-        )?;
-        let rows = stmt.query_map([], Self::map_turn)?;
-        Ok(rows.filter_map(|r| r.ok()).collect())
-    }
-
-    /// Retrieve all memories (for archive export).
-    pub fn all_memories(&self) -> Result<Vec<Memory>> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let mut stmt = conn.prepare(
-            "SELECT id, content, weight, created_at FROM memories ORDER BY created_at ASC",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            let created_at: String = row.get(3)?;
-            let created_at = chrono::DateTime::parse_from_rfc3339(&created_at)
-                .map(|dt| dt.with_timezone(&Utc))
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-            let weight_str: String = row.get(2)?;
-            let weight = match weight_str.as_str() {
-                "ephemeral" => MemoryWeight::Ephemeral,
-                "distilled" => MemoryWeight::Distilled,
-                "crystallized" => MemoryWeight::Crystallized,
-                w => {
-                    return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                        StoreError::InvalidData(format!("unknown weight: {}", w)),
-                    )))
-                }
-            };
-            Ok(Memory {
-                id: row.get(0)?,
-                content: row.get(1)?,
-                weight,
+        if !self
+            .persistence
+            .record_exists("protected_topic_entry", &secret.id)?
+        {
+            let entry = ProtectedTopicEntryDoc {
+                id: secret.id.clone(),
+                topic_name: secret.plan.topic_name.clone(),
+                session_id: secret.session_id.clone(),
+                role: secret.role.clone(),
+                source: secret.source.clone(),
+                secret_kind: secret.plan.secret_kind.as_str().to_string(),
+                redacted_excerpt: secret.plan.redacted_excerpt.clone(),
+                preview: secret.plan.preview.clone(),
+                ciphertext: secret.ciphertext.clone(),
                 created_at,
-            })
-        })?;
-        Ok(rows.filter_map(|r| r.ok()).collect())
-    }
+            };
+            self.persistence
+                .create("protected_topic_entry", &entry.id, &entry)?;
+        }
 
-    fn map_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<ConversationTurn> {
-        let created_at: String = row.get(10)?;
-        let created_at = chrono::DateTime::parse_from_rfc3339(&created_at)
-            .map(|dt| dt.with_timezone(&Utc))
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-        Ok(ConversationTurn {
-            id: row.get(0)?,
-            session_id: row.get(1)?,
-            turn_number: row.get::<_, i64>(2)? as u32,
-            role: row.get(3)?,
-            content: row.get(4)?,
-            provider: row.get(5)?,
-            model: row.get(6)?,
-            tier: row.get(7)?,
-            complexity_score: row.get::<_, Option<i64>>(8)?.map(|v| v as u8),
-            token_estimate: row.get::<_, Option<i64>>(9)?.map(|v| v as u32),
-            created_at,
-        })
+        Ok(())
     }
-
-    // ── Idempotent inserts (for backup import) ────────────────────
 
     fn prepare_turn_for_storage(
         &self,
@@ -647,8 +572,6 @@ impl MemoryStore {
         };
 
         let mut persisted_turn = turn.clone();
-        // paper Sections 22-27 runtime verification + self-sufficient entity via protected topics:
-        // move secret-bearing chat content into encrypted topics before normal turn persistence.
         persisted_turn.content = secret.plan.redacted_excerpt.clone();
         Ok((persisted_turn, Some(secret)))
     }
@@ -677,7 +600,14 @@ impl MemoryStore {
         .map_err(StoreError::ProtectedTopic)?;
 
         Ok(Some(PreparedProtectedSecret {
-            id: Uuid::new_v4().to_string(),
+            id: stable_secret_id(
+                &plan.topic_name,
+                session_id,
+                role,
+                source,
+                &created_at.to_rfc3339(),
+                content,
+            ),
             plan,
             session_id: session_id.to_string(),
             role: role.to_string(),
@@ -686,86 +616,167 @@ impl MemoryStore {
             created_at,
         }))
     }
+}
 
-    /// Insert a conversation turn, ignoring if the ID already exists.
-    /// Returns `true` if a new row was inserted.
-    pub fn insert_turn_or_ignore(&self, turn: &ConversationTurn) -> Result<bool> {
-        let (persisted_turn, protected_secret) =
-            self.prepare_turn_for_storage(turn, "conversation_turn")?;
-        let mut conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let tx = conn.transaction()?;
-        if let Some(secret) = protected_secret.as_ref() {
-            let entity_id = self
-                .entity_id
-                .as_deref()
-                .ok_or_else(|| StoreError::ProtectedTopic("missing entity id".to_string()))?;
-            persist_protected_secret_tx(&tx, entity_id, secret)?;
+impl Drop for MemoryStore {
+    fn drop(&mut self) {
+        if let Some(root) = self.temp_root.take() {
+            let _ = std::fs::remove_dir_all(root);
         }
-        let changed = insert_turn_tx(&tx, &persisted_turn, true)?;
-        tx.commit()?;
-        Ok(changed > 0)
     }
+}
 
-    /// Insert a memory, ignoring if the ID already exists.
-    /// Returns `true` if a new row was inserted.
-    pub fn insert_memory_or_ignore(&self, memory: &Memory) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let changed = conn.execute(
-            "INSERT OR IGNORE INTO memories (id, content, weight, created_at) \
-             VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![
-                memory.id,
-                memory.content,
-                memory.weight.as_str(),
-                memory.created_at.to_rfc3339(),
-            ],
-        )?;
-        Ok(changed > 0)
-    }
+#[derive(Default)]
+struct SessionAccumulator {
+    turn_count: u64,
+    first_at: String,
+    last_at: String,
+}
 
-    // ── Memories ──────────────────────────────────────────────────
-
-    /// Recent memories (MVP: by created_at DESC; sqlite-vec stubbed).
-    pub fn recent_memories(&self, limit: usize) -> Result<Vec<Memory>> {
-        let conn = self.conn.lock().map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
-        })?;
-        let mut stmt = conn.prepare(
-            "SELECT id, content, weight, created_at FROM memories ORDER BY created_at DESC LIMIT ?1",
-        )?;
-        let rows = stmt.query_map([limit as i64], |row| {
-            let created_at: String = row.get(3)?;
-            let created_at = chrono::DateTime::parse_from_rfc3339(&created_at)
-                .map(|dt| dt.with_timezone(&Utc))
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-            let weight_str: String = row.get(2)?;
-            let weight = match weight_str.as_str() {
-                "ephemeral" => MemoryWeight::Ephemeral,
-                "distilled" => MemoryWeight::Distilled,
-                "crystallized" => MemoryWeight::Crystallized,
-                w => {
-                    return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                        StoreError::InvalidData(format!("unknown weight: {}", w)),
-                    )))
-                }
-            };
-            Ok(Memory {
-                id: row.get(0)?,
-                content: row.get(1)?,
-                weight,
-                created_at,
-            })
-        })?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row?);
+impl SessionAccumulator {
+    fn new(created_at: String) -> Self {
+        Self {
+            turn_count: 0,
+            first_at: created_at.clone(),
+            last_at: created_at,
         }
-        Ok(out)
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct MemoryDoc {
+    id: String,
+    content: String,
+    weight: String,
+    created_at: String,
+}
+
+impl From<&Memory> for MemoryDoc {
+    fn from(value: &Memory) -> Self {
+        Self {
+            id: value.id.clone(),
+            content: value.content.clone(),
+            weight: value.weight.as_str().to_string(),
+            created_at: value.created_at.to_rfc3339(),
+        }
+    }
+}
+
+impl TryFrom<MemoryDoc> for Memory {
+    type Error = StoreError;
+
+    fn try_from(value: MemoryDoc) -> Result<Self> {
+        Ok(Self {
+            id: value.id,
+            content: value.content,
+            weight: parse_weight(&value.weight)?,
+            created_at: parse_timestamp(&value.created_at)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TurnDoc {
+    id: String,
+    session_id: String,
+    turn_number: u32,
+    role: String,
+    content: String,
+    provider: Option<String>,
+    model: Option<String>,
+    tier: Option<String>,
+    complexity_score: Option<u8>,
+    token_estimate: Option<u32>,
+    created_at: String,
+}
+
+impl From<&ConversationTurn> for TurnDoc {
+    fn from(value: &ConversationTurn) -> Self {
+        Self {
+            id: value.id.clone(),
+            session_id: value.session_id.clone(),
+            turn_number: value.turn_number,
+            role: value.role.clone(),
+            content: value.content.clone(),
+            provider: value.provider.clone(),
+            model: value.model.clone(),
+            tier: value.tier.clone(),
+            complexity_score: value.complexity_score,
+            token_estimate: value.token_estimate,
+            created_at: value.created_at.to_rfc3339(),
+        }
+    }
+}
+
+impl TryFrom<TurnDoc> for ConversationTurn {
+    type Error = StoreError;
+
+    fn try_from(value: TurnDoc) -> Result<Self> {
+        Ok(Self {
+            id: value.id,
+            session_id: value.session_id,
+            turn_number: value.turn_number,
+            role: value.role,
+            content: value.content,
+            provider: value.provider,
+            model: value.model,
+            tier: value.tier,
+            complexity_score: value.complexity_score,
+            token_estimate: value.token_estimate,
+            created_at: parse_timestamp(&value.created_at)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BirthDoc {
+    id: String,
+    content: String,
+    created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ProtectedTopicDoc {
+    id: String,
+    topic_name: String,
+    entity_id: String,
+    protection_kind: String,
+    entry_count: u64,
+    last_secret_kind: String,
+    last_redacted_excerpt: String,
+    last_preview: TriangleEthicPreview,
+    created_at: String,
+    updated_at: String,
+}
+
+impl TryFrom<ProtectedTopicDoc> for ProtectedTopicSummary {
+    type Error = StoreError;
+
+    fn try_from(value: ProtectedTopicDoc) -> Result<Self> {
+        Ok(Self {
+            topic_name: value.topic_name,
+            entity_id: value.entity_id,
+            entry_count: value.entry_count,
+            updated_at: parse_timestamp(&value.updated_at)?,
+            last_secret_kind: parse_secret_kind(&value.last_secret_kind)?,
+            last_redacted_excerpt: value.last_redacted_excerpt,
+            last_preview: value.last_preview,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ProtectedTopicEntryDoc {
+    id: String,
+    topic_name: String,
+    session_id: String,
+    role: String,
+    source: String,
+    secret_kind: String,
+    redacted_excerpt: String,
+    preview: TriangleEthicPreview,
+    ciphertext: Vec<u8>,
+    created_at: String,
 }
 
 struct PreparedProtectedSecret {
@@ -778,6 +789,35 @@ struct PreparedProtectedSecret {
     created_at: chrono::DateTime<Utc>,
 }
 
+fn uses_legacy_layout(config: &AppConfig) -> bool {
+    config
+        .db_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name != "memory.db")
+        || config.data_dir.join("jobs.db").exists()
+        || config.data_dir.join("calendar.db").exists()
+        || config.data_dir.join("kb.db").exists()
+}
+
+fn shared_db_path(config: &AppConfig) -> PathBuf {
+    if config
+        .db_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "memory.db")
+    {
+        return config.db_path.clone();
+    }
+
+    config
+        .data_dir
+        .parent()
+        .and_then(|parent| parent.parent())
+        .map(|root| root.join("memory.db"))
+        .unwrap_or_else(|| config.data_dir.join("memory.db"))
+}
+
 fn infer_entity_id(path: &Path) -> Option<String> {
     path.parent()
         .and_then(|parent| parent.file_name())
@@ -786,110 +826,65 @@ fn infer_entity_id(path: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
-fn insert_turn_tx(
-    tx: &rusqlite::Transaction<'_>,
-    turn: &ConversationTurn,
-    ignore_conflicts: bool,
-) -> rusqlite::Result<usize> {
-    let sql = if ignore_conflicts {
-        "INSERT OR IGNORE INTO conversation_turns \
-         (id, session_id, turn_number, role, content, provider, model, tier, \
-          complexity_score, token_estimate, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
-    } else {
-        "INSERT INTO conversation_turns \
-         (id, session_id, turn_number, role, content, provider, model, tier, \
-          complexity_score, token_estimate, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
-    };
 
-    tx.execute(
-        sql,
-        rusqlite::params![
-            turn.id,
-            turn.session_id,
-            turn.turn_number,
-            turn.role,
-            turn.content,
-            turn.provider,
-            turn.model,
-            turn.tier,
-            turn.complexity_score.map(|v| v as i64),
-            turn.token_estimate.map(|v| v as i64),
-            turn.created_at.to_rfc3339(),
-        ],
-    )
+fn parse_weight(value: &str) -> Result<MemoryWeight> {
+    match value {
+        "ephemeral" => Ok(MemoryWeight::Ephemeral),
+        "distilled" => Ok(MemoryWeight::Distilled),
+        "crystallized" => Ok(MemoryWeight::Crystallized),
+        other => Err(StoreError::InvalidData(format!("unknown weight: {}", other))),
+    }
 }
 
-fn persist_protected_secret_tx(
-    tx: &rusqlite::Transaction<'_>,
-    entity_id: &str,
-    secret: &PreparedProtectedSecret,
-) -> Result<()> {
-    let preview_json = serde_json::to_string(&secret.plan.preview)
-        .map_err(|e| StoreError::ProtectedTopic(e.to_string()))?;
-    let created_at = secret.created_at.to_rfc3339();
-
-    tx.execute(
-        "INSERT INTO protected_topics \
-         (topic_name, entity_id, protection_kind, entry_count, last_secret_kind, \
-          last_redacted_excerpt, last_preview_json, created_at, updated_at) \
-         VALUES (?1, ?2, 'secret', 1, ?3, ?4, ?5, ?6, ?7) \
-         ON CONFLICT(topic_name) DO UPDATE SET \
-            entry_count = protected_topics.entry_count + 1, \
-            last_secret_kind = excluded.last_secret_kind, \
-            last_redacted_excerpt = excluded.last_redacted_excerpt, \
-            last_preview_json = excluded.last_preview_json, \
-            updated_at = excluded.updated_at",
-        rusqlite::params![
-            secret.plan.topic_name,
-            entity_id,
-            secret.plan.secret_kind.as_str(),
-            secret.plan.redacted_excerpt,
-            preview_json,
-            created_at,
-            created_at,
-        ],
-    )?;
-
-    tx.execute(
-        "INSERT INTO protected_topic_entries \
-         (id, topic_name, session_id, role, source, secret_kind, redacted_excerpt, \
-          preview_json, ciphertext, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        rusqlite::params![
-            secret.id,
-            secret.plan.topic_name,
-            secret.session_id,
-            secret.role,
-            secret.source,
-            secret.plan.secret_kind.as_str(),
-            secret.plan.redacted_excerpt,
-            preview_json,
-            secret.ciphertext,
-            created_at,
-        ],
-    )?;
-
-    Ok(())
-}
-
-fn parse_secret_kind(raw: &str) -> std::result::Result<SecretKind, String> {
-    match raw {
+fn parse_secret_kind(value: &str) -> Result<SecretKind> {
+    match value {
         "api_key" => Ok(SecretKind::ApiKey),
         "password" => Ok(SecretKind::Password),
         "token" => Ok(SecretKind::Token),
         "credential" => Ok(SecretKind::Credential),
-        other => Err(format!("unknown secret kind: {}", other)),
+        other => Err(StoreError::InvalidData(format!(
+            "unknown secret kind: {}",
+            other
+        ))),
     }
 }
 
-fn parse_preview_json(raw: &str) -> std::result::Result<crate::TriangleEthicPreview, String> {
-    serde_json::from_str(raw).map_err(|e| e.to_string())
+fn parse_timestamp(value: &str) -> Result<chrono::DateTime<Utc>> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|timestamp| timestamp.with_timezone(&Utc))
+        .map_err(|error| StoreError::InvalidData(error.to_string()))
 }
 
-fn sqlite_invalid_data(message: String) -> rusqlite::Error {
-    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(message)))
+fn binding(key: &str, value: impl Serialize) -> Result<QueryBinding> {
+    QueryBinding::new(key, value).map_err(StoreError::from)
+}
+
+fn contains_case_insensitive(content: &str, query: &str) -> bool {
+    content.to_ascii_lowercase().contains(query)
+}
+
+fn stable_secret_id(
+    topic_name: &str,
+    session_id: &str,
+    role: &str,
+    source: &str,
+    created_at: &str,
+    content: &str,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(topic_name.as_bytes());
+    hasher.update(b"|");
+    hasher.update(session_id.as_bytes());
+    hasher.update(b"|");
+    hasher.update(role.as_bytes());
+    hasher.update(b"|");
+    hasher.update(source.as_bytes());
+    hasher.update(b"|");
+    hasher.update(created_at.as_bytes());
+    hasher.update(b"|");
+    hasher.update(content.as_bytes());
+    let digest = hasher.finalize();
+    digest.iter().map(|byte| format!("{:02x}", byte)).collect()
 }
 
 #[cfg(test)]
@@ -907,234 +902,44 @@ mod tests {
     }
 
     #[test]
-    fn test_double_birth_rejected() {
+    fn test_insert_and_retrieve_memory() {
         let store = MemoryStore::open_in_memory().unwrap();
-        store
-            .record_birth(&Memory::crystallized("I was born".into()))
-            .unwrap();
-        let result = store.record_birth(&Memory::crystallized("Born again".into()));
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            StoreError::BirthAlreadyRecorded => {}
-            e => panic!("Expected BirthAlreadyRecorded, got: {:?}", e),
-        }
-    }
-
-    #[test]
-    fn test_insert_and_retrieve_ephemeral_memory() {
-        let store = MemoryStore::open_in_memory().unwrap();
-
-        let mem = Memory::ephemeral("user: Hello | assistant: Hi there".into());
-        store.insert_memory(&mem).unwrap();
+        let memory = Memory::ephemeral("hello".into());
+        store.insert_memory(&memory).unwrap();
 
         let recent = store.recent_memories(10).unwrap();
         assert_eq!(recent.len(), 1);
-        assert_eq!(recent[0].content, "user: Hello | assistant: Hi there");
-        assert_eq!(recent[0].weight, MemoryWeight::Ephemeral);
-    }
-
-    #[test]
-    fn test_insert_multiple_weights() {
-        let store = MemoryStore::open_in_memory().unwrap();
-
-        store
-            .insert_memory(&Memory::ephemeral("ephemeral msg".into()))
-            .unwrap();
-        store
-            .insert_memory(&Memory::distilled("distilled msg".into()))
-            .unwrap();
-        store
-            .insert_memory(&Memory::crystallized("crystallized msg".into()))
-            .unwrap();
-
-        let recent = store.recent_memories(10).unwrap();
-        assert_eq!(recent.len(), 3);
-
-        // Verify all weight tiers are stored and retrieved correctly
-        let weights: Vec<&MemoryWeight> = recent.iter().map(|m| &m.weight).collect();
-        assert!(weights.contains(&&MemoryWeight::Ephemeral));
-        assert!(weights.contains(&&MemoryWeight::Distilled));
-        assert!(weights.contains(&&MemoryWeight::Crystallized));
-    }
-
-    #[test]
-    fn test_recent_memories_ordering() {
-        let store = MemoryStore::open_in_memory().unwrap();
-
-        // Insert in order — recent_memories should return most recent first
-        store
-            .insert_memory(&Memory::ephemeral("first".into()))
-            .unwrap();
-        // Small delay to ensure different timestamps
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        store
-            .insert_memory(&Memory::ephemeral("second".into()))
-            .unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        store
-            .insert_memory(&Memory::ephemeral("third".into()))
-            .unwrap();
-
-        let recent = store.recent_memories(10).unwrap();
-        assert_eq!(recent.len(), 3);
-        assert_eq!(recent[0].content, "third");
-        assert_eq!(recent[1].content, "second");
-        assert_eq!(recent[2].content, "first");
-    }
-
-    #[test]
-    fn test_recent_memories_limit() {
-        let store = MemoryStore::open_in_memory().unwrap();
-
-        for i in 0..10 {
-            store
-                .insert_memory(&Memory::ephemeral(format!("msg {}", i)))
-                .unwrap();
-        }
-
-        let recent = store.recent_memories(3).unwrap();
-        assert_eq!(recent.len(), 3);
-    }
-
-    #[test]
-    fn test_recent_memories_empty_store() {
-        let store = MemoryStore::open_in_memory().unwrap();
-        let recent = store.recent_memories(10).unwrap();
-        assert!(recent.is_empty());
-    }
-
-    #[test]
-    fn test_memory_ids_are_unique() {
-        let store = MemoryStore::open_in_memory().unwrap();
-
-        let m1 = Memory::ephemeral("msg1".into());
-        let m2 = Memory::ephemeral("msg2".into());
-        assert_ne!(m1.id, m2.id);
-
-        store.insert_memory(&m1).unwrap();
-        store.insert_memory(&m2).unwrap();
-
-        let recent = store.recent_memories(10).unwrap();
-        assert_eq!(recent.len(), 2);
-    }
-
-    #[test]
-    fn test_file_backed_store() {
-        let tmp = std::env::temp_dir().join("abigail_memory_file_test");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-
-        let db_path = tmp.join("test.db");
-
-        // Open, insert, close
-        {
-            let store = MemoryStore::open(&db_path).unwrap();
-            store
-                .insert_memory(&Memory::ephemeral("persisted msg".into()))
-                .unwrap();
-            store
-                .record_birth(&Memory::crystallized("born".into()))
-                .unwrap();
-        }
-
-        // Reopen and verify persistence
-        {
-            let store = MemoryStore::open(&db_path).unwrap();
-            assert!(store.has_birth().unwrap());
-            let recent = store.recent_memories(10).unwrap();
-            assert_eq!(recent.len(), 1);
-            assert_eq!(recent[0].content, "persisted msg");
-        }
-
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn test_count_memories() {
-        let store = MemoryStore::open_in_memory().unwrap();
-        assert_eq!(store.count_memories().unwrap(), 0);
-
-        store
-            .insert_memory(&Memory::ephemeral("msg1".into()))
-            .unwrap();
-        assert_eq!(store.count_memories().unwrap(), 1);
-
-        store
-            .insert_memory(&Memory::ephemeral("msg2".into()))
-            .unwrap();
-        store
-            .insert_memory(&Memory::distilled("msg3".into()))
-            .unwrap();
-        assert_eq!(store.count_memories().unwrap(), 3);
-    }
-
-    #[test]
-    fn test_clear_memories() {
-        let store = MemoryStore::open_in_memory().unwrap();
-
-        // Add some memories and a birth record
-        store
-            .insert_memory(&Memory::ephemeral("msg1".into()))
-            .unwrap();
-        store
-            .insert_memory(&Memory::ephemeral("msg2".into()))
-            .unwrap();
-        store
-            .record_birth(&Memory::crystallized("born".into()))
-            .unwrap();
-
-        assert_eq!(store.count_memories().unwrap(), 2);
-        assert!(store.has_birth().unwrap());
-
-        // Clear memories
-        let deleted = store.clear_memories().unwrap();
-        assert_eq!(deleted, 2);
-
-        // Memories gone, but birth still there
-        assert_eq!(store.count_memories().unwrap(), 0);
-        assert!(store.has_birth().unwrap());
-    }
-
-    #[test]
-    fn test_vacuum() {
-        let store = MemoryStore::open_in_memory().unwrap();
-
-        // Insert and delete some data
-        for i in 0..10 {
-            store
-                .insert_memory(&Memory::ephemeral(format!("msg {}", i)))
-                .unwrap();
-        }
-        store.clear_memories().unwrap();
-
-        // VACUUM should succeed
-        assert!(store.vacuum().is_ok());
+        assert_eq!(recent[0].content, "hello");
     }
 
     #[test]
     fn test_insert_turn_or_ignore_idempotent() {
         let store = MemoryStore::open_in_memory().unwrap();
-        let turn = ConversationTurn::new("sess1", "user", "hello");
+        let turn = ConversationTurn::new("session-1", "user", "hello");
 
-        // First insert succeeds
         assert!(store.insert_turn_or_ignore(&turn).unwrap());
-        assert_eq!(store.total_turn_count().unwrap(), 1);
-
-        // Second insert with same ID is silently ignored
         assert!(!store.insert_turn_or_ignore(&turn).unwrap());
         assert_eq!(store.total_turn_count().unwrap(), 1);
     }
 
     #[test]
-    fn test_insert_memory_or_ignore_idempotent() {
-        let store = MemoryStore::open_in_memory().unwrap();
-        let mem = Memory::ephemeral("remember this".into());
+    fn test_file_backed_store_persists() {
+        let tmp = std::env::temp_dir().join(format!("abigail_store_file_{}", Uuid::new_v4()));
+        let db_path = tmp.join("test.db");
+        std::fs::create_dir_all(&tmp).unwrap();
 
-        assert!(store.insert_memory_or_ignore(&mem).unwrap());
-        assert_eq!(store.count_memories().unwrap(), 1);
+        {
+            let store = MemoryStore::open(&db_path).unwrap();
+            store
+                .insert_memory(&Memory::ephemeral("persisted".into()))
+                .unwrap();
+        }
 
-        // Duplicate is ignored
-        assert!(!store.insert_memory_or_ignore(&mem).unwrap());
-        assert_eq!(store.count_memories().unwrap(), 1);
+        {
+            let reopened = MemoryStore::open(&db_path).unwrap();
+            assert_eq!(reopened.count_memories().unwrap(), 1);
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

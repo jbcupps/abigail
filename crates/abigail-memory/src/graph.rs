@@ -71,7 +71,7 @@ impl MemoryEdge {
     }
 }
 
-/// In-memory graph store (used with SQLite backend).
+/// In-memory graph store used by the local embedded memory backend.
 /// For Postgres, edges are stored directly in the database.
 #[derive(Debug, Default)]
 pub struct MemoryGraph {

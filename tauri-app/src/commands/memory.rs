@@ -3,11 +3,13 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SqliteStats {
+pub struct StoreStats {
     pub size_bytes: u64,
     pub memory_count: u64,
     pub has_birth: bool,
 }
+
+pub type SqliteStats = StoreStats;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryInfo {
@@ -28,7 +30,7 @@ pub struct ConversationTurnInfo {
 }
 
 #[tauri::command]
-pub fn get_sqlite_stats(state: State<AppState>) -> Result<SqliteStats, String> {
+pub fn get_store_stats(state: State<AppState>) -> Result<StoreStats, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let db_path = config.db_path.clone();
     drop(config);
@@ -40,7 +42,7 @@ pub fn get_sqlite_stats(state: State<AppState>) -> Result<SqliteStats, String> {
     let has_birth = mem.has_birth().map_err(|e| e.to_string())?;
     drop(mem);
 
-    Ok(SqliteStats {
+    Ok(StoreStats {
         size_bytes,
         memory_count,
         has_birth,
@@ -48,7 +50,12 @@ pub fn get_sqlite_stats(state: State<AppState>) -> Result<SqliteStats, String> {
 }
 
 #[tauri::command]
-pub fn optimize_sqlite(state: State<AppState>) -> Result<i64, String> {
+pub fn get_sqlite_stats(state: State<AppState>) -> Result<StoreStats, String> {
+    get_store_stats(state)
+}
+
+#[tauri::command]
+pub fn optimize_store(state: State<AppState>) -> Result<i64, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let db_path = config.db_path.clone();
     drop(config);
@@ -65,8 +72,13 @@ pub fn optimize_sqlite(state: State<AppState>) -> Result<i64, String> {
     let size_after = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
 
     let saved = size_before as i64 - size_after as i64;
-    tracing::info!("SQLite optimized: {} bytes saved", saved);
+    tracing::info!("Store optimized: {} bytes saved", saved);
     Ok(saved)
+}
+
+#[tauri::command]
+pub fn optimize_sqlite(state: State<AppState>) -> Result<i64, String> {
+    optimize_store(state)
 }
 
 #[tauri::command]

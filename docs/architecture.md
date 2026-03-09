@@ -25,3 +25,11 @@ flowchart LR
 ```
 
 This diagram is the canonical high-level flow for persistent skill topology provisioning and Forge-driven capability evolution.
+
+## Hive-Owned Memory Store
+
+- `Abigail Hive` opens the shared local SurrealDB store before user-facing Entities start.
+- Shared orchestration records live in namespace `abigail`, database `hive`.
+- Per-Entity state lives in namespace `abigail`, database `entity_<uuid>`.
+- The memory path is local-first and desktop-native, with legacy SQLite files used only as first-launch migration inputs.
+- Queue state, protected-topic capture, calendar data, knowledge-base entries, and chat memory now share the same persistence substrate so reflection and enrichment jobs can query across those layers without cross-database glue code.

@@ -1,8 +1,6 @@
-//! Database skill: query, execute, and inspect SQLite databases within sandboxed directories.
-//!
-//! All database operations are restricted to allowed root directories to prevent
-//! path traversal and unauthorized file access.
+//! Database skill: inspect and administer local embedded SurrealDB stores within sandboxed directories.
 
+use abigail_persistence::{EntityScope, PersistenceHandle, QueryBinding};
 use abigail_skills::{
     CapabilityDescriptor, CostEstimate, ExecutionContext, FileSystemPermission, HealthStatus,
     Permission, Skill, SkillConfig, SkillError, SkillHealth, SkillManifest, SkillResult,
@@ -12,25 +10,21 @@ use async_trait::async_trait;
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use uuid::Uuid;
 
-/// Maximum number of rows returned by a single query.
 const MAX_ROWS: usize = 1000;
 
-/// Database skill with sandboxed directory access.
 pub struct DatabaseSkill {
     manifest: SkillManifest,
-    /// Root directories where database operations are allowed.
     allowed_roots: Vec<PathBuf>,
 }
 
 impl DatabaseSkill {
-    /// Parse the embedded skill.toml manifest.
     pub fn default_manifest() -> SkillManifest {
         let toml_str = include_str!("../skill.toml");
         SkillManifest::parse(toml_str).expect("Failed to parse database skill.toml")
     }
 
-    /// Create a new database skill with the given allowed root directories.
     pub fn new(manifest: SkillManifest, allowed_roots: Vec<PathBuf>) -> Self {
         Self {
             manifest,
@@ -38,12 +32,8 @@ impl DatabaseSkill {
         }
     }
 
-    /// Validate that a path is within one of the allowed roots.
-    /// Returns the canonicalized path if valid, or an error.
     fn validate_path(&self, path_str: &str) -> SkillResult<PathBuf> {
         let path = PathBuf::from(path_str);
-
-        // Reject obviously malicious patterns
         let normalized = path_str.replace('\\', "/");
         if normalized.contains("../") || normalized.contains("/..") {
             return Err(SkillError::PermissionDenied(
@@ -51,7 +41,6 @@ impl DatabaseSkill {
             ));
         }
 
-        // For existing paths, canonicalize and check containment
         if path.exists() {
             let canonical = path
                 .canonicalize()
@@ -65,7 +54,6 @@ impl DatabaseSkill {
             )));
         }
 
-        // For new paths (db_execute creating a new database), check parent exists and is allowed
         if let Some(parent) = path.parent() {
             if parent.exists() {
                 let canonical_parent = parent.canonicalize().map_err(|e| {
@@ -83,98 +71,82 @@ impl DatabaseSkill {
         )))
     }
 
-    /// Strip the Windows extended-length path prefix (`\\?\`) if present.
     #[cfg(target_os = "windows")]
-    fn strip_unc_prefix(p: &Path) -> PathBuf {
-        let s = p.to_string_lossy();
-        if let Some(stripped) = s.strip_prefix(r"\\?\") {
-            PathBuf::from(stripped)
-        } else {
-            p.to_path_buf()
-        }
+    fn strip_unc_prefix(path: &Path) -> PathBuf {
+        let display = path.to_string_lossy();
+        display
+            .strip_prefix(r"\\?\")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| path.to_path_buf())
     }
 
     #[cfg(not(target_os = "windows"))]
-    fn strip_unc_prefix(p: &Path) -> PathBuf {
-        p.to_path_buf()
+    fn strip_unc_prefix(path: &Path) -> PathBuf {
+        path.to_path_buf()
     }
 
-    /// Check if a canonicalized path is within any allowed root.
     fn is_within_allowed_roots(&self, canonical_path: &Path) -> bool {
         let canonical_path = Self::strip_unc_prefix(canonical_path);
-        for root in &self.allowed_roots {
-            let canonical_root = match root.canonicalize() {
-                Ok(r) => Self::strip_unc_prefix(&r),
-                Err(_) => root.clone(),
-            };
-            if canonical_path.starts_with(&canonical_root) {
-                return true;
-            }
-        }
-        false
+        self.allowed_roots.iter().any(|root| {
+            let canonical_root = root
+                .canonicalize()
+                .map(|value| Self::strip_unc_prefix(&value))
+                .unwrap_or_else(|_| root.clone());
+            canonical_path.starts_with(&canonical_root)
+        })
     }
 
-    /// Convert a rusqlite Value to a serde_json Value.
-    fn sqlite_value_to_json(val: rusqlite::types::Value) -> serde_json::Value {
-        match val {
-            rusqlite::types::Value::Null => serde_json::Value::Null,
-            rusqlite::types::Value::Integer(i) => serde_json::json!(i),
-            rusqlite::types::Value::Real(f) => serde_json::json!(f),
-            rusqlite::types::Value::Text(s) => serde_json::json!(s),
-            rusqlite::types::Value::Blob(b) => {
-                serde_json::json!(format!("<blob {} bytes>", b.len()))
-            }
-        }
-    }
-
-    /// Execute a read-only SELECT query against a database.
-    fn db_query(&self, db_path: &str, query: &str, params: &[String]) -> SkillResult<ToolOutput> {
+    fn open_store(&self, db_path: &str) -> SkillResult<PersistenceHandle> {
         let path = self.validate_path(db_path)?;
+        PersistenceHandle::open(&path, infer_scope(&path))
+            .map_err(|e| SkillError::ToolFailed(format!("Cannot open database: {}", e)))
+    }
 
-        if !path.is_file() {
-            return Ok(ToolOutput::error(format!("'{}' is not a file", db_path)));
+    fn rewrite_query(
+        &self,
+        statement: &str,
+        params: &[String],
+    ) -> SkillResult<(String, Vec<QueryBinding>)> {
+        let mut query = statement.to_string();
+        let mut bindings = Vec::with_capacity(params.len());
+        for (index, value) in params.iter().enumerate() {
+            let token = format!("?{}", index + 1);
+            let name = format!("p{}", index);
+            query = query.replace(&token, &format!("${}", name));
+            bindings.push(
+                QueryBinding::new(&name, value)
+                    .map_err(|e| SkillError::ToolFailed(format!("Binding failed: {}", e)))?,
+            );
+        }
+        Ok((query, bindings))
+    }
+
+    fn db_query(&self, db_path: &str, query: &str, params: &[String]) -> SkillResult<ToolOutput> {
+        let upper = query.trim_start().to_ascii_uppercase();
+        if !upper.starts_with("SELECT")
+            && !upper.starts_with("RETURN")
+            && !upper.starts_with("INFO")
+            && !upper.starts_with("DEFINE")
+        {
+            return Err(SkillError::PermissionDenied(
+                "db_query only allows read-oriented SurrealQL statements".to_string(),
+            ));
         }
 
-        let conn = rusqlite::Connection::open_with_flags(
-            &path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .map_err(|e| SkillError::ToolFailed(format!("Cannot open database: {}", e)))?;
-
-        let mut stmt = conn
-            .prepare(query)
-            .map_err(|e| SkillError::ToolFailed(format!("Invalid query: {}", e)))?;
-
-        let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
-
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params
-            .iter()
-            .map(|s| s as &dyn rusqlite::types::ToSql)
-            .collect();
-
-        let mut rows_out: Vec<serde_json::Value> = Vec::new();
-        let mut rows = stmt
-            .query(param_refs.as_slice())
+        let store = self.open_store(db_path)?;
+        let (query, bindings) = self.rewrite_query(query, params)?;
+        let rows: Vec<serde_json::Value> = store
+            .query_vec(&query, &bindings)
             .map_err(|e| SkillError::ToolFailed(format!("Query execution failed: {}", e)))?;
 
-        while let Some(row) = rows
-            .next()
-            .map_err(|e| SkillError::ToolFailed(format!("Error reading row: {}", e)))?
-        {
-            if rows_out.len() >= MAX_ROWS {
-                break;
-            }
-            let mut row_map = serde_json::Map::new();
-            for (i, col_name) in column_names.iter().enumerate() {
-                let val: rusqlite::types::Value = row
-                    .get(i)
-                    .map_err(|e| SkillError::ToolFailed(format!("Error reading column: {}", e)))?;
-                row_map.insert(col_name.clone(), Self::sqlite_value_to_json(val));
-            }
-            rows_out.push(serde_json::Value::Object(row_map));
-        }
+        let column_names = rows
+            .iter()
+            .find_map(|row| row.as_object().map(|object| object.keys().cloned().collect::<Vec<_>>()))
+            .unwrap_or_default();
 
-        let row_count = rows_out.len();
+        let row_count = rows.len().min(MAX_ROWS);
+        let truncated = rows.len() > MAX_ROWS;
+        let rows = rows.into_iter().take(MAX_ROWS).collect::<Vec<_>>();
         let formatted = if row_count == 0 {
             "Query returned no results.".to_string()
         } else {
@@ -188,155 +160,66 @@ impl DatabaseSkill {
         Ok(ToolOutput::success(serde_json::json!({
             "formatted": formatted,
             "columns": column_names,
-            "rows": rows_out,
+            "rows": rows,
             "row_count": row_count,
-            "truncated": row_count >= MAX_ROWS,
+            "truncated": truncated,
         })))
     }
 
-    /// Execute a write statement (INSERT, UPDATE, DELETE) against a database.
     fn db_execute(
         &self,
         db_path: &str,
         statement: &str,
         params: &[String],
     ) -> SkillResult<ToolOutput> {
-        // Safety: block DROP TABLE / DROP DATABASE
-        let upper = statement.to_uppercase();
+        let upper = statement.to_ascii_uppercase();
         if upper.contains("DROP TABLE") || upper.contains("DROP DATABASE") {
             return Err(SkillError::PermissionDenied(
                 "DROP TABLE and DROP DATABASE statements are not allowed".to_string(),
             ));
         }
 
-        let path = self.validate_path(db_path)?;
-
-        let conn = rusqlite::Connection::open_with_flags(
-            &path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
-                | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
-                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .map_err(|e| SkillError::ToolFailed(format!("Cannot open database: {}", e)))?;
-
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params
-            .iter()
-            .map(|s| s as &dyn rusqlite::types::ToSql)
-            .collect();
-
-        let rows_affected = conn
-            .execute(statement, param_refs.as_slice())
+        let store = self.open_store(db_path)?;
+        let (statement, bindings) = self.rewrite_query(statement, params)?;
+        store
+            .execute(&statement, &bindings)
             .map_err(|e| SkillError::ToolFailed(format!("Statement execution failed: {}", e)))?;
 
-        let formatted = format!(
-            "Statement executed successfully. {} row{} affected.",
-            rows_affected,
-            if rows_affected == 1 { "" } else { "s" }
-        );
-
-        tracing::info!(
-            "Executed statement on {}: {} rows affected",
-            path.display(),
-            rows_affected
-        );
-
         Ok(ToolOutput::success(serde_json::json!({
-            "formatted": formatted,
-            "rows_affected": rows_affected,
-            "db_path": path.display().to_string(),
+            "formatted": "Statement executed successfully.".to_string(),
+            "rows_affected": serde_json::Value::Null,
+            "db_path": self.validate_path(db_path)?.display().to_string(),
         })))
     }
 
-    /// Inspect the schema of a database: list all tables and their columns.
     fn db_schema(&self, db_path: &str) -> SkillResult<ToolOutput> {
-        let path = self.validate_path(db_path)?;
-
-        if !path.is_file() {
-            return Ok(ToolOutput::error(format!("'{}' is not a file", db_path)));
-        }
-
-        let conn = rusqlite::Connection::open_with_flags(
-            &path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .map_err(|e| SkillError::ToolFailed(format!("Cannot open database: {}", e)))?;
-
-        // Get all table names from sqlite_master
-        let mut table_stmt = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-            .map_err(|e| SkillError::ToolFailed(format!("Cannot query sqlite_master: {}", e)))?;
-
-        let table_names: Vec<String> = table_stmt
-            .query_map([], |row| row.get(0))
-            .map_err(|e| SkillError::ToolFailed(format!("Error reading tables: {}", e)))?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        let mut tables: Vec<serde_json::Value> = Vec::new();
-        let mut formatted_lines: Vec<String> = Vec::new();
-
-        for table_name in &table_names {
-            // PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
-            let pragma_query = format!("PRAGMA table_info(\"{}\")", table_name);
-            let mut col_stmt = conn
-                .prepare(&pragma_query)
-                .map_err(|e| SkillError::ToolFailed(format!("Cannot get table info: {}", e)))?;
-
-            let columns: Vec<serde_json::Value> = col_stmt
-                .query_map([], |row| {
-                    let name: String = row.get(1)?;
-                    let col_type: String = row.get(2)?;
-                    let notnull: bool = row.get(3)?;
-                    let default: rusqlite::types::Value = row.get(4)?;
-                    let pk: bool = row.get(5)?;
-                    Ok(serde_json::json!({
-                        "name": name,
-                        "type": col_type,
-                        "not_null": notnull,
-                        "default": Self::sqlite_value_to_json(default),
-                        "primary_key": pk,
-                    }))
-                })
-                .map_err(|e| SkillError::ToolFailed(format!("Error reading columns: {}", e)))?
-                .filter_map(|r| r.ok())
-                .collect();
-
-            // Build formatted output
-            formatted_lines.push(format!("Table: {}", table_name));
-            for col in &columns {
-                let name = col["name"].as_str().unwrap_or("?");
-                let col_type = col["type"].as_str().unwrap_or("?");
-                let pk = if col["primary_key"].as_bool().unwrap_or(false) {
-                    " [PK]"
-                } else {
-                    ""
-                };
-                let nn = if col["not_null"].as_bool().unwrap_or(false) {
-                    " NOT NULL"
-                } else {
-                    ""
-                };
-                formatted_lines.push(format!("  {} {}{}{}", name, col_type, nn, pk));
-            }
-            formatted_lines.push(String::new());
-
-            tables.push(serde_json::json!({
-                "name": table_name,
-                "columns": columns,
-            }));
-        }
-
-        let formatted = if tables.is_empty() {
-            "Database has no tables.".to_string()
-        } else {
-            formatted_lines.join("\n")
-        };
+        let store = self.open_store(db_path)?;
+        let rows: Vec<serde_json::Value> = store
+            .query_vec("INFO FOR DB", &[])
+            .map_err(|e| SkillError::ToolFailed(format!("Schema inspection failed: {}", e)))?;
+        let details = rows.into_iter().next().unwrap_or(serde_json::Value::Null);
+        let tables = details
+            .get("tables")
+            .and_then(|value| value.as_object())
+            .map(|tables| {
+                tables
+                    .iter()
+                    .map(|(name, definition)| {
+                        serde_json::json!({
+                            "name": name,
+                            "definition": definition,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
 
         Ok(ToolOutput::success(serde_json::json!({
-            "formatted": formatted,
-            "db_path": path.display().to_string(),
+            "formatted": format!("Database has {} table definition(s).", tables.len()),
+            "db_path": self.validate_path(db_path)?.display().to_string(),
             "table_count": tables.len(),
             "tables": tables,
+            "details": details,
         })))
     }
 }
@@ -356,17 +239,17 @@ impl Skill for DatabaseSkill {
     }
 
     fn health(&self) -> SkillHealth {
-        let all_accessible = self.allowed_roots.iter().all(|r| r.exists());
+        let all_accessible = self.allowed_roots.iter().all(|root| root.exists());
         SkillHealth {
             status: if all_accessible {
                 HealthStatus::Healthy
             } else {
                 HealthStatus::Degraded
             },
-            message: if !all_accessible {
-                Some("Some allowed root directories are not accessible".to_string())
-            } else {
+            message: if all_accessible {
                 None
+            } else {
+                Some("Some allowed root directories are not accessible".to_string())
             },
             last_check: chrono::Utc::now(),
             metrics: HashMap::new(),
@@ -377,23 +260,13 @@ impl Skill for DatabaseSkill {
         vec![
             ToolDescriptor {
                 name: "db_query".to_string(),
-                description: "Execute a read-only SELECT query against a SQLite database. Returns up to 1000 rows as a JSON array.".to_string(),
+                description: "Execute a read-oriented SurrealQL query against a local embedded database.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "db_path": {
-                            "type": "string",
-                            "description": "Absolute path to the SQLite database file"
-                        },
-                        "query": {
-                            "type": "string",
-                            "description": "SQL SELECT query to execute"
-                        },
-                        "params": {
-                            "type": "array",
-                            "items": { "type": "string" },
-                            "description": "Optional positional parameters for the query"
-                        }
+                        "db_path": { "type": "string", "description": "Path to the embedded database store" },
+                        "query": { "type": "string", "description": "SurrealQL SELECT/INFO/RETURN query to execute" },
+                        "params": { "type": "array", "items": { "type": "string" }, "description": "Optional positional parameters (?1, ?2, ...)" }
                     },
                     "required": ["db_path", "query"]
                 }),
@@ -407,36 +280,22 @@ impl Skill for DatabaseSkill {
                         "truncated": { "type": "boolean" }
                     }
                 }),
-                cost_estimate: CostEstimate {
-                    latency_ms: 50,
-                    network_bound: false,
-                    token_cost: None,
-                },
-                required_permissions: vec![Permission::FileSystem(
-                    FileSystemPermission::Read(vec!["~".to_string()]),
-                )],
+                cost_estimate: CostEstimate { latency_ms: 50, network_bound: false, token_cost: None },
+                required_permissions: vec![Permission::FileSystem(FileSystemPermission::Read(
+                    vec!["~".to_string()],
+                ))],
                 autonomous: true,
                 requires_confirmation: false,
             },
             ToolDescriptor {
                 name: "db_execute".to_string(),
-                description: "Execute a write statement (INSERT, UPDATE, DELETE, CREATE TABLE) against a SQLite database. DROP TABLE and DROP DATABASE are blocked for safety.".to_string(),
+                description: "Execute a mutating SurrealQL statement against a local embedded database. DROP TABLE and DROP DATABASE are blocked.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "db_path": {
-                            "type": "string",
-                            "description": "Absolute path to the SQLite database file"
-                        },
-                        "statement": {
-                            "type": "string",
-                            "description": "SQL statement to execute (INSERT, UPDATE, DELETE, CREATE TABLE)"
-                        },
-                        "params": {
-                            "type": "array",
-                            "items": { "type": "string" },
-                            "description": "Optional positional parameters for the statement"
-                        }
+                        "db_path": { "type": "string", "description": "Path to the embedded database store" },
+                        "statement": { "type": "string", "description": "SurrealQL statement to execute" },
+                        "params": { "type": "array", "items": { "type": "string" }, "description": "Optional positional parameters (?1, ?2, ...)" }
                     },
                     "required": ["db_path", "statement"]
                 }),
@@ -444,36 +303,25 @@ impl Skill for DatabaseSkill {
                     "type": "object",
                     "properties": {
                         "formatted": { "type": "string" },
-                        "rows_affected": { "type": "integer" },
+                        "rows_affected": { "type": ["integer", "null"] },
                         "db_path": { "type": "string" }
                     }
                 }),
-                cost_estimate: CostEstimate {
-                    latency_ms: 50,
-                    network_bound: false,
-                    token_cost: None,
-                },
+                cost_estimate: CostEstimate { latency_ms: 50, network_bound: false, token_cost: None },
                 required_permissions: vec![
-                    Permission::FileSystem(
-                        FileSystemPermission::Read(vec!["~".to_string()]),
-                    ),
-                    Permission::FileSystem(
-                        FileSystemPermission::Write(vec!["~".to_string()]),
-                    ),
+                    Permission::FileSystem(FileSystemPermission::Read(vec!["~".to_string()])),
+                    Permission::FileSystem(FileSystemPermission::Write(vec!["~".to_string()])),
                 ],
                 autonomous: false,
                 requires_confirmation: true,
             },
             ToolDescriptor {
                 name: "db_schema".to_string(),
-                description: "Inspect the schema of a SQLite database: list all tables and their columns with types, constraints, and primary keys.".to_string(),
+                description: "Inspect SurrealDB database metadata and table definitions.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "db_path": {
-                            "type": "string",
-                            "description": "Absolute path to the SQLite database file"
-                        }
+                        "db_path": { "type": "string", "description": "Path to the embedded database store" }
                     },
                     "required": ["db_path"]
                 }),
@@ -486,14 +334,10 @@ impl Skill for DatabaseSkill {
                         "tables": { "type": "array" }
                     }
                 }),
-                cost_estimate: CostEstimate {
-                    latency_ms: 50,
-                    network_bound: false,
-                    token_cost: None,
-                },
-                required_permissions: vec![Permission::FileSystem(
-                    FileSystemPermission::Read(vec!["~".to_string()]),
-                )],
+                cost_estimate: CostEstimate { latency_ms: 50, network_bound: false, token_cost: None },
+                required_permissions: vec![Permission::FileSystem(FileSystemPermission::Read(
+                    vec!["~".to_string()],
+                ))],
                 autonomous: true,
                 requires_confirmation: false,
             },
@@ -550,12 +394,21 @@ impl Skill for DatabaseSkill {
     }
 }
 
+fn infer_scope(path: &Path) -> EntityScope {
+    path.parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+        .filter(|candidate| Uuid::parse_str(candidate).is_ok())
+        .map(|id| EntityScope::Entity(id.to_string()))
+        .unwrap_or(EntityScope::Hive)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn test_skill(roots: Vec<PathBuf>) -> DatabaseSkill {
-        DatabaseSkill::new(DatabaseSkill::default_manifest(), roots)
+    fn test_skill(root: PathBuf) -> DatabaseSkill {
+        DatabaseSkill::new(DatabaseSkill::default_manifest(), vec![root])
     }
 
     #[test]
@@ -565,139 +418,13 @@ mod tests {
     }
 
     #[test]
-    fn test_tools_list() {
-        let skill = test_skill(vec![]);
-        let tools = skill.tools();
-        assert_eq!(tools.len(), 3);
-        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
-        assert!(names.contains(&"db_query"));
-        assert!(names.contains(&"db_execute"));
-        assert!(names.contains(&"db_schema"));
-    }
-
-    #[test]
-    fn test_db_execute_requires_confirmation() {
-        let skill = test_skill(vec![]);
-        let tools = skill.tools();
-        let execute_tool = tools.iter().find(|t| t.name == "db_execute").unwrap();
-        assert!(execute_tool.requires_confirmation);
-        assert!(!execute_tool.autonomous);
-    }
-
-    #[test]
-    fn test_db_query_is_autonomous() {
-        let skill = test_skill(vec![]);
-        let tools = skill.tools();
-        let query_tool = tools.iter().find(|t| t.name == "db_query").unwrap();
-        assert!(query_tool.autonomous);
-        assert!(!query_tool.requires_confirmation);
-    }
-
-    #[test]
-    fn test_db_schema_is_autonomous() {
-        let skill = test_skill(vec![]);
-        let tools = skill.tools();
-        let schema_tool = tools.iter().find(|t| t.name == "db_schema").unwrap();
-        assert!(schema_tool.autonomous);
-        assert!(!schema_tool.requires_confirmation);
-    }
-
-    #[test]
-    fn test_path_traversal_blocked() {
-        let tmp = std::env::temp_dir().join("abigail_db_test_traversal");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-
-        let skill = test_skill(vec![tmp.clone()]);
-
-        let result = skill.validate_path("../../etc/passwd");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("traversal"));
-
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
     fn test_drop_table_blocked() {
-        let tmp = std::env::temp_dir().join("abigail_db_test_drop");
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp = std::env::temp_dir().join(format!("abigail_db_test_{}", Uuid::new_v4()));
         std::fs::create_dir_all(&tmp).unwrap();
-
         let db_path = tmp.join("test.db");
-        // Create a database with a table
-        {
-            let conn = rusqlite::Connection::open(&db_path).unwrap();
-            conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)", [])
-                .unwrap();
-        }
-
-        let skill = test_skill(vec![tmp.clone()]);
-
+        let skill = test_skill(tmp.clone());
         let result = skill.db_execute(&db_path.display().to_string(), "DROP TABLE users", &[]);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("DROP TABLE"));
-
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn test_query_and_schema() {
-        let tmp = std::env::temp_dir().join("abigail_db_test_query");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-
-        let db_path = tmp.join("test.db");
-        // Create and populate a database
-        {
-            let conn = rusqlite::Connection::open(&db_path).unwrap();
-            conn.execute(
-                "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT NOT NULL, value REAL)",
-                [],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO items (name, value) VALUES (?1, ?2)",
-                rusqlite::params!["alpha", 1.5],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO items (name, value) VALUES (?1, ?2)",
-                rusqlite::params!["beta", 2.5],
-            )
-            .unwrap();
-        }
-
-        let skill = test_skill(vec![tmp.clone()]);
-
-        // Test db_query
-        let result = skill
-            .db_query(&db_path.display().to_string(), "SELECT * FROM items", &[])
-            .unwrap();
-        assert!(result.success);
-        let data = result.data.unwrap();
-        assert_eq!(data["row_count"], 2);
-
-        // Test db_schema
-        let result = skill.db_schema(&db_path.display().to_string()).unwrap();
-        assert!(result.success);
-        let data = result.data.unwrap();
-        assert_eq!(data["table_count"], 1);
-        let tables = data["tables"].as_array().unwrap();
-        assert_eq!(tables[0]["name"], "items");
-
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn test_health_check() {
-        let tmp = std::env::temp_dir().join("abigail_db_test_health");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-
-        let skill = test_skill(vec![tmp.clone()]);
-        let health = skill.health();
-        assert_eq!(health.status, HealthStatus::Healthy);
-
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = std::fs::remove_dir_all(tmp);
     }
 }

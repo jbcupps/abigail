@@ -38,6 +38,7 @@ use abigail_auth::AuthManager;
 use abigail_core::{validate_local_llm_url, AppConfig, SecretsVault};
 use abigail_hive::{Hive, ModelRegistry};
 use abigail_memory::MemoryStore;
+use abigail_persistence::{EntityScope, PersistenceHandle};
 #[allow(deprecated)]
 use abigail_router::{
     IdEgoRouter, OrchestrationScheduler, SubagentDefinition, SubagentManager, SubagentProvider,
@@ -510,39 +511,9 @@ fn try_run() -> Result<(), String> {
 
     // Open job queue database for async task management.
     let job_queue = {
-        let job_db_path = data_dir.join("jobs.db");
-        let conn = rusqlite::Connection::open(&job_db_path).map_err(|e| {
-            format!(
-                "Failed to open job queue database at {}: {e}",
-                job_db_path.display()
-            )
-        })?;
-        conn.execute_batch("PRAGMA journal_mode=WAL;")
-            .map_err(|e| format!("Failed to set WAL mode on job queue: {e}"))?;
-        conn.execute_batch(abigail_queue::MIGRATION_V3_JOB_QUEUE)
-            .map_err(|e| format!("Failed to run job queue migrations: {e}"))?;
-        for stmt in abigail_queue::MIGRATION_V4_ORCHESTRATION.split(';') {
-            let trimmed = stmt.trim();
-            if !trimmed.is_empty() {
-                let _ = conn.execute_batch(trimmed);
-            }
-        }
-        for stmt in abigail_queue::MIGRATION_V5_DEPENDS_ON.split(';') {
-            let trimmed = stmt.trim();
-            if !trimmed.is_empty() {
-                let _ = conn.execute_batch(trimmed);
-            }
-        }
-        for stmt in abigail_queue::MIGRATION_V6_EXECUTION_MODE.split(';') {
-            let trimmed = stmt.trim();
-            if !trimmed.is_empty() {
-                let _ = conn.execute_batch(trimmed);
-            }
-        }
-        Arc::new(abigail_queue::JobQueue::new(
-            Arc::new(std::sync::Mutex::new(conn)),
-            stream_broker.clone(),
-        ))
+        let queue_store = PersistenceHandle::open(&config.db_path, EntityScope::Hive)
+            .map_err(|e| format!("Failed to open Hive queue store at {}: {e}", config.db_path.display()))?;
+        Arc::new(abigail_queue::JobQueue::new(queue_store, stream_broker.clone()))
     };
 
     // Seed skill instructions into data_dir when absent (first run / clean install).
@@ -1026,6 +997,8 @@ fn try_run() -> Result<(), String> {
             set_active_provider,
             get_active_provider,
             set_routing_mode,
+            get_store_stats,
+            optimize_store,
             get_sqlite_stats,
             optimize_sqlite,
             reset_memories,

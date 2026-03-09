@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/abigail-persistence",
     "crates/abigail-core",
     "crates/abigail-memory",
     "crates/abigail-capabilities",
@@ -65,7 +66,7 @@ rand = "0.8"
 base64 = "0.22"
 sha2 = "0.10"
 directories = "5"
-rusqlite = { version = "0.32", features = ["bundled", "blob"] }
+surrealdb = { version = "3.0.2", default-features = false, features = ["kv-mem", "kv-surrealkv"] }
 thiserror = "1.0"
 anyhow = "1.0"
 tracing = "0.1"

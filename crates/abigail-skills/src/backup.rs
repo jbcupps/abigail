@@ -104,7 +104,7 @@ impl Skill for BackupManagementSkill {
         vec![
             ToolDescriptor {
                 name: "list_backups".to_string(),
-                description: "List available backup directories that contain importable memory databases. Returns paths, timestamps, and whether each backup has a usable SQLite DB.".to_string(),
+                description: "List available backup directories that contain importable memory stores. Returns paths, timestamps, and whether each backup has a usable memory database.".to_string(),
                 parameters: serde_json::json!({"type": "object", "properties": {}}),
                 returns: serde_json::json!({
                     "type": "array",

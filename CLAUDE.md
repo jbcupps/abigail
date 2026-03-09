@@ -8,9 +8,11 @@ Abigail manages multiple personal AI Entities that the user, mentor, or family h
 **Development Rules (Always Follow)**
 - The user creates and manages Entities - Abigail is the silent coordinator behind them.
 - Abigail itself is represented by an immortal local `Abigail Hive` Entity with elevated local privileges; it owns shared memory and must remain undeletable.
+- `Abigail Hive` owns the shared embedded SurrealDB persistence root (`memory.db`) and legacy SQLite files are migration inputs only, never active runtime stores.
 - Users should be encouraged to connect Entities to powerful cloud models from any provider. This multi-provider freedom is a major advantage.
 - Provider/model selector changes must stay stable across direct APIs and CLI-backed providers, and identity recovery must preserve shared Hive memory/docs instead of crashing.
 - Privacy and local-first are non-negotiable. Cloud models are optional power-ups, never required.
+- Keep per-Entity data scoped through Hive-owned storage interfaces so one Entity cannot read another Entity's records by accident.
 - Keep everything dead-simple for the family user. Delight and ease of use come first.
 
 **Origin Story (Respect This Link)**
