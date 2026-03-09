@@ -1351,7 +1351,7 @@ mod tests {
 
         let migrated_config = AppConfig::load(&agent_dir.join("config.json")).unwrap();
         assert_eq!(migrated_config.data_dir, agent_dir);
-        assert_eq!(migrated_config.db_path, agent_dir.join("abigail_memory.db"));
+        assert_eq!(migrated_config.db_path, manager.shared_memory_db_path());
         assert_eq!(
             migrated_config.external_pubkey_path,
             Some(agent_dir.join("external_pubkey.bin"))
