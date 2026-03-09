@@ -23,12 +23,14 @@ impl ScopedCipher {
             .unlock
             .root_kek()
             .map_err(|e| PersistenceError::Join(e.to_string()))?;
-        Ok(crypto::derive_scope_key(&root, &format!("persistence:{}", self.scope.label())))
+        Ok(crypto::derive_scope_key(
+            &root,
+            &format!("persistence:{}", self.scope.label()),
+        ))
     }
 
     pub fn encrypt_bytes(&self, bytes: &[u8]) -> Result<Vec<u8>> {
-        Ok(crypto::seal(&self.key()?, bytes)
-            .map_err(|e| PersistenceError::Join(e.to_string()))?)
+        Ok(crypto::seal(&self.key()?, bytes).map_err(|e| PersistenceError::Join(e.to_string()))?)
     }
 
     pub fn decrypt_bytes(&self, envelope: &[u8]) -> Result<Vec<u8>> {

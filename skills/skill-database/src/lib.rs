@@ -141,7 +141,10 @@ impl DatabaseSkill {
 
         let column_names = rows
             .iter()
-            .find_map(|row| row.as_object().map(|object| object.keys().cloned().collect::<Vec<_>>()))
+            .find_map(|row| {
+                row.as_object()
+                    .map(|object| object.keys().cloned().collect::<Vec<_>>())
+            })
             .unwrap_or_default();
 
         let row_count = rows.len().min(MAX_ROWS);

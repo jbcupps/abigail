@@ -724,4 +724,3 @@ fn parse_routing_mode(s: &str) -> abigail_core::RoutingMode {
         _ => abigail_core::RoutingMode::default(),
     }
 }
-

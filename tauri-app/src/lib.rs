@@ -511,9 +511,17 @@ fn try_run() -> Result<(), String> {
 
     // Open job queue database for async task management.
     let job_queue = {
-        let queue_store = PersistenceHandle::open(&config.db_path, EntityScope::Hive)
-            .map_err(|e| format!("Failed to open Hive queue store at {}: {e}", config.db_path.display()))?;
-        Arc::new(abigail_queue::JobQueue::new(queue_store, stream_broker.clone()))
+        let queue_store =
+            PersistenceHandle::open(&config.db_path, EntityScope::Hive).map_err(|e| {
+                format!(
+                    "Failed to open Hive queue store at {}: {e}",
+                    config.db_path.display()
+                )
+            })?;
+        Arc::new(abigail_queue::JobQueue::new(
+            queue_store,
+            stream_broker.clone(),
+        ))
     };
 
     // Seed skill instructions into data_dir when absent (first run / clean install).

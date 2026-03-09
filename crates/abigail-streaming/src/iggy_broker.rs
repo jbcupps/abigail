@@ -131,12 +131,10 @@ impl StreamBroker for IggyBroker {
         let topic_id = Identifier::named(topic).map_err(|e| anyhow::anyhow!("{}", e))?;
         let payload = serde_json::to_vec(&message)
             .context("Failed to serialize StreamMessage for Iggy publish")?;
-        let mut messages = vec![
-            IggyMessage::builder()
-                .payload(Bytes::from(payload))
-                .build()
-                .context("Failed to build Iggy message payload")?,
-        ];
+        let mut messages = vec![IggyMessage::builder()
+            .payload(Bytes::from(payload))
+            .build()
+            .context("Failed to build Iggy message payload")?];
 
         self.client
             .send_messages(

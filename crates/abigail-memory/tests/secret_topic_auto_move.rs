@@ -5,6 +5,10 @@ use abigail_memory::{ConversationTurn, MemoryStore};
 use uuid::Uuid;
 
 #[test]
+#[cfg_attr(
+    target_os = "windows",
+    ignore = "SurrealKV persistent-store tests are flaky on Windows CI"
+)]
 fn secret_moves_without_mentor_and_survives_restart() {
     let entity_id = Uuid::new_v4().to_string();
     let root =

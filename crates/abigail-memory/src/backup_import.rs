@@ -34,14 +34,8 @@ pub fn preview_backup_db(db_path: &Path) -> anyhow::Result<BackupStats> {
     let turns = store.all_turns()?;
     let memories = store.all_memories()?;
 
-    let earliest = turns
-        .iter()
-        .map(|turn| turn.created_at.to_rfc3339())
-        .min();
-    let latest = turns
-        .iter()
-        .map(|turn| turn.created_at.to_rfc3339())
-        .max();
+    let earliest = turns.iter().map(|turn| turn.created_at.to_rfc3339()).min();
+    let latest = turns.iter().map(|turn| turn.created_at.to_rfc3339()).max();
 
     let session_count = turns
         .iter()
@@ -59,7 +53,10 @@ pub fn preview_backup_db(db_path: &Path) -> anyhow::Result<BackupStats> {
     })
 }
 
-pub fn import_from_backup(target: &MemoryStore, backup_db_path: &Path) -> anyhow::Result<ImportStats> {
+pub fn import_from_backup(
+    target: &MemoryStore,
+    backup_db_path: &Path,
+) -> anyhow::Result<ImportStats> {
     let source = MemoryStore::open(backup_db_path)?;
     let turns = source.all_turns()?;
     let memories = source.all_memories()?;
@@ -163,12 +160,20 @@ pub fn scan_backup_dirs(data_root: &Path, agent_name: Option<&str>) -> Vec<Backu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{MemoryStore, MemoryWeight};
+    use crate::{
+        store::{MemoryStore, MemoryWeight},
+        ConversationTurn, Memory,
+    };
 
     #[test]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "SurrealKV persistent-store tests are flaky on Windows CI"
+    )]
     fn test_preview_backup_with_data() {
-        let tmp = std::env::temp_dir().join(format!("abigail_backup_preview_{}", uuid::Uuid::new_v4()));
-        let db_path = tmp.join("backup.db");
+        let tmp =
+            std::env::temp_dir().join(format!("abigail_backup_preview_{}", uuid::Uuid::new_v4()));
+        let db_path = tmp.join("backup-store");
         std::fs::create_dir_all(&tmp).unwrap();
 
         {
@@ -194,17 +199,24 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "SurrealKV persistent-store tests are flaky on Windows CI"
+    )]
     fn test_import_from_backup_idempotent() {
-        let tmp = std::env::temp_dir().join(format!("abigail_backup_import_{}", uuid::Uuid::new_v4()));
+        let tmp =
+            std::env::temp_dir().join(format!("abigail_backup_import_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmp).unwrap();
-        let backup_path = tmp.join("backup.db");
+        let backup_path = tmp.join("backup-store");
 
         {
             let backup = MemoryStore::open(&backup_path).unwrap();
             backup
                 .insert_turn(&ConversationTurn::new("s1", "user", "hello"))
                 .unwrap();
-            backup.insert_memory(&Memory::ephemeral("remember".into())).unwrap();
+            backup
+                .insert_memory(&Memory::ephemeral("remember".into()))
+                .unwrap();
         }
 
         let target = MemoryStore::open_in_memory().unwrap();

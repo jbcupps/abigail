@@ -313,7 +313,10 @@ impl JobQueue {
             }
         }
         if recovered > 0 {
-            tracing::warn!("Crash recovery: marked {} running jobs as failed", recovered);
+            tracing::warn!(
+                "Crash recovery: marked {} running jobs as failed",
+                recovered
+            );
         }
         Ok(recovered)
     }
@@ -324,7 +327,10 @@ impl JobQueue {
             .into_iter()
             .filter(|job| {
                 job.is_recurring
-                    && job.cron_expression.as_ref().is_some_and(|cron| !cron.is_empty())
+                    && job
+                        .cron_expression
+                        .as_ref()
+                        .is_some_and(|cron| !cron.is_empty())
                     && job.status == JobStatus::Queued
             })
             .collect())
@@ -463,10 +469,7 @@ mod tests {
             .mark_running(&job_id, "agent-1", "gpt-4.1", "openai")
             .await
             .unwrap();
-        queue
-            .mark_completed(&job_id, "done", 2)
-            .await
-            .unwrap();
+        queue.mark_completed(&job_id, "done", 2).await.unwrap();
 
         let record = queue.get_job(&job_id).unwrap().unwrap();
         assert_eq!(record.status, JobStatus::Completed);

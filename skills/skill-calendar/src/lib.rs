@@ -99,7 +99,10 @@ impl CalendarSkill {
                 from.map(|min| event.start_time.as_str() >= min)
                     .unwrap_or(true)
             })
-            .filter(|event| to.map(|max| event.start_time.as_str() <= max).unwrap_or(true))
+            .filter(|event| {
+                to.map(|max| event.start_time.as_str() <= max)
+                    .unwrap_or(true)
+            })
             .map(|event| serde_json::to_value(event).unwrap_or_default())
             .collect();
 
@@ -139,7 +142,10 @@ impl CalendarSkill {
 
     fn delete_event(&self, id: &str) -> SkillResult<ToolOutput> {
         let Some(_) = self.get_event(id)? else {
-            return Ok(ToolOutput::error(format!("No event found with id '{}'", id)));
+            return Ok(ToolOutput::error(format!(
+                "No event found with id '{}'",
+                id
+            )));
         };
 
         self.open_store()?
@@ -163,7 +169,10 @@ impl CalendarSkill {
         location: Option<&str>,
     ) -> SkillResult<ToolOutput> {
         let Some(mut event) = self.get_event(id)? else {
-            return Ok(ToolOutput::error(format!("No event found with id '{}'", id)));
+            return Ok(ToolOutput::error(format!(
+                "No event found with id '{}'",
+                id
+            )));
         };
 
         if let Some(title) = title {

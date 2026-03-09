@@ -6,9 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use surrealdb::engine::local::{Db, Mem, SurrealKv};
-use surrealdb::types::{
-    Number as SurrealNumber, RecordIdKey, Value as SurrealValue,
-};
+use surrealdb::types::{Number as SurrealNumber, RecordIdKey, Value as SurrealValue};
 use surrealdb::Surreal;
 use thiserror::Error;
 
@@ -103,22 +101,24 @@ impl PersistenceHandle {
 
     pub fn open(path: impl AsRef<Path>, scope: EntityScope) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
-        std::fs::create_dir_all(&path)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
 
         let runtime = persistence_runtime()?;
         let init_path = path.clone();
         let init_scope = scope.clone();
         let db = block_on_runtime(runtime, async move {
-                let db = Surreal::new::<SurrealKv>(init_path.clone())
-                    .await
-                    .map_err(PersistenceError::from)?;
-                db.use_ns("abigail")
-                    .use_db(init_scope.database_name())
-                    .await
-                    .map_err(PersistenceError::from)?;
-                schema::ensure_schema(&db, &init_scope).await?;
-                Ok::<_, PersistenceError>(db)
-            })?;
+            let db = Surreal::new::<SurrealKv>(surrealkv_path_arg(&init_path))
+                .await
+                .map_err(PersistenceError::from)?;
+            db.use_ns("abigail")
+                .use_db(init_scope.database_name())
+                .await
+                .map_err(PersistenceError::from)?;
+            schema::ensure_schema(&db, &init_scope).await?;
+            Ok::<_, PersistenceError>(db)
+        })?;
 
         Ok(Self {
             inner: Arc::new(PersistenceInner {
@@ -314,6 +314,23 @@ fn persistence_runtime() -> Result<&'static tokio::runtime::Runtime> {
     }
 }
 
+fn surrealkv_path_arg(path: &Path) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        let rendered = path.to_string_lossy().replace('\\', "/");
+        if path.is_absolute() && !rendered.starts_with('/') {
+            format!("/{rendered}")
+        } else {
+            rendered
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        path.to_string_lossy().to_string()
+    }
+}
+
 fn surreal_value_to_json(value: SurrealValue) -> Value {
     match value {
         SurrealValue::None | SurrealValue::Null => Value::Null,
@@ -330,18 +347,24 @@ fn surreal_value_to_json(value: SurrealValue) -> Value {
         SurrealValue::File(value) => Value::String(format!("{value:?}")),
         SurrealValue::Range(value) => Value::String(format!("{value:?}")),
         SurrealValue::Regex(value) => Value::String(format!("{value}")),
-        SurrealValue::Array(values) => {
-            Value::Array(values.into_iter().map(surreal_value_to_json).collect::<Vec<_>>())
-        }
+        SurrealValue::Array(values) => Value::Array(
+            values
+                .into_iter()
+                .map(surreal_value_to_json)
+                .collect::<Vec<_>>(),
+        ),
         SurrealValue::Object(values) => Value::Object(
             values
                 .into_iter()
                 .map(|(key, value)| (key, surreal_value_to_json(value)))
                 .collect(),
         ),
-        SurrealValue::Set(values) => {
-            Value::Array(values.into_iter().map(surreal_value_to_json).collect::<Vec<_>>())
-        }
+        SurrealValue::Set(values) => Value::Array(
+            values
+                .into_iter()
+                .map(surreal_value_to_json)
+                .collect::<Vec<_>>(),
+        ),
     }
 }
 
@@ -360,9 +383,12 @@ fn record_id_to_json(key: RecordIdKey) -> Value {
         RecordIdKey::Number(value) => Value::Number(value.into()),
         RecordIdKey::String(value) => Value::String(value),
         RecordIdKey::Uuid(value) => Value::String(value.to_string()),
-        RecordIdKey::Array(value) => {
-            Value::Array(value.into_iter().map(surreal_value_to_json).collect::<Vec<_>>())
-        }
+        RecordIdKey::Array(value) => Value::Array(
+            value
+                .into_iter()
+                .map(surreal_value_to_json)
+                .collect::<Vec<_>>(),
+        ),
         RecordIdKey::Object(value) => Value::Object(
             value
                 .into_iter()
