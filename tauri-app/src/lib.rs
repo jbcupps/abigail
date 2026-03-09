@@ -38,6 +38,7 @@ use abigail_auth::AuthManager;
 use abigail_core::{validate_local_llm_url, AppConfig, SecretsVault};
 use abigail_hive::{Hive, ModelRegistry};
 use abigail_memory::MemoryStore;
+use abigail_persistence::{EntityScope, PersistenceHandle};
 #[allow(deprecated)]
 use abigail_router::{
     IdEgoRouter, OrchestrationScheduler, SubagentDefinition, SubagentManager, SubagentProvider,
@@ -55,13 +56,167 @@ use abigail_streaming::MemoryBroker;
 use identity_manager::IdentityManager;
 use rate_limit::CooldownGuard;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use tauri::{Emitter, Manager};
+
+const KEK_RECOVERY_MESSAGE_SNIPPET: &str =
+    "vault sentinel exists but stable KEK could not be loaded";
+
+fn startup_profile_root() -> PathBuf {
+    profile_root_for_data_dir(&abigail_core::AppConfig::default_paths().data_dir)
+}
+
+fn profile_root_for_data_dir(data_dir: &Path) -> PathBuf {
+    match data_dir.file_name().and_then(|name| name.to_str()) {
+        Some(name) if name.eq_ignore_ascii_case("data") => data_dir
+            .parent()
+            .unwrap_or(data_dir)
+            .to_path_buf(),
+        _ => data_dir.to_path_buf(),
+    }
+}
+
+fn is_clean_start_recovery_candidate(message: &str) -> bool {
+    let normalized = message.to_ascii_lowercase();
+    normalized.contains(&KEK_RECOVERY_MESSAGE_SNIPPET.to_ascii_lowercase())
+        || (normalized.contains("stable kek") && normalized.contains("vault sentinel"))
+}
+
+fn archive_profile_for_clean_start() -> Result<PathBuf, String> {
+    let profile_root = startup_profile_root();
+    if !profile_root.exists() {
+        return Ok(profile_root);
+    }
+
+    let backup_root = profile_root.with_file_name(format!(
+        "{}.backup-{}",
+        profile_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Abigail"),
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    ));
+
+    std::fs::rename(&profile_root, &backup_root).map_err(|e| {
+        format!(
+            "Failed to archive existing Abigail profile from '{}' to '{}': {}",
+            profile_root.display(),
+            backup_root.display(),
+            e
+        )
+    })?;
+
+    std::fs::create_dir_all(&profile_root).map_err(|e| {
+        format!(
+            "Archived '{}' but failed to create fresh profile directory '{}': {}",
+            backup_root.display(),
+            profile_root.display(),
+            e
+        )
+    })?;
+
+    Ok(backup_root)
+}
+
+fn relaunch_current_executable() -> Result<(), String> {
+    let current_exe = std::env::current_exe()
+        .map_err(|e| format!("Failed to resolve current executable for restart: {}", e))?;
+
+    std::process::Command::new(&current_exe)
+        .args(std::env::args_os().skip(1))
+        .spawn()
+        .map_err(|e| format!("Failed to relaunch '{}': {}", current_exe.display(), e))?;
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn prompt_clean_start_for_kek_recovery(message: &str) -> bool {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+
+    fn to_wide(s: &str) -> Vec<u16> {
+        OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+
+    let prompt = format!(
+        "Abigail found an existing local profile, but the vault trust root can no longer be unlocked.\n\n\
+         This usually means the stable KEK is missing from Windows secure storage for the current profile.\n\n\
+         Select Yes to archive the current Abigail data folder and restart with a clean profile.\n\
+         Select No to leave the current data untouched and keep the error details.\n\n\
+         Error:\n{message}"
+    );
+
+    let title_w = to_wide("Abigail — Clean Start Available");
+    let msg_w = to_wide(&prompt);
+
+    const MB_YESNO: u32 = 0x0000_0004;
+    const MB_ICONWARNING: u32 = 0x0000_0030;
+    const IDYES: i32 = 6;
+
+    unsafe {
+        #[link(name = "user32")]
+        extern "system" {
+            fn MessageBoxW(
+                hwnd: *const (),
+                text: *const u16,
+                caption: *const u16,
+                utype: u32,
+            ) -> i32;
+        }
+
+        MessageBoxW(
+            std::ptr::null(),
+            msg_w.as_ptr(),
+            title_w.as_ptr(),
+            MB_YESNO | MB_ICONWARNING,
+        ) == IDYES
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn prompt_clean_start_for_kek_recovery(_message: &str) -> bool {
+    false
+}
+
+fn maybe_offer_clean_start_recovery(message: &str) -> Result<bool, String> {
+    if !is_clean_start_recovery_candidate(message) {
+        return Ok(false);
+    }
+
+    if !prompt_clean_start_for_kek_recovery(message) {
+        return Ok(false);
+    }
+
+    let backup_root = archive_profile_for_clean_start()?;
+    relaunch_current_executable().map_err(|e| {
+        format!(
+            "{}\nArchived profile backup: {}",
+            e,
+            backup_root.display()
+        )
+    })?;
+
+    Ok(true)
+}
 
 /// Show a native OS error dialog (blocking) so users see startup failures
 /// even when running as a Windows GUI app with no console.
 pub fn show_fatal_error(title: &str, message: &str) {
+    eprintln!("[{title}] {message}");
+
+    let error_report_path = abigail_core::AppConfig::default_paths()
+        .data_dir
+        .join("startup-error.txt");
+    if let Some(parent) = error_report_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&error_report_path, format!("[{title}]\n{message}\n"));
+
     #[cfg(target_os = "windows")]
     {
         use std::ffi::OsStr;
@@ -102,8 +257,7 @@ pub fn show_fatal_error(title: &str, message: &str) {
 
     #[cfg(not(target_os = "windows"))]
     {
-        // On non-Windows, print to stderr (best effort).
-        eprintln!("[{title}] {message}");
+        // Dialogs are Windows-native only; stderr/file output above is the fallback elsewhere.
     }
 }
 
@@ -355,6 +509,22 @@ pub async fn rebuild_router_from_handle(handle: &tauri::AppHandle) -> Result<(),
 
 pub fn run() {
     if let Err(e) = try_run() {
+        match maybe_offer_clean_start_recovery(&e) {
+            Ok(true) => return,
+            Ok(false) => {}
+            Err(clean_start_error) => {
+                let message = format!(
+                    "Abigail failed to start:\n\n{e}\n\n\
+                     Clean start recovery also failed:\n{clean_start_error}\n\n\
+                     If this keeps happening, try deleting the data folder at:\n\
+                     %LOCALAPPDATA%\\abigail\\Abigail\\\n\
+                     and reinstalling."
+                );
+                show_fatal_error("Abigail — Startup Error", &message);
+                std::process::exit(1);
+            }
+        }
+
         show_fatal_error(
             "Abigail — Startup Error",
             &format!(
@@ -510,37 +680,15 @@ fn try_run() -> Result<(), String> {
 
     // Open job queue database for async task management.
     let job_queue = {
-        let job_db_path = data_dir.join("jobs.db");
-        let conn = rusqlite::Connection::open(&job_db_path).map_err(|e| {
-            format!(
-                "Failed to open job queue database at {}: {e}",
-                job_db_path.display()
-            )
-        })?;
-        conn.execute_batch("PRAGMA journal_mode=WAL;")
-            .map_err(|e| format!("Failed to set WAL mode on job queue: {e}"))?;
-        conn.execute_batch(abigail_queue::MIGRATION_V3_JOB_QUEUE)
-            .map_err(|e| format!("Failed to run job queue migrations: {e}"))?;
-        for stmt in abigail_queue::MIGRATION_V4_ORCHESTRATION.split(';') {
-            let trimmed = stmt.trim();
-            if !trimmed.is_empty() {
-                let _ = conn.execute_batch(trimmed);
-            }
-        }
-        for stmt in abigail_queue::MIGRATION_V5_DEPENDS_ON.split(';') {
-            let trimmed = stmt.trim();
-            if !trimmed.is_empty() {
-                let _ = conn.execute_batch(trimmed);
-            }
-        }
-        for stmt in abigail_queue::MIGRATION_V6_EXECUTION_MODE.split(';') {
-            let trimmed = stmt.trim();
-            if !trimmed.is_empty() {
-                let _ = conn.execute_batch(trimmed);
-            }
-        }
+        let queue_store =
+            PersistenceHandle::open(&config.db_path, EntityScope::Hive).map_err(|e| {
+                format!(
+                    "Failed to open Hive queue store at {}: {e}",
+                    config.db_path.display()
+                )
+            })?;
         Arc::new(abigail_queue::JobQueue::new(
-            Arc::new(std::sync::Mutex::new(conn)),
+            queue_store,
             stream_broker.clone(),
         ))
     };
@@ -1026,6 +1174,8 @@ fn try_run() -> Result<(), String> {
             set_active_provider,
             get_active_provider,
             set_routing_mode,
+            get_store_stats,
+            optimize_store,
             get_sqlite_stats,
             optimize_sqlite,
             reset_memories,
@@ -1116,4 +1266,31 @@ fn try_run() -> Result<(), String> {
         });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_start_candidate_matches_kek_recovery_error() {
+        let message = "Failed to init IdentityManager: Recovery Mode: Vault error: Recovery Mode: vault sentinel exists but stable KEK could not be loaded.";
+        assert!(is_clean_start_recovery_candidate(message));
+    }
+
+    #[test]
+    fn clean_start_candidate_ignores_unrelated_errors() {
+        assert!(!is_clean_start_recovery_candidate(
+            "Failed to build Tauri app: icon resource missing"
+        ));
+    }
+
+    #[test]
+    fn profile_root_for_data_dir_uses_parent_of_data_directory() {
+        let data_dir = PathBuf::from(r"C:\Users\jbcup\AppData\Local\abigail\Abigail\data");
+        assert_eq!(
+            profile_root_for_data_dir(&data_dir),
+            PathBuf::from(r"C:\Users\jbcup\AppData\Local\abigail\Abigail")
+        );
+    }
 }

@@ -6,15 +6,11 @@
 use crate::broker::{MessageHandler, StreamBroker};
 use crate::types::{StreamMessage, SubscriptionHandle, TopicConfig};
 use anyhow::Context;
-use iggy::client::{Client, ConsumerGroupClient, MessageClient, StreamClient, TopicClient};
-use iggy::clients::client::IggyClient;
-use iggy::compression::compression_algorithm::CompressionAlgorithm;
-use iggy::consumer::Consumer;
-use iggy::identifier::Identifier;
-use iggy::messages::poll_messages::PollingStrategy;
-use iggy::messages::send_messages::{Message as IggyMessage, Partitioning};
-use iggy::utils::expiry::IggyExpiry;
-use iggy::utils::topic_size::MaxTopicSize;
+use iggy::prelude::{
+    Client, CompressionAlgorithm, Consumer, ConsumerGroupClient, Identifier, IggyClient,
+    IggyExpiry, IggyMessage, MaxTopicSize, MessageClient, Partitioning, PollingStrategy,
+    StreamClient, TopicClient,
+};
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tokio_util::bytes::Bytes;
@@ -90,7 +86,7 @@ impl IggyBroker {
             .is_none()
         {
             self.client
-                .create_stream(stream, None)
+                .create_stream(stream)
                 .await
                 .with_context(|| format!("Failed to create Iggy stream '{}'", stream))?;
         }
@@ -108,7 +104,6 @@ impl IggyBroker {
                     topic,
                     topic_cfg.partitions.max(1),
                     CompressionAlgorithm::None,
-                    None,
                     None,
                     expiry_from_topic_config(topic_cfg),
                     MaxTopicSize::ServerDefault,
@@ -136,7 +131,10 @@ impl StreamBroker for IggyBroker {
         let topic_id = Identifier::named(topic).map_err(|e| anyhow::anyhow!("{}", e))?;
         let payload = serde_json::to_vec(&message)
             .context("Failed to serialize StreamMessage for Iggy publish")?;
-        let mut messages = vec![IggyMessage::new(None, Bytes::from(payload), None)];
+        let mut messages = vec![IggyMessage::builder()
+            .payload(Bytes::from(payload))
+            .build()
+            .context("Failed to build Iggy message payload")?];
 
         self.client
             .send_messages(
@@ -267,7 +265,7 @@ impl StreamBroker for IggyBroker {
             .is_none()
         {
             self.client
-                .create_consumer_group(&stream_id, &topic_id, group_name, None)
+                .create_consumer_group(&stream_id, &topic_id, group_name)
                 .await
                 .with_context(|| {
                     format!(

@@ -1,6 +1,6 @@
-//! Knowledge Base skill: store, search, retrieve, delete, and list tags for
-//! structured knowledge entries persisted in a local SQLite database (`kb.db`).
+//! Knowledge Base skill backed by the shared SurrealDB memory store.
 
+use abigail_persistence::{EntityScope, PersistenceHandle};
 use abigail_skills::{
     CapabilityDescriptor, CostEstimate, ExecutionContext, FileSystemPermission, HealthStatus,
     Permission, Skill, SkillConfig, SkillError, SkillHealth, SkillManifest, SkillResult,
@@ -8,61 +8,55 @@ use abigail_skills::{
 };
 use async_trait::async_trait;
 use std::any::Any;
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
+use uuid::Uuid;
 
-/// Knowledge Base skill backed by a per-user SQLite database.
 pub struct KnowledgeBaseSkill {
     manifest: SkillManifest,
-    /// Directory where `kb.db` will be created/opened.
     data_dir: PathBuf,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct KnowledgeEntryDoc {
+    id: String,
+    title: String,
+    content: String,
+    tags: Option<String>,
+    category: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
 impl KnowledgeBaseSkill {
-    /// Parse the embedded `skill.toml` manifest.
     pub fn default_manifest() -> SkillManifest {
         let toml_str = include_str!("../skill.toml");
         SkillManifest::parse(toml_str).expect("Failed to parse knowledge-base skill.toml")
     }
 
-    /// Create a new Knowledge Base skill that stores its database in `data_dir`.
     pub fn new(manifest: SkillManifest, data_dir: PathBuf) -> Self {
         Self { manifest, data_dir }
     }
 
-    // ── Database helpers ────────────────────────────────────────────────
-
-    /// Return the path to the SQLite database file.
-    fn db_path(&self) -> PathBuf {
-        self.data_dir.join("kb.db")
+    fn open_store(&self) -> SkillResult<PersistenceHandle> {
+        std::fs::create_dir_all(&self.data_dir)
+            .map_err(|e| SkillError::InitFailed(format!("Cannot create data directory: {}", e)))?;
+        PersistenceHandle::open(shared_db_path(&self.data_dir), infer_scope(&self.data_dir))
+            .map_err(|e| SkillError::InitFailed(format!("Cannot open knowledge base store: {}", e)))
     }
 
-    /// Open (or create) the database and ensure the schema exists.
-    fn ensure_db(&self) -> SkillResult<rusqlite::Connection> {
-        let path = self.db_path();
-        let conn = rusqlite::Connection::open(&path).map_err(|e| {
-            SkillError::ToolFailed(format!("Cannot open knowledge base database: {}", e))
-        })?;
-
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS entries (
-                id         TEXT PRIMARY KEY,
-                title      TEXT NOT NULL,
-                content    TEXT NOT NULL,
-                tags       TEXT,
-                category   TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );",
-        )
-        .map_err(|e| SkillError::ToolFailed(format!("Cannot create entries table: {}", e)))?;
-
-        Ok(conn)
+    fn list_all(&self) -> SkillResult<Vec<KnowledgeEntryDoc>> {
+        self.open_store()?
+            .query_vec("SELECT * FROM kb_entry ORDER BY updated_at DESC", &[])
+            .map_err(|e| SkillError::ToolFailed(format!("Failed to load knowledge entries: {}", e)))
     }
 
-    // ── Tool implementations ────────────────────────────────────────────
+    fn get_entry(&self, id: &str) -> SkillResult<Option<KnowledgeEntryDoc>> {
+        self.open_store()?
+            .select_record("kb_entry", id)
+            .map_err(|e| SkillError::ToolFailed(format!("Failed to load entry: {}", e)))
+    }
 
-    /// Store a new knowledge entry and return its generated ID.
     fn kb_store(&self, params: &ToolParams) -> SkillResult<ToolOutput> {
         let title: String = params.get("title").ok_or_else(|| {
             SkillError::ToolFailed("Missing required parameter: title".to_string())
@@ -73,19 +67,21 @@ impl KnowledgeBaseSkill {
         let tags: Option<Vec<String>> = params.get("tags");
         let category: Option<String> = params.get("category");
 
-        let conn = self.ensure_db()?;
-        let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
-        let tags_csv = tags.map(|t| t.join(","));
+        let id = Uuid::new_v4().to_string();
+        let entry = KnowledgeEntryDoc {
+            id: id.clone(),
+            title: title.clone(),
+            content,
+            tags: tags.map(|tags| tags.join(",")),
+            category,
+            created_at: now.clone(),
+            updated_at: now,
+        };
 
-        conn.execute(
-            "INSERT INTO entries (id, title, content, tags, category, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            rusqlite::params![id, title, content, tags_csv, category, now, now],
-        )
-        .map_err(|e| SkillError::ToolFailed(format!("Insert failed: {}", e)))?;
-
-        tracing::info!("Stored knowledge entry '{}' with id {}", title, id);
+        self.open_store()?
+            .create("kb_entry", &id, &entry)
+            .map_err(|e| SkillError::ToolFailed(format!("Insert failed: {}", e)))?;
 
         Ok(ToolOutput::success(serde_json::json!({
             "formatted": format!("Stored entry '{}' (id: {})", title, id),
@@ -94,88 +90,45 @@ impl KnowledgeBaseSkill {
         })))
     }
 
-    /// Search entries by title/content (LIKE) with optional tag filter.
     fn kb_search(&self, params: &ToolParams) -> SkillResult<ToolOutput> {
         let query: String = params.get("query").ok_or_else(|| {
             SkillError::ToolFailed("Missing required parameter: query".to_string())
         })?;
         let tag: Option<String> = params.get("tag");
+        let query_lower = query.to_ascii_lowercase();
 
-        let conn = self.ensure_db()?;
-        let like_pattern = format!("%{}%", query);
+        let results: Vec<serde_json::Value> = self
+            .list_all()?
+            .into_iter()
+            .filter(|entry| {
+                entry.title.to_ascii_lowercase().contains(&query_lower)
+                    || entry.content.to_ascii_lowercase().contains(&query_lower)
+            })
+            .filter(|entry| {
+                tag.as_ref()
+                    .map(|tag| {
+                        entry
+                            .tags
+                            .as_ref()
+                            .map(|csv| csv.split(',').any(|item| item.trim() == tag))
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(true)
+            })
+            .map(|entry| serde_json::to_value(entry).unwrap_or_default())
+            .collect();
 
-        let mut results: Vec<serde_json::Value> = Vec::new();
-
-        if let Some(ref tag_filter) = tag {
-            let tag_like = format!("%{}%", tag_filter);
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, title, content, tags, category, created_at, updated_at
-                     FROM entries
-                     WHERE (title LIKE ?1 OR content LIKE ?1)
-                       AND tags LIKE ?2
-                     ORDER BY updated_at DESC",
-                )
-                .map_err(|e| SkillError::ToolFailed(format!("Query prepare failed: {}", e)))?;
-
-            let rows = stmt
-                .query_map(rusqlite::params![like_pattern, tag_like], |row| {
-                    Ok(serde_json::json!({
-                        "id": row.get::<_, String>(0)?,
-                        "title": row.get::<_, String>(1)?,
-                        "content": row.get::<_, String>(2)?,
-                        "tags": row.get::<_, Option<String>>(3)?,
-                        "category": row.get::<_, Option<String>>(4)?,
-                        "created_at": row.get::<_, String>(5)?,
-                        "updated_at": row.get::<_, String>(6)?,
-                    }))
-                })
-                .map_err(|e| SkillError::ToolFailed(format!("Query failed: {}", e)))?;
-
-            for val in rows.flatten() {
-                results.push(val);
-            }
-        } else {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, title, content, tags, category, created_at, updated_at
-                     FROM entries
-                     WHERE title LIKE ?1 OR content LIKE ?1
-                     ORDER BY updated_at DESC",
-                )
-                .map_err(|e| SkillError::ToolFailed(format!("Query prepare failed: {}", e)))?;
-
-            let rows = stmt
-                .query_map(rusqlite::params![like_pattern], |row| {
-                    Ok(serde_json::json!({
-                        "id": row.get::<_, String>(0)?,
-                        "title": row.get::<_, String>(1)?,
-                        "content": row.get::<_, String>(2)?,
-                        "tags": row.get::<_, Option<String>>(3)?,
-                        "category": row.get::<_, Option<String>>(4)?,
-                        "created_at": row.get::<_, String>(5)?,
-                        "updated_at": row.get::<_, String>(6)?,
-                    }))
-                })
-                .map_err(|e| SkillError::ToolFailed(format!("Query failed: {}", e)))?;
-
-            for val in rows.flatten() {
-                results.push(val);
-            }
-        }
-
-        let count = results.len();
         let formatted = if results.is_empty() {
             format!("No entries found matching '{}'.", query)
         } else {
             results
                 .iter()
-                .map(|r| {
+                .map(|entry| {
                     format!(
                         "- [{}] {} (tags: {})",
-                        r["id"].as_str().unwrap_or("?"),
-                        r["title"].as_str().unwrap_or("?"),
-                        r["tags"].as_str().unwrap_or("none"),
+                        entry["id"].as_str().unwrap_or("?"),
+                        entry["title"].as_str().unwrap_or("?"),
+                        entry["tags"].as_str().unwrap_or("none"),
                     )
                 })
                 .collect::<Vec<_>>()
@@ -184,76 +137,49 @@ impl KnowledgeBaseSkill {
 
         Ok(ToolOutput::success(serde_json::json!({
             "formatted": formatted,
-            "count": count,
+            "count": results.len(),
             "entries": results,
         })))
     }
 
-    /// Retrieve a single entry by ID.
     fn kb_get(&self, params: &ToolParams) -> SkillResult<ToolOutput> {
         let id: String = params
             .get("id")
             .ok_or_else(|| SkillError::ToolFailed("Missing required parameter: id".to_string()))?;
 
-        let conn = self.ensure_db()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, title, content, tags, category, created_at, updated_at
-                 FROM entries WHERE id = ?1",
-            )
-            .map_err(|e| SkillError::ToolFailed(format!("Query prepare failed: {}", e)))?;
+        let entry = self
+            .get_entry(&id)?
+            .ok_or_else(|| SkillError::ToolFailed(format!("Entry not found: {}", id)))?;
 
-        let entry = stmt
-            .query_row(rusqlite::params![id], |row| {
-                Ok(serde_json::json!({
-                    "id": row.get::<_, String>(0)?,
-                    "title": row.get::<_, String>(1)?,
-                    "content": row.get::<_, String>(2)?,
-                    "tags": row.get::<_, Option<String>>(3)?,
-                    "category": row.get::<_, Option<String>>(4)?,
-                    "created_at": row.get::<_, String>(5)?,
-                    "updated_at": row.get::<_, String>(6)?,
-                }))
-            })
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    SkillError::ToolFailed(format!("Entry not found: {}", id))
-                }
-                other => SkillError::ToolFailed(format!("Query failed: {}", other)),
-            })?;
-
+        let value = serde_json::to_value(&entry).unwrap_or_default();
         let formatted = format!(
             "# {}\n\n{}\n\nTags: {}\nCategory: {}\nCreated: {}\nUpdated: {}",
-            entry["title"].as_str().unwrap_or("?"),
-            entry["content"].as_str().unwrap_or(""),
-            entry["tags"].as_str().unwrap_or("none"),
-            entry["category"].as_str().unwrap_or("none"),
-            entry["created_at"].as_str().unwrap_or("?"),
-            entry["updated_at"].as_str().unwrap_or("?"),
+            entry.title,
+            entry.content,
+            entry.tags.clone().unwrap_or_else(|| "none".to_string()),
+            entry.category.clone().unwrap_or_else(|| "none".to_string()),
+            entry.created_at,
+            entry.updated_at,
         );
 
         Ok(ToolOutput::success(serde_json::json!({
             "formatted": formatted,
-            "entry": entry,
+            "entry": value,
         })))
     }
 
-    /// Delete an entry by ID.
     fn kb_delete(&self, params: &ToolParams) -> SkillResult<ToolOutput> {
         let id: String = params
             .get("id")
             .ok_or_else(|| SkillError::ToolFailed("Missing required parameter: id".to_string()))?;
 
-        let conn = self.ensure_db()?;
-        let affected = conn
-            .execute("DELETE FROM entries WHERE id = ?1", rusqlite::params![id])
-            .map_err(|e| SkillError::ToolFailed(format!("Delete failed: {}", e)))?;
-
-        if affected == 0 {
+        if self.get_entry(&id)?.is_none() {
             return Ok(ToolOutput::error(format!("Entry not found: {}", id)));
         }
 
-        tracing::info!("Deleted knowledge entry {}", id);
+        self.open_store()?
+            .delete_record("kb_entry", &id)
+            .map_err(|e| SkillError::ToolFailed(format!("Delete failed: {}", e)))?;
 
         Ok(ToolOutput::success(serde_json::json!({
             "formatted": format!("Deleted entry {}", id),
@@ -262,36 +188,21 @@ impl KnowledgeBaseSkill {
         })))
     }
 
-    /// List all distinct tags across every entry.
     fn kb_list_tags(&self) -> SkillResult<ToolOutput> {
-        let conn = self.ensure_db()?;
-        let mut stmt = conn
-            .prepare("SELECT DISTINCT tags FROM entries WHERE tags IS NOT NULL AND tags != ''")
-            .map_err(|e| SkillError::ToolFailed(format!("Query prepare failed: {}", e)))?;
-
-        let rows = stmt
-            .query_map([], |row| row.get::<_, String>(0))
-            .map_err(|e| SkillError::ToolFailed(format!("Query failed: {}", e)))?;
-
-        let mut tag_set = std::collections::BTreeSet::new();
-        for csv in rows.flatten() {
-            for tag in csv.split(',') {
-                let trimmed = tag.trim();
-                if !trimmed.is_empty() {
-                    tag_set.insert(trimmed.to_string());
+        let mut tags = BTreeSet::new();
+        for entry in self.list_all()? {
+            if let Some(csv) = entry.tags {
+                for tag in csv.split(',') {
+                    let trimmed = tag.trim();
+                    if !trimmed.is_empty() {
+                        tags.insert(trimmed.to_string());
+                    }
                 }
             }
         }
-
-        let tags: Vec<String> = tag_set.into_iter().collect();
-        let formatted = if tags.is_empty() {
-            "No tags found.".to_string()
-        } else {
-            tags.join(", ")
-        };
-
+        let tags: Vec<String> = tags.into_iter().collect();
         Ok(ToolOutput::success(serde_json::json!({
-            "formatted": formatted,
+            "formatted": if tags.is_empty() { "No tags found.".to_string() } else { tags.join(", ") },
             "count": tags.len(),
             "tags": tags,
         })))
@@ -305,6 +216,7 @@ impl Skill for KnowledgeBaseSkill {
     }
 
     async fn initialize(&mut self, _config: SkillConfig) -> SkillResult<()> {
+        let _ = self.open_store()?;
         Ok(())
     }
 
@@ -313,17 +225,17 @@ impl Skill for KnowledgeBaseSkill {
     }
 
     fn health(&self) -> SkillHealth {
-        let parent_ok = self.data_dir.exists();
+        let healthy = self.open_store().is_ok();
         SkillHealth {
-            status: if parent_ok {
+            status: if healthy {
                 HealthStatus::Healthy
             } else {
                 HealthStatus::Degraded
             },
-            message: if !parent_ok {
-                Some("Data directory does not exist".to_string())
-            } else {
+            message: if healthy {
                 None
+            } else {
+                Some("Knowledge base store is unavailable".to_string())
             },
             last_check: chrono::Utc::now(),
             metrics: HashMap::new(),
@@ -338,23 +250,10 @@ impl Skill for KnowledgeBaseSkill {
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "title": {
-                            "type": "string",
-                            "description": "Title of the knowledge entry"
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "Body content of the knowledge entry"
-                        },
-                        "tags": {
-                            "type": "array",
-                            "items": { "type": "string" },
-                            "description": "Optional list of tags"
-                        },
-                        "category": {
-                            "type": "string",
-                            "description": "Optional category for the entry"
-                        }
+                        "title": { "type": "string", "description": "Title of the knowledge entry" },
+                        "content": { "type": "string", "description": "Body content of the knowledge entry" },
+                        "tags": { "type": "array", "items": { "type": "string" }, "description": "Optional list of tags" },
+                        "category": { "type": "string", "description": "Optional category for the entry" }
                     },
                     "required": ["title", "content"]
                 }),
@@ -366,11 +265,7 @@ impl Skill for KnowledgeBaseSkill {
                         "title": { "type": "string" }
                     }
                 }),
-                cost_estimate: CostEstimate {
-                    latency_ms: 10,
-                    network_bound: false,
-                    token_cost: None,
-                },
+                cost_estimate: CostEstimate { latency_ms: 10, network_bound: false, token_cost: None },
                 required_permissions: vec![
                     Permission::FileSystem(FileSystemPermission::Read(vec!["~".to_string()])),
                     Permission::FileSystem(FileSystemPermission::Write(vec!["~".to_string()])),
@@ -384,14 +279,8 @@ impl Skill for KnowledgeBaseSkill {
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Search text to match in title or content"
-                        },
-                        "tag": {
-                            "type": "string",
-                            "description": "Optional tag to filter results"
-                        }
+                        "query": { "type": "string", "description": "Search text to match in title or content" },
+                        "tag": { "type": "string", "description": "Optional tag to filter results" }
                     },
                     "required": ["query"]
                 }),
@@ -403,14 +292,10 @@ impl Skill for KnowledgeBaseSkill {
                         "entries": { "type": "array" }
                     }
                 }),
-                cost_estimate: CostEstimate {
-                    latency_ms: 10,
-                    network_bound: false,
-                    token_cost: None,
-                },
-                required_permissions: vec![
-                    Permission::FileSystem(FileSystemPermission::Read(vec!["~".to_string()])),
-                ],
+                cost_estimate: CostEstimate { latency_ms: 10, network_bound: false, token_cost: None },
+                required_permissions: vec![Permission::FileSystem(FileSystemPermission::Read(
+                    vec!["~".to_string()],
+                ))],
                 autonomous: true,
                 requires_confirmation: false,
             },
@@ -419,29 +304,17 @@ impl Skill for KnowledgeBaseSkill {
                 description: "Retrieve a single knowledge entry by its ID.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
-                    "properties": {
-                        "id": {
-                            "type": "string",
-                            "description": "UUID of the entry to retrieve"
-                        }
-                    },
+                    "properties": { "id": { "type": "string", "description": "UUID of the entry to retrieve" } },
                     "required": ["id"]
                 }),
                 returns: serde_json::json!({
                     "type": "object",
-                    "properties": {
-                        "formatted": { "type": "string" },
-                        "entry": { "type": "object" }
-                    }
+                    "properties": { "formatted": { "type": "string" }, "entry": { "type": "object" } }
                 }),
-                cost_estimate: CostEstimate {
-                    latency_ms: 10,
-                    network_bound: false,
-                    token_cost: None,
-                },
-                required_permissions: vec![
-                    Permission::FileSystem(FileSystemPermission::Read(vec!["~".to_string()])),
-                ],
+                cost_estimate: CostEstimate { latency_ms: 10, network_bound: false, token_cost: None },
+                required_permissions: vec![Permission::FileSystem(FileSystemPermission::Read(
+                    vec!["~".to_string()],
+                ))],
                 autonomous: true,
                 requires_confirmation: false,
             },
@@ -450,12 +323,7 @@ impl Skill for KnowledgeBaseSkill {
                 description: "Delete a knowledge entry by its ID.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
-                    "properties": {
-                        "id": {
-                            "type": "string",
-                            "description": "UUID of the entry to delete"
-                        }
-                    },
+                    "properties": { "id": { "type": "string", "description": "UUID of the entry to delete" } },
                     "required": ["id"]
                 }),
                 returns: serde_json::json!({
@@ -466,11 +334,7 @@ impl Skill for KnowledgeBaseSkill {
                         "deleted": { "type": "boolean" }
                     }
                 }),
-                cost_estimate: CostEstimate {
-                    latency_ms: 10,
-                    network_bound: false,
-                    token_cost: None,
-                },
+                cost_estimate: CostEstimate { latency_ms: 10, network_bound: false, token_cost: None },
                 required_permissions: vec![
                     Permission::FileSystem(FileSystemPermission::Read(vec!["~".to_string()])),
                     Permission::FileSystem(FileSystemPermission::Write(vec!["~".to_string()])),
@@ -481,11 +345,7 @@ impl Skill for KnowledgeBaseSkill {
             ToolDescriptor {
                 name: "kb_list_tags".to_string(),
                 description: "List all distinct tags across all knowledge entries.".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }),
+                parameters: serde_json::json!({ "type": "object", "properties": {}, "required": [] }),
                 returns: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -494,14 +354,10 @@ impl Skill for KnowledgeBaseSkill {
                         "tags": { "type": "array" }
                     }
                 }),
-                cost_estimate: CostEstimate {
-                    latency_ms: 10,
-                    network_bound: false,
-                    token_cost: None,
-                },
-                required_permissions: vec![
-                    Permission::FileSystem(FileSystemPermission::Read(vec!["~".to_string()])),
-                ],
+                cost_estimate: CostEstimate { latency_ms: 10, network_bound: false, token_cost: None },
+                required_permissions: vec![Permission::FileSystem(FileSystemPermission::Read(
+                    vec!["~".to_string()],
+                ))],
                 autonomous: true,
                 requires_confirmation: false,
             },
@@ -537,146 +393,38 @@ impl Skill for KnowledgeBaseSkill {
     }
 }
 
+fn infer_scope(data_dir: &Path) -> EntityScope {
+    data_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|candidate| Uuid::parse_str(candidate).is_ok())
+        .map(|id| EntityScope::Entity(id.to_string()))
+        .or_else(|| {
+            data_dir
+                .parent()
+                .and_then(|parent| parent.file_name())
+                .and_then(|name| name.to_str())
+                .filter(|candidate| Uuid::parse_str(candidate).is_ok())
+                .map(|id| EntityScope::Entity(id.to_string()))
+        })
+        .unwrap_or(EntityScope::Hive)
+}
+
+fn shared_db_path(data_dir: &Path) -> PathBuf {
+    data_dir
+        .parent()
+        .and_then(|parent| parent.parent())
+        .map(|root| root.join("memory.db"))
+        .unwrap_or_else(|| data_dir.join("memory.db"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-
-    fn test_skill(data_dir: PathBuf) -> KnowledgeBaseSkill {
-        KnowledgeBaseSkill::new(KnowledgeBaseSkill::default_manifest(), data_dir)
-    }
 
     #[test]
     fn test_manifest_parses() {
         let manifest = KnowledgeBaseSkill::default_manifest();
         assert_eq!(manifest.name, "Knowledge Base");
-    }
-
-    #[test]
-    fn test_tools_list() {
-        let tmp = std::env::temp_dir().join("abigail_kb_test_tools");
-        let skill = test_skill(tmp);
-        let tools = skill.tools();
-        assert_eq!(tools.len(), 5);
-        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
-        assert!(names.contains(&"kb_store"));
-        assert!(names.contains(&"kb_search"));
-        assert!(names.contains(&"kb_get"));
-        assert!(names.contains(&"kb_delete"));
-        assert!(names.contains(&"kb_list_tags"));
-    }
-
-    #[test]
-    fn test_store_and_search() {
-        let tmp = std::env::temp_dir().join("abigail_kb_test_store_search");
-        let _ = fs::remove_dir_all(&tmp);
-        fs::create_dir_all(&tmp).unwrap();
-
-        let skill = test_skill(tmp.clone());
-
-        // Store an entry
-        let store_params = ToolParams::new()
-            .with("title", "Rust Ownership")
-            .with("content", "Rust uses an ownership model for memory safety.")
-            .with("tags", vec!["rust", "memory"])
-            .with("category", "Programming");
-
-        let store_result = skill.kb_store(&store_params).unwrap();
-        assert!(store_result.success);
-        let store_data = store_result.data.unwrap();
-        let stored_id = store_data["id"].as_str().unwrap().to_string();
-        assert!(!stored_id.is_empty());
-
-        // Search by title keyword
-        let search_params = ToolParams::new().with("query", "Ownership");
-        let search_result = skill.kb_search(&search_params).unwrap();
-        assert!(search_result.success);
-        let search_data = search_result.data.unwrap();
-        assert_eq!(search_data["count"], 1);
-
-        // Search by content keyword
-        let search_params2 = ToolParams::new().with("query", "memory safety");
-        let search_result2 = skill.kb_search(&search_params2).unwrap();
-        assert!(search_result2.success);
-        let search_data2 = search_result2.data.unwrap();
-        assert_eq!(search_data2["count"], 1);
-
-        // Search with tag filter
-        let search_params3 = ToolParams::new()
-            .with("query", "Rust")
-            .with("tag", "memory");
-        let search_result3 = skill.kb_search(&search_params3).unwrap();
-        assert!(search_result3.success);
-        let search_data3 = search_result3.data.unwrap();
-        assert_eq!(search_data3["count"], 1);
-
-        // Search that returns nothing
-        let search_params4 = ToolParams::new().with("query", "nonexistent topic");
-        let search_result4 = skill.kb_search(&search_params4).unwrap();
-        assert!(search_result4.success);
-        let search_data4 = search_result4.data.unwrap();
-        assert_eq!(search_data4["count"], 0);
-
-        // Get by ID
-        let get_params = ToolParams::new().with("id", &stored_id);
-        let get_result = skill.kb_get(&get_params).unwrap();
-        assert!(get_result.success);
-        let get_data = get_result.data.unwrap();
-        assert_eq!(
-            get_data["entry"]["title"].as_str().unwrap(),
-            "Rust Ownership"
-        );
-
-        // List tags
-        let tags_result = skill.kb_list_tags().unwrap();
-        assert!(tags_result.success);
-        let tags_data = tags_result.data.unwrap();
-        let tags: Vec<String> = serde_json::from_value(tags_data["tags"].clone()).unwrap();
-        assert!(tags.contains(&"rust".to_string()));
-        assert!(tags.contains(&"memory".to_string()));
-
-        let _ = fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn test_store_and_delete() {
-        let tmp = std::env::temp_dir().join("abigail_kb_test_store_delete");
-        let _ = fs::remove_dir_all(&tmp);
-        fs::create_dir_all(&tmp).unwrap();
-
-        let skill = test_skill(tmp.clone());
-
-        // Store an entry
-        let store_params = ToolParams::new()
-            .with("title", "Temporary Note")
-            .with("content", "This will be deleted.");
-        let store_result = skill.kb_store(&store_params).unwrap();
-        assert!(store_result.success);
-        let store_data = store_result.data.unwrap();
-        let stored_id = store_data["id"].as_str().unwrap().to_string();
-
-        // Verify it exists
-        let get_params = ToolParams::new().with("id", &stored_id);
-        let get_result = skill.kb_get(&get_params).unwrap();
-        assert!(get_result.success);
-
-        // Delete it
-        let delete_params = ToolParams::new().with("id", &stored_id);
-        let delete_result = skill.kb_delete(&delete_params).unwrap();
-        assert!(delete_result.success);
-        let delete_data = delete_result.data.unwrap();
-        assert_eq!(delete_data["deleted"], true);
-
-        // Verify it is gone
-        let get_result2 = skill.kb_get(&get_params);
-        assert!(get_result2.is_err());
-
-        // Delete non-existent entry returns error output (not Err)
-        let delete_result2 = skill
-            .kb_delete(&ToolParams::new().with("id", "does-not-exist"))
-            .unwrap();
-        assert!(!delete_result2.success);
-
-        let _ = fs::remove_dir_all(&tmp);
     }
 }

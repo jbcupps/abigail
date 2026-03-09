@@ -13,4 +13,4 @@ async-trait.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tokio-util.workspace = true
-iggy = "0.6.40"
+iggy = "=0.8.0"

@@ -38,9 +38,18 @@ All user data is preserved during both auto-update and manual installer upgrades
 - `keys.vault` / legacy `keys.bin`
 - `secrets.vault` / legacy `secrets.bin`
 - `skills.vault` / legacy `skills.bin`
-- `abigail_memory.db` plus WAL / SHM files
-- `jobs.db` plus WAL / SHM files
+- `memory.db` (the Hive-owned embedded SurrealDB store)
 - `docs/` signed constitutional artifacts
+
+Legacy SQLite files may still appear during upgrade only:
+
+- `abigail_seed.db`
+- `abigail_memory.db`
+- `jobs.db`
+- `calendar.db`
+- `kb.db`
+
+On first launch after the migration, Abigail imports supported legacy SQLite data into the Hive-owned Surreal store and archives the legacy files with a `.legacy-imported` suffix after a successful import.
 
 ### Hive multi-agent files
 
@@ -60,6 +69,8 @@ All user data is preserved during both auto-update and manual installer upgrades
 
 - `AppConfig` migrates older schema versions forward automatically.
 - Legacy passphrase vaults remain readable and are upgraded with explicit KDF metadata.
+- The runtime persistence layer is now embedded SurrealDB under the shared Hive `memory.db` path.
+- Existing SQLite-backed chat history, queue state, calendar entries, and knowledge-base records are imported on first launch.
 - Archive v1 remains restore-compatible even though new exports use archive v2.
 - Legacy email transport fields remain compatibility-only; the removed transport is not re-enabled during upgrade.
 

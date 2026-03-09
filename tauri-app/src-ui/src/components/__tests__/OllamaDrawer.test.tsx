@@ -27,8 +27,13 @@ describe("OllamaDrawer", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the drawer when open", () => {
+  it("renders the drawer when open", async () => {
     render(<OllamaDrawer onClose={() => {}} />);
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("detect_ollama");
+      expect(mockInvoke).toHaveBeenCalledWith("list_recommended_models");
+      expect(mockInvoke).toHaveBeenCalledWith("get_config_snapshot");
+    });
     const drawer = screen.getByTestId("ollama-drawer");
     expect(drawer).toBeInTheDocument();
   });

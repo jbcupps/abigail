@@ -189,6 +189,10 @@ impl IdentityManager {
         PathBuf::from("identities").join(agent_id)
     }
 
+    fn shared_memory_db_path(&self) -> PathBuf {
+        HiveEntity::memory_db_path(&self.data_root)
+    }
+
     /// Create a new IdentityManager, loading GlobalConfig and master key from disk.
     /// If master key doesn't exist, generates one (first-run bootstrap).
     pub fn new(data_root: PathBuf) -> anyhow::Result<Self> {
@@ -421,7 +425,7 @@ impl IdentityManager {
             data_dir: agent_dir.clone(),
             models_dir: agent_dir.join("models"),
             docs_dir: docs_dir.clone(),
-            db_path: agent_dir.join("abigail_memory.db"),
+            db_path: self.shared_memory_db_path(),
             openai_api_key: None,
             email: None,
             birth_complete: false,
@@ -775,11 +779,7 @@ impl IdentityManager {
             config.data_dir = agent_dir.clone();
             config.models_dir = agent_dir.join("models");
             config.docs_dir = agent_dir.join("docs");
-            config.db_path = if agent_dir.join("abigail_memory.db").exists() {
-                agent_dir.join("abigail_memory.db")
-            } else {
-                agent_dir.join("abigail_seed.db")
-            };
+            config.db_path = self.shared_memory_db_path();
             if legacy_pubkey.exists() && agent_dir.join("external_pubkey.bin").exists() {
                 config.external_pubkey_path = Some(agent_dir.join("external_pubkey.bin"));
             }
@@ -1073,11 +1073,7 @@ impl IdentityManager {
                     config.data_dir = agent_dir.clone();
                     config.models_dir = agent_dir.join("models");
                     config.docs_dir = agent_dir.join("docs");
-                    config.db_path = if agent_dir.join("abigail_memory.db").exists() {
-                        agent_dir.join("abigail_memory.db")
-                    } else {
-                        agent_dir.join("abigail_seed.db")
-                    };
+                    config.db_path = self.shared_memory_db_path();
                     if agent_dir.join("external_pubkey.bin").exists() {
                         config.external_pubkey_path = Some(agent_dir.join("external_pubkey.bin"));
                     }
@@ -1355,7 +1351,7 @@ mod tests {
 
         let migrated_config = AppConfig::load(&agent_dir.join("config.json")).unwrap();
         assert_eq!(migrated_config.data_dir, agent_dir);
-        assert_eq!(migrated_config.db_path, agent_dir.join("abigail_memory.db"));
+        assert_eq!(migrated_config.db_path, manager.shared_memory_db_path());
         assert_eq!(
             migrated_config.external_pubkey_path,
             Some(agent_dir.join("external_pubkey.bin"))

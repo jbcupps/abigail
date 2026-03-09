@@ -35,6 +35,24 @@ function encodeBase64Text(value) {
   return Buffer.from(String(value ?? "").trim(), "utf8").toString("base64");
 }
 
+function resolveWindowsTimestampTsp(timestampUrl) {
+  const explicit = String(process.env.WINDOWS_TIMESTAMP_TSP ?? "").trim();
+  if (explicit) {
+    return isTruthy(explicit);
+  }
+
+  if (!timestampUrl) {
+    return false;
+  }
+
+  try {
+    const hostname = new URL(timestampUrl).hostname.toLowerCase();
+    return hostname === "ts.ssl.com" || hostname.endsWith(".ssl.com");
+  } catch {
+    return false;
+  }
+}
+
 function normalizeMinisignBox(value, label) {
   const trimmed = String(value ?? "").trim();
   if (!trimmed) {
@@ -68,6 +86,7 @@ const enableUpdaterArtifacts = isTruthy(process.env.ABIGAIL_ENABLE_UPDATER_ARTIF
 const updaterPubkey = String(process.env.TAURI_UPDATER_PUBKEY ?? "").trim();
 const windowsThumbprint = String(process.env.WINDOWS_CERTIFICATE_THUMBPRINT ?? "").trim();
 const windowsTimestampUrl = String(process.env.WINDOWS_TIMESTAMP_URL ?? "").trim();
+const windowsTimestampTsp = resolveWindowsTimestampTsp(windowsTimestampUrl);
 
 if (!fs.existsSync(configPath)) {
   throw new Error(`Tauri config not found: ${configPath}`);
@@ -101,6 +120,7 @@ if (windowsThumbprint) {
 
 if (windowsTimestampUrl) {
   config.bundle.windows.timestampUrl = windowsTimestampUrl;
+  config.bundle.windows.tsp = windowsTimestampTsp;
 }
 
 fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
@@ -113,6 +133,7 @@ console.log(
       hasUpdaterPubkey: Boolean(normalizedUpdaterPubkey.encoded),
       windowsCertificateThumbprint: config.bundle.windows.certificateThumbprint ?? null,
       windowsTimestampUrl: config.bundle.windows.timestampUrl ?? "",
+      windowsTimestampTsp: config.bundle.windows.tsp ?? false,
     },
     null,
     2

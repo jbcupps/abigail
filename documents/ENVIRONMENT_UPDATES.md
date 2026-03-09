@@ -140,8 +140,7 @@ Expanded Abigail distribution from Windows-only to four delivery channels.
 
 ### Docker (`docker/`)
 
-- **`docker/Dockerfile.dev`**: Development container based on `rust:1.84-bookworm` with Node.js 20, Tauri Linux system deps, `cargo-audit`, `tauri-cli`. Non-root user. Entrypoint: bash.
-- **`docker/Dockerfile`**: Multi-stage build for validation. Builder stage compiles workspace + runs tests. Runtime stage uses `debian:bookworm-slim` with minimal deps, non-root user.
+- **`docker/Dockerfile`**: Single container definition for local validation and build-oriented dev flows. Builder stage compiles the workspace + runs tests; runtime stage uses `debian:bookworm-slim` with minimal deps and a non-root user.
 - **`docker/docker-compose.yml`**: `abigail-dev` service (bind-mount dev shell, port 1420) and `abigail-build` service (one-shot validation).
 - **`docker/.dockerignore`**: Excludes `target/`, `node_modules/`, `.git/`, secrets, IDE files.
 

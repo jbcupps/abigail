@@ -244,7 +244,7 @@ fn default_job_mode() -> String {
     "agentic_run".to_string()
 }
 
-/// Full job record as stored in SQLite.
+/// Full job record as stored in the embedded queue store.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobRecord {
     pub id: JobId,

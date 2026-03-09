@@ -1,0 +1,16 @@
+[package]
+name = "abigail-persistence"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+abigail-core = { path = "../abigail-core" }
+anyhow.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+surrealdb.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+sqlx = { version = "0.8.1", default-features = false, features = ["sqlite", "runtime-tokio-rustls", "chrono", "uuid"] }

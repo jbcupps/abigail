@@ -67,7 +67,7 @@ jobs:
             resource_name: abigail-keygen
             ollama_bin: ollama
 
-    runs-on: ${{ matrix.platform }}
+    runs-on: ${{ matrix.platform == 'windows-latest' && vars.ABIGAIL_WINDOWS_RUNNER != '' && vars.ABIGAIL_WINDOWS_RUNNER || matrix.platform }}
 
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -177,15 +177,20 @@ jobs:
           # Set repository variable ABIGAIL_REQUIRE_UPDATER_SIGNING=true once the
           # Tauri updater signing keys are available.
           ABIGAIL_REQUIRE_UPDATER_SIGNING: ${{ vars.ABIGAIL_REQUIRE_UPDATER_SIGNING == 'true' }}
-          # Set repository variable ABIGAIL_REQUIRE_WINDOWS_SIGNING=true once the
-          # Windows EV/OV/IV certificate material is available.
+          # Set repository variables ABIGAIL_REQUIRE_WINDOWS_SIGNING=true and
+          # ABIGAIL_WINDOWS_SIGNING_MODE=store once the Windows signer is
+          # available on a self-hosted runner. PFX-based signing remains
+          # supported via ABIGAIL_WINDOWS_SIGNING_MODE=pfx.
           ABIGAIL_REQUIRE_WINDOWS_SIGNING: ${{ matrix.platform == 'windows-latest' && vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true' }}
+          ABIGAIL_WINDOWS_SIGNING_MODE: ${{ vars.ABIGAIL_WINDOWS_SIGNING_MODE }}
+          ABIGAIL_WINDOWS_RUNNER: ${{ vars.ABIGAIL_WINDOWS_RUNNER }}
           ABIGAIL_REQUIRE_MAC_SIGNING: ${{ matrix.platform == 'macos-latest' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
           WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
           WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+          WINDOWS_SIGNING_CERT_PEM: ${{ secrets.WINDOWS_SIGNING_CERT_PEM }}
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
           WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -205,6 +210,7 @@ jobs:
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
           WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+          WINDOWS_TIMESTAMP_TSP: ${{ vars.ABIGAIL_WINDOWS_TIMESTAMP_TSP }}
         run: |
           node scripts/prepare_tauri_bundle_config.mjs tauri-app/tauri.conf.json
 
@@ -300,23 +306,17 @@ jobs:
             exit 1
           fi
 
-      - name: Import Windows code signing certificate
+      - name: Prepare Windows code signing certificate
         if: matrix.platform == 'windows-latest' && vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true'
         shell: pwsh
         env:
+          ABIGAIL_WINDOWS_SIGNING_MODE: ${{ vars.ABIGAIL_WINDOWS_SIGNING_MODE }}
           WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
           WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+          WINDOWS_SIGNING_CERT_PEM: ${{ secrets.WINDOWS_SIGNING_CERT_PEM }}
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
         run: |
-          $certPath = Join-Path $env:RUNNER_TEMP 'abigail-signing-cert.pfx'
-          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERT_BASE64))
-          $password = ConvertTo-SecureString -String $env:WINDOWS_SIGNING_CERT_PASSWORD -AsPlainText -Force
-          Import-PfxCertificate -FilePath $certPath -Password $password -CertStoreLocation Cert:\CurrentUser\My | Out-Null
-          $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Thumbprint -eq $env:WINDOWS_CERTIFICATE_THUMBPRINT }
-          if (-not $cert) {
-            throw "Imported Windows signing certificate with thumbprint $env:WINDOWS_CERTIFICATE_THUMBPRINT was not found in Cert:\CurrentUser\My"
-          }
-          $cert | Select-Object Thumbprint, Subject | Format-Table -AutoSize
+          ./scripts/windows_signing_preflight.ps1
 
       - name: Import Apple Developer ID certificate (macOS)
         if: matrix.platform == 'macos-latest'

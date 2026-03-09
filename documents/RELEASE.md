@@ -8,21 +8,23 @@
 
 ## Required release secrets
 
-Official published releases require all of the following:
+Official published releases always require all of the following updater and macOS inputs:
 
 - `TAURI_SIGNING_PRIVATE_KEY`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 - `TAURI_UPDATER_PUBKEY`
-- `WINDOWS_SIGNING_CERT_BASE64`
-- `WINDOWS_SIGNING_CERT_PASSWORD`
-- `WINDOWS_CERTIFICATE_THUMBPRINT`
-- `WINDOWS_TIMESTAMP_URL`
 - `APPLE_CERTIFICATE`
 - `APPLE_CERTIFICATE_PASSWORD`
 - `APPLE_SIGNING_IDENTITY`
 - `APPLE_ID`
 - `APPLE_PASSWORD`
 - `APPLE_TEAM_ID`
+
+Windows Authenticode can run in either mode:
+
+- `pfx` mode: `WINDOWS_SIGNING_CERT_BASE64`, `WINDOWS_SIGNING_CERT_PASSWORD`, `WINDOWS_CERTIFICATE_THUMBPRINT`, `WINDOWS_TIMESTAMP_URL`
+- `store` mode for SSL.com or YubiKey-backed certs: repository variables `ABIGAIL_WINDOWS_SIGNING_MODE=store` and `ABIGAIL_WINDOWS_RUNNER=<self-hosted runner label>`, plus `WINDOWS_CERTIFICATE_THUMBPRINT` and `WINDOWS_TIMESTAMP_URL`
+- Optional for `store` mode: `WINDOWS_SIGNING_CERT_PEM` to import the public leaf certificate into `Cert:\CurrentUser\My` before Tauri signs by thumbprint
 
 `scripts/enforce_release_prereqs.sh` blocks the build if required inputs are missing.
 
@@ -35,6 +37,7 @@ Updater key format for Tauri 2:
 ## Build-time release preparation
 
 - `scripts/prepare_tauri_bundle_config.mjs` injects the updater verification public key and signing fields into `tauri-app/tauri.conf.json`.
+- For SSL.com timestamps, `scripts/prepare_tauri_bundle_config.mjs` enables Tauri's RFC 3161 (`tsp`) mode automatically when the timestamp host is `ssl.com`, or explicitly when `ABIGAIL_WINDOWS_TIMESTAMP_TSP=true`.
 - `scripts/validate_tauri_signing_key.sh` normalizes and validates the updater signing secret key before bundling.
 - `scripts/generate_tauri_latest_manifest.mjs` produces `latest.json` from the signed updater artifacts that are actually attached to the release.
 
@@ -61,7 +64,7 @@ Official releases publish:
 
 - Validation builds can still run without published release output.
 - If `create_github_release=true`, the Windows fast-release path requires updater signing inputs.
-- Windows Authenticode is used for fast pre-releases only when the Windows certificate inputs are configured.
+- Windows Authenticode is used for fast pre-releases only when the selected Windows signing mode is fully configured.
 - Fast pre-releases generate Windows updater metadata only.
 
 ## Versioning
@@ -72,7 +75,7 @@ Official releases publish:
 ## Minimal release checklist
 
 1. Confirm the repo is on the intended commit.
-2. Ensure required signing secrets are configured in GitHub Actions.
+2. Ensure required signing secrets and Windows signing mode variables are configured in GitHub Actions.
 3. Run the appropriate workflow.
 4. Confirm installers, updater artifacts, `.sig` files, and `latest.json` are attached to the release.
 5. Confirm the release notes and security docs reflect the shipped behavior.

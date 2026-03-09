@@ -1,7 +1,7 @@
-//! PostgreSQL memory backend — optional alternative to SQLite.
+//! PostgreSQL memory backend — optional alternative to the embedded memory store.
 //!
 //! Feature-gated behind `postgres` Cargo feature.
-//! Implements the same operations as the SQLite MemoryStore but against Postgres.
+//! Implements the same operations as the embedded MemoryStore but against Postgres.
 
 #[cfg(feature = "postgres")]
 use chrono::Utc;

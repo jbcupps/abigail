@@ -88,7 +88,7 @@ enabled = true
 [[skill]]
 id = "com.abigail.skills.database"
 instruction_file = "skill_database.md"
-keywords = ["database", "sql", "query", "sqlite", "db", "schema", "table"]
+keywords = ["database", "sql", "query", "surrealdb", "db", "schema", "table"]
 enabled = true
 
 [[skill]]

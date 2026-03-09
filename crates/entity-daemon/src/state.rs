@@ -23,7 +23,7 @@ pub struct EntityDaemonState {
     pub executor: Arc<SkillExecutor>,
     /// Path to this entity's constitutional documents directory.
     pub docs_dir: PathBuf,
-    /// SQLite memory store for persistent memory across conversations.
+    /// Surreal-backed memory store for persistent memory across conversations.
     pub memory: Arc<MemoryStore>,
     /// Persistent async job queue for delegated sub-agent tasks.
     pub job_queue: Arc<JobQueue>,

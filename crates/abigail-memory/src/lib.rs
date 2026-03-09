@@ -2,6 +2,8 @@ pub mod archive;
 pub mod backup_import;
 pub mod embeddings;
 pub mod graph;
+pub mod layers;
+pub mod models;
 pub mod postgres;
 pub mod protected_topics;
 pub mod schema;
@@ -15,6 +17,8 @@ pub use backup_import::{
 };
 pub use embeddings::cosine_similarity;
 pub use graph::{EdgeType, MemoryEdge, MemoryGraph};
+pub use layers::MemoryLayer;
+pub use models::MemoryEntry;
 pub use protected_topics::{
     plan_secret_move, ProtectedTopicEntry, ProtectedTopicSummary, SecretKind, SecretMovePlan,
     TriangleEthicPreview,
