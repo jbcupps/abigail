@@ -412,7 +412,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 10a. Register mentor chat monitor + passive out-of-band observers.
     let _mentor_chat_monitor_handle =
-        abigail_router::monitors::mentor_chat::start_mentor_chat_monitor(stream_broker.clone())
+        abigail_router::monitor::mentor_chat::start_mentor_chat_monitor(stream_broker.clone())
             .await
             .map_err(|e| tracing::warn!("Failed to start mentor chat monitor: {}", e))
             .ok();

@@ -74,6 +74,7 @@ Startup and agent load fail closed when any link in that chain fails.
 
 - Release builds inject the updater verification public key at build time.
 - Release scripts normalize updater minisign key boxes to the base64 format consumed by Tauri 2 before bundling.
+- Windows release signing supports exportable `.pfx` inputs and hardware-token certificate-store signing on a self-hosted runner.
 - Published updater metadata is generated from the signed updater artifacts attached to the release.
 - Official release workflows hard-fail without updater signing inputs.
 - Official Windows releases require Authenticode inputs.

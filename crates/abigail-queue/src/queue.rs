@@ -415,12 +415,17 @@ impl JobQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use abigail_persistence::{EntityScope, PersistenceHandle};
+    use abigail_persistence::{ci_mode_enabled, EntityScope, PersistenceHandle};
     use abigail_streaming::MemoryBroker;
 
     fn setup_test_queue() -> JobQueue {
-        let root = std::env::temp_dir().join(format!("abigail-job-queue-{}", uuid::Uuid::new_v4()));
-        let store = PersistenceHandle::open(root.join("memory.db"), EntityScope::Hive).unwrap();
+        let store = if cfg!(target_os = "windows") || ci_mode_enabled() {
+            PersistenceHandle::open_ephemeral(EntityScope::Hive).unwrap()
+        } else {
+            let root =
+                std::env::temp_dir().join(format!("abigail-job-queue-{}", uuid::Uuid::new_v4()));
+            PersistenceHandle::open(root.join("memory.db"), EntityScope::Hive).unwrap()
+        };
         let broker = Arc::new(MemoryBroker::new(64));
         JobQueue::new(store, broker)
     }

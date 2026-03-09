@@ -1,5 +1,10 @@
 # DECENTRALIZED_TRUST_PAPER_ALIGNMENT
 
+This note keeps the live repository aligned with the principles pulled forward from
+"Toward a Decentralized Trust Framework for Verifiable and Ethically Aligned AI."
+The original paper is not bundled in this repository; this document is the tracked
+alignment reference for the current Abigail codebase.
+
 | Paper Section | Requirement | Implementation Status | Owner | Notes |
 | --- | --- | --- | --- | --- |
 | Sections 22-27 | Runtime verification for stable KEK + encrypted sentinel + non-mutating recovery mode | OK | Main | Session KEK isolation, sentinel verification (`data/vault.sentinel`), provider-switch vault guard, and explicit recovery-path handling are now enforced. |

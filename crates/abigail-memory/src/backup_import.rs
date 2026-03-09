@@ -168,7 +168,7 @@ mod tests {
     #[test]
     #[cfg_attr(
         target_os = "windows",
-        ignore = "SurrealKV persistent-store tests are flaky on Windows CI"
+        ignore = "Windows SurrealKV CI flakiness – tracked upstream"
     )]
     fn test_preview_backup_with_data() {
         let tmp =
@@ -201,7 +201,7 @@ mod tests {
     #[test]
     #[cfg_attr(
         target_os = "windows",
-        ignore = "SurrealKV persistent-store tests are flaky on Windows CI"
+        ignore = "Windows SurrealKV CI flakiness – tracked upstream"
     )]
     fn test_import_from_backup_idempotent() {
         let tmp =

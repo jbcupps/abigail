@@ -199,6 +199,12 @@ impl MentorChatMonitor {
     }
 }
 
+pub async fn start_mentor_chat_monitor(
+    broker: Arc<dyn StreamBroker>,
+) -> anyhow::Result<SubscriptionHandle> {
+    MentorChatMonitor::new(broker).spawn().await
+}
+
 /// Request enriched preprompt from the monitor over the chat topic.
 pub async fn request_enriched_preprompt(
     broker: Arc<dyn StreamBroker>,
@@ -329,5 +335,12 @@ mod tests {
         let out = got.unwrap();
         assert!(out.contains("Constitutional Monitor Context"));
         assert!(out.contains("Superego decisions are tracked in Hive/documents"));
+    }
+
+    #[tokio::test]
+    async fn start_monitor_helper_subscribes() {
+        let broker: Arc<dyn StreamBroker> = Arc::new(MemoryBroker::default());
+        let handle = start_mentor_chat_monitor(broker).await.unwrap();
+        handle.cancel();
     }
 }

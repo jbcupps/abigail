@@ -145,6 +145,10 @@ pub struct MemoryStore {
 }
 
 impl MemoryStore {
+    pub fn new_for_ci() -> Result<Self> {
+        Self::open_in_memory()
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_unlock(path, Arc::new(HybridUnlockProvider::new()))
     }
@@ -154,7 +158,7 @@ impl MemoryStore {
         unlock: Arc<dyn UnlockProvider>,
     ) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
-        let entity_id = infer_entity_id(&path);
+        let entity_id = infer_entity_id(&path).or_else(|| synthetic_file_scope(&path));
         Self::open_internal(path, unlock, entity_id, None)
     }
 
@@ -853,6 +857,15 @@ fn infer_entity_id(path: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
+fn synthetic_file_scope(path: &Path) -> Option<String> {
+    path.file_stem().and_then(|name| name.to_str()).map(|name| {
+        format!(
+            "file_{}",
+            name.replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+        )
+    })
+}
+
 fn parse_weight(value: &str) -> Result<MemoryWeight> {
     match value {
         "ephemeral" => Ok(MemoryWeight::Ephemeral),
@@ -964,7 +977,7 @@ mod tests {
     #[test]
     #[cfg_attr(
         target_os = "windows",
-        ignore = "SurrealKV persistent-store tests are flaky on Windows CI"
+        ignore = "Windows SurrealKV CI flakiness – tracked upstream"
     )]
     fn test_file_backed_store_persists() {
         let tmp = std::env::temp_dir().join(format!("abigail_store_file_{}", Uuid::new_v4()));

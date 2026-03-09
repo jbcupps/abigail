@@ -28,8 +28,7 @@ This runbook reflects the current interactive onboarding + chat flow in this rep
 From the repository root:
 
 ```bash
-cargo build
-cd tauri-app/src-ui && npm install && cd ../..
+cd tauri-app/src-ui && npm ci && cd ../..
 cargo tauri dev
 ```
 
@@ -132,7 +131,7 @@ docker compose -f docker/docker-compose.yml up -d abigail-dev
 docker compose -f docker/docker-compose.yml exec abigail-dev bash
 
 # Inside the container:
-cd tauri-app/src-ui && npm install && cd ../..
+cd tauri-app/src-ui && npm ci && cd ../..
 cargo build
 cargo test --all
 ```
@@ -218,7 +217,7 @@ Reference template: [`example.env`](../example.env)
 
 ### CI/release builds
 
-Use the workflows documented in [`documents/RELEASE.md`](RELEASE.md) for tagged releases and artifact retrieval. CI builds for all three platforms:
+Use the workflows documented in [`RELEASE.md`](RELEASE.md) for tagged releases and artifact retrieval. CI builds for all three platforms:
 
 | Platform | Artifact | Runner |
 |----------|----------|--------|
@@ -239,7 +238,7 @@ This downloads and runs the correct platform installer automatically.
 ### Local installer build
 
 ```bash
-cd tauri-app/src-ui && npm install && cd ../..
+cd tauri-app/src-ui && npm ci && cd ../..
 cd tauri-app && cargo tauri build
 ```
 

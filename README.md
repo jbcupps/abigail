@@ -36,4 +36,4 @@ No accounts. No data sharing. Just your family and the Entities you control.
 ### For the Curious: Where Abigail Came From
 Abigail began as part of a larger research vision for trustworthy, decentralized AI. We took the best parts of that vision and made them simple, safe, and useful for real families.
 
-See [documents/Toward-a-Decentralized-Trust-Framework.pdf](documents/Toward-a-Decentralized-Trust-Framework.pdf).
+See [documents/DECENTRALIZED_TRUST_PAPER_ALIGNMENT.md](documents/DECENTRALIZED_TRUST_PAPER_ALIGNMENT.md).

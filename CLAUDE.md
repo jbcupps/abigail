@@ -16,7 +16,7 @@ Abigail manages multiple personal AI Entities that the user, mentor, or family h
 - Keep everything dead-simple for the family user. Delight and ease of use come first.
 
 **Origin Story (Respect This Link)**
-Abigail grew from the vision in "Toward a Decentralized Trust Framework for Verifiable and Ethically Aligned AI" (see `documents/Toward-a-Decentralized-Trust-Framework.pdf`). That remains the philosophical foundation. The current mission is personal and human-scale: give families their own private, multi-capable AI Entities coordinated by Abigail.
+Abigail grew from the vision in "Toward a Decentralized Trust Framework for Verifiable and Ethically Aligned AI" (see `documents/DECENTRALIZED_TRUST_PAPER_ALIGNMENT.md`). That remains the philosophical foundation. The current mission is personal and human-scale: give families their own private, multi-capable AI Entities coordinated by Abigail.
 
 **How You Should Work**
 - Prefer the simplest solution that feels magical to a busy parent.

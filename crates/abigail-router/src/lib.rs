@@ -5,7 +5,6 @@ pub mod council;
 pub mod execution_state;
 pub mod governor;
 pub mod monitor;
-pub mod monitors;
 pub mod orchestration;
 pub mod planner;
 pub mod router;

@@ -32,8 +32,13 @@ describe("ProviderDrawer", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the drawer when open", () => {
+  it("renders the drawer when open", async () => {
     render(<ProviderDrawer onClose={() => {}} />);
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("get_stored_providers");
+      expect(mockInvoke).toHaveBeenCalledWith("get_router_status");
+      expect(mockInvoke).toHaveBeenCalledWith("detect_cli_providers_full");
+    });
     const drawer = screen.getByTestId("provider-drawer");
     expect(drawer).toBeInTheDocument();
   });

@@ -10,10 +10,16 @@ scripts/uat/uat-keys.env
 # Rust
 target/
 *.pdb
+.cargo-docker/
+artifacts/
+release-assets/
+output/
 
 # Node / frontend
 tauri-app/src-ui/node_modules/
 tauri-app/src-ui/dist/
+tauri-app/abigail-keygen*
+tauri-app/ollama*
 
 # Test coverage outputs
 tauri-app/src-ui/coverage/
