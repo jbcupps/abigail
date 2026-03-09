@@ -104,12 +104,13 @@ impl PersistenceHandle {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        std::fs::create_dir_all(&path)?;
 
         let runtime = persistence_runtime()?;
         let init_path = path.clone();
         let init_scope = scope.clone();
         let db = block_on_runtime(runtime, async move {
-            let db = Surreal::new::<SurrealKv>(surrealkv_path_arg(&init_path))
+            let db = Surreal::new::<SurrealKv>(init_path)
                 .await
                 .map_err(PersistenceError::from)?;
             db.use_ns("abigail")
@@ -165,7 +166,7 @@ impl PersistenceHandle {
             let values: Vec<SurrealValue> = response.take(0).map_err(PersistenceError::from)?;
             values
                 .into_iter()
-                .map(|value| surreal_value_to_json(value))
+                .map(surreal_value_to_json)
                 .map(serde_json::from_value)
                 .collect::<std::result::Result<Vec<T>, _>>()
                 .map_err(PersistenceError::from)
@@ -311,23 +312,6 @@ fn persistence_runtime() -> Result<&'static tokio::runtime::Runtime> {
     }) {
         Ok(runtime) => Ok(runtime),
         Err(error) => Err(PersistenceError::Join(error.clone())),
-    }
-}
-
-fn surrealkv_path_arg(path: &Path) -> String {
-    #[cfg(target_os = "windows")]
-    {
-        let rendered = path.to_string_lossy().replace('\\', "/");
-        if path.is_absolute() && !rendered.starts_with('/') {
-            format!("/{rendered}")
-        } else {
-            rendered
-        }
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        path.to_string_lossy().to_string()
     }
 }
 

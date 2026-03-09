@@ -90,6 +90,10 @@ pub struct BirthOrchestrator {
 impl BirthOrchestrator {
     pub fn new(config: AppConfig) -> anyhow::Result<Self> {
         let store = MemoryStore::open_with_config(&config)?;
+        Self::bootstrap(config, store)
+    }
+
+    fn bootstrap(config: AppConfig, store: MemoryStore) -> anyhow::Result<Self> {
         if store.has_birth()? {
             return Err(BirthError::AlreadyBorn.into());
         }
@@ -109,6 +113,11 @@ impl BirthOrchestrator {
             conversation_history,
             crystallization_engine: None,
         })
+    }
+
+    #[cfg(test)]
+    fn new_with_store(config: AppConfig, store: MemoryStore) -> anyhow::Result<Self> {
+        Self::bootstrap(config, store)
     }
 
     pub fn current_stage(&self) -> BirthStage {
@@ -437,13 +446,17 @@ mod tests {
         }
     }
 
+    fn test_orchestrator(config: AppConfig) -> BirthOrchestrator {
+        BirthOrchestrator::new_with_store(config, MemoryStore::open_in_memory().unwrap()).unwrap()
+    }
+
     #[test]
     fn test_initial_stage_is_darkness() {
         let tmp = std::env::temp_dir().join("abigail_birth_initial_v2");
         let _ = fs::remove_dir_all(&tmp);
         let config = test_config(&tmp);
 
-        let orch = BirthOrchestrator::new(config).unwrap();
+        let orch = test_orchestrator(config);
         assert_eq!(orch.current_stage(), BirthStage::Darkness);
         assert_eq!(orch.display_message(), "Awakening in the dark...");
 
@@ -457,7 +470,7 @@ mod tests {
         let config = test_config(&tmp);
         let docs_dir = config.docs_dir.clone();
 
-        let mut orch = BirthOrchestrator::new(config).unwrap();
+        let mut orch = test_orchestrator(config);
         orch.generate_identity(&docs_dir).unwrap();
 
         // Signing key should be held
@@ -477,7 +490,7 @@ mod tests {
         let config = test_config(&tmp);
         let docs_dir = config.docs_dir.clone();
 
-        let mut orch = BirthOrchestrator::new(config).unwrap();
+        let mut orch = test_orchestrator(config);
         orch.generate_identity(&docs_dir).unwrap();
         orch.advance_past_darkness().unwrap();
         assert_eq!(orch.current_stage(), BirthStage::Ignition);
@@ -492,7 +505,7 @@ mod tests {
         let config = test_config(&tmp);
         let docs_dir = config.docs_dir.clone();
 
-        let mut orch = BirthOrchestrator::new(config).unwrap();
+        let mut orch = test_orchestrator(config);
         orch.generate_identity(&docs_dir).unwrap();
         orch.advance_past_darkness().unwrap();
         orch.advance_to_connectivity().unwrap();
@@ -508,7 +521,7 @@ mod tests {
         let config = test_config(&tmp);
         let docs_dir = config.docs_dir.clone();
 
-        let mut orch = BirthOrchestrator::new(config).unwrap();
+        let mut orch = test_orchestrator(config);
         orch.generate_identity(&docs_dir).unwrap();
         orch.advance_past_darkness().unwrap();
         orch.advance_to_connectivity().unwrap();
@@ -526,7 +539,7 @@ mod tests {
         let docs_dir = config.docs_dir.clone();
         fs::create_dir_all(&docs_dir).unwrap();
 
-        let mut orch = BirthOrchestrator::new(config).unwrap();
+        let mut orch = test_orchestrator(config);
         orch.generate_identity(&docs_dir).unwrap();
         orch.advance_past_darkness().unwrap();
         orch.advance_to_connectivity().unwrap();
@@ -553,7 +566,7 @@ mod tests {
         let docs_dir = config.docs_dir.clone();
         fs::create_dir_all(&docs_dir).unwrap();
 
-        let mut orch = BirthOrchestrator::new(config).unwrap();
+        let mut orch = test_orchestrator(config);
         orch.generate_identity(&docs_dir).unwrap();
         orch.advance_past_darkness().unwrap();
         orch.advance_to_connectivity().unwrap();
@@ -581,7 +594,7 @@ mod tests {
             fs::write(docs_dir.join(name), content).unwrap();
         }
 
-        let mut orch = BirthOrchestrator::new(config).unwrap();
+        let mut orch = test_orchestrator(config);
         orch.generate_identity(&docs_dir).unwrap();
         orch.advance_past_darkness().unwrap();
         orch.advance_to_connectivity().unwrap();
@@ -613,7 +626,7 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
         let config = test_config(&tmp);
 
-        let mut orch = BirthOrchestrator::new(config).unwrap();
+        let mut orch = test_orchestrator(config);
         assert_eq!(orch.current_stage(), BirthStage::Darkness);
         orch.skip_to_life_for_mvp();
         assert_eq!(orch.current_stage(), BirthStage::Emergence);
@@ -628,7 +641,7 @@ mod tests {
         let config = test_config(&tmp);
         let config_path = config.config_path();
 
-        let mut orch = BirthOrchestrator::new(config).unwrap();
+        let mut orch = test_orchestrator(config);
         orch.skip_to_life_for_mvp();
         orch.complete_birth().unwrap();
 
@@ -645,11 +658,12 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
         let config = test_config(&tmp);
 
-        let mut orch = BirthOrchestrator::new(config.clone()).unwrap();
+        let store = MemoryStore::open_in_memory().unwrap();
+        let mut orch = BirthOrchestrator::new_with_store(config.clone(), store.clone()).unwrap();
         orch.skip_to_life_for_mvp();
         orch.complete_birth().unwrap();
 
-        let result = BirthOrchestrator::new(config);
+        let result = BirthOrchestrator::new_with_store(config, store);
         assert!(result.is_err());
         let err = format!("{}", result.err().unwrap());
         assert!(
@@ -691,7 +705,7 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
         let config = test_config(&tmp);
 
-        let mut orch = BirthOrchestrator::new(config).unwrap();
+        let mut orch = test_orchestrator(config);
         orch.add_message("system", "Hello");
         orch.add_message("user", "Hi there");
         assert_eq!(orch.get_conversation().len(), 2);
@@ -707,7 +721,7 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
         let config = test_config(&tmp);
 
-        let mut orch = BirthOrchestrator::new(config).unwrap();
+        let mut orch = test_orchestrator(config);
         // In Darkness stage, crystallize should fail
         let result = orch.crystallize_soul("soul", "growth");
         assert!(result.is_err());
@@ -721,7 +735,7 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
         let config = test_config(&tmp);
 
-        let mut orch = BirthOrchestrator::new(config).unwrap();
+        let mut orch = test_orchestrator(config);
         // In Darkness stage, complete_emergence should fail
         let result = orch.complete_emergence();
         assert!(result.is_err());
@@ -736,7 +750,7 @@ mod tests {
         let config = test_config(&tmp);
         let docs_dir = config.docs_dir.clone();
 
-        let mut orch = BirthOrchestrator::new(config).unwrap();
+        let mut orch = test_orchestrator(config);
         orch.generate_identity(&docs_dir).unwrap();
         orch.advance_past_darkness().unwrap();
         // Now in Ignition — calling again should fail
@@ -753,7 +767,7 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
         let config = test_config(&tmp);
 
-        let mut orch = BirthOrchestrator::new(config).unwrap();
+        let mut orch = test_orchestrator(config);
         // In Darkness stage, advance_to_connectivity should fail
         let result = orch.advance_to_connectivity();
         assert!(result.is_err());
@@ -768,7 +782,7 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
         let config = test_config(&tmp);
 
-        let mut orch = BirthOrchestrator::new(config).unwrap();
+        let mut orch = test_orchestrator(config);
         // In Darkness stage, advance_to_crystallization should fail
         let result = orch.advance_to_crystallization();
         assert!(result.is_err());
@@ -784,7 +798,7 @@ mod tests {
         let config = test_config(&tmp);
         let docs_dir = config.docs_dir.clone();
 
-        let mut orch = BirthOrchestrator::new(config).unwrap();
+        let mut orch = test_orchestrator(config);
         orch.generate_identity(&docs_dir).unwrap();
         orch.advance_past_darkness().unwrap();
         // Now in Ignition — generate_identity should fail

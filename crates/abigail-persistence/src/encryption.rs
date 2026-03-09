@@ -30,12 +30,11 @@ impl ScopedCipher {
     }
 
     pub fn encrypt_bytes(&self, bytes: &[u8]) -> Result<Vec<u8>> {
-        Ok(crypto::seal(&self.key()?, bytes).map_err(|e| PersistenceError::Join(e.to_string()))?)
+        crypto::seal(&self.key()?, bytes).map_err(|e| PersistenceError::Join(e.to_string()))
     }
 
     pub fn decrypt_bytes(&self, envelope: &[u8]) -> Result<Vec<u8>> {
-        Ok(crypto::open(&self.key()?, envelope)
-            .map_err(|e| PersistenceError::Join(e.to_string()))?)
+        crypto::open(&self.key()?, envelope).map_err(|e| PersistenceError::Join(e.to_string()))
     }
 
     pub fn encrypt_json<T: serde::Serialize>(&self, value: &T) -> Result<Vec<u8>> {
