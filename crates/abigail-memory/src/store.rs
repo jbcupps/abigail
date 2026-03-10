@@ -175,6 +175,24 @@ impl MemoryStore {
         })
     }
 
+    /// Opens an ephemeral in-memory store with a caller-supplied entity id and
+    /// unlock provider.  Useful for tests that need a specific entity scope
+    /// (e.g. secret-detection tests that assert on `secrets-{entity_id}` topic
+    /// names) without touching the filesystem.
+    pub fn open_in_memory_with_entity_and_unlock(
+        entity_id: &str,
+        unlock: Arc<dyn UnlockProvider>,
+    ) -> Result<Self> {
+        Ok(Self {
+            persistence: PersistenceHandle::open_ephemeral(EntityScope::Entity(
+                entity_id.to_string(),
+            ))?,
+            unlock,
+            entity_id: Some(entity_id.to_string()),
+            temp_root: None,
+        })
+    }
+
     pub fn schema_version(&self) -> Result<i64> {
         Ok(STORE_SCHEMA_VERSION)
     }
