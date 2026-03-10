@@ -84,6 +84,24 @@ jobs:
         if: matrix.platform == 'windows-latest'
         run: choco install nsis --no-progress -y
 
+      - name: Install Windows SDK signing tools
+        if: matrix.platform == 'windows-latest' && vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          choco install windows-sdk-10-version-2004-windbg --no-progress -y
+          # Locate signtool.exe and add its directory to PATH
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match 'x64' } |
+            Sort-Object { [version]($_.FullName -replace '.*\\(\d+\.\d+\.\d+\.\d+)\\.*', '$1') } -Descending |
+            Select-Object -First 1
+          if ($signtool) {
+            Write-Host "Found signtool at: $($signtool.FullName)"
+            echo ($signtool.DirectoryName) | Out-File -Append -FilePath $env:GITHUB_PATH
+          } else {
+            Write-Error "signtool.exe not found after SDK install"
+            exit 1
+          }
+
       - name: Install Linux dependencies (Tauri 2 / Debian)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
@@ -357,6 +375,19 @@ jobs:
 
           # Verify the identity is available
           security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+          # Validate that APPLE_SIGNING_IDENTITY matches an imported certificate
+          if [[ -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+            if ! security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -qF "$APPLE_SIGNING_IDENTITY"; then
+              echo "::error::APPLE_SIGNING_IDENTITY='$APPLE_SIGNING_IDENTITY' does not match any certificate in the keychain."
+              echo "Available identities:"
+              security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+              echo ""
+              echo "Update the APPLE_SIGNING_IDENTITY secret to match the CN of the certificate in APPLE_CERTIFICATE."
+              exit 1
+            fi
+            echo "Verified: APPLE_SIGNING_IDENTITY matches an imported certificate"
+          fi
 
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
           echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> $GITHUB_ENV

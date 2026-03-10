@@ -116,11 +116,16 @@ if (normalizedUpdaterPubkey.encoded) {
 
 if (windowsThumbprint) {
   config.bundle.windows.certificateThumbprint = windowsThumbprint;
+} else {
+  delete config.bundle.windows.certificateThumbprint;
 }
 
 if (windowsTimestampUrl) {
   config.bundle.windows.timestampUrl = windowsTimestampUrl;
   config.bundle.windows.tsp = windowsTimestampTsp;
+} else {
+  delete config.bundle.windows.timestampUrl;
+  delete config.bundle.windows.tsp;
 }
 
 fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
