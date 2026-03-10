@@ -69,10 +69,9 @@ fn startup_profile_root() -> PathBuf {
 
 fn profile_root_for_data_dir(data_dir: &Path) -> PathBuf {
     match data_dir.file_name().and_then(|name| name.to_str()) {
-        Some(name) if name.eq_ignore_ascii_case("data") => data_dir
-            .parent()
-            .unwrap_or(data_dir)
-            .to_path_buf(),
+        Some(name) if name.eq_ignore_ascii_case("data") => {
+            data_dir.parent().unwrap_or(data_dir).to_path_buf()
+        }
         _ => data_dir.to_path_buf(),
     }
 }
@@ -193,13 +192,8 @@ fn maybe_offer_clean_start_recovery(message: &str) -> Result<bool, String> {
     }
 
     let backup_root = archive_profile_for_clean_start()?;
-    relaunch_current_executable().map_err(|e| {
-        format!(
-            "{}\nArchived profile backup: {}",
-            e,
-            backup_root.display()
-        )
-    })?;
+    relaunch_current_executable()
+        .map_err(|e| format!("{}\nArchived profile backup: {}", e, backup_root.display()))?;
 
     Ok(true)
 }
