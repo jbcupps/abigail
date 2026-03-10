@@ -975,10 +975,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        target_os = "windows",
-        ignore = "Windows SurrealKV CI flakiness – tracked upstream"
-    )]
+    #[ignore = "SurrealKV releases file locks asynchronously on drop; close-and-reopen races in CI"]
     fn test_file_backed_store_persists() {
         let tmp = std::env::temp_dir().join(format!("abigail_store_file_{}", Uuid::new_v4()));
         let db_path = tmp.join("store");

@@ -31,6 +31,10 @@ pub struct BackupEntry {
 
 pub fn preview_backup_db(db_path: &Path) -> anyhow::Result<BackupStats> {
     let store = MemoryStore::open(db_path)?;
+    preview_backup_store(&store, &db_path.to_string_lossy())
+}
+
+pub fn preview_backup_store(store: &MemoryStore, label: &str) -> anyhow::Result<BackupStats> {
     let turns = store.all_turns()?;
     let memories = store.all_memories()?;
 
@@ -44,7 +48,7 @@ pub fn preview_backup_db(db_path: &Path) -> anyhow::Result<BackupStats> {
         .len() as u64;
 
     Ok(BackupStats {
-        db_path: db_path.to_string_lossy().to_string(),
+        db_path: label.to_string(),
         turn_count: turns.len() as u64,
         memory_count: memories.len() as u64,
         session_count,
@@ -58,6 +62,13 @@ pub fn import_from_backup(
     backup_db_path: &Path,
 ) -> anyhow::Result<ImportStats> {
     let source = MemoryStore::open(backup_db_path)?;
+    import_from_store(target, &source)
+}
+
+pub fn import_from_store(
+    target: &MemoryStore,
+    source: &MemoryStore,
+) -> anyhow::Result<ImportStats> {
     let turns = source.all_turns()?;
     let memories = source.all_memories()?;
 
@@ -166,68 +177,42 @@ mod tests {
     };
 
     #[test]
-    #[cfg_attr(
-        target_os = "windows",
-        ignore = "Windows SurrealKV CI flakiness – tracked upstream"
-    )]
     fn test_preview_backup_with_data() {
-        let tmp =
-            std::env::temp_dir().join(format!("abigail_backup_preview_{}", uuid::Uuid::new_v4()));
-        let db_path = tmp.join("backup-store");
-        std::fs::create_dir_all(&tmp).unwrap();
+        let store = MemoryStore::open_in_memory().unwrap();
+        store
+            .insert_turn(&ConversationTurn::new("s1", "user", "hello"))
+            .unwrap();
+        store
+            .insert_memory(&Memory {
+                id: uuid::Uuid::new_v4().to_string(),
+                content: "memory".into(),
+                weight: MemoryWeight::Distilled,
+                created_at: chrono::Utc::now(),
+            })
+            .unwrap();
 
-        {
-            let store = MemoryStore::open(&db_path).unwrap();
-            store
-                .insert_turn(&ConversationTurn::new("s1", "user", "hello"))
-                .unwrap();
-            store
-                .insert_memory(&Memory {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    content: "memory".into(),
-                    weight: MemoryWeight::Distilled,
-                    created_at: chrono::Utc::now(),
-                })
-                .unwrap();
-        }
-
-        let stats = preview_backup_db(&db_path).unwrap();
+        let stats = preview_backup_store(&store, ":memory:").unwrap();
         assert_eq!(stats.turn_count, 1);
         assert_eq!(stats.memory_count, 1);
-
-        let _ = std::fs::remove_dir_all(tmp);
     }
 
     #[test]
-    #[cfg_attr(
-        target_os = "windows",
-        ignore = "Windows SurrealKV CI flakiness – tracked upstream"
-    )]
     fn test_import_from_backup_idempotent() {
-        let tmp =
-            std::env::temp_dir().join(format!("abigail_backup_import_{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&tmp).unwrap();
-        let backup_path = tmp.join("backup-store");
-
-        {
-            let backup = MemoryStore::open(&backup_path).unwrap();
-            backup
-                .insert_turn(&ConversationTurn::new("s1", "user", "hello"))
-                .unwrap();
-            backup
-                .insert_memory(&Memory::ephemeral("remember".into()))
-                .unwrap();
-        }
+        let source = MemoryStore::open_in_memory().unwrap();
+        source
+            .insert_turn(&ConversationTurn::new("s1", "user", "hello"))
+            .unwrap();
+        source
+            .insert_memory(&Memory::ephemeral("remember".into()))
+            .unwrap();
 
         let target = MemoryStore::open_in_memory().unwrap();
-        let stats = import_from_backup(&target, &backup_path).unwrap();
+        let stats = import_from_store(&target, &source).unwrap();
         assert_eq!(stats.turns_imported, 1);
         assert_eq!(stats.memories_imported, 1);
 
-        let stats2 = import_from_backup(&target, &backup_path).unwrap();
+        let stats2 = import_from_store(&target, &source).unwrap();
         assert_eq!(stats2.turns_skipped, 1);
         assert_eq!(stats2.memories_skipped, 1);
-
-        let _ = std::fs::remove_dir_all(tmp);
     }
 }
