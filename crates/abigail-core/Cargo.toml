@@ -24,7 +24,7 @@ hkdf = "0.12"
 argon2 = "0.5"
 keyring = { version = "3.6", features = ["crypto-rust"] }
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3.6", features = ["sync-secret-service", "crypto-rust"] }
 
 [target.'cfg(windows)'.dependencies]
