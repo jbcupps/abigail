@@ -22,6 +22,9 @@ aes-gcm.workspace = true
 sha2.workspace = true
 hkdf = "0.12"
 argon2 = "0.5"
+keyring = { version = "3.6", features = ["crypto-rust"] }
+
+[target.'cfg(unix)'.dependencies]
 keyring = { version = "3.6", features = ["sync-secret-service", "crypto-rust"] }
 
 [target.'cfg(windows)'.dependencies]
