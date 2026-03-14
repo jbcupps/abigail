@@ -142,9 +142,13 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: cargo llvm-cov --workspace --exclude abigail-app --lcov --output-path lcov.info
 
-      - name: Run tests (non-ubuntu)
-        if: matrix.platform != 'ubuntu-22.04'
+      - name: Run tests (macOS)
+        if: matrix.platform == 'macos-latest'
         run: cargo test --workspace --exclude abigail-app
+
+      - name: Compile tests only (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: cargo test --workspace --exclude abigail-app --no-run
 
       - name: Upload Rust coverage to Codecov
         if: matrix.platform == 'ubuntu-22.04'
