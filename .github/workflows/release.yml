@@ -505,7 +505,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download all installer artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
           pattern: abigail-installer-*
@@ -513,7 +513,7 @@ jobs:
         continue-on-error: true
 
       - name: Download MSI artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
           pattern: abigail-msi-*
@@ -522,7 +522,7 @@ jobs:
 
       - name: Download updater artifacts
         if: vars.ABIGAIL_REQUIRE_UPDATER_SIGNING == 'true'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
           pattern: abigail-updater-*
