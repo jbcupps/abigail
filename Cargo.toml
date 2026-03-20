@@ -66,7 +66,7 @@ rand = "0.8"
 base64 = "0.22"
 sha2 = "0.10"
 directories = "5"
-surrealdb = { version = "3.0.2", default-features = false, features = ["kv-mem", "kv-surrealkv"] }
+surrealdb = { version = "3.0.4", default-features = false, features = ["kv-mem", "kv-surrealkv"] }
 thiserror = "1.0"
 anyhow = "1.0"
 tracing = "0.1"
