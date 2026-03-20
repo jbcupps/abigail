@@ -3,9 +3,7 @@ use crate::protected_topics::{
     ProtectedTopicSummary, SecretKind, SecretMovePlan, TriangleEthicPreview,
 };
 use abigail_core::{AppConfig, HybridUnlockProvider, PassphraseUnlockProvider, UnlockProvider};
-use abigail_persistence::{
-    migrate_legacy_layout, EntityScope, PersistenceError, PersistenceHandle, QueryBinding,
-};
+use abigail_persistence::{EntityScope, PersistenceError, PersistenceHandle, QueryBinding};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -198,13 +196,8 @@ impl MemoryStore {
     }
 
     pub fn open_with_config(config: &AppConfig) -> Result<Self> {
-        if uses_legacy_layout(config) {
-            migrate_legacy_layout(config)
-                .map_err(|error| StoreError::Migration(error.to_string()))?;
-        }
-
-        let shared_path = shared_db_path(config);
-        if let Some(parent) = shared_path.parent() {
+        let db_path = config.db_path.clone();
+        if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|error| StoreError::Migration(error.to_string()))?;
         }
@@ -218,12 +211,22 @@ impl MemoryStore {
                 .and_then(|name| name.to_str())
                 .map(str::to_string)
         };
+        tracing::info!(
+            "MemoryStore opening SurrealDB store: scope={} path={} data_dir={}",
+            if config.is_hive { "hive" } else { "entity" },
+            db_path.display(),
+            config.data_dir.display()
+        );
         Self::open_internal(
-            shared_path,
+            db_path,
             Arc::new(HybridUnlockProvider::new()),
             entity_id,
             None,
         )
+    }
+
+    pub fn path(&self) -> &Path {
+        self.persistence.path()
     }
 
     pub fn capture_secret_message(
@@ -829,44 +832,6 @@ struct PreparedProtectedSecret {
     created_at: chrono::DateTime<Utc>,
 }
 
-fn uses_legacy_layout(config: &AppConfig) -> bool {
-    legacy_primary_db_path(config).is_some()
-        || config.data_dir.join("jobs.db").exists()
-        || config.data_dir.join("calendar.db").exists()
-        || config.data_dir.join("kb.db").exists()
-}
-
-fn shared_db_path(config: &AppConfig) -> PathBuf {
-    if is_shared_db_path(&config.db_path) {
-        return config.db_path.clone();
-    }
-
-    if uses_legacy_layout(config) {
-        config
-            .data_dir
-            .parent()
-            .and_then(|parent| parent.parent())
-            .map(|root| root.join("memory.db"))
-            .unwrap_or_else(|| config.data_dir.join("memory.db"))
-    } else {
-        config.db_path.clone()
-    }
-}
-
-fn legacy_primary_db_path(config: &AppConfig) -> Option<&Path> {
-    if is_shared_db_path(&config.db_path) || !config.db_path.exists() {
-        return None;
-    }
-
-    Some(config.db_path.as_path())
-}
-
-fn is_shared_db_path(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name == "memory.db")
-}
-
 fn infer_entity_id(path: &Path) -> Option<String> {
     path.parent()
         .and_then(|parent| parent.file_name())
@@ -1015,27 +980,13 @@ mod tests {
     }
 
     #[test]
-    fn test_shared_db_path_honors_explicit_non_legacy_path() {
+    fn test_open_with_config_uses_configured_db_path() {
         let tmp = std::env::temp_dir().join(format!("abigail_store_path_{}", Uuid::new_v4()));
         let db_path = tmp.join("sandbox").join("test.db");
         let config = test_config(&tmp, db_path.clone());
+        let store = MemoryStore::open_with_config(&config).unwrap();
 
-        assert!(!uses_legacy_layout(&config));
-        assert_eq!(shared_db_path(&config), db_path);
-    }
-
-    #[test]
-    fn test_shared_db_path_uses_hive_root_for_existing_legacy_db() {
-        let tmp = std::env::temp_dir().join(format!("abigail_store_legacy_{}", Uuid::new_v4()));
-        let agent_dir = tmp.join("identities").join(Uuid::new_v4().to_string());
-        let legacy_db = agent_dir.join("abigail_memory.db");
-        std::fs::create_dir_all(&agent_dir).unwrap();
-        std::fs::write(&legacy_db, b"legacy").unwrap();
-
-        let config = test_config(&tmp, legacy_db);
-
-        assert!(uses_legacy_layout(&config));
-        assert_eq!(shared_db_path(&config), tmp.join("memory.db"));
+        assert_eq!(store.path(), db_path.as_path());
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

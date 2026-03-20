@@ -1,5 +1,6 @@
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use tauri::State;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,11 +32,12 @@ pub struct ConversationTurnInfo {
 
 #[tauri::command]
 pub fn get_store_stats(state: State<AppState>) -> Result<StoreStats, String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    let db_path = config.db_path.clone();
-    drop(config);
+    let db_path = {
+        let memory = state.memory.read().map_err(|e| e.to_string())?;
+        memory.path().to_path_buf()
+    };
 
-    let size_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
+    let size_bytes = store_size_bytes(&db_path);
 
     let mem = state.memory.read().map_err(|e| e.to_string())?;
     let memory_count = mem.count_memories().map_err(|e| e.to_string())?;
@@ -56,11 +58,12 @@ pub fn get_sqlite_stats(state: State<AppState>) -> Result<StoreStats, String> {
 
 #[tauri::command]
 pub fn optimize_store(state: State<AppState>) -> Result<i64, String> {
-    let config = state.config.read().map_err(|e| e.to_string())?;
-    let db_path = config.db_path.clone();
-    drop(config);
+    let db_path = {
+        let memory = state.memory.read().map_err(|e| e.to_string())?;
+        memory.path().to_path_buf()
+    };
 
-    let size_before = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
+    let size_before = store_size_bytes(&db_path);
 
     state
         .memory
@@ -69,7 +72,7 @@ pub fn optimize_store(state: State<AppState>) -> Result<i64, String> {
         .vacuum()
         .map_err(|e| e.to_string())?;
 
-    let size_after = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
+    let size_after = store_size_bytes(&db_path);
 
     let saved = size_before as i64 - size_after as i64;
     tracing::info!("Store optimized: {} bytes saved", saved);
@@ -79,6 +82,19 @@ pub fn optimize_store(state: State<AppState>) -> Result<i64, String> {
 #[tauri::command]
 pub fn optimize_sqlite(state: State<AppState>) -> Result<i64, String> {
     optimize_store(state)
+}
+
+fn store_size_bytes(path: &Path) -> u64 {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => metadata.len(),
+        Ok(metadata) if metadata.is_dir() => std::fs::read_dir(path)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| store_size_bytes(&entry.path()))
+            .sum(),
+        _ => 0,
+    }
 }
 
 #[tauri::command]

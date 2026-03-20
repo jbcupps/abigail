@@ -35,7 +35,7 @@ use crate::commands::skills::*;
 use crate::state::AppState;
 
 use abigail_auth::AuthManager;
-use abigail_core::{validate_local_llm_url, AppConfig, SecretsVault};
+use abigail_core::{validate_local_llm_url, AppConfig, GlobalConfig, SecretsVault};
 use abigail_hive::{Hive, ModelRegistry};
 use abigail_memory::MemoryStore;
 use abigail_persistence::{EntityScope, PersistenceHandle};
@@ -58,10 +58,47 @@ use rate_limit::CooldownGuard;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
 use tauri::{Emitter, Manager};
 
 const KEK_RECOVERY_MESSAGE_SNIPPET: &str =
     "vault sentinel exists but stable KEK could not be loaded";
+
+struct StartupCycle {
+    started_at: Instant,
+    last_stage_at: Instant,
+}
+
+impl StartupCycle {
+    fn begin() -> Self {
+        let now = Instant::now();
+        tracing::info!("Startup cycle: begin");
+        Self {
+            started_at: now,
+            last_stage_at: now,
+        }
+    }
+
+    fn stage(&mut self, label: &str) {
+        let now = Instant::now();
+        let stage_ms = now.duration_since(self.last_stage_at).as_millis();
+        let total_ms = now.duration_since(self.started_at).as_millis();
+        tracing::info!(
+            "Startup cycle: {} (+{} ms, total {} ms)",
+            label,
+            stage_ms,
+            total_ms
+        );
+        self.last_stage_at = now;
+    }
+
+    fn ready(&self) {
+        tracing::info!(
+            "Startup cycle: ready to enter event loop (total {} ms)",
+            self.started_at.elapsed().as_millis()
+        );
+    }
+}
 
 fn startup_profile_root() -> PathBuf {
     profile_root_for_data_dir(&abigail_core::AppConfig::default_paths().data_dir)
@@ -80,6 +117,61 @@ fn is_clean_start_recovery_candidate(message: &str) -> bool {
     let normalized = message.to_ascii_lowercase();
     normalized.contains(&KEK_RECOVERY_MESSAGE_SNIPPET.to_ascii_lowercase())
         || (normalized.contains("stable kek") && normalized.contains("vault sentinel"))
+}
+
+fn is_disposable_bootstrap_profile(data_dir: &Path) -> bool {
+    let global = match GlobalConfig::load(data_dir) {
+        Ok(global) => global,
+        Err(error) => {
+            tracing::warn!(
+                "KEK recovery: could not inspect global config at {}: {}",
+                data_dir.display(),
+                error
+            );
+            return false;
+        }
+    };
+
+    if global.agents.iter().any(|agent| !agent.is_hive) {
+        return false;
+    }
+
+    let Some(hive_agent) = global.agents.iter().find(|agent| agent.is_hive) else {
+        return false;
+    };
+
+    let hive_config_path = data_dir.join(&hive_agent.directory).join("config.json");
+    let hive_config = match AppConfig::load(&hive_config_path) {
+        Ok(config) => config,
+        Err(error) => {
+            tracing::warn!(
+                "KEK recovery: could not inspect Hive config at {}: {}",
+                hive_config_path.display(),
+                error
+            );
+            return false;
+        }
+    };
+
+    if !hive_config.is_hive || hive_config.birth_complete {
+        return false;
+    }
+
+    const VAULT_PAYLOADS: &[&str] = &[
+        "secrets.bin",
+        "secrets.vault",
+        "skills.bin",
+        "skills.vault",
+        "keys.bin",
+        "keys.vault",
+        "hive_secrets.bin",
+        "hive_secrets.vault",
+    ];
+
+    !VAULT_PAYLOADS
+        .iter()
+        .map(|name| data_dir.join(name))
+        .any(|path| path.exists())
 }
 
 fn archive_profile_for_clean_start() -> Result<PathBuf, String> {
@@ -185,6 +277,23 @@ fn prompt_clean_start_for_kek_recovery(_message: &str) -> bool {
 fn maybe_offer_clean_start_recovery(message: &str) -> Result<bool, String> {
     if !is_clean_start_recovery_candidate(message) {
         return Ok(false);
+    }
+
+    let data_dir = AppConfig::default_paths().data_dir;
+    if is_disposable_bootstrap_profile(&data_dir) {
+        tracing::warn!(
+            "Startup detected an unrecoverable disposable bootstrap profile at {}; auto-archiving without prompting",
+            data_dir.display()
+        );
+        let backup_root = archive_profile_for_clean_start()?;
+        relaunch_current_executable().map_err(|e| {
+            format!(
+                "{}\nArchived disposable bootstrap profile backup: {}",
+                e,
+                backup_root.display()
+            )
+        })?;
+        return Ok(true);
     }
 
     if !prompt_clean_start_for_kek_recovery(message) {
@@ -539,10 +648,12 @@ fn try_run() -> Result<(), String> {
 
     let log_buffer = log_capture::new_log_buffer();
     log_capture::init_tracing(log_buffer.clone());
+    let mut startup = StartupCycle::begin();
 
     let current_version = env!("CARGO_PKG_VERSION");
     let hive_data_dir = abigail_core::AppConfig::default_paths().data_dir;
     install_upgrade::run_preflight(&hive_data_dir, current_version)?;
+    startup.stage("preflight complete");
 
     let identity_manager = Arc::new(
         IdentityManager::new(hive_data_dir.clone())
@@ -550,6 +661,7 @@ fn try_run() -> Result<(), String> {
     );
     let startup_agent_id =
         install_upgrade::run_identity_upgrade(&hive_data_dir, current_version, &identity_manager)?;
+    startup.stage("identity manager ready");
 
     let mut config = get_config();
     let mut active_agent_id = None;
@@ -589,6 +701,14 @@ fn try_run() -> Result<(), String> {
             }
         }
     }
+    tracing::info!(
+        "Startup config resolved: data_dir={} db_path={} is_hive={} active_agent_id={:?}",
+        config.data_dir.display(),
+        config.db_path.display(),
+        config.is_hive,
+        active_agent_id
+    );
+    startup.stage("active config resolved");
 
     let data_dir = config.data_dir.clone();
     let iggy_connection = config.iggy_connection.clone();
@@ -614,6 +734,7 @@ fn try_run() -> Result<(), String> {
     ));
 
     let hive = Arc::new(Hive::new(secrets.clone(), hive_secrets.clone()));
+    startup.stage("vaults and registries prepared");
 
     let router = tauri::async_runtime::block_on(async {
         let built = hive
@@ -622,6 +743,7 @@ fn try_run() -> Result<(), String> {
             .map_err(|e| format!("Failed to build LLM providers: {e}"))?;
         Ok::<_, String>(IdEgoRouter::from_built_providers(built))
     })?;
+    startup.stage("provider router built");
 
     // Initialize model registry from persisted catalog
     let model_registry = {
@@ -668,12 +790,17 @@ fn try_run() -> Result<(), String> {
         MemoryStore::open_with_config(&config)
             .map_err(|e| format!("Failed to open MemoryStore: {e}"))?,
     ));
+    startup.stage("memory store opened");
     let agentic_runtime = Arc::new(agentic_runtime::AgenticRuntime::new(&data_dir));
     #[allow(deprecated)]
     let orchestration_scheduler = Arc::new(OrchestrationScheduler::new(data_dir.clone()));
 
     // Open job queue database for async task management.
     let job_queue = {
+        tracing::info!(
+            "Opening Surreal job queue store at {}",
+            config.db_path.display()
+        );
         let queue_store =
             PersistenceHandle::open(&config.db_path, EntityScope::Hive).map_err(|e| {
                 format!(
@@ -686,9 +813,11 @@ fn try_run() -> Result<(), String> {
             stream_broker.clone(),
         ))
     };
+    startup.stage("job queue opened");
 
     // Seed skill instructions into data_dir when absent (first run / clean install).
     skill_instructions::bootstrap_if_needed(&data_dir);
+    startup.stage("skill instructions bootstrapped");
 
     let state = AppState {
         config: RwLock::new(config),
@@ -736,14 +865,16 @@ fn try_run() -> Result<(), String> {
         )),
         force_override: RwLock::new(crate::state::ForceOverride::default()),
     };
+    startup.stage("app state assembled");
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let handle = app.handle();
             let state = handle.state::<AppState>();
+            tracing::info!("Startup setup: entering Tauri setup hook");
 
             tauri::async_runtime::block_on(async {
                 state
@@ -752,12 +883,15 @@ fn try_run() -> Result<(), String> {
                     .await
                     .map_err(|e| e.to_string())
             })?;
+            tracing::info!("Startup setup: agentic recovery initialized");
 
             register_runtime_subagents(&state)?;
+            tracing::info!("Startup setup: runtime subagents registered");
 
             // Register Hive Management Skill
             let hive_ops = Arc::new(crate::hive_ops::TauriHiveOps::new(handle.clone()));
             register_hive_management_skill(&state.registry, hive_ops);
+            tracing::info!("Startup setup: Hive management skill registered");
 
             // Register Backup Management Skill
             let backup_ops = Arc::new(crate::backup_ops::TauriBackupOps::new(handle.clone()));
@@ -807,6 +941,7 @@ fn try_run() -> Result<(), String> {
 
             // Register identity-bound skills that need the active entity data dir.
             install_identity_bound_skills(&state)?;
+            tracing::info!("Startup setup: identity-bound skills registered");
 
             // Register native Rust skills (compiled into the binary).
             {
@@ -824,6 +959,7 @@ fn try_run() -> Result<(), String> {
                     state.skills_secrets.clone(),
                 );
             }
+            tracing::info!("Startup setup: native skills registered");
 
             // Register configured MCP servers as skills (HTTP transport).
             {
@@ -1243,21 +1379,23 @@ fn try_run() -> Result<(), String> {
             set_runtime_mode
         ])
         .build(tauri::generate_context!())
-        .map_err(|e| format!("Failed to build Tauri app: {e}"))?
-        .run(|app_handle, event| {
-            if let tauri::RunEvent::Exit = event {
-                // Gracefully shut down managed Ollama process
-                let state = app_handle.state::<crate::state::AppState>();
-                let ollama = state.ollama.clone();
-                tauri::async_runtime::block_on(async {
-                    let mut guard = ollama.lock().await;
-                    if let Some(ref mut mgr) = *guard {
-                        tracing::info!("App exiting: shutting down managed Ollama");
-                        mgr.shutdown();
-                    }
-                });
-            }
-        });
+        .map_err(|e| format!("Failed to build Tauri app: {e}"))?;
+    startup.stage("tauri app built");
+    startup.ready();
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            // Gracefully shut down managed Ollama process
+            let state = app_handle.state::<crate::state::AppState>();
+            let ollama = state.ollama.clone();
+            tauri::async_runtime::block_on(async {
+                let mut guard = ollama.lock().await;
+                if let Some(ref mut mgr) = *guard {
+                    tracing::info!("App exiting: shutting down managed Ollama");
+                    mgr.shutdown();
+                }
+            });
+        }
+    });
 
     Ok(())
 }
@@ -1277,6 +1415,81 @@ mod tests {
         assert!(!is_clean_start_recovery_candidate(
             "Failed to build Tauri app: icon resource missing"
         ));
+    }
+
+    #[test]
+    fn disposable_bootstrap_profile_detects_unborn_hive_only_state() {
+        let root = std::env::temp_dir().join(format!(
+            "abigail_disposable_profile_{}",
+            uuid::Uuid::new_v4()
+        ));
+        let data_dir = root.join("data");
+        let hive_id = "726cde06-380a-40c9-a1bf-625cc9a4a659";
+        let hive_dir = data_dir.join("identities").join(hive_id);
+        std::fs::create_dir_all(&hive_dir).unwrap();
+
+        let mut global = GlobalConfig::new(&data_dir);
+        global
+            .register_agent(abigail_core::AgentEntry {
+                id: hive_id.to_string(),
+                name: "Abigail Hive".to_string(),
+                is_hive: true,
+                directory: PathBuf::from("identities").join(hive_id),
+            })
+            .unwrap();
+        global.save(&data_dir).unwrap();
+
+        let mut hive_config = AppConfig::default_paths();
+        hive_config.data_dir = hive_dir.clone();
+        hive_config.models_dir = hive_dir.join("models");
+        hive_config.docs_dir = hive_dir.join("docs");
+        hive_config.db_path = data_dir.join("memory.db");
+        hive_config.agent_name = Some("Abigail Hive".to_string());
+        hive_config.is_hive = true;
+        hive_config.birth_complete = false;
+        hive_config.save(&hive_dir.join("config.json")).unwrap();
+
+        assert!(is_disposable_bootstrap_profile(&data_dir));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn disposable_bootstrap_profile_rejects_existing_vault_payloads() {
+        let root = std::env::temp_dir().join(format!(
+            "abigail_non_disposable_profile_{}",
+            uuid::Uuid::new_v4()
+        ));
+        let data_dir = root.join("data");
+        let hive_id = "726cde06-380a-40c9-a1bf-625cc9a4a659";
+        let hive_dir = data_dir.join("identities").join(hive_id);
+        std::fs::create_dir_all(&hive_dir).unwrap();
+
+        let mut global = GlobalConfig::new(&data_dir);
+        global
+            .register_agent(abigail_core::AgentEntry {
+                id: hive_id.to_string(),
+                name: "Abigail Hive".to_string(),
+                is_hive: true,
+                directory: PathBuf::from("identities").join(hive_id),
+            })
+            .unwrap();
+        global.save(&data_dir).unwrap();
+
+        let mut hive_config = AppConfig::default_paths();
+        hive_config.data_dir = hive_dir.clone();
+        hive_config.models_dir = hive_dir.join("models");
+        hive_config.docs_dir = hive_dir.join("docs");
+        hive_config.db_path = data_dir.join("memory.db");
+        hive_config.agent_name = Some("Abigail Hive".to_string());
+        hive_config.is_hive = true;
+        hive_config.birth_complete = false;
+        hive_config.save(&hive_dir.join("config.json")).unwrap();
+        std::fs::write(data_dir.join("hive_secrets.bin"), b"payload").unwrap();
+
+        assert!(!is_disposable_bootstrap_profile(&data_dir));
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

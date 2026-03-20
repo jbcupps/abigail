@@ -244,9 +244,10 @@ pub async fn load_agent(state: State<'_, AppState>, agent_id: String) -> Result<
         let config = state.config.read().map_err(|e| e.to_string())?;
         let new_store =
             abigail_memory::MemoryStore::open_with_config(&config).map_err(|e| e.to_string())?;
+        let store_path = new_store.path().to_path_buf();
         let mut memory = state.memory.write().map_err(|e| e.to_string())?;
         *memory = new_store;
-        tracing::info!("load_agent: reopened MemoryStore at {:?}", config.db_path);
+        tracing::info!("load_agent: reopened MemoryStore at {:?}", store_path);
     }
 
     crate::rebuild_router(&state).await?;
