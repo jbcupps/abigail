@@ -2,10 +2,10 @@ use crate::schema;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::OnceLock;
-use surrealdb::engine::local::{Db, Mem, SurrealKv};
+use std::sync::{Arc, Mutex, OnceLock};
+use surrealdb::engine::local::{Db, Mem};
 use surrealdb::types::{Number as SurrealNumber, RecordIdKey, Value as SurrealValue};
 use surrealdb::Surreal;
 use thiserror::Error;
@@ -105,14 +105,13 @@ impl PersistenceHandle {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::create_dir_all(&path)?;
+        let path = normalize_store_path(&path)?;
 
         let runtime = persistence_runtime()?;
-        let init_path = path.clone();
+        let base_db = shared_file_engine(&path)?;
         let init_scope = scope.clone();
         let db = block_on_runtime(runtime, async move {
-            let db = Surreal::new::<SurrealKv>(init_path)
-                .await
-                .map_err(PersistenceError::from)?;
+            let db = base_db.as_ref().clone();
             db.use_ns("abigail")
                 .use_db(init_scope.database_name())
                 .await
@@ -120,6 +119,11 @@ impl PersistenceHandle {
             schema::ensure_schema(&db, &init_scope).await?;
             Ok::<_, PersistenceError>(db)
         })?;
+        tracing::info!(
+            "Persistence scope ready: scope={} path={}",
+            scope.label(),
+            path.display()
+        );
 
         Ok(Self {
             inner: Arc::new(PersistenceInner {
@@ -315,6 +319,76 @@ fn persistence_runtime() -> Result<&'static tokio::runtime::Runtime> {
     }
 }
 
+fn normalize_store_path(path: &Path) -> Result<PathBuf> {
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+
+    #[cfg(windows)]
+    {
+        let raw = path.to_string_lossy();
+        if let Some(stripped) = raw.strip_prefix(r"\\?\") {
+            return Ok(PathBuf::from(stripped));
+        }
+    }
+
+    Ok(path)
+}
+
+fn shared_file_engine(path: &Path) -> Result<Arc<Surreal<Db>>> {
+    let cache = file_engine_cache();
+    {
+        let cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(db) = cache.get(path) {
+            tracing::debug!("Persistence engine cache hit: {}", path.display());
+            return Ok(db.clone());
+        }
+    }
+
+    tracing::info!(
+        "Persistence engine cache miss: opening embedded Surreal store at {}",
+        path.display()
+    );
+    let runtime = persistence_runtime()?;
+    let endpoint_path = local_engine_open_path(path);
+    let opened = block_on_runtime(runtime, async move {
+        // Persist the embedded store with the local Mem engine. This keeps the
+        // runtime single-host and avoids SurrealKV's Windows write failures.
+        Surreal::new::<Mem>(endpoint_path)
+            .sync("never")
+            .await
+            .map_err(PersistenceError::from)
+    })?;
+    let opened = Arc::new(opened);
+
+    let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+    Ok(cache
+        .entry(path.to_path_buf())
+        .or_insert_with(|| opened.clone())
+        .clone())
+}
+
+fn file_engine_cache() -> &'static Mutex<HashMap<PathBuf, Arc<Surreal<Db>>>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<Surreal<Db>>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn local_engine_open_path(path: &Path) -> String {
+    let mut raw = path.to_string_lossy().replace('\\', "/");
+
+    #[cfg(windows)]
+    {
+        let bytes = raw.as_bytes();
+        if bytes.len() >= 2 && bytes[1] == b':' && !raw.starts_with('/') {
+            raw.insert(0, '/');
+        }
+    }
+
+    raw
+}
+
 fn surreal_value_to_json(value: SurrealValue) -> Value {
     match value {
         SurrealValue::None | SurrealValue::Null => Value::Null,
@@ -380,5 +454,62 @@ fn record_id_to_json(key: RecordIdKey) -> Value {
                 .collect(),
         ),
         RecordIdKey::Range(value) => Value::String(format!("{value:?}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+    use uuid::Uuid;
+
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+    struct TestDoc {
+        id: String,
+        value: String,
+    }
+
+    #[test]
+    fn file_backed_handles_can_share_one_embedded_store_across_scopes() {
+        let root = std::env::temp_dir().join(format!("abigail-persistence-{}", Uuid::new_v4()));
+        let path = root.join("memory.db");
+
+        let hive = PersistenceHandle::open(&path, EntityScope::Hive).unwrap();
+        let entity =
+            PersistenceHandle::open(&path, EntityScope::Entity("entity-a".to_string())).unwrap();
+
+        hive.upsert(
+            "hive_meta",
+            "primary",
+            &TestDoc {
+                id: "primary".to_string(),
+                value: "hive".to_string(),
+            },
+        )
+        .unwrap();
+        entity
+            .upsert(
+                "memory_entry",
+                "entity-doc",
+                &TestDoc {
+                    id: "entity-doc".to_string(),
+                    value: "entity".to_string(),
+                },
+            )
+            .unwrap();
+
+        let hive_doc = hive
+            .select_record::<TestDoc>("hive_meta", "primary")
+            .unwrap()
+            .unwrap();
+        let entity_doc = entity
+            .select_record::<TestDoc>("memory_entry", "entity-doc")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(hive_doc.value, "hive");
+        assert_eq!(entity_doc.value, "entity");
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }

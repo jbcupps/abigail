@@ -12,5 +12,6 @@ serde_json.workspace = true
 surrealdb.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 uuid.workspace = true
 sqlx = { version = "0.8.1", default-features = false, features = ["sqlite", "runtime-tokio-rustls", "chrono", "uuid"] }

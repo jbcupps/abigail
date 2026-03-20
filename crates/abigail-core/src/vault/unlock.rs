@@ -21,6 +21,7 @@ const PASSPHRASE_ENV: &str = "ABIGAIL_VAULT_PASSPHRASE";
 const RAW_KEK_ENV: &str = "ABIGAIL_VAULT_RAW_KEY";
 const PASSPHRASE_SALT: &[u8] = b"abigail-vault-passphrase-salt-v1";
 const KDF_METADATA_FILE: &str = "vault.kdf.json";
+const WINDOWS_KEK_FALLBACK_FILE: &str = "vault.kek.dpapi";
 const ARGON2_MEMORY_COST_KIB: u32 = 64 * 1024;
 const ARGON2_TIME_COST: u32 = 3;
 const ARGON2_PARALLELISM: u32 = 1;
@@ -98,6 +99,24 @@ impl UnlockProvider for HybridUnlockProvider {
         // stable KEK + sentinel check must succeed before runtime unlock is accepted.
         if let Some(kek) = os_keyring_load_optional()? {
             let sentinel_value = verify_or_create_sentinel(&data_root, &kek)?;
+            if let Err(error) = persist_windows_kek_fallback(&data_root, &kek) {
+                tracing::warn!(
+                    "Stable KEK loaded from OS keyring but fallback persistence failed: {}",
+                    error
+                );
+            }
+            super::cache_session_root_kek(kek, sentinel_value);
+            return Ok(kek);
+        }
+
+        if let Some(kek) = load_windows_kek_fallback_optional(&data_root)? {
+            tracing::warn!(
+                "Stable KEK recovered from DPAPI fallback file because OS keyring lookup failed"
+            );
+            if let Err(error) = os_keyring_store_verified(&kek) {
+                tracing::warn!("Failed to repair OS keyring from fallback KEK: {}", error);
+            }
+            let sentinel_value = verify_or_create_sentinel(&data_root, &kek)?;
             super::cache_session_root_kek(kek, sentinel_value);
             return Ok(kek);
         }
@@ -131,12 +150,29 @@ impl UnlockProvider for HybridUnlockProvider {
         // First boot only (no sentinel exists): create stable KEK once.
         tracing::info!("No stable vault KEK found; bootstrapping initial root key");
         let kek = generate_random_kek();
-        os_keyring_store(&kek).map_err(|e| {
-            CoreError::Vault(format!(
-                "Recovery Mode: failed to persist stable KEK '{}': {}",
-                KEYRING_ACCOUNT, e
-            ))
-        })?;
+        let keyring_persisted = match os_keyring_store_verified(&kek) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!("Stable KEK could not be verified in OS keyring: {}", error);
+                false
+            }
+        };
+        let fallback_persisted = match persist_windows_kek_fallback(&data_root, &kek) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!(
+                    "Stable KEK could not be persisted to DPAPI fallback file: {}",
+                    error
+                );
+                false
+            }
+        };
+        if !keyring_persisted && !fallback_persisted {
+            return Err(CoreError::Vault(format!(
+                "Recovery Mode: failed to persist stable KEK '{}': Windows keyring verification failed and no DPAPI fallback could be written.",
+                KEYRING_ACCOUNT
+            )));
+        }
         let sentinel_value = super::write_encrypted_sentinel(&data_root, &kek)?;
         super::cache_session_root_kek(kek, sentinel_value);
         Ok(kek)
@@ -337,6 +373,51 @@ fn os_keyring_store(kek: &[u8; KEK_LEN]) -> Result<()> {
     Ok(())
 }
 
+fn os_keyring_store_verified(kek: &[u8; KEK_LEN]) -> Result<()> {
+    os_keyring_store(kek)?;
+    let reloaded = os_keyring_load()?;
+    if &reloaded != kek {
+        return Err(CoreError::Keyring(
+            "keyring verification failed: stored KEK did not round-trip".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn windows_kek_fallback_path(data_root: &Path) -> PathBuf {
+    data_root.join(WINDOWS_KEK_FALLBACK_FILE)
+}
+
+#[cfg(windows)]
+fn persist_windows_kek_fallback(data_root: &Path, kek: &[u8; KEK_LEN]) -> Result<()> {
+    let encrypted = crate::dpapi::dpapi_encrypt(kek)?;
+    crate::secure_fs::write_bytes_atomic(&windows_kek_fallback_path(data_root), &encrypted)
+}
+
+#[cfg(not(windows))]
+fn persist_windows_kek_fallback(_data_root: &Path, _kek: &[u8; KEK_LEN]) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(windows)]
+fn load_windows_kek_fallback_optional(data_root: &Path) -> Result<Option<[u8; KEK_LEN]>> {
+    let path = windows_kek_fallback_path(data_root);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let encrypted = std::fs::read(&path)?;
+    let decrypted = crate::dpapi::dpapi_decrypt(&encrypted)?;
+    let kek: [u8; KEK_LEN] = decrypted
+        .try_into()
+        .map_err(|_| CoreError::Vault("DPAPI fallback KEK wrong length".to_string()))?;
+    Ok(Some(kek))
+}
+
+#[cfg(not(windows))]
+fn load_windows_kek_fallback_optional(_data_root: &Path) -> Result<Option<[u8; KEK_LEN]>> {
+    Ok(None)
+}
+
 fn verify_or_create_sentinel(data_root: &Path, kek: &[u8; KEK_LEN]) -> Result<String> {
     let sentinel_path = super::sentinel_path(data_root);
     if sentinel_path.exists() {
@@ -372,6 +453,22 @@ mod tests {
         let a = PassphraseUnlockProvider::new("alpha");
         let b = PassphraseUnlockProvider::new("beta");
         assert_ne!(a.root_kek().unwrap(), b.root_kek().unwrap());
+    }
+
+    #[test]
+    fn windows_kek_fallback_roundtrips() {
+        let dir = std::env::temp_dir().join("abigail_windows_kek_fallback_roundtrip");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut kek = [0u8; KEK_LEN];
+        kek.copy_from_slice(&[7u8; KEK_LEN]);
+
+        persist_windows_kek_fallback(&dir, &kek).unwrap();
+        let loaded = load_windows_kek_fallback_optional(&dir).unwrap().unwrap();
+        assert_eq!(loaded, kek);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
