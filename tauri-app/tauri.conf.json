@@ -61,16 +61,5 @@
     "externalBin": [],
     "copyright": "Copyright (c) 2025-2026 Jim Cupps",
     "category": "Developer"
-  },
-  "plugins": {
-    "updater": {
-      "pubkey": "",
-      "endpoints": [
-        "https://github.com/jbcupps/abigail/releases/latest/download/latest.json"
-      ],
-      "windows": {
-        "installMode": "passive"
-      }
-    }
   }
 }

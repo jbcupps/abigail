@@ -2,8 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
-// Re-export the shared envelope from hive-core.
-pub use hive_core::ApiEnvelope;
+// Re-export the shared envelope and Hive-managed runtime contract types.
+pub use hive_core::{
+    ApiEnvelope, EntityOutboxRecord, ForgeApprovalJob, RuntimeSessionLease, RuntimeSessionStatus,
+    SkillAssignment,
+};
 
 // ---------------------------------------------------------------------------
 // Chat
@@ -297,6 +300,46 @@ pub struct EntityStatus {
     pub ego_provider: Option<String>,
     pub routing_mode: String,
     pub skills_count: usize,
+}
+
+/// Runtime session status exposed by the entity runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeSessionStatusResponse {
+    pub lease: RuntimeSessionLease,
+    pub connected_to_hive: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_hive_sync_at_utc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_hive_error: Option<String>,
+    pub assignment_count: usize,
+}
+
+/// Current local outbox sync status for the runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityOutboxStatus {
+    pub queued_records: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oldest_record_at_utc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_sync_at_utc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_sync_error: Option<String>,
+}
+
+/// Acknowledgement that a skill artifact was applied or reloaded in the runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillApplyAcknowledgement {
+    pub skill_id: String,
+    pub status: String,
+    pub applied_at_utc: String,
+}
+
+/// List wrapper for recent skill apply acknowledgements.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillApplyAcknowledgementList {
+    pub acknowledgements: Vec<SkillApplyAcknowledgement>,
 }
 
 // ---------------------------------------------------------------------------

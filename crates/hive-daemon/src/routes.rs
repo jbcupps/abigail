@@ -6,9 +6,13 @@ use axum::{
     Json,
 };
 use hive_core::{
-    ApiEnvelope, CreateEntityRequest, CreateEntityResponse, EntityInfo, HiveStatus, ProviderConfig,
-    ProviderModelInfo, ProviderModelsRequest, ProviderModelsResponse, SecretListResponse,
-    SecretValueResponse, SignEntityRequest, StoreSecretRequest,
+    ApiEnvelope, CreateEntityRequest, CreateEntityResponse, CreateForgeApprovalJobRequest,
+    EntityInfo, ForgeApprovalJobsResponse, HiveStatus, OutboxSyncRequest, OutboxSyncResponse,
+    ProviderConfig, ProviderModelInfo, ProviderModelsRequest, ProviderModelsResponse,
+    RuntimeHeartbeatRequest, RuntimeHeartbeatResponse, RuntimeRegistrationRequest,
+    RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus, SecretListResponse,
+    SecretValueResponse, SetSkillAssignmentsRequest, SignEntityRequest, SkillAssignmentsResponse,
+    StoreSecretRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -284,5 +288,156 @@ pub async fn discover_models(
             }))
         }
         Err(e) => Json(ApiEnvelope::error(e)),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/runtime/sessions
+// ---------------------------------------------------------------------------
+
+pub async fn issue_runtime_session(
+    State(state): State<HiveDaemonState>,
+    Json(body): Json<RuntimeSessionRequest>,
+) -> Json<ApiEnvelope<RuntimeSessionLease>> {
+    match state.identity_manager.list_agents() {
+        Ok(agents) => {
+            let Some(agent) = agents.into_iter().find(|agent| agent.id == body.entity_id) else {
+                return Json(ApiEnvelope::error(format!(
+                    "Entity {} not found",
+                    body.entity_id
+                )));
+            };
+
+            match state.runtime_control.lock() {
+                Ok(mut control) => Json(ApiEnvelope::success(control.issue_session(
+                    body,
+                    Some(agent.name),
+                    Some(state.hive_url.clone()),
+                ))),
+                Err(e) => Json(ApiEnvelope::error(e.to_string())),
+            }
+        }
+        Err(e) => Json(ApiEnvelope::error(e)),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/runtime/register
+// ---------------------------------------------------------------------------
+
+pub async fn register_runtime(
+    State(state): State<HiveDaemonState>,
+    Json(body): Json<RuntimeRegistrationRequest>,
+) -> Json<ApiEnvelope<RuntimeSessionStatus>> {
+    match state.runtime_control.lock() {
+        Ok(mut control) => match control.register_runtime(body) {
+            Ok(status) => Json(ApiEnvelope::success(status)),
+            Err(e) => Json(ApiEnvelope::error(e)),
+        },
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/runtime/heartbeat
+// ---------------------------------------------------------------------------
+
+pub async fn record_runtime_heartbeat(
+    State(state): State<HiveDaemonState>,
+    Json(body): Json<RuntimeHeartbeatRequest>,
+) -> Json<ApiEnvelope<RuntimeHeartbeatResponse>> {
+    match state.runtime_control.lock() {
+        Ok(mut control) => match control.record_heartbeat(body) {
+            Ok(response) => Json(ApiEnvelope::success(response)),
+            Err(e) => Json(ApiEnvelope::error(e)),
+        },
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/runtime/sessions/:lease_id
+// ---------------------------------------------------------------------------
+
+pub async fn get_runtime_session(
+    State(state): State<HiveDaemonState>,
+    Path(lease_id): Path<String>,
+) -> Json<ApiEnvelope<RuntimeSessionStatus>> {
+    match state.runtime_control.lock() {
+        Ok(control) => match control.session_status(&lease_id) {
+            Some(status) => Json(ApiEnvelope::success(status)),
+            None => Json(ApiEnvelope::error(format!(
+                "Runtime lease {} not found",
+                lease_id
+            ))),
+        },
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GET/POST /v1/entities/:id/assignments
+// ---------------------------------------------------------------------------
+
+pub async fn get_skill_assignments(
+    State(state): State<HiveDaemonState>,
+    Path(entity_id): Path<String>,
+) -> Json<ApiEnvelope<SkillAssignmentsResponse>> {
+    match state.runtime_control.lock() {
+        Ok(control) => Json(ApiEnvelope::success(control.assignments(&entity_id))),
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+pub async fn set_skill_assignments(
+    State(state): State<HiveDaemonState>,
+    Path(entity_id): Path<String>,
+    Json(body): Json<SetSkillAssignmentsRequest>,
+) -> Json<ApiEnvelope<SkillAssignmentsResponse>> {
+    match state.runtime_control.lock() {
+        Ok(mut control) => Json(ApiEnvelope::success(control.set_assignments(&entity_id, body))),
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GET/POST /v1/entities/:id/forge-approvals
+// ---------------------------------------------------------------------------
+
+pub async fn get_forge_approval_jobs(
+    State(state): State<HiveDaemonState>,
+    Path(entity_id): Path<String>,
+) -> Json<ApiEnvelope<ForgeApprovalJobsResponse>> {
+    match state.runtime_control.lock() {
+        Ok(control) => Json(ApiEnvelope::success(control.forge_jobs(&entity_id))),
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+pub async fn create_forge_approval_job(
+    State(state): State<HiveDaemonState>,
+    Path(entity_id): Path<String>,
+    Json(body): Json<CreateForgeApprovalJobRequest>,
+) -> Json<ApiEnvelope<hive_core::ForgeApprovalJob>> {
+    match state.runtime_control.lock() {
+        Ok(mut control) => Json(ApiEnvelope::success(control.create_forge_job(&entity_id, body))),
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/runtime/outbox/sync
+// ---------------------------------------------------------------------------
+
+pub async fn sync_runtime_outbox(
+    State(state): State<HiveDaemonState>,
+    Json(body): Json<OutboxSyncRequest>,
+) -> Json<ApiEnvelope<OutboxSyncResponse>> {
+    match state.runtime_control.lock() {
+        Ok(mut control) => match control.sync_outbox(body) {
+            Ok(response) => Json(ApiEnvelope::success(response)),
+            Err(e) => Json(ApiEnvelope::error(e)),
+        },
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
     }
 }

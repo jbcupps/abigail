@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Abigail Hive</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f3efe5;
+        --panel: rgba(255, 250, 242, 0.88);
+        --ink: #1b2a28;
+        --muted: #5f6f69;
+        --accent: #135d56;
+        --accent-strong: #0b403b;
+        --warm: #b25c25;
+        --line: rgba(27, 42, 40, 0.12);
+        --shadow: 0 24px 80px rgba(26, 34, 31, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(19, 93, 86, 0.16), transparent 24%),
+          radial-gradient(circle at bottom right, rgba(178, 92, 37, 0.14), transparent 26%),
+          linear-gradient(180deg, #faf6ed 0%, var(--bg) 100%);
+      }
+
+      main {
+        width: min(1400px, calc(100vw - 28px));
+        margin: 0 auto;
+        padding: 28px 0 32px;
+      }
+
+      .hero {
+        display: flex;
+        justify-content: space-between;
+        align-items: end;
+        gap: 18px;
+        margin-bottom: 20px;
+      }
+
+      .eyebrow {
+        margin: 0 0 10px;
+        color: var(--warm);
+        font-size: 0.8rem;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(2.4rem, 5vw, 4.2rem);
+        line-height: 0.95;
+      }
+
+      .lede {
+        max-width: 760px;
+        margin: 14px 0 0;
+        color: var(--muted);
+        font-size: 1.02rem;
+      }
+
+      .dashboard {
+        display: grid;
+        gap: 18px;
+        grid-template-columns: 1.2fr 1.8fr;
+      }
+
+      .column {
+        display: grid;
+        gap: 18px;
+        align-content: start;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        padding: 20px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(12px);
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .summary-card {
+        border-radius: 18px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(27, 42, 40, 0.08);
+      }
+
+      .summary-label {
+        display: block;
+        color: var(--muted);
+        font-size: 0.82rem;
+        margin-bottom: 8px;
+      }
+
+      .summary-value {
+        font-size: 1.05rem;
+        font-weight: 700;
+        word-break: break-word;
+      }
+
+      .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+
+      .panel-header h2,
+      .panel-header h3,
+      h3 {
+        margin: 0;
+      }
+
+      .pill {
+        border-radius: 999px;
+        padding: 7px 11px;
+        font-size: 0.8rem;
+        font-weight: 700;
+      }
+
+      .pill-idle {
+        background: rgba(27, 42, 40, 0.08);
+        color: var(--muted);
+      }
+
+      .pill-ok {
+        background: rgba(19, 93, 86, 0.14);
+        color: var(--accent);
+      }
+
+      .pill-warn {
+        background: rgba(178, 92, 37, 0.14);
+        color: var(--warm);
+      }
+
+      label {
+        display: grid;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      input,
+      button {
+        font: inherit;
+      }
+
+      input {
+        width: 100%;
+        border-radius: 14px;
+        border: 1px solid rgba(27, 42, 40, 0.15);
+        background: rgba(255, 255, 255, 0.88);
+        padding: 12px 14px;
+        color: var(--ink);
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      button {
+        cursor: pointer;
+        border: 0;
+        border-radius: 999px;
+        padding: 11px 16px;
+        background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+        color: white;
+        font-weight: 700;
+      }
+
+      button.secondary {
+        background: rgba(27, 42, 40, 0.08);
+        color: var(--ink);
+      }
+
+      .entity-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .entity-card {
+        border-radius: 18px;
+        border: 1px solid rgba(27, 42, 40, 0.08);
+        background: rgba(255, 255, 255, 0.66);
+        padding: 14px;
+      }
+
+      .entity-card.active {
+        border-color: rgba(19, 93, 86, 0.36);
+        box-shadow: inset 0 0 0 1px rgba(19, 93, 86, 0.18);
+      }
+
+      .entity-name {
+        font-size: 1rem;
+        font-weight: 800;
+      }
+
+      .entity-meta {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 0.84rem;
+        line-height: 1.45;
+      }
+
+      .entity-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .json-view {
+        margin: 0;
+        border-radius: 18px;
+        background: rgba(24, 32, 31, 0.96);
+        color: #e8f0ed;
+        padding: 16px;
+        min-height: 140px;
+        max-height: 320px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: "Cascadia Code", Consolas, monospace;
+        font-size: 0.84rem;
+      }
+
+      .stack {
+        display: grid;
+        gap: 14px;
+      }
+
+      @media (max-width: 1080px) {
+        .dashboard {
+          grid-template-columns: 1fr;
+        }
+
+        .summary-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Control Plane</p>
+          <h1>Abigail Hive</h1>
+          <p class="lede">
+            Manage entities, inspect Hive connectivity, and issue runtime sessions from the new split-app shell instead of the placeholder splash page.
+          </p>
+        </div>
+        <div class="actions">
+          <button id="refresh-hive" type="button">Refresh Hive</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="summary-grid">
+          <article class="summary-card">
+            <span class="summary-label">Hive Daemon</span>
+            <div id="hive-url" class="summary-value">Loading…</div>
+          </article>
+          <article class="summary-card">
+            <span class="summary-label">Entities</span>
+            <div id="entity-count" class="summary-value">0</div>
+          </article>
+          <article class="summary-card">
+            <span class="summary-label">Hive Status</span>
+            <div id="hive-pill" class="pill pill-idle">Loading</div>
+          </article>
+        </div>
+      </section>
+
+      <section class="dashboard">
+        <div class="column">
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Create Entity</h2>
+            </div>
+            <label>
+              <span>Name</span>
+              <input id="new-entity-name" type="text" placeholder="Kitchen Helper, Mentor, Storyteller…" />
+            </label>
+            <div class="actions">
+              <button id="create-entity" type="button">Create Entity</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Entities</h2>
+              <span id="entity-list-pill" class="pill pill-idle">Idle</span>
+            </div>
+            <div id="entity-list" class="entity-list"></div>
+          </section>
+        </div>
+
+        <div class="column">
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Selected Entity</h2>
+              <span id="selected-pill" class="pill pill-idle">None</span>
+            </div>
+            <div id="selected-entity-meta" class="stack"></div>
+            <div class="actions" style="margin-top: 14px">
+              <button id="issue-runtime-session" type="button">Issue Runtime Session</button>
+              <button id="load-assignments" type="button" class="secondary">Load Assignments</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Latest Runtime Session Lease</h3>
+            </div>
+            <pre id="lease-output" class="json-view">No runtime session issued yet.</pre>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Skill Assignments</h3>
+            </div>
+            <pre id="assignments-output" class="json-view">Select an entity to inspect its assignments.</pre>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

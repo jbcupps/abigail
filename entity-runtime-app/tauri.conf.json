@@ -1,0 +1,26 @@
+{
+  "productName": "Abigail Entity Runtime",
+  "version": "0.0.1",
+  "identifier": "com.abigail.entity-runtime",
+  "build": {
+    "frontendDist": "dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Abigail Entity Runtime",
+        "width": 1180,
+        "height": 860,
+        "resizable": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": false,
+    "icon": [
+      "../tauri-app/icons/32x32.png",
+      "../tauri-app/icons/128x128.png",
+      "../tauri-app/icons/icon.ico"
+    ]
+  }
+}

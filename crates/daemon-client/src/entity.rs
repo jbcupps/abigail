@@ -1,6 +1,9 @@
 //! HTTP client for entity-daemon.
 
-use entity_core::{ChatRequest, ChatResponse, SkillInfo, ToolExecRequest, ToolExecResponse};
+use entity_core::{
+    ChatRequest, ChatResponse, EntityOutboxStatus, RuntimeSessionStatusResponse,
+    SkillApplyAcknowledgementList, SkillInfo, ToolExecRequest, ToolExecResponse,
+};
 use futures_util::StreamExt;
 use hive_core::ApiEnvelope;
 
@@ -44,6 +47,28 @@ impl EntityClient {
         let resp: ApiEnvelope<serde_json::Value> = self
             .client
             .get(format!("{}/v1/status", self.base_url))
+            .send()
+            .await?
+            .json()
+            .await?;
+        unwrap_envelope(resp)
+    }
+
+    pub async fn session_status(&self) -> anyhow::Result<RuntimeSessionStatusResponse> {
+        let resp: ApiEnvelope<RuntimeSessionStatusResponse> = self
+            .client
+            .get(format!("{}/v1/session/status", self.base_url))
+            .send()
+            .await?
+            .json()
+            .await?;
+        unwrap_envelope(resp)
+    }
+
+    pub async fn outbox_status(&self) -> anyhow::Result<EntityOutboxStatus> {
+        let resp: ApiEnvelope<EntityOutboxStatus> = self
+            .client
+            .get(format!("{}/v1/outbox/status", self.base_url))
             .send()
             .await?
             .json()
@@ -133,6 +158,19 @@ impl EntityClient {
         let resp: ApiEnvelope<Vec<SkillInfo>> = self
             .client
             .get(format!("{}/v1/skills", self.base_url))
+            .send()
+            .await?
+            .json()
+            .await?;
+        unwrap_envelope(resp)
+    }
+
+    pub async fn list_skill_apply_acknowledgements(
+        &self,
+    ) -> anyhow::Result<SkillApplyAcknowledgementList> {
+        let resp: ApiEnvelope<SkillApplyAcknowledgementList> = self
+            .client
+            .get(format!("{}/v1/skills/acks", self.base_url))
             .send()
             .await?
             .json()

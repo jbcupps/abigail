@@ -1,6 +1,11 @@
 //! HTTP client for hive-daemon.
 
-use hive_core::{ApiEnvelope, EntityInfo, ProviderConfig, SecretListResponse, SecretValueResponse};
+use hive_core::{
+    ApiEnvelope, EntityInfo, ForgeApprovalJobsResponse, OutboxSyncRequest, OutboxSyncResponse,
+    ProviderConfig, RuntimeHeartbeatRequest, RuntimeHeartbeatResponse, RuntimeRegistrationRequest,
+    RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus, SecretListResponse,
+    SecretValueResponse, SkillAssignmentsResponse,
+};
 
 /// HTTP client wrapping all hive-daemon REST endpoints.
 #[derive(Clone)]
@@ -119,6 +124,101 @@ impl HiveDaemonClient {
             .json()
             .await?;
         Ok(unwrap_envelope(resp)?.keys)
+    }
+
+    pub async fn issue_runtime_session(
+        &self,
+        entity_id: &str,
+        runtime_id: Option<String>,
+    ) -> anyhow::Result<RuntimeSessionLease> {
+        let resp: ApiEnvelope<RuntimeSessionLease> = self
+            .client
+            .post(format!("{}/v1/runtime/sessions", self.base_url))
+            .json(&RuntimeSessionRequest {
+                entity_id: entity_id.to_string(),
+                runtime_id,
+            })
+            .send()
+            .await?
+            .json()
+            .await?;
+        unwrap_envelope(resp)
+    }
+
+    pub async fn register_runtime(
+        &self,
+        request: &RuntimeRegistrationRequest,
+    ) -> anyhow::Result<RuntimeSessionStatus> {
+        let resp: ApiEnvelope<RuntimeSessionStatus> = self
+            .client
+            .post(format!("{}/v1/runtime/register", self.base_url))
+            .json(request)
+            .send()
+            .await?
+            .json()
+            .await?;
+        unwrap_envelope(resp)
+    }
+
+    pub async fn heartbeat(
+        &self,
+        request: &RuntimeHeartbeatRequest,
+    ) -> anyhow::Result<RuntimeHeartbeatResponse> {
+        let resp: ApiEnvelope<RuntimeHeartbeatResponse> = self
+            .client
+            .post(format!("{}/v1/runtime/heartbeat", self.base_url))
+            .json(request)
+            .send()
+            .await?
+            .json()
+            .await?;
+        unwrap_envelope(resp)
+    }
+
+    pub async fn get_skill_assignments(
+        &self,
+        entity_id: &str,
+    ) -> anyhow::Result<SkillAssignmentsResponse> {
+        let resp: ApiEnvelope<SkillAssignmentsResponse> = self
+            .client
+            .get(format!("{}/v1/entities/{}/assignments", self.base_url, entity_id))
+            .send()
+            .await?
+            .json()
+            .await?;
+        unwrap_envelope(resp)
+    }
+
+    pub async fn get_forge_approval_jobs(
+        &self,
+        entity_id: &str,
+    ) -> anyhow::Result<ForgeApprovalJobsResponse> {
+        let resp: ApiEnvelope<ForgeApprovalJobsResponse> = self
+            .client
+            .get(format!(
+                "{}/v1/entities/{}/forge-approvals",
+                self.base_url, entity_id
+            ))
+            .send()
+            .await?
+            .json()
+            .await?;
+        unwrap_envelope(resp)
+    }
+
+    pub async fn sync_outbox(
+        &self,
+        request: &OutboxSyncRequest,
+    ) -> anyhow::Result<OutboxSyncResponse> {
+        let resp: ApiEnvelope<OutboxSyncResponse> = self
+            .client
+            .post(format!("{}/v1/runtime/outbox/sync", self.base_url))
+            .json(request)
+            .send()
+            .await?
+            .json()
+            .await?;
+        unwrap_envelope(resp)
     }
 }
 

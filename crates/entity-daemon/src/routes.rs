@@ -8,8 +8,9 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::Json;
 use entity_core::{
     ApiEnvelope, CancelChatStreamResponse, CancelJobResponse, ChatRequest, ChatResponse,
-    EntityStatus, JobStatusResponse, ListJobsResponse, MemoryEntry, MemoryInsertRequest,
-    MemorySearchRequest, MemoryStats, QueueJobRecord, SkillInfo, SubmitJobRequest,
+    EntityOutboxStatus, EntityStatus, JobStatusResponse, ListJobsResponse, MemoryEntry,
+    MemoryInsertRequest, MemorySearchRequest, MemoryStats, QueueJobRecord,
+    RuntimeSessionStatusResponse, SkillApplyAcknowledgementList, SkillInfo, SubmitJobRequest,
     SubmitJobResponse, ToolExecRequest, ToolExecResponse, ToolInfo, TopicResultsResponse,
 };
 use futures_util::{Stream, StreamExt};
@@ -48,6 +49,41 @@ pub async fn get_status(State(state): State<EntityDaemonState>) -> Json<ApiEnvel
 }
 
 // ---------------------------------------------------------------------------
+// GET /v1/session/status
+// ---------------------------------------------------------------------------
+
+pub async fn get_session_status(
+    State(state): State<EntityDaemonState>,
+) -> Json<ApiEnvelope<RuntimeSessionStatusResponse>> {
+    let runtime_url = state.runtime_url.read().await.clone();
+    let last_hive_sync_at_utc = state.last_hive_sync_at_utc.read().await.clone();
+    let last_hive_error = state.last_hive_error.read().await.clone();
+    let assignment_count = state.skill_assignments.read().await.len();
+
+    Json(ApiEnvelope::success(RuntimeSessionStatusResponse {
+        lease: state.session_lease.clone(),
+        connected_to_hive: last_hive_error.is_none(),
+        runtime_url,
+        last_hive_sync_at_utc,
+        last_hive_error,
+        assignment_count,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/outbox/status
+// ---------------------------------------------------------------------------
+
+pub async fn get_outbox_status(
+    State(state): State<EntityDaemonState>,
+) -> Json<ApiEnvelope<EntityOutboxStatus>> {
+    match state.outbox.status() {
+        Ok(status) => Json(ApiEnvelope::success(status)),
+        Err(error) => Json(ApiEnvelope::error(error)),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // POST /v1/chat
 // ---------------------------------------------------------------------------
 
@@ -81,6 +117,13 @@ pub async fn chat(
     // Archive the user turn (async, fire-and-forget via StreamBroker).
     let user_turn = abigail_memory::ConversationTurn::new(&session_id, "user", &body.message);
     crate::memory_consumer::publish_turn(state.stream_broker.clone(), user_turn);
+    let _ = state.queue_outbox_record(
+        "chat_user_turn",
+        serde_json::json!({
+            "session_id": session_id.clone(),
+            "message": body.message.clone(),
+        }),
+    );
 
     let system_prompt = if status.mode == abigail_core::RoutingMode::CliOrchestrator {
         let prompt = entity_chat::build_cli_system_prompt(
@@ -182,6 +225,15 @@ pub async fn chat(
                 complexity_score,
             );
             crate::memory_consumer::publish_turn(state.stream_broker.clone(), asst_turn);
+            let _ = state.queue_outbox_record(
+                "chat_assistant_turn",
+                serde_json::json!({
+                    "session_id": session_id.clone(),
+                    "reply": tool_result.content.clone(),
+                    "provider": provider.clone(),
+                    "model_used": model_used.clone(),
+                }),
+            );
 
             state.maybe_auto_archive();
 
@@ -233,6 +285,13 @@ pub async fn chat_stream(
     // Archive user turn (async, fire-and-forget via StreamBroker).
     let user_turn = abigail_memory::ConversationTurn::new(&session_id, "user", &body.message);
     crate::memory_consumer::publish_turn(state.stream_broker.clone(), user_turn);
+    let _ = state.queue_outbox_record(
+        "chat_user_turn",
+        serde_json::json!({
+            "session_id": session_id.clone(),
+            "message": body.message.clone(),
+        }),
+    );
 
     let base_prompt =
         abigail_core::system_prompt::build_system_prompt(&state.docs_dir, &state.config.agent_name);
@@ -290,6 +349,7 @@ pub async fn chat_stream(
     let turns_since_archive = state.turns_since_archive.clone();
     let cancel_state = state.active_stream_cancel.clone();
     let sid = session_id.clone();
+    let state_for_stream = state.clone();
     tokio::spawn(async move {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
         let sse_fwd = sse_tx.clone();
@@ -351,6 +411,15 @@ pub async fn chat_stream(
                             complexity_score,
                         );
                 crate::memory_consumer::publish_turn(broker_for_stream, asst_turn);
+                let _ = state_for_stream.queue_outbox_record(
+                    "chat_assistant_turn",
+                    serde_json::json!({
+                        "session_id": sid.clone(),
+                        "reply": pipeline.content.clone(),
+                        "provider": provider.clone(),
+                        "model_used": model_used.clone(),
+                    }),
+                );
 
                 // Trigger auto-archive if threshold reached.
                 {
@@ -527,6 +596,19 @@ pub async fn list_skills(
 }
 
 // ---------------------------------------------------------------------------
+// GET /v1/skills/acks
+// ---------------------------------------------------------------------------
+
+pub async fn list_skill_apply_acknowledgements(
+    State(state): State<EntityDaemonState>,
+) -> Json<ApiEnvelope<SkillApplyAcknowledgementList>> {
+    let acknowledgements = state.recent_skill_acks.read().await.clone();
+    Json(ApiEnvelope::success(SkillApplyAcknowledgementList {
+        acknowledgements,
+    }))
+}
+
+// ---------------------------------------------------------------------------
 // POST /v1/tools/execute
 // ---------------------------------------------------------------------------
 
@@ -680,6 +762,15 @@ pub async fn memory_insert(
 
     match state.memory.insert_memory(&memory) {
         Ok(()) => {
+            let _ = state.queue_outbox_record(
+                "memory_insert",
+                serde_json::json!({
+                    "id": entry.id.clone(),
+                    "content": entry.content.clone(),
+                    "weight": entry.weight.clone(),
+                    "created_at": entry.created_at.clone(),
+                }),
+            );
             if let Some(ref hook) = state.memory_hook {
                 if let Err(e) = hook.on_memory_persisted(
                     &entry.id,
@@ -990,6 +1081,19 @@ mod tests {
         EntityDaemonState {
             entity_id: "test-entity".to_string(),
             config: AppConfig::default_paths(),
+            hive_url: "http://127.0.0.1:3141".to_string(),
+            runtime_id: "runtime-test".to_string(),
+            session_lease: hive_core::RuntimeSessionLease {
+                lease_id: "lease-test".to_string(),
+                entity_id: "test-entity".to_string(),
+                runtime_id: "runtime-test".to_string(),
+                entity_name: Some("Test Entity".to_string()),
+                hive_url: Some("http://127.0.0.1:3141".to_string()),
+                issued_at_utc: chrono::Utc::now().to_rfc3339(),
+                expires_at_utc: None,
+                offline_until_close: true,
+                lease_scope: "entity-runtime-session".to_string(),
+            },
             router: Arc::new(router),
             registry,
             executor,
@@ -1005,6 +1109,17 @@ mod tests {
             constraints: Arc::new(tokio::sync::RwLock::new(
                 abigail_router::ConstraintStore::new(),
             )),
+            outbox: Arc::new(crate::outbox::RuntimeOutbox::load(
+                test_scratch_dir("abigail_routes_test_outbox"),
+                64,
+            )
+            .expect("outbox")),
+            last_hive_sync_at_utc: Arc::new(tokio::sync::RwLock::new(None)),
+            last_hive_error: Arc::new(tokio::sync::RwLock::new(None)),
+            runtime_url: Arc::new(tokio::sync::RwLock::new(None)),
+            skill_assignments: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            forge_jobs: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            recent_skill_acks: Arc::new(tokio::sync::RwLock::new(Vec::new())),
         }
     }
 

@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "description": "Default permissions for Abigail Entity Runtime",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default"
+  ]
+}

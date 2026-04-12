@@ -1,8 +1,7 @@
 //! Hive-daemon integration tests — exercises the real binary over HTTP.
 //!
-//! Requires `cargo build -p hive-daemon` before running.
-//! Marked `#[ignore]` so they don't slow down `cargo test --workspace`;
-//! run explicitly with `cargo test -p hive-daemon --test integration -- --ignored`.
+//! Runs in the normal test path so daemon contract coverage is part of the
+//! required stabilization gate.
 
 use daemon_test_harness::HiveDaemonHandle;
 use std::time::Duration;
@@ -16,7 +15,6 @@ async fn hive() -> HiveDaemonHandle {
 }
 
 #[tokio::test]
-#[ignore]
 async fn health_returns_200() {
     let hive = hive().await;
     let resp = reqwest::get(format!("{}/health", hive.url()))
@@ -26,7 +24,6 @@ async fn health_returns_200() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn entity_lifecycle() {
     let hive = hive().await;
     let client = reqwest::Client::new();
@@ -68,7 +65,6 @@ async fn entity_lifecycle() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn secrets_crud() {
     let hive = hive().await;
     let client = reqwest::Client::new();
@@ -99,7 +95,7 @@ async fn secrets_crud() {
         .await
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
-    let keys = body["data"].as_array().expect("secrets list");
+    let keys = body["data"]["keys"].as_array().expect("secrets list");
     assert!(
         keys.iter().any(|k| k.as_str() == Some("test_key")),
         "stored key should appear in list"
@@ -107,7 +103,6 @@ async fn secrets_crud() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn provider_config() {
     let hive = hive().await;
     let client = reqwest::Client::new();

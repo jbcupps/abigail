@@ -8,6 +8,7 @@ mod capability_matcher;
 mod hive_client;
 mod job_scheduler;
 mod memory_consumer;
+mod outbox;
 mod queue_ops;
 mod routes;
 mod state;
@@ -26,7 +27,7 @@ use abigail_runtime::{
     register_supported_native_skills,
 };
 use abigail_skills::{Skill, SkillExecutionPolicy, SkillExecutor, SkillRegistry};
-use abigail_streaming::{IggyBroker, MemoryBroker, StreamBroker, TopicConfig};
+use abigail_streaming::{MemoryBroker, StreamBroker};
 use axum::routing::{get, post};
 use axum::Router;
 use capability_matcher::CapabilityMatcher;
@@ -59,8 +60,8 @@ struct Cli {
     #[arg(long)]
     data_dir: Option<String>,
 
-    /// Iggy connection string for persistent event streaming.
-    /// When omitted, uses an in-process MemoryBroker (no external deps).
+    /// Reserved for a future external broker.
+    /// The current dev build always uses the in-process MemoryBroker.
     #[arg(long)]
     iggy_connection: Option<String>,
 }
@@ -97,6 +98,18 @@ async fn main() -> anyhow::Result<()> {
         "Provider config: ego={:?}, routing_mode={}",
         provider_config.ego_provider_name,
         provider_config.routing_mode
+    );
+
+    let session_lease = hive_client
+        .issue_runtime_session(
+            &cli.entity_id,
+            Some(format!("entity-runtime-{}", cli.entity_id)),
+        )
+        .await?;
+    tracing::info!(
+        "Issued runtime session lease {} for runtime {}",
+        session_lease.lease_id,
+        session_lease.runtime_id
     );
 
     // 2. Build providers from the resolved config
@@ -346,54 +359,23 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // 10. Initialize event streaming (Iggy if configured, otherwise in-process MemoryBroker) and job queue.
-    let stream_broker: Arc<dyn StreamBroker> = if let Some(ref conn) = cli.iggy_connection {
-        let broker = Arc::new(
-            IggyBroker::new(conn.clone())
-                .map_err(|e| anyhow::anyhow!("Failed to configure Iggy broker: {}", e))?,
+    // 10. Initialize event streaming with the in-process broker for the current dev runtime.
+    if let Some(ref conn) = cli.iggy_connection {
+        tracing::warn!(
+            "Ignoring --iggy-connection={} in the current dev build; using in-process MemoryBroker",
+            conn
         );
-
-        let topics: &[(&str, &str)] = &[
-            ("abigail", "job-events"),
-            ("abigail", "conversation-turns"),
-            ("abigail", "skill-events"),
-            ("entity", "conscience-check"),
-            ("entity", "ethical-signals"),
-        ];
-        for (stream, topic) in topics {
-            broker
-                .ensure_topic(stream, topic, TopicConfig::default())
-                .await
-                .map_err(|e| {
-                    anyhow::anyhow!("Failed to ensure Iggy topic {}/{}: {}", stream, topic, e)
-                })?;
-            broker
-                .ensure_consumer_group(stream, topic, "entity-daemon")
-                .await
-                .map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to ensure Iggy consumer group entity-daemon for {}/{}: {}",
-                        stream,
-                        topic,
-                        e
-                    )
-                })?;
-        }
-        tracing::info!(
-            "Connected to Iggy at {} ({} topics bootstrapped)",
-            conn,
-            topics.len()
-        );
-        broker
     } else {
-        tracing::info!("Using in-process MemoryBroker (no --iggy-connection provided)");
-        Arc::new(MemoryBroker::default())
-    };
+        tracing::info!("Using in-process MemoryBroker");
+    }
+    let stream_broker: Arc<dyn StreamBroker> = Arc::new(MemoryBroker::default());
 
     // Phase 5B: Safe async boot - never block the main runtime.
     abigail_skills::set_skill_topology_broker(stream_broker.clone());
-    tokio::spawn(async {
-        abigail_skills::provision_all_skills("skills/registry.toml").await;
+    let provisioning_registry_path = shared_registry_path.clone();
+    tokio::spawn(async move {
+        let registry_path = provisioning_registry_path.to_string_lossy().to_string();
+        abigail_skills::provision_all_skills(&registry_path).await;
     });
 
     tokio::spawn(async {
@@ -474,9 +456,27 @@ async fn main() -> anyhow::Result<()> {
     let total_skills = registry.list().map(|s| s.len()).unwrap_or(0);
     tracing::info!("Total skills registered: {}", total_skills);
 
+    let skill_assignments = hive_client
+        .get_skill_assignments(&cli.entity_id)
+        .await
+        .map(|response| response.assignments)
+        .unwrap_or_default();
+    let forge_jobs = hive_client
+        .get_forge_approval_jobs(&cli.entity_id)
+        .await
+        .map(|response| response.jobs)
+        .unwrap_or_default();
+    let outbox = Arc::new(outbox::RuntimeOutbox::load(
+        entity_dir.join("runtime_outbox.json"),
+        256,
+    )?);
+
     let state = EntityDaemonState {
         entity_id: cli.entity_id.clone(),
         config,
+        hive_url: cli.hive_url.clone(),
+        runtime_id: session_lease.runtime_id.clone(),
+        session_lease,
         router,
         registry,
         executor,
@@ -492,6 +492,13 @@ async fn main() -> anyhow::Result<()> {
         constraints: Arc::new(tokio::sync::RwLock::new(
             abigail_router::ConstraintStore::with_data_dir(entity_dir.clone()),
         )),
+        outbox,
+        last_hive_sync_at_utc: Arc::new(tokio::sync::RwLock::new(None)),
+        last_hive_error: Arc::new(tokio::sync::RwLock::new(None)),
+        runtime_url: Arc::new(tokio::sync::RwLock::new(None)),
+        skill_assignments: Arc::new(tokio::sync::RwLock::new(skill_assignments)),
+        forge_jobs: Arc::new(tokio::sync::RwLock::new(forge_jobs)),
+        recent_skill_acks: Arc::new(tokio::sync::RwLock::new(Vec::new())),
     };
 
     // Start background queue scheduler (Phase 1 async sub-agent execution).
@@ -537,6 +544,7 @@ async fn main() -> anyhow::Result<()> {
         let registry_for_watcher = state.registry.clone();
         let vault_for_watcher = Some(skill_vault.clone());
         let broker_for_watcher = state.stream_broker.clone();
+        let state_for_watcher = state.clone();
 
         match abigail_skills::SkillsWatcher::start(vec![watch_dir, shared_watch_dir]) {
             Ok((watcher, mut rx)) => {
@@ -581,6 +589,18 @@ async fn main() -> anyhow::Result<()> {
                                                         },
                                                     )
                                                     .await;
+                                                    state_for_watcher
+                                                        .push_skill_ack(entity_core::SkillApplyAcknowledgement {
+                                                            skill_id: p
+                                                                .file_stem()
+                                                                .and_then(|stem| stem.to_str())
+                                                                .unwrap_or("unknown")
+                                                                .to_string(),
+                                                            status: "reloaded".to_string(),
+                                                            applied_at_utc: chrono::Utc::now()
+                                                                .to_rfc3339(),
+                                                        })
+                                                        .await;
                                                 }
                                                 Err(e) => tracing::debug!(
                                                     "Skill watcher: skip {:?}: {}",
@@ -642,6 +662,18 @@ async fn main() -> anyhow::Result<()> {
                                                         },
                                                     )
                                                     .await;
+                                                    state_for_watcher
+                                                        .push_skill_ack(entity_core::SkillApplyAcknowledgement {
+                                                            skill_id: p
+                                                                .file_stem()
+                                                                .and_then(|stem| stem.to_str())
+                                                                .unwrap_or("unknown")
+                                                                .to_string(),
+                                                            status: "removed".to_string(),
+                                                            applied_at_utc: chrono::Utc::now()
+                                                                .to_rfc3339(),
+                                                        })
+                                                        .await;
                                                 }
                                             }
                                         }
@@ -681,6 +713,8 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(routes::health))
         .route("/v1/status", get(routes::get_status))
+        .route("/v1/session/status", get(routes::get_session_status))
+        .route("/v1/outbox/status", get(routes::get_outbox_status))
         .route("/v1/chat", post(routes::chat))
         .route("/v1/chat/stream", post(routes::chat_stream))
         .route("/v1/chat/cancel", post(routes::cancel_chat_stream))
@@ -697,22 +731,98 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/topics/:topic/watch", get(routes::watch_topic))
         .route("/v1/routing/diagnose", get(routes::diagnose_routing))
         .route("/v1/skills", get(routes::list_skills))
+        .route("/v1/skills/acks", get(routes::list_skill_apply_acknowledgements))
         .route("/v1/tools/execute", post(routes::execute_tool))
         .route("/v1/memory/stats", get(routes::memory_stats))
         .route("/v1/memory/search", post(routes::memory_search))
         .route("/v1/memory/recent", get(routes::memory_recent))
         .route("/v1/memory/insert", post(routes::memory_insert))
         .layer(cors)
-        .with_state(state);
+        .with_state(state.clone());
 
-    let addr = format!("127.0.0.1:{}", cli.port);
-    tracing::info!("Entity daemon listening on http://{}", addr);
-    println!("Entity daemon listening on http://{}", addr);
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", cli.port)).await?;
+    let local_addr = listener.local_addr()?;
+    let local_url = format!("http://{}", local_addr);
+    {
+        let mut runtime_url = state.runtime_url.write().await;
+        *runtime_url = Some(local_url.clone());
+    }
 
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    hive_client
+        .register_runtime(&hive_core::RuntimeRegistrationRequest {
+            lease_id: state.session_lease.lease_id.clone(),
+            runtime_id: state.runtime_id.clone(),
+            local_url: local_url.clone(),
+            process_id: Some(std::process::id()),
+        })
+        .await?;
+    state.record_hive_sync_success().await;
+    spawn_runtime_supervision(state.clone(), hive_client.clone());
+
+    tracing::info!("Entity daemon listening on {}", local_url);
+    println!("Entity daemon listening on {}", local_url);
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+fn spawn_runtime_supervision(state: EntityDaemonState, hive_client: HiveClient) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(10));
+        loop {
+            ticker.tick().await;
+
+            let outbox_status = match state.outbox.status() {
+                Ok(status) => status,
+                Err(error) => {
+                    state.record_hive_sync_error(error).await;
+                    continue;
+                }
+            };
+            let runtime_url = state.runtime_url.read().await.clone();
+
+            let heartbeat = hive_core::RuntimeHeartbeatRequest {
+                lease_id: state.session_lease.lease_id.clone(),
+                runtime_id: state.runtime_id.clone(),
+                local_url: runtime_url,
+                outbox_depth: outbox_status.queued_records,
+                outbox_oldest_at_utc: outbox_status.oldest_record_at_utc.clone(),
+            };
+
+            match hive_client.heartbeat(&heartbeat).await {
+                Ok(_) => {
+                    if let Ok(records) = state.outbox.snapshot() {
+                        if !records.is_empty() {
+                            match hive_client
+                                .sync_outbox(&hive_core::OutboxSyncRequest {
+                                    lease_id: state.session_lease.lease_id.clone(),
+                                    runtime_id: state.runtime_id.clone(),
+                                    records,
+                                })
+                                .await
+                            {
+                                Ok(response) => {
+                                    let _ = state.outbox.acknowledge(&response.accepted_record_ids);
+                                }
+                                Err(error) => {
+                                    let error = error.to_string();
+                                    let _ = state.outbox.mark_sync_error(&error);
+                                    state.record_hive_sync_error(error).await;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                    state.record_hive_sync_success().await;
+                }
+                Err(error) => {
+                    let error = error.to_string();
+                    let _ = state.outbox.mark_sync_error(&error);
+                    state.record_hive_sync_error(error).await;
+                }
+            }
+        }
+    });
 }
 
 fn parse_routing_mode(s: &str) -> abigail_core::RoutingMode {

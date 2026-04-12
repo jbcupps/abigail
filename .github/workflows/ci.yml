@@ -50,6 +50,18 @@ jobs:
       - name: Install frontend dependencies
         run: cd tauri-app/src-ui && npm ci
 
+      - name: Verify unsigned stabilization lane
+        run: node scripts/check_unsigned_stabilization.mjs
+
+      - name: Check Hive and Runtime apps
+        run: cargo check -p abigail-hive-app -p abigail-entity-runtime-app
+
+      - name: Run Hive daemon contract tests
+        run: cargo test -p hive-daemon --test integration
+
+      - name: Run Entity runtime contract tests
+        run: cargo test -p entity-daemon --test integration
+
       - name: Run stability gates
         run: node scripts/check_stability.mjs
 

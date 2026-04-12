@@ -3,8 +3,10 @@
 use abigail_skills::{HiveAgentInfo, HiveOperations};
 use async_trait::async_trait;
 use hive_core::{
-    ApiEnvelope, CreateEntityResponse, EntityInfo, ProviderConfig, SecretListResponse,
-    SecretValueResponse,
+    ApiEnvelope, CreateEntityResponse, EntityInfo, ForgeApprovalJobsResponse, OutboxSyncRequest,
+    OutboxSyncResponse, ProviderConfig, RuntimeHeartbeatRequest, RuntimeHeartbeatResponse,
+    RuntimeRegistrationRequest, RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus,
+    SecretListResponse, SecretValueResponse, SkillAssignmentsResponse,
 };
 
 /// HTTP client for fetching data from the Hive daemon.
@@ -59,6 +61,142 @@ impl HiveClient {
         if resp.ok {
             resp.data
                 .ok_or_else(|| anyhow::anyhow!("Empty data in entity response"))
+        } else {
+            Err(anyhow::anyhow!(
+                "Hive error: {}",
+                resp.error.unwrap_or_default()
+            ))
+        }
+    }
+
+    pub async fn issue_runtime_session(
+        &self,
+        entity_id: &str,
+        runtime_id: Option<String>,
+    ) -> anyhow::Result<RuntimeSessionLease> {
+        let url = format!("{}/v1/runtime/sessions", self.base_url);
+        let resp: ApiEnvelope<RuntimeSessionLease> = self
+            .client
+            .post(&url)
+            .json(&RuntimeSessionRequest {
+                entity_id: entity_id.to_string(),
+                runtime_id,
+            })
+            .send()
+            .await?
+            .json()
+            .await?;
+        if resp.ok {
+            resp.data
+                .ok_or_else(|| anyhow::anyhow!("Empty data in runtime session response"))
+        } else {
+            Err(anyhow::anyhow!(
+                "Hive error: {}",
+                resp.error.unwrap_or_default()
+            ))
+        }
+    }
+
+    pub async fn register_runtime(
+        &self,
+        request: &RuntimeRegistrationRequest,
+    ) -> anyhow::Result<RuntimeSessionStatus> {
+        let url = format!("{}/v1/runtime/register", self.base_url);
+        let resp: ApiEnvelope<RuntimeSessionStatus> = self
+            .client
+            .post(&url)
+            .json(request)
+            .send()
+            .await?
+            .json()
+            .await?;
+        if resp.ok {
+            resp.data
+                .ok_or_else(|| anyhow::anyhow!("Empty data in runtime register response"))
+        } else {
+            Err(anyhow::anyhow!(
+                "Hive error: {}",
+                resp.error.unwrap_or_default()
+            ))
+        }
+    }
+
+    pub async fn heartbeat(
+        &self,
+        request: &RuntimeHeartbeatRequest,
+    ) -> anyhow::Result<RuntimeHeartbeatResponse> {
+        let url = format!("{}/v1/runtime/heartbeat", self.base_url);
+        let resp: ApiEnvelope<RuntimeHeartbeatResponse> = self
+            .client
+            .post(&url)
+            .json(request)
+            .send()
+            .await?
+            .json()
+            .await?;
+        if resp.ok {
+            resp.data
+                .ok_or_else(|| anyhow::anyhow!("Empty data in runtime heartbeat response"))
+        } else {
+            Err(anyhow::anyhow!(
+                "Hive error: {}",
+                resp.error.unwrap_or_default()
+            ))
+        }
+    }
+
+    pub async fn get_skill_assignments(
+        &self,
+        entity_id: &str,
+    ) -> anyhow::Result<SkillAssignmentsResponse> {
+        let url = format!("{}/v1/entities/{}/assignments", self.base_url, entity_id);
+        let resp: ApiEnvelope<SkillAssignmentsResponse> =
+            self.client.get(&url).send().await?.json().await?;
+        if resp.ok {
+            resp.data
+                .ok_or_else(|| anyhow::anyhow!("Empty data in assignments response"))
+        } else {
+            Err(anyhow::anyhow!(
+                "Hive error: {}",
+                resp.error.unwrap_or_default()
+            ))
+        }
+    }
+
+    pub async fn get_forge_approval_jobs(
+        &self,
+        entity_id: &str,
+    ) -> anyhow::Result<ForgeApprovalJobsResponse> {
+        let url = format!("{}/v1/entities/{}/forge-approvals", self.base_url, entity_id);
+        let resp: ApiEnvelope<ForgeApprovalJobsResponse> =
+            self.client.get(&url).send().await?.json().await?;
+        if resp.ok {
+            resp.data
+                .ok_or_else(|| anyhow::anyhow!("Empty data in forge approvals response"))
+        } else {
+            Err(anyhow::anyhow!(
+                "Hive error: {}",
+                resp.error.unwrap_or_default()
+            ))
+        }
+    }
+
+    pub async fn sync_outbox(
+        &self,
+        request: &OutboxSyncRequest,
+    ) -> anyhow::Result<OutboxSyncResponse> {
+        let url = format!("{}/v1/runtime/outbox/sync", self.base_url);
+        let resp: ApiEnvelope<OutboxSyncResponse> = self
+            .client
+            .post(&url)
+            .json(request)
+            .send()
+            .await?
+            .json()
+            .await?;
+        if resp.ok {
+            resp.data
+                .ok_or_else(|| anyhow::anyhow!("Empty data in outbox sync response"))
         } else {
             Err(anyhow::anyhow!(
                 "Hive error: {}",

@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Abigail Entity Runtime</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f0e7;
+        --panel: rgba(255, 252, 246, 0.9);
+        --ink: #1f2630;
+        --muted: #646d76;
+        --accent: #a8511d;
+        --accent-strong: #7f3510;
+        --cool: #295c7a;
+        --line: rgba(31, 38, 48, 0.11);
+        --shadow: 0 24px 80px rgba(31, 38, 48, 0.11);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(168, 81, 29, 0.18), transparent 24%),
+          radial-gradient(circle at right, rgba(41, 92, 122, 0.14), transparent 24%),
+          linear-gradient(180deg, #fbf7f1 0%, var(--bg) 100%);
+      }
+
+      main {
+        width: min(1420px, calc(100vw - 28px));
+        margin: 0 auto;
+        padding: 28px 0 32px;
+      }
+
+      .hero {
+        display: flex;
+        justify-content: space-between;
+        align-items: end;
+        gap: 18px;
+        margin-bottom: 20px;
+      }
+
+      .eyebrow {
+        margin: 0 0 10px;
+        color: var(--accent);
+        font-size: 0.8rem;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(2.4rem, 5vw, 4.1rem);
+        line-height: 0.95;
+      }
+
+      .lede {
+        max-width: 760px;
+        margin: 14px 0 0;
+        color: var(--muted);
+        font-size: 1.02rem;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        padding: 20px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(12px);
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+
+      .summary-card {
+        border-radius: 18px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(31, 38, 48, 0.08);
+      }
+
+      .summary-label {
+        display: block;
+        color: var(--muted);
+        font-size: 0.82rem;
+        margin-bottom: 8px;
+      }
+
+      .summary-value {
+        font-size: 1rem;
+        font-weight: 700;
+        word-break: break-word;
+      }
+
+      .dashboard {
+        display: grid;
+        gap: 18px;
+        grid-template-columns: 1.2fr 1fr;
+      }
+
+      .column {
+        display: grid;
+        gap: 18px;
+        align-content: start;
+      }
+
+      .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+
+      .panel-header h2,
+      .panel-header h3 {
+        margin: 0;
+      }
+
+      .pill {
+        border-radius: 999px;
+        padding: 7px 11px;
+        font-size: 0.8rem;
+        font-weight: 700;
+      }
+
+      .pill-idle {
+        background: rgba(31, 38, 48, 0.08);
+        color: var(--muted);
+      }
+
+      .pill-ok {
+        background: rgba(41, 92, 122, 0.14);
+        color: var(--cool);
+      }
+
+      .pill-warn {
+        background: rgba(168, 81, 29, 0.14);
+        color: var(--accent);
+      }
+
+      label {
+        display: grid;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      input,
+      textarea,
+      button {
+        font: inherit;
+      }
+
+      input,
+      textarea {
+        width: 100%;
+        border-radius: 14px;
+        border: 1px solid rgba(31, 38, 48, 0.14);
+        background: rgba(255, 255, 255, 0.9);
+        padding: 12px 14px;
+        color: var(--ink);
+      }
+
+      textarea {
+        resize: vertical;
+        min-height: 120px;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      button {
+        cursor: pointer;
+        border: 0;
+        border-radius: 999px;
+        padding: 11px 16px;
+        background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+        color: white;
+        font-weight: 700;
+      }
+
+      button.secondary {
+        background: rgba(31, 38, 48, 0.08);
+        color: var(--ink);
+      }
+
+      .transcript {
+        display: grid;
+        gap: 12px;
+      }
+
+      .bubble {
+        border-radius: 20px;
+        padding: 14px 16px;
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(31, 38, 48, 0.08);
+      }
+
+      .bubble.user {
+        border-left: 4px solid rgba(168, 81, 29, 0.65);
+      }
+
+      .bubble.assistant {
+        border-left: 4px solid rgba(41, 92, 122, 0.55);
+      }
+
+      .bubble-role {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--muted);
+        font-size: 0.8rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .json-view {
+        margin: 0;
+        border-radius: 18px;
+        background: rgba(25, 30, 38, 0.96);
+        color: #e8eef4;
+        padding: 16px;
+        min-height: 120px;
+        max-height: 320px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: "Cascadia Code", Consolas, monospace;
+        font-size: 0.84rem;
+      }
+
+      @media (max-width: 1120px) {
+        .dashboard {
+          grid-template-columns: 1fr;
+        }
+
+        .summary-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 720px) {
+        .summary-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Runtime</p>
+          <h1>Abigail Entity Runtime</h1>
+          <p class="lede">
+            Chat with the active entity, inspect runtime/session health, and watch outbox and skill-ack activity from the split runtime window.
+          </p>
+        </div>
+        <div class="actions">
+          <button id="refresh-runtime" type="button">Refresh Runtime</button>
+        </div>
+      </section>
+
+      <section class="summary-grid">
+        <article class="summary-card">
+          <span class="summary-label">Runtime Daemon</span>
+          <div id="runtime-url" class="summary-value">Loading…</div>
+        </article>
+        <article class="summary-card">
+          <span class="summary-label">Entity</span>
+          <div id="entity-name" class="summary-value">Loading…</div>
+        </article>
+        <article class="summary-card">
+          <span class="summary-label">Hive Link</span>
+          <div id="runtime-pill" class="pill pill-idle">Loading</div>
+        </article>
+        <article class="summary-card">
+          <span class="summary-label">Outbox Queue</span>
+          <div id="outbox-count" class="summary-value">0</div>
+        </article>
+      </section>
+
+      <section class="dashboard">
+        <div class="column">
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Chat</h2>
+              <span id="chat-pill" class="pill pill-idle">Idle</span>
+            </div>
+            <label>
+              <span>Session ID</span>
+              <input id="session-id" type="text" />
+            </label>
+            <label>
+              <span>Message</span>
+              <textarea id="chat-message" placeholder="Say hello to the active Entity Runtime…"></textarea>
+            </label>
+            <div class="actions">
+              <button id="send-chat" type="button">Send Chat</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Conversation</h3>
+            </div>
+            <div id="transcript" class="transcript">
+              <div class="bubble assistant">
+                <span class="bubble-role">Assistant</span>
+                Runtime transcript will appear here as you chat.
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="column">
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Session Snapshot</h2>
+            </div>
+            <pre id="session-status" class="json-view">Loading…</pre>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Runtime Status</h3>
+            </div>
+            <pre id="runtime-status" class="json-view">Loading…</pre>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Skill Acknowledgements</h3>
+              <span id="ack-pill" class="pill pill-idle">Idle</span>
+            </div>
+            <pre id="acks-status" class="json-view">Loading…</pre>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

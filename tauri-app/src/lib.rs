@@ -867,11 +867,20 @@ fn try_run() -> Result<(), String> {
     };
     startup.stage("app state assembled");
 
-    let app = tauri::Builder::default()
+    let updater_enabled = std::env::var("ABIGAIL_ENABLE_UPDATER")
+        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
-        .setup(|app| {
+        .plugin(tauri_plugin_process::init());
+    if updater_enabled {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    } else {
+        tracing::info!("Updater plugin disabled for stabilization build");
+    }
+
+    let app = builder.setup(|app| {
             let handle = app.handle();
             let state = handle.state::<AppState>();
             tracing::info!("Startup setup: entering Tauri setup hook");

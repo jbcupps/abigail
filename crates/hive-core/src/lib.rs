@@ -157,3 +157,180 @@ pub struct ProviderModelsResponse {
     pub provider: String,
     pub models: Vec<ProviderModelInfo>,
 }
+
+// ---------------------------------------------------------------------------
+// Runtime session + supervision contracts
+// ---------------------------------------------------------------------------
+
+/// Request a Hive-issued runtime session lease for an entity runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeSessionRequest {
+    pub entity_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_id: Option<String>,
+}
+
+/// Hive-issued session lease for a runtime instance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeSessionLease {
+    pub lease_id: String,
+    pub entity_id: String,
+    pub runtime_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entity_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hive_url: Option<String>,
+    pub issued_at_utc: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at_utc: Option<String>,
+    pub offline_until_close: bool,
+    pub lease_scope: String,
+}
+
+/// Runtime registration payload sent after the runtime binds its local API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeRegistrationRequest {
+    pub lease_id: String,
+    pub runtime_id: String,
+    pub local_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_id: Option<u32>,
+}
+
+/// Hive view of a registered runtime instance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeRegistration {
+    pub lease_id: String,
+    pub runtime_id: String,
+    pub entity_id: String,
+    pub local_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_id: Option<u32>,
+    pub registered_at_utc: String,
+    pub last_seen_at_utc: String,
+    pub state: String,
+}
+
+/// Combined session + runtime supervision status snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeSessionStatus {
+    pub lease: RuntimeSessionLease,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registration: Option<RuntimeRegistration>,
+    pub connected: bool,
+    pub outbox_depth: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outbox_oldest_at_utc: Option<String>,
+}
+
+/// Heartbeat sent from the entity runtime to Hive while the runtime is alive.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeHeartbeatRequest {
+    pub lease_id: String,
+    pub runtime_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_url: Option<String>,
+    #[serde(default)]
+    pub outbox_depth: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outbox_oldest_at_utc: Option<String>,
+}
+
+/// Heartbeat acknowledgement from Hive.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeHeartbeatResponse {
+    pub accepted: bool,
+    pub server_time_utc: String,
+}
+
+// ---------------------------------------------------------------------------
+// Skill assignments + forge approvals
+// ---------------------------------------------------------------------------
+
+/// A single Hive-managed skill assignment for an entity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillAssignment {
+    pub assignment_id: String,
+    pub entity_id: String,
+    pub skill_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manifest_path: Option<String>,
+    pub assigned_at_utc: String,
+    pub status: String,
+}
+
+/// Replace the set of skill assignments for an entity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetSkillAssignmentsRequest {
+    pub assignments: Vec<SkillAssignment>,
+}
+
+/// Response wrapper for an entity's skill assignments.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillAssignmentsResponse {
+    pub entity_id: String,
+    pub assignments: Vec<SkillAssignment>,
+}
+
+/// Hive-approved forge work item for a target entity runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeApprovalJob {
+    pub job_id: String,
+    pub entity_id: String,
+    pub skill_id: String,
+    pub code_path: String,
+    pub markdown_path: String,
+    pub approved_at_utc: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
+}
+
+/// Request to create a new forge approval for an entity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateForgeApprovalJobRequest {
+    pub skill_id: String,
+    pub code_path: String,
+    pub markdown_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
+}
+
+/// Response wrapper for pending/known forge approvals for an entity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeApprovalJobsResponse {
+    pub entity_id: String,
+    pub jobs: Vec<ForgeApprovalJob>,
+}
+
+// ---------------------------------------------------------------------------
+// Runtime outbox sync
+// ---------------------------------------------------------------------------
+
+/// Durable entity-scoped write queued locally while the runtime is active.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityOutboxRecord {
+    pub record_id: String,
+    pub entity_id: String,
+    pub kind: String,
+    pub created_at_utc: String,
+    pub payload: serde_json::Value,
+}
+
+/// Batch sync request for runtime outbox records.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutboxSyncRequest {
+    pub lease_id: String,
+    pub runtime_id: String,
+    pub records: Vec<EntityOutboxRecord>,
+}
+
+/// Batch sync acknowledgement from Hive.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutboxSyncResponse {
+    pub accepted_record_ids: Vec<String>,
+    pub pending_records: usize,
+    pub server_time_utc: String,
+}
