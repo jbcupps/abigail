@@ -72,7 +72,9 @@ impl EntityDaemonState {
         kind: &str,
         payload: serde_json::Value,
     ) -> Result<(), String> {
-        self.outbox.enqueue(&self.entity_id, kind, payload).map(|_| ())
+        self.outbox
+            .enqueue(&self.entity_id, kind, payload)
+            .map(|_| ())
     }
 
     pub async fn record_hive_sync_success(&self) {

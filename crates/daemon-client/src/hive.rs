@@ -181,7 +181,10 @@ impl HiveDaemonClient {
     ) -> anyhow::Result<SkillAssignmentsResponse> {
         let resp: ApiEnvelope<SkillAssignmentsResponse> = self
             .client
-            .get(format!("{}/v1/entities/{}/assignments", self.base_url, entity_id))
+            .get(format!(
+                "{}/v1/entities/{}/assignments",
+                self.base_url, entity_id
+            ))
             .send()
             .await?
             .json()

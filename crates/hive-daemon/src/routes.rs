@@ -395,7 +395,9 @@ pub async fn set_skill_assignments(
     Json(body): Json<SetSkillAssignmentsRequest>,
 ) -> Json<ApiEnvelope<SkillAssignmentsResponse>> {
     match state.runtime_control.lock() {
-        Ok(mut control) => Json(ApiEnvelope::success(control.set_assignments(&entity_id, body))),
+        Ok(mut control) => Json(ApiEnvelope::success(
+            control.set_assignments(&entity_id, body),
+        )),
         Err(e) => Json(ApiEnvelope::error(e.to_string())),
     }
 }
@@ -420,7 +422,9 @@ pub async fn create_forge_approval_job(
     Json(body): Json<CreateForgeApprovalJobRequest>,
 ) -> Json<ApiEnvelope<hive_core::ForgeApprovalJob>> {
     match state.runtime_control.lock() {
-        Ok(mut control) => Json(ApiEnvelope::success(control.create_forge_job(&entity_id, body))),
+        Ok(mut control) => Json(ApiEnvelope::success(
+            control.create_forge_job(&entity_id, body),
+        )),
         Err(e) => Json(ApiEnvelope::error(e.to_string())),
     }
 }

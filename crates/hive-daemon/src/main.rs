@@ -115,9 +115,15 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/secrets/:key", get(routes::get_secret))
         .route("/v1/providers/models", post(routes::discover_models))
         .route("/v1/runtime/sessions", post(routes::issue_runtime_session))
-        .route("/v1/runtime/sessions/:lease_id", get(routes::get_runtime_session))
+        .route(
+            "/v1/runtime/sessions/:lease_id",
+            get(routes::get_runtime_session),
+        )
         .route("/v1/runtime/register", post(routes::register_runtime))
-        .route("/v1/runtime/heartbeat", post(routes::record_runtime_heartbeat))
+        .route(
+            "/v1/runtime/heartbeat",
+            post(routes::record_runtime_heartbeat),
+        )
         .route("/v1/runtime/outbox/sync", post(routes::sync_runtime_outbox))
         .layer(cors)
         .with_state(state);

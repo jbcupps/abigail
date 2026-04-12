@@ -67,7 +67,10 @@ async fn approve_forge_job(
     let client = reqwest::Client::new();
     let base_url = hive_url();
     let response: hive_core::ApiEnvelope<hive_core::ForgeApprovalJob> = client
-        .post(format!("{}/v1/entities/{}/forge-approvals", base_url, entity_id))
+        .post(format!(
+            "{}/v1/entities/{}/forge-approvals",
+            base_url, entity_id
+        ))
         .json(&CreateForgeApprovalJobRequest {
             skill_id,
             code_path,

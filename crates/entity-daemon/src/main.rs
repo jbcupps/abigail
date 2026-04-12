@@ -731,7 +731,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/topics/:topic/watch", get(routes::watch_topic))
         .route("/v1/routing/diagnose", get(routes::diagnose_routing))
         .route("/v1/skills", get(routes::list_skills))
-        .route("/v1/skills/acks", get(routes::list_skill_apply_acknowledgements))
+        .route(
+            "/v1/skills/acks",
+            get(routes::list_skill_apply_acknowledgements),
+        )
         .route("/v1/tools/execute", post(routes::execute_tool))
         .route("/v1/memory/stats", get(routes::memory_stats))
         .route("/v1/memory/search", post(routes::memory_search))

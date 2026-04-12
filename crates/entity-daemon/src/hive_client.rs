@@ -167,7 +167,10 @@ impl HiveClient {
         &self,
         entity_id: &str,
     ) -> anyhow::Result<ForgeApprovalJobsResponse> {
-        let url = format!("{}/v1/entities/{}/forge-approvals", self.base_url, entity_id);
+        let url = format!(
+            "{}/v1/entities/{}/forge-approvals",
+            self.base_url, entity_id
+        );
         let resp: ApiEnvelope<ForgeApprovalJobsResponse> =
             self.client.get(&url).send().await?.json().await?;
         if resp.ok {

@@ -868,7 +868,12 @@ fn try_run() -> Result<(), String> {
     startup.stage("app state assembled");
 
     let updater_enabled = std::env::var("ABIGAIL_ENABLE_UPDATER")
-        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            )
+        })
         .unwrap_or(false);
 
     let mut builder = tauri::Builder::default()

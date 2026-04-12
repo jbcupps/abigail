@@ -85,7 +85,10 @@ impl RuntimeOutbox {
         let inner = self.inner.lock().map_err(|e| e.to_string())?;
         Ok(EntityOutboxStatus {
             queued_records: inner.records.len(),
-            oldest_record_at_utc: inner.records.first().map(|record| record.created_at_utc.clone()),
+            oldest_record_at_utc: inner
+                .records
+                .first()
+                .map(|record| record.created_at_utc.clone()),
             last_sync_at_utc: inner.last_sync_at_utc.clone(),
             last_sync_error: inner.last_sync_error.clone(),
         })
@@ -110,7 +113,11 @@ mod tests {
         let outbox = RuntimeOutbox::load(root.join("outbox.json"), 4).unwrap();
 
         let first = outbox
-            .enqueue("entity-1", "chat_turn", serde_json::json!({ "message": "hi" }))
+            .enqueue(
+                "entity-1",
+                "chat_turn",
+                serde_json::json!({ "message": "hi" }),
+            )
             .unwrap();
         let second = outbox
             .enqueue(

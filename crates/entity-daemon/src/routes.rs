@@ -1109,11 +1109,13 @@ mod tests {
             constraints: Arc::new(tokio::sync::RwLock::new(
                 abigail_router::ConstraintStore::new(),
             )),
-            outbox: Arc::new(crate::outbox::RuntimeOutbox::load(
-                test_scratch_dir("abigail_routes_test_outbox"),
-                64,
-            )
-            .expect("outbox")),
+            outbox: Arc::new(
+                crate::outbox::RuntimeOutbox::load(
+                    test_scratch_dir("abigail_routes_test_outbox"),
+                    64,
+                )
+                .expect("outbox"),
+            ),
             last_hive_sync_at_utc: Arc::new(tokio::sync::RwLock::new(None)),
             last_hive_error: Arc::new(tokio::sync::RwLock::new(None)),
             runtime_url: Arc::new(tokio::sync::RwLock::new(None)),
