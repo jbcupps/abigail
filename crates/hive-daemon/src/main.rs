@@ -10,8 +10,8 @@ mod state;
 use abigail_core::{AppConfig, SecretsVault};
 use abigail_hive::Hive;
 use abigail_identity::IdentityManager;
-use axum::routing::{get, post};
 use axum::Router;
+use axum::routing::{get, post};
 use clap::Parser;
 use state::HiveDaemonState;
 use std::sync::{Arc, Mutex};
@@ -47,6 +47,7 @@ async fn main() -> anyhow::Result<()> {
     } else {
         AppConfig::default_paths().data_dir
     };
+    abigail_core::vault::unlock::configure_process_vault_data_dir(&data_root);
 
     tracing::info!("Hive data root: {}", data_root.display());
 

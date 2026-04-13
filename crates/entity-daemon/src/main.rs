@@ -28,8 +28,8 @@ use abigail_runtime::{
 };
 use abigail_skills::{Skill, SkillExecutionPolicy, SkillExecutor, SkillRegistry};
 use abigail_streaming::{MemoryBroker, StreamBroker};
-use axum::routing::{get, post};
 use axum::Router;
+use axum::routing::{get, post};
 use capability_matcher::CapabilityMatcher;
 use clap::Parser;
 use hive_client::HiveClient;
@@ -83,17 +83,20 @@ async fn main() -> anyhow::Result<()> {
         cli.entity_id,
         cli.hive_url
     );
+    let entity_id = uuid::Uuid::parse_str(&cli.entity_id)
+        .map(|id| id.to_string())
+        .map_err(|e| anyhow::anyhow!("--entity-id must be a valid UUID: {}", e))?;
 
     // 1. Fetch provider config from Hive
     let hive_client = HiveClient::new(&cli.hive_url);
-    let entity_info = hive_client.get_entity(&cli.entity_id).await?;
+    let entity_info = hive_client.get_entity(&entity_id).await?;
     tracing::info!(
         "Entity '{}' (birth_complete={})",
         entity_info.name,
         entity_info.birth_complete
     );
 
-    let provider_config = hive_client.get_provider_config(&cli.entity_id).await?;
+    let provider_config = hive_client.get_provider_config(&entity_id).await?;
     tracing::info!(
         "Provider config: ego={:?}, routing_mode={}",
         provider_config.ego_provider_name,
@@ -101,10 +104,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let session_lease = hive_client
-        .issue_runtime_session(
-            &cli.entity_id,
-            Some(format!("entity-runtime-{}", cli.entity_id)),
-        )
+        .issue_runtime_session(&entity_id, Some(format!("entity-runtime-{}", entity_id)))
         .await?;
     tracing::info!(
         "Issued runtime session lease {} for runtime {}",
@@ -174,8 +174,9 @@ async fn main() -> anyhow::Result<()> {
     } else {
         AppConfig::default_paths().data_dir
     };
+    abigail_core::vault::unlock::configure_process_vault_data_dir(&data_root);
     tracing::info!("Entity data root: {}", data_root.display());
-    let entity_dir = data_root.join("identities").join(&cli.entity_id);
+    let entity_dir = data_root.join("identities").join(&entity_id);
     let docs_dir = entity_dir.join("docs");
     let skills_dir = entity_dir.join("skills");
     let shared_skills_base = data_root.join("skills");
@@ -263,7 +264,7 @@ async fn main() -> anyhow::Result<()> {
         register_identity_bound_skills(
             &registry,
             config.data_dir.clone(),
-            Some(cli.entity_id.clone()),
+            Some(entity_id.clone()),
             allow_local_network,
         );
         register_supported_native_skills(
@@ -457,22 +458,19 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Total skills registered: {}", total_skills);
 
     let skill_assignments = hive_client
-        .get_skill_assignments(&cli.entity_id)
+        .get_skill_assignments(&entity_id)
         .await
         .map(|response| response.assignments)
         .unwrap_or_default();
     let forge_jobs = hive_client
-        .get_forge_approval_jobs(&cli.entity_id)
+        .get_forge_approval_jobs(&entity_id)
         .await
         .map(|response| response.jobs)
         .unwrap_or_default();
-    let outbox = Arc::new(outbox::RuntimeOutbox::load(
-        entity_dir.join("runtime_outbox.json"),
-        256,
-    )?);
+    let outbox = Arc::new(outbox::RuntimeOutbox::load(&entity_dir, 256)?);
 
     let state = EntityDaemonState {
-        entity_id: cli.entity_id.clone(),
+        entity_id: entity_id.clone(),
         config,
         hive_url: cli.hive_url.clone(),
         runtime_id: session_lease.runtime_id.clone(),

@@ -21,6 +21,8 @@ const PASSPHRASE_ENV: &str = "ABIGAIL_VAULT_PASSPHRASE";
 const RAW_KEK_ENV: &str = "ABIGAIL_VAULT_RAW_KEY";
 const PASSPHRASE_SALT: &[u8] = b"abigail-vault-passphrase-salt-v1";
 const KDF_METADATA_FILE: &str = "vault.kdf.json";
+const PROCESS_VAULT_DATA_DIR_ENV: &str = "ABIGAIL_VAULT_DATA_DIR";
+#[cfg(windows)]
 const WINDOWS_KEK_FALLBACK_FILE: &str = "vault.kek.dpapi";
 const ARGON2_MEMORY_COST_KIB: u32 = 64 * 1024;
 const ARGON2_TIME_COST: u32 = 3;
@@ -84,13 +86,26 @@ impl Default for HybridUnlockProvider {
     }
 }
 
+pub fn configure_process_vault_data_dir(data_root: &Path) {
+    std::env::set_var(PROCESS_VAULT_DATA_DIR_ENV, data_root);
+}
+
+pub fn process_vault_data_dir() -> PathBuf {
+    if let Some(path) = std::env::var_os(PROCESS_VAULT_DATA_DIR_ENV) {
+        if !path.is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+    crate::AppConfig::default_paths().data_dir
+}
+
 impl UnlockProvider for HybridUnlockProvider {
     fn root_kek(&self) -> Result<[u8; KEK_LEN]> {
         if let Some(kek) = super::cached_session_root_kek() {
             return Ok(kek);
         }
 
-        let data_root = crate::AppConfig::default_paths().data_dir;
+        let data_root = process_vault_data_dir();
         std::fs::create_dir_all(&data_root)?;
         let sentinel_path = super::sentinel_path(&data_root);
         let has_sentinel = sentinel_path.exists();
@@ -384,6 +399,7 @@ fn os_keyring_store_verified(kek: &[u8; KEK_LEN]) -> Result<()> {
     Ok(())
 }
 
+#[cfg(windows)]
 fn windows_kek_fallback_path(data_root: &Path) -> PathBuf {
     data_root.join(WINDOWS_KEK_FALLBACK_FILE)
 }
@@ -455,6 +471,7 @@ mod tests {
         assert_ne!(a.root_kek().unwrap(), b.root_kek().unwrap());
     }
 
+    #[cfg(windows)]
     #[test]
     fn windows_kek_fallback_roundtrips() {
         let dir = std::env::temp_dir().join("abigail_windows_kek_fallback_roundtrip");
@@ -467,6 +484,22 @@ mod tests {
         persist_windows_kek_fallback(&dir, &kek).unwrap();
         let loaded = load_windows_kek_fallback_optional(&dir).unwrap().unwrap();
         assert_eq!(loaded, kek);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn windows_kek_fallback_is_disabled_off_windows() {
+        let dir = std::env::temp_dir().join("abigail_windows_kek_fallback_disabled");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut kek = [0u8; KEK_LEN];
+        kek.copy_from_slice(&[7u8; KEK_LEN]);
+
+        persist_windows_kek_fallback(&dir, &kek).unwrap();
+        assert!(load_windows_kek_fallback_optional(&dir).unwrap().is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

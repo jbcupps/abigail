@@ -1,8 +1,10 @@
 use entity_core::{EntityOutboxRecord, EntityOutboxStatus};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
+
+const OUTBOX_FILE_NAME: &str = "runtime_outbox.json";
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct PersistedOutbox {
@@ -21,8 +23,9 @@ pub struct RuntimeOutbox {
 }
 
 impl RuntimeOutbox {
-    pub fn load(path: impl AsRef<Path>, max_records: usize) -> anyhow::Result<Self> {
-        let path = path.as_ref().to_path_buf();
+    pub fn load(root_dir: impl AsRef<std::path::Path>, max_records: usize) -> anyhow::Result<Self> {
+        let path =
+            abigail_core::path_guard::trusted_file_path(root_dir.as_ref(), OUTBOX_FILE_NAME)?;
         let inner = if path.exists() {
             let bytes = fs::read_to_string(&path)?;
             serde_json::from_str(&bytes)?
@@ -110,7 +113,7 @@ mod tests {
     #[test]
     fn outbox_round_trips_and_acknowledges() {
         let root = std::env::temp_dir().join(format!("abigail-outbox-{}", uuid::Uuid::new_v4()));
-        let outbox = RuntimeOutbox::load(root.join("outbox.json"), 4).unwrap();
+        let outbox = RuntimeOutbox::load(&root, 4).unwrap();
 
         let first = outbox
             .enqueue(
