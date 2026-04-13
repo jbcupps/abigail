@@ -28,8 +28,8 @@ use abigail_runtime::{
 };
 use abigail_skills::{Skill, SkillExecutionPolicy, SkillExecutor, SkillRegistry};
 use abigail_streaming::{MemoryBroker, StreamBroker};
-use axum::Router;
 use axum::routing::{get, post};
+use axum::Router;
 use capability_matcher::CapabilityMatcher;
 use clap::Parser;
 use hive_client::HiveClient;
