@@ -47,7 +47,7 @@ members = [
     "skills/skill-image",
     "skills/skill-clipboard",
     "skills/skill-system-monitor",
-    "tauri-app", "codex_cargo_run_test", "codex_build_script_test", "codex_phf_test", "codex_icu_test",
+    "tauri-app",
 ]
 
 [workspace.package]
