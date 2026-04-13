@@ -25,14 +25,29 @@ async fn runtime_exposes_session_and_outbox_status() {
     let cluster = cluster().await;
     let client = reqwest::Client::new();
 
-    let session: serde_json::Value = client
-        .get(format!("{}/v1/session/status", cluster.entity_url()))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    // The entity daemon may still be initialising routes right after the
+    // health endpoint becomes available.  Retry a few times to avoid flaky
+    // "EOF while parsing" failures on slower CI runners.
+    let mut session: serde_json::Value = serde_json::Value::Null;
+    for attempt in 0..5u32 {
+        let resp = client
+            .get(format!("{}/v1/session/status", cluster.entity_url()))
+            .send()
+            .await;
+        if let Ok(r) = resp {
+            if let Ok(v) = r.json::<serde_json::Value>().await {
+                session = v;
+                break;
+            }
+        }
+        if attempt < 4 {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    }
+    assert!(
+        !session.is_null(),
+        "session/status never returned a valid JSON response"
+    );
     assert!(session["ok"].as_bool().unwrap_or(false));
     assert_eq!(
         session["data"]["lease"]["entity_id"].as_str(),
