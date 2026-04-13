@@ -1,4 +1,8 @@
 //! Entity-daemon integration tests — exercises the real runtime binary over HTTP.
+//!
+//! These tests require the `hive-daemon` and `entity-daemon` binaries to be
+//! pre-built.  The CI stability job handles that explicitly; the generic
+//! `cargo test --workspace` run skips them to avoid flaky build-order races.
 
 use daemon_test_harness::TestCluster;
 use std::time::Duration;
@@ -13,6 +17,10 @@ async fn cluster() -> TestCluster {
 
 #[tokio::test]
 async fn health_returns_200() {
+    if std::env::var("ABIGAIL_DAEMON_INTEGRATION").is_err() {
+        eprintln!("Skipping: set ABIGAIL_DAEMON_INTEGRATION=1 to run daemon integration tests");
+        return;
+    }
     let cluster = cluster().await;
     let resp = reqwest::get(format!("{}/health", cluster.entity_url()))
         .await
@@ -22,12 +30,13 @@ async fn health_returns_200() {
 
 #[tokio::test]
 async fn runtime_exposes_session_and_outbox_status() {
+    if std::env::var("ABIGAIL_DAEMON_INTEGRATION").is_err() {
+        eprintln!("Skipping: set ABIGAIL_DAEMON_INTEGRATION=1 to run daemon integration tests");
+        return;
+    }
     let cluster = cluster().await;
     let client = reqwest::Client::new();
 
-    // The entity daemon may still be initialising routes right after the
-    // health endpoint becomes available.  Retry a few times to avoid flaky
-    // "EOF while parsing" failures on slower CI runners.
     let mut session: serde_json::Value = serde_json::Value::Null;
     for attempt in 0..5u32 {
         let resp = client
