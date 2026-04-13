@@ -99,6 +99,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/entities", post(routes::create_entity))
         .route("/v1/entities/:id", get(routes::get_entity))
         .route(
+            "/v1/entities/:id/config",
+            axum::routing::patch(routes::update_entity_config),
+        )
+        .route(
             "/v1/entities/:id/provider-config",
             get(routes::get_provider_config),
         )

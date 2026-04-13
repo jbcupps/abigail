@@ -160,9 +160,14 @@ pub async fn set_local_llm_during_birth(
 }
 
 /// Start the managed Ollama instance, pull model if needed, and configure the
-/// local LLM URL for the router.  Returns `true` if the model needed to be
-/// pulled (so the frontend can show the loading screen), `false` if it was
-/// already present or Ollama management is disabled.
+/// local LLM URL for the router.  Returns `true` if background work (install
+/// and/or model pull) is happening, `false` if everything was already ready or
+/// Ollama management is disabled.
+///
+/// When Ollama is not installed, this command **auto-installs** it before
+/// starting the server and pulling the model.  All heavy work runs in a
+/// background tokio task; the command returns immediately so the frontend can
+/// show the loading screen.
 ///
 /// Emits `ollama-lifecycle` events so the frontend can track progress.
 #[tauri::command]
@@ -209,8 +214,85 @@ pub async fn start_managed_ollama(
         config.data_dir.clone()
     };
 
-    // 5. Start Ollama (bundled or system)
-    let mgr = OllamaManager::discover_and_start_bundled(&data_dir, bundled_path).await?;
+    // 5. Try to start Ollama (bundled or system).  If not found, auto-install.
+    let start_result = OllamaManager::discover_and_start_bundled(&data_dir, bundled_path).await;
+
+    let needs_install = start_result.is_err();
+
+    if needs_install {
+        // Ollama binary not found — run install + start + model-pull in background.
+        tracing::info!("Ollama not found; launching background auto-install");
+        let app_bg = app.clone();
+        let data_dir_bg = data_dir.clone();
+
+        tokio::spawn(async move {
+            let state_ref = app_bg.state::<AppState>();
+
+            // ── Phase 1: Install Ollama ──────────────────────────────
+            let _ = app_bg.emit(
+                "ollama-lifecycle",
+                OllamaLifecycleState::InstallingOllama { progress_pct: 0.0 },
+            );
+
+            let app_install = app_bg.clone();
+            let install_result =
+                OllamaManager::download_and_install(move |progress: OllamaInstallProgress| {
+                    let pct = match (progress.written, progress.total) {
+                        (Some(w), Some(t)) if t > 0 => (w as f32 / t as f32) * 100.0,
+                        _ => 0.0,
+                    };
+                    let _ = app_install.emit(
+                        "ollama-lifecycle",
+                        OllamaLifecycleState::InstallingOllama { progress_pct: pct },
+                    );
+                })
+                .await;
+
+            if let Err(e) = install_result {
+                tracing::error!("Auto-install of Ollama failed: {}", e);
+                let _ = app_bg.emit(
+                    "ollama-lifecycle",
+                    OllamaLifecycleState::Error(format!("Ollama install failed: {e}")),
+                );
+                return;
+            }
+
+            tracing::info!("Ollama auto-install complete, starting server");
+
+            // ── Phase 2: Start the freshly installed Ollama ──────────
+            let _ = app_bg.emit("ollama-lifecycle", OllamaLifecycleState::Starting);
+
+            let mgr = match OllamaManager::discover_and_start(&data_dir_bg).await {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::error!("Failed to start Ollama after install: {}", e);
+                    let _ = app_bg.emit(
+                        "ollama-lifecycle",
+                        OllamaLifecycleState::Error(format!(
+                            "Ollama installed but failed to start: {e}"
+                        )),
+                    );
+                    return;
+                }
+            };
+
+            let base_url = mgr.base_url();
+            {
+                let mut guard = state_ref.ollama.lock().await;
+                *guard = Some(mgr);
+            }
+            let _ = app_bg.emit("ollama-lifecycle", OllamaLifecycleState::Running);
+
+            // ── Phase 3: Pull model ──────────────────────────────────
+            pull_model_and_finalize(&app_bg, &state_ref, &base_url, &model_name, first_pull_done)
+                .await;
+        });
+
+        return Ok(true);
+    }
+
+    // Ollama was already installed — normal synchronous start succeeded.
+    let mgr = start_result.unwrap();
     let base_url = mgr.base_url();
 
     // 6. Store manager in state
@@ -222,112 +304,18 @@ pub async fn start_managed_ollama(
     let _ = app.emit("ollama-lifecycle", OllamaLifecycleState::Running);
 
     // 7. Check if model already exists
-    let model_exists = {
-        let guard = state.ollama.lock().await;
-        if let Some(ref mgr) = *guard {
-            // Quick check via the existing ensure_model pattern — look at /api/tags
-            let client = reqwest::Client::new();
-            let tags_url = format!("{}/api/tags", mgr.base_url());
-            match client.get(&tags_url).send().await {
-                Ok(resp) => {
-                    if let Ok(body) = resp.json::<serde_json::Value>().await {
-                        body.get("models")
-                            .and_then(|m| m.as_array())
-                            .map(|models| {
-                                models.iter().any(|m| {
-                                    m.get("name").and_then(|n| n.as_str()).is_some_and(|name| {
-                                        name == model_name
-                                            || name == format!("{}:latest", model_name)
-                                            || name.starts_with(&format!("{}:", model_name))
-                                    })
-                                })
-                            })
-                            .unwrap_or(false)
-                    } else {
-                        false
-                    }
-                }
-                Err(_) => false,
-            }
-        } else {
-            false
-        }
-    };
+    let model_exists = check_model_exists_on_server(&base_url, &model_name).await;
 
     let needs_pull = !model_exists;
 
     if needs_pull {
-        // 8. Return immediately so the frontend can show the loading screen,
-        //    then pull the model in a background task that emits progress events.
         let app_bg = app.clone();
         tokio::spawn(async move {
             let state_ref = app_bg.state::<AppState>();
-
-            // Pull model with streaming progress
-            let pull_result =
-                OllamaManager::pull_model_streaming(&base_url, &model_name, |progress| {
-                    let pct = match (progress.completed, progress.total) {
-                        (Some(c), Some(t)) if t > 0 => (c as f32 / t as f32) * 100.0,
-                        _ => 0.0,
-                    };
-                    let _ = app_bg.emit(
-                        "ollama-lifecycle",
-                        OllamaLifecycleState::PullingModel { progress_pct: pct },
-                    );
-                    let _ = app_bg.emit(
-                        "ollama-model-progress",
-                        OllamaModelProgress {
-                            model: model_name.clone(),
-                            completed: progress.completed,
-                            total: progress.total,
-                            status: progress.status.clone(),
-                        },
-                    );
-                })
+            pull_model_and_finalize(&app_bg, &state_ref, &base_url, &model_name, first_pull_done)
                 .await;
-
-            if let Err(e) = pull_result {
-                tracing::error!("Background model pull failed: {}", e);
-                let _ = app_bg.emit(
-                    "ollama-lifecycle",
-                    OllamaLifecycleState::Error(e.to_string()),
-                );
-                return;
-            }
-
-            // Mark model ready
-            {
-                let mut guard = state_ref.ollama.lock().await;
-                if let Some(ref mut mgr) = *guard {
-                    mgr.mark_model_ready();
-                }
-            }
-
-            // Auto-configure local_llm_base_url
-            if let Ok(mut config) = state_ref.config.write() {
-                let should_set = config.local_llm_base_url.is_none()
-                    || config
-                        .local_llm_base_url
-                        .as_deref()
-                        .is_none_or(|u| u.is_empty());
-                if should_set {
-                    config.local_llm_base_url = Some(base_url.clone());
-                }
-                if !first_pull_done {
-                    config.first_model_pull_complete = true;
-                }
-                let _ = config.save(&config.config_path());
-            }
-
-            // Rebuild router
-            if let Err(e) = crate::rebuild_router_from_handle(&app_bg).await {
-                tracing::warn!("Failed to rebuild router after Ollama start: {}", e);
-            }
-
-            let _ = app_bg.emit("ollama-lifecycle", OllamaLifecycleState::ModelReady);
         });
 
-        // Return immediately — frontend shows loading screen
         return Ok(true);
     }
 
@@ -366,6 +354,106 @@ pub async fn start_managed_ollama(
 
     let _ = app.emit("ollama-lifecycle", OllamaLifecycleState::ModelReady);
     Ok(false)
+}
+
+/// Check whether a model is already available on a running Ollama server.
+async fn check_model_exists_on_server(base_url: &str, model_name: &str) -> bool {
+    let client = reqwest::Client::new();
+    let tags_url = format!("{}/api/tags", base_url);
+    match client.get(&tags_url).send().await {
+        Ok(resp) => {
+            if let Ok(body) = resp.json::<serde_json::Value>().await {
+                body.get("models")
+                    .and_then(|m| m.as_array())
+                    .map(|models| {
+                        models.iter().any(|m| {
+                            m.get("name").and_then(|n| n.as_str()).is_some_and(|name| {
+                                name == model_name
+                                    || name == format!("{}:latest", model_name)
+                                    || name.starts_with(&format!("{}:", model_name))
+                            })
+                        })
+                    })
+                    .unwrap_or(false)
+            } else {
+                false
+            }
+        }
+        Err(_) => false,
+    }
+}
+
+/// Background helper: pull a model, configure `local_llm_base_url`, rebuild
+/// the router, and emit `ModelReady`.  Used by both the fresh-install path and
+/// the normal "Ollama exists but model is missing" path.
+async fn pull_model_and_finalize(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    base_url: &str,
+    model_name: &str,
+    first_pull_done: bool,
+) {
+    let base_url = base_url.to_string();
+    let model_name = model_name.to_string();
+    let app_bg = app.clone();
+
+    let pull_result = OllamaManager::pull_model_streaming(&base_url, &model_name, |progress| {
+        let pct = match (progress.completed, progress.total) {
+            (Some(c), Some(t)) if t > 0 => (c as f32 / t as f32) * 100.0,
+            _ => 0.0,
+        };
+        let _ = app_bg.emit(
+            "ollama-lifecycle",
+            OllamaLifecycleState::PullingModel { progress_pct: pct },
+        );
+        let _ = app_bg.emit(
+            "ollama-model-progress",
+            OllamaModelProgress {
+                model: model_name.clone(),
+                completed: progress.completed,
+                total: progress.total,
+                status: progress.status.clone(),
+            },
+        );
+    })
+    .await;
+
+    if let Err(e) = pull_result {
+        tracing::error!("Background model pull failed: {}", e);
+        let _ = app.emit(
+            "ollama-lifecycle",
+            OllamaLifecycleState::Error(e.to_string()),
+        );
+        return;
+    }
+
+    {
+        let mut guard = state.ollama.lock().await;
+        if let Some(ref mut mgr) = *guard {
+            mgr.mark_model_ready();
+        }
+    }
+
+    if let Ok(mut config) = state.config.write() {
+        let should_set = config.local_llm_base_url.is_none()
+            || config
+                .local_llm_base_url
+                .as_deref()
+                .is_none_or(|u| u.is_empty());
+        if should_set {
+            config.local_llm_base_url = Some(base_url.clone());
+        }
+        if !first_pull_done {
+            config.first_model_pull_complete = true;
+        }
+        let _ = config.save(&config.config_path());
+    }
+
+    if let Err(e) = crate::rebuild_router_from_handle(app).await {
+        tracing::warn!("Failed to rebuild router after Ollama start: {}", e);
+    }
+
+    let _ = app.emit("ollama-lifecycle", OllamaLifecycleState::ModelReady);
 }
 
 /// Send a lightweight generate request to Ollama so the model loads into memory.

@@ -6,6 +6,7 @@ use entity_core::{
     SkillApplyAcknowledgementList,
 };
 use serde::Serialize;
+use tauri::Emitter;
 
 #[derive(Debug, Serialize)]
 struct RuntimeConnectionInfo {
@@ -62,6 +63,68 @@ async fn send_chat(message: String, session_id: Option<String>) -> Result<ChatRe
 }
 
 #[tauri::command]
+async fn send_chat_stream(
+    app: tauri::AppHandle,
+    message: String,
+    session_id: Option<String>,
+) -> Result<(), String> {
+    let client = EntityClient::new(&entity_url());
+    let request = ChatRequest {
+        message: message.clone(),
+        target: None,
+        session_messages: None,
+        session_id,
+        model_override: None,
+    };
+    let _ = app.emit(
+        "runtime-chat-envelope",
+        serde_json::json!({ "type": "Request", "message": message }),
+    );
+    let mut rx = client
+        .chat_stream(&request)
+        .await
+        .map_err(|e| e.to_string())?;
+    while let Some(event) = rx.recv().await {
+        match event {
+            daemon_client::ChatStreamEvent::Token(token) => {
+                let _ = app.emit(
+                    "runtime-chat-envelope",
+                    serde_json::json!({ "type": "Token", "token": token }),
+                );
+            }
+            daemon_client::ChatStreamEvent::Done(resp) => {
+                let _ = app.emit(
+                    "runtime-chat-envelope",
+                    serde_json::json!({
+                        "type": "Done",
+                        "reply": &resp.reply,
+                        "provider": &resp.provider,
+                        "tier": &resp.tier,
+                        "model_used": &resp.model_used,
+                        "complexity_score": &resp.complexity_score,
+                    }),
+                );
+            }
+            daemon_client::ChatStreamEvent::Error(error) => {
+                let _ = app.emit(
+                    "runtime-chat-envelope",
+                    serde_json::json!({ "type": "Error", "error": error }),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn cancel_chat_stream() -> Result<bool, String> {
+    EntityClient::new(&entity_url())
+        .cancel_chat_stream()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn list_skill_acks() -> Result<SkillApplyAcknowledgementList, String> {
     EntityClient::new(&entity_url())
         .list_skill_apply_acknowledgements()
@@ -85,6 +148,8 @@ pub fn run() {
             get_session_status,
             get_outbox_status,
             send_chat,
+            send_chat_stream,
+            cancel_chat_stream,
             list_skill_acks
         ])
         .run(tauri::generate_context!())

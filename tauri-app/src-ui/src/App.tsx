@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
 import SoulRegistry from "./components/SoulRegistry";
 import BootSequence from "./components/BootSequence";
@@ -114,17 +114,14 @@ function AppInner() {
   const { refreshAgentName, refreshTheme } = useTheme();
   const skillToasts = useSkillEvents();
 
-  const initializeApp = async () => {
+  const initializeAppRef = useRef<() => Promise<void>>();
+  initializeAppRef.current = async () => {
     try {
-      // Always enter Registry selection first for explicit mentor choice.
       const activeAgent = await invoke<string | null>("get_active_agent");
       if (activeAgent) {
         await invoke("suspend_agent");
       }
 
-      // Start managed Ollama (bundled Hive agent LLM).
-      // Await the result BEFORE entering model_loading so AbnormalBrainScreen
-      // mounts with correct initial values for isFirstPull / progress / status.
       let needsPull = false;
       let ollamaFailed = false;
       try {
@@ -135,7 +132,6 @@ function AppInner() {
       }
 
       if (ollamaFailed) {
-        // No Ollama — show instant text + 100% bar, let onReady transition
         setIsFirstPull(false);
         setOllamaProgress(100);
         setOllamaStatus("No local LLM found — continuing with cloud providers");
@@ -144,35 +140,33 @@ function AppInner() {
       }
 
       if (needsPull) {
-        // Model is being downloaded — typewriter + progress bar via events
         setIsFirstPull(true);
         setOllamaProgress(0);
-        setOllamaStatus("Downloading model...");
+        setOllamaStatus("Preparing local model...");
         setAppState("model_loading");
         return;
       }
 
-      // Model exists — show instant text + 100% bar, fire warmup in background
       setIsFirstPull(false);
       setOllamaProgress(100);
       setOllamaStatus("Hive agent ready");
       setAppState("model_loading");
-      // Non-blocking warmup — model will load on first real request if this fails
       invoke("warmup_ollama_model").catch(() => {});
     } catch (e) {
       console.error("[App] initializeApp failed; falling back to management screen:", e);
-      // Fallback to management screen on error
       setAppState("management");
     }
   };
 
-  const handleSplashComplete = () => {
+  const handleSplashComplete = useCallback(() => {
     setAppState("loading");
-    initializeApp();
-  };
+    initializeAppRef.current?.();
+  }, []);
 
-  // Continue to management screen after model loading completes
-  const continueAfterModelReady = async () => {
+  // Continue to management screen after model loading completes.
+  // Wrapped in useCallback so AbnormalBrainScreen's onReady/onSkip
+  // effects don't get invalidated by parent re-renders.
+  const continueAfterModelReady = useCallback(async () => {
     try {
       const identities = await invoke<unknown[]>("get_identities");
       if (identities.length === 0) {
@@ -188,7 +182,7 @@ function AppInner() {
       console.error("[App] continueAfterModelReady failed:", e);
       setAppState("management");
     }
-  };
+  }, []);
 
   // Listen for Ollama lifecycle and model progress events
   useEffect(() => {
@@ -196,16 +190,21 @@ function AppInner() {
 
     listen<Record<string, unknown> | string>("ollama-lifecycle", (event) => {
       const payload = event.payload;
-      if (typeof payload === "object" && payload !== null && "pulling_model" in payload) {
-        // PullingModel { progress_pct } — serde serializes to {"pulling_model": {"progress_pct": N}}
+      if (typeof payload === "object" && payload !== null && "installing_ollama" in payload) {
+        const inner = (payload as { installing_ollama: { progress_pct?: number } }).installing_ollama;
+        const rawPct = inner?.progress_pct ?? 0;
+        setOllamaProgress(rawPct * 0.4);
+        setOllamaStatus("Installing Ollama...");
+      } else if (payload === "starting") {
+        setOllamaStatus("Starting Ollama server...");
+      } else if (typeof payload === "object" && payload !== null && "pulling_model" in payload) {
         const inner = (payload as { pulling_model: { progress_pct?: number } }).pulling_model;
-        setOllamaProgress(inner?.progress_pct ?? 0);
+        const rawPct = inner?.progress_pct ?? 0;
+        setOllamaProgress(40 + rawPct * 0.6);
       } else if (payload === "model_ready") {
         setOllamaProgress(100);
-        // onReady in AbnormalBrainScreen will handle transition after brief pause
       } else if (typeof payload === "object" && payload !== null && "error" in payload) {
         console.warn("[App] Ollama lifecycle error:", payload);
-        // Skip to management on error
         setAppState("management");
       }
     }).then((fn) => unlisteners.push(fn));
@@ -214,9 +213,9 @@ function AppInner() {
       "ollama-model-progress",
       (event) => {
         const { status, completed, total } = event.payload;
-        setOllamaStatus(status || "Downloading...");
+        setOllamaStatus(status || "Downloading model...");
         if (completed != null && total != null && total > 0) {
-          setOllamaProgress((completed / total) * 100);
+          setOllamaProgress(40 + (completed / total) * 60);
         }
       }
     ).then((fn) => unlisteners.push(fn));
@@ -227,9 +226,8 @@ function AppInner() {
   }, []);
 
   useEffect(() => {
-    // If we somehow start in loading (e.g. no splash needed), initialize immediately
     if (appState === "loading") {
-      initializeApp();
+      initializeAppRef.current?.();
     }
   }, []);
 

@@ -428,6 +428,7 @@ pub fn augment_system_prompt(
                     prompt.push_str(&tool_lines.join("\n"));
                 }
             }
+            append_web_and_image_guidance(&mut prompt, registry);
 
             // Only inject instructions for skills that are actually registered
             let skill_section =
@@ -476,6 +477,31 @@ pub fn augment_system_prompt(
     }
 
     prompt
+}
+
+fn append_web_and_image_guidance(prompt: &mut String, registry: &SkillRegistry) {
+    let has_web_search = registry
+        .get_skill(&SkillId("com.abigail.skills.web-search".to_string()))
+        .is_ok();
+    let has_browser = registry
+        .get_skill(&SkillId("com.abigail.skills.browser".to_string()))
+        .is_ok();
+    if !has_web_search && !has_browser {
+        return;
+    }
+
+    prompt.push_str("\n\n## Web Research And Images\n");
+    if has_web_search {
+        prompt.push_str(
+            "- For current information, call `com.abigail.skills.web-search::web_search` and cite key sources in your final reply.\n",
+        );
+    }
+    if has_browser {
+        prompt.push_str(
+            "- When the user explicitly asks for visuals, use browser tooling and return markdown image links like `![caption](https://...)` or safe `data:image/...` links so the runtime UI can render inline images.\n",
+        );
+    }
+    prompt.push_str("- Prefer concise, family-friendly summaries before detailed evidence.\n");
 }
 
 /// Build a CLI-optimized system prompt for CliOrchestrator mode.
@@ -529,6 +555,7 @@ pub fn build_cli_system_prompt(
             prompt.push_str(&format!("{}: {}\n", skill_name, tools.join(", ")));
         }
     }
+    append_web_and_image_guidance(&mut prompt, registry);
 
     // Budgeted instruction injection: max 1 instruction, 2048 bytes for CLI mode
     let skill_section = instruction_registry.format_for_prompt_budgeted(

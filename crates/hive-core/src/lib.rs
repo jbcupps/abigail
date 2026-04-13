@@ -86,6 +86,32 @@ pub struct ProviderConfig {
     pub cli_permission_mode: Option<String>,
 }
 
+/// Request to update per-entity provider and routing preferences.
+///
+/// Fields are patch-style: omitted values are left unchanged.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateEntityConfigRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_provider_preference: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ego_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_llm_base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing_mode: Option<String>,
+    /// CLI permission mode string
+    /// (allowlist_only, interactive, dangerous_skip_all).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_permission_mode: Option<String>,
+}
+
+/// Response after applying an entity config patch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateEntityConfigResponse {
+    pub entity_id: String,
+    pub provider_config: ProviderConfig,
+}
+
 // ---------------------------------------------------------------------------
 // Hive status
 // ---------------------------------------------------------------------------
@@ -333,4 +359,27 @@ pub struct OutboxSyncResponse {
     pub accepted_record_ids: Vec<String>,
     pub pending_records: usize,
     pub server_time_utc: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_entity_config_request_serializes_patch_fields() {
+        let patch = UpdateEntityConfigRequest {
+            active_provider_preference: Some("openai".to_string()),
+            ego_model: None,
+            local_llm_base_url: Some("http://localhost:11434".to_string()),
+            routing_mode: Some("ego_primary".to_string()),
+            cli_permission_mode: Some("interactive".to_string()),
+        };
+
+        let json = serde_json::to_value(&patch).expect("serialize patch");
+        assert_eq!(json["active_provider_preference"], "openai");
+        assert_eq!(json["local_llm_base_url"], "http://localhost:11434");
+        assert_eq!(json["routing_mode"], "ego_primary");
+        assert_eq!(json["cli_permission_mode"], "interactive");
+        assert!(json.get("ego_model").is_none());
+    }
 }

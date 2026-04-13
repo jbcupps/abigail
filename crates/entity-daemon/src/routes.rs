@@ -17,6 +17,45 @@ use futures_util::{Stream, StreamExt};
 use std::convert::Infallible;
 use tokio_util::sync::CancellationToken;
 
+const BUS_STREAM: &str = "abigail";
+const BUS_TOPIC: &str = "job-events";
+
+fn publish_chat_lifecycle_event(
+    broker: std::sync::Arc<dyn abigail_streaming::StreamBroker>,
+    session_id: String,
+    entity_id: String,
+    phase: &str,
+    payload: serde_json::Value,
+) {
+    let phase = phase.to_string();
+    let watch_topic = format!("chat-{}", session_id);
+    tokio::spawn(async move {
+        let _ = broker
+            .ensure_topic(
+                BUS_STREAM,
+                BUS_TOPIC,
+                abigail_streaming::TopicConfig::default(),
+            )
+            .await;
+        let mut msg = abigail_streaming::StreamMessage::new(
+            serde_json::json!({
+                "kind": "chat_lifecycle",
+                "phase": phase,
+                "session_id": session_id,
+                "entity_id": entity_id,
+                "payload": payload,
+                "timestamp_utc": chrono::Utc::now().to_rfc3339(),
+            })
+            .to_string()
+            .into_bytes(),
+        );
+        msg.headers.insert("topic".to_string(), watch_topic);
+        if let Err(e) = broker.publish(BUS_STREAM, BUS_TOPIC, msg).await {
+            tracing::warn!("Failed to publish chat lifecycle event: {}", e);
+        }
+    });
+}
+
 // ---------------------------------------------------------------------------
 // GET /health
 // ---------------------------------------------------------------------------
@@ -97,6 +136,26 @@ pub async fn chat(
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let model_override = body.model_override.clone();
+    publish_chat_lifecycle_event(
+        state.stream_broker.clone(),
+        session_id.clone(),
+        state.entity_id.clone(),
+        "chat_started",
+        serde_json::json!({
+            "message_preview": body.message.chars().take(200).collect::<String>(),
+            "model_override": model_override.clone(),
+        }),
+    );
+    publish_chat_lifecycle_event(
+        state.stream_broker.clone(),
+        session_id.clone(),
+        state.entity_id.clone(),
+        "chat_started",
+        serde_json::json!({
+            "message_preview": body.message.chars().take(200).collect::<String>(),
+            "model_override": model_override.clone(),
+        }),
+    );
 
     // Register selected model as the entity subscriber identity for mentor chat topic.
     let _subscriber_group = state
@@ -236,6 +295,24 @@ pub async fn chat(
             );
 
             state.maybe_auto_archive();
+            publish_chat_lifecycle_event(
+                state.stream_broker.clone(),
+                session_id.clone(),
+                state.entity_id.clone(),
+                "chat_completed",
+                serde_json::json!({
+                    "provider": provider.clone(),
+                    "model_used": model_used.clone(),
+                    "tool_calls": tool_result.tool_calls_made.len(),
+                    "tool_summary": tool_result.tool_calls_made.iter().map(|record| {
+                        serde_json::json!({
+                            "skill_id": record.skill_id,
+                            "tool_name": record.tool_name,
+                            "success": record.success,
+                        })
+                    }).collect::<Vec<_>>(),
+                }),
+            );
 
             Json(ApiEnvelope::success(ChatResponse {
                 reply: tool_result.content,
@@ -248,7 +325,18 @@ pub async fn chat(
                 session_id: Some(session_id),
             }))
         }
-        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+        Err(e) => {
+            publish_chat_lifecycle_event(
+                state.stream_broker.clone(),
+                session_id.clone(),
+                state.entity_id.clone(),
+                "chat_failed",
+                serde_json::json!({
+                    "error": e.to_string(),
+                }),
+            );
+            Json(ApiEnvelope::error(e.to_string()))
+        }
     }
 }
 
@@ -447,7 +535,7 @@ pub async fn chat_stream(
                     model_used,
                     complexity_score,
                     execution_trace: pipeline.execution_trace,
-                    session_id: Some(sid),
+                    session_id: Some(sid.clone()),
                 };
                 let _ = sse_tx
                     .send(
@@ -456,11 +544,38 @@ pub async fn chat_stream(
                             .data(serde_json::to_string(&response).unwrap_or_default()),
                     )
                     .await;
+                publish_chat_lifecycle_event(
+                    state_for_stream.stream_broker.clone(),
+                    sid.clone(),
+                    state_for_stream.entity_id.clone(),
+                    "chat_completed",
+                    serde_json::json!({
+                        "provider": response.provider,
+                        "model_used": response.model_used,
+                        "tool_calls": response.tool_calls_made.len(),
+                        "tool_summary": response.tool_calls_made.iter().map(|record| {
+                            serde_json::json!({
+                                "skill_id": record.skill_id,
+                                "tool_name": record.tool_name,
+                                "success": record.success,
+                            })
+                        }).collect::<Vec<_>>(),
+                    }),
+                );
             }
             Err(e) => {
                 let _ = sse_tx
                     .send(Event::default().event("error").data(e.to_string()))
                     .await;
+                publish_chat_lifecycle_event(
+                    state_for_stream.stream_broker.clone(),
+                    sid.clone(),
+                    state_for_stream.entity_id.clone(),
+                    "chat_failed",
+                    serde_json::json!({
+                        "error": e.to_string(),
+                    }),
+                );
             }
         }
     });
@@ -1034,7 +1149,7 @@ mod tests {
     use abigail_persistence::{EntityScope, PersistenceHandle};
     use abigail_router::IdEgoRouter;
     use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
-    use abigail_streaming::MemoryBroker;
+    use abigail_streaming::{MemoryBroker, TopicConfig};
     use async_trait::async_trait;
     use axum::extract::{Path, Query, State};
     use axum::Json;
@@ -1130,6 +1245,52 @@ mod tests {
             .map(|dir| dir.join("target").join("test-data"))
             .unwrap_or_else(|_| std::env::temp_dir())
             .join(format!("{prefix}_{}", uuid::Uuid::new_v4()))
+    }
+
+    #[tokio::test]
+    async fn chat_lifecycle_event_is_published_with_topic_header() {
+        let broker: Arc<dyn abigail_streaming::StreamBroker> = Arc::new(MemoryBroker::new(64));
+        broker
+            .ensure_topic("abigail", "job-events", TopicConfig::default())
+            .await
+            .expect("ensure topic");
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<abigail_streaming::StreamMessage>(4);
+        let handle = broker
+            .subscribe(
+                "abigail",
+                "job-events",
+                "test-lifecycle",
+                Box::new(move |msg| {
+                    let tx = tx.clone();
+                    Box::pin(async move {
+                        let _ = tx.send(msg).await;
+                    })
+                }),
+            )
+            .await
+            .expect("subscribe");
+
+        publish_chat_lifecycle_event(
+            broker.clone(),
+            "session-123".to_string(),
+            "entity-abc".to_string(),
+            "chat_started",
+            serde_json::json!({ "message_preview": "hello" }),
+        );
+
+        let first = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timed out waiting for lifecycle event")
+            .expect("event message");
+        handle.cancel();
+        assert_eq!(
+            first.headers.get("topic").map(String::as_str),
+            Some("chat-session-123")
+        );
+        let payload: serde_json::Value =
+            serde_json::from_slice(&first.payload).expect("payload json");
+        assert_eq!(payload["phase"], "chat_started");
+        assert_eq!(payload["entity_id"], "entity-abc");
     }
 
     #[tokio::test]

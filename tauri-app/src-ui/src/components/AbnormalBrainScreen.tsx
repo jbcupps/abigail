@@ -45,15 +45,19 @@ export default function AbnormalBrainScreen({
   const [flickerChar, setFlickerChar] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Keep a stable ref so the effect doesn't depend on callback identity.
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+
   // When progress hits 100, notify parent after a brief pause
   const readyFired = useRef(false);
   useEffect(() => {
     if (progress >= 100 && !readyFired.current) {
       readyFired.current = true;
-      const t = setTimeout(onReady, 600);
+      const t = setTimeout(() => onReadyRef.current(), 600);
       return () => clearTimeout(t);
     }
-  }, [progress, onReady]);
+  }, [progress]);
 
   // Sync typewriterDone when isFirstPull changes to false after mount
   useEffect(() => {

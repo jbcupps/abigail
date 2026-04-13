@@ -2,9 +2,10 @@
 
 use hive_core::{
     ApiEnvelope, EntityInfo, ForgeApprovalJobsResponse, OutboxSyncRequest, OutboxSyncResponse,
-    ProviderConfig, RuntimeHeartbeatRequest, RuntimeHeartbeatResponse, RuntimeRegistrationRequest,
-    RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus, SecretListResponse,
-    SecretValueResponse, SkillAssignmentsResponse,
+    ProviderConfig, ProviderModelsRequest, ProviderModelsResponse, RuntimeHeartbeatRequest,
+    RuntimeHeartbeatResponse, RuntimeRegistrationRequest, RuntimeSessionLease,
+    RuntimeSessionRequest, RuntimeSessionStatus, SecretListResponse, SecretValueResponse,
+    SkillAssignmentsResponse, UpdateEntityConfigRequest, UpdateEntityConfigResponse,
 };
 
 /// HTTP client wrapping all hive-daemon REST endpoints.
@@ -87,6 +88,25 @@ impl HiveDaemonClient {
         unwrap_envelope(resp)
     }
 
+    pub async fn update_entity_config(
+        &self,
+        entity_id: &str,
+        patch: &UpdateEntityConfigRequest,
+    ) -> anyhow::Result<UpdateEntityConfigResponse> {
+        let resp: ApiEnvelope<UpdateEntityConfigResponse> = self
+            .client
+            .patch(format!(
+                "{}/v1/entities/{}/config",
+                self.base_url, entity_id
+            ))
+            .json(patch)
+            .send()
+            .await?
+            .json()
+            .await?;
+        unwrap_envelope(resp)
+    }
+
     pub async fn store_secret(&self, key: &str, value: &str) -> anyhow::Result<()> {
         let resp: ApiEnvelope<String> = self
             .client
@@ -124,6 +144,25 @@ impl HiveDaemonClient {
             .json()
             .await?;
         Ok(unwrap_envelope(resp)?.keys)
+    }
+
+    pub async fn discover_provider_models(
+        &self,
+        provider: &str,
+        api_key: &str,
+    ) -> anyhow::Result<ProviderModelsResponse> {
+        let resp: ApiEnvelope<ProviderModelsResponse> = self
+            .client
+            .post(format!("{}/v1/providers/models", self.base_url))
+            .json(&ProviderModelsRequest {
+                provider: provider.to_string(),
+                api_key: api_key.to_string(),
+            })
+            .send()
+            .await?
+            .json()
+            .await?;
+        unwrap_envelope(resp)
     }
 
     pub async fn issue_runtime_session(

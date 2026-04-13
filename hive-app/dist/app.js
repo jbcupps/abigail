@@ -8,6 +8,7 @@ const state = {
   selectedEntityId: null,
   latestLease: null,
   latestAssignments: null,
+  latestProviderConfig: null,
 };
 
 const elements = {
@@ -21,6 +22,14 @@ const elements = {
   selectedEntityMeta: document.querySelector("#selected-entity-meta"),
   leaseOutput: document.querySelector("#lease-output"),
   assignmentsOutput: document.querySelector("#assignments-output"),
+  providerPill: document.querySelector("#provider-pill"),
+  providerName: document.querySelector("#provider-name"),
+  providerKey: document.querySelector("#provider-key"),
+  routingMode: document.querySelector("#routing-mode"),
+  localLlmUrl: document.querySelector("#local-llm-url"),
+  modelId: document.querySelector("#model-id"),
+  cliPermissionMode: document.querySelector("#cli-permission-mode"),
+  providerConfigOutput: document.querySelector("#provider-config-output"),
 };
 
 function setPill(element, label, variant = "idle") {
@@ -36,7 +45,6 @@ async function tauriInvoke(command, args = {}) {
   if (!invoke) {
     throw new Error("Tauri invoke API is unavailable in this window.");
   }
-
   return invoke(command, args);
 }
 
@@ -44,17 +52,53 @@ function pickDefaultEntity(entities) {
   return entities.find((entity) => !entity.is_hive)?.id ?? entities[0]?.id ?? null;
 }
 
+function populateModelOptions(models, selectedValue = "") {
+  const existing = [
+    "<option value=''>Use provider default</option>",
+    ...models.map((model) => {
+      const selected = model.model_id === selectedValue ? " selected" : "";
+      const display = model.display_name ? `${model.display_name} (${model.model_id})` : model.model_id;
+      return `<option value="${model.model_id}"${selected}>${display}</option>`;
+    }),
+  ];
+  elements.modelId.innerHTML = existing.join("");
+}
+
+function hydrateProviderForm(config) {
+  if (!config) {
+    setPill(elements.providerPill, "Select Entity", "idle");
+    return;
+  }
+  if (config.ego_provider_name) {
+    elements.providerName.value = config.ego_provider_name;
+  }
+  if (config.local_llm_base_url) {
+    elements.localLlmUrl.value = config.local_llm_base_url;
+  } else {
+    elements.localLlmUrl.value = "";
+  }
+  if (config.routing_mode) {
+    elements.routingMode.value = config.routing_mode;
+  }
+  setPill(elements.providerPill, "Loaded", "ok");
+}
+
 function renderSummary() {
   elements.hiveUrl.textContent = state.connection?.hive_url ?? "Unavailable";
   elements.entityCount.textContent = String(state.status?.entity_count ?? 0);
-  setPill(elements.hivePill, state.status ? "Connected" : "Unavailable", state.status ? "ok" : "warn");
+  setPill(
+    elements.hivePill,
+    state.status ? "Connected" : "Unavailable",
+    state.status ? "ok" : "warn",
+  );
 }
 
 function renderSelectedEntity() {
   const entity = state.status?.entities?.find((item) => item.id === state.selectedEntityId);
   if (!entity) {
     setPill(elements.selectedPill, "None", "idle");
-    elements.selectedEntityMeta.innerHTML = "<div class='entity-meta'>Select an entity to issue a runtime session or inspect assignments.</div>";
+    elements.selectedEntityMeta.innerHTML =
+      "<div class='entity-meta'>Select an entity to issue a runtime session or inspect assignments.</div>";
     return;
   }
 
@@ -82,7 +126,6 @@ function renderEntities() {
   }
 
   setPill(elements.entityListPill, `${entities.length} loaded`, "ok");
-
   for (const entity of entities) {
     const card = document.createElement("article");
     card.className = `entity-card${entity.id === state.selectedEntityId ? " active" : ""}`;
@@ -102,7 +145,7 @@ function renderEntities() {
       state.selectedEntityId = entity.id;
       renderEntities();
       renderSelectedEntity();
-      await loadAssignments();
+      await Promise.all([loadAssignments(), loadProviderConfig()]);
     });
 
     card.querySelector("[data-action='lease']").addEventListener("click", async () => {
@@ -111,7 +154,6 @@ function renderEntities() {
       renderSelectedEntity();
       await issueRuntimeSession();
     });
-
     elements.entityList.appendChild(card);
   }
 }
@@ -122,10 +164,12 @@ async function refreshHive() {
       tauriInvoke("get_hive_connection_info"),
       tauriInvoke("get_hive_status"),
     ]);
-
     state.connection = connection;
     state.status = status;
-    if (!state.selectedEntityId || !status.entities.some((entity) => entity.id === state.selectedEntityId)) {
+    if (
+      !state.selectedEntityId ||
+      !status.entities.some((entity) => entity.id === state.selectedEntityId)
+    ) {
       state.selectedEntityId = pickDefaultEntity(status.entities);
     }
 
@@ -133,13 +177,15 @@ async function refreshHive() {
     renderEntities();
     renderSelectedEntity();
     if (state.selectedEntityId) {
-      await loadAssignments();
+      await Promise.all([loadAssignments(), loadProviderConfig()]);
     }
   } catch (error) {
     setPill(elements.hivePill, "Error", "warn");
     setPill(elements.entityListPill, "Error", "warn");
+    setPill(elements.providerPill, "Error", "warn");
     renderJson(elements.assignmentsOutput, { error: String(error) });
     renderJson(elements.leaseOutput, { error: String(error) });
+    renderJson(elements.providerConfigOutput, { error: String(error) });
   }
 }
 
@@ -148,7 +194,6 @@ async function loadAssignments() {
     renderJson(elements.assignmentsOutput, "Select an entity to inspect assignments.");
     return;
   }
-
   try {
     state.latestAssignments = await tauriInvoke("list_assignments", { entityId: state.selectedEntityId });
     renderJson(elements.assignmentsOutput, state.latestAssignments);
@@ -157,12 +202,88 @@ async function loadAssignments() {
   }
 }
 
+async function loadProviderConfig() {
+  if (!state.selectedEntityId) {
+    renderJson(elements.providerConfigOutput, "Select an entity to inspect provider configuration.");
+    return;
+  }
+  try {
+    state.latestProviderConfig = await tauriInvoke("get_provider_config", {
+      entityId: state.selectedEntityId,
+    });
+    renderJson(elements.providerConfigOutput, state.latestProviderConfig);
+    hydrateProviderForm(state.latestProviderConfig);
+  } catch (error) {
+    setPill(elements.providerPill, "Failed", "warn");
+    renderJson(elements.providerConfigOutput, { error: String(error) });
+  }
+}
+
+async function storeProviderKey() {
+  const provider = elements.providerName.value.trim().toLowerCase();
+  const value = elements.providerKey.value.trim();
+  if (!provider || !value) {
+    setPill(elements.providerPill, "Missing Key", "warn");
+    return;
+  }
+  try {
+    await tauriInvoke("store_secret", { key: provider, value });
+    elements.providerKey.value = "";
+    setPill(elements.providerPill, "Key Saved", "ok");
+  } catch (error) {
+    setPill(elements.providerPill, "Save Failed", "warn");
+    renderJson(elements.providerConfigOutput, { error: String(error) });
+  }
+}
+
+async function discoverModels() {
+  const provider = elements.providerName.value.trim().toLowerCase();
+  const apiKey = elements.providerKey.value.trim();
+  if (!provider || !apiKey) {
+    setPill(elements.providerPill, "Need Key", "warn");
+    return;
+  }
+  try {
+    const response = await tauriInvoke("discover_provider_models", { provider, apiKey });
+    populateModelOptions(response.models || []);
+    setPill(elements.providerPill, `${(response.models || []).length} models`, "ok");
+  } catch (error) {
+    setPill(elements.providerPill, "Model Fail", "warn");
+    renderJson(elements.providerConfigOutput, { error: String(error) });
+  }
+}
+
+async function applyProviderConfig() {
+  if (!state.selectedEntityId) {
+    setPill(elements.providerPill, "Select Entity", "warn");
+    return;
+  }
+  try {
+    const model = elements.modelId.value.trim();
+    const localUrl = elements.localLlmUrl.value.trim();
+    const cliMode = elements.cliPermissionMode.value.trim();
+    const updated = await tauriInvoke("update_entity_provider_config", {
+      entityId: state.selectedEntityId,
+      activeProviderPreference: elements.providerName.value.trim().toLowerCase(),
+      egoModel: model || null,
+      localLlmBaseUrl: localUrl || null,
+      routingMode: elements.routingMode.value.trim(),
+      cliPermissionMode: cliMode || null,
+    });
+    setPill(elements.providerPill, "Applied", "ok");
+    renderJson(elements.providerConfigOutput, updated);
+    await loadProviderConfig();
+  } catch (error) {
+    setPill(elements.providerPill, "Apply Failed", "warn");
+    renderJson(elements.providerConfigOutput, { error: String(error) });
+  }
+}
+
 async function issueRuntimeSession() {
   if (!state.selectedEntityId) {
     renderJson(elements.leaseOutput, "Select an entity before issuing a runtime session.");
     return;
   }
-
   try {
     state.latestLease = await tauriInvoke("issue_runtime_session", { entityId: state.selectedEntityId });
     renderJson(elements.leaseOutput, state.latestLease);
@@ -177,7 +298,6 @@ async function createEntity() {
     elements.newEntityName.focus();
     return;
   }
-
   try {
     const entityId = await tauriInvoke("create_entity", { name });
     elements.newEntityName.value = "";
@@ -185,7 +305,7 @@ async function createEntity() {
     state.selectedEntityId = entityId;
     renderEntities();
     renderSelectedEntity();
-    await loadAssignments();
+    await Promise.all([loadAssignments(), loadProviderConfig()]);
   } catch (error) {
     renderJson(elements.assignmentsOutput, { error: String(error) });
   }
@@ -195,6 +315,11 @@ document.querySelector("#refresh-hive").addEventListener("click", refreshHive);
 document.querySelector("#create-entity").addEventListener("click", createEntity);
 document.querySelector("#issue-runtime-session").addEventListener("click", issueRuntimeSession);
 document.querySelector("#load-assignments").addEventListener("click", loadAssignments);
+document.querySelector("#store-provider-key").addEventListener("click", storeProviderKey);
+document.querySelector("#discover-models").addEventListener("click", discoverModels);
+document.querySelector("#apply-provider-config").addEventListener("click", applyProviderConfig);
+document.querySelector("#refresh-provider-config").addEventListener("click", loadProviderConfig);
+
 elements.newEntityName.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
@@ -202,4 +327,5 @@ elements.newEntityName.addEventListener("keydown", (event) => {
   }
 });
 
+populateModelOptions([]);
 void refreshHive();

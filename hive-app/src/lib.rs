@@ -3,6 +3,7 @@
 use daemon_client::HiveDaemonClient;
 use hive_core::{
     CreateForgeApprovalJobRequest, HiveStatus, RuntimeSessionLease, SkillAssignmentsResponse,
+    UpdateEntityConfigRequest, UpdateEntityConfigResponse,
 };
 use serde::Serialize;
 
@@ -44,6 +45,68 @@ async fn issue_runtime_session(entity_id: String) -> Result<RuntimeSessionLease,
     let client = HiveDaemonClient::new(&hive_url());
     client
         .issue_runtime_session(&entity_id, Some(format!("entity-runtime-{}", entity_id)))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_provider_config(entity_id: String) -> Result<hive_core::ProviderConfig, String> {
+    let client = HiveDaemonClient::new(&hive_url());
+    client
+        .get_provider_config(&entity_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn update_entity_provider_config(
+    entity_id: String,
+    active_provider_preference: Option<String>,
+    ego_model: Option<String>,
+    local_llm_base_url: Option<String>,
+    routing_mode: Option<String>,
+    cli_permission_mode: Option<String>,
+) -> Result<UpdateEntityConfigResponse, String> {
+    let client = HiveDaemonClient::new(&hive_url());
+    client
+        .update_entity_config(
+            &entity_id,
+            &UpdateEntityConfigRequest {
+                active_provider_preference,
+                ego_model,
+                local_llm_base_url,
+                routing_mode,
+                cli_permission_mode,
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn store_secret(key: String, value: String) -> Result<String, String> {
+    let client = HiveDaemonClient::new(&hive_url());
+    client
+        .store_secret(&key, &value)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(format!("Secret '{}' stored", key))
+}
+
+#[tauri::command]
+async fn list_secrets() -> Result<Vec<String>, String> {
+    let client = HiveDaemonClient::new(&hive_url());
+    client.list_secrets().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn discover_provider_models(
+    provider: String,
+    api_key: String,
+) -> Result<hive_core::ProviderModelsResponse, String> {
+    let client = HiveDaemonClient::new(&hive_url());
+    client
+        .discover_provider_models(&provider, &api_key)
         .await
         .map_err(|e| e.to_string())
 }
@@ -109,6 +172,11 @@ pub fn run() {
             get_hive_status,
             create_entity,
             issue_runtime_session,
+            get_provider_config,
+            update_entity_provider_config,
+            store_secret,
+            list_secrets,
+            discover_provider_models,
             list_assignments,
             approve_forge_job
         ])

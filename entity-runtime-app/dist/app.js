@@ -1,6 +1,7 @@
 const invoke =
   window.__TAURI__?.core?.invoke?.bind(window.__TAURI__.core) ??
   window.__TAURI_INTERNALS__?.invoke;
+const listen = window.__TAURI__?.event?.listen;
 
 const state = {
   connection: null,
@@ -9,6 +10,10 @@ const state = {
   outboxStatus: null,
   acknowledgements: null,
   transcript: [],
+  activeAssistantIndex: null,
+  streaming: false,
+  topicEvents: [],
+  topicEventSource: null,
 };
 
 const elements = {
@@ -24,6 +29,9 @@ const elements = {
   acksStatus: document.querySelector("#acks-status"),
   ackPill: document.querySelector("#ack-pill"),
   transcript: document.querySelector("#transcript"),
+  busTopic: document.querySelector("#bus-topic"),
+  busPill: document.querySelector("#bus-pill"),
+  topicResults: document.querySelector("#topic-results"),
 };
 
 function setPill(element, label, variant = "idle") {
@@ -39,6 +47,76 @@ function ensureSessionId() {
   if (!elements.sessionId.value.trim()) {
     elements.sessionId.value = `runtime-${Date.now()}`;
   }
+  if (!elements.busTopic.value.trim()) {
+    elements.busTopic.value = `chat-${elements.sessionId.value.trim()}`;
+  }
+}
+
+function escapeHtml(value) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function sanitizeUrl(rawUrl, allowDataImage = false) {
+  if (!rawUrl) {
+    return null;
+  }
+  const trimmed = rawUrl.trim();
+  if (allowDataImage && /^data:image\/(png|jpeg|jpg|webp|gif);base64,[a-z0-9+/=]+$/i.test(trimmed)) {
+    if (trimmed.length <= 2_000_000) {
+      return trimmed;
+    }
+    return null;
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return null;
+}
+
+function markdownToHtml(markdown) {
+  const source = markdown || "";
+  const codeBlocks = [];
+  let html = escapeHtml(source).replace(/```([\s\S]*?)```/g, (_, code) => {
+    const token = `@@CODE_BLOCK_${codeBlocks.length}@@`;
+    codeBlocks.push(`<pre><code>${code.trimEnd()}</code></pre>`);
+    return token;
+  });
+
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
+    const safeUrl = sanitizeUrl(url, true);
+    if (!safeUrl) {
+      return `<em>Image omitted (unsupported or unsafe URL): ${escapeHtml(url)}</em>`;
+    }
+    return `<img src="${safeUrl}" alt="${alt}" loading="lazy" />`;
+  });
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
+    const safeUrl = sanitizeUrl(url, false);
+    if (!safeUrl) {
+      return escapeHtml(text);
+    }
+    return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+  });
+
+  const paragraphs = html
+    .split(/\n{2,}/)
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.length > 0)
+    .map((chunk) => {
+      const withBreaks = chunk.replace(/\n/g, "<br />");
+      return `<p>${withBreaks}</p>`;
+    });
+
+  html = paragraphs.join("");
+  codeBlocks.forEach((block, index) => {
+    html = html.replaceAll(`@@CODE_BLOCK_${index}@@`, block);
+  });
+  return html || "<p></p>";
 }
 
 async function tauriInvoke(command, args = {}) {
@@ -66,7 +144,7 @@ function renderTranscript() {
     item.className = `bubble ${message.role}`;
     item.innerHTML = `
       <span class="bubble-role">${message.role}</span>
-      <div>${message.text}</div>
+      <div class="bubble-body">${markdownToHtml(message.text)}</div>
     `;
     elements.transcript.appendChild(item);
   }
@@ -116,13 +194,81 @@ async function refreshRuntime() {
     renderJson(elements.sessionStatus, sessionStatus);
     renderJson(elements.runtimeStatus, runtimeStatus);
     renderJson(elements.acksStatus, acknowledgements);
+    await refreshTopicResults();
   } catch (error) {
     setPill(elements.runtimePill, "Error", "warn");
     setPill(elements.ackPill, "Error", "warn");
     renderJson(elements.sessionStatus, { error: String(error) });
     renderJson(elements.runtimeStatus, { error: String(error) });
     renderJson(elements.acksStatus, { error: String(error) });
+    renderJson(elements.topicResults, { error: String(error) });
   }
+}
+
+function currentTopic() {
+  const topic = elements.busTopic.value.trim();
+  if (topic) {
+    return topic;
+  }
+  ensureSessionId();
+  return `chat-${elements.sessionId.value.trim()}`;
+}
+
+async function refreshTopicResults() {
+  try {
+    const topic = currentTopic();
+    const runtimeUrl = state.connection?.runtime_url ?? (await tauriInvoke("get_runtime_connection_info")).runtime_url;
+    const response = await fetch(
+      `${runtimeUrl}/v1/topics/${encodeURIComponent(topic)}/results?limit=20`,
+      { method: "GET" },
+    );
+    const json = await response.json();
+    renderJson(elements.topicResults, {
+      latest_events: state.topicEvents.slice(-8),
+      topic_results: json,
+    });
+    setPill(elements.busPill, "Ready", "ok");
+  } catch (error) {
+    setPill(elements.busPill, "Topic Error", "warn");
+    renderJson(elements.topicResults, { error: String(error), latest_events: state.topicEvents.slice(-8) });
+  }
+}
+
+function stopTopicWatch() {
+  if (state.topicEventSource) {
+    state.topicEventSource.close();
+    state.topicEventSource = null;
+    setPill(elements.busPill, "Watch Stopped", "idle");
+  }
+}
+
+async function watchTopic() {
+  stopTopicWatch();
+  const topic = currentTopic();
+  const runtimeUrl = state.connection?.runtime_url ?? (await tauriInvoke("get_runtime_connection_info")).runtime_url;
+  const url = `${runtimeUrl}/v1/topics/${encodeURIComponent(topic)}/watch`;
+  const stream = new EventSource(url);
+  state.topicEventSource = stream;
+  setPill(elements.busPill, "Watching", "warn");
+
+  stream.addEventListener("job_event", (event) => {
+    try {
+      const payload = JSON.parse(event.data);
+      state.topicEvents.push(payload);
+      if (state.topicEvents.length > 50) {
+        state.topicEvents = state.topicEvents.slice(-50);
+      }
+      renderJson(elements.topicResults, {
+        latest_events: state.topicEvents.slice(-8),
+      });
+      setPill(elements.busPill, "Live", "ok");
+    } catch (error) {
+      renderJson(elements.topicResults, { error: String(error) });
+    }
+  });
+  stream.addEventListener("error", () => {
+    setPill(elements.busPill, "Watch Error", "warn");
+  });
 }
 
 async function sendChat() {
@@ -133,29 +279,93 @@ async function sendChat() {
   }
 
   ensureSessionId();
-  setPill(elements.chatPill, "Sending", "warn");
+  setPill(elements.chatPill, "Streaming", "warn");
   state.transcript.push({ role: "user", text: message });
+  state.transcript.push({ role: "assistant", text: "" });
+  state.activeAssistantIndex = state.transcript.length - 1;
+  state.streaming = true;
+  elements.chatMessage.value = "";
   renderTranscript();
 
   try {
-    const response = await tauriInvoke("send_chat", {
+    await tauriInvoke("send_chat_stream", {
       message,
       sessionId: elements.sessionId.value.trim(),
     });
-    state.transcript.push({ role: "assistant", text: response.reply ?? JSON.stringify(response, null, 2) });
-    elements.chatMessage.value = "";
-    setPill(elements.chatPill, "Delivered", "ok");
-    await refreshRuntime();
+    elements.busTopic.value = `chat-${elements.sessionId.value.trim()}`;
   } catch (error) {
-    state.transcript.push({ role: "assistant", text: `Error: ${String(error)}` });
+    if (state.activeAssistantIndex != null) {
+      state.transcript[state.activeAssistantIndex].text = `Error: ${String(error)}`;
+    }
+    state.streaming = false;
+    state.activeAssistantIndex = null;
     setPill(elements.chatPill, "Failed", "warn");
+    renderTranscript();
   }
+}
 
-  renderTranscript();
+async function cancelChat() {
+  try {
+    const cancelled = await tauriInvoke("cancel_chat_stream");
+    if (cancelled) {
+      setPill(elements.chatPill, "Cancelled", "warn");
+    }
+  } catch (error) {
+    setPill(elements.chatPill, "Cancel Failed", "warn");
+    state.transcript.push({ role: "assistant", text: `Error: ${String(error)}` });
+    renderTranscript();
+  }
+}
+
+async function bindRuntimeStreamEvents() {
+  if (!listen) {
+    return;
+  }
+  await listen("runtime-chat-envelope", async (event) => {
+    const payload = event.payload || {};
+    if (payload.type === "Token") {
+      if (state.activeAssistantIndex == null) {
+        state.transcript.push({ role: "assistant", text: "" });
+        state.activeAssistantIndex = state.transcript.length - 1;
+      }
+      state.transcript[state.activeAssistantIndex].text += payload.token || "";
+      renderTranscript();
+      return;
+    }
+    if (payload.type === "Done") {
+      if (state.activeAssistantIndex == null) {
+        state.transcript.push({ role: "assistant", text: payload.reply || "" });
+      } else if (payload.reply && !state.transcript[state.activeAssistantIndex].text) {
+        state.transcript[state.activeAssistantIndex].text = payload.reply;
+      }
+      state.streaming = false;
+      state.activeAssistantIndex = null;
+      setPill(elements.chatPill, "Delivered", "ok");
+      renderTranscript();
+      await refreshRuntime();
+      await refreshTopicResults();
+      return;
+    }
+    if (payload.type === "Error") {
+      if (state.activeAssistantIndex == null) {
+        state.transcript.push({ role: "assistant", text: `Error: ${payload.error || "Unknown error"}` });
+      } else {
+        state.transcript[state.activeAssistantIndex].text = `Error: ${payload.error || "Unknown error"}`;
+      }
+      state.streaming = false;
+      state.activeAssistantIndex = null;
+      setPill(elements.chatPill, "Failed", "warn");
+      renderTranscript();
+    }
+  });
 }
 
 document.querySelector("#refresh-runtime").addEventListener("click", refreshRuntime);
 document.querySelector("#send-chat").addEventListener("click", sendChat);
+document.querySelector("#cancel-chat").addEventListener("click", cancelChat);
+document.querySelector("#refresh-topic").addEventListener("click", refreshTopicResults);
+document.querySelector("#watch-topic").addEventListener("click", watchTopic);
+document.querySelector("#stop-topic-watch").addEventListener("click", stopTopicWatch);
 elements.chatMessage.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
     event.preventDefault();
@@ -165,4 +375,5 @@ elements.chatMessage.addEventListener("keydown", (event) => {
 
 ensureSessionId();
 renderTranscript();
+void bindRuntimeStreamEvents();
 void refreshRuntime();

@@ -231,6 +231,43 @@
         text-transform: uppercase;
       }
 
+      .bubble-body {
+        line-height: 1.45;
+      }
+
+      .bubble-body p {
+        margin: 0 0 8px;
+      }
+
+      .bubble-body p:last-child {
+        margin-bottom: 0;
+      }
+
+      .bubble-body code {
+        font-family: "Cascadia Code", Consolas, monospace;
+        font-size: 0.9em;
+        background: rgba(31, 38, 48, 0.08);
+        border-radius: 6px;
+        padding: 1px 5px;
+      }
+
+      .bubble-body pre {
+        margin: 10px 0;
+        background: rgba(31, 38, 48, 0.06);
+        border-radius: 12px;
+        padding: 10px 12px;
+        overflow: auto;
+      }
+
+      .bubble-body img {
+        margin-top: 8px;
+        max-width: min(100%, 520px);
+        max-height: 360px;
+        border-radius: 12px;
+        border: 1px solid rgba(31, 38, 48, 0.16);
+        display: block;
+      }
+
       .json-view {
         margin: 0;
         border-radius: 18px;
@@ -314,6 +351,7 @@
             </label>
             <div class="actions">
               <button id="send-chat" type="button">Send Chat</button>
+              <button id="cancel-chat" type="button" class="secondary">Cancel</button>
             </div>
           </section>
 
@@ -351,6 +389,23 @@
               <span id="ack-pill" class="pill pill-idle">Idle</span>
             </div>
             <pre id="acks-status" class="json-view">Loading…</pre>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Message Bus Topic</h3>
+              <span id="bus-pill" class="pill pill-idle">Idle</span>
+            </div>
+            <label>
+              <span>Topic</span>
+              <input id="bus-topic" type="text" placeholder="chat-runtime-..." />
+            </label>
+            <div class="actions">
+              <button id="refresh-topic" type="button" class="secondary">Refresh Topic</button>
+              <button id="watch-topic" type="button">Watch Topic</button>
+              <button id="stop-topic-watch" type="button" class="secondary">Stop Watch</button>
+            </div>
+            <pre id="topic-results" class="json-view">Topic diagnostics will appear here.</pre>
           </section>
         </div>
       </section>

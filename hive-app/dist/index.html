@@ -160,11 +160,13 @@
       }
 
       input,
+      select,
       button {
         font: inherit;
       }
 
-      input {
+      input,
+      select {
         width: 100%;
         border-radius: 14px;
         border: 1px solid rgba(27, 42, 40, 0.15);
@@ -249,6 +251,12 @@
         gap: 14px;
       }
 
+      .field-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
       @media (max-width: 1080px) {
         .dashboard {
           grid-template-columns: 1fr;
@@ -331,9 +339,84 @@
 
           <section class="panel">
             <div class="panel-header">
+              <h3>Provider Setup</h3>
+              <span id="provider-pill" class="pill pill-idle">Idle</span>
+            </div>
+            <div class="stack">
+              <div class="field-grid">
+                <label>
+                  <span>Provider</span>
+                  <select id="provider-name">
+                    <option value="openai">openai</option>
+                    <option value="anthropic">anthropic</option>
+                    <option value="google">google</option>
+                    <option value="xai">xai</option>
+                    <option value="openrouter">openrouter</option>
+                    <option value="deepseek">deepseek</option>
+                    <option value="mistral">mistral</option>
+                    <option value="groq">groq</option>
+                    <option value="together">together</option>
+                    <option value="fireworks">fireworks</option>
+                    <option value="cohere">cohere</option>
+                    <option value="tavily">tavily</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Routing Mode</span>
+                  <select id="routing-mode">
+                    <option value="ego_primary">ego_primary</option>
+                    <option value="cli_orchestrator">cli_orchestrator</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                <span>Provider API Key</span>
+                <input id="provider-key" type="password" placeholder="Paste key (stored in Hive vault)" />
+              </label>
+              <label>
+                <span>Local LLM URL (optional)</span>
+                <input id="local-llm-url" type="text" placeholder="http://localhost:11434" />
+              </label>
+              <div class="actions">
+                <button id="store-provider-key" type="button">Save Key</button>
+                <button id="discover-models" type="button" class="secondary">Discover Models</button>
+                <button id="refresh-provider-config" type="button" class="secondary">Refresh Config</button>
+              </div>
+              <div class="field-grid">
+                <label>
+                  <span>Model (discovery)</span>
+                  <select id="model-id">
+                    <option value="">Use provider default</option>
+                  </select>
+                </label>
+                <label>
+                  <span>CLI Permission</span>
+                  <select id="cli-permission-mode">
+                    <option value="">Keep current</option>
+                    <option value="allowlist_only">allowlist_only</option>
+                    <option value="interactive">interactive</option>
+                    <option value="dangerous_skip_all">dangerous_skip_all</option>
+                  </select>
+                </label>
+              </div>
+              <div class="actions">
+                <button id="apply-provider-config" type="button">Apply Provider Config</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
               <h3>Latest Runtime Session Lease</h3>
             </div>
             <pre id="lease-output" class="json-view">No runtime session issued yet.</pre>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Provider Config Preview</h3>
+            </div>
+            <pre id="provider-config-output" class="json-view">Select an entity to load provider configuration.</pre>
           </section>
 
           <section class="panel">
