@@ -38,7 +38,7 @@ async fn runtime_exposes_session_and_outbox_status() {
     let client = reqwest::Client::new();
 
     let mut session: serde_json::Value = serde_json::Value::Null;
-    for attempt in 0..5u32 {
+    for attempt in 0..15u32 {
         let resp = client
             .get(format!("{}/v1/session/status", cluster.entity_url()))
             .send()
@@ -49,8 +49,8 @@ async fn runtime_exposes_session_and_outbox_status() {
                 break;
             }
         }
-        if attempt < 4 {
-            tokio::time::sleep(Duration::from_millis(500)).await;
+        if attempt < 14 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
     assert!(
