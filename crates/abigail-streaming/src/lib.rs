@@ -5,11 +5,13 @@
 //! Phase 3 adds `IggyBroker` for persistent, multi-consumer streaming.
 
 pub mod broker;
+pub mod bus;
 pub mod iggy_broker;
 pub mod memory_broker;
 pub mod types;
 
 pub use broker::StreamBroker;
+pub use bus::{compute_soul_ref, Envelope, Topic, BUS_STREAM};
 pub use iggy_broker::{IggyBroker, IggyBrokerConfig};
 pub use memory_broker::MemoryBroker;
 pub use types::{StreamMessage, SubscriptionHandle, TopicConfig};

@@ -15,6 +15,39 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
+/// Hot-swappable handle to the active router.
+///
+/// Every call site fetches the current router via [`RouterHandle::current`],
+/// so a provider change from the Hive applies to in-flight subscribers and
+/// handlers without an entity-daemon restart.
+pub struct RouterHandle {
+    inner: std::sync::RwLock<Arc<IdEgoRouter>>,
+}
+
+impl RouterHandle {
+    pub fn new(router: Arc<IdEgoRouter>) -> Self {
+        Self {
+            inner: std::sync::RwLock::new(router),
+        }
+    }
+
+    /// The currently active router.
+    pub fn current(&self) -> Arc<IdEgoRouter> {
+        match self.inner.read() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    /// Replace the active router (hive-initiated provider change).
+    pub fn swap(&self, router: Arc<IdEgoRouter>) {
+        match self.inner.write() {
+            Ok(mut guard) => *guard = router,
+            Err(poisoned) => *poisoned.into_inner() = router,
+        }
+    }
+}
+
 /// Shared state for all entity-daemon route handlers.
 #[derive(Clone)]
 pub struct EntityDaemonState {
@@ -24,7 +57,7 @@ pub struct EntityDaemonState {
     pub hive_url: String,
     pub runtime_id: String,
     pub session_lease: RuntimeSessionLease,
-    pub router: Arc<IdEgoRouter>,
+    pub router: Arc<RouterHandle>,
     pub registry: Arc<SkillRegistry>,
     pub executor: Arc<SkillExecutor>,
     /// Path to this entity's constitutional documents directory.
@@ -61,6 +94,10 @@ pub struct EntityDaemonState {
     pub forge_jobs: Arc<RwLock<Vec<ForgeApprovalJob>>>,
     /// Recent runtime acknowledgements for skill apply/hot-reload activity.
     pub recent_skill_acks: Arc<RwLock<Vec<SkillApplyAcknowledgement>>>,
+    /// In-flight chat turns awaiting their Ego action (keyed by correlation id).
+    pub turns: Arc<crate::pipeline::TurnRegistry>,
+    /// Hash reference to this entity's soul documents, stamped on bus envelopes.
+    pub soul_ref: String,
 }
 
 /// Default number of turns between automatic archive exports.

@@ -204,7 +204,12 @@ pub struct IdEgoRouter {
     pub local_http: Option<Arc<LocalHttpProvider>>,
     pub mode: RoutingMode,
     selected_chat_model: Arc<RwLock<Option<String>>>,
+    /// Ring buffer of recent model-call outcomes (newest first via `health_board`).
+    health: Arc<RwLock<std::collections::VecDeque<entity_core::ProviderHealthEntry>>>,
 }
+
+/// How many recent model-call outcomes the health board retains.
+const HEALTH_BOARD_CAPACITY: usize = 32;
 
 impl IdEgoRouter {
     /// Chooses Id vs Ego for the main routing path. Chat and direct user prompts
@@ -286,6 +291,48 @@ impl IdEgoRouter {
         }
     }
 
+    /// Recent model-call health, newest first.
+    pub fn health_board(&self) -> Vec<entity_core::ProviderHealthEntry> {
+        self.health
+            .read()
+            .map(|board| board.iter().rev().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    fn record_health(&self, entry: entity_core::ProviderHealthEntry) {
+        if let Ok(mut board) = self.health.write() {
+            if board.len() >= HEALTH_BOARD_CAPACITY {
+                board.pop_front();
+            }
+            board.push_back(entry);
+        }
+    }
+
+    /// Derive health entries from a completed turn's trace: every error step
+    /// is "degraded"; the serving step is "healthy" or "fallback".
+    fn record_health_from_trace(&self, trace: &entity_core::ExecutionTrace) {
+        for step in &trace.steps {
+            let succeeded = matches!(step.result, entity_core::StepResult::Success);
+            let state = if !succeeded {
+                "degraded"
+            } else if trace.fallback_occurred {
+                "fallback"
+            } else {
+                "healthy"
+            };
+            self.record_health(entity_core::ProviderHealthEntry {
+                provider: step.provider_label.clone(),
+                model: step
+                    .model_reported
+                    .clone()
+                    .or_else(|| step.model_requested.clone()),
+                state: state.to_string(),
+                message: step.error_summary.clone(),
+                at_utc: step.ended_at_utc.clone(),
+            });
+        }
+    }
+
     /// Update the currently selected chat model (typically from UI dropdown model_override).
     pub fn set_selected_chat_model(&self, model: Option<String>) {
         let normalized = Self::normalize_model_name(model);
@@ -351,6 +398,7 @@ impl IdEgoRouter {
             local_http: id_result.local_http,
             mode,
             selected_chat_model: Arc::new(RwLock::new(None)),
+            health: Arc::new(RwLock::new(std::collections::VecDeque::new())),
         }
     }
 
@@ -372,6 +420,7 @@ impl IdEgoRouter {
             local_http: id_result.local_http,
             mode,
             selected_chat_model: Arc::new(RwLock::new(None)),
+            health: Arc::new(RwLock::new(std::collections::VecDeque::new())),
         }
     }
 
@@ -406,6 +455,7 @@ impl IdEgoRouter {
             local_http: providers.local_http,
             mode,
             selected_chat_model: Arc::new(RwLock::new(None)),
+            health: Arc::new(RwLock::new(std::collections::VecDeque::new())),
         };
 
         tracing::info!(
@@ -566,9 +616,12 @@ impl IdEgoRouter {
             model_override: model_override.clone(),
         };
 
-        let completion = self
+        let result = self
             .execute_with_fallback(&request, target, &model_override, req.stream_tx, &mut trace)
-            .await?;
+            .await;
+
+        self.record_health_from_trace(&trace);
+        let completion = result?;
 
         Ok(RoutingResponse {
             completion,

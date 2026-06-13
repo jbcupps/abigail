@@ -1,15 +1,15 @@
 //! Fire-and-forget memory persistence via StreamBroker topic consumer.
 //!
 //! Instead of blocking the chat request with synchronous `memory.insert_turn()`,
-//! turns are published to the `"abigail/conversation-turns"` topic and consumed
+//! turns are published to `Topic::MemoryArchive` and consumed
 //! asynchronously by a background task.
 
 use abigail_memory::{ConversationTurn, MemoryStore};
-use abigail_streaming::{StreamBroker, StreamMessage, SubscriptionHandle};
+use abigail_streaming::{StreamBroker, StreamMessage, SubscriptionHandle, Topic, BUS_STREAM};
 use std::sync::Arc;
 
-const STREAM: &str = "abigail";
-const TOPIC: &str = "conversation-turns";
+const STREAM: &str = BUS_STREAM;
+const TOPIC: &str = Topic::MemoryArchive.as_str();
 const CONSUMER_GROUP: &str = "memory-consumer";
 
 /// Publish a conversation turn to the StreamBroker for async persistence.

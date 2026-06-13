@@ -216,6 +216,62 @@ impl Hive {
         None
     }
 
+    /// Resolve a named provider profile for sub-agent delegation.
+    ///
+    /// The profile name is a provider name ("openai", "anthropic",
+    /// "perplexity", "google", "xai", or a CLI provider). Credentials are
+    /// resolved through the entity vault, then the hive vault, then
+    /// environment variables. CLI providers fall back to system auth.
+    pub fn resolve_provider_profile(&self, name: &str) -> Option<ProviderSelection> {
+        let name = name.trim().to_lowercase();
+        if name.is_empty() {
+            return None;
+        }
+
+        for vault in [&self.secrets, &self.hive_secrets] {
+            if let Ok(guard) = vault.lock() {
+                if let Some(key) = guard
+                    .get_secret(&name)
+                    .map(str::trim)
+                    .filter(|key| !key.is_empty())
+                {
+                    return Some(ProviderSelection {
+                        provider: name.clone(),
+                        auth: ProviderAuth::ApiKey(key.to_string()),
+                    });
+                }
+            }
+        }
+
+        let env_var = match name.as_str() {
+            "openai" => Some("OPENAI_API_KEY"),
+            "anthropic" => Some("ANTHROPIC_API_KEY"),
+            "perplexity" => Some("PERPLEXITY_API_KEY"),
+            "google" => Some("GEMINI_API_KEY"),
+            "xai" => Some("XAI_API_KEY"),
+            _ => None,
+        };
+        if let Some(var) = env_var {
+            if let Ok(key) = std::env::var(var) {
+                let key = key.trim().to_string();
+                if !key.is_empty() {
+                    return Some(ProviderSelection {
+                        provider: name,
+                        auth: ProviderAuth::ApiKey(key),
+                    });
+                }
+            }
+        }
+
+        if Self::is_cli_provider(&name) {
+            return Some(ProviderSelection {
+                provider: name,
+                auth: ProviderAuth::System,
+            });
+        }
+        None
+    }
+
     /// Detect CLI tools installed on PATH that can serve as Ego providers
     /// via their own authentication (OAuth / `claude auth login`).
     fn detect_cli_on_path() -> Option<ProviderSelection> {

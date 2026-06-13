@@ -548,25 +548,6 @@ async function handleInvoke(cmd: string, args: Record<string, unknown> = {}): Pr
       return null;
     }
 
-    // Orchestration backend
-    case "get_orchestration_backend_status":
-      return {
-        healthy: true,
-        jobs_loaded: 0,
-        runtime_loaded_runs: state.agenticRuns.length,
-        runtime_active_runs: state.agenticRuns.filter((run) => !["completed", "failed", "cancelled"].includes(run.status)).length,
-      };
-    case "list_orchestration_jobs":
-      return [];
-    case "set_orchestration_job_enabled":
-      return null;
-    case "delete_orchestration_job":
-      return null;
-    case "run_orchestration_job_now":
-      return { run_id: `orch-${Date.now()}`, mode: "id_check", result_summary: "Harness orchestration run complete." };
-    case "list_orchestration_job_logs":
-      return [];
-
     // Chat screen status
     case "get_router_status": {
       const hasLocalHttp = typeof state.localLlmUrl === "string" && state.localLlmUrl.trim().length > 0;

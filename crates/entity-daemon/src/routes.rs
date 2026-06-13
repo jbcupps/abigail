@@ -17,10 +17,10 @@ use futures_util::{Stream, StreamExt};
 use std::convert::Infallible;
 use tokio_util::sync::CancellationToken;
 
-const BUS_STREAM: &str = "abigail";
-const BUS_TOPIC: &str = "job-events";
+const BUS_STREAM: &str = abigail_streaming::BUS_STREAM;
+const BUS_TOPIC: &str = abigail_streaming::Topic::JobEvents.as_str();
 
-fn publish_chat_lifecycle_event(
+pub(crate) fn publish_chat_lifecycle_event(
     broker: std::sync::Arc<dyn abigail_streaming::StreamBroker>,
     session_id: String,
     entity_id: String,
@@ -69,7 +69,8 @@ pub async fn health() -> &'static str {
 // ---------------------------------------------------------------------------
 
 pub async fn get_status(State(state): State<EntityDaemonState>) -> Json<ApiEnvelope<EntityStatus>> {
-    let router_status = state.router.status();
+    let router = state.router.current();
+    let router_status = router.status();
     let skills_count = state
         .registry
         .list()
@@ -84,6 +85,7 @@ pub async fn get_status(State(state): State<EntityDaemonState>) -> Json<ApiEnvel
         ego_provider: router_status.ego_provider,
         routing_mode: format!("{:?}", router_status.mode),
         skills_count,
+        provider_health: router.health_board(),
     }))
 }
 
@@ -130,7 +132,6 @@ pub async fn chat(
     State(state): State<EntityDaemonState>,
     Json(body): Json<ChatRequest>,
 ) -> Json<ApiEnvelope<ChatResponse>> {
-    let status = state.router.status();
     let session_id = body
         .session_id
         .clone()
@@ -146,32 +147,12 @@ pub async fn chat(
             "model_override": model_override.clone(),
         }),
     );
-    publish_chat_lifecycle_event(
-        state.stream_broker.clone(),
-        session_id.clone(),
-        state.entity_id.clone(),
-        "chat_started",
-        serde_json::json!({
-            "message_preview": body.message.chars().take(200).collect::<String>(),
-            "model_override": model_override.clone(),
-        }),
-    );
 
     // Register selected model as the entity subscriber identity for mentor chat topic.
     let _subscriber_group = state
         .router
+        .current()
         .register_selected_model_subscriber(&state.entity_id, model_override.clone());
-
-    // Request monitor-enriched preprompt context over the chat topic.
-    let enriched_preprompt = abigail_router::request_enriched_preprompt(
-        state.stream_broker.clone(),
-        state.router.clone(),
-        &state.entity_id,
-        &session_id,
-        &body.message,
-        model_override.clone(),
-    )
-    .await;
 
     // Archive the user turn (async, fire-and-forget via StreamBroker).
     let user_turn = abigail_memory::ConversationTurn::new(&session_id, "user", &body.message);
@@ -184,158 +165,35 @@ pub async fn chat(
         }),
     );
 
-    let system_prompt = if status.mode == abigail_core::RoutingMode::CliOrchestrator {
-        let prompt = entity_chat::build_cli_system_prompt(
-            &state.docs_dir,
-            &state.config.agent_name,
-            &state.registry,
-            &state.instruction_registry,
-            &body.message,
-        );
-        abigail_router::inject_preprompt(&prompt, enriched_preprompt.clone())
-    } else {
-        let base_prompt = abigail_core::system_prompt::build_system_prompt(
-            &state.docs_dir,
-            &state.config.agent_name,
-        );
-        let runtime_ctx = entity_chat::RuntimeContext {
-            provider_name: status.ego_provider.clone(),
-            model_id: None,
-            routing_mode: Some(format!("{:?}", status.mode)),
-            tier: None,
-            complexity_score: None,
-            entity_name: state.config.agent_name.clone(),
-            entity_id: Some(state.entity_id.clone()),
-            has_local_llm: status.has_local_http,
-            last_provider_change_at: None,
+    // Hand the turn to the Id → Ego pipeline and await the committed action.
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+    let ctx = crate::pipeline::TurnContext {
+        session_messages: body.session_messages,
+        stream_tx: None,
+        cancel: None,
+        done: done_tx,
+    };
+    let correlation_id =
+        match crate::pipeline::begin_turn(&state, &session_id, &body.message, model_override, ctx)
+            .await
+        {
+            Ok(id) => id,
+            Err(e) => {
+                return Json(ApiEnvelope::error(format!(
+                    "failed to start chat turn: {e}"
+                )))
+            }
         };
-        let prompt = entity_chat::augment_system_prompt(
-            &base_prompt,
-            &state.registry,
-            &state.instruction_registry,
-            &body.message,
-            &runtime_ctx,
-            entity_chat::PromptMode::Full,
-        );
-        abigail_router::inject_preprompt(&prompt, enriched_preprompt.clone())
-    };
 
-    let budget = entity_chat::ContextBudget::default();
-    let messages = entity_chat::build_contextual_messages_with_memory(
-        &state.memory,
-        &session_id,
-        &system_prompt,
-        body.session_messages,
-        &body.message,
-        &budget,
-    );
-
-    let tools = entity_chat::build_tool_definitions(&state.registry);
-
-    let result = if tools.is_empty() {
-        let resp = state
-            .router
-            .route_unified(abigail_router::RoutingRequest {
-                messages,
-                tools: None,
-                model_override,
-                stream_tx: None,
-                force_id_only: false,
-            })
-            .await;
-        resp.map(|r| entity_chat::ToolUseResult {
-            content: r.completion.content,
-            tool_calls_made: Vec::new(),
-            execution_trace: r.trace,
-        })
-    } else {
-        entity_chat::run_tool_use_loop_with_model_override(
-            &state.router,
-            &state.executor,
-            messages,
-            tools,
-            model_override,
-        )
-        .await
-    };
-
-    match result {
-        Ok(tool_result) => {
-            let tier = tool_result.tier().map(|s| s.to_string());
-            let model_used = tool_result.model_used().map(|s| s.to_string());
-            let complexity_score = tool_result.complexity_score();
-            let provider = tool_result
-                .execution_trace
-                .as_ref()
-                .and_then(|t| t.final_provider())
-                .map(|s| s.to_string())
-                .or_else(|| Some(entity_chat::provider_label(&state.router)));
-
-            // Archive the assistant turn (async, fire-and-forget via StreamBroker).
-            let asst_turn = abigail_memory::ConversationTurn::new(
-                &session_id,
-                "assistant",
-                &tool_result.content,
-            )
-            .with_metadata(
-                provider.clone(),
-                model_used.clone(),
-                tier.clone(),
-                complexity_score,
-            );
-            crate::memory_consumer::publish_turn(state.stream_broker.clone(), asst_turn);
-            let _ = state.queue_outbox_record(
-                "chat_assistant_turn",
-                serde_json::json!({
-                    "session_id": session_id.clone(),
-                    "reply": tool_result.content.clone(),
-                    "provider": provider.clone(),
-                    "model_used": model_used.clone(),
-                }),
-            );
-
-            state.maybe_auto_archive();
-            publish_chat_lifecycle_event(
-                state.stream_broker.clone(),
-                session_id.clone(),
-                state.entity_id.clone(),
-                "chat_completed",
-                serde_json::json!({
-                    "provider": provider.clone(),
-                    "model_used": model_used.clone(),
-                    "tool_calls": tool_result.tool_calls_made.len(),
-                    "tool_summary": tool_result.tool_calls_made.iter().map(|record| {
-                        serde_json::json!({
-                            "skill_id": record.skill_id,
-                            "tool_name": record.tool_name,
-                            "success": record.success,
-                        })
-                    }).collect::<Vec<_>>(),
-                }),
-            );
-
-            Json(ApiEnvelope::success(ChatResponse {
-                reply: tool_result.content,
-                provider,
-                tool_calls_made: tool_result.tool_calls_made,
-                tier,
-                model_used,
-                complexity_score,
-                execution_trace: tool_result.execution_trace,
-                session_id: Some(session_id),
-            }))
-        }
-        Err(e) => {
-            publish_chat_lifecycle_event(
-                state.stream_broker.clone(),
-                session_id.clone(),
-                state.entity_id.clone(),
-                "chat_failed",
-                serde_json::json!({
-                    "error": e.to_string(),
-                }),
-            );
-            Json(ApiEnvelope::error(e.to_string()))
+    match tokio::time::timeout(crate::pipeline::CHAT_TURN_TIMEOUT, done_rx).await {
+        Ok(Ok(Ok(response))) => Json(ApiEnvelope::success(response)),
+        Ok(Ok(Err(e))) => Json(ApiEnvelope::error(e)),
+        Ok(Err(_)) => Json(ApiEnvelope::error(
+            "chat pipeline dropped the turn".to_string(),
+        )),
+        Err(_) => {
+            let _ = state.turns.take(&correlation_id);
+            Json(ApiEnvelope::error("chat turn timed out".to_string()))
         }
     }
 }
@@ -353,22 +211,22 @@ pub async fn chat_stream(
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let model_override = body.model_override.clone();
+    publish_chat_lifecycle_event(
+        state.stream_broker.clone(),
+        session_id.clone(),
+        state.entity_id.clone(),
+        "chat_started",
+        serde_json::json!({
+            "message_preview": body.message.chars().take(200).collect::<String>(),
+            "model_override": model_override.clone(),
+        }),
+    );
 
     // Register selected model as the entity subscriber identity for mentor chat topic.
     let _subscriber_group = state
         .router
+        .current()
         .register_selected_model_subscriber(&state.entity_id, model_override.clone());
-
-    // Request monitor-enriched preprompt context over the chat topic.
-    let enriched_preprompt = abigail_router::request_enriched_preprompt(
-        state.stream_broker.clone(),
-        state.router.clone(),
-        &state.entity_id,
-        &session_id,
-        &body.message,
-        model_override.clone(),
-    )
-    .await;
 
     // Archive user turn (async, fire-and-forget via StreamBroker).
     let user_turn = abigail_memory::ConversationTurn::new(&session_id, "user", &body.message);
@@ -381,44 +239,8 @@ pub async fn chat_stream(
         }),
     );
 
-    let base_prompt =
-        abigail_core::system_prompt::build_system_prompt(&state.docs_dir, &state.config.agent_name);
-    let router_status = state.router.status();
-
-    let runtime_ctx = entity_chat::RuntimeContext {
-        provider_name: router_status.ego_provider.clone(),
-        model_id: None,
-        routing_mode: Some(format!("{:?}", router_status.mode)),
-        tier: None,
-        complexity_score: None,
-        entity_name: state.config.agent_name.clone(),
-        entity_id: Some(state.entity_id.clone()),
-        has_local_llm: router_status.has_local_http,
-        last_provider_change_at: None,
-    };
-
-    let system_prompt = entity_chat::augment_system_prompt(
-        &base_prompt,
-        &state.registry,
-        &state.instruction_registry,
-        &body.message,
-        &runtime_ctx,
-        entity_chat::PromptMode::Full,
-    );
-    let system_prompt = abigail_router::inject_preprompt(&system_prompt, enriched_preprompt);
-
-    let budget = entity_chat::ContextBudget::default();
-    let messages = entity_chat::build_contextual_messages_with_memory(
-        &state.memory,
-        &session_id,
-        &system_prompt,
-        body.session_messages,
-        &body.message,
-        &budget,
-    );
-    let tools = entity_chat::build_tool_definitions(&state.registry);
-
     let (sse_tx, sse_rx) = tokio::sync::mpsc::channel::<Event>(64);
+    let (token_tx, mut token_rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
 
     // Create cancellation token and store it so POST /v1/chat/cancel can fire it.
     let cancel_token = CancellationToken::new();
@@ -429,20 +251,37 @@ pub async fn chat_stream(
         }
     }
 
-    let router = state.router.clone();
-    let executor = state.executor.clone();
-    let memory = state.memory.clone();
-    let broker_for_stream = state.stream_broker.clone();
-    let archive_exporter = state.archive_exporter.clone();
-    let turns_since_archive = state.turns_since_archive.clone();
+    // Hand the turn to the Id → Ego pipeline; tokens arrive via token_rx.
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+    let ctx = crate::pipeline::TurnContext {
+        session_messages: body.session_messages,
+        stream_tx: Some(token_tx),
+        cancel: Some(cancel_token.clone()),
+        done: done_tx,
+    };
+    let begin =
+        crate::pipeline::begin_turn(&state, &session_id, &body.message, model_override, ctx).await;
+
     let cancel_state = state.active_stream_cancel.clone();
-    let sid = session_id.clone();
-    let state_for_stream = state.clone();
+    let turns = state.turns.clone();
     tokio::spawn(async move {
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+        let correlation_id = match begin {
+            Ok(id) => id,
+            Err(e) => {
+                let _ = sse_tx
+                    .send(
+                        Event::default()
+                            .event("error")
+                            .data(format!("failed to start chat turn: {e}")),
+                    )
+                    .await;
+                return;
+            }
+        };
+
         let sse_fwd = sse_tx.clone();
         let fwd_task = tokio::spawn(async move {
-            while let Some(event) = rx.recv().await {
+            while let Some(event) = token_rx.recv().await {
                 if let StreamEvent::Token(token) = event {
                     let _ = sse_fwd
                         .send(Event::default().event("token").data(token))
@@ -451,92 +290,18 @@ pub async fn chat_stream(
             }
         });
 
-        let pipeline_fut = entity_chat::stream_chat_pipeline(
-            &router,
-            &executor,
-            messages,
-            tools,
-            tx,
-            model_override,
-        );
-        tokio::pin!(pipeline_fut);
+        let outcome = tokio::time::timeout(crate::pipeline::CHAT_TURN_TIMEOUT, done_rx).await;
 
-        let result = tokio::select! {
-            res = &mut pipeline_fut => res,
-            _ = cancel_token.cancelled() => Err(anyhow::anyhow!("Interrupted by user")),
-        };
-
-        // Clear the stored token.
+        // Clear the stored cancellation token.
         {
             let mut active = cancel_state.lock().await;
             *active = None;
         }
 
-        let _ = fwd_task.await;
-
-        match result {
-            Ok(pipeline) => {
-                let trace_ref = pipeline.execution_trace.as_ref();
-                let tier = trace_ref
-                    .and_then(|t| t.final_tier())
-                    .map(|s| s.to_string());
-                let model_used = trace_ref
-                    .and_then(|t| t.final_model())
-                    .map(|s| s.to_string());
-                let complexity_score = trace_ref.and_then(|t| t.complexity_score);
-                let provider = trace_ref
-                    .and_then(|t| t.final_provider())
-                    .map(|s| s.to_string())
-                    .or_else(|| Some(entity_chat::provider_label(&router)));
-
-                // Archive assistant turn (async, fire-and-forget via StreamBroker).
-                let asst_turn =
-                    abigail_memory::ConversationTurn::new(&sid, "assistant", &pipeline.content)
-                        .with_metadata(
-                            provider.clone(),
-                            model_used.clone(),
-                            tier.clone(),
-                            complexity_score,
-                        );
-                crate::memory_consumer::publish_turn(broker_for_stream, asst_turn);
-                let _ = state_for_stream.queue_outbox_record(
-                    "chat_assistant_turn",
-                    serde_json::json!({
-                        "session_id": sid.clone(),
-                        "reply": pipeline.content.clone(),
-                        "provider": provider.clone(),
-                        "model_used": model_used.clone(),
-                    }),
-                );
-
-                // Trigger auto-archive if threshold reached.
-                {
-                    use std::sync::atomic::Ordering;
-                    let count = turns_since_archive.fetch_add(1, Ordering::Relaxed) + 1;
-                    if count >= crate::state::ARCHIVE_INTERVAL_TURNS {
-                        turns_since_archive.store(0, Ordering::Relaxed);
-                        if let Some(ref exp) = archive_exporter {
-                            let m = memory.clone();
-                            let e = exp.clone();
-                            tokio::spawn(async move {
-                                if let Err(err) = e.export(&m) {
-                                    tracing::warn!("Auto-archive (stream) failed: {}", err);
-                                }
-                            });
-                        }
-                    }
-                }
-
-                let response = ChatResponse {
-                    reply: pipeline.content,
-                    provider,
-                    tool_calls_made: pipeline.tool_calls_made,
-                    tier,
-                    model_used,
-                    complexity_score,
-                    execution_trace: pipeline.execution_trace,
-                    session_id: Some(sid.clone()),
-                };
+        match outcome {
+            Ok(Ok(Ok(response))) => {
+                // Drain remaining tokens before emitting the final event.
+                let _ = fwd_task.await;
                 let _ = sse_tx
                     .send(
                         Event::default()
@@ -544,38 +309,27 @@ pub async fn chat_stream(
                             .data(serde_json::to_string(&response).unwrap_or_default()),
                     )
                     .await;
-                publish_chat_lifecycle_event(
-                    state_for_stream.stream_broker.clone(),
-                    sid.clone(),
-                    state_for_stream.entity_id.clone(),
-                    "chat_completed",
-                    serde_json::json!({
-                        "provider": response.provider,
-                        "model_used": response.model_used,
-                        "tool_calls": response.tool_calls_made.len(),
-                        "tool_summary": response.tool_calls_made.iter().map(|record| {
-                            serde_json::json!({
-                                "skill_id": record.skill_id,
-                                "tool_name": record.tool_name,
-                                "success": record.success,
-                            })
-                        }).collect::<Vec<_>>(),
-                    }),
-                );
             }
-            Err(e) => {
+            Ok(Ok(Err(e))) => {
+                fwd_task.abort();
+                let _ = sse_tx.send(Event::default().event("error").data(e)).await;
+            }
+            Ok(Err(_)) => {
+                fwd_task.abort();
                 let _ = sse_tx
-                    .send(Event::default().event("error").data(e.to_string()))
+                    .send(
+                        Event::default()
+                            .event("error")
+                            .data("chat pipeline dropped the turn"),
+                    )
                     .await;
-                publish_chat_lifecycle_event(
-                    state_for_stream.stream_broker.clone(),
-                    sid.clone(),
-                    state_for_stream.entity_id.clone(),
-                    "chat_failed",
-                    serde_json::json!({
-                        "error": e.to_string(),
-                    }),
-                );
+            }
+            Err(_) => {
+                let _ = turns.take(&correlation_id);
+                fwd_task.abort();
+                let _ = sse_tx
+                    .send(Event::default().event("error").data("chat turn timed out"))
+                    .await;
             }
         }
     });
@@ -662,7 +416,7 @@ pub async fn diagnose_routing(
     State(state): State<EntityDaemonState>,
     Query(query): Query<DiagnoseQuery>,
 ) -> Json<ApiEnvelope<abigail_router::RoutingDiagnosis>> {
-    let diagnosis = state.router.diagnose(&query.message);
+    let diagnosis = state.router.current().diagnose(&query.message);
     Json(ApiEnvelope::success(diagnosis))
 }
 
@@ -923,6 +677,9 @@ pub async fn submit_job(
         ttl_seconds: body.ttl_seconds.unwrap_or(3600),
         input_data: body.input_data,
         parent_job_id: body.parent_job_id,
+        parent_correlation_id: body.parent_correlation_id,
+        depth: body.depth.unwrap_or(0),
+        provider_profile: body.provider_profile,
         cron_expression: None,
         is_recurring: false,
         significance_keywords: vec![],
@@ -1073,7 +830,7 @@ pub async fn watch_topic(
         });
 
         match broker
-            .subscribe("abigail", "job-events", &group_name, handler)
+            .subscribe(BUS_STREAM, BUS_TOPIC, &group_name, handler)
             .await
         {
             Ok(handle) => {
@@ -1209,7 +966,7 @@ mod tests {
                 offline_until_close: true,
                 lease_scope: "entity-runtime-session".to_string(),
             },
-            router: Arc::new(router),
+            router: Arc::new(crate::state::RouterHandle::new(Arc::new(router))),
             registry,
             executor,
             docs_dir,
@@ -1237,6 +994,8 @@ mod tests {
             skill_assignments: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             forge_jobs: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             recent_skill_acks: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            turns: Arc::new(crate::pipeline::TurnRegistry::default()),
+            soul_ref: abigail_streaming::compute_soul_ref(b"test-soul"),
         }
     }
 
@@ -1251,14 +1010,14 @@ mod tests {
     async fn chat_lifecycle_event_is_published_with_topic_header() {
         let broker: Arc<dyn abigail_streaming::StreamBroker> = Arc::new(MemoryBroker::new(64));
         broker
-            .ensure_topic("abigail", "job-events", TopicConfig::default())
+            .ensure_topic(BUS_STREAM, BUS_TOPIC, TopicConfig::default())
             .await
             .expect("ensure topic");
         let (tx, mut rx) = tokio::sync::mpsc::channel::<abigail_streaming::StreamMessage>(4);
         let handle = broker
             .subscribe(
-                "abigail",
-                "job-events",
+                BUS_STREAM,
+                BUS_TOPIC,
                 "test-lifecycle",
                 Box::new(move |msg| {
                     let tx = tx.clone();
@@ -1308,6 +1067,9 @@ mod tests {
             ttl_seconds: Some(600),
             input_data: None,
             parent_job_id: None,
+            parent_correlation_id: None,
+            depth: None,
+            provider_profile: None,
         };
 
         let resp = submit_job(State(state.clone()), Json(submit)).await.0;
@@ -1339,6 +1101,9 @@ mod tests {
                 ttl_seconds: 3600,
                 input_data: None,
                 parent_job_id: None,
+                parent_correlation_id: None,
+                depth: 0,
+                provider_profile: None,
                 cron_expression: None,
                 is_recurring: false,
                 significance_keywords: vec![],
@@ -1376,6 +1141,9 @@ mod tests {
                 ttl_seconds: 3600,
                 input_data: None,
                 parent_job_id: None,
+                parent_correlation_id: None,
+                depth: 0,
+                provider_profile: None,
                 cron_expression: None,
                 is_recurring: false,
                 significance_keywords: vec![],

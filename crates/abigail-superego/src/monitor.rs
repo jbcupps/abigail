@@ -1,15 +1,17 @@
 //! Out-of-band Superego monitor for ethical/safety checks over chat topic.
 
-use abigail_streaming::{StreamBroker, StreamMessage, SubscriptionHandle, TopicConfig};
+use abigail_streaming::{
+    StreamBroker, StreamMessage, SubscriptionHandle, Topic, TopicConfig, BUS_STREAM,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
-const STREAM: &str = "entity";
-const CHAT_TOPIC: &str = "chat-topic";
-const SIGNAL_TOPIC: &str = "ethical-signals";
+const STREAM: &str = BUS_STREAM;
+const CHAT_TOPIC: &str = Topic::MentorInput.as_str();
+const SIGNAL_TOPIC: &str = Topic::SuperegoEvaluation.as_str();
 const CONSUMER_GROUP: &str = "superego-monitor";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

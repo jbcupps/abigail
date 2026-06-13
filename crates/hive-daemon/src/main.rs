@@ -3,6 +3,7 @@
 //! Wraps `IdentityManager`, `Hive`, and `SecretsVault` behind an Axum REST API.
 //! Listens on `--port` (default 3141).
 
+mod birth;
 mod routes;
 mod runtime_registry;
 mod state;
@@ -98,6 +99,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/entities", get(routes::list_entities))
         .route("/v1/entities", post(routes::create_entity))
         .route("/v1/entities/:id", get(routes::get_entity))
+        .route("/v1/birth/scenarios", get(birth::get_scenarios))
+        .route(
+            "/v1/entities/:id/birth",
+            get(birth::get_birth_document).post(birth::perform_birth),
+        )
         .route(
             "/v1/entities/:id/config",
             axum::routing::patch(routes::update_entity_config),
@@ -119,6 +125,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/secrets/list", get(routes::list_secrets))
         .route("/v1/secrets/:key", get(routes::get_secret))
         .route("/v1/providers/models", post(routes::discover_models))
+        .route(
+            "/v1/providers/profiles/:name",
+            get(routes::get_provider_profile),
+        )
         .route("/v1/runtime/sessions", post(routes::issue_runtime_session))
         .route(
             "/v1/runtime/sessions/:lease_id",

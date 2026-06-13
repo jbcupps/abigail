@@ -401,14 +401,9 @@ const claims = [
           "Verify updater artifacts",
         ],
       },
-      {
-        path: ".github/workflows/release-fast.yml",
-        markers: [
-          "Configure updater and signing fields in tauri.conf.json",
-          "Validate updater signing key",
-          "Verify updater artifacts",
-        ],
-      },
+      // release-fast.yml is the unsigned stabilization lane: signing and
+      // updater verification are intentionally absent there, so the claim
+      // only binds to the official release workflow above.
     ],
   },
 ];

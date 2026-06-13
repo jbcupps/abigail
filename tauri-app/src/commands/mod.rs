@@ -10,6 +10,5 @@ pub mod jobs;
 pub mod logging;
 pub mod memory;
 pub mod ollama;
-pub mod orchestration;
 pub mod sensory;
 pub mod skills;

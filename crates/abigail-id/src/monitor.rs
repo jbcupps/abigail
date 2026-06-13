@@ -1,13 +1,15 @@
 //! Out-of-band Id monitor for quick safety/feasibility checks.
 
-use abigail_streaming::{StreamBroker, StreamMessage, SubscriptionHandle, TopicConfig};
+use abigail_streaming::{
+    StreamBroker, StreamMessage, SubscriptionHandle, Topic, TopicConfig, BUS_STREAM,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-const STREAM: &str = "entity";
-const CHAT_TOPIC: &str = "chat-topic";
-const SIGNAL_TOPIC: &str = "id-signals";
+const STREAM: &str = BUS_STREAM;
+const CHAT_TOPIC: &str = Topic::MentorInput.as_str();
+const SIGNAL_TOPIC: &str = Topic::IdSignal.as_str();
 const CONSUMER_GROUP: &str = "id-monitor";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

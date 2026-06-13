@@ -5,7 +5,6 @@ pub mod council;
 pub mod execution_state;
 pub mod governor;
 pub mod monitor;
-pub mod orchestration;
 pub mod planner;
 pub mod router;
 pub mod subagent;
@@ -21,10 +20,6 @@ pub use execution_state::ExecutionState;
 pub use governor::{ExecutionGovernor, GovernedResult};
 pub use monitor::mentor_chat::{
     inject_preprompt, request_enriched_preprompt, MentorChatEnvelope, MentorChatMonitor,
-};
-#[allow(deprecated)]
-pub use orchestration::{
-    JobMode, OrchestrationJob, OrchestrationJobLog, OrchestrationScheduler, SignificancePolicy,
 };
 pub use planner::{GoalFrame, Planner};
 pub use router::{

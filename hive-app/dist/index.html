@@ -266,6 +266,331 @@
           grid-template-columns: 1fr;
         }
       }
+
+      /* ── The Birth Rite ─────────────────────────────────────────── */
+
+      #rite-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background:
+          radial-gradient(circle at 50% 18%, rgba(19, 93, 86, 0.35), transparent 52%),
+          radial-gradient(circle at 82% 88%, rgba(178, 92, 37, 0.22), transparent 46%),
+          linear-gradient(180deg, #0c1514 0%, #101e1c 100%);
+        color: #e9f2ee;
+        overflow-y: auto;
+      }
+
+      #rite-overlay[hidden] {
+        display: none;
+      }
+
+      .rite-stage {
+        width: min(720px, 100%);
+        margin: auto;
+        text-align: center;
+        animation: rite-fade-up 600ms ease both;
+      }
+
+      @keyframes rite-fade-up {
+        from {
+          opacity: 0;
+          transform: translateY(18px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .rite-eyebrow {
+        margin: 0 0 12px;
+        color: #d9a05b;
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.32em;
+        text-transform: uppercase;
+      }
+
+      .rite-stage h2 {
+        margin: 0 0 10px;
+        font-size: clamp(1.8rem, 4vw, 2.8rem);
+        line-height: 1.05;
+      }
+
+      .rite-lede {
+        margin: 0 auto 26px;
+        max-width: 540px;
+        color: rgba(233, 242, 238, 0.72);
+        font-size: 1.02rem;
+        line-height: 1.6;
+      }
+
+      .rite-progress {
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        margin-bottom: 22px;
+        color: rgba(233, 242, 238, 0.45);
+        font-size: 0.82rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      .rite-progress .lit {
+        color: #d9a05b;
+      }
+
+      .rite-cards {
+        display: grid;
+        gap: 14px;
+        text-align: left;
+      }
+
+      .rite-cards.paths {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      @media (max-width: 720px) {
+        .rite-cards.paths {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .rite-card {
+        border: 1px solid rgba(233, 242, 238, 0.14);
+        border-radius: 18px;
+        padding: 18px;
+        background: rgba(233, 242, 238, 0.05);
+        cursor: pointer;
+        transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+      }
+
+      .rite-card:hover {
+        border-color: rgba(217, 160, 91, 0.65);
+        background: rgba(217, 160, 91, 0.08);
+        transform: translateY(-2px);
+      }
+
+      .rite-card.selected {
+        border-color: #d9a05b;
+        background: rgba(217, 160, 91, 0.14);
+        box-shadow: 0 0 0 1px #d9a05b inset;
+      }
+
+      .rite-card h4 {
+        margin: 0 0 6px;
+        font-size: 1.05rem;
+        color: #f4ede0;
+      }
+
+      .rite-card p {
+        margin: 0;
+        color: rgba(233, 242, 238, 0.66);
+        font-size: 0.92rem;
+        line-height: 1.5;
+      }
+
+      .rite-card .rite-tag {
+        display: inline-block;
+        margin-bottom: 8px;
+        padding: 3px 9px;
+        border-radius: 999px;
+        background: rgba(19, 93, 86, 0.4);
+        color: #9fd5cc;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .rite-trial-text {
+        margin: 0 auto 22px;
+        max-width: 600px;
+        text-align: left;
+        color: rgba(233, 242, 238, 0.82);
+        font-size: 1rem;
+        line-height: 1.65;
+        border-left: 3px solid rgba(217, 160, 91, 0.55);
+        padding-left: 16px;
+      }
+
+      .rite-actions {
+        display: flex;
+        justify-content: center;
+        gap: 12px;
+        margin-top: 26px;
+      }
+
+      .rite-actions button {
+        padding: 12px 22px;
+      }
+
+      .rite-actions button:disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
+
+      .rite-actions .ghost {
+        background: transparent;
+        border: 1px solid rgba(233, 242, 238, 0.25);
+        color: rgba(233, 242, 238, 0.8);
+      }
+
+      .rite-input {
+        width: min(420px, 100%);
+        margin: 0 auto;
+        border-radius: 14px;
+        border: 1px solid rgba(233, 242, 238, 0.22);
+        background: rgba(233, 242, 238, 0.07);
+        color: #f4ede0;
+        padding: 14px 16px;
+        font-size: 1.1rem;
+        text-align: center;
+      }
+
+      .rite-forge-glyph {
+        font-size: 3.4rem;
+        margin: 18px 0;
+        animation: rite-pulse 1100ms ease-in-out infinite;
+      }
+
+      @keyframes rite-pulse {
+        0%, 100% {
+          opacity: 0.45;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1.12);
+        }
+      }
+
+      .rite-archetype {
+        margin: 6px 0 4px;
+        font-size: clamp(2.2rem, 5vw, 3.4rem);
+        color: #f0c98a;
+        text-shadow: 0 0 32px rgba(217, 160, 91, 0.35);
+      }
+
+      .rite-epithet {
+        margin: 0 auto 26px;
+        max-width: 480px;
+        color: rgba(233, 242, 238, 0.72);
+        font-style: italic;
+      }
+
+      .rite-stats {
+        display: grid;
+        gap: 12px;
+        width: min(460px, 100%);
+        margin: 0 auto 24px;
+        text-align: left;
+      }
+
+      .rite-stat-label {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.86rem;
+        color: rgba(233, 242, 238, 0.78);
+        margin-bottom: 5px;
+      }
+
+      .rite-stat-track {
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(233, 242, 238, 0.1);
+        overflow: hidden;
+      }
+
+      .rite-stat-fill {
+        height: 100%;
+        width: 0;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #135d56, #2da393);
+        transition: width 1100ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      .rite-stat-fill.warm {
+        background: linear-gradient(90deg, #8a4a1e, #d9a05b);
+      }
+
+      .rite-sigil {
+        display: inline-block;
+        margin: 0 auto 20px;
+        padding: 14px 20px;
+        border-radius: 14px;
+        background: rgba(10, 18, 17, 0.85);
+        color: #9fd5cc;
+        font-family: "Cascadia Code", Consolas, monospace;
+        font-size: 0.82rem;
+        line-height: 1.35;
+        text-align: left;
+        white-space: pre;
+      }
+
+      .rite-certificate {
+        width: min(520px, 100%);
+        margin: 0 auto 24px;
+        padding: 26px;
+        border-radius: 20px;
+        border: 1px solid rgba(217, 160, 91, 0.5);
+        background:
+          radial-gradient(circle at top, rgba(217, 160, 91, 0.1), transparent 60%),
+          rgba(233, 242, 238, 0.04);
+        text-align: left;
+      }
+
+      .rite-certificate .cert-head {
+        text-align: center;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        font-size: 0.72rem;
+        color: #d9a05b;
+        margin-bottom: 16px;
+      }
+
+      .rite-certificate .cert-name {
+        text-align: center;
+        font-size: 1.7rem;
+        font-weight: 800;
+        color: #f4ede0;
+      }
+
+      .rite-certificate .cert-arch {
+        text-align: center;
+        color: #f0c98a;
+        margin-bottom: 18px;
+      }
+
+      .rite-certificate dl {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 6px 14px;
+        margin: 0;
+        font-size: 0.84rem;
+      }
+
+      .rite-certificate dt {
+        color: rgba(233, 242, 238, 0.55);
+      }
+
+      .rite-certificate dd {
+        margin: 0;
+        color: rgba(233, 242, 238, 0.88);
+        word-break: break-all;
+        font-family: "Cascadia Code", Consolas, monospace;
+      }
+
+      .rite-error {
+        color: #f2a39a;
+        margin-top: 14px;
+        font-size: 0.9rem;
+      }
     </style>
   </head>
   <body>
@@ -428,6 +753,10 @@
         </div>
       </section>
     </main>
+
+    <div id="rite-overlay" hidden>
+      <div id="rite-stage" class="rite-stage"></div>
+    </div>
 
     <script type="module" src="./app.js"></script>
   </body>

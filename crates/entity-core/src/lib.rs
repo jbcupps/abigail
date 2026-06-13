@@ -300,6 +300,23 @@ pub struct EntityStatus {
     pub ego_provider: Option<String>,
     pub routing_mode: String,
     pub skills_count: usize,
+    /// Recent model-call health (newest first): is my provider healthy *right now*?
+    #[serde(default)]
+    pub provider_health: Vec<ProviderHealthEntry>,
+}
+
+/// Outcome of one model call, for the live provider health board.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderHealthEntry {
+    /// Provider label (e.g. "anthropic", "claude-cli", "id").
+    pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// "healthy", "fallback" (served by the failsafe), or "degraded" (call failed).
+    pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    pub at_utc: String,
 }
 
 /// Runtime session status exposed by the entity runtime.
@@ -454,6 +471,15 @@ pub struct SubmitJobRequest {
     pub input_data: Option<serde_json::Value>,
     #[serde(default)]
     pub parent_job_id: Option<String>,
+    /// Correlation id of the chat turn (or parent run) that spawned this job.
+    #[serde(default)]
+    pub parent_correlation_id: Option<String>,
+    /// Sub-agent nesting depth (0 = mentor-initiated). Capped server-side.
+    #[serde(default)]
+    pub depth: Option<u32>,
+    /// Named provider profile to run this job on (e.g. "perplexity").
+    #[serde(default)]
+    pub provider_profile: Option<String>,
 }
 
 /// Response after queue submission.

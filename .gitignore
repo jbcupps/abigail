@@ -31,6 +31,8 @@ lcov.info
 
 # Tauri generated files
 tauri-app/gen/
+hive-app/gen/
+entity-runtime-app/gen/
 
 # Application data files (created at runtime, not in repo)
 config.json

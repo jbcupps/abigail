@@ -157,6 +157,73 @@ async fn approve_forge_job(
     }
 }
 
+async fn hive_get<T: serde::de::DeserializeOwned>(path: &str) -> Result<T, String> {
+    let response: hive_core::ApiEnvelope<T> = reqwest::Client::new()
+        .get(format!("{}{}", hive_url(), path))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    if response.ok {
+        response
+            .data
+            .ok_or_else(|| "Missing response data".to_string())
+    } else {
+        Err(response
+            .error
+            .unwrap_or_else(|| "Unknown hive error".to_string()))
+    }
+}
+
+async fn hive_post<T: serde::de::DeserializeOwned, B: Serialize>(
+    path: &str,
+    body: &B,
+) -> Result<T, String> {
+    let response: hive_core::ApiEnvelope<T> = reqwest::Client::new()
+        .post(format!("{}{}", hive_url(), path))
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    if response.ok {
+        response
+            .data
+            .ok_or_else(|| "Missing response data".to_string())
+    } else {
+        Err(response
+            .error
+            .unwrap_or_else(|| "Unknown hive error".to_string()))
+    }
+}
+
+#[tauri::command]
+async fn get_birth_scenarios() -> Result<hive_core::ForgeScenariosResponse, String> {
+    hive_get("/v1/birth/scenarios").await
+}
+
+#[tauri::command]
+async fn perform_birth(
+    entity_id: String,
+    path: String,
+    choices: Vec<(String, String)>,
+) -> Result<hive_core::BirthRiteResponse, String> {
+    hive_post(
+        &format!("/v1/entities/{}/birth", entity_id),
+        &hive_core::BirthRiteRequest { path, choices },
+    )
+    .await
+}
+
+#[tauri::command]
+async fn get_birth_document(entity_id: String) -> Result<hive_core::EntityBirthDocument, String> {
+    hive_get(&format!("/v1/entities/{}/birth", entity_id)).await
+}
+
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -178,7 +245,10 @@ pub fn run() {
             list_secrets,
             discover_provider_models,
             list_assignments,
-            approve_forge_job
+            approve_forge_job,
+            get_birth_scenarios,
+            perform_birth,
+            get_birth_document
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Abigail Hive app");

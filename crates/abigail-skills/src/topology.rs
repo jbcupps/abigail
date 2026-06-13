@@ -10,7 +10,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 /// Stream name used for persistent skill request/response topics.
-pub const SKILL_TOPOLOGY_STREAM: &str = "entity";
+pub const SKILL_TOPOLOGY_STREAM: &str = abigail_streaming::BUS_STREAM;
 
 #[derive(Debug, Deserialize)]
 struct RegistryFile {

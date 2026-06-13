@@ -9,13 +9,16 @@ use hive_core::{
     ApiEnvelope, CreateEntityRequest, CreateEntityResponse, CreateForgeApprovalJobRequest,
     EntityInfo, ForgeApprovalJobsResponse, HiveStatus, OutboxSyncRequest, OutboxSyncResponse,
     ProviderConfig, ProviderModelInfo, ProviderModelsRequest, ProviderModelsResponse,
-    RuntimeHeartbeatRequest, RuntimeHeartbeatResponse, RuntimeRegistrationRequest,
-    RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus, SecretListResponse,
-    SecretValueResponse, SetSkillAssignmentsRequest, SignEntityRequest, SkillAssignmentsResponse,
-    StoreSecretRequest, UpdateEntityConfigRequest, UpdateEntityConfigResponse,
+    ProviderProfileResponse, RuntimeHeartbeatRequest, RuntimeHeartbeatResponse,
+    RuntimeRegistrationRequest, RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus,
+    SecretListResponse, SecretValueResponse, SetSkillAssignmentsRequest, SignEntityRequest,
+    SkillAssignmentsResponse, StoreSecretRequest, UpdateEntityConfigRequest,
+    UpdateEntityConfigResponse,
 };
 
-fn provider_config_from_hive_config(hive_config: &abigail_hive::HiveConfig) -> ProviderConfig {
+pub(crate) fn provider_config_from_hive_config(
+    hive_config: &abigail_hive::HiveConfig,
+) -> ProviderConfig {
     ProviderConfig {
         local_llm_base_url: hive_config.local_llm_base_url.clone(),
         ego_provider_name: hive_config
@@ -166,6 +169,32 @@ pub async fn get_provider_config(
             &hive_config,
         ))),
         Err(e) => Json(ApiEnvelope::error(e)),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/providers/profiles/:name
+// ---------------------------------------------------------------------------
+
+/// Resolve a named provider profile for sub-agent delegation. The profile
+/// name is a provider name; the Hive resolves credentials through its vaults
+/// and environment so an entity can run a sub-agent on a provider other than
+/// its Ego.
+pub async fn get_provider_profile(
+    State(state): State<HiveDaemonState>,
+    Path(name): Path<String>,
+) -> Json<ApiEnvelope<ProviderProfileResponse>> {
+    match state.hive.resolve_provider_profile(&name) {
+        Some(selection) => Json(ApiEnvelope::success(ProviderProfileResponse {
+            name,
+            provider_name: selection.provider.clone(),
+            api_key: selection.api_key(),
+            model: None,
+        })),
+        None => Json(ApiEnvelope::error(format!(
+            "No credentials available for provider profile '{}'",
+            name
+        ))),
     }
 }
 

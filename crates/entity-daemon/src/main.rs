@@ -9,18 +9,18 @@ mod hive_client;
 mod job_scheduler;
 mod memory_consumer;
 mod outbox;
+mod pipeline;
 mod queue_ops;
+mod router_build;
 mod routes;
 mod state;
 mod subagent_runner;
 
 use abigail_core::{AppConfig, SecretsVault};
-use abigail_hive::Hive;
 use abigail_identity::{HiveEntity, IdentityManager};
 use abigail_memory::MemoryStore;
 use abigail_persistence::{EntityScope, PersistenceHandle};
 use abigail_queue::JobQueue;
-use abigail_router::IdEgoRouter;
 use abigail_runtime::{
     collect_declared_secret_keys, register_dynamic_api_skills, register_hive_management_skill,
     register_identity_bound_skills, register_preloaded_skills, register_skill_factory,
@@ -96,7 +96,26 @@ async fn main() -> anyhow::Result<()> {
         entity_info.birth_complete
     );
 
-    let provider_config = hive_client.get_provider_config(&entity_id).await?;
+    // Idempotent birth re-read: the full runtime identity in one shot.
+    // Hive-side changes (provider, certificate, assignments) apply on the
+    // next launch with no re-provisioning. Falls back to the older
+    // provider-config endpoint for pre-birth-document hives.
+    let provider_config = match hive_client.get_birth_document(&entity_id).await {
+        Ok(birth_doc) => {
+            if let Some(ref certificate) = birth_doc.certificate {
+                tracing::info!(
+                    "Born as {} — {}",
+                    certificate.archetype,
+                    certificate.epithet
+                );
+            }
+            birth_doc.provider_config
+        }
+        Err(e) => {
+            tracing::debug!("Birth document unavailable ({}); using provider-config", e);
+            hive_client.get_provider_config(&entity_id).await?
+        }
+    };
     tracing::info!(
         "Provider config: ego={:?}, routing_mode={}",
         provider_config.ego_provider_name,
@@ -112,43 +131,20 @@ async fn main() -> anyhow::Result<()> {
         session_lease.runtime_id
     );
 
-    // 2. Build providers from the resolved config
-    let cli_permission_mode = provider_config
-        .cli_permission_mode
-        .as_deref()
-        .and_then(|s| {
-            serde_json::from_str::<abigail_core::CliPermissionMode>(&format!("\"{s}\"")).ok()
-        })
-        .unwrap_or_default();
-
-    let hive_config = abigail_hive::HiveConfig {
-        local_llm_base_url: provider_config.local_llm_base_url,
-        ego_provider: provider_config.ego_provider_name.map(|provider| {
-            let auth = abigail_hive::ProviderAuth::System;
-            abigail_hive::ProviderSelection { provider, auth }
-        }),
-        ego_model: provider_config.ego_model,
-        routing_mode: parse_routing_mode(&provider_config.routing_mode),
-        cli_permission_mode,
-    };
-
-    let built = Hive::build_providers(&hive_config).await;
-
-    // 3. Build the router from pre-built providers
-    let router = IdEgoRouter::from_built_providers(built);
-    let router = Arc::new(router);
+    // 2/3. Build providers + router from the resolved config (shared with the
+    // governance hot-swap path). Keep a JSON snapshot so the supervision loop
+    // can detect hive-side provider changes.
+    let initial_provider_config = serde_json::to_value(&provider_config).unwrap_or_default();
+    let ego_provider_for_discovery = provider_config.ego_provider_name.clone();
+    let ego_key_for_discovery = provider_config.ego_api_key.clone();
+    let router = Arc::new(router_build::build_router(provider_config).await);
+    let router = Arc::new(state::RouterHandle::new(router));
     tracing::info!("Router built");
 
     // 3b. Background model discovery (non-blocking diagnostic)
     {
-        let ego_provider = hive_config
-            .ego_provider
-            .as_ref()
-            .map(|selection| selection.provider.clone());
-        let ego_key = hive_config
-            .ego_provider
-            .as_ref()
-            .and_then(|selection| selection.api_key());
+        let ego_provider = ego_provider_for_discovery;
+        let ego_key = ego_key_for_discovery;
         tokio::spawn(async move {
             if let (Some(provider), Some(key)) = (ego_provider, ego_key) {
                 match abigail_capabilities::cognitive::validation::discover_models(&provider, &key)
@@ -199,7 +195,7 @@ async fn main() -> anyhow::Result<()> {
     config.agent_name = Some(entity_info.name.clone());
     config.birth_complete = entity_info.birth_complete;
     config.is_hive = entity_info.is_hive;
-    config.routing_mode = hive_config.routing_mode;
+    config.routing_mode = router.current().mode;
     config.data_dir = entity_dir.clone();
     config.docs_dir = docs_dir.clone();
     config.db_path = HiveEntity::memory_db_path(&data_root);
@@ -229,7 +225,89 @@ async fn main() -> anyhow::Result<()> {
     if let Err(e) = registry.set_execution_policy(SkillExecutionPolicy::from_app_config(&config)) {
         tracing::error!("Failed to apply entity skill execution policy: {}", e);
     }
-    let executor = Arc::new(SkillExecutor::new(registry.clone()));
+
+    // In-process stream broker — created before the executor so every tool
+    // execution publishes a `Topic::SkillExecuted` audit envelope.
+    if let Some(ref conn) = cli.iggy_connection {
+        tracing::warn!(
+            "Ignoring --iggy-connection={} in the current dev build; using in-process MemoryBroker",
+            conn
+        );
+    } else {
+        tracing::info!("Using in-process MemoryBroker");
+    }
+    let stream_broker: Arc<dyn StreamBroker> = Arc::new(MemoryBroker::default());
+
+    let executor =
+        Arc::new(SkillExecutor::new(registry.clone()).with_broker(stream_broker.clone()));
+
+    // 5b. Register configured MCP servers as dynamic skills (HTTP transport).
+    //     Runs async so a slow/unreachable MCP server never delays boot.
+    {
+        let mcp_servers: Vec<_> = config
+            .mcp_servers
+            .iter()
+            .filter(|s| s.transport.eq_ignore_ascii_case("http"))
+            .cloned()
+            .collect();
+        if !mcp_servers.is_empty() {
+            let trust_policy = config.mcp_trust_policy.clone();
+            let registry_for_mcp = registry.clone();
+            let broker_for_mcp = stream_broker.clone();
+            tokio::spawn(async move {
+                for server in mcp_servers {
+                    if let Err(policy_err) =
+                        trust_policy.validate_http_server_url(&server.id, &server.command_or_url)
+                    {
+                        tracing::warn!(
+                            "MCP server '{}' rejected by trust policy: {}",
+                            server.id,
+                            policy_err
+                        );
+                        continue;
+                    }
+                    let mut runtime = abigail_skills::protocol::mcp::McpSkillRuntime::new(
+                        format!("mcp.{}", server.id),
+                        format!("MCP {}", server.name),
+                        server.command_or_url.clone(),
+                        Some(trust_policy.clone()),
+                    );
+                    if let Err(e) = abigail_skills::Skill::initialize(
+                        &mut runtime,
+                        abigail_skills::skill::SkillConfig {
+                            values: std::collections::HashMap::new(),
+                            secrets: std::collections::HashMap::new(),
+                            limits: Default::default(),
+                            permissions: vec![],
+                            stream_broker: Some(broker_for_mcp.clone()),
+                        },
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            "MCP server '{}' initialization failed ({}); skipping",
+                            server.id,
+                            e
+                        );
+                        continue;
+                    }
+                    let skill_id = abigail_skills::Skill::manifest(&runtime).id.clone();
+                    let tool_count = abigail_skills::Skill::tools(&runtime).len();
+                    match registry_for_mcp.register(skill_id.clone(), Arc::new(runtime)) {
+                        Ok(_) => tracing::info!(
+                            "Registered MCP server '{}' as skill {} ({} tools)",
+                            server.id,
+                            skill_id.0,
+                            tool_count
+                        ),
+                        Err(e) => {
+                            tracing::warn!("Failed to register MCP skill {}: {}", skill_id.0, e)
+                        }
+                    }
+                }
+            });
+        }
+    }
 
     // 6. Register HiveManagementSkill (built-in)
     let http_hive_ops = Arc::new(hive_client::HttpHiveOps::new(&cli.hive_url));
@@ -360,17 +438,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // 10. Initialize event streaming with the in-process broker for the current dev runtime.
-    if let Some(ref conn) = cli.iggy_connection {
-        tracing::warn!(
-            "Ignoring --iggy-connection={} in the current dev build; using in-process MemoryBroker",
-            conn
-        );
-    } else {
-        tracing::info!("Using in-process MemoryBroker");
-    }
-    let stream_broker: Arc<dyn StreamBroker> = Arc::new(MemoryBroker::default());
-
+    // 10. Event streaming uses the in-process broker created before the executor.
     // Phase 5B: Safe async boot - never block the main runtime.
     abigail_skills::set_skill_topology_broker(stream_broker.clone());
     let provisioning_registry_path = shared_registry_path.clone();
@@ -469,6 +537,16 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_default();
     let outbox = Arc::new(outbox::RuntimeOutbox::load(&entity_dir, 256)?);
 
+    // Soul reference: hash of the entity's soul documents, stamped on every
+    // pipeline envelope so downstream observers know which identity version
+    // produced a message.
+    let soul_ref = {
+        let mut soul_bytes = std::fs::read(docs_dir.join("soul.md")).unwrap_or_default();
+        soul_bytes
+            .extend_from_slice(&std::fs::read(docs_dir.join("ethics.md")).unwrap_or_default());
+        abigail_streaming::compute_soul_ref(&soul_bytes)
+    };
+
     let state = EntityDaemonState {
         entity_id: entity_id.clone(),
         config,
@@ -497,10 +575,19 @@ async fn main() -> anyhow::Result<()> {
         skill_assignments: Arc::new(tokio::sync::RwLock::new(skill_assignments)),
         forge_jobs: Arc::new(tokio::sync::RwLock::new(forge_jobs)),
         recent_skill_acks: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        turns: Arc::new(pipeline::TurnRegistry::default()),
+        soul_ref,
     };
 
+    // Spawn the bicameral chat pipeline (Id stage → Ego stage → journal).
+    // Fatal on failure: without the pipeline every chat request would hang
+    // until the turn timeout, which is worse than refusing to start.
+    let _pipeline_handles = pipeline::spawn(state.clone())
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to start chat pipeline: {}", e))?;
+
     // Start background queue scheduler (Phase 1 async sub-agent execution).
-    let capability_matcher = CapabilityMatcher::from_router(state.router.clone());
+    let capability_matcher = CapabilityMatcher::from_router(state.router.current());
     let subagent_runner = Arc::new(
         SubagentRunner::new(
             state.job_queue.clone(),
@@ -511,7 +598,8 @@ async fn main() -> anyhow::Result<()> {
             state.config.agent_name.clone(),
         )
         .with_docs_dir(state.docs_dir.clone())
-        .with_instruction_registry(state.instruction_registry.clone()),
+        .with_instruction_registry(state.instruction_registry.clone())
+        .with_hive_client(Arc::new(hive_client.clone())),
     );
     let scheduler = Arc::new(
         JobScheduler::new(state.job_queue.clone(), subagent_runner)
@@ -758,7 +846,7 @@ async fn main() -> anyhow::Result<()> {
         })
         .await?;
     state.record_hive_sync_success().await;
-    spawn_runtime_supervision(state.clone(), hive_client.clone());
+    spawn_runtime_supervision(state.clone(), hive_client.clone(), initial_provider_config);
 
     tracing::info!("Entity daemon listening on {}", local_url);
     println!("Entity daemon listening on {}", local_url);
@@ -767,11 +855,75 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn spawn_runtime_supervision(state: EntityDaemonState, hive_client: HiveClient) {
+fn spawn_runtime_supervision(
+    state: EntityDaemonState,
+    hive_client: HiveClient,
+    initial_provider_config: serde_json::Value,
+) {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(10));
+        let mut tick_count: u64 = 0;
+        let mut last_provider_config = initial_provider_config;
         loop {
             ticker.tick().await;
+            tick_count += 1;
+
+            // Every 6th tick (~60s): check the Hive for a changed provider
+            // config and publish a governance refresh so the router hot-swaps
+            // without an entity-daemon restart.
+            if tick_count.is_multiple_of(6) {
+                if let Ok(fresh) = hive_client.get_provider_config(&state.entity_id).await {
+                    let fresh_json = serde_json::to_value(&fresh).unwrap_or_default();
+                    if fresh_json != last_provider_config {
+                        tracing::info!(
+                            "Provider config changed on hive (ego={:?}); publishing refresh",
+                            fresh.ego_provider_name
+                        );
+                        last_provider_config = fresh_json.clone();
+                        let envelope = abigail_streaming::Envelope::new(
+                            abigail_streaming::Topic::GovernanceInbound,
+                            state.entity_id.clone(),
+                            uuid::Uuid::new_v4().to_string(),
+                            serde_json::json!({
+                                "kind": pipeline::governance::KIND_PROVIDER_REFRESH,
+                                "provider_config": fresh_json,
+                            }),
+                        )
+                        .with_soul_ref(state.soul_ref.clone());
+                        if let Err(e) = envelope.publish(state.stream_broker.as_ref()).await {
+                            tracing::warn!("Failed to publish provider refresh: {}", e);
+                        }
+                    }
+                }
+            }
+
+            // Every 3rd tick (~30s): check the Hive for changed skill
+            // assignments and publish a governance refresh on the bus so
+            // they apply live without an entity-daemon restart.
+            if tick_count.is_multiple_of(3) {
+                if let Ok(response) = hive_client.get_skill_assignments(&state.entity_id).await {
+                    let fresh = response.assignments;
+                    let changed = {
+                        let current = state.skill_assignments.read().await;
+                        serde_json::to_value(&*current).ok() != serde_json::to_value(&fresh).ok()
+                    };
+                    if changed {
+                        let envelope = abigail_streaming::Envelope::new(
+                            abigail_streaming::Topic::GovernanceInbound,
+                            state.entity_id.clone(),
+                            uuid::Uuid::new_v4().to_string(),
+                            serde_json::json!({
+                                "kind": pipeline::governance::KIND_SKILL_ASSIGNMENTS_REFRESH,
+                                "assignments": fresh,
+                            }),
+                        )
+                        .with_soul_ref(state.soul_ref.clone());
+                        if let Err(e) = envelope.publish(state.stream_broker.as_ref()).await {
+                            tracing::warn!("Failed to publish assignment refresh: {}", e);
+                        }
+                    }
+                }
+            }
 
             let outbox_status = match state.outbox.status() {
                 Ok(status) => status,
@@ -824,14 +976,4 @@ fn spawn_runtime_supervision(state: EntityDaemonState, hive_client: HiveClient) 
             }
         }
     });
-}
-
-fn parse_routing_mode(s: &str) -> abigail_core::RoutingMode {
-    match s {
-        "EgoPrimary" | "TierBased" | "IdPrimary" | "Council" => {
-            abigail_core::RoutingMode::EgoPrimary
-        }
-        "CliOrchestrator" => abigail_core::RoutingMode::CliOrchestrator,
-        _ => abigail_core::RoutingMode::default(),
-    }
 }

@@ -193,6 +193,18 @@ pub struct JobSpec {
     /// Parent job for chaining/dependency.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_job_id: Option<JobId>,
+    /// Correlation id of the chat turn (or parent run) that spawned this job.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_correlation_id: Option<String>,
+    /// Nesting depth: 0 = mentor-initiated, 1 = spawned by a sub-agent, etc.
+    /// Submissions beyond [`crate::queue::MAX_SUBAGENT_DEPTH`] are rejected.
+    #[serde(default)]
+    pub depth: u32,
+    /// Named provider profile to run this job on (e.g. "perplexity") —
+    /// resolved through the Hive so a sub-agent can use a different provider
+    /// than the entity's Ego.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_profile: Option<String>,
     /// Cron expression (UTC) for recurring jobs. E.g. "0 */6 * * *".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cron_expression: Option<String>,
@@ -259,6 +271,15 @@ pub struct JobRecord {
     pub allowed_skill_ids: Vec<String>,
     pub input_data: Option<serde_json::Value>,
     pub parent_job_id: Option<JobId>,
+    /// Correlation id of the chat turn (or parent run) that spawned this job.
+    #[serde(default)]
+    pub parent_correlation_id: Option<String>,
+    /// Nesting depth: 0 = mentor-initiated, 1 = spawned by a sub-agent, etc.
+    #[serde(default)]
+    pub depth: u32,
+    /// Named provider profile this job runs on (None = entity's Ego).
+    #[serde(default)]
+    pub provider_profile: Option<String>,
     pub agent_id: Option<String>,
     pub model_used: Option<String>,
     pub provider_used: Option<String>,
@@ -443,6 +464,9 @@ mod tests {
             ttl_seconds: 1800,
             input_data: None,
             parent_job_id: None,
+            parent_correlation_id: None,
+            depth: 0,
+            provider_profile: None,
             cron_expression: None,
             is_recurring: false,
             significance_keywords: vec![],

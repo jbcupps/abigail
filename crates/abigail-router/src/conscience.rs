@@ -1,23 +1,23 @@
 //! Conscience monitor — async ethical evaluation via StreamBroker topics.
 //!
 //! Replaces the synchronous `spawn_conscience_monitor()` stub with a topic-based
-//! consumer that subscribes to `"entity/conscience-check"`, evaluates requests
-//! against pattern rules, and publishes signals to `"entity/ethical-signals"`.
+//! consumer that subscribes to `Topic::ConscienceCheck`, evaluates requests
+//! against pattern rules, and publishes signals to `Topic::SuperegoEvaluation`.
 //!
 //! Phase 1: PII patterns, destructive keyword detection.
 //! Phase 2 (future): LLM-based ethical evaluation.
 
-use abigail_streaming::{StreamBroker, SubscriptionHandle, TopicConfig};
+use abigail_streaming::{StreamBroker, SubscriptionHandle, Topic, TopicConfig, BUS_STREAM};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Stream used for conscience events.
-const STREAM: &str = "entity";
+const STREAM: &str = BUS_STREAM;
 /// Topic for incoming conscience check requests.
-const CHECK_TOPIC: &str = "conscience-check";
+const CHECK_TOPIC: &str = Topic::ConscienceCheck.as_str();
 /// Topic for outgoing ethical signals.
-const SIGNAL_TOPIC: &str = "ethical-signals";
+const SIGNAL_TOPIC: &str = Topic::SuperegoEvaluation.as_str();
 
 /// A request to evaluate a message or action for ethical concerns.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,14 +1,14 @@
 //! Out-of-band chat-topic subscriber for memory correlation persistence.
 
 use crate::{plan_secret_move, ConversationTurn, MemoryStore};
-use abigail_streaming::{StreamBroker, SubscriptionHandle, TopicConfig};
+use abigail_streaming::{StreamBroker, SubscriptionHandle, Topic, TopicConfig, BUS_STREAM};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
-const STREAM: &str = "entity";
-const TOPIC: &str = "chat-topic";
+const STREAM: &str = BUS_STREAM;
+const TOPIC: &str = Topic::MentorInput.as_str();
 const CONSUMER_GROUP: &str = "memory-chat-topic-subscriber";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,7 +95,7 @@ pub async fn spawn_chat_topic_subscriber(
                     &env.session_id,
                     "user",
                     &env.message,
-                    "entity/chat-topic",
+                    "entity/mentor.input",
                 ) {
                     tracing::warn!(
                         "memory chat-topic subscriber: failed to capture protected secret: {}",

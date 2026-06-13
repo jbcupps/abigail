@@ -164,11 +164,11 @@ pub fn get_assembled_prompt(state: State<AppState>) -> Result<String, String> {
 pub fn get_topic_stats(_state: State<AppState>) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "topics": [
-            { "stream": "abigail", "topic": "conversation-turns", "description": "Chat turn persistence" },
-            { "stream": "abigail", "topic": "job-events", "description": "Job lifecycle events" },
-            { "stream": "abigail", "topic": "skill-events", "description": "Skill hot-reload events" },
-            { "stream": "entity", "topic": "conscience-check", "description": "Ethical check requests" },
-            { "stream": "entity", "topic": "ethical-signals", "description": "Ethical evaluation results" },
+            { "stream": "entity", "topic": "memory.archive", "description": "Chat turn persistence" },
+            { "stream": "entity", "topic": "job.events", "description": "Job lifecycle events" },
+            { "stream": "entity", "topic": "skill.executed", "description": "Skill execution events" },
+            { "stream": "entity", "topic": "conscience.check", "description": "Ethical check requests" },
+            { "stream": "entity", "topic": "superego.evaluation", "description": "Ethical evaluation results" },
         ]
     }))
 }

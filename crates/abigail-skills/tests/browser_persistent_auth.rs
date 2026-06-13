@@ -58,6 +58,7 @@ fn execution_context() -> ExecutionContext {
     ExecutionContext {
         request_id: "browser-persistent-auth".to_string(),
         user_id: Some("test".to_string()),
+        ..Default::default()
     }
 }
 

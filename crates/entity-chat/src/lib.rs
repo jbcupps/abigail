@@ -11,6 +11,7 @@ use abigail_queue::JobQueue;
 use abigail_router::IdEgoRouter;
 use abigail_skills::manifest::SkillId;
 use abigail_skills::skill::ToolParams;
+pub use abigail_skills::JobContext;
 use abigail_skills::{SkillExecutor, SkillRegistry};
 use entity_core::{SessionMessage, ToolCallRecord};
 use std::collections::HashSet;
@@ -762,7 +763,7 @@ pub async fn run_tool_use_loop(
     messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
 ) -> anyhow::Result<ToolUseResult> {
-    run_tool_use_loop_with_model_override(router, executor, messages, tools, None).await
+    run_tool_use_loop_with_model_override(router, executor, messages, tools, None, None).await
 }
 
 /// Same as [`run_tool_use_loop_with_model_override`] but also handles built-in
@@ -774,6 +775,7 @@ pub async fn run_tool_use_loop_with_jobs(
     tools: Vec<ToolDefinition>,
     model_override: Option<String>,
     job_queue: Arc<JobQueue>,
+    job_ctx: Option<&JobContext>,
 ) -> anyhow::Result<ToolUseResult> {
     let mut all_records = Vec::new();
     let mut last_trace: Option<entity_core::ExecutionTrace> = None;
@@ -815,7 +817,8 @@ pub async fn run_tool_use_loop_with_jobs(
             let (output_json, record) = if job_tools::is_job_tool(&tc.name) {
                 let args: serde_json::Value =
                     serde_json::from_str(&tc.arguments).unwrap_or_default();
-                let result = job_tools::execute_job_tool(&job_queue, &tc.name, &args).await;
+                let result =
+                    job_tools::execute_job_tool(&job_queue, &tc.name, &args, job_ctx).await;
                 let record = ToolCallRecord {
                     skill_id: "builtin.jobs".into(),
                     tool_name: tc.name.clone(),
@@ -823,7 +826,7 @@ pub async fn run_tool_use_loop_with_jobs(
                 };
                 (result, record)
             } else {
-                execute_single_tool_call(executor, tc).await
+                execute_single_tool_call(executor, tc, job_ctx).await
             };
             all_records.push(record);
             messages.push(Message::tool_result(&tc.id, output_json));
@@ -842,13 +845,15 @@ pub async fn run_tool_use_loop_with_jobs(
 }
 
 /// Same as [`run_tool_use_loop`] but allows forcing a model override for all
-/// LLM calls in the loop.
+/// LLM calls in the loop, and threading the running job's context (depth +
+/// correlation id) into tool execution so delegated child jobs nest correctly.
 pub async fn run_tool_use_loop_with_model_override(
     router: &IdEgoRouter,
     executor: &SkillExecutor,
     mut messages: Vec<Message>,
     tools: Vec<ToolDefinition>,
     model_override: Option<String>,
+    job_ctx: Option<&JobContext>,
 ) -> anyhow::Result<ToolUseResult> {
     let mut all_records = Vec::new();
     let mut last_trace: Option<entity_core::ExecutionTrace> = None;
@@ -887,7 +892,7 @@ pub async fn run_tool_use_loop_with_model_override(
         });
 
         for tc in &tool_calls {
-            let (output_json, record) = execute_single_tool_call(executor, tc).await;
+            let (output_json, record) = execute_single_tool_call(executor, tc, job_ctx).await;
             all_records.push(record);
             messages.push(Message::tool_result(&tc.id, output_json));
         }
@@ -960,7 +965,7 @@ pub async fn run_tool_use_loop_with_delegation(
         });
 
         for tc in &tool_calls {
-            let (output_json, record) = execute_single_tool_call(executor, tc).await;
+            let (output_json, record) = execute_single_tool_call(executor, tc, None).await;
             all_records.push(record);
             messages.push(Message::tool_result(&tc.id, output_json));
         }
@@ -993,6 +998,9 @@ pub async fn run_tool_use_loop_with_delegation(
                     "delegated_at_round": effective_rounds,
                 })),
                 parent_job_id: None,
+                parent_correlation_id: None,
+                depth: 1,
+                provider_profile: None,
                 cron_expression: None,
                 is_recurring: false,
                 significance_keywords: vec![],
@@ -1065,6 +1073,7 @@ pub async fn run_tool_use_loop_rounds_only(
     messages: &mut Vec<Message>,
     tools: &[ToolDefinition],
     model_override: Option<String>,
+    job_ctx: Option<&JobContext>,
 ) -> anyhow::Result<IntermediateToolResult> {
     let mut all_records = Vec::new();
     let mut did_tool_calls = false;
@@ -1106,7 +1115,7 @@ pub async fn run_tool_use_loop_rounds_only(
         });
 
         for tc in &tool_calls {
-            let (output_json, record) = execute_single_tool_call(executor, tc).await;
+            let (output_json, record) = execute_single_tool_call(executor, tc, job_ctx).await;
             all_records.push(record);
             messages.push(Message::tool_result(&tc.id, output_json));
         }
@@ -1147,6 +1156,7 @@ pub async fn stream_chat_pipeline(
     tools: Vec<ToolDefinition>,
     tx: tokio::sync::mpsc::Sender<StreamEvent>,
     model_override: Option<String>,
+    job_ctx: Option<&JobContext>,
 ) -> anyhow::Result<StreamPipelineResult> {
     let mut messages = messages;
     let mut tool_calls_made = Vec::new();
@@ -1159,6 +1169,7 @@ pub async fn stream_chat_pipeline(
             &mut messages,
             &tools,
             model_override.clone(),
+            job_ctx,
         )
         .await?;
         tool_calls_made = intermediate.tool_calls_made;
@@ -1217,6 +1228,7 @@ pub fn provider_label(router: &IdEgoRouter) -> String {
 async fn execute_single_tool_call(
     executor: &SkillExecutor,
     tc: &ToolCall,
+    job_ctx: Option<&JobContext>,
 ) -> (String, ToolCallRecord) {
     let Some((skill_id_str, tool_name)) = split_qualified_tool_name(&tc.name) else {
         let err_msg = format!("Invalid tool name format: {}", tc.name);
@@ -1295,7 +1307,10 @@ async fn execute_single_tool_call(
     tracing::info!("Executing tool: {}::{}", skill_id_str, tool_name);
 
     let skill_id = SkillId(skill_id_str.clone());
-    match executor.execute(&skill_id, &tool_name, params).await {
+    match executor
+        .execute_in_job_context(&skill_id, &tool_name, params, job_ctx)
+        .await
+    {
         Ok(output) => {
             let result_json = serde_json::json!({
                 "success": output.success,
@@ -1571,7 +1586,7 @@ mod tests {
             name: "test.echo::echo".into(),
             arguments: r#"{"input":"hello"}"#.into(),
         };
-        let (json, record) = execute_single_tool_call(&executor, &tc).await;
+        let (json, record) = execute_single_tool_call(&executor, &tc, None).await;
         assert!(record.success);
         assert_eq!(record.skill_id, "test.echo");
         assert_eq!(record.tool_name, "echo");
@@ -1589,7 +1604,7 @@ mod tests {
             name: "no_separator".into(),
             arguments: "{}".into(),
         };
-        let (json, record) = execute_single_tool_call(&executor, &tc).await;
+        let (json, record) = execute_single_tool_call(&executor, &tc, None).await;
         assert!(!record.success);
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed["error"]
@@ -1615,7 +1630,7 @@ mod tests {
             name: "test.echo::echo".into(),
             arguments: "not valid json!!!".into(),
         };
-        let (json, record) = execute_single_tool_call(&executor, &tc).await;
+        let (json, record) = execute_single_tool_call(&executor, &tc, None).await;
         assert!(
             !record.success,
             "malformed args should return an error, not silently succeed"
@@ -1637,7 +1652,7 @@ mod tests {
             name: "ghost.skill::tool".into(),
             arguments: "{}".into(),
         };
-        let (json, record) = execute_single_tool_call(&executor, &tc).await;
+        let (json, record) = execute_single_tool_call(&executor, &tc, None).await;
         assert!(!record.success);
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed["error"].is_string());

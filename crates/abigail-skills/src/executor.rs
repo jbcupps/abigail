@@ -12,7 +12,7 @@ use tokio::sync::Semaphore;
 use crate::manifest::{FileSystemPermission, NetworkPermission, Permission, SkillId};
 use crate::registry::SkillRegistry;
 use crate::sandbox::{AuditAction, AuditActionKind, ResourceLimits, SkillSandbox};
-use crate::skill::{ExecutionContext, SkillError, SkillResult, ToolOutput, ToolParams};
+use crate::skill::{ExecutionContext, JobContext, SkillError, SkillResult, ToolOutput, ToolParams};
 
 pub struct SkillExecutor {
     pub registry: Arc<SkillRegistry>,
@@ -20,6 +20,22 @@ pub struct SkillExecutor {
     concurrency_limiter: Arc<Semaphore>,
     /// Default timeout for a single tool call (from ResourceLimits::max_cpu_ms).
     default_timeout_ms: u64,
+    /// Optional broker for `Topic::SkillExecuted` audit envelopes.
+    broker: Option<Arc<dyn abigail_streaming::StreamBroker>>,
+}
+
+/// Maximum characters of redacted params included in an audit event.
+const AUDIT_PARAMS_MAX_CHARS: usize = 800;
+
+/// One tool execution's audit data, bound for `Topic::SkillExecuted`.
+struct ExecutionAuditRecord {
+    skill_id: String,
+    tool_name: String,
+    request_id: String,
+    params_redacted: String,
+    success: bool,
+    error: Option<String>,
+    duration_ms: u64,
 }
 
 impl SkillExecutor {
@@ -33,7 +49,58 @@ impl SkillExecutor {
             registry,
             concurrency_limiter: Arc::new(Semaphore::new(limits.max_concurrency as usize)),
             default_timeout_ms: limits.max_cpu_ms,
+            broker: None,
         }
+    }
+
+    /// Attach a stream broker; every tool execution then publishes a
+    /// `Topic::SkillExecuted` audit envelope (fire-and-forget).
+    pub fn with_broker(mut self, broker: Arc<dyn abigail_streaming::StreamBroker>) -> Self {
+        self.broker = Some(broker);
+        self
+    }
+
+    /// Publish a skill execution audit event. Params are secret-redacted and
+    /// truncated; failures are logged but never propagate to the caller.
+    fn publish_audit(&self, record: ExecutionAuditRecord) {
+        let Some(broker) = self.broker.clone() else {
+            return;
+        };
+        let payload = serde_json::json!({
+            "kind": "skill_execution",
+            "skill_id": record.skill_id,
+            "tool_name": record.tool_name,
+            "request_id": record.request_id,
+            "params": record.params_redacted,
+            "success": record.success,
+            "error": record.error,
+            "duration_ms": record.duration_ms,
+            "timestamp_utc": chrono::Utc::now().to_rfc3339(),
+        });
+        let mut msg = abigail_streaming::StreamMessage::new(payload.to_string().into_bytes());
+        msg.headers.insert("skill_id".to_string(), record.skill_id);
+        msg.headers
+            .insert("tool_name".to_string(), record.tool_name);
+        msg.headers
+            .insert("success".to_string(), record.success.to_string());
+        msg.headers
+            .insert("correlation_id".to_string(), record.request_id);
+        tokio::spawn(async move {
+            let topic = abigail_streaming::Topic::SkillExecuted;
+            let _ = broker
+                .ensure_topic(
+                    abigail_streaming::BUS_STREAM,
+                    topic.as_str(),
+                    abigail_streaming::TopicConfig::default(),
+                )
+                .await;
+            if let Err(e) = broker
+                .publish(abigail_streaming::BUS_STREAM, topic.as_str(), msg)
+                .await
+            {
+                tracing::debug!("Failed to publish skill execution audit: {}", e);
+            }
+        });
     }
 
     /// Build audit actions for a tool based on its required_permissions.
@@ -89,7 +156,21 @@ impl SkillExecutor {
         tool_name: &str,
         params: ToolParams,
     ) -> SkillResult<ToolOutput> {
-        self.execute_with_confirmation(skill_id, tool_name, params, true)
+        self.execute_full(skill_id, tool_name, params, true, None)
+            .await
+    }
+
+    /// Execute a tool on behalf of a running job. The job's depth and
+    /// correlation id are threaded into the tool's [`ExecutionContext`] so
+    /// queue tools can derive child-job depth/correlation from the parent.
+    pub async fn execute_in_job_context(
+        &self,
+        skill_id: &SkillId,
+        tool_name: &str,
+        params: ToolParams,
+        job: Option<&JobContext>,
+    ) -> SkillResult<ToolOutput> {
+        self.execute_full(skill_id, tool_name, params, true, job)
             .await
     }
 
@@ -99,6 +180,18 @@ impl SkillExecutor {
         tool_name: &str,
         params: ToolParams,
         confirmed: bool,
+    ) -> SkillResult<ToolOutput> {
+        self.execute_full(skill_id, tool_name, params, confirmed, None)
+            .await
+    }
+
+    async fn execute_full(
+        &self,
+        skill_id: &SkillId,
+        tool_name: &str,
+        params: ToolParams,
+        confirmed: bool,
+        job: Option<&JobContext>,
     ) -> SkillResult<ToolOutput> {
         let request_id = Uuid::new_v4().to_string();
         tracing::info!(
@@ -157,9 +250,20 @@ impl SkillExecutor {
             .await
             .map_err(|_| SkillError::ToolFailed("concurrency limiter closed".into()))?;
 
+        // Snapshot params for the audit trail before they move into the tool:
+        // secret-redacted and truncated so keys never ride the bus.
+        let params_redacted: String = abigail_core::redact_secrets(
+            &serde_json::to_string(&params.values).unwrap_or_default(),
+        )
+        .chars()
+        .take(AUDIT_PARAMS_MAX_CHARS)
+        .collect();
+
         let context = ExecutionContext {
-            request_id,
+            request_id: request_id.clone(),
             user_id: None,
+            job_depth: job.map(|j| j.depth),
+            correlation_id: job.and_then(|j| j.correlation_id.clone()),
         };
 
         let timeout_ms = self.default_timeout_ms;
@@ -174,6 +278,15 @@ impl SkillExecutor {
                     duration_ms = duration_ms,
                     "Tool completed successfully"
                 );
+                self.publish_audit(ExecutionAuditRecord {
+                    skill_id: skill_id.0.clone(),
+                    tool_name: tool_name.to_string(),
+                    request_id: request_id.clone(),
+                    params_redacted,
+                    success: out.success,
+                    error: None,
+                    duration_ms,
+                });
                 Ok(out)
             }
             Ok(Err(e)) => {
@@ -185,6 +298,15 @@ impl SkillExecutor {
                     error = %e,
                     "Tool execution failed"
                 );
+                self.publish_audit(ExecutionAuditRecord {
+                    skill_id: skill_id.0.clone(),
+                    tool_name: tool_name.to_string(),
+                    request_id: request_id.clone(),
+                    params_redacted,
+                    success: false,
+                    error: Some(e.to_string()),
+                    duration_ms,
+                });
                 Err(e)
             }
             Err(_) => {
@@ -194,6 +316,15 @@ impl SkillExecutor {
                     timeout_ms = timeout_ms,
                     "Tool exceeded timeout"
                 );
+                self.publish_audit(ExecutionAuditRecord {
+                    skill_id: skill_id.0.clone(),
+                    tool_name: tool_name.to_string(),
+                    request_id: request_id.clone(),
+                    params_redacted,
+                    success: false,
+                    error: Some(format!("exceeded timeout ({} ms)", timeout_ms)),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                });
                 Err(SkillError::ToolFailed(format!(
                     "Tool {} exceeded timeout ({} ms)",
                     tool_name, timeout_ms
@@ -1115,6 +1246,64 @@ mod tests {
             .execute_with_confirmation(&skill_id, "shell_exec", ToolParams::new(), true)
             .await;
         assert!(result.is_ok(), "confirmed execution should succeed");
+    }
+
+    #[tokio::test]
+    async fn execute_publishes_skill_executed_audit() {
+        use abigail_streaming::{MemoryBroker, StreamBroker, Topic, TopicConfig, BUS_STREAM};
+
+        let registry = Arc::new(SkillRegistry::new());
+        let skill_id = SkillId("test.echo_audit".to_string());
+        let manifest = test_manifest("test.echo_audit", vec![]);
+        registry
+            .register(skill_id.clone(), Arc::new(EchoSkill { manifest }))
+            .unwrap();
+
+        let broker: Arc<dyn StreamBroker> = Arc::new(MemoryBroker::new(64));
+        broker
+            .ensure_topic(
+                BUS_STREAM,
+                Topic::SkillExecuted.as_str(),
+                TopicConfig::default(),
+            )
+            .await
+            .unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<abigail_streaming::StreamMessage>(4);
+        let _sub = broker
+            .subscribe(
+                BUS_STREAM,
+                Topic::SkillExecuted.as_str(),
+                "audit-test",
+                Box::new(move |msg| {
+                    let tx = tx.clone();
+                    Box::pin(async move {
+                        let _ = tx.send(msg).await;
+                    })
+                }),
+            )
+            .await
+            .unwrap();
+
+        let executor = SkillExecutor::new(registry).with_broker(broker);
+        let params = ToolParams::new().with("api_key", "sk-ant-secretsecretsecretsecret123456");
+        executor.execute(&skill_id, "echo", params).await.unwrap();
+
+        let msg = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("audit event should arrive")
+            .expect("channel open");
+        assert_eq!(msg.headers.get("skill_id").unwrap(), "test.echo_audit");
+        assert_eq!(msg.headers.get("success").unwrap(), "true");
+        let payload: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+        assert_eq!(payload["kind"], "skill_execution");
+        assert_eq!(payload["tool_name"], "echo");
+        // The raw secret must never ride the bus.
+        let params_str = payload["params"].as_str().unwrap();
+        assert!(
+            !params_str.contains("secretsecretsecret"),
+            "params must be redacted, got: {}",
+            params_str
+        );
     }
 
     #[tokio::test]

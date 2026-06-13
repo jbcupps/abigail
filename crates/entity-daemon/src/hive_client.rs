@@ -18,9 +18,16 @@ pub struct HiveClient {
 
 impl HiveClient {
     pub fn new(base_url: &str) -> Self {
+        // Control-plane calls share the supervision loop with heartbeats and
+        // outbox sync; an unbounded request (e.g. a half-open connection
+        // across a hive restart) would stop heartbeats permanently.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .unwrap_or_default();
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
-            client: reqwest::Client::new(),
+            client,
         }
     }
 
@@ -34,6 +41,45 @@ impl HiveClient {
         if resp.ok {
             resp.data
                 .ok_or_else(|| anyhow::anyhow!("Empty data in provider-config response"))
+        } else {
+            Err(anyhow::anyhow!(
+                "Hive error: {}",
+                resp.error.unwrap_or_default()
+            ))
+        }
+    }
+
+    /// Fetch the entity's full birth document (idempotent runtime identity).
+    /// Called on every launch so hive-side changes apply on restart.
+    pub async fn get_birth_document(
+        &self,
+        entity_id: &str,
+    ) -> anyhow::Result<hive_core::EntityBirthDocument> {
+        let url = format!("{}/v1/entities/{}/birth", self.base_url, entity_id);
+        let resp: ApiEnvelope<hive_core::EntityBirthDocument> =
+            self.client.get(&url).send().await?.json().await?;
+        if resp.ok {
+            resp.data
+                .ok_or_else(|| anyhow::anyhow!("Empty data in birth document response"))
+        } else {
+            Err(anyhow::anyhow!(
+                "Hive error: {}",
+                resp.error.unwrap_or_default()
+            ))
+        }
+    }
+
+    /// Resolve a named provider profile for sub-agent delegation.
+    pub async fn get_provider_profile(
+        &self,
+        name: &str,
+    ) -> anyhow::Result<hive_core::ProviderProfileResponse> {
+        let url = format!("{}/v1/providers/profiles/{}", self.base_url, name);
+        let resp: ApiEnvelope<hive_core::ProviderProfileResponse> =
+            self.client.get(&url).send().await?.json().await?;
+        if resp.ok {
+            resp.data
+                .ok_or_else(|| anyhow::anyhow!("Empty data in provider-profile response"))
         } else {
             Err(anyhow::anyhow!(
                 "Hive error: {}",

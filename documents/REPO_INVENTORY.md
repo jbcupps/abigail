@@ -104,5 +104,5 @@ anchored to the current shipping paths in `tauri-app/Cargo.toml`,
 ## Deferred Sunset Notes
 
 - `tauri-app/src/chat_coordinator.rs` still accepts the deprecated `target` input and normalizes it to `AUTO`. Keep until external callers are audited; remove only after no live caller still sends it.
-- `tauri-app/src/commands/orchestration.rs` still depends on deprecated `OrchestrationScheduler`. Keep until Tauri orchestration finishes moving to `abigail_queue`.
+- Tauri orchestration finished moving to `abigail_queue`: `tauri-app/src/commands/orchestration.rs` and `OrchestrationScheduler` (`crates/abigail-router/src/orchestration.rs`) have been removed. Job management goes through the JobQueue commands (`list_jobs`, `cancel_job`, `list_recurring_templates`).
 - `entity-daemon` and `hive-daemon` keep their ignored integration tests for now. They should be revisited in a dedicated runtime-hardening pass, not deleted blindly.

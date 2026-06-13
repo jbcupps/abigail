@@ -86,6 +86,116 @@ pub struct ProviderConfig {
     pub cli_permission_mode: Option<String>,
 }
 
+// ---------------------------------------------------------------------------
+// Birth rite (Soul Forge)
+// ---------------------------------------------------------------------------
+
+/// One ethical trial in the Soul Forge, presented during the birth rite.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeScenarioView {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub choices: Vec<ForgeChoiceView>,
+}
+
+/// One choice within a forge trial. Weight effects stay server-side so the
+/// rite is a genuine values exercise, not a stat-min-maxing screen.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeChoiceView {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+}
+
+/// Response listing the Soul Forge trials.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForgeScenariosResponse {
+    pub scenarios: Vec<ForgeScenarioView>,
+}
+
+/// Request to perform (or re-run) the birth rite for an entity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BirthRiteRequest {
+    /// "quickstart" (template soul, balanced weights) or "forge" (trials).
+    pub path: String,
+    /// (scenario_id, choice_id) pairs — required for the "forge" path.
+    #[serde(default)]
+    pub choices: Vec<(String, String)>,
+}
+
+/// The four ethical axes of an entity's soul.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EthicWeights {
+    pub deontology: f32,
+    pub teleology: f32,
+    pub areteology: f32,
+    pub welfare: f32,
+}
+
+/// A signed birth certificate — the entity's character sheet, vouched for by
+/// the Hive master key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BirthCertificate {
+    pub entity_id: String,
+    pub entity_name: String,
+    /// Soul archetype (e.g. "The Guardian").
+    pub archetype: String,
+    /// Flavor line for the archetype.
+    pub epithet: String,
+    pub weights: EthicWeights,
+    /// Deterministic hash of the forged soul configuration.
+    pub soul_hash: String,
+    /// ASCII sigil art for the soul.
+    pub sigil: String,
+    /// "quickstart" or "forge".
+    pub birth_path: String,
+    pub issued_at_utc: String,
+    /// Hex-encoded Hive master public key.
+    pub master_public_key: String,
+    /// Hex-encoded Ed25519 signature over the certificate payload.
+    pub signature: String,
+}
+
+/// Response after performing the birth rite.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BirthRiteResponse {
+    pub certificate: BirthCertificate,
+    /// True when the rite was re-run on an already-born entity (re-tempering).
+    pub retempered: bool,
+}
+
+/// The full runtime identity for an entity, returned by
+/// `GET /v1/entities/:id/birth`. Idempotent — entity-daemon re-reads it on
+/// every launch so hive-side changes apply on restart.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityBirthDocument {
+    pub entity: EntityInfo,
+    #[serde(default)]
+    pub certificate: Option<BirthCertificate>,
+    pub provider_config: ProviderConfig,
+    #[serde(default)]
+    pub assignments: Vec<SkillAssignment>,
+}
+
+/// A named provider profile resolved by the Hive for sub-agent delegation.
+///
+/// Profiles let a sub-agent run on a different provider than the entity's
+/// Ego (e.g. a research job on Perplexity while chat runs on Claude). The
+/// profile name is a provider name; the Hive resolves credentials through
+/// its vaults and environment.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderProfileResponse {
+    /// The requested profile name.
+    pub name: String,
+    /// Resolved provider name (normalized).
+    pub provider_name: String,
+    /// API key, when the provider needs one (None for CLI/system auth).
+    pub api_key: Option<String>,
+    /// Default model for this profile (None = provider default).
+    pub model: Option<String>,
+}
+
 /// Request to update per-entity provider and routing preferences.
 ///
 /// Fields are patch-style: omitted values are left unchanged.

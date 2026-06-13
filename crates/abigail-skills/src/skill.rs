@@ -177,10 +177,28 @@ pub struct ToolMetadata {
     pub extra: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ExecutionContext {
     pub request_id: String,
     pub user_id: Option<String>,
+    /// Depth of the job this tool call is running inside (`None` for direct
+    /// mentor/chat execution, which counts as depth 0).
+    pub job_depth: Option<u32>,
+    /// Correlation id of the originating trace, inherited by any child jobs
+    /// submitted during this execution.
+    pub correlation_id: Option<String>,
+}
+
+/// Identity of the job whose agent loop is executing tools. Threaded into
+/// each tool's [`ExecutionContext`] so queue tools derive child-job depth and
+/// correlation from the actual parent job instead of trusting model-supplied
+/// parameters.
+#[derive(Debug, Clone, Default)]
+pub struct JobContext {
+    /// Depth of the currently-running job (a direct chat turn counts as 0).
+    pub depth: u32,
+    /// Correlation id shared across the job's whole trace.
+    pub correlation_id: Option<String>,
 }
 
 /// Core skill trait — all skills must implement this.

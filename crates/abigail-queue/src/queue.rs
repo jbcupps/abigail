@@ -8,6 +8,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
+/// Maximum sub-agent nesting depth: a mentor-initiated job (depth 0) may
+/// spawn sub-jobs (depth 1) which may spawn one more level (depth 2).
+pub const MAX_SUBAGENT_DEPTH: u32 = 2;
+
 pub struct JobQueue {
     store: PersistenceHandle,
     broker: Arc<dyn StreamBroker>,
@@ -15,8 +19,8 @@ pub struct JobQueue {
 }
 
 impl JobQueue {
-    const STREAM: &'static str = "abigail";
-    const TOPIC: &'static str = "job-events";
+    const STREAM: &'static str = abigail_streaming::BUS_STREAM;
+    const TOPIC: &'static str = abigail_streaming::Topic::JobEvents.as_str();
 
     pub fn new(store: PersistenceHandle, broker: Arc<dyn StreamBroker>) -> Self {
         let (local_bus, _) = broadcast::channel(256);
@@ -32,6 +36,13 @@ impl JobQueue {
     }
 
     pub async fn submit_job(&self, spec: JobSpec) -> anyhow::Result<JobId> {
+        if spec.depth > MAX_SUBAGENT_DEPTH {
+            anyhow::bail!(
+                "Job depth {} exceeds the sub-agent nesting limit ({})",
+                spec.depth,
+                MAX_SUBAGENT_DEPTH
+            );
+        }
         let job_id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now();
         let record = JobRecord {
@@ -47,6 +58,9 @@ impl JobQueue {
             allowed_skill_ids: spec.allowed_skill_ids,
             input_data: spec.input_data,
             parent_job_id: spec.parent_job_id,
+            parent_correlation_id: spec.parent_correlation_id,
+            depth: spec.depth,
+            provider_profile: spec.provider_profile,
             agent_id: None,
             model_used: None,
             provider_used: None,
@@ -353,6 +367,9 @@ impl JobQueue {
             ttl_seconds: template.ttl_seconds,
             input_data: template.input_data.clone(),
             parent_job_id: Some(template.id.clone()),
+            parent_correlation_id: template.parent_correlation_id.clone(),
+            depth: template.depth,
+            provider_profile: template.provider_profile.clone(),
             cron_expression: None,
             is_recurring: false,
             significance_keywords: template.significance_keywords.clone(),
@@ -443,6 +460,9 @@ mod tests {
             ttl_seconds: 3600,
             input_data: None,
             parent_job_id: None,
+            parent_correlation_id: None,
+            depth: 0,
+            provider_profile: None,
             cron_expression: None,
             is_recurring: false,
             significance_keywords: vec![],
@@ -463,6 +483,35 @@ mod tests {
         let record = queue.get_job(&job_id).unwrap().unwrap();
         assert_eq!(record.status, JobStatus::Queued);
         assert_eq!(record.topic, "test-topic");
+    }
+
+    #[tokio::test]
+    async fn test_submit_rejects_excess_depth() {
+        let queue = setup_test_queue();
+
+        let mut at_limit = test_spec("depth-ok");
+        at_limit.depth = MAX_SUBAGENT_DEPTH;
+        assert!(queue.submit_job(at_limit).await.is_ok());
+
+        let mut too_deep = test_spec("depth-exceeded");
+        too_deep.depth = MAX_SUBAGENT_DEPTH + 1;
+        let err = queue.submit_job(too_deep).await.unwrap_err();
+        assert!(err.to_string().contains("nesting limit"));
+    }
+
+    #[tokio::test]
+    async fn test_submit_carries_provider_profile_and_correlation() {
+        let queue = setup_test_queue();
+        let mut spec = test_spec("profile-topic");
+        spec.provider_profile = Some("perplexity".to_string());
+        spec.parent_correlation_id = Some("turn-123".to_string());
+        spec.depth = 1;
+
+        let job_id = queue.submit_job(spec).await.unwrap();
+        let record = queue.get_job(&job_id).unwrap().unwrap();
+        assert_eq!(record.provider_profile.as_deref(), Some("perplexity"));
+        assert_eq!(record.parent_correlation_id.as_deref(), Some("turn-123"));
+        assert_eq!(record.depth, 1);
     }
 
     #[tokio::test]

@@ -536,6 +536,21 @@ impl IdentityManager {
         Ok(())
     }
 
+    /// Sign an arbitrary payload with the Hive master key.
+    ///
+    /// Returns `(signature_hex, master_public_key_hex)`. Used for artifacts
+    /// the Hive vouches for, like birth certificates.
+    pub fn sign_payload(&self, payload: &[u8]) -> (String, String) {
+        use ed25519_dalek::Signer as _;
+        let signature = self.master_key.sign(payload);
+        let to_hex =
+            |bytes: &[u8]| -> String { bytes.iter().map(|b| format!("{:02x}", b)).collect() };
+        (
+            to_hex(&signature.to_bytes()),
+            to_hex(&self.master_key.verifying_key().to_bytes()),
+        )
+    }
+
     /// Get the agent directory path for a given UUID.
     pub fn agent_dir(&self, agent_id: &str) -> Result<PathBuf, String> {
         let gc = self.global_config.read().map_err(|e| e.to_string())?;
