@@ -376,6 +376,7 @@ fn file_engine_cache() -> &'static Mutex<HashMap<PathBuf, Arc<Surreal<Db>>>> {
 }
 
 fn local_engine_open_path(path: &Path) -> String {
+    #[allow(unused_mut)]
     let mut raw = path.to_string_lossy().replace('\\', "/");
 
     #[cfg(windows)]

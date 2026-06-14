@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::manifest::SkillId;
 
-/// Publish a skill event to the StreamBroker on the "abigail/skill-events" topic.
+/// Publish a skill event to the StreamBroker on `Topic::SkillExecuted`.
 /// Fire-and-forget: logs a warning on failure but never blocks the caller.
 pub async fn publish_skill_event(
     broker: &Arc<dyn abigail_streaming::StreamBroker>,
@@ -23,7 +23,14 @@ pub async fn publish_skill_event(
         .insert("skill_id".to_string(), event.skill_id.0.clone());
     msg.headers
         .insert("trigger".to_string(), event.trigger.clone());
-    if let Err(e) = broker.publish("abigail", "skill-events", msg).await {
+    if let Err(e) = broker
+        .publish(
+            abigail_streaming::BUS_STREAM,
+            abigail_streaming::Topic::SkillExecuted.as_str(),
+            msg,
+        )
+        .await
+    {
         tracing::warn!("Failed to publish skill event: {}", e);
     }
 }

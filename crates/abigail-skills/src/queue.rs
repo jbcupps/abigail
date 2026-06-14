@@ -81,7 +81,7 @@ impl Skill for QueueManagementSkill {
         vec![
             ToolDescriptor {
                 name: "submit_job".to_string(),
-                description: "Submit a new async job to the queue.".to_string(),
+                description: "Submit a new async job to the queue. Set provider_profile to run the sub-agent on a specific provider (e.g. 'perplexity' for research) instead of the entity's default.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -95,7 +95,8 @@ impl Skill for QueueManagementSkill {
                         "allowed_skill_ids": { "type": "array", "items": { "type": "string" } },
                         "ttl_seconds": { "type": "integer" },
                         "input_data": {},
-                        "parent_job_id": { "type": "string" }
+                        "parent_job_id": { "type": "string" },
+                        "provider_profile": { "type": "string", "description": "Named provider to run this job on (openai, anthropic, perplexity, google, xai, or a CLI provider). Omit to use the entity's default." }
                     },
                     "required": ["goal", "topic"]
                 }),
@@ -174,7 +175,7 @@ impl Skill for QueueManagementSkill {
         &self,
         tool_name: &str,
         params: ToolParams,
-        _context: &ExecutionContext,
+        context: &ExecutionContext,
     ) -> SkillResult<ToolOutput> {
         match tool_name {
             "submit_job" => {
@@ -196,6 +197,16 @@ impl Skill for QueueManagementSkill {
                 let input_data = params.values.get("input_data").cloned();
                 let parent_job_id = params.get_string("parent_job_id");
 
+                // Depth derives from the job this tool call runs inside, never
+                // from model-supplied params: an agent at depth N can only
+                // create depth N+1 children, so the queue's nesting limit
+                // actually terminates recursive delegation.
+                let depth = context.job_depth.unwrap_or(0) + 1;
+                let parent_correlation_id = context
+                    .correlation_id
+                    .clone()
+                    .or_else(|| params.get_string("parent_correlation_id"));
+
                 let spec = JobSpec {
                     goal,
                     topic: topic.clone(),
@@ -208,6 +219,9 @@ impl Skill for QueueManagementSkill {
                     ttl_seconds,
                     input_data,
                     parent_job_id,
+                    parent_correlation_id,
+                    depth,
+                    provider_profile: params.get_string("provider_profile"),
                     cron_expression: params.get_string("cron_expression"),
                     is_recurring: params.get::<bool>("is_recurring").unwrap_or(false),
                     significance_keywords: params
@@ -315,6 +329,93 @@ impl Skill for QueueManagementSkill {
 
     fn triggers(&self) -> Vec<TriggerDescriptor> {
         vec![]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::skill::ExecutionContext;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct RecordingOps {
+        submitted: Mutex<Vec<JobSpec>>,
+    }
+
+    #[async_trait]
+    impl QueueOperations for RecordingOps {
+        async fn submit_job(&self, spec: JobSpec) -> Result<String, String> {
+            self.submitted.lock().unwrap().push(spec);
+            Ok("job-1".to_string())
+        }
+        async fn get_job(&self, _job_id: &str) -> Result<Option<JobRecord>, String> {
+            Ok(None)
+        }
+        async fn list_jobs(
+            &self,
+            _status: Option<&str>,
+            _limit: usize,
+        ) -> Result<Vec<JobRecord>, String> {
+            Ok(vec![])
+        }
+        async fn cancel_job(&self, _job_id: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn topic_results(
+            &self,
+            _topic: &str,
+            _limit: usize,
+        ) -> Result<Vec<JobRecord>, String> {
+            Ok(vec![])
+        }
+        async fn topic_all_terminal(&self, _topic: &str) -> Result<bool, String> {
+            Ok(true)
+        }
+    }
+
+    fn submit_params() -> ToolParams {
+        ToolParams::new()
+            .with("goal", "child task")
+            .with("topic", "test-topic")
+    }
+
+    #[tokio::test]
+    async fn submit_job_derives_depth_and_correlation_from_invoking_job() {
+        let ops = Arc::new(RecordingOps::default());
+        let skill = QueueManagementSkill::new(ops.clone());
+        let context = ExecutionContext {
+            job_depth: Some(1),
+            correlation_id: Some("turn-123".to_string()),
+            ..Default::default()
+        };
+        // Model-supplied depth must be ignored — only the real job depth counts.
+        let params = submit_params().with("depth", 0u32);
+        skill
+            .execute_tool("submit_job", params, &context)
+            .await
+            .unwrap();
+
+        let submitted = ops.submitted.lock().unwrap();
+        assert_eq!(submitted[0].depth, 2);
+        assert_eq!(
+            submitted[0].parent_correlation_id.as_deref(),
+            Some("turn-123")
+        );
+    }
+
+    #[tokio::test]
+    async fn submit_job_outside_job_context_starts_at_depth_one() {
+        let ops = Arc::new(RecordingOps::default());
+        let skill = QueueManagementSkill::new(ops.clone());
+        skill
+            .execute_tool("submit_job", submit_params(), &ExecutionContext::default())
+            .await
+            .unwrap();
+
+        let submitted = ops.submitted.lock().unwrap();
+        assert_eq!(submitted[0].depth, 1);
+        assert_eq!(submitted[0].parent_correlation_id, None);
     }
 }
 

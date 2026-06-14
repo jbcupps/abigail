@@ -162,6 +162,27 @@ impl Default for SoulForgeEngine {
     }
 }
 
+/// Soul output for the Quick Start path: perfectly balanced weights with no
+/// trial choices. Deterministic, so re-running quick start yields the same
+/// soul hash.
+pub fn quickstart_output() -> SoulOutput {
+    let weights = TriangleWeights {
+        deontology: 0.25,
+        teleology: 0.25,
+        areteology: 0.25,
+        welfare: 0.25,
+    };
+    let soul_hash = compute_soul_hash(&[], &weights);
+    let sigil = generate_sigil(&weights);
+    SoulOutput {
+        archetype: "The Balanced".to_string(),
+        weights,
+        soul_hash,
+        sigil,
+        choices_made: Vec::new(),
+    }
+}
+
 /// Derive an archetype name from the ethical weights.
 fn derive_archetype(weights: &TriangleWeights) -> String {
     let dominant = weights.dominant();
@@ -412,7 +433,7 @@ fn built_in_scenarios() -> Vec<ForgeScenario> {
 }
 
 /// Persistent stream topology used by the DevOps Forge worker.
-pub const FORGE_STREAM: &str = "entity";
+pub const FORGE_STREAM: &str = abigail_streaming::BUS_STREAM;
 pub const FORGE_REQUEST_TOPIC: &str = "topic.skill.forge.request";
 pub const FORGE_RESPONSE_TOPIC: &str = "topic.skill.forge.response";
 pub const FORGE_WORKER_GROUP: &str = "skill-worker.forge";

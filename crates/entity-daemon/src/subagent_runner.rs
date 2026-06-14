@@ -6,7 +6,7 @@ use abigail_queue::{ExecutionMode, JobQueue, JobRecord};
 use abigail_router::IdEgoRouter;
 use abigail_skills::manifest::SkillId;
 use abigail_skills::skill::ToolParams;
-use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
+use abigail_skills::{InstructionRegistry, JobContext, SkillExecutor, SkillRegistry};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::time::{timeout, Duration};
@@ -15,19 +15,21 @@ use tokio::time::{timeout, Duration};
 #[derive(Clone)]
 pub struct SubagentRunner {
     queue: Arc<JobQueue>,
-    router: Arc<IdEgoRouter>,
+    router: Arc<crate::state::RouterHandle>,
     registry: Arc<SkillRegistry>,
     executor: Arc<SkillExecutor>,
     matcher: CapabilityMatcher,
     entity_name: Option<String>,
     docs_dir: std::path::PathBuf,
     instruction_registry: Arc<InstructionRegistry>,
+    /// Hive client for resolving named provider profiles (None in tests).
+    hive_client: Option<Arc<crate::hive_client::HiveClient>>,
 }
 
 impl SubagentRunner {
     pub fn new(
         queue: Arc<JobQueue>,
-        router: Arc<IdEgoRouter>,
+        router: Arc<crate::state::RouterHandle>,
         registry: Arc<SkillRegistry>,
         executor: Arc<SkillExecutor>,
         matcher: CapabilityMatcher,
@@ -42,6 +44,7 @@ impl SubagentRunner {
             entity_name,
             docs_dir: std::path::PathBuf::new(),
             instruction_registry: Arc::new(InstructionRegistry::empty()),
+            hive_client: None,
         }
     }
 
@@ -57,6 +60,53 @@ impl SubagentRunner {
         self
     }
 
+    /// Set the Hive client used to resolve named provider profiles.
+    pub fn with_hive_client(mut self, client: Arc<crate::hive_client::HiveClient>) -> Self {
+        self.hive_client = Some(client);
+        self
+    }
+
+    /// Build a one-off router for a job's provider profile.
+    ///
+    /// Resolves the profile through the Hive, constructs the Ego provider,
+    /// and pairs it with the main router's Id so fallback still works.
+    /// Returns None (with a log) when the profile cannot be resolved — the
+    /// job then runs on the entity's default router.
+    async fn profile_router(&self, profile: &str) -> Option<Arc<IdEgoRouter>> {
+        let client = self.hive_client.as_ref()?;
+        let resolved = match client.get_provider_profile(profile).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                tracing::warn!(
+                    "Provider profile '{}' could not be resolved ({}); using default router",
+                    profile,
+                    e
+                );
+                return None;
+            }
+        };
+        let ego_result = abigail_hive::ProviderRegistry::build_ego(
+            Some(&resolved.provider_name),
+            resolved.api_key,
+            resolved.model,
+        );
+        let Some(ego) = ego_result.provider else {
+            tracing::warn!(
+                "Provider profile '{}' resolved but provider construction failed; using default router",
+                profile
+            );
+            return None;
+        };
+        let built = abigail_hive::BuiltProviders {
+            id: self.router.current().id.clone(),
+            local_http: None,
+            ego: Some(ego),
+            ego_kind: ego_result.kind,
+            routing_mode: abigail_core::RoutingMode::EgoPrimary,
+        };
+        Some(Arc::new(IdEgoRouter::from_built_providers(built)))
+    }
+
     /// Claim and execute a job. Returns `Ok(())` when finished (including claim races).
     pub async fn run_job(&self, job: JobRecord) -> anyhow::Result<()> {
         let selection = self.matcher.select(&job.capability);
@@ -65,10 +115,14 @@ impl SubagentRunner {
             .model_hint
             .clone()
             .unwrap_or_else(|| "auto".to_string());
+        let provider_for_state = job
+            .provider_profile
+            .clone()
+            .unwrap_or_else(|| selection.provider.clone());
 
         if let Err(err) = self
             .queue
-            .mark_running(&job.id, &agent_id, &model_for_state, &selection.provider)
+            .mark_running(&job.id, &agent_id, &model_for_state, &provider_for_state)
             .await
         {
             if is_claim_race(&err) {
@@ -125,7 +179,10 @@ impl SubagentRunner {
             dtc.tool_name
         );
 
-        let task = self.executor.execute(&skill_id, &dtc.tool_name, params);
+        let job_ctx = job_context(job);
+        let task =
+            self.executor
+                .execute_in_job_context(&skill_id, &dtc.tool_name, params, Some(&job_ctx));
         match timeout(Duration::from_millis(timeout_ms), task).await {
             Ok(Ok(output)) => {
                 let result = serde_json::json!({
@@ -171,12 +228,31 @@ impl SubagentRunner {
         );
         let tools = filter_tools_for_job(entity_chat::build_tool_definitions(&self.registry), job);
 
+        // Run on the job's provider profile when one is set and resolvable;
+        // otherwise the entity's current default router.
+        let router = match job.provider_profile.as_deref() {
+            Some(profile) => match self.profile_router(profile).await {
+                Some(profile_router) => profile_router,
+                None => self.router.current(),
+            },
+            None => self.router.current(),
+        };
+        // A profile carries its own model; only the default router uses the
+        // capability matcher's model hint.
+        let model_override = if job.provider_profile.is_some() {
+            None
+        } else {
+            selection.model_hint.clone()
+        };
+
+        let job_ctx = job_context(job);
         let task = entity_chat::run_tool_use_loop_with_model_override(
-            &self.router,
+            &router,
             &self.executor,
             messages,
             tools,
-            selection.model_hint.clone(),
+            model_override,
+            Some(&job_ctx),
         );
         match timeout(Duration::from_millis(timeout_ms), task).await {
             Ok(Ok(result)) => {
@@ -213,6 +289,19 @@ impl SubagentRunner {
 fn is_claim_race(err: &anyhow::Error) -> bool {
     let text = err.to_string().to_lowercase();
     text.contains("not in queued state")
+}
+
+/// Tool-execution context for a running job: any child job its agent submits
+/// nests at depth = job.depth + 1 and inherits the trace correlation id,
+/// falling back to this job's id as the trace root.
+fn job_context(job: &JobRecord) -> JobContext {
+    JobContext {
+        depth: job.depth,
+        correlation_id: job
+            .parent_correlation_id
+            .clone()
+            .or_else(|| Some(job.id.clone())),
+    }
 }
 
 fn build_job_messages(

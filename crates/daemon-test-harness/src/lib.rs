@@ -214,10 +214,15 @@ fn cargo_bin(name: &str) -> PathBuf {
 }
 
 /// Read stdout lines from a child process until we find the "listening on http://..." URL.
+///
+/// Anchored on the "listening on " marker: daemon startup logs mention other
+/// URLs first (e.g. the entity daemon logs the hive URL it connects to), so
+/// matching any "http://" would lock onto the wrong daemon's address.
 async fn parse_listen_url(
     stdout: std::process::ChildStdout,
     timeout: Duration,
 ) -> anyhow::Result<String> {
+    const MARKER: &str = "listening on http://";
     let (tx, rx) = tokio::sync::oneshot::channel::<String>();
     let mut tx = Some(tx);
 
@@ -228,9 +233,10 @@ async fn parse_listen_url(
                 Ok(l) => l,
                 Err(_) => break,
             };
-            if let Some(idx) = line.find("http://") {
+            if let Some(idx) = line.find(MARKER) {
                 if let Some(sender) = tx.take() {
-                    let url = line[idx..].trim().to_string();
+                    let url_start = idx + MARKER.len() - "http://".len();
+                    let url = line[url_start..].trim().to_string();
                     let _ = sender.send(url);
                 }
             }

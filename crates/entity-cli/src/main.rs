@@ -245,6 +245,9 @@ async fn main() -> anyhow::Result<()> {
                         ttl_seconds,
                         input_data: None,
                         parent_job_id: None,
+                        parent_correlation_id: None,
+                        depth: None,
+                        provider_profile: None,
                     })
                     .send()
                     .await?

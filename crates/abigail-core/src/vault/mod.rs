@@ -113,7 +113,7 @@ fn validate_sentinel(sentinel: &str) -> Result<()> {
 /// runtime verification without mutating identity data on failure.
 pub async fn init_resilient() {
     let result = tokio::task::spawn_blocking(|| {
-        let data_root = crate::AppConfig::default_paths().data_dir;
+        let data_root = unlock::process_vault_data_dir();
         let _ = std::fs::create_dir_all(&data_root);
 
         if let Err(e) = crate::SecretsVault::load(data_root.clone()) {

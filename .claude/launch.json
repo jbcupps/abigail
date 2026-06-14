@@ -8,6 +8,12 @@
       "port": 1420
     },
     {
+      "name": "hive-app-ui",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "4173", "--directory", "hive-app/dist"],
+      "port": 4173
+    },
+    {
       "name": "hive-daemon",
       "runtimeExecutable": "cargo",
       "runtimeArgs": ["run", "-p", "hive-daemon", "--", "--port", "3141"],

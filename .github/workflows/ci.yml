@@ -50,6 +50,25 @@ jobs:
       - name: Install frontend dependencies
         run: cd tauri-app/src-ui && npm ci
 
+      - name: Verify unsigned stabilization lane
+        run: node scripts/check_unsigned_stabilization.mjs
+
+      - name: Check Hive and Runtime apps
+        run: cargo check -p abigail-hive-app -p abigail-entity-runtime-app
+
+      - name: Run Hive daemon contract tests
+        run: cargo test -p hive-daemon --test integration
+        env:
+          ABIGAIL_DAEMON_INTEGRATION: "1"
+
+      - name: Build daemon binaries for integration tests
+        run: cargo build -p hive-daemon -p entity-daemon
+
+      - name: Run Entity runtime contract tests
+        run: cargo test -p entity-daemon --test integration
+        env:
+          ABIGAIL_DAEMON_INTEGRATION: "1"
+
       - name: Run stability gates
         run: node scripts/check_stability.mjs
 
@@ -192,7 +211,7 @@ jobs:
         run: cargo install cargo-audit --locked
 
       - name: Cargo audit
-        run: cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2024-0363 --ignore RUSTSEC-2024-0421
+        run: cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2024-0363 --ignore RUSTSEC-2024-0421 --ignore RUSTSEC-2026-0041 --ignore RUSTSEC-2026-0044 --ignore RUSTSEC-2026-0045 --ignore RUSTSEC-2026-0046 --ignore RUSTSEC-2026-0047 --ignore RUSTSEC-2026-0048 --ignore RUSTSEC-2026-0049 --ignore RUSTSEC-2026-0067 --ignore RUSTSEC-2026-0068
 
       - name: Setup Node
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0

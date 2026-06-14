@@ -28,7 +28,7 @@ describe("SanctumDrawer", () => {
 
     let backendHealthy = true;
     mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "get_orchestration_backend_status") {
+      if (cmd === "get_agentic_runtime_status") {
         return Promise.resolve({ healthy: backendHealthy });
       }
       return Promise.resolve(null);
@@ -61,7 +61,7 @@ describe("SanctumDrawer", () => {
   it("shows browser sessions and clear controls in the Browser Session tab", async () => {
     const user = userEvent.setup();
     mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "get_orchestration_backend_status") {
+      if (cmd === "get_agentic_runtime_status") {
         return Promise.resolve({ healthy: false });
       }
       if (cmd === "list_browser_sessions") {

@@ -196,10 +196,8 @@ impl SkillSandbox {
                         }
                         Permission::FileSystem(crate::manifest::FileSystemPermission::Read(
                             allowed,
-                        )) => {
-                            if allowed.iter().any(|a| path_is_under(path, a)) {
-                                return true;
-                            }
+                        )) if allowed.iter().any(|a| path_is_under(path, a)) => {
+                            return true;
                         }
                         _ => {}
                     }
@@ -214,10 +212,8 @@ impl SkillSandbox {
                         }
                         Permission::FileSystem(crate::manifest::FileSystemPermission::Write(
                             allowed,
-                        )) => {
-                            if allowed.iter().any(|a| path_is_under(path, a)) {
-                                return true;
-                            }
+                        )) if allowed.iter().any(|a| path_is_under(path, a)) => {
+                            return true;
                         }
                         _ => {}
                     }
@@ -231,10 +227,10 @@ impl SkillSandbox {
                         | Permission::Memory(crate::manifest::MemoryPermission::ReadWrite) => {
                             return true
                         }
-                        Permission::Memory(crate::manifest::MemoryPermission::Namespace(ns)) => {
-                            if namespace.as_ref().map(|n| n == ns).unwrap_or(false) {
-                                return true;
-                            }
+                        Permission::Memory(crate::manifest::MemoryPermission::Namespace(ns))
+                            if namespace.as_ref().map(|n| n == ns).unwrap_or(false) =>
+                        {
+                            return true;
                         }
                         _ => {}
                     }

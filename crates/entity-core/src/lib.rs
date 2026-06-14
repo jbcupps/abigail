@@ -2,8 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
-// Re-export the shared envelope from hive-core.
-pub use hive_core::ApiEnvelope;
+// Re-export the shared envelope and Hive-managed runtime contract types.
+pub use hive_core::{
+    ApiEnvelope, EntityOutboxRecord, ForgeApprovalJob, RuntimeSessionLease, RuntimeSessionStatus,
+    SkillAssignment,
+};
 
 // ---------------------------------------------------------------------------
 // Chat
@@ -297,6 +300,63 @@ pub struct EntityStatus {
     pub ego_provider: Option<String>,
     pub routing_mode: String,
     pub skills_count: usize,
+    /// Recent model-call health (newest first): is my provider healthy *right now*?
+    #[serde(default)]
+    pub provider_health: Vec<ProviderHealthEntry>,
+}
+
+/// Outcome of one model call, for the live provider health board.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderHealthEntry {
+    /// Provider label (e.g. "anthropic", "claude-cli", "id").
+    pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// "healthy", "fallback" (served by the failsafe), or "degraded" (call failed).
+    pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    pub at_utc: String,
+}
+
+/// Runtime session status exposed by the entity runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeSessionStatusResponse {
+    pub lease: RuntimeSessionLease,
+    pub connected_to_hive: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_hive_sync_at_utc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_hive_error: Option<String>,
+    pub assignment_count: usize,
+}
+
+/// Current local outbox sync status for the runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityOutboxStatus {
+    pub queued_records: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oldest_record_at_utc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_sync_at_utc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_sync_error: Option<String>,
+}
+
+/// Acknowledgement that a skill artifact was applied or reloaded in the runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillApplyAcknowledgement {
+    pub skill_id: String,
+    pub status: String,
+    pub applied_at_utc: String,
+}
+
+/// List wrapper for recent skill apply acknowledgements.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillApplyAcknowledgementList {
+    pub acknowledgements: Vec<SkillApplyAcknowledgement>,
 }
 
 // ---------------------------------------------------------------------------
@@ -411,6 +471,15 @@ pub struct SubmitJobRequest {
     pub input_data: Option<serde_json::Value>,
     #[serde(default)]
     pub parent_job_id: Option<String>,
+    /// Correlation id of the chat turn (or parent run) that spawned this job.
+    #[serde(default)]
+    pub parent_correlation_id: Option<String>,
+    /// Sub-agent nesting depth (0 = mentor-initiated). Capped server-side.
+    #[serde(default)]
+    pub depth: Option<u32>,
+    /// Named provider profile to run this job on (e.g. "perplexity").
+    #[serde(default)]
+    pub provider_profile: Option<String>,
 }
 
 /// Response after queue submission.

@@ -29,6 +29,8 @@ members = [
     "crates/abigail-runtime",
     "crates/daemon-test-harness",
     "crates/daemon-client",
+    "hive-app",
+    "entity-runtime-app",
     "skills/skill-web-search",
     "skills/skill-browser",
     "skills/skill-filesystem",

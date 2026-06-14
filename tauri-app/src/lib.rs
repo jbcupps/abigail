@@ -29,7 +29,6 @@ use crate::commands::jobs::*;
 use crate::commands::logging::*;
 use crate::commands::memory::*;
 use crate::commands::ollama::*;
-use crate::commands::orchestration::*;
 use crate::commands::sensory::*;
 use crate::commands::skills::*;
 use crate::state::AppState;
@@ -39,10 +38,7 @@ use abigail_core::{validate_local_llm_url, AppConfig, GlobalConfig, SecretsVault
 use abigail_hive::{Hive, ModelRegistry};
 use abigail_memory::MemoryStore;
 use abigail_persistence::{EntityScope, PersistenceHandle};
-#[allow(deprecated)]
-use abigail_router::{
-    IdEgoRouter, OrchestrationScheduler, SubagentDefinition, SubagentManager, SubagentProvider,
-};
+use abigail_router::{IdEgoRouter, SubagentDefinition, SubagentManager, SubagentProvider};
 use abigail_runtime::{
     create_browser_skill, register_dynamic_api_skills, register_hive_management_skill,
     register_preloaded_skills, register_skill_factory, register_supported_native_skills,
@@ -792,8 +788,6 @@ fn try_run() -> Result<(), String> {
     ));
     startup.stage("memory store opened");
     let agentic_runtime = Arc::new(agentic_runtime::AgenticRuntime::new(&data_dir));
-    #[allow(deprecated)]
-    let orchestration_scheduler = Arc::new(OrchestrationScheduler::new(data_dir.clone()));
 
     // Open job queue database for async task management.
     let job_queue = {
@@ -836,7 +830,6 @@ fn try_run() -> Result<(), String> {
         active_agent_id: RwLock::new(active_agent_id),
         subagent_manager,
         agentic_runtime,
-        orchestration_scheduler,
         browser,
         http_client,
         ollama: Arc::new(tokio::sync::Mutex::new(None)),
@@ -867,11 +860,25 @@ fn try_run() -> Result<(), String> {
     };
     startup.stage("app state assembled");
 
-    let app = tauri::Builder::default()
+    let updater_enabled = std::env::var("ABIGAIL_ENABLE_UPDATER")
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            )
+        })
+        .unwrap_or(false);
+
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
-        .setup(|app| {
+        .plugin(tauri_plugin_process::init());
+    if updater_enabled {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    } else {
+        tracing::info!("Updater plugin disabled for stabilization build");
+    }
+
+    let app = builder.setup(|app| {
             let handle = app.handle();
             let state = handle.state::<AppState>();
             tracing::info!("Startup setup: entering Tauri setup hook");
@@ -1324,12 +1331,6 @@ fn try_run() -> Result<(), String> {
             cancel_agentic_run,
             list_agentic_runs,
             get_agentic_runtime_status,
-            get_orchestration_backend_status,
-            list_orchestration_jobs,
-            set_orchestration_job_enabled,
-            delete_orchestration_job,
-            run_orchestration_job_now,
-            list_orchestration_job_logs,
             list_subagents,
             delegate_to_subagent,
             get_governor_status,

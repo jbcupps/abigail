@@ -105,13 +105,15 @@ const config = JSON.parse(raw);
 config.bundle ??= {};
 config.bundle.windows ??= {};
 config.plugins ??= {};
-config.plugins.updater ??= {};
 
 const createUpdaterArtifacts = Boolean(normalizedUpdaterPubkey.encoded) && enableUpdaterArtifacts;
 config.bundle.createUpdaterArtifacts = createUpdaterArtifacts;
 
 if (normalizedUpdaterPubkey.encoded) {
+  config.plugins.updater ??= {};
   config.plugins.updater.pubkey = normalizedUpdaterPubkey.encoded;
+} else if (config.plugins.updater) {
+  delete config.plugins.updater;
 }
 
 if (windowsThumbprint) {

@@ -6,6 +6,7 @@
 
 use abigail_capabilities::cognitive::ToolDefinition;
 use abigail_queue::{DirectToolCall, ExecutionMode, JobQueue, JobSpec, RequiredCapability};
+use abigail_skills::JobContext;
 use serde_json::json;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -176,13 +177,18 @@ pub fn is_job_tool(name: &str) -> bool {
 }
 
 /// Execute a built-in job tool call. Returns the JSON result string.
+///
+/// `job_ctx` identifies the job whose agent issued the call (if any), so a
+/// submitted child job nests at depth = parent + 1 and inherits the trace
+/// correlation id.
 pub async fn execute_job_tool(
     queue: &Arc<JobQueue>,
     tool_name: &str,
     args: &serde_json::Value,
+    job_ctx: Option<&JobContext>,
 ) -> String {
     match tool_name {
-        TOOL_SUBMIT_JOB => execute_submit(queue, args).await,
+        TOOL_SUBMIT_JOB => execute_submit(queue, args, job_ctx).await,
         TOOL_GET_RESULT => execute_get_result(queue, args).await,
         TOOL_LIST_JOBS => execute_list(queue, args).await,
         TOOL_CREATE_RECURRING => execute_create_recurring(queue, args).await,
@@ -192,7 +198,11 @@ pub async fn execute_job_tool(
     }
 }
 
-async fn execute_submit(queue: &Arc<JobQueue>, args: &serde_json::Value) -> String {
+async fn execute_submit(
+    queue: &Arc<JobQueue>,
+    args: &serde_json::Value,
+    job_ctx: Option<&JobContext>,
+) -> String {
     let goal = args["goal"].as_str().unwrap_or("").to_string();
     let capability_str = args["capability"].as_str().unwrap_or("general");
     let topic = args["topic"].as_str().unwrap_or("delegation").to_string();
@@ -228,6 +238,11 @@ async fn execute_submit(queue: &Arc<JobQueue>, args: &serde_json::Value) -> Stri
         None
     };
 
+    let provider_profile = args["provider_profile"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .map(String::from);
+
     let spec = JobSpec {
         goal,
         topic: topic.clone(),
@@ -240,6 +255,11 @@ async fn execute_submit(queue: &Arc<JobQueue>, args: &serde_json::Value) -> Stri
         ttl_seconds: 3600,
         input_data: None,
         parent_job_id: None,
+        parent_correlation_id: job_ctx.and_then(|c| c.correlation_id.clone()),
+        // A job submitted from inside another job nests one level deeper;
+        // submissions from a direct chat turn start at depth 1.
+        depth: job_ctx.map(|c| c.depth).unwrap_or(0) + 1,
+        provider_profile,
         cron_expression: None,
         is_recurring: false,
         significance_keywords: vec![],
@@ -367,6 +387,9 @@ async fn execute_create_recurring(queue: &Arc<JobQueue>, args: &serde_json::Valu
         ttl_seconds: 86_400,
         input_data: None,
         parent_job_id: None,
+        parent_correlation_id: None,
+        depth: 0,
+        provider_profile: None,
         cron_expression: Some(cron_expression),
         is_recurring: true,
         significance_keywords: vec![],
@@ -428,5 +451,63 @@ async fn execute_cancel_recurring(queue: &Arc<JobQueue>, args: &serde_json::Valu
         })
         .to_string(),
         Err(e) => json!({"error": format!("Failed to cancel recurring job: {}", e)}).to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use abigail_persistence::{EntityScope, PersistenceHandle};
+    use abigail_streaming::MemoryBroker;
+
+    fn test_queue() -> Arc<JobQueue> {
+        let store = PersistenceHandle::open_ephemeral(EntityScope::Hive).unwrap();
+        Arc::new(JobQueue::new(store, Arc::new(MemoryBroker::new(64))))
+    }
+
+    fn submit_args() -> serde_json::Value {
+        json!({"goal": "child task", "capability": "general", "topic": "test-topic"})
+    }
+
+    #[tokio::test]
+    async fn submit_inherits_depth_and_correlation_from_job_context() {
+        let queue = test_queue();
+        let ctx = JobContext {
+            depth: 1,
+            correlation_id: Some("turn-9".to_string()),
+        };
+        let out = execute_job_tool(&queue, TOOL_SUBMIT_JOB, &submit_args(), Some(&ctx)).await;
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let record = queue
+            .get_job(parsed["job_id"].as_str().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.depth, 2);
+        assert_eq!(record.parent_correlation_id.as_deref(), Some("turn-9"));
+    }
+
+    #[tokio::test]
+    async fn submit_from_depth_two_job_is_rejected() {
+        let queue = test_queue();
+        let ctx = JobContext {
+            depth: 2,
+            correlation_id: None,
+        };
+        let out = execute_job_tool(&queue, TOOL_SUBMIT_JOB, &submit_args(), Some(&ctx)).await;
+        assert!(out.contains("nesting limit"), "got: {}", out);
+        assert!(queue.list_jobs(None, 10).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn submit_without_job_context_starts_at_depth_one() {
+        let queue = test_queue();
+        let out = execute_job_tool(&queue, TOOL_SUBMIT_JOB, &submit_args(), None).await;
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let record = queue
+            .get_job(parsed["job_id"].as_str().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.depth, 1);
+        assert_eq!(record.parent_correlation_id, None);
     }
 }

@@ -335,10 +335,16 @@ async fn rounds_only_returns_final_text_when_no_tools_called() {
     let mut messages = entity_chat::build_contextual_messages(&system, None, "hi");
     let tools = entity_chat::build_tool_definitions(&registry);
 
-    let result =
-        entity_chat::run_tool_use_loop_rounds_only(&router, &executor, &mut messages, &tools, None)
-            .await
-            .unwrap();
+    let result = entity_chat::run_tool_use_loop_rounds_only(
+        &router,
+        &executor,
+        &mut messages,
+        &tools,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert!(result.final_text.is_some());
     assert_eq!(result.final_text.unwrap(), "Mock response #1");

@@ -3,7 +3,9 @@
 //! Wraps `IdentityManager`, `Hive`, and `SecretsVault` behind an Axum REST API.
 //! Listens on `--port` (default 3141).
 
+mod birth;
 mod routes;
+mod runtime_registry;
 mod state;
 
 use abigail_core::{AppConfig, SecretsVault};
@@ -46,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
     } else {
         AppConfig::default_paths().data_dir
     };
+    abigail_core::vault::unlock::configure_process_vault_data_dir(&data_root);
 
     tracing::info!("Hive data root: {}", data_root.display());
 
@@ -72,10 +75,16 @@ async fn main() -> anyhow::Result<()> {
 
     let hive = Arc::new(Hive::new(entity_secrets.clone(), hive_secrets.clone()));
 
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", cli.port)).await?;
+    let local_addr = listener.local_addr()?;
+    let hive_url = format!("http://{}", local_addr);
+
     let state = HiveDaemonState {
         identity_manager,
         hive,
         hive_secrets,
+        hive_url: hive_url.clone(),
+        runtime_control: Arc::new(Mutex::new(runtime_registry::RuntimeControlPlane::default())),
     };
 
     // Build router
@@ -90,23 +99,52 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/entities", get(routes::list_entities))
         .route("/v1/entities", post(routes::create_entity))
         .route("/v1/entities/:id", get(routes::get_entity))
+        .route("/v1/birth/scenarios", get(birth::get_scenarios))
+        .route(
+            "/v1/entities/:id/birth",
+            get(birth::get_birth_document).post(birth::perform_birth),
+        )
+        .route(
+            "/v1/entities/:id/config",
+            axum::routing::patch(routes::update_entity_config),
+        )
         .route(
             "/v1/entities/:id/provider-config",
             get(routes::get_provider_config),
         )
         .route("/v1/entities/:id/sign", post(routes::sign_entity))
+        .route(
+            "/v1/entities/:id/assignments",
+            get(routes::get_skill_assignments).post(routes::set_skill_assignments),
+        )
+        .route(
+            "/v1/entities/:id/forge-approvals",
+            get(routes::get_forge_approval_jobs).post(routes::create_forge_approval_job),
+        )
         .route("/v1/secrets", post(routes::store_secret))
         .route("/v1/secrets/list", get(routes::list_secrets))
         .route("/v1/secrets/:key", get(routes::get_secret))
         .route("/v1/providers/models", post(routes::discover_models))
+        .route(
+            "/v1/providers/profiles/:name",
+            get(routes::get_provider_profile),
+        )
+        .route("/v1/runtime/sessions", post(routes::issue_runtime_session))
+        .route(
+            "/v1/runtime/sessions/:lease_id",
+            get(routes::get_runtime_session),
+        )
+        .route("/v1/runtime/register", post(routes::register_runtime))
+        .route(
+            "/v1/runtime/heartbeat",
+            post(routes::record_runtime_heartbeat),
+        )
+        .route("/v1/runtime/outbox/sync", post(routes::sync_runtime_outbox))
         .layer(cors)
         .with_state(state);
 
-    let addr = format!("127.0.0.1:{}", cli.port);
-    tracing::info!("Hive daemon listening on http://{}", addr);
-    println!("Hive daemon listening on http://{}", addr);
-
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    tracing::info!("Hive daemon listening on {}", hive_url);
+    println!("Hive daemon listening on {}", hive_url);
     axum::serve(listener, app).await?;
 
     Ok(())

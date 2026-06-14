@@ -175,8 +175,17 @@ pub async fn provision_all_skills(registry_path: &str) {
         return;
     };
 
-    let registry = load_persistent_topology_entries(registry_path)
-        .expect("Failed to load skills/registry.toml");
+    let registry = match load_persistent_topology_entries(registry_path) {
+        Ok(registry) => registry,
+        Err(error) => {
+            tracing::warn!(
+                "Skill topology provisioning skipped; unable to load registry at {}: {}",
+                registry_path,
+                error
+            );
+            return;
+        }
+    };
 
     let mut worker_handles: Vec<SubscriptionHandle> = Vec::new();
     let skill_count = registry.len();

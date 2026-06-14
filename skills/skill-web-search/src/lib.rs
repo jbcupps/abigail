@@ -260,7 +260,7 @@ mod tests {
         let params = ToolParams::new().with("query", "where does Elon Musk live");
         let ctx = ExecutionContext {
             request_id: "test".to_string(),
-            user_id: None,
+            ..Default::default()
         };
 
         let result = skill
@@ -284,7 +284,7 @@ mod tests {
         let params = ToolParams::new().with("query", "test query");
         let ctx = ExecutionContext {
             request_id: "test".to_string(),
-            user_id: None,
+            ..Default::default()
         };
 
         let result = skill.execute_tool("web_search", params, &ctx).await;

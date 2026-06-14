@@ -339,7 +339,7 @@ impl MemoryStore {
             .into_iter()
             .filter(|memory| contains_case_insensitive(&memory.content, &query))
             .collect();
-        memories.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        memories.sort_by_key(|memory| std::cmp::Reverse(memory.created_at));
         memories.truncate(limit);
         Ok(memories)
     }
@@ -378,7 +378,7 @@ impl MemoryStore {
             .into_iter()
             .map(TryFrom::try_from)
             .collect::<Result<Vec<_>>>()?;
-        turns.sort_by(|left, right| left.turn_number.cmp(&right.turn_number));
+        turns.sort_by_key(|turn| turn.turn_number);
         Ok(turns)
     }
 
@@ -401,7 +401,7 @@ impl MemoryStore {
             .into_iter()
             .filter(|turn| contains_case_insensitive(&turn.content, &query))
             .collect();
-        turns.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        turns.sort_by_key(|turn| std::cmp::Reverse(turn.created_at));
         turns.truncate(limit);
         Ok(turns)
     }

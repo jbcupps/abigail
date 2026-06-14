@@ -79,6 +79,11 @@ pub enum OllamaLifecycleState {
     NotStarted,
     /// Ollama binary discovered, process starting.
     Starting,
+    /// Ollama is being downloaded and installed automatically.
+    InstallingOllama {
+        /// Install progress as a percentage (0.0–100.0).
+        progress_pct: f32,
+    },
     /// Ollama server is responding to health checks.
     Running,
     /// Model download in progress.
@@ -334,6 +339,7 @@ impl OllamaManager {
             file.flush()
                 .await
                 .map_err(|e| format!("Failed to flush installer file: {}", e))?;
+            drop(file);
 
             on_progress(OllamaInstallProgress {
                 step: "installing".to_string(),

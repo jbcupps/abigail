@@ -231,7 +231,10 @@ impl AgenticEngine {
         headers.insert("task_id".to_string(), task_id.to_string());
 
         let msg = abigail_streaming::StreamMessage::with_headers(payload, headers);
-        if let Err(e) = broker.publish("entity", &topic, msg).await {
+        if let Err(e) = broker
+            .publish(abigail_streaming::BUS_STREAM, &topic, msg)
+            .await
+        {
             tracing::debug!("Failed to publish AgenticEvent to broker: {}", e);
         }
     }

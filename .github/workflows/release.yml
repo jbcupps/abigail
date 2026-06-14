@@ -1,4 +1,4 @@
-# Build Abigail installers, publish GitHub Release, and publish npm package.
+# Build Abigail beta/release artifacts, publish GitHub Release, and publish npm package.
 #
 # Triggers:
 #   - Tags matching 'v*' (e.g., v0.0.3)
@@ -10,7 +10,7 @@
 #
 # Platforms: Windows (NSIS), Ubuntu (deb), macOS (dmg universal binary)
 
-name: Release
+name: Beta Release (Signed)
 
 env:
   OLLAMA_VERSION: "v0.5.13"

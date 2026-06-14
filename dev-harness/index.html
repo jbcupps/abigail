@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Abigail Split Stack Harness</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Local Dev Harness</p>
+        <h1>Hive + Entity Runtime</h1>
+        <p class="lede">
+          A local browser fallback for testing the split Abigail stack when desktop shells are blocked by Windows policy.
+        </p>
+      </section>
+
+      <section class="panel panel-wide">
+        <div class="connection-grid">
+          <label>
+            <span>Hive URL</span>
+            <input id="hive-url" type="text" />
+          </label>
+          <label>
+            <span>Runtime URL</span>
+            <input id="runtime-url" type="text" />
+          </label>
+          <label>
+            <span>Entity ID</span>
+            <input id="entity-id" type="text" placeholder="auto-filled from Hive list" />
+          </label>
+          <label>
+            <span>Session ID</span>
+            <input id="session-id" type="text" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="refresh-all" type="button">Refresh All</button>
+          <button id="load-entities" type="button" class="secondary">Load Entities</button>
+          <button id="load-runtime" type="button" class="secondary">Refresh Runtime</button>
+        </div>
+      </section>
+
+      <section class="dashboard">
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Hive</h2>
+            <span id="hive-health-pill" class="pill pill-muted">Unknown</span>
+          </div>
+          <pre id="hive-status" class="json-view">Waiting for refresh...</pre>
+          <div class="subpanel">
+            <h3>Entities</h3>
+            <ul id="entity-list" class="entity-list"></ul>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Runtime</h2>
+            <span id="runtime-health-pill" class="pill pill-muted">Unknown</span>
+          </div>
+          <pre id="runtime-status" class="json-view">Waiting for refresh...</pre>
+          <div class="runtime-snapshots">
+            <div class="snapshot">
+              <h3>Session</h3>
+              <pre id="session-status" class="json-view compact">Waiting for refresh...</pre>
+            </div>
+            <div class="snapshot">
+              <h3>Outbox</h3>
+              <pre id="outbox-status" class="json-view compact">Waiting for refresh...</pre>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="dashboard">
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Chat Probe</h2>
+            <span id="chat-pill" class="pill pill-muted">Idle</span>
+          </div>
+          <label>
+            <span>Message</span>
+            <textarea id="chat-message" rows="5" placeholder="Send a message into the active Entity Runtime"></textarea>
+          </label>
+          <div class="actions">
+            <button id="send-chat" type="button">Send Chat</button>
+          </div>
+          <pre id="chat-response" class="json-view compact">No chat sent yet.</pre>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Skill Acknowledgements</h2>
+            <span id="ack-pill" class="pill pill-muted">Idle</span>
+          </div>
+          <pre id="skill-acks" class="json-view">Waiting for refresh...</pre>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

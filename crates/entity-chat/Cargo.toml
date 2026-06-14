@@ -23,3 +23,5 @@ async-trait.workspace = true
 chrono.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 abigail-core = { path = "../abigail-core" }
+abigail-persistence = { path = "../abigail-persistence" }
+abigail-streaming = { path = "../abigail-streaming" }

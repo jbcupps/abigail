@@ -3,11 +3,15 @@ import { check, Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 
 export default function UpdateNotification() {
+  const updaterEnabled = import.meta.env.VITE_ABIGAIL_ENABLE_UPDATER === "true";
   const [update, setUpdate] = useState<Update | null>(null);
   const [installing, setInstalling] = useState(false);
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
+    if (!updaterEnabled) {
+      return;
+    }
     let cancelled = false;
     check()
       .then((u) => {
@@ -21,7 +25,9 @@ export default function UpdateNotification() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [updaterEnabled]);
+
+  if (!updaterEnabled) return null;
 
   if (!update || dismissed) return null;
 

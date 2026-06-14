@@ -179,6 +179,12 @@ impl<'a> ChatCoordinator<'a> {
             }
         });
 
+        // Chat turns are depth 0; jobs submitted from this turn nest below it
+        // and inherit the turn's correlation id for trace continuity.
+        let job_ctx = entity_chat::JobContext {
+            depth: 0,
+            correlation_id: Some(prepared.correlation_id.clone()),
+        };
         let pipeline_fut = entity_chat::stream_chat_pipeline(
             &prepared.router,
             &self.state.executor,
@@ -186,6 +192,7 @@ impl<'a> ChatCoordinator<'a> {
             prepared.tools,
             tx,
             prepared.model_override,
+            Some(&job_ctx),
         );
         tokio::pin!(pipeline_fut);
 

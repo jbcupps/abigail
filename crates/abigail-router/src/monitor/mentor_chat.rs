@@ -1,15 +1,17 @@
 //! Mentor chat monitor for preprompt enrichment over topic transport.
 //!
 //! Flow:
-//! 1) request envelope is published to `entity/chat-topic`
+//! 1) request envelope is published to `Topic::MentorInput`
 //! 2) monitor subscriber injects minimal preprompt + id/superego context
-//! 3) enriched envelope is republished to `entity/chat-topic`
+//! 3) enriched envelope is republished to `Topic::MentorInput`
 
 use crate::router::IdEgoRouter;
 use abigail_core::constitutional::{
     infer_id_context, infer_superego_context, load_minimal_preprompt,
 };
-use abigail_streaming::{StreamBroker, StreamMessage, SubscriptionHandle, TopicConfig};
+use abigail_streaming::{
+    StreamBroker, StreamMessage, SubscriptionHandle, Topic, TopicConfig, BUS_STREAM,
+};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -18,8 +20,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub const STREAM: &str = "entity";
-pub const CHAT_TOPIC: &str = "chat-topic";
+pub const STREAM: &str = BUS_STREAM;
+pub const CHAT_TOPIC: &str = Topic::MentorInput.as_str();
 const MONITOR_GROUP: &str = "mentor-chat-monitor";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

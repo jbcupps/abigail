@@ -6,10 +6,36 @@ use axum::{
     Json,
 };
 use hive_core::{
-    ApiEnvelope, CreateEntityRequest, CreateEntityResponse, EntityInfo, HiveStatus, ProviderConfig,
-    ProviderModelInfo, ProviderModelsRequest, ProviderModelsResponse, SecretListResponse,
-    SecretValueResponse, SignEntityRequest, StoreSecretRequest,
+    ApiEnvelope, CreateEntityRequest, CreateEntityResponse, CreateForgeApprovalJobRequest,
+    EntityInfo, ForgeApprovalJobsResponse, HiveStatus, OutboxSyncRequest, OutboxSyncResponse,
+    ProviderConfig, ProviderModelInfo, ProviderModelsRequest, ProviderModelsResponse,
+    ProviderProfileResponse, RuntimeHeartbeatRequest, RuntimeHeartbeatResponse,
+    RuntimeRegistrationRequest, RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus,
+    SecretListResponse, SecretValueResponse, SetSkillAssignmentsRequest, SignEntityRequest,
+    SkillAssignmentsResponse, StoreSecretRequest, UpdateEntityConfigRequest,
+    UpdateEntityConfigResponse,
 };
+
+pub(crate) fn provider_config_from_hive_config(
+    hive_config: &abigail_hive::HiveConfig,
+) -> ProviderConfig {
+    ProviderConfig {
+        local_llm_base_url: hive_config.local_llm_base_url.clone(),
+        ego_provider_name: hive_config
+            .ego_provider
+            .as_ref()
+            .map(|selection| selection.provider.clone()),
+        ego_api_key: hive_config
+            .ego_provider
+            .as_ref()
+            .and_then(|selection| selection.api_key()),
+        ego_model: hive_config.ego_model.clone(),
+        routing_mode: format!("{:?}", hive_config.routing_mode),
+        cli_permission_mode: serde_json::to_value(hive_config.cli_permission_mode)
+            .ok()
+            .and_then(|v| v.as_str().map(String::from)),
+    }
+}
 
 // ---------------------------------------------------------------------------
 // GET /health
@@ -139,21 +165,104 @@ pub async fn get_provider_config(
 
     // Resolve via Hive priority chain
     match state.hive.resolve_config(&config) {
-        Ok(hive_config) => Json(ApiEnvelope::success(ProviderConfig {
-            local_llm_base_url: hive_config.local_llm_base_url,
-            ego_provider_name: hive_config
-                .ego_provider
-                .as_ref()
-                .map(|selection| selection.provider.clone()),
-            ego_api_key: hive_config
-                .ego_provider
-                .as_ref()
-                .and_then(|selection| selection.api_key()),
-            ego_model: hive_config.ego_model,
-            routing_mode: format!("{:?}", hive_config.routing_mode),
-            cli_permission_mode: serde_json::to_value(hive_config.cli_permission_mode)
-                .ok()
-                .and_then(|v| v.as_str().map(String::from)),
+        Ok(hive_config) => Json(ApiEnvelope::success(provider_config_from_hive_config(
+            &hive_config,
+        ))),
+        Err(e) => Json(ApiEnvelope::error(e)),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/providers/profiles/:name
+// ---------------------------------------------------------------------------
+
+/// Resolve a named provider profile for sub-agent delegation. The profile
+/// name is a provider name; the Hive resolves credentials through its vaults
+/// and environment so an entity can run a sub-agent on a provider other than
+/// its Ego.
+pub async fn get_provider_profile(
+    State(state): State<HiveDaemonState>,
+    Path(name): Path<String>,
+) -> Json<ApiEnvelope<ProviderProfileResponse>> {
+    match state.hive.resolve_provider_profile(&name) {
+        Some(selection) => Json(ApiEnvelope::success(ProviderProfileResponse {
+            name,
+            provider_name: selection.provider.clone(),
+            api_key: selection.api_key(),
+            model: None,
+        })),
+        None => Json(ApiEnvelope::error(format!(
+            "No credentials available for provider profile '{}'",
+            name
+        ))),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /v1/entities/:id/config
+// ---------------------------------------------------------------------------
+
+pub async fn update_entity_config(
+    State(state): State<HiveDaemonState>,
+    Path(entity_id): Path<String>,
+    Json(body): Json<UpdateEntityConfigRequest>,
+) -> Json<ApiEnvelope<UpdateEntityConfigResponse>> {
+    let mut config = match state.identity_manager.load_agent(&entity_id) {
+        Ok(c) => c,
+        Err(e) => return Json(ApiEnvelope::error(e)),
+    };
+
+    if let Some(provider) = body.active_provider_preference {
+        let provider = provider.trim().to_lowercase();
+        if !provider.is_empty() {
+            config.active_provider_preference = Some(provider);
+        }
+    }
+    if let Some(url) = body.local_llm_base_url {
+        let trimmed = url.trim().to_string();
+        config.local_llm_base_url = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        };
+    }
+    if let Some(mode) = body.routing_mode {
+        let parsed: abigail_core::RoutingMode = match serde_json::from_str(&format!("\"{}\"", mode))
+        {
+            Ok(value) => value,
+            Err(e) => return Json(ApiEnvelope::error(format!("Invalid routing_mode: {}", e))),
+        };
+        config.routing_mode = parsed;
+    }
+    if let Some(cli_mode) = body.cli_permission_mode {
+        let parsed: abigail_core::CliPermissionMode =
+            match serde_json::from_str(&format!("\"{}\"", cli_mode)) {
+                Ok(value) => value,
+                Err(e) => {
+                    return Json(ApiEnvelope::error(format!(
+                        "Invalid cli_permission_mode: {}",
+                        e
+                    )))
+                }
+            };
+        config.cli_permission_mode = parsed;
+    }
+
+    if body.ego_model.is_some() {
+        tracing::warn!(
+            "update_entity_config received ego_model, but AppConfig has no persisted ego_model field yet"
+        );
+    }
+
+    let config_path = config.config_path();
+    if let Err(e) = config.save(&config_path) {
+        return Json(ApiEnvelope::error(e.to_string()));
+    }
+
+    match state.hive.resolve_config(&config) {
+        Ok(hive_config) => Json(ApiEnvelope::success(UpdateEntityConfigResponse {
+            entity_id,
+            provider_config: provider_config_from_hive_config(&hive_config),
         })),
         Err(e) => Json(ApiEnvelope::error(e)),
     }
@@ -284,5 +393,233 @@ pub async fn discover_models(
             }))
         }
         Err(e) => Json(ApiEnvelope::error(e)),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/runtime/sessions
+// ---------------------------------------------------------------------------
+
+pub async fn issue_runtime_session(
+    State(state): State<HiveDaemonState>,
+    Json(body): Json<RuntimeSessionRequest>,
+) -> Json<ApiEnvelope<RuntimeSessionLease>> {
+    match state.identity_manager.list_agents() {
+        Ok(agents) => {
+            let Some(agent) = agents.into_iter().find(|agent| agent.id == body.entity_id) else {
+                return Json(ApiEnvelope::error(format!(
+                    "Entity {} not found",
+                    body.entity_id
+                )));
+            };
+
+            match state.runtime_control.lock() {
+                Ok(mut control) => Json(ApiEnvelope::success(control.issue_session(
+                    body,
+                    Some(agent.name),
+                    Some(state.hive_url.clone()),
+                ))),
+                Err(e) => Json(ApiEnvelope::error(e.to_string())),
+            }
+        }
+        Err(e) => Json(ApiEnvelope::error(e)),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/runtime/register
+// ---------------------------------------------------------------------------
+
+pub async fn register_runtime(
+    State(state): State<HiveDaemonState>,
+    Json(body): Json<RuntimeRegistrationRequest>,
+) -> Json<ApiEnvelope<RuntimeSessionStatus>> {
+    match state.runtime_control.lock() {
+        Ok(mut control) => match control.register_runtime(body) {
+            Ok(status) => Json(ApiEnvelope::success(status)),
+            Err(e) => Json(ApiEnvelope::error(e)),
+        },
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/runtime/heartbeat
+// ---------------------------------------------------------------------------
+
+pub async fn record_runtime_heartbeat(
+    State(state): State<HiveDaemonState>,
+    Json(body): Json<RuntimeHeartbeatRequest>,
+) -> Json<ApiEnvelope<RuntimeHeartbeatResponse>> {
+    match state.runtime_control.lock() {
+        Ok(mut control) => match control.record_heartbeat(body) {
+            Ok(response) => Json(ApiEnvelope::success(response)),
+            Err(e) => Json(ApiEnvelope::error(e)),
+        },
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/runtime/sessions/:lease_id
+// ---------------------------------------------------------------------------
+
+pub async fn get_runtime_session(
+    State(state): State<HiveDaemonState>,
+    Path(lease_id): Path<String>,
+) -> Json<ApiEnvelope<RuntimeSessionStatus>> {
+    match state.runtime_control.lock() {
+        Ok(control) => match control.session_status(&lease_id) {
+            Some(status) => Json(ApiEnvelope::success(status)),
+            None => Json(ApiEnvelope::error(format!(
+                "Runtime lease {} not found",
+                lease_id
+            ))),
+        },
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GET/POST /v1/entities/:id/assignments
+// ---------------------------------------------------------------------------
+
+pub async fn get_skill_assignments(
+    State(state): State<HiveDaemonState>,
+    Path(entity_id): Path<String>,
+) -> Json<ApiEnvelope<SkillAssignmentsResponse>> {
+    match state.runtime_control.lock() {
+        Ok(control) => Json(ApiEnvelope::success(control.assignments(&entity_id))),
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+pub async fn set_skill_assignments(
+    State(state): State<HiveDaemonState>,
+    Path(entity_id): Path<String>,
+    Json(body): Json<SetSkillAssignmentsRequest>,
+) -> Json<ApiEnvelope<SkillAssignmentsResponse>> {
+    match state.runtime_control.lock() {
+        Ok(mut control) => Json(ApiEnvelope::success(
+            control.set_assignments(&entity_id, body),
+        )),
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GET/POST /v1/entities/:id/forge-approvals
+// ---------------------------------------------------------------------------
+
+pub async fn get_forge_approval_jobs(
+    State(state): State<HiveDaemonState>,
+    Path(entity_id): Path<String>,
+) -> Json<ApiEnvelope<ForgeApprovalJobsResponse>> {
+    match state.runtime_control.lock() {
+        Ok(control) => Json(ApiEnvelope::success(control.forge_jobs(&entity_id))),
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+pub async fn create_forge_approval_job(
+    State(state): State<HiveDaemonState>,
+    Path(entity_id): Path<String>,
+    Json(body): Json<CreateForgeApprovalJobRequest>,
+) -> Json<ApiEnvelope<hive_core::ForgeApprovalJob>> {
+    match state.runtime_control.lock() {
+        Ok(mut control) => Json(ApiEnvelope::success(
+            control.create_forge_job(&entity_id, body),
+        )),
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/runtime/outbox/sync
+// ---------------------------------------------------------------------------
+
+pub async fn sync_runtime_outbox(
+    State(state): State<HiveDaemonState>,
+    Json(body): Json<OutboxSyncRequest>,
+) -> Json<ApiEnvelope<OutboxSyncResponse>> {
+    match state.runtime_control.lock() {
+        Ok(mut control) => match control.sync_outbox(body) {
+            Ok(response) => Json(ApiEnvelope::success(response)),
+            Err(e) => Json(ApiEnvelope::error(e)),
+        },
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime_registry::RuntimeControlPlane;
+    use abigail_core::{AppConfig, SecretsVault};
+    use abigail_hive::Hive;
+    use abigail_identity::IdentityManager;
+    use std::sync::{Arc, Mutex};
+
+    fn build_state() -> (HiveDaemonState, String) {
+        let data_root = AppConfig::default_paths()
+            .data_dir
+            .join("test-hive-daemon-routes")
+            .join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&data_root).expect("create test data root");
+
+        let identity_manager = Arc::new(IdentityManager::new(data_root.clone()).expect("identity"));
+        let (entity_id, _) = identity_manager
+            .create_agent("Route Test")
+            .expect("create entity");
+
+        let entity_secrets_dir = data_root.join("entity_secrets");
+        let hive_secrets_dir = data_root.join("hive_secrets");
+        std::fs::create_dir_all(&entity_secrets_dir).expect("entity_secrets_dir");
+        std::fs::create_dir_all(&hive_secrets_dir).expect("hive_secrets_dir");
+
+        let entity_secrets = Arc::new(Mutex::new(SecretsVault::new(entity_secrets_dir)));
+        let hive_secrets = Arc::new(Mutex::new(SecretsVault::new(hive_secrets_dir)));
+        let hive = Arc::new(Hive::new(entity_secrets, hive_secrets.clone()));
+
+        (
+            HiveDaemonState {
+                identity_manager,
+                hive,
+                hive_secrets,
+                hive_url: "http://127.0.0.1:3141".to_string(),
+                runtime_control: Arc::new(Mutex::new(RuntimeControlPlane::default())),
+            },
+            entity_id,
+        )
+    }
+
+    #[tokio::test]
+    async fn update_entity_config_persists_provider_preferences() {
+        let (state, entity_id) = build_state();
+        let resp = update_entity_config(
+            State(state.clone()),
+            Path(entity_id.clone()),
+            Json(UpdateEntityConfigRequest {
+                active_provider_preference: Some("openai".to_string()),
+                ego_model: None,
+                local_llm_base_url: Some("http://localhost:11434".to_string()),
+                routing_mode: Some("cli_orchestrator".to_string()),
+                cli_permission_mode: Some("interactive".to_string()),
+            }),
+        )
+        .await
+        .0;
+
+        assert!(resp.ok, "response error: {:?}", resp.error);
+        let config = state
+            .identity_manager
+            .load_agent(&entity_id)
+            .expect("load updated config");
+        assert_eq!(config.active_provider_preference.as_deref(), Some("openai"));
+        assert_eq!(
+            config.local_llm_base_url.as_deref(),
+            Some("http://localhost:11434")
+        );
+        assert_eq!(format!("{:?}", config.routing_mode), "CliOrchestrator");
     }
 }

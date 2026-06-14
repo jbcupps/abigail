@@ -116,7 +116,7 @@ export default function SanctumDrawer({ open, onClose, onDisconnect }: SanctumDr
     let mounted = true;
     const checkBackendReadiness = async () => {
       try {
-        const status = await invoke<{ healthy: boolean }>("get_orchestration_backend_status");
+        const status = await invoke<{ healthy: boolean }>("get_agentic_runtime_status");
         if (mounted) {
           setBackendReady(Boolean(status?.healthy));
         }
