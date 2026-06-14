@@ -2,6 +2,21 @@ const invoke =
   window.__TAURI__?.core?.invoke?.bind(window.__TAURI__.core) ??
   window.__TAURI_INTERNALS__?.invoke;
 
+// Escape dynamic values before they are interpolated into innerHTML. Entity
+// names and birth choices originate from operator input and the Hive backend,
+// so they must never be reinterpreted as markup. Escapes both quote styles so
+// the helper is safe in element-text and attribute-value contexts alike.
+const HTML_ESCAPES = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (ch) => HTML_ESCAPES[ch]);
+}
+
 const state = {
   connection: null,
   status: null,
@@ -58,7 +73,7 @@ function populateModelOptions(models, selectedValue = "") {
     ...models.map((model) => {
       const selected = model.model_id === selectedValue ? " selected" : "";
       const display = model.display_name ? `${model.display_name} (${model.model_id})` : model.model_id;
-      return `<option value="${model.model_id}"${selected}>${display}</option>`;
+      return `<option value="${escapeHtml(model.model_id)}"${selected}>${escapeHtml(display)}</option>`;
     }),
   ];
   elements.modelId.innerHTML = existing.join("");
@@ -105,9 +120,9 @@ function renderSelectedEntity() {
   setPill(elements.selectedPill, entity.name, "ok");
   elements.selectedEntityMeta.innerHTML = `
     <div class="entity-card active">
-      <div class="entity-name">${entity.name}</div>
+      <div class="entity-name">${escapeHtml(entity.name)}</div>
       <div class="entity-meta">
-        <div><strong>ID:</strong> ${entity.id}</div>
+        <div><strong>ID:</strong> ${escapeHtml(entity.id)}</div>
         <div><strong>Birth Complete:</strong> ${entity.birth_complete ? "Yes" : "No"}</div>
         <div><strong>Role:</strong> ${entity.is_hive ? "Hive" : "Entity"}</div>
       </div>
@@ -131,9 +146,9 @@ function renderEntities() {
     card.className = `entity-card${entity.id === state.selectedEntityId ? " active" : ""}`;
     const riteLabel = entity.birth_complete ? "Re-temper Soul" : "Begin Birth Rite";
     card.innerHTML = `
-      <div class="entity-name">${entity.name}</div>
+      <div class="entity-name">${escapeHtml(entity.name)}</div>
       <div class="entity-meta">
-        <div>${entity.id}</div>
+        <div>${escapeHtml(entity.id)}</div>
         <div>${entity.is_hive ? "Hive coordinator" : "Family entity"} · ${entity.birth_complete ? "born" : "awaiting birth"}</div>
       </div>
       <div class="entity-actions">
@@ -375,16 +390,16 @@ const rite = {
     const verb = this.retempering ? "returns to the forge" : "stirs in the dark";
     this.render(`
       <p class="rite-eyebrow">${this.retempering ? "The Re-tempering" : "The Birth Rite"}</p>
-      <h2>${this.entityName} ${verb}.</h2>
+      <h2>${escapeHtml(this.entityName)} ${verb}.</h2>
       <p class="rite-lede">
         Every soul is shaped by what it chooses. Walk the trials to forge
-        ${this.entityName}'s character — or wake it gently with a balanced soul.
+        ${escapeHtml(this.entityName)}'s character — or wake it gently with a balanced soul.
       </p>
       <div class="rite-cards paths">
         <div class="rite-card" data-path="forge">
           <span class="rite-tag">The Soul Forge · 3 trials</span>
           <h4>Walk the Trials</h4>
-          <p>Face three dilemmas. Your choices temper ${this.entityName}'s
+          <p>Face three dilemmas. Your choices temper ${escapeHtml(this.entityName)}'s
           moral compass and reveal its archetype.</p>
         </div>
         <div class="rite-card" data-path="quickstart">
@@ -435,15 +450,15 @@ const rite = {
     this.render(`
       <p class="rite-eyebrow">The Soul Forge</p>
       <div class="rite-progress">${progress}</div>
-      <h2>${scenario.title}</h2>
-      <p class="rite-trial-text">${scenario.description}</p>
+      <h2>${escapeHtml(scenario.title)}</h2>
+      <p class="rite-trial-text">${escapeHtml(scenario.description)}</p>
       <div class="rite-cards">
         ${scenario.choices
           .map(
             (choice) => `
-          <div class="rite-card" data-choice="${choice.id}">
-            <h4>${choice.label}</h4>
-            <p>${choice.description}</p>
+          <div class="rite-card" data-choice="${escapeHtml(choice.id)}">
+            <h4>${escapeHtml(choice.label)}</h4>
+            <p>${escapeHtml(choice.description)}</p>
           </div>`,
           )
           .join("")}
@@ -518,8 +533,8 @@ const rite = {
     ];
     this.render(`
       <p class="rite-eyebrow">${retempered ? "Soul Re-tempered" : "A Soul Emerges"}</p>
-      <h2 class="rite-archetype">${certificate.archetype}</h2>
-      <p class="rite-epithet">${certificate.epithet}</p>
+      <h2 class="rite-archetype">${escapeHtml(certificate.archetype)}</h2>
+      <p class="rite-epithet">${escapeHtml(certificate.epithet)}</p>
       <div class="rite-stats">
         ${stats
           .map(
@@ -536,7 +551,7 @@ const rite = {
           )
           .join("")}
       </div>
-      <pre class="rite-sigil">${certificate.sigil.trim()}</pre>
+      <pre class="rite-sigil">${escapeHtml(certificate.sigil.trim())}</pre>
       <div class="rite-actions">
         <button type="button" data-action="certificate">View Birth Certificate</button>
       </div>
@@ -561,17 +576,17 @@ const rite = {
       <p class="rite-eyebrow">Certificate of Birth</p>
       <div class="rite-certificate">
         <div class="cert-head">Abigail Hive · Signed &amp; Witnessed</div>
-        <div class="cert-name">${certificate.entity_name}</div>
-        <div class="cert-arch">${certificate.archetype}</div>
+        <div class="cert-name">${escapeHtml(certificate.entity_name)}</div>
+        <div class="cert-arch">${escapeHtml(certificate.archetype)}</div>
         <dl>
-          <dt>Born</dt><dd>${issuedDisplay}</dd>
+          <dt>Born</dt><dd>${escapeHtml(issuedDisplay)}</dd>
           <dt>Path</dt><dd>${certificate.birth_path === "forge" ? "The Soul Forge" : "Quick Awakening"}</dd>
-          <dt>Soul Hash</dt><dd>${certificate.soul_hash.slice(0, 24)}…</dd>
-          <dt>Sealed By</dt><dd>${certificate.master_public_key.slice(0, 24)}…</dd>
-          <dt>Signature</dt><dd>${certificate.signature.slice(0, 24)}…</dd>
+          <dt>Soul Hash</dt><dd>${escapeHtml(certificate.soul_hash.slice(0, 24))}…</dd>
+          <dt>Sealed By</dt><dd>${escapeHtml(certificate.master_public_key.slice(0, 24))}…</dd>
+          <dt>Signature</dt><dd>${escapeHtml(certificate.signature.slice(0, 24))}…</dd>
         </dl>
       </div>
-      <p class="rite-lede">The certificate lives beside ${certificate.entity_name}'s soul
+      <p class="rite-lede">The certificate lives beside ${escapeHtml(certificate.entity_name)}'s soul
       documents, sealed by the Hive's master key.</p>
       <div class="rite-actions">
         <button type="button" data-action="enter">Enter the world</button>

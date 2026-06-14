@@ -212,7 +212,7 @@ impl InstructionRegistry {
         }
 
         // Sort by specificity descending (more words = more specific = higher priority)
-        scored.sort_by(|a, b| b.2.cmp(&a.2));
+        scored.sort_by_key(|item| std::cmp::Reverse(item.2));
 
         let mut section = String::from("\n\n## Skill-Specific Instructions\n\n");
         let header_len = section.len();
