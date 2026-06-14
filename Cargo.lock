@@ -9788,7 +9788,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "sysinfo 0.30.13",
+ "sysinfo",
  "tokio",
  "tracing",
 ]
@@ -10435,7 +10435,7 @@ dependencies = [
  "surrealdb-types",
  "surrealkv",
  "surrealmx",
- "sysinfo 0.37.2",
+ "sysinfo",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -10613,21 +10613,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "sysinfo"
-version = "0.30.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a5b4ddaee55fb2bea2bf0e5000747e5f5c0de765e5a5ff87f4cd106439f4bb3"
-dependencies = [
- "cfg-if",
- "core-foundation-sys",
- "libc",
- "ntapi",
- "once_cell",
- "rayon",
- "windows 0.52.0",
 ]
 
 [[package]]
