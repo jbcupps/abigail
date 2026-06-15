@@ -216,6 +216,77 @@ impl Hive {
         None
     }
 
+    /// Rank the providers the home actually has by capability tier and return
+    /// the strongest one. Unlike [`Self::determine_ego_provider`] (first
+    /// available by a fixed order), this picks the *best* available so the Hive
+    /// helper and new entities can be pinned to it. Returns `None` when no cloud
+    /// or CLI provider is available (callers fall back to the local model).
+    pub fn resolve_best_model(&self) -> Option<crate::best_model::BestModel> {
+        use crate::best_model::{api_provider_profile, cli_provider_tier, BestModel};
+
+        // Keep `candidate` if it is strictly better than the current best. At
+        // equal tier, prefer a CLI provider (model is None — no API-key spend).
+        fn consider(best: &mut Option<BestModel>, candidate: BestModel) {
+            let replace = match best {
+                None => true,
+                Some(current) => {
+                    candidate.tier > current.tier
+                        || (candidate.tier == current.tier
+                            && candidate.model.is_none()
+                            && current.model.is_some())
+                }
+            };
+            if replace {
+                *best = Some(candidate);
+            }
+        }
+
+        let mut best: Option<BestModel> = None;
+
+        // Authenticated CLI tools on PATH.
+        for det in detect_all_cli_providers() {
+            if det.on_path && det.is_authenticated {
+                if let Some(tier) = cli_provider_tier(&det.provider_name) {
+                    consider(
+                        &mut best,
+                        BestModel {
+                            provider: det.provider_name.clone(),
+                            model: None,
+                            tier,
+                            reason: format!("{} is installed and signed in", det.provider_name),
+                        },
+                    );
+                }
+            }
+        }
+
+        // Stored API keys in the Hive vault.
+        if let Ok(vault) = self.hive_secrets.lock() {
+            for provider in crate::best_model::KNOWN_API_PROVIDERS {
+                let has_key = vault
+                    .get_secret(provider)
+                    .map(str::trim)
+                    .filter(|key| !key.is_empty())
+                    .is_some();
+                if has_key {
+                    if let Some((tier, model)) = api_provider_profile(provider) {
+                        consider(
+                            &mut best,
+                            BestModel {
+                                provider: (*provider).to_string(),
+                                model: Some(model.to_string()),
+                                tier,
+                                reason: format!("{} API key is configured", provider),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
+        best
+    }
+
     /// Resolve a named provider profile for sub-agent delegation.
     ///
     /// The profile name is a provider name ("openai", "anthropic",
@@ -341,7 +412,7 @@ impl Hive {
         Ok(HiveConfig {
             local_llm_base_url: config.local_llm_base_url.clone(),
             ego_provider,
-            ego_model: None,
+            ego_model: config.ego_model.clone(),
             routing_mode: config.routing_mode,
             cli_permission_mode: config.cli_permission_mode,
         })

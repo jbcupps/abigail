@@ -6,13 +6,15 @@ use axum::{
     Json,
 };
 use hive_core::{
-    ApiEnvelope, CreateEntityRequest, CreateEntityResponse, CreateForgeApprovalJobRequest,
-    EntityInfo, ForgeApprovalJobsResponse, HiveStatus, OutboxSyncRequest, OutboxSyncResponse,
+    ApiEnvelope, BestModelResponse, CliDetectResponse, CliProviderDetection, CreateEntityRequest,
+    CreateEntityResponse, CreateForgeApprovalJobRequest, EntityInfo, EntityOpenResponse,
+    ForgeApprovalJobsResponse, HelperInfo, HiveDefaultResponse, HiveStatus, OutboxSyncRequest,
+    OutboxSyncResponse,
     ProviderConfig, ProviderModelInfo, ProviderModelsRequest, ProviderModelsResponse,
     ProviderProfileResponse, RuntimeHeartbeatRequest, RuntimeHeartbeatResponse,
     RuntimeRegistrationRequest, RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus,
-    SecretListResponse, SecretValueResponse, SetSkillAssignmentsRequest, SignEntityRequest,
-    SkillAssignmentsResponse, StoreSecretRequest, UpdateEntityConfigRequest,
+    SecretListResponse, SecretValueResponse, SetHiveDefaultRequest, SetSkillAssignmentsRequest,
+    SignEntityRequest, SkillAssignmentsResponse, StoreSecretRequest, UpdateEntityConfigRequest,
     UpdateEntityConfigResponse,
 };
 
@@ -63,10 +65,26 @@ pub async fn get_status(State(state): State<HiveDaemonState>) -> Json<ApiEnvelop
                     immortal: a.immortal,
                 })
                 .collect();
+            let any_provider_configured = state.hive.resolve_best_model().is_some();
+            let helper_local_url = state.helper_url.lock().ok().and_then(|g| g.clone());
+            let helper_running = helper_local_url.is_some();
+            let ready_state = if any_provider_configured {
+                "ready"
+            } else {
+                "needs_provider"
+            };
+
             let status = HiveStatus {
                 master_key_loaded: true,
                 entity_count: entities.len(),
                 entities,
+                ready_state: ready_state.to_string(),
+                any_provider_configured,
+                setup_complete: any_provider_configured,
+                helper: Some(HelperInfo {
+                    running: helper_running,
+                    local_url: helper_local_url,
+                }),
             };
             Json(ApiEnvelope::success(status))
         }
@@ -158,10 +176,24 @@ pub async fn get_provider_config(
     Path(entity_id): Path<String>,
 ) -> Json<ApiEnvelope<ProviderConfig>> {
     // Load the agent's AppConfig
-    let config = match state.identity_manager.load_agent(&entity_id) {
+    let mut config = match state.identity_manager.load_agent(&entity_id) {
         Ok(c) => c,
         Err(e) => return Json(ApiEnvelope::error(e)),
     };
+
+    // Inherit the Hive-level default provider/model when this entity has none of
+    // its own, so a name-only entity "just works" with the family's provider.
+    if !config.is_hive
+        && config.active_provider_preference.is_none()
+        && config.ego_model.is_none()
+    {
+        if let Ok(hive_id) = state.identity_manager.hive_agent_id() {
+            if let Ok(hive_config) = state.identity_manager.load_agent(&hive_id) {
+                config.active_provider_preference = hive_config.active_provider_preference;
+                config.ego_model = hive_config.ego_model;
+            }
+        }
+    }
 
     // Resolve via Hive priority chain
     match state.hive.resolve_config(&config) {
@@ -196,6 +228,129 @@ pub async fn get_provider_profile(
             name
         ))),
     }
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/providers/best
+// ---------------------------------------------------------------------------
+
+/// Return the best available provider/model, ranked by capability tier.
+pub async fn get_best_model(
+    State(state): State<HiveDaemonState>,
+) -> Json<ApiEnvelope<BestModelResponse>> {
+    let resp = match state.hive.resolve_best_model() {
+        Some(best) => BestModelResponse {
+            provider: Some(best.provider),
+            model: best.model,
+            tier: Some(best.tier.as_str().to_string()),
+            reason: Some(best.reason),
+        },
+        None => BestModelResponse::default(),
+    };
+    Json(ApiEnvelope::success(resp))
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/providers/detect
+// ---------------------------------------------------------------------------
+
+/// Detect CLI provider tools (claude, gemini, codex, grok) installed on PATH,
+/// including whether they are signed in.
+pub async fn detect_cli(
+    State(_state): State<HiveDaemonState>,
+) -> Json<ApiEnvelope<CliDetectResponse>> {
+    let providers = abigail_hive::detect_cli_providers_full()
+        .into_iter()
+        .map(|d| CliProviderDetection {
+            provider: d.provider_name,
+            on_path: d.on_path,
+            is_official: d.is_official,
+            is_authenticated: d.is_authenticated,
+            auth_hint: d.auth_hint,
+        })
+        .collect();
+    Json(ApiEnvelope::success(CliDetectResponse { providers }))
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/providers/hive-default
+// ---------------------------------------------------------------------------
+
+/// Set the Hive-level default provider/model that newly created entities
+/// inherit. With an empty body, seeds from the best available provider.
+pub async fn set_hive_default(
+    State(state): State<HiveDaemonState>,
+    Json(body): Json<SetHiveDefaultRequest>,
+) -> Json<ApiEnvelope<HiveDefaultResponse>> {
+    // Resolve which provider/model to store: explicit, or best available.
+    let (provider, model) = match body.provider.clone() {
+        Some(p) => (Some(p), body.model.clone()),
+        None => match state.hive.resolve_best_model() {
+            Some(best) => (Some(best.provider), best.model),
+            None => (None, None),
+        },
+    };
+
+    let hive_id = match state.identity_manager.hive_agent_id() {
+        Ok(id) => id,
+        Err(e) => return Json(ApiEnvelope::error(e)),
+    };
+    let mut config = match state.identity_manager.load_agent(&hive_id) {
+        Ok(c) => c,
+        Err(e) => return Json(ApiEnvelope::error(e)),
+    };
+
+    config.active_provider_preference = provider
+        .as_ref()
+        .map(|p| p.trim().to_lowercase())
+        .filter(|p| !p.is_empty());
+    config.ego_model = model
+        .as_ref()
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty());
+
+    let config_path = config.config_path();
+    if let Err(e) = config.save(&config_path) {
+        return Json(ApiEnvelope::error(e.to_string()));
+    }
+
+    Json(ApiEnvelope::success(HiveDefaultResponse {
+        provider: config.active_provider_preference.clone(),
+        model: config.ego_model.clone(),
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/entities/:id/open
+// ---------------------------------------------------------------------------
+
+/// Ensure the entity's daemon is running (starting it on demand if needed) and
+/// return its local URL. Idempotent — reuses a live daemon.
+pub async fn open_entity(
+    State(state): State<HiveDaemonState>,
+    Path(entity_id): Path<String>,
+) -> Json<ApiEnvelope<EntityOpenResponse>> {
+    match state.supervisor.ensure_entity_running(&entity_id).await {
+        Ok(local_url) => Json(ApiEnvelope::success(EntityOpenResponse {
+            entity_id,
+            local_url,
+        })),
+        Err(e) => Json(ApiEnvelope::error(format!("{:#}", e))),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /v1/entities/:id/close
+// ---------------------------------------------------------------------------
+
+/// Stop the entity's daemon (called when its window closes). The immortal Hive
+/// helper is managed separately and is never affected by this.
+pub async fn close_entity(
+    State(state): State<HiveDaemonState>,
+    Path(entity_id): Path<String>,
+) -> Json<ApiEnvelope<String>> {
+    state.supervisor.stop_entity(&entity_id);
+    Json(ApiEnvelope::success(format!("Entity {} stopped", entity_id)))
 }
 
 // ---------------------------------------------------------------------------
@@ -248,10 +403,13 @@ pub async fn update_entity_config(
         config.cli_permission_mode = parsed;
     }
 
-    if body.ego_model.is_some() {
-        tracing::warn!(
-            "update_entity_config received ego_model, but AppConfig has no persisted ego_model field yet"
-        );
+    if let Some(model) = body.ego_model {
+        let trimmed = model.trim().to_string();
+        config.ego_model = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        };
     }
 
     let config_path = config.config_path();
@@ -588,6 +746,11 @@ mod tests {
                 hive_secrets,
                 hive_url: "http://127.0.0.1:3141".to_string(),
                 runtime_control: Arc::new(Mutex::new(RuntimeControlPlane::default())),
+                helper_url: Arc::new(Mutex::new(None)),
+                supervisor: crate::supervisor::HiveSupervisor::new(
+                    "http://127.0.0.1:3141".to_string(),
+                    data_root.clone(),
+                ),
             },
             entity_id,
         )
@@ -601,7 +764,7 @@ mod tests {
             Path(entity_id.clone()),
             Json(UpdateEntityConfigRequest {
                 active_provider_preference: Some("openai".to_string()),
-                ego_model: None,
+                ego_model: Some("gpt-4.1".to_string()),
                 local_llm_base_url: Some("http://localhost:11434".to_string()),
                 routing_mode: Some("cli_orchestrator".to_string()),
                 cli_permission_mode: Some("interactive".to_string()),
@@ -611,11 +774,17 @@ mod tests {
         .0;
 
         assert!(resp.ok, "response error: {:?}", resp.error);
+        // The chosen model is surfaced back on the resolved provider config.
+        assert_eq!(
+            resp.data.as_ref().and_then(|d| d.provider_config.ego_model.as_deref()),
+            Some("gpt-4.1")
+        );
         let config = state
             .identity_manager
             .load_agent(&entity_id)
             .expect("load updated config");
         assert_eq!(config.active_provider_preference.as_deref(), Some("openai"));
+        assert_eq!(config.ego_model.as_deref(), Some("gpt-4.1"));
         assert_eq!(
             config.local_llm_base_url.as_deref(),
             Some("http://localhost:11434")

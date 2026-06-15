@@ -81,8 +81,12 @@ async fn curate_and_publish(state: EntityDaemonState, envelope: MentorChatEnvelo
     // Constitutional enrichment (same source the mentor monitor uses).
     let enriched_preprompt = load_minimal_preprompt(&envelope.message).await.ok();
 
-    // Base prompt from the soul documents; CLI providers get the compressed form.
-    let base_prompt = if status.mode == abigail_core::RoutingMode::CliOrchestrator {
+    // Base prompt: the persistent Hive helper gets an assistant persona focused
+    // on helping the user run Abigail; family-facing entities use their soul
+    // (CLI providers get the compressed form).
+    let base_prompt = if state.config.is_hive {
+        abigail_core::system_prompt::build_hive_helper_prompt(&state.config.agent_name)
+    } else if status.mode == abigail_core::RoutingMode::CliOrchestrator {
         entity_chat::build_cli_system_prompt(
             &state.docs_dir,
             &state.config.agent_name,

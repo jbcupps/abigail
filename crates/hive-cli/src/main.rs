@@ -19,7 +19,7 @@ use hive_core::{
 #[command(name = "hive-cli", about = "CLI client for Abigail Hive daemon")]
 struct Cli {
     /// Hive daemon URL
-    #[arg(long, default_value = "http://127.0.0.1:3141", global = true)]
+    #[arg(long, default_value = "http://127.0.0.1:43141", global = true)]
     url: String,
 
     #[command(subcommand)]

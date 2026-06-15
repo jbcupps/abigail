@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Current config schema version. Increment when making breaking changes.
-pub const CONFIG_SCHEMA_VERSION: u32 = 26;
+pub const CONFIG_SCHEMA_VERSION: u32 = 27;
 
 /// Routing mode determines how messages are routed between Id (local) and Ego (cloud).
 ///
@@ -261,11 +261,11 @@ fn default_skill_recovery_budget() -> u8 {
 }
 
 fn default_hive_daemon_url() -> String {
-    "http://127.0.0.1:3141".to_string()
+    "http://127.0.0.1:43141".to_string()
 }
 
 fn default_entity_daemon_url() -> String {
-    "http://127.0.0.1:3142".to_string()
+    "http://127.0.0.1:43142".to_string()
 }
 
 fn default_bundled_ollama() -> bool {
@@ -399,6 +399,12 @@ pub struct AppConfig {
     /// When set, this overrides the trinity ego_provider for routing.
     #[serde(default)]
     pub active_provider_preference: Option<String>,
+
+    /// Preferred Ego model id for the active provider (e.g. "claude-sonnet-4-6",
+    /// "gpt-4.1"). When set, the router uses this model instead of the provider's
+    /// default. Resolved into `ProviderConfig.ego_model`.
+    #[serde(default)]
+    pub ego_model: Option<String>,
 
     /// Legacy multi-account email config kept only for compatibility loads.
     #[serde(default, skip_serializing)]
@@ -549,6 +555,7 @@ impl AppConfig {
             sao_endpoint: None,
             provider_catalog: Vec::new(),
             active_provider_preference: None,
+            ego_model: None,
             email_accounts: Vec::new(),
             bundled_ollama: default_bundled_ollama(),
             bundled_model: default_bundled_model(),
@@ -899,6 +906,13 @@ impl AppConfig {
             tracing::debug!("Migrated config from v25 to v26 (is_hive field)");
         }
 
+        if self.schema_version < 27 {
+            // v27: Persisted per-entity ego_model selection (defaults via serde).
+            self.schema_version = 27;
+            migrated = true;
+            tracing::debug!("Migrated config from v26 to v27 (ego_model field)");
+        }
+
         migrated
     }
     /// Check if birth was interrupted (birth_stage set but birth_complete is false).
@@ -959,6 +973,7 @@ mod tests {
             sao_endpoint: None,
             provider_catalog: Vec::new(),
             active_provider_preference: None,
+            ego_model: None,
             email_accounts: Vec::new(),
             bundled_ollama: false,
             bundled_model: None,

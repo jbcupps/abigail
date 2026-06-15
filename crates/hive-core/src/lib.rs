@@ -228,10 +228,83 @@ pub struct UpdateEntityConfigResponse {
 
 /// Overall Hive status snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct HiveStatus {
     pub master_key_loaded: bool,
     pub entity_count: usize,
     pub entities: Vec<EntityInfo>,
+    /// Onboarding state: "starting" | "needs_provider" | "ready".
+    #[serde(default)]
+    pub ready_state: String,
+    /// Whether at least one cloud or CLI provider is available.
+    #[serde(default)]
+    pub any_provider_configured: bool,
+    /// Whether the home has ever completed provider setup.
+    #[serde(default)]
+    pub setup_complete: bool,
+    /// Runtime status of the persistent Hive helper entity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub helper: Option<HelperInfo>,
+}
+
+/// Runtime status of the persistent Hive helper entity.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct HelperInfo {
+    pub running: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_url: Option<String>,
+}
+
+/// Best available provider/model, ranked by capability. Fields are `None` when
+/// no cloud or CLI provider is available (the home falls back to a local model).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BestModelResponse {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub tier: Option<String>,
+    pub reason: Option<String>,
+}
+
+/// One detected CLI provider tool (claude, gemini, codex, grok).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CliProviderDetection {
+    pub provider: String,
+    pub on_path: bool,
+    pub is_official: bool,
+    pub is_authenticated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_hint: Option<String>,
+}
+
+/// Response for `GET /v1/providers/detect`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CliDetectResponse {
+    pub providers: Vec<CliProviderDetection>,
+}
+
+/// Set the Hive-level default provider/model that new entities inherit. Omit
+/// both fields to seed from the best available provider.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SetHiveDefaultRequest {
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+/// Response for `POST /v1/providers/hive-default`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HiveDefaultResponse {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+}
+
+/// Response for `POST /v1/entities/:id/open` — the entity's daemon is running
+/// and reachable at `local_url`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityOpenResponse {
+    pub entity_id: String,
+    pub local_url: String,
 }
 
 // ---------------------------------------------------------------------------

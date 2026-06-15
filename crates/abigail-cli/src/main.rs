@@ -62,7 +62,7 @@ enum Commands {
     /// Start the REST API server
     Serve {
         /// Port to listen on
-        #[arg(long, default_value = "3141")]
+        #[arg(long, default_value = "43141")]
         port: u16,
     },
 }

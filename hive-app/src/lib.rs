@@ -2,10 +2,37 @@
 
 use daemon_client::HiveDaemonClient;
 use hive_core::{
-    CreateForgeApprovalJobRequest, HiveStatus, RuntimeSessionLease, SkillAssignmentsResponse,
-    UpdateEntityConfigRequest, UpdateEntityConfigResponse,
+    ApiEnvelope, CreateForgeApprovalJobRequest, EntityOpenResponse, HiveStatus, RuntimeSessionLease,
+    SkillAssignmentsResponse, UpdateEntityConfigRequest, UpdateEntityConfigResponse,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+
+/// Tracks which entities currently have a Runtime window open, so a second
+/// "Open" click focuses the idea of one window per entity rather than spawning
+/// duplicates. Shared with the per-window watcher task via an `Arc`.
+#[derive(Default)]
+struct OpenEntities(Arc<Mutex<HashSet<String>>>);
+
+/// Locate the Entity Runtime app executable next to this (Hive app) exe.
+fn entity_app_binary() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let name = if cfg!(windows) {
+        "abigail-entity-runtime-app.exe"
+    } else {
+        "abigail-entity-runtime-app"
+    };
+    Some(dir.join(name))
+}
+
+/// Stop tracking an entity as having an open window.
+fn forget(tracking: &Arc<Mutex<HashSet<String>>>, entity_id: &str) {
+    if let Ok(mut set) = tracking.lock() {
+        set.remove(entity_id);
+    }
+}
 
 #[derive(Debug, Serialize)]
 struct HiveConnectionInfo {
@@ -13,7 +40,7 @@ struct HiveConnectionInfo {
 }
 
 fn hive_url() -> String {
-    std::env::var("ABIGAIL_HIVE_URL").unwrap_or_else(|_| "http://127.0.0.1:3141".to_string())
+    std::env::var("ABIGAIL_HIVE_URL").unwrap_or_else(|_| "http://127.0.0.1:43141".to_string())
 }
 
 #[tauri::command]
@@ -24,6 +51,7 @@ async fn get_hive_status() -> Result<HiveStatus, String> {
         master_key_loaded: true,
         entity_count: entities.len(),
         entities,
+        ..Default::default()
     })
 }
 
@@ -224,6 +252,244 @@ async fn get_birth_document(entity_id: String) -> Result<hive_core::EntityBirthD
     hive_get(&format!("/v1/entities/{}/birth", entity_id)).await
 }
 
+/// Open an Entity: ensure its daemon is running, then launch the Entity Runtime
+/// app pointed at it. When that window closes, tell the Hive to stop the daemon.
+#[tauri::command]
+async fn open_entity(
+    entity_id: String,
+    open: tauri::State<'_, OpenEntities>,
+) -> Result<(), String> {
+    // One window per entity — skip if already open.
+    {
+        let mut set = open.0.lock().map_err(|e| e.to_string())?;
+        if set.contains(&entity_id) {
+            return Ok(());
+        }
+        set.insert(entity_id.clone());
+    }
+    let tracking = open.0.clone();
+
+    let hive = hive_url();
+    // 1. Ensure the entity's daemon is running and learn its URL.
+    let resp: Result<ApiEnvelope<EntityOpenResponse>, String> = async {
+        reqwest::Client::new()
+            .post(format!("{}/v1/entities/{}/open", hive, entity_id))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .json()
+            .await
+            .map_err(|e| e.to_string())
+    }
+    .await;
+    let local_url = match resp {
+        Ok(env) if env.ok => match env.data {
+            Some(d) => d.local_url,
+            None => {
+                forget(&tracking, &entity_id);
+                return Err("Hive returned no runtime URL".to_string());
+            }
+        },
+        Ok(env) => {
+            forget(&tracking, &entity_id);
+            return Err(env.error.unwrap_or_else(|| "Failed to open entity".to_string()));
+        }
+        Err(e) => {
+            forget(&tracking, &entity_id);
+            return Err(e);
+        }
+    };
+
+    // 2. Launch the Entity Runtime app pointed at that daemon.
+    let bin = entity_app_binary().ok_or("Entity Runtime app binary not found")?;
+    let child = tokio::process::Command::new(&bin)
+        .env("ABIGAIL_ENTITY_URL", &local_url)
+        .env("ABIGAIL_HIVE_URL", &hive)
+        .spawn()
+        .map_err(|e| format!("Failed to launch Entity Runtime app: {}", e));
+    let mut child = match child {
+        Ok(c) => c,
+        Err(e) => {
+            forget(&tracking, &entity_id);
+            return Err(e);
+        }
+    };
+
+    // 3. When the window closes (process exits), stop the daemon.
+    let entity_id_for_task = entity_id.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = child.wait().await;
+        forget(&tracking, &entity_id_for_task);
+        let _ = reqwest::Client::new()
+            .post(format!("{}/v1/entities/{}/close", hive, entity_id_for_task))
+            .send()
+            .await;
+    });
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Production launch — ensure the Hive daemon is running.
+//
+// In a packaged install the Hive app is the user's only entry point: double-
+// clicking it must bring up the whole stack with no terminal. On launch it
+// adopts a healthy daemon recorded in a runtime descriptor, or spawns a fresh
+// one (on the first free port) and records it. In dev the split launcher sets
+// `ABIGAIL_HIVE_URL` and starts the daemon itself, so this is skipped entirely.
+// ---------------------------------------------------------------------------
+
+const HIVE_PORT_START: u16 = 43141;
+const HIVE_PORT_END: u16 = 43150;
+
+#[derive(Serialize, Deserialize)]
+struct HiveRuntimeDescriptor {
+    hive_url: String,
+    pid: u32,
+    started_at_epoch: u64,
+}
+
+fn runtime_dir() -> std::path::PathBuf {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("Abigail").join("runtime")
+}
+
+fn descriptor_path() -> std::path::PathBuf {
+    runtime_dir().join("hive.json")
+}
+
+fn read_descriptor() -> Option<HiveRuntimeDescriptor> {
+    serde_json::from_slice(&std::fs::read(descriptor_path()).ok()?).ok()
+}
+
+fn write_descriptor(url: &str, pid: u32) {
+    if std::fs::create_dir_all(runtime_dir()).is_err() {
+        return;
+    }
+    let started_at_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Ok(json) = serde_json::to_vec_pretty(&HiveRuntimeDescriptor {
+        hive_url: url.to_string(),
+        pid,
+        started_at_epoch,
+    }) {
+        let _ = std::fs::write(descriptor_path(), json);
+    }
+}
+
+fn is_daemon_healthy(url: &str) -> bool {
+    let url = url.to_string();
+    tauri::async_runtime::block_on(async move {
+        reqwest::Client::new()
+            .get(format!("{}/health", url))
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+            .map(|r| r.status().is_success())
+            .unwrap_or(false)
+    })
+}
+
+fn hive_daemon_binary() -> Option<std::path::PathBuf> {
+    let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let name = if cfg!(windows) {
+        "hive-daemon.exe"
+    } else {
+        "hive-daemon"
+    };
+    Some(dir.join(name))
+}
+
+fn pick_hive_port() -> Option<u16> {
+    (HIVE_PORT_START..=HIVE_PORT_END)
+        .find(|port| std::net::TcpListener::bind(("127.0.0.1", *port)).is_ok())
+}
+
+/// Spawn a process with a cleaned environment (a dev/agent shell can leak
+/// `CLAUDECODE`, which breaks the claude-cli provider) and no console window.
+fn spawn_clean(command: &mut std::process::Command) -> std::io::Result<std::process::Child> {
+    command
+        .env_remove("CLAUDECODE")
+        .env_remove("CLAUDE_CODE_ENTRYPOINT")
+        .env_remove("CLAUDE_CODE_SESSION_ID");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command.spawn()
+}
+
+fn spawn_hive_daemon() -> Result<(String, u32), String> {
+    let bin = hive_daemon_binary().ok_or("hive-daemon binary not found")?;
+    let port = pick_hive_port().ok_or("no free port for the Hive daemon")?;
+    let url = format!("http://127.0.0.1:{}", port);
+    let mut command = std::process::Command::new(&bin);
+    command.arg("--port").arg(port.to_string());
+    let child = spawn_clean(&mut command).map_err(|e| e.to_string())?;
+    let pid = child.id();
+
+    // Confirm it actually came up (e.g. it lost the port race) before we record
+    // it in the descriptor and point the UI at it. The normal case binds in well
+    // under a second; the bound only matters on failure.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while std::time::Instant::now() < deadline {
+        if is_daemon_healthy(&url) {
+            return Ok((url, pid));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+    Err(format!("Hive daemon did not become healthy at {}", url))
+}
+
+fn reap_stale(pid: u32) {
+    #[cfg(windows)]
+    {
+        let mut cmd = std::process::Command::new("taskkill");
+        cmd.args(["/PID", &pid.to_string(), "/F", "/T"]);
+        let _ = spawn_clean(&mut cmd).map(|mut c| c.wait());
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+    }
+}
+
+fn ensure_hive_daemon() {
+    // Dev: the split launcher already started the daemon and set this.
+    if std::env::var("ABIGAIL_HIVE_URL")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    // Adopt a healthy recorded daemon if one exists.
+    if let Some(desc) = read_descriptor() {
+        if is_daemon_healthy(&desc.hive_url) {
+            std::env::set_var("ABIGAIL_HIVE_URL", &desc.hive_url);
+            tracing::info!("Adopted running Hive daemon at {}", desc.hive_url);
+            return;
+        }
+        // Recorded but unhealthy — reap the stale process before respawning.
+        reap_stale(desc.pid);
+    }
+
+    match spawn_hive_daemon() {
+        Ok((url, pid)) => {
+            std::env::set_var("ABIGAIL_HIVE_URL", &url);
+            write_descriptor(&url, pid);
+            tracing::info!("Started Hive daemon at {} (pid {})", url, pid);
+        }
+        Err(e) => tracing::error!("Failed to start Hive daemon: {}", e),
+    }
+}
+
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -234,8 +500,14 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(OpenEntities::default())
+        .setup(|_app| {
+            ensure_hive_daemon();
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_hive_connection_info,
+            open_entity,
             get_hive_status,
             create_entity,
             issue_runtime_session,

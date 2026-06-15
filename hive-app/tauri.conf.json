@@ -3,15 +3,22 @@
   "version": "0.0.1",
   "identifier": "com.abigail.hive",
   "build": {
-    "frontendDist": "dist"
+    "beforeDevCommand": { "cwd": "src-ui", "script": "npm run dev" },
+    "devUrl": "http://localhost:1421",
+    "beforeBuildCommand": { "cwd": "src-ui", "script": "npm run build" },
+    "frontendDist": "src-ui/dist"
   },
   "app": {
+    "security": {
+      "csp": { "default-src": "'self'", "script-src": "'self'", "style-src": "'self' 'unsafe-inline'", "connect-src": "'self' http://localhost:* http://127.0.0.1:*", "img-src": "'self' data: blob:", "font-src": "'self'", "media-src": "'self' blob:" }
+    },
     "windows": [
       {
         "title": "Abigail Hive",
         "width": 1280,
         "height": 860,
-        "resizable": true
+        "resizable": true,
+        "visible": false
       }
     ]
   },
