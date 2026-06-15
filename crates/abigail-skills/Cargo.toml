@@ -16,7 +16,7 @@ anyhow.workspace = true
 chrono.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-toml = "0.9"
+toml = "1.0"
 uuid = { version = "1.6", features = ["v4"] }
 futures-util = "0.3"
 tokio-util.workspace = true
