@@ -650,7 +650,7 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.assets.outputs.count != '0'
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v2
         with:
           tag_name: ${{ needs.build.outputs.tag }}
           name: Abigail ${{ needs.build.outputs.tag }}
