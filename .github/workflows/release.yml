@@ -506,7 +506,7 @@ jobs:
           security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
 
       - name: Upload installers (Artifacts)
-        uses: actions/upload-artifact@47309c993abb98030a35d55ef7ff34b7fa1074b5 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
         with:
           name: abigail-installer-${{ matrix.platform }}
           path: ${{ matrix.installer_path }}
@@ -514,7 +514,7 @@ jobs:
 
       - name: Upload MSI installer (Windows)
         if: matrix.platform == 'windows-latest'
-        uses: actions/upload-artifact@47309c993abb98030a35d55ef7ff34b7fa1074b5 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
         with:
           name: abigail-msi-windows-latest
           path: target/release/bundle/msi/*.msi
@@ -522,7 +522,7 @@ jobs:
 
       - name: Upload updater artifacts
         if: vars.ABIGAIL_REQUIRE_UPDATER_SIGNING == 'true' && matrix.platform != 'ubuntu-22.04'
-        uses: actions/upload-artifact@47309c993abb98030a35d55ef7ff34b7fa1074b5 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
         with:
           name: abigail-updater-${{ matrix.platform }}
           path: |
