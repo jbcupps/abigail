@@ -9,7 +9,6 @@
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
-const { execSync } = require("child_process");
 
 const pkg = require("../package.json");
 const version = pkg.version;
@@ -19,9 +18,14 @@ const version = pkg.version;
 // ---------------------------------------------------------------------------
 
 const PLATFORM_MAP = {
-  win32: { ext: "msi", archMap: { x64: "x64", arm64: "arm64" } },
-  darwin: { ext: "dmg", archMap: { x64: "universal", arm64: "universal" } },
-  linux: { ext: "AppImage", archMap: { x64: "x64", arm64: "arm64" } },
+  win32: {
+    assetName: "Abigail-windows-x64.msi",
+    archMap: { x64: "x64" },
+  },
+  linux: {
+    assetName: "Abigail-linux-x64.deb",
+    archMap: { x64: "x64" },
+  },
 };
 
 function getPlatformInfo() {
@@ -43,7 +47,7 @@ function getPlatformInfo() {
   return {
     platform,
     arch: mappedArch,
-    ext: info.ext,
+    filename: info.assetName,
   };
 }
 
@@ -92,9 +96,8 @@ function download(url, destPath, redirectCount = 0) {
 // ---------------------------------------------------------------------------
 
 async function main() {
-  const { platform, arch, ext } = getPlatformInfo();
+  const { platform, arch, filename } = getPlatformInfo();
 
-  const filename = `abigail_${version}_${arch}.${ext}`;
   const url = `https://github.com/jbcupps/abigail/releases/download/v${version}/${filename}`;
 
   // Determine install directory: place the binary next to this package

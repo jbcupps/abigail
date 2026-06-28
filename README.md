@@ -31,6 +31,7 @@ No accounts. No data sharing. Just your family and the Entities you control.
 - Legacy migration and upgrade preservation are not current product promises. Remove or replace stale compatibility paths when they get in the way of the active Hive-first design.
 - The stabilization lane is moving toward two parallel desktop app roots: `Abigail Hive` for control-plane/admin work and `Abigail Entity Runtime` for chat/runtime work.
 - Default local builds and installer validation are intentionally unsigned and updater-free during stabilization. Final OV signing happens later on the dedicated release-signing system.
+- Repeatable release automation is documented in [`docs/RELEASE_RUNBOOK.md`](docs/RELEASE_RUNBOOK.md). The active full installer release lane currently builds Windows and Ubuntu packages only; Apple/macOS builds are temporarily removed from the matrix.
 
 ## Dev Start
 
