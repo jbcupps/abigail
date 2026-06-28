@@ -155,7 +155,7 @@ jobs:
 
       - name: Install cargo-llvm-cov (ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
-        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2.82.2
+        uses: taiki-e/install-action@bffeee26d4db9be238a4ea78d8826604ebcb594d # v2.82.5
         with:
           tool: cargo-llvm-cov
 
@@ -169,7 +169,7 @@ jobs:
 
       - name: Upload Rust coverage to Codecov
         if: matrix.platform == 'ubuntu-22.04'
-        uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad # v5
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
         with:
           files: lcov.info
           flags: rust

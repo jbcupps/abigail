@@ -3,11 +3,11 @@
 //! key wrapping (derived from the Ed25519 keypair generated at first run).
 
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng, Payload},
+    aead::{Aead, KeyInit, Payload},
     Aes256Gcm, Nonce,
 };
 use hkdf::Hkdf;
-use rand::RngCore;
+use rand::{rngs::OsRng, RngCore};
 use std::path::{Path, PathBuf};
 use x25519_dalek::{EphemeralSecret, PublicKey as X25519Public, StaticSecret};
 
@@ -131,7 +131,7 @@ impl ArchiveExporter {
         let cipher = Aes256Gcm::new_from_slice(&aead_key)?;
         let mut nonce_bytes = [0u8; NONCE_LEN];
         rand::thread_rng().fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce = Nonce::try_from(&nonce_bytes[..]).expect("AES-GCM nonce is 12 bytes");
 
         let header = ArchiveHeaderV2 {
             version: ARCHIVE_VERSION_V2,
@@ -159,7 +159,7 @@ impl ArchiveExporter {
 
         let ciphertext = cipher
             .encrypt(
-                nonce,
+                &nonce,
                 Payload {
                     msg: json.as_ref(),
                     aad: &out,
@@ -266,13 +266,13 @@ fn decrypt_archive_v1(data: &[u8], x_secret: &StaticSecret) -> anyhow::Result<Ve
 
     let mut nonce_bytes = [0u8; NONCE_LEN];
     nonce_bytes.copy_from_slice(&data[36..36 + NONCE_LEN]);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let nonce = Nonce::try_from(&nonce_bytes[..]).expect("AES-GCM nonce is 12 bytes");
     let ciphertext = &data[36 + NONCE_LEN..];
 
     let shared = x_secret.diffie_hellman(&eph_public);
     let cipher = Aes256Gcm::new_from_slice(shared.as_bytes())?;
     cipher
-        .decrypt(nonce, ciphertext)
+        .decrypt(&nonce, ciphertext)
         .map_err(|_| anyhow::anyhow!("Decryption failed - wrong recovery key?"))
 }
 
@@ -316,7 +316,7 @@ fn decrypt_archive_v2(data: &[u8], x_secret: &StaticSecret) -> anyhow::Result<Ve
         .as_slice()
         .try_into()
         .map_err(|_| anyhow::anyhow!("Archive v2 nonce must be {} bytes", NONCE_LEN))?;
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let nonce = Nonce::try_from(&nonce_bytes[..]).expect("AES-GCM nonce is 12 bytes");
 
     let shared = x_secret.diffie_hellman(&eph_public);
     let aead_key = derive_archive_key(shared.as_bytes())?;
@@ -325,7 +325,7 @@ fn decrypt_archive_v2(data: &[u8], x_secret: &StaticSecret) -> anyhow::Result<Ve
 
     cipher
         .decrypt(
-            nonce,
+            &nonce,
             Payload {
                 msg: ciphertext,
                 aad: &data[..header_end],
@@ -427,7 +427,10 @@ mod tests {
         let cipher = Aes256Gcm::new_from_slice(shared.as_bytes()).unwrap();
         let nonce_bytes = [7u8; NONCE_LEN];
         let ciphertext = cipher
-            .encrypt(Nonce::from_slice(&nonce_bytes), json.as_ref())
+            .encrypt(
+                &Nonce::try_from(&nonce_bytes[..]).expect("AES-GCM nonce is 12 bytes"),
+                json.as_ref(),
+            )
             .unwrap();
 
         let archive_path = tmp.join("legacy.abigail");
