@@ -259,14 +259,70 @@ jobs:
             }
           "
 
-      - name: Generate Cargo.lock
-        run: cargo generate-lockfile
+      - name: Validate Cargo.lock
+        shell: bash
+        run: cargo metadata --locked --format-version=1 >/dev/null
 
       - name: Rust cache
         uses: swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
         with:
           workspaces: "."
           shared-key: release-${{ matrix.platform }}
+
+      - name: Prime Playwright Rust driver cache
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PLAYWRIGHT_VERSION="1.59.1"
+          case "${{ runner.os }}" in
+            Windows)
+              PLAYWRIGHT_PLATFORM="win32_x64"
+              ;;
+            Linux)
+              PLAYWRIGHT_PLATFORM="linux"
+              ;;
+            macOS)
+              if [[ "$(uname -m)" == "arm64" ]]; then
+                PLAYWRIGHT_PLATFORM="mac-arm64"
+              else
+                PLAYWRIGHT_PLATFORM="mac"
+              fi
+              ;;
+            *)
+              echo "Unsupported runner OS for Playwright driver: ${{ runner.os }}" >&2
+              exit 1
+              ;;
+          esac
+
+          WORKSPACE_DIR="${GITHUB_WORKSPACE}"
+          WORKSPACE_POSIX="$WORKSPACE_DIR"
+          RUNNER_TEMP_POSIX="$RUNNER_TEMP"
+          if command -v cygpath >/dev/null 2>&1; then
+            WORKSPACE_POSIX="$(cygpath -u "$WORKSPACE_DIR")"
+            RUNNER_TEMP_POSIX="$(cygpath -u "$RUNNER_TEMP")"
+          fi
+
+          echo "CARGO_WORKSPACE_DIR=$WORKSPACE_DIR" >> "$GITHUB_ENV"
+
+          DRIVER_NAME="playwright-${PLAYWRIGHT_VERSION}-${PLAYWRIGHT_PLATFORM}"
+          DRIVER_DIR="${WORKSPACE_POSIX}/drivers/${DRIVER_NAME}"
+          if [[ -e "$DRIVER_DIR/node" || -e "$DRIVER_DIR/node.exe" ]]; then
+            echo "Playwright Rust driver already present: $DRIVER_DIR"
+            exit 0
+          fi
+
+          mkdir -p "${WORKSPACE_POSIX}/drivers"
+          ZIP_PATH="${RUNNER_TEMP_POSIX}/${DRIVER_NAME}.zip"
+          URL="https://playwright.azureedge.net/builds/driver/${DRIVER_NAME}.zip"
+
+          curl --fail --location --retry 5 --retry-delay 5 --retry-all-errors \
+            --output "$ZIP_PATH" "$URL"
+          unzip -q "$ZIP_PATH" -d "$DRIVER_DIR"
+
+          if [[ "${{ runner.os }}" != "Windows" ]]; then
+            chmod +x "$DRIVER_DIR/node" "$DRIVER_DIR/package/cli.js" 2>/dev/null || true
+          fi
 
       - name: Install and build frontend
         run: |
@@ -433,9 +489,7 @@ jobs:
           # Only fall back to secrets if the validation step didn't run or didn't export.
           TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # macOS code signing (Tauri picks these up automatically)
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # macOS code signing uses the certificate imported into the temporary keychain above.
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           # macOS notarization
           APPLE_ID: ${{ secrets.APPLE_ID }}
