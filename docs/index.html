@@ -3,13 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Abigail — Download</title>
+  <title>Abigail - Download</title>
   <style>
     body { font-family: system-ui, -apple-system, sans-serif; max-width: 36rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
     h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem; }
     p { color: #374151; margin: 0.75rem 0; }
     .cta { display: inline-block; margin: 1rem 0; padding: 0.75rem 1.5rem; background: #2563eb; color: white; text-decoration: none; border-radius: 0.5rem; font-weight: 600; }
     .cta:hover { background: #1d4ed8; }
+    .cta.unavailable { background: #6b7280; cursor: not-allowed; }
+    .cta.unavailable:hover { background: #6b7280; }
     .others { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid #e5e7eb; }
     .others h2 { font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; }
     .others ul { list-style: none; padding: 0; margin: 0; }
@@ -25,9 +27,9 @@
   <div class="others">
     <h2>Other downloads</h2>
     <ul>
-      <li><a href="https://github.com/jbcupps/abigail/releases/latest/download/Abigail-windows-x64-setup.exe">Windows (x64)</a> — .exe installer</li>
-      <li><a href="https://github.com/jbcupps/abigail/releases/latest/download/Abigail-macos-x64.dmg">macOS (x64)</a> — .dmg</li>
-      <li><a href="https://github.com/jbcupps/abigail/releases/latest/download/Abigail-linux-x64.deb">Linux (x64)</a> — .deb</li>
+      <li><a href="https://github.com/jbcupps/abigail/releases/latest/download/Abigail-windows-x64-setup.exe">Windows (x64)</a> - .exe installer</li>
+      <li><a href="https://github.com/jbcupps/abigail/releases/latest/download/Abigail-linux-x64.deb">Linux (x64)</a> - .deb</li>
+      <li>macOS - temporarily unavailable while Apple signing is paused</li>
     </ul>
   </div>
   <script>
@@ -35,7 +37,7 @@
       var BASE = 'https://github.com/jbcupps/abigail/releases/latest/download/';
       var links = {
         windows: { url: BASE + 'Abigail-windows-x64-setup.exe', label: 'Download for Windows' },
-        macos:   { url: BASE + 'Abigail-macos-x64.dmg',   label: 'Download for macOS' },
+        macos:   { url: 'https://github.com/jbcupps/abigail/releases/latest', label: 'macOS build temporarily unavailable' },
         linux:   { url: BASE + 'Abigail-linux-x64.deb',   label: 'Download for Linux' }
       };
       var os = 'linux';
@@ -48,6 +50,10 @@
       var el = document.getElementById('main-download');
       el.textContent = info.label;
       el.href = info.url;
+      if (os === 'macos') {
+        el.className += ' unavailable';
+        el.setAttribute('aria-disabled', 'true');
+      }
     })();
   </script>
 </body>
