@@ -4,11 +4,11 @@
 #   - Tags matching 'v*' (e.g., v0.0.3)
 #   - Manual workflow_dispatch with optional version input
 #
-# Stage 1: Parallel 3-platform builds (Windows, Ubuntu, macOS).
+# Stage 1: Parallel 2-platform builds (Windows, Ubuntu).
 # Stage 2: Create GitHub Release + publish npm package.
 #          Proceeds if at least one platform built successfully.
 #
-# Platforms: Windows (NSIS), Ubuntu (deb), macOS (dmg universal binary)
+# Platforms: Windows (NSIS), Ubuntu (deb)
 
 name: Beta Release (Signed)
 
@@ -53,16 +53,6 @@ jobs:
             installer_path: target/release/bundle/deb/*.deb
             asset_name: Abigail-linux-x64.deb
             asset_glob: "*.deb"
-            keygen_bin: abigail-keygen
-            resource_name: abigail-keygen
-            ollama_bin: ollama
-
-          - platform: macos-latest
-            args: "--target universal-apple-darwin"
-            target: aarch64-apple-darwin,x86_64-apple-darwin
-            installer_path: target/universal-apple-darwin/release/bundle/dmg/*.dmg
-            asset_name: Abigail-macos-universal.dmg
-            asset_glob: "*.dmg"
             keygen_bin: abigail-keygen
             resource_name: abigail-keygen
             ollama_bin: ollama
@@ -637,14 +627,6 @@ jobs:
             cp "$DEB" release-assets/Abigail-linux-x64.deb
           fi
 
-          DMG=$(find artifacts/abigail-installer-macos-latest -name "*.dmg" -type f 2>/dev/null | head -1 || true)
-          if [ -z "$DMG" ]; then
-            echo "WARNING: No macOS dmg found in artifacts"
-          else
-            echo "Found macOS dmg: $DMG"
-            cp "$DMG" release-assets/Abigail-macos-universal.dmg
-          fi
-
           WINDOWS_UPDATER=$(find artifacts/abigail-updater-windows-latest -name "*.nsis.zip" -type f 2>/dev/null | head -1 || true)
           WINDOWS_UPDATER_SIG=$(find artifacts/abigail-updater-windows-latest -name "*.nsis.zip.sig" -type f 2>/dev/null | head -1 || true)
           if [ -n "$WINDOWS_UPDATER" ] && [ -n "$WINDOWS_UPDATER_SIG" ]; then
@@ -657,13 +639,6 @@ jobs:
           if [ -n "$WINDOWS_MSI_UPDATER" ] && [ -n "$WINDOWS_MSI_UPDATER_SIG" ]; then
             cp "$WINDOWS_MSI_UPDATER" release-assets/Abigail-updater-windows-x64.msi.zip
             cp "$WINDOWS_MSI_UPDATER_SIG" release-assets/Abigail-updater-windows-x64.msi.zip.sig
-          fi
-
-          MAC_UPDATER=$(find artifacts/abigail-updater-macos-latest -name "*.app.tar.gz" -type f 2>/dev/null | head -1 || true)
-          MAC_UPDATER_SIG=$(find artifacts/abigail-updater-macos-latest -name "*.app.tar.gz.sig" -type f 2>/dev/null | head -1 || true)
-          if [ -n "$MAC_UPDATER" ] && [ -n "$MAC_UPDATER_SIG" ]; then
-            cp "$MAC_UPDATER" release-assets/Abigail-updater-macos-universal.app.tar.gz
-            cp "$MAC_UPDATER_SIG" release-assets/Abigail-updater-macos-universal.app.tar.gz.sig
           fi
 
           if [[ "${{ vars.ABIGAIL_REQUIRE_UPDATER_SIGNING }}" == "true" ]]; then
@@ -718,7 +693,6 @@ jobs:
             Download the installer for your platform:
             - **Windows**: `Abigail-windows-x64-setup.exe` (NSIS installer)
             - **Windows (MSI)**: `Abigail-windows-x64.msi` (Windows Installer)
-            - **macOS**: `Abigail-macos-universal.dmg` (Intel + Apple Silicon)
             - **Linux**: `Abigail-linux-x64.deb` (Ubuntu 22.04+)
 
             Or install via npm:
@@ -741,7 +715,6 @@ jobs:
 
             ### Platform Notes
 
-            - **macOS**: The app is signed and notarized with a Developer ID certificate. If Gatekeeper still prompts, right-click → Open on first launch.
             - **Linux**: Requires `libwebkit2gtk-4.1-0` and `libayatana-appindicator3-1`. Ubuntu 22.04+ recommended.
 
             See [SECURITY_NOTES.md](https://github.com/${{ github.repository }}/blob/main/documents/SECURITY_NOTES.md) for details.
