@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, beforeEach, expect } from "vitest";
 import App from "../App";
@@ -16,13 +16,13 @@ describe("App full lifecycle flow", () => {
     // Splash → may briefly show model_loading → management
     await user.click(await screen.findByRole("button", { name: /\[skip\]/i }));
 
-    // Wait for management screen (entity name input)
+    // Wait for management screen (Entity name input)
     const entityInput = await waitFor(
-      () => screen.getByPlaceholderText(/entity name/i),
+      () => screen.getByLabelText(/entity name/i),
       { timeout: 5000 }
     );
     await user.type(entityInput, "Lifecycle Prime");
-    await user.click(screen.getByRole("button", { name: /^birth$/i }));
+    await user.click(screen.getByRole("button", { name: /^create entity$/i }));
 
     // Key presentation
     await user.click(await screen.findByRole("checkbox"));
@@ -51,10 +51,12 @@ describe("App full lifecycle flow", () => {
     // Eject back to management.
     await user.click(screen.getByTitle(/open the forge/i));
     await user.click(await screen.findByRole("button", { name: /\[eject\]/i }));
-    expect(await screen.findByText(/soul registry/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /abigail hive/i })).toBeInTheDocument();
 
     // Reload same identity and validate chat re-entry.
-    await user.click(screen.getByText("Lifecycle Prime"));
+    const entityCard = screen.getByText("Lifecycle Prime").closest("li");
+    expect(entityCard).not.toBeNull();
+    await user.click(within(entityCard!).getByRole("button", { name: /^open$/i }));
     const resumedInput = await waitFor(() => screen.getByPlaceholderText(/^message$/i), { timeout: 7000 });
     await user.type(resumedInput, "resumed lifecycle check");
     await user.click(screen.getByRole("button", { name: /send/i }));
@@ -70,11 +72,11 @@ describe("App full lifecycle flow", () => {
     await user.click(await screen.findByRole("button", { name: /\[skip\]/i }));
 
     const entityInput = await waitFor(
-      () => screen.getByPlaceholderText(/entity name/i),
+      () => screen.getByLabelText(/entity name/i),
       { timeout: 5000 }
     );
     await user.type(entityInput, "Provider Validation Entity");
-    await user.click(screen.getByRole("button", { name: /^birth$/i }));
+    await user.click(screen.getByRole("button", { name: /^create entity$/i }));
 
     await user.click(await screen.findByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: /continue/i }));
