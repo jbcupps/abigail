@@ -14,7 +14,7 @@ struct RuntimeConnectionInfo {
 }
 
 fn entity_url() -> String {
-    std::env::var("ABIGAIL_ENTITY_URL").unwrap_or_else(|_| "http://127.0.0.1:3142".to_string())
+    std::env::var("ABIGAIL_ENTITY_URL").unwrap_or_else(|_| "http://127.0.0.1:43142".to_string())
 }
 
 #[tauri::command]

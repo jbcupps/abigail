@@ -1,12 +1,13 @@
 //! Hive daemon — control plane HTTP server for the Abigail Hive.
 //!
 //! Wraps `IdentityManager`, `Hive`, and `SecretsVault` behind an Axum REST API.
-//! Listens on `--port` (default 3141).
+//! Listens on `--port` (default 43141).
 
 mod birth;
 mod routes;
 mod runtime_registry;
 mod state;
+mod supervisor;
 
 use abigail_core::{AppConfig, SecretsVault};
 use abigail_hive::Hive;
@@ -22,7 +23,7 @@ use tower_http::cors::{Any, CorsLayer};
 #[command(name = "hive-daemon", about = "Abigail Hive control plane daemon")]
 struct Cli {
     /// Port to listen on
-    #[arg(long, default_value = "3141")]
+    #[arg(long, default_value = "43141")]
     port: u16,
 
     /// Data directory (defaults to platform-specific app data dir)
@@ -79,13 +80,31 @@ async fn main() -> anyhow::Result<()> {
     let local_addr = listener.local_addr()?;
     let hive_url = format!("http://{}", local_addr);
 
+    // Capture the immortal Hive helper's id before `identity_manager` moves into
+    // the daemon state.
+    let hive_helper_id = identity_manager.hive_agent_id();
+    let helper_url: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let supervisor = supervisor::HiveSupervisor::new(hive_url.clone(), data_root.clone());
+
     let state = HiveDaemonState {
         identity_manager,
         hive,
         hive_secrets,
         hive_url: hive_url.clone(),
         runtime_control: Arc::new(Mutex::new(runtime_registry::RuntimeControlPlane::default())),
+        helper_url: helper_url.clone(),
+        supervisor: supervisor.clone(),
     };
+
+    // Start the persistent Hive helper out-of-band: the immortal "Abigail Hive"
+    // identity, run as its own entity-daemon. The control plane keeps serving
+    // /health immediately while the helper warms up.
+    match hive_helper_id {
+        Ok(id) => {
+            supervisor::supervise_hive_helper(id, hive_url.clone(), data_root.clone(), helper_url)
+        }
+        Err(e) => tracing::warn!("Hive helper not started: {}", e),
+    }
 
     // Build router
     let cors = CorsLayer::new()
@@ -99,6 +118,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/entities", get(routes::list_entities))
         .route("/v1/entities", post(routes::create_entity))
         .route("/v1/entities/:id", get(routes::get_entity))
+        .route("/v1/entities/:id/open", post(routes::open_entity))
+        .route("/v1/entities/:id/close", post(routes::close_entity))
         .route("/v1/birth/scenarios", get(birth::get_scenarios))
         .route(
             "/v1/entities/:id/birth",
@@ -125,6 +146,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/secrets/list", get(routes::list_secrets))
         .route("/v1/secrets/:key", get(routes::get_secret))
         .route("/v1/providers/models", post(routes::discover_models))
+        .route("/v1/providers/best", get(routes::get_best_model))
+        .route("/v1/providers/detect", get(routes::detect_cli))
+        .route("/v1/providers/hive-default", post(routes::set_hive_default))
         .route(
             "/v1/providers/profiles/:name",
             get(routes::get_provider_profile),

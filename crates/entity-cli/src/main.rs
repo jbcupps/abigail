@@ -21,7 +21,7 @@ use std::path::PathBuf;
 #[command(name = "entity-cli", about = "CLI client for Abigail Entity daemon")]
 struct Cli {
     /// Entity daemon URL
-    #[arg(long, default_value = "http://127.0.0.1:3142", global = true)]
+    #[arg(long, default_value = "http://127.0.0.1:43142", global = true)]
     url: String,
 
     #[command(subcommand)]

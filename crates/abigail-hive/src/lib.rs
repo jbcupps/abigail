@@ -3,10 +3,12 @@
 //! Entities and the router request providers through the Hive — never touching
 //! vault internals directly.
 
+pub mod best_model;
 pub mod hive;
 pub mod model_registry;
 pub mod provider_registry;
 
+pub use best_model::{BestModel, CapabilityTier};
 pub use hive::{
     detect_cli_providers_full, is_binary_on_path, BuiltProviders, Hive, HiveConfig, ProviderAuth,
     ProviderSelection,

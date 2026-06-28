@@ -58,6 +58,33 @@ function Invoke-CargoOrThrow {
     }
 }
 
+function Build-Frontend {
+    param(
+        [Parameter(Mandatory = $true)][string]$AppDir,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    $uiDir = Join-Path $AppDir "src-ui"
+    if (-not (Test-Path (Join-Path $uiDir "package.json"))) {
+        return
+    }
+
+    $npm = (Get-Command npm).Source
+    Push-Location $uiDir
+    try {
+        if (-not (Test-Path "node_modules")) {
+            Write-Host "Installing $Label frontend dependencies..."
+            & $npm install
+            if ($LASTEXITCODE -ne 0) { throw "npm install failed for $Label frontend." }
+        }
+        Write-Host "Building $Label frontend..."
+        & $npm run build
+        if ($LASTEXITCODE -ne 0) { throw "npm run build failed for $Label frontend." }
+    } finally {
+        Pop-Location
+    }
+}
+
 $workspaceRoot = Get-WorkspaceRoot
 $sessionRoot = Join-Path $workspaceRoot "target\manual-test\stability-reset"
 $logsRoot = Join-Path $sessionRoot "logs"
@@ -92,6 +119,8 @@ $diagnosticSummary = $null
 
 if (-not $SkipDesktopApps) {
     try {
+        Build-Frontend -AppDir (Join-Path $workspaceRoot "hive-app") -Label "Abigail Hive"
+        Build-Frontend -AppDir (Join-Path $workspaceRoot "entity-runtime-app") -Label "Abigail Entity Runtime"
         Write-Host "Building Abigail Hive desktop shell..."
         Invoke-CargoOrThrow -Arguments @("build", "-p", "abigail-hive-app", "--bin", "abigail-hive-app") -FailureMessage "Failed to build Abigail Hive desktop shell."
         Write-Host "Building Abigail Entity Runtime desktop shell..."

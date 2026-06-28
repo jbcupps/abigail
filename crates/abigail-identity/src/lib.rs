@@ -444,6 +444,7 @@ impl IdentityManager {
             sao_endpoint: None,
             provider_catalog: Vec::new(),
             active_provider_preference: None,
+            ego_model: None,
             email_accounts: Vec::new(),
             bundled_ollama: true,
             bundled_model: Some("llama3.2:3b".to_string()),
@@ -462,8 +463,8 @@ impl IdentityManager {
             last_provider_change_at: None,
             cli_permission_mode: Default::default(),
             runtime_mode: Default::default(),
-            hive_daemon_url: "http://127.0.0.1:3141".to_string(),
-            entity_daemon_url: "http://127.0.0.1:3142".to_string(),
+            hive_daemon_url: "http://127.0.0.1:43141".to_string(),
+            entity_daemon_url: "http://127.0.0.1:43142".to_string(),
             iggy_connection: None,
             theme_id: {
                 let gc = self.global_config.read().map_err(|e| e.to_string())?;

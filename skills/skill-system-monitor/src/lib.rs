@@ -13,7 +13,7 @@ use abigail_skills::{
 use async_trait::async_trait;
 use std::any::Any;
 use std::collections::HashMap;
-use sysinfo::System;
+use sysinfo::{ProcessesToUpdate, System};
 
 /// Maximum number of processes returned by `process_list`.
 const MAX_PROCESS_RESULTS: usize = 100;
@@ -49,7 +49,7 @@ impl SystemMonitorSkill {
     /// Gather live resource usage (CPU, memory).
     fn system_resources() -> ToolOutput {
         let mut sys = System::new();
-        sys.refresh_cpu();
+        sys.refresh_cpu_all();
         sys.refresh_memory();
 
         let total_memory_mb = sys.total_memory() / (1024 * 1024);
@@ -74,14 +74,17 @@ impl SystemMonitorSkill {
     /// List running processes, optionally filtered by name.
     fn process_list(filter: Option<&str>) -> ToolOutput {
         let mut sys = System::new();
-        sys.refresh_processes();
+        sys.refresh_processes(ProcessesToUpdate::All, true);
 
         let mut processes: Vec<serde_json::Value> = sys
             .processes()
             .values()
             .filter(|p| {
                 if let Some(f) = filter {
-                    p.name().to_lowercase().contains(&f.to_lowercase())
+                    p.name()
+                        .to_string_lossy()
+                        .to_lowercase()
+                        .contains(&f.to_lowercase())
                 } else {
                     true
                 }
@@ -89,7 +92,7 @@ impl SystemMonitorSkill {
             .map(|p| {
                 serde_json::json!({
                     "pid": p.pid().as_u32(),
-                    "name": p.name(),
+                    "name": p.name().to_string_lossy(),
                     "cpu_usage": p.cpu_usage(),
                     "memory_kb": p.memory() / 1024,
                 })

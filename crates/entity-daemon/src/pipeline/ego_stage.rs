@@ -233,15 +233,27 @@ async fn respond(
                 }
             }
         }
-        Err(e) => EgoActionPayload {
-            session_id: payload.session_id.clone(),
-            status: "error".to_string(),
-            error: Some(e.to_string()),
-            response: None,
-            user_message: payload.message.clone(),
-            superego_verdict: None,
-            superego_findings: Vec::new(),
-        },
+        Err(e) => {
+            let detail = e.to_string();
+            // Preserve the user-interruption signal verbatim (the client detects
+            // it); turn any other failure into a warm, non-technical message so a
+            // family member never sees a raw error. The cause stays in the logs.
+            let user_error = if detail.to_lowercase().contains("interrupted by user") {
+                detail
+            } else {
+                tracing::warn!("Ego stage: chat turn failed: {}", detail);
+                friendly_turn_error()
+            };
+            EgoActionPayload {
+                session_id: payload.session_id.clone(),
+                status: "error".to_string(),
+                error: Some(user_error),
+                response: None,
+                user_message: payload.message.clone(),
+                superego_verdict: None,
+                superego_findings: Vec::new(),
+            }
+        }
     };
 
     // Publish the committed action for the journal, superego, and any other
@@ -275,4 +287,13 @@ async fn respond(
             correlation_id
         );
     }
+}
+
+/// Warm, non-technical message shown to a family member when a chat turn fails
+/// outright (for example, no language model is reachable). The technical cause
+/// is recorded in the daemon logs, not surfaced to the family.
+fn friendly_turn_error() -> String {
+    "I'm having trouble reaching a language model right now. Please try again in a \
+     moment — or ask whoever set up Abigail to connect a model in the Hive."
+        .to_string()
 }

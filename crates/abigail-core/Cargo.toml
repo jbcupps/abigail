@@ -20,7 +20,7 @@ url = "2.5"
 reqwest.workspace = true
 aes-gcm.workspace = true
 sha2.workspace = true
-hkdf = "0.12"
+hkdf = "0.13"
 argon2 = "0.5"
 keyring = { version = "3.6", features = ["crypto-rust"] }
 

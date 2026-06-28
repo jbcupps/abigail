@@ -48,11 +48,11 @@ struct Cli {
     entity_id: String,
 
     /// Hive daemon URL
-    #[arg(long, default_value = "http://127.0.0.1:3141")]
+    #[arg(long, default_value = "http://127.0.0.1:43141")]
     hive_url: String,
 
     /// Port to listen on
-    #[arg(long, default_value = "3142")]
+    #[arg(long, default_value = "43142")]
     port: u16,
 
     /// Data directory (defaults to platform-specific app data dir).
