@@ -750,11 +750,28 @@ jobs:
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
 
-      - name: Publish to npm
+      - name: Publish npm package (optional)
         if: steps.assets.outputs.count != '0'
         working-directory: npm-package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          npm publish --access public || echo "WARNING: npm publish failed (token may not be configured)"
-          echo "Published abigail-desktop@${{ steps.npm_version.outputs.version }} to npm"
+          set -euo pipefail
+
+          VERSION="${{ steps.npm_version.outputs.version }}"
+
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::notice::NPM_TOKEN is not configured; skipping optional npm publish."
+            exit 0
+          fi
+
+          if npm view "abigail-desktop@${VERSION}" version >/dev/null 2>&1; then
+            echo "::notice::abigail-desktop@${VERSION} already exists on npm; skipping publish."
+            exit 0
+          fi
+
+          if npm publish --access public; then
+            echo "Published abigail-desktop@${VERSION} to npm"
+          else
+            echo "::warning::Optional npm publish failed. GitHub release assets were already published."
+          fi

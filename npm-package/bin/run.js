@@ -76,24 +76,13 @@ function launch(binaryPath, meta) {
       break;
 
     case "darwin":
-      // For .dmg, try the Applications folder first
-      const macAppPath = "/Applications/Abigail.app";
-      if (fs.existsSync(macAppPath)) {
-        spawn("open", ["-a", macAppPath, "--args", ...args], {
-          stdio: "inherit",
-        });
-      } else {
-        // Mount and open the dmg
-        console.log(
-          "Abigail is not installed yet. Opening the disk image..."
-        );
-        spawn("open", [binaryPath], { stdio: "inherit" });
-      }
+      console.error("macOS builds are temporarily unavailable.");
+      process.exit(1);
       break;
 
     case "linux":
-      // AppImage is directly executable
-      spawn(binaryPath, args, {
+      console.log("Opening the Abigail Debian installer...");
+      spawn("xdg-open", [binaryPath], {
         stdio: "inherit",
         detached: true,
       }).unref();

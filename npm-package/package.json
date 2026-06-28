@@ -9,7 +9,6 @@
     "postinstall": "node scripts/install.js"
   },
   "os": [
-    "darwin",
     "linux",
     "win32"
   ],
