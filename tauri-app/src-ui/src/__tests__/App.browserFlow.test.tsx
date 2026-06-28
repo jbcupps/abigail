@@ -14,12 +14,10 @@ describe("App browser harness full flow", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: /\[skip\]/i }));
-    expect(
-      await screen.findByText(/birth a new sovereign entity to begin/i, {}, { timeout: 5000 })
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /create entity/i })).toBeInTheDocument();
 
-    await user.type(screen.getByPlaceholderText(/entity name/i), "E2E Birth Test");
-    await user.click(screen.getByRole("button", { name: /^birth$/i }));
+    await user.type(screen.getByLabelText(/entity name/i), "E2E Birth Test");
+    await user.click(screen.getByRole("button", { name: /^create entity$/i }));
 
     expect(await screen.findByText(/your constitutional signing key/i)).toBeInTheDocument();
     await user.click(screen.getByRole("checkbox"));
@@ -57,11 +55,11 @@ describe("App browser harness full flow", () => {
     await user.click(await screen.findByRole("button", { name: /\[skip\]/i }));
 
     const entityInput = await waitFor(
-      () => screen.getByPlaceholderText(/entity name/i),
+      () => screen.getByLabelText(/entity name/i),
       { timeout: 5000 }
     );
     await user.type(entityInput, "Skill Flow Test");
-    await user.click(screen.getByRole("button", { name: /^birth$/i }));
+    await user.click(screen.getByRole("button", { name: /^create entity$/i }));
     await user.click(await screen.findByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: /continue/i }));
 
@@ -91,11 +89,11 @@ describe("App browser harness full flow", () => {
     await user.click(await screen.findByRole("button", { name: /\[skip\]/i }));
 
     const entityInput = await waitFor(
-      () => screen.getByPlaceholderText(/entity name/i),
+      () => screen.getByLabelText(/entity name/i),
       { timeout: 5000 }
     );
     await user.type(entityInput, "Validation Flow");
-    await user.click(screen.getByRole("button", { name: /^birth$/i }));
+    await user.click(screen.getByRole("button", { name: /^create entity$/i }));
 
     await user.click(await screen.findByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: /continue/i }));
@@ -118,11 +116,11 @@ describe("App browser harness full flow", () => {
     await user.click(await screen.findByRole("button", { name: /\[skip\]/i }));
 
     const entityInput = await waitFor(
-      () => screen.getByPlaceholderText(/entity name/i),
+      () => screen.getByLabelText(/entity name/i),
       { timeout: 5000 }
     );
     await user.type(entityInput, "Provider Recovery");
-    await user.click(screen.getByRole("button", { name: /^birth$/i }));
+    await user.click(screen.getByRole("button", { name: /^create entity$/i }));
     await user.click(await screen.findByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: /continue/i }));
 

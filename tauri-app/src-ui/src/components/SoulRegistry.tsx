@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useRef, useState } from "react";
+import { type FormEvent, type MouseEvent, useEffect, useRef, useState } from "react";
 import ConfirmationModal from "./ConfirmationModal";
 import OllamaDrawer from "./OllamaDrawer";
 import ProviderDrawer from "./ProviderDrawer";
@@ -16,203 +16,6 @@ interface OllamaModelTag {
   name: string;
   size: number;
   modified_at: string;
-}
-
-/** Hive Agent status panel — shows the local Ollama LLM powering the Hive control plane. */
-function HiveAgentPanel() {
-  const [status, setStatus] = useState<OllamaStatusInfo | null>(null);
-  const [models, setModels] = useState<OllamaModelTag[]>([]);
-  const [activeModel, setActiveModel] = useState("");
-  const [baseUrl, setBaseUrl] = useState("http://localhost:11434");
-  const [expanded, setExpanded] = useState(false);
-  const [pullModel, setPullModel] = useState("");
-  const [pulling, setPulling] = useState(false);
-  const [pullStatus, setPullStatus] = useState("");
-
-  useEffect(() => {
-    refreshStatus();
-  }, []);
-
-  const refreshStatus = async () => {
-    try {
-      const s = await invoke<OllamaStatusInfo>("get_ollama_status");
-      setStatus(s);
-
-      // Fetch model list from Ollama API
-      const config = await invoke<{ local_llm_base_url?: string; bundled_model?: string }>("get_config_snapshot");
-      const computedBaseUrl = config.local_llm_base_url || `http://127.0.0.1:${s.port}`;
-      setBaseUrl(computedBaseUrl);
-      setActiveModel(config.bundled_model || "llama3.2:3b");
-
-      if (s.running) {
-        try {
-          const resp = await fetch(`${computedBaseUrl}/api/tags`);
-          if (resp.ok) {
-            const data = await resp.json();
-            setModels(
-              (data.models || []).map((m: Record<string, unknown>) => ({
-                name: String(m.name || ""),
-                size: Number(m.size || 0),
-                modified_at: String(m.modified_at || ""),
-              }))
-            );
-          }
-        } catch {
-          // Ollama API not reachable
-        }
-      }
-    } catch {
-      // get_ollama_status not available
-    }
-  };
-
-  const handlePullModel = async () => {
-    if (!pullModel.trim()) return;
-    setPulling(true);
-    setPullStatus("Starting pull...");
-    try {
-      await invoke("pull_ollama_model", { model: pullModel.trim(), baseUrl });
-      setPullStatus("Complete");
-      setPullModel("");
-      await refreshStatus();
-    } catch (e) {
-      setPullStatus(`Error: ${e}`);
-    } finally {
-      setPulling(false);
-    }
-  };
-
-  const handleSwitchModel = async (modelName: string) => {
-    try {
-      // Update config with new bundled_model
-      await invoke("set_bundled_model", { modelName });
-      setActiveModel(modelName);
-    } catch {
-      // set_bundled_model may not exist yet — that's fine
-    }
-  };
-
-  const formatSize = (bytes: number) => {
-    if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
-    if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`;
-    return `${bytes} B`;
-  };
-
-  if (!status) return null;
-
-  return (
-    <div className="w-full max-w-4xl mb-6">
-      <div className="border border-theme-border-dim rounded-lg bg-theme-bg-elevated overflow-hidden">
-        {/* Header — always visible */}
-        <button
-          className="w-full px-4 py-3 flex items-center justify-between hover:bg-theme-bg-inset transition-colors"
-          onClick={() => setExpanded(!expanded)}
-        >
-          <div className="flex items-center gap-3">
-            <div
-              className={`w-2 h-2 rounded-full ${
-                status.running && status.model_ready
-                  ? "bg-theme-success shadow-[0_0_6px_rgba(34,197,94,0.5)]"
-                  : status.running
-                    ? "bg-theme-warning"
-                    : "bg-theme-danger"
-              }`}
-            />
-            <span className="text-[10px] uppercase tracking-widest text-theme-text-dim font-bold">
-              Hive Agent
-            </span>
-            <span className="text-xs text-theme-text-bright font-mono">
-              {activeModel}
-            </span>
-            {status.running && status.model_ready && (
-              <span className="text-[9px] text-theme-success uppercase">Online</span>
-            )}
-            {status.running && !status.model_ready && (
-              <span className="text-[9px] text-theme-warning uppercase">Loading</span>
-            )}
-            {!status.running && (
-              <span className="text-[9px] text-theme-danger uppercase">Offline</span>
-            )}
-          </div>
-          <span className="text-theme-text-dim text-xs">{expanded ? "\u25B2" : "\u25BC"}</span>
-        </button>
-
-        {/* Expanded panel */}
-        {expanded && (
-          <div className="border-t border-theme-border-dim p-4 space-y-4">
-            {/* Installed models */}
-            <div>
-              <h4 className="text-[10px] uppercase tracking-widest text-theme-text-dim font-bold mb-2">
-                Installed Models
-              </h4>
-              {models.length === 0 ? (
-                <p className="text-theme-text-dim text-xs">No models found.</p>
-              ) : (
-                <div className="space-y-1">
-                  {models.map((m) => (
-                    <div
-                      key={m.name}
-                      className={`flex items-center justify-between px-3 py-2 rounded border text-xs ${
-                        m.name === activeModel || m.name.startsWith(activeModel + ":")
-                          ? "border-theme-success bg-theme-success-dim text-theme-success"
-                          : "border-theme-border-dim text-theme-text-dim"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono">{m.name}</span>
-                        <span className="text-[10px] text-theme-text-dim">{formatSize(m.size)}</span>
-                      </div>
-                      {m.name !== activeModel && !m.name.startsWith(activeModel + ":") && (
-                        <button
-                          className="text-[10px] px-2 py-0.5 border border-theme-border-dim rounded hover:border-theme-primary hover:text-theme-primary"
-                          onClick={() => handleSwitchModel(m.name)}
-                        >
-                          Use
-                        </button>
-                      )}
-                      {(m.name === activeModel || m.name.startsWith(activeModel + ":")) && (
-                        <span className="text-[10px] text-theme-success">Active</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Pull new model */}
-            <div>
-              <h4 className="text-[10px] uppercase tracking-widest text-theme-text-dim font-bold mb-2">
-                Download Model
-              </h4>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={pullModel}
-                  onChange={(e) => setPullModel(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") handlePullModel(); }}
-                  placeholder="e.g. llama3.2:3b, mistral, phi3..."
-                  className="flex-1 bg-theme-bg border border-theme-border-dim rounded px-3 py-1.5 text-xs text-theme-text placeholder:text-theme-text-dim focus:border-theme-primary focus:outline-none font-mono"
-                  disabled={pulling}
-                />
-                <button
-                  className="border border-theme-primary-faint text-theme-primary px-4 py-1.5 rounded text-xs hover:bg-theme-primary-glow disabled:opacity-50"
-                  onClick={handlePullModel}
-                  disabled={pulling || !pullModel.trim()}
-                >
-                  {pulling ? "..." : "Pull"}
-                </button>
-              </div>
-              {pullStatus && (
-                <p className={`text-[10px] mt-1 ${pullStatus.startsWith("Error") ? "text-theme-danger" : "text-theme-text-dim"}`}>
-                  {pullStatus}
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
 }
 
 interface SoulIdentityInfo {
@@ -249,6 +52,307 @@ interface SoulRegistryProps {
   onNewSoul: (soulId: string) => void;
 }
 
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+
+const buttonVariants: Record<ButtonVariant, string> = {
+  primary:
+    "bg-theme-primary text-white hover:bg-theme-primary-muted disabled:hover:bg-theme-primary",
+  secondary:
+    "border border-theme-border bg-theme-bg-elevated text-theme-text hover:border-theme-primary hover:bg-theme-hover",
+  ghost:
+    "text-theme-text-dim hover:bg-theme-hover hover:text-theme-text",
+  danger:
+    "border border-theme-danger text-theme-danger hover:bg-theme-danger-dim",
+};
+
+function Button({
+  children,
+  className = "",
+  disabled,
+  variant = "secondary",
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      className={[
+        "inline-flex min-h-9 items-center justify-center gap-2 rounded-theme-md px-3 py-2",
+        "text-sm font-medium transition-colors duration-theme-fast",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-theme-focus-ring",
+        "disabled:cursor-not-allowed disabled:opacity-45",
+        buttonVariants[variant],
+        className,
+      ].join(" ")}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+function StatusPill({
+  children,
+  tone = "neutral",
+}: {
+  children: React.ReactNode;
+  tone?: "neutral" | "success" | "warning" | "danger" | "primary";
+}) {
+  const tones = {
+    neutral: "border-theme-border text-theme-text-dim bg-theme-surface-dim",
+    success: "border-theme-success text-theme-success bg-theme-success-dim",
+    warning: "border-theme-warning text-theme-warning bg-theme-warning-dim",
+    danger: "border-theme-danger text-theme-danger bg-theme-danger-dim",
+    primary: "border-theme-primary text-theme-primary bg-theme-primary-glow",
+  };
+
+  return (
+    <span
+      className={[
+        "inline-flex min-h-6 items-center rounded-theme-sm border px-2 py-0.5",
+        "text-[11px] font-semibold leading-4",
+        tones[tone],
+      ].join(" ")}
+    >
+      {children}
+    </span>
+  );
+}
+
+function safeErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  const message = String(error || "").trim();
+  return message || "Something went wrong. Try again.";
+}
+
+function formatBytes(bytes: number) {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`;
+  return `${bytes} B`;
+}
+
+function formatDate(dateStr: string | null) {
+  if (!dateStr) return "Not recorded";
+  try {
+    return new Date(dateStr).toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
+function modelMatchesActive(modelName: string, activeModel: string) {
+  return modelName === activeModel || modelName.startsWith(activeModel + ":");
+}
+
+function HiveAgentPanel() {
+  const [status, setStatus] = useState<OllamaStatusInfo | null>(null);
+  const [models, setModels] = useState<OllamaModelTag[]>([]);
+  const [activeModel, setActiveModel] = useState("");
+  const [baseUrl, setBaseUrl] = useState("http://localhost:11434");
+  const [expanded, setExpanded] = useState(false);
+  const [pullModel, setPullModel] = useState("");
+  const [pulling, setPulling] = useState(false);
+  const [pullStatus, setPullStatus] = useState("");
+
+  const refreshStatus = async () => {
+    try {
+      const ollamaStatus = await invoke<OllamaStatusInfo>("get_ollama_status");
+      setStatus(ollamaStatus);
+
+      const config = await invoke<{ local_llm_base_url?: string; bundled_model?: string }>(
+        "get_config_snapshot"
+      );
+      const computedBaseUrl = config.local_llm_base_url || `http://127.0.0.1:${ollamaStatus.port}`;
+      setBaseUrl(computedBaseUrl);
+      setActiveModel(config.bundled_model || "llama3.2:3b");
+
+      if (ollamaStatus.running) {
+        try {
+          const response = await fetch(`${computedBaseUrl}/api/tags`);
+          if (response.ok) {
+            const data = await response.json();
+            setModels(
+              (data.models || []).map((model: Record<string, unknown>) => ({
+                name: String(model.name || ""),
+                size: Number(model.size || 0),
+                modified_at: String(model.modified_at || ""),
+              }))
+            );
+          }
+        } catch {
+          setModels([]);
+        }
+      }
+    } catch {
+      setStatus(null);
+    }
+  };
+
+  useEffect(() => {
+    void refreshStatus();
+  }, []);
+
+  const handlePullModel = async (event?: FormEvent) => {
+    event?.preventDefault();
+    const modelName = pullModel.trim();
+    if (!modelName || pulling) return;
+
+    setPulling(true);
+    setPullStatus("Downloading model...");
+    try {
+      await invoke("pull_ollama_model", { model: modelName, baseUrl });
+      setPullStatus("Model downloaded.");
+      setPullModel("");
+      await refreshStatus();
+    } catch (error) {
+      setPullStatus(`Model download failed. ${safeErrorMessage(error)}`);
+    } finally {
+      setPulling(false);
+    }
+  };
+
+  const handleSwitchModel = async (modelName: string) => {
+    try {
+      await invoke("set_bundled_model", { modelName });
+      setActiveModel(modelName);
+    } catch (error) {
+      setPullStatus(`Could not switch model. ${safeErrorMessage(error)}`);
+    }
+  };
+
+  if (!status) {
+    return (
+      <section className="rounded-theme-lg border border-theme-border bg-theme-surface p-5">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-theme-text-bright">Hive model</h2>
+            <p className="mt-1 text-sm text-theme-text-dim">
+              Abigail can still use cloud providers while local model status is unavailable.
+            </p>
+          </div>
+          <StatusPill tone="warning">Checking</StatusPill>
+        </div>
+      </section>
+    );
+  }
+
+  const statusTone = status.running && status.model_ready ? "success" : status.running ? "warning" : "danger";
+  const statusText = status.running && status.model_ready ? "Online" : status.running ? "Loading" : "Offline";
+
+  return (
+    <section className="rounded-theme-lg border border-theme-border bg-theme-surface p-5">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-lg font-semibold text-theme-text-bright">Hive model</h2>
+            <StatusPill tone={statusTone}>{statusText}</StatusPill>
+          </div>
+          <p className="mt-1 text-sm text-theme-text-dim">
+            Local model for the Hive control plane.
+          </p>
+          <p className="mt-2 font-mono text-xs text-theme-text">
+            {activeModel || "No model selected"}
+          </p>
+        </div>
+        <Button variant="secondary" onClick={() => setExpanded((value) => !value)}>
+          {expanded ? "Hide model details" : "Manage local model"}
+        </Button>
+      </div>
+
+      {expanded && (
+        <div className="mt-5 grid gap-5 border-t border-theme-border-dim pt-5 lg:grid-cols-[1fr_320px]">
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-theme-text-dim">
+              Installed models
+            </h3>
+            {models.length === 0 ? (
+              <p className="mt-3 text-sm text-theme-text-dim">No local models found.</p>
+            ) : (
+              <ul className="mt-3 grid gap-2">
+                {models.map((model) => {
+                  const active = modelMatchesActive(model.name, activeModel);
+                  return (
+                    <li
+                      key={model.name}
+                      className="flex flex-col gap-3 rounded-theme-md border border-theme-border-dim bg-theme-bg-inset p-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate font-mono text-sm text-theme-text-bright">
+                          {model.name}
+                        </div>
+                        <div className="mt-1 text-xs text-theme-text-dim">
+                          {formatBytes(model.size)}
+                        </div>
+                      </div>
+                      {active ? (
+                        <StatusPill tone="success">Active</StatusPill>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          className="self-start sm:self-auto"
+                          onClick={() => void handleSwitchModel(model.name)}
+                        >
+                          Use model
+                        </Button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          <form className="rounded-theme-md border border-theme-border-dim bg-theme-bg-inset p-4" onSubmit={handlePullModel}>
+            <label htmlFor="pull-model" className="text-xs font-semibold text-theme-text">
+              Download model
+            </label>
+            <p className="mt-1 text-xs text-theme-text-dim">
+              Use an Ollama model name such as llama3.2:3b.
+            </p>
+            <input
+              id="pull-model"
+              type="text"
+              value={pullModel}
+              onChange={(event) => setPullModel(event.target.value)}
+              placeholder="llama3.2:3b"
+              className="mt-3 min-h-10 w-full rounded-theme-md border border-theme-border bg-theme-input-bg px-3 py-2 font-mono text-sm text-theme-text placeholder:text-theme-text-dim focus:border-theme-primary focus:outline-none"
+              disabled={pulling}
+            />
+            <Button
+              type="submit"
+              variant="primary"
+              className="mt-3 w-full"
+              disabled={pulling || !pullModel.trim()}
+              aria-busy={pulling}
+            >
+              {pulling ? "Downloading..." : "Download model"}
+            </Button>
+            {pullStatus && (
+              <p
+                className={[
+                  "mt-3 text-xs",
+                  pullStatus.includes("failed") || pullStatus.startsWith("Could not")
+                    ? "text-theme-danger"
+                    : "text-theme-text-dim",
+                ].join(" ")}
+                role={pullStatus.includes("failed") ? "alert" : "status"}
+              >
+                {pullStatus}
+              </p>
+            )}
+          </form>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function SoulRegistry({
   onSoulSelected,
   onNewSoul,
@@ -268,6 +372,7 @@ export default function SoulRegistry({
   const [providerDrawerOpen, setProviderDrawerOpen] = useState(false);
   const [themeDrawerOpen, setThemeDrawerOpen] = useState(false);
   const mountedRef = useRef(true);
+  const birthInFlightRef = useRef(false);
 
   const fetchSouls = async () => {
     try {
@@ -276,9 +381,9 @@ export default function SoulRegistry({
       if (!mountedRef.current) return;
       setSouls(identities);
       setError(null);
-    } catch (e) {
+    } catch (fetchError) {
       if (!mountedRef.current) return;
-      setError(String(e));
+      setError(safeErrorMessage(fetchError));
     } finally {
       if (mountedRef.current) setLoading(false);
     }
@@ -289,42 +394,45 @@ export default function SoulRegistry({
       const list = await invoke<BackupInfo[]>("list_backups");
       if (!mountedRef.current) return;
       setBackups(list);
-    } catch (e) {
+    } catch (backupError) {
       if (!mountedRef.current) return;
-      setError(String(e));
+      setError(safeErrorMessage(backupError));
     }
   };
 
   useEffect(() => {
     mountedRef.current = true;
-    fetchSouls();
+    void fetchSouls();
     return () => {
       mountedRef.current = false;
     };
   }, []);
 
   useEffect(() => {
-    if (showRecoverPanel) fetchBackups();
+    if (showRecoverPanel) void fetchBackups();
   }, [showRecoverPanel]);
 
-  const handleBirthSoul = async () => {
-    if (!newSoulName.trim()) return;
+  const handleBirthSoul = async (event?: FormEvent) => {
+    event?.preventDefault();
+    const name = newSoulName.trim();
+    if (!name || birthInFlightRef.current) return;
 
+    birthInFlightRef.current = true;
+    setBirthing(true);
+    setError(null);
     try {
-      setBirthing(true);
-      const uuid = await invoke<string>("create_agent", {
-        name: newSoulName.trim(),
-      });
+      const uuid = await invoke<string>("create_agent", { name });
       if (!mountedRef.current) return;
       setNewSoulName("");
-      setBirthing(false);
       await invoke("load_agent", { agentId: uuid });
       if (!mountedRef.current) return;
       onNewSoul(uuid);
-    } catch (e) {
+    } catch (birthError) {
       if (!mountedRef.current) return;
-      setError(String(e));
-      setBirthing(false);
+      setError(safeErrorMessage(birthError));
+    } finally {
+      if (mountedRef.current) setBirthing(false);
+      birthInFlightRef.current = false;
     }
   };
 
@@ -333,21 +441,21 @@ export default function SoulRegistry({
       await invoke("load_agent", { agentId: soulId });
       if (!mountedRef.current) return;
       onSoulSelected(soulId);
-    } catch (e) {
+    } catch (wakeError) {
       if (!mountedRef.current) return;
-      setError(String(e));
+      setError(safeErrorMessage(wakeError));
     }
   };
 
-  const handleBackupSoul = async (e: React.MouseEvent, soul: SoulIdentityInfo) => {
-    e.stopPropagation();
+  const handleBackupSoul = async (event: MouseEvent, soul: SoulIdentityInfo) => {
+    event.stopPropagation();
     try {
       await invoke<string>("backup_agent_identity", { agentId: soul.id });
       if (!mountedRef.current) return;
       setError(null);
-    } catch (e) {
+    } catch (backupError) {
       if (!mountedRef.current) return;
-      setError(String(e));
+      setError(safeErrorMessage(backupError));
     }
   };
 
@@ -361,12 +469,12 @@ export default function SoulRegistry({
       } else if (confirmAction.type === "archive") {
         await invoke("archive_agent_identity", { agentId: confirmAction.soul.id });
         await fetchSouls();
-      } else if (confirmAction.type === "delete_backup") {
+      } else {
         await invoke("delete_backup", { backupDirName: confirmAction.backup.directory_name });
         await fetchBackups();
       }
-    } catch (e) {
-      setError(String(e));
+    } catch (confirmError) {
+      setError(safeErrorMessage(confirmError));
     } finally {
       setConfirmLoading(false);
       setConfirmAction(null);
@@ -380,53 +488,30 @@ export default function SoulRegistry({
       if (!mountedRef.current) return;
       await fetchSouls();
       await fetchBackups();
-    } catch (e) {
+    } catch (restoreError) {
       if (!mountedRef.current) return;
-      setError(String(e));
+      setError(safeErrorMessage(restoreError));
     } finally {
       if (mountedRef.current) setRestoring(null);
     }
   };
 
   const handleMigrateLegacy = async () => {
+    setMigrating(true);
+    setError(null);
     try {
-      setMigrating(true);
       const uuid = await invoke<string | null>("migrate_legacy_identity");
-      if (uuid) {
-        await fetchSouls();
-      }
-    } catch (e) {
+      if (uuid) await fetchSouls();
+    } catch (migrationError) {
       if (!mountedRef.current) return;
-      setError(String(e));
+      setError(safeErrorMessage(migrationError));
     } finally {
       if (mountedRef.current) setMigrating(false);
     }
   };
 
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return "Unknown";
-    try {
-      return new Date(dateStr).toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    } catch {
-      return dateStr;
-    }
-  };
+  const toggleRecoverPanel = () => setShowRecoverPanel((value) => !value);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-theme-bg text-theme-text-dim font-primary flex items-center justify-center">
-        <div className="animate-pulse">Consulting the Soul Registry...</div>
-      </div>
-    );
-  }
-
-  // Confirmation modal
   const confirmModal = confirmAction && (
     <ConfirmationModal
       title={
@@ -438,16 +523,12 @@ export default function SoulRegistry({
       }
       message={
         confirmAction.type === "delete"
-          ? "This will permanently destroy all data, memories, keys, and constitutional documents. This cannot be undone."
+          ? "This permanently removes local data, memories, keys, and documents. This cannot be undone."
           : confirmAction.type === "archive"
-            ? "This entity will be moved to backups and removed from the active registry. You can restore it later from the recovery panel."
+            ? "This Entity will move to backups and leave the active list. You can restore it later."
             : "This backup will be permanently deleted. This cannot be undone."
       }
-      detail={
-        confirmAction.type === "delete"
-          ? "Use Archive instead to preserve the data."
-          : undefined
-      }
+      detail={confirmAction.type === "delete" ? "Use Archive if you want to preserve the data." : undefined}
       confirmLabel={
         confirmAction.type === "delete" || confirmAction.type === "delete_backup"
           ? "Delete permanently"
@@ -464,44 +545,6 @@ export default function SoulRegistry({
     />
   );
 
-  // Error banner (shared between both states)
-  const errorBanner = error && (
-    <div className="w-full max-w-lg mb-4 p-3 border border-theme-danger rounded bg-theme-danger-dim text-theme-danger text-sm">
-      {error}
-      <button
-        className="ml-2 text-theme-danger underline"
-        onClick={() => setError(null)}
-      >
-        dismiss
-      </button>
-    </div>
-  );
-
-  // Shared drawer button bar (parameterized by container width)
-  const drawerButtons = (maxWidth: string) => (
-    <div className={`w-full ${maxWidth} flex gap-3 mb-6`}>
-      <button
-        className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-primary uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
-        onClick={() => setOllamaDrawerOpen(true)}
-      >
-        Manage Ollama
-      </button>
-      <button
-        className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-primary uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
-        onClick={() => setProviderDrawerOpen(true)}
-      >
-        Configure Providers
-      </button>
-      <button
-        className="flex-1 px-4 py-2 border border-theme-border-dim rounded text-xs font-primary uppercase tracking-widest text-theme-text-dim hover:border-theme-primary hover:text-theme-primary transition-colors"
-        onClick={() => setThemeDrawerOpen(true)}
-      >
-        Theme
-      </button>
-    </div>
-  );
-
-  // Conditionally rendered drawers (shared between both states)
   const drawers = (
     <>
       {ollamaDrawerOpen && <OllamaDrawer onClose={() => setOllamaDrawerOpen(false)} />}
@@ -510,345 +553,308 @@ export default function SoulRegistry({
     </>
   );
 
-  // Empty state: Welcome landing page
-  if (souls.length === 0) {
+  if (loading) {
     return (
-      <div className="min-h-screen bg-theme-bg text-theme-text font-primary flex flex-col items-center justify-center p-8">
-        {confirmModal}
-
-        {/* Welcome header */}
-        <div className="text-center mb-10">
-          <h1 className="text-theme-primary text-4xl font-bold tracking-widest mb-2">
-            ABIGAIL
-          </h1>
-          <p className="text-theme-text-dim text-sm uppercase tracking-widest">
-            Sovereign Entity Interface
-          </p>
-        </div>
-
-        {errorBanner}
-
-        <HiveAgentPanel />
-
-        {drawerButtons("max-w-md")}
-
-        {/* Create soul card */}
-        <div className="w-full max-w-md border-2 border-theme-primary rounded-lg p-6 mb-6 bg-theme-bg-elevated">
-          <p className="text-theme-text-bright text-sm mb-4">
-            Birth a new Sovereign Entity to begin
-          </p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={newSoulName}
-              onChange={(e) => setNewSoulName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleBirthSoul();
-              }}
-              placeholder="Entity name (e.g. Buddy Joe)..."
-              className="flex-1 bg-theme-bg border border-theme-border rounded px-3 py-2 text-theme-primary-dim placeholder:text-theme-text-dim focus:border-theme-primary focus:outline-none text-sm"
-              disabled={birthing}
-              autoFocus
-            />
-            <button
-              className="border border-theme-primary text-theme-primary px-5 py-2 rounded hover:bg-theme-primary-glow disabled:opacity-50 disabled:cursor-not-allowed text-sm font-bold"
-              onClick={handleBirthSoul}
-              disabled={birthing || !newSoulName.trim()}
-            >
-              {birthing ? "Birthing..." : "Birth"}
-            </button>
+      <main className="min-h-screen bg-theme-bg px-6 py-8 text-theme-text font-primary">
+        <div className="mx-auto grid min-h-[70vh] max-w-5xl place-items-center">
+          <div className="w-full max-w-md rounded-theme-lg border border-theme-border bg-theme-surface p-6">
+            <div className="h-4 w-32 animate-pulse rounded bg-theme-surface-bright" />
+            <div className="mt-4 h-16 animate-pulse rounded-theme-md bg-theme-surface-dim" />
+            <p className="mt-4 text-sm text-theme-text-dim" role="status">
+              Loading Abigail Hive...
+            </p>
           </div>
         </div>
-
-        {/* Migration & Recovery links */}
-        <div className="text-center">
-          <div className="text-theme-border text-xs mb-3">or</div>
-          <div className="flex flex-col gap-2 items-center">
-            <button
-              className="text-theme-text-dim hover:text-theme-text text-xs underline"
-              onClick={handleMigrateLegacy}
-              disabled={migrating}
-            >
-              {migrating ? "Checking..." : "Recall legacy identity from previous Hive"}
-            </button>
-            <button
-              className="text-theme-text-dim hover:text-theme-text text-xs underline"
-              onClick={() => setShowRecoverPanel(!showRecoverPanel)}
-            >
-              Recover entity from backup
-            </button>
-          </div>
-        </div>
-
-        {/* Recover panel (empty state) */}
-        {showRecoverPanel && (
-          <div className="w-full max-w-lg mt-6 border border-theme-border-dim rounded-lg p-4 bg-theme-bg-inset">
-            <h3 className="text-theme-text text-sm font-bold mb-3 uppercase tracking-widest">
-              Available Backups
-            </h3>
-            {backups.length === 0 ? (
-              <p className="text-theme-text-dim text-xs">No backups found.</p>
-            ) : (
-              <div className="max-h-60 overflow-y-auto space-y-2">
-                {backups.map((backup) => (
-                  <div
-                    key={backup.directory_name}
-                    className="border border-theme-border-dim rounded p-3 flex items-center justify-between"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-theme-text-bright text-sm font-bold truncate">
-                          {backup.agent_name}
-                        </span>
-                        <span
-                          className={`text-[9px] uppercase px-1 py-0.5 rounded border ${
-                            backup.backup_type === "archive"
-                              ? "border-theme-warning text-theme-warning bg-theme-warning-dim"
-                              : "border-theme-success text-theme-success bg-theme-success-dim"
-                          }`}
-                        >
-                          {backup.backup_type === "archive" ? "Archived" : "Backup"}
-                        </span>
-                      </div>
-                      <div className="text-[10px] text-theme-text-dim mt-1">
-                        {formatDate(backup.created_at)}
-                        {backup.has_memories && " \u00B7 Has memories"}
-                        {backup.has_signatures && " \u00B7 Signed"}
-                      </div>
-                    </div>
-                    <div className="flex gap-2 ml-2">
-                      <button
-                        className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-primary hover:text-theme-primary disabled:opacity-50"
-                        onClick={() => handleRestoreBackup(backup)}
-                        disabled={restoring === backup.directory_name}
-                      >
-                        {restoring === backup.directory_name ? "..." : "Restore"}
-                      </button>
-                      <button
-                        className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-danger hover:text-theme-danger"
-                        onClick={() =>
-                          setConfirmAction({ type: "delete_backup", backup })
-                        }
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {drawers}
-      </div>
+      </main>
     );
   }
 
-  // Populated state: Soul selector
+  const hiveSoul = souls.find((soul) => soul.is_hive);
+  const familyEntities = souls.filter((soul) => !soul.is_hive);
+
   return (
-    <div className="min-h-screen bg-theme-bg text-theme-text font-primary flex flex-col items-center justify-center p-8">
+    <main className="min-h-screen bg-theme-bg px-4 py-6 text-theme-text font-primary sm:px-6 lg:px-8">
       {confirmModal}
+      {drawers}
 
-      {/* Header */}
-      <div className="text-center mb-8">
-        <h1 className="text-2xl text-theme-primary font-bold tracking-widest">SOUL REGISTRY</h1>
-        <p className="text-theme-text-dim text-xs uppercase mt-1 tracking-widest">Abigail Hive Node</p>
-      </div>
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
+        <header className="flex flex-col gap-4 rounded-theme-lg border border-theme-border bg-theme-bg-elevated p-5 shadow-theme-elevated lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-2xl font-semibold leading-8 text-theme-text-bright">
+                Abigail Hive
+              </h1>
+              <StatusPill tone="primary">Private coordinator</StatusPill>
+            </div>
+            <p className="mt-2 max-w-2xl text-sm leading-[22px] text-theme-text-dim">
+              Create Entities your family can talk to, connect models, and keep local memory under
+              Hive control.
+            </p>
+          </div>
 
-      {errorBanner}
+          <nav className="flex flex-wrap gap-2" aria-label="Hive tools">
+            <Button variant="secondary" onClick={() => setOllamaDrawerOpen(true)}>
+              Manage Ollama
+            </Button>
+            <Button variant="secondary" onClick={() => setProviderDrawerOpen(true)}>
+              Connect models
+            </Button>
+            <Button variant="secondary" onClick={() => setThemeDrawerOpen(true)}>
+              Theme
+            </Button>
+          </nav>
+        </header>
 
-      <HiveAgentPanel />
-
-      {drawerButtons("max-w-4xl")}
-
-      {/* Soul cards grid */}
-      <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
-        {souls.map((soul) => (
+        {error && (
           <div
-            key={soul.id}
-            className="group relative border border-theme-border-dim rounded-lg p-5 hover:border-theme-primary hover:bg-theme-primary-glow cursor-pointer transition-all overflow-hidden"
-            onClick={() => handleWakeSoul(soul.id)}
+            className="flex flex-col gap-3 rounded-theme-lg border border-theme-danger bg-theme-danger-dim p-4 text-sm text-theme-danger sm:flex-row sm:items-center sm:justify-between"
+            role="alert"
           >
-            {/* Visual accent color strip */}
-            <div
-              className="absolute top-0 left-0 w-1 h-full bg-theme-primary-dim group-hover:bg-theme-primary"
-              style={soul.primary_color ? { backgroundColor: soul.primary_color } : {}}
+            <span>{error}</span>
+            <Button variant="ghost" className="self-start text-theme-danger sm:self-auto" onClick={() => setError(null)}>
+              Dismiss
+            </Button>
+          </div>
+        )}
+
+        <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <HiveAgentPanel />
+
+          <form
+            className="rounded-theme-lg border border-theme-border bg-theme-surface p-5"
+            onSubmit={handleBirthSoul}
+          >
+            <h2 className="text-lg font-semibold text-theme-text-bright">Create Entity</h2>
+            <p className="mt-1 text-sm text-theme-text-dim">
+              Use the name your family will say naturally.
+            </p>
+            <label htmlFor="new-entity-name" className="mt-4 block text-xs font-semibold text-theme-text">
+              Entity name
+            </label>
+            <input
+              id="new-entity-name"
+              type="text"
+              value={newSoulName}
+              onChange={(event) => setNewSoulName(event.target.value)}
+              placeholder="Ada"
+              className="mt-2 min-h-10 w-full rounded-theme-md border border-theme-border bg-theme-input-bg px-3 py-2 text-sm text-theme-text placeholder:text-theme-text-dim focus:border-theme-primary focus:outline-none"
+              disabled={birthing}
+              autoFocus={souls.length === 0}
             />
+            <Button
+              type="submit"
+              variant="primary"
+              className="mt-4 w-full"
+              disabled={birthing || !newSoulName.trim()}
+              aria-busy={birthing}
+            >
+              {birthing ? "Creating..." : "Create Entity"}
+            </Button>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button variant="ghost" onClick={toggleRecoverPanel}>
+                {showRecoverPanel ? "Hide backups" : "Restore backup"}
+              </Button>
+              <Button variant="ghost" onClick={() => void handleMigrateLegacy()} disabled={migrating}>
+                {migrating ? "Checking..." : "Recall legacy identity"}
+              </Button>
+            </div>
+          </form>
+        </section>
 
-            <div className="flex items-center gap-4">
-              {/* Avatar placeholder or real avatar */}
-              <div
-                className="w-12 h-12 rounded-full border border-theme-border-dim flex items-center justify-center bg-theme-bg-inset text-lg"
-                style={soul.primary_color ? { borderColor: soul.primary_color, color: soul.primary_color } : {}}
-              >
-                {soul.avatar_url ? (
-                  <img src={soul.avatar_url} alt="" className="w-full h-full rounded-full" />
-                ) : (
-                  soul.name.substring(0, 1).toUpperCase()
-                )}
+        <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-theme-text-dim">
+                  Entities ({familyEntities.length})
+                </h2>
+                <p className="mt-1 text-sm text-theme-text-dim">
+                  Open the Entity your family wants to talk to.
+                </p>
               </div>
-
-              <div className="flex-1">
-                <div className="flex justify-between items-start">
-                  <h2 className="text-theme-text-bright font-bold text-lg group-hover:text-theme-primary">
-                    {soul.name}
-                  </h2>
-                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={(e) => handleBackupSoul(e, soul)}
-                      className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-success hover:text-theme-success"
-                      title="Create Backup"
-                    >
-                      Backup
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setConfirmAction({ type: "archive", soul });
-                      }}
-                      disabled={soul.immortal}
-                      className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-primary hover:text-theme-text"
-                      title="Archive Entity"
-                    >
-                      Archive
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setConfirmAction({ type: "delete", soul });
-                      }}
-                      disabled={soul.immortal}
-                      className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-danger hover:text-theme-danger"
-                      title="Delete Entity"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded border ${soul.birth_complete ? "border-theme-success text-theme-success bg-theme-success-dim" : "border-theme-warning text-theme-warning bg-theme-warning-dim"}`}>
-                    {soul.birth_complete ? "Active" : "In-Utero"}
-                  </span>
-                  {soul.immortal && (
-                    <span className="text-[10px] uppercase px-1.5 py-0.5 rounded border border-theme-primary text-theme-primary bg-theme-primary-glow">
-                      Immortal
-                    </span>
-                  )}
-                  <span className="text-[10px] text-theme-text-dim font-mono">
-                    ID: {soul.id.substring(0, 8)}
-                  </span>
-                </div>
-              </div>
+              <Button variant="ghost" onClick={() => void fetchSouls()}>
+                Refresh
+              </Button>
             </div>
 
-            {soul.birth_date && (
-              <div className="mt-4 pt-3 border-t border-theme-border-dim flex justify-between items-center text-[10px] text-theme-text-dim uppercase tracking-tighter">
-                <span>Birthed</span>
-                <span>{soul.birth_date}</span>
+            {familyEntities.length === 0 ? (
+              <div className="rounded-theme-lg border border-dashed border-theme-border bg-theme-surface-dim p-8 text-center">
+                <h3 className="text-lg font-semibold text-theme-text-bright">No Entities yet</h3>
+                <p className="mx-auto mt-2 max-w-md text-sm text-theme-text-dim">
+                  Create the first Entity your family will talk to.
+                </p>
               </div>
+            ) : (
+              <ul
+                className="grid gap-4"
+                style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}
+              >
+                {familyEntities.map((soul) => (
+                  <li
+                    key={soul.id}
+                    className="relative overflow-hidden rounded-theme-lg border border-theme-border bg-theme-surface p-5"
+                  >
+                    <div
+                      className="absolute inset-y-0 left-0 w-1 bg-theme-primary"
+                      style={soul.primary_color ? { backgroundColor: soul.primary_color } : undefined}
+                    />
+                    <div className="flex items-start gap-4">
+                      <div
+                        className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-full border border-theme-border bg-theme-bg-inset text-lg font-semibold text-theme-primary"
+                        style={
+                          soul.primary_color
+                            ? { borderColor: soul.primary_color, color: soul.primary_color }
+                            : undefined
+                        }
+                      >
+                        {soul.avatar_url ? (
+                          <img src={soul.avatar_url} alt="" className="size-full object-cover" />
+                        ) : (
+                          soul.name.substring(0, 1).toUpperCase()
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <h3 className="truncate text-lg font-semibold text-theme-text-bright">
+                          {soul.name}
+                        </h3>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <StatusPill tone={soul.birth_complete ? "success" : "warning"}>
+                            {soul.birth_complete ? "Ready" : "New"}
+                          </StatusPill>
+                          {soul.immortal && <StatusPill tone="primary">Hive protected</StatusPill>}
+                        </div>
+                        <p className="mt-3 font-mono text-xs text-theme-text-dim">
+                          ID: {soul.id.substring(0, 8)}
+                        </p>
+                        {soul.birth_date && (
+                          <p className="mt-1 text-xs text-theme-text-dim">
+                            Created {formatDate(soul.birth_date)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-5 flex flex-wrap gap-2 border-t border-theme-border-dim pt-4">
+                      <Button variant="primary" onClick={() => void handleWakeSoul(soul.id)}>
+                        Open
+                      </Button>
+                      <Button variant="secondary" onClick={(event) => void handleBackupSoul(event, soul)}>
+                        Back up
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => setConfirmAction({ type: "archive", soul })}
+                        disabled={soul.immortal}
+                      >
+                        Archive
+                      </Button>
+                      <Button
+                        variant="danger"
+                        onClick={() => setConfirmAction({ type: "delete", soul })}
+                        disabled={soul.immortal}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
-        ))}
-      </div>
 
-      {/* Initialize New Soul */}
-      <div className="w-full max-w-lg border border-theme-border-dim rounded-lg p-6 bg-theme-bg-inset">
-        <h3 className="text-theme-text text-sm font-bold mb-4 uppercase tracking-widest">
-          Birth New Entity
-        </h3>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={newSoulName}
-            onChange={(e) => setNewSoulName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleBirthSoul();
-            }}
-            placeholder="Entity name..."
-            className="flex-1 bg-theme-bg border border-theme-border-dim rounded px-3 py-2 text-theme-primary-dim placeholder:text-theme-text-dim focus:border-theme-primary focus:outline-none text-sm"
-            disabled={birthing}
-          />
-          <button
-            className="border border-theme-primary-faint text-theme-primary px-6 py-2 rounded hover:bg-theme-primary-glow disabled:opacity-50 disabled:cursor-not-allowed text-sm font-bold uppercase tracking-widest"
-            onClick={handleBirthSoul}
-            disabled={birthing || !newSoulName.trim()}
-          >
-            {birthing ? "..." : "Birth"}
-          </button>
-        </div>
-      </div>
-
-      {/* Recover from backup */}
-      <div className="w-full max-w-lg mt-4 text-center">
-        <button
-          className="text-theme-text-dim hover:text-theme-text text-xs underline"
-          onClick={() => setShowRecoverPanel(!showRecoverPanel)}
-        >
-          {showRecoverPanel ? "Hide recovery panel" : "Recover entity from backup"}
-        </button>
-      </div>
-
-      {showRecoverPanel && (
-        <div className="w-full max-w-lg mt-4 border border-theme-border-dim rounded-lg p-4 bg-theme-bg-inset">
-          <h3 className="text-theme-text text-sm font-bold mb-3 uppercase tracking-widest">
-            Available Backups
-          </h3>
-          {backups.length === 0 ? (
-            <p className="text-theme-text-dim text-xs">No backups found.</p>
-          ) : (
-            <div className="max-h-60 overflow-y-auto space-y-2">
-              {backups.map((backup) => (
-                <div
-                  key={backup.directory_name}
-                  className="border border-theme-border-dim rounded p-3 flex items-center justify-between"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-theme-text-bright text-sm font-bold truncate">
-                        {backup.agent_name}
-                      </span>
-                      <span
-                        className={`text-[9px] uppercase px-1 py-0.5 rounded border ${
-                          backup.backup_type === "archive"
-                            ? "border-theme-warning text-theme-warning bg-theme-warning-dim"
-                            : "border-theme-success text-theme-success bg-theme-success-dim"
-                        }`}
-                      >
-                        {backup.backup_type === "archive" ? "Archived" : "Backup"}
-                      </span>
-                    </div>
-                    <div className="text-[10px] text-theme-text-dim mt-1">
-                      {formatDate(backup.created_at)}
-                      {backup.has_memories && " \u00B7 Has memories"}
-                      {backup.has_signatures && " \u00B7 Signed"}
-                    </div>
-                  </div>
-                  <div className="flex gap-2 ml-2">
-                    <button
-                      className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-primary hover:text-theme-primary disabled:opacity-50"
-                      onClick={() => handleRestoreBackup(backup)}
-                      disabled={restoring === backup.directory_name}
-                    >
-                      {restoring === backup.directory_name ? "..." : "Restore"}
-                    </button>
-                    <button
-                      className="px-2 py-1 text-[10px] border border-theme-border-dim rounded text-theme-text-dim hover:border-theme-danger hover:text-theme-danger"
-                      onClick={() =>
-                        setConfirmAction({ type: "delete_backup", backup })
-                      }
-                    >
-                      Delete
-                    </button>
-                  </div>
+          <aside className="rounded-theme-lg border border-theme-border bg-theme-surface p-5">
+            <h2 className="text-lg font-semibold text-theme-text-bright">Hive status</h2>
+            {hiveSoul ? (
+              <div className="mt-4 grid gap-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-theme-text-dim">Coordinator</span>
+                  <span className="font-medium text-theme-text-bright">{hiveSoul.name}</span>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-theme-text-dim">Protection</span>
+                  <StatusPill tone={hiveSoul.immortal ? "primary" : "warning"}>
+                    {hiveSoul.immortal ? "Immortal" : "Standard"}
+                  </StatusPill>
+                </div>
+                <div>
+                  <span className="text-theme-text-dim">Hive ID</span>
+                  <p className="mt-1 break-all font-mono text-xs text-theme-text">
+                    {hiveSoul.id}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-theme-text-dim">
+                The Hive identity will appear here after initialization.
+              </p>
+            )}
+          </aside>
+        </section>
 
-      {drawers}
-    </div>
+        {showRecoverPanel && (
+          <section className="rounded-theme-lg border border-theme-border bg-theme-bg-elevated p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-theme-text-bright">Backups</h2>
+                <p className="mt-1 text-sm text-theme-text-dim">
+                  Restore an archived Entity or remove old backups.
+                </p>
+              </div>
+              <Button variant="ghost" onClick={toggleRecoverPanel}>Close</Button>
+            </div>
+
+            {backups.length === 0 ? (
+              <p className="mt-5 rounded-theme-md border border-theme-border-dim bg-theme-bg-inset p-4 text-sm text-theme-text-dim">
+                No backups found.
+              </p>
+            ) : (
+              <ul className="mt-5 grid gap-3">
+                {backups.map((backup) => (
+                  <li
+                    key={backup.directory_name}
+                    className="flex flex-col gap-3 rounded-theme-md border border-theme-border-dim bg-theme-bg-inset p-4 md:flex-row md:items-center md:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="truncate text-sm font-semibold text-theme-text-bright">
+                          {backup.agent_name}
+                        </h3>
+                        <StatusPill tone={backup.backup_type === "archive" ? "warning" : "success"}>
+                          {backup.backup_type === "archive" ? "Archived" : "Backup"}
+                        </StatusPill>
+                      </div>
+                      <p className="mt-1 text-xs text-theme-text-dim">
+                        Created {formatDate(backup.created_at)}
+                      </p>
+                      <p className="mt-1 text-xs text-theme-text-dim">
+                        {backup.has_memories ? "Includes memories" : "No memories recorded"}
+                        {" / "}
+                        {backup.has_signatures ? "Signed" : "Unsigned"}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="secondary"
+                        onClick={() => void handleRestoreBackup(backup)}
+                        disabled={restoring === backup.directory_name}
+                      >
+                        {restoring === backup.directory_name ? "Restoring..." : "Restore"}
+                      </Button>
+                      <Button
+                        variant="danger"
+                        onClick={() => setConfirmAction({ type: "delete_backup", backup })}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+      </div>
+    </main>
   );
 }
