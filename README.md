@@ -35,7 +35,8 @@ No accounts. No data sharing. Just your family and the Entities you control.
 ## Dev Start
 
 - From the repo root, start the desktop app with `cargo tauri dev`.
-- If you only need the frontend shell, run `npm run dev` in `tauri-app/src-ui`.
+- If you only need the Hive frontend shell, run `npm run dev` in `hive-app/src-ui`.
+- If you only need the Entity Runtime frontend shell, run `npm run dev` in `entity-runtime-app/src-ui`.
 - The Tauri watcher now ignores frontend dependency churn through `.taurignore`, so Vite temp files should not retrigger Rust rebuilds during normal dev.
 - On Windows machines with Application Control enabled, `cargo build` and `cargo tauri dev` can still fail with `os error 4551` when Cargo tries to execute generated build-script binaries. That is an OS policy blocker, not an Abigail source-code failure. Use a build-allowed environment to launch the desktop shell in that case.
 

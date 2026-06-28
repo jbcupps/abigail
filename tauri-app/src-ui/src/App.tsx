@@ -114,7 +114,7 @@ function AppInner() {
   const { refreshAgentName, refreshTheme } = useTheme();
   const skillToasts = useSkillEvents();
 
-  const initializeAppRef = useRef<() => Promise<void>>();
+  const initializeAppRef = useRef<(() => Promise<void>) | null>(null);
   initializeAppRef.current = async () => {
     try {
       const activeAgent = await invoke<string | null>("get_active_agent");

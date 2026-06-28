@@ -30,7 +30,7 @@ abigail-queue = { path = "../crates/abigail-queue" }
 abigail-persistence = { path = "../crates/abigail-persistence" }
 abigail-streaming = { path = "../crates/abigail-streaming" }
 daemon-client = { path = "../crates/daemon-client" }
-tauri = { version = "2.10", features = ["tray-icon"] }
+tauri = { version = "2.11", features = ["tray-icon"] }
 tauri-plugin-dialog = "2.0"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"

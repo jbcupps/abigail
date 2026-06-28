@@ -66,7 +66,7 @@ x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 aes-gcm = "0.10"
 rand = "0.8"
 base64 = "0.22"
-sha2 = "0.10"
+sha2 = "0.11"
 directories = "5"
 surrealdb = { version = "3.0.2", default-features = false, features = ["kv-mem", "kv-surrealkv"] }
 thiserror = "1.0"

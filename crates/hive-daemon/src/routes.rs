@@ -9,13 +9,12 @@ use hive_core::{
     ApiEnvelope, BestModelResponse, CliDetectResponse, CliProviderDetection, CreateEntityRequest,
     CreateEntityResponse, CreateForgeApprovalJobRequest, EntityInfo, EntityOpenResponse,
     ForgeApprovalJobsResponse, HelperInfo, HiveDefaultResponse, HiveStatus, OutboxSyncRequest,
-    OutboxSyncResponse,
-    ProviderConfig, ProviderModelInfo, ProviderModelsRequest, ProviderModelsResponse,
-    ProviderProfileResponse, RuntimeHeartbeatRequest, RuntimeHeartbeatResponse,
-    RuntimeRegistrationRequest, RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus,
-    SecretListResponse, SecretValueResponse, SetHiveDefaultRequest, SetSkillAssignmentsRequest,
-    SignEntityRequest, SkillAssignmentsResponse, StoreSecretRequest, UpdateEntityConfigRequest,
-    UpdateEntityConfigResponse,
+    OutboxSyncResponse, ProviderConfig, ProviderModelInfo, ProviderModelsRequest,
+    ProviderModelsResponse, ProviderProfileResponse, RuntimeHeartbeatRequest,
+    RuntimeHeartbeatResponse, RuntimeRegistrationRequest, RuntimeSessionLease,
+    RuntimeSessionRequest, RuntimeSessionStatus, SecretListResponse, SecretValueResponse,
+    SetHiveDefaultRequest, SetSkillAssignmentsRequest, SignEntityRequest, SkillAssignmentsResponse,
+    StoreSecretRequest, UpdateEntityConfigRequest, UpdateEntityConfigResponse,
 };
 
 pub(crate) fn provider_config_from_hive_config(
@@ -183,9 +182,7 @@ pub async fn get_provider_config(
 
     // Inherit the Hive-level default provider/model when this entity has none of
     // its own, so a name-only entity "just works" with the family's provider.
-    if !config.is_hive
-        && config.active_provider_preference.is_none()
-        && config.ego_model.is_none()
+    if !config.is_hive && config.active_provider_preference.is_none() && config.ego_model.is_none()
     {
         if let Ok(hive_id) = state.identity_manager.hive_agent_id() {
             if let Ok(hive_config) = state.identity_manager.load_agent(&hive_id) {
@@ -350,7 +347,10 @@ pub async fn close_entity(
     Path(entity_id): Path<String>,
 ) -> Json<ApiEnvelope<String>> {
     state.supervisor.stop_entity(&entity_id);
-    Json(ApiEnvelope::success(format!("Entity {} stopped", entity_id)))
+    Json(ApiEnvelope::success(format!(
+        "Entity {} stopped",
+        entity_id
+    )))
 }
 
 // ---------------------------------------------------------------------------
@@ -776,7 +776,9 @@ mod tests {
         assert!(resp.ok, "response error: {:?}", resp.error);
         // The chosen model is surfaced back on the resolved provider config.
         assert_eq!(
-            resp.data.as_ref().and_then(|d| d.provider_config.ego_model.as_deref()),
+            resp.data
+                .as_ref()
+                .and_then(|d| d.provider_config.ego_model.as_deref()),
             Some("gpt-4.1")
         );
         let config = state

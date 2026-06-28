@@ -227,8 +227,7 @@ pub struct UpdateEntityConfigResponse {
 // ---------------------------------------------------------------------------
 
 /// Overall Hive status snapshot.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HiveStatus {
     pub master_key_loaded: bool,
     pub entity_count: usize,

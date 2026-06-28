@@ -2,8 +2,9 @@
 
 use daemon_client::HiveDaemonClient;
 use hive_core::{
-    ApiEnvelope, CreateForgeApprovalJobRequest, EntityOpenResponse, HiveStatus, RuntimeSessionLease,
-    SkillAssignmentsResponse, UpdateEntityConfigRequest, UpdateEntityConfigResponse,
+    ApiEnvelope, CreateForgeApprovalJobRequest, EntityOpenResponse, HiveStatus,
+    RuntimeSessionLease, SkillAssignmentsResponse, UpdateEntityConfigRequest,
+    UpdateEntityConfigResponse,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -292,7 +293,9 @@ async fn open_entity(
         },
         Ok(env) => {
             forget(&tracking, &entity_id);
-            return Err(env.error.unwrap_or_else(|| "Failed to open entity".to_string()));
+            return Err(env
+                .error
+                .unwrap_or_else(|| "Failed to open entity".to_string()));
         }
         Err(e) => {
             forget(&tracking, &entity_id);

@@ -1336,7 +1336,11 @@ fn triangle_ethic_token(tool_name: &str, params: &ToolParams) -> String {
     });
     let mut digest = Sha256::new();
     digest.update(payload.to_string().as_bytes());
-    format!("{:x}", digest.finalize())
+    digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn persist_session_record(profile_dir: &Path, record: &BrowserSessionRecord) -> Result<(), String> {

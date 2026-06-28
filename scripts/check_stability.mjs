@@ -14,14 +14,14 @@ const steps = [
     args: ["check", "-p", "entity-daemon"],
   },
   {
-    label: "cargo check -p abigail-app",
+    label: "cargo check -p abigail-hive-app -p abigail-entity-runtime-app",
     command: "cargo",
-    args: ["check", "-p", "abigail-app"],
+    args: ["check", "-p", "abigail-hive-app", "-p", "abigail-entity-runtime-app"],
   },
   {
-    label: "cargo test --workspace --exclude abigail-app --no-run",
+    label: "cargo test -p soul-forge -p abigail-skills --no-run",
     command: "cargo",
-    args: ["test", "--workspace", "--exclude", "abigail-app", "--no-run"],
+    args: ["test", "-p", "soul-forge", "-p", "abigail-skills", "--no-run"],
   },
   {
     label: "node scripts/check_crypto_claims.mjs",
@@ -29,16 +29,28 @@ const steps = [
     args: ["scripts/check_crypto_claims.mjs"],
   },
   {
-    label: "npm run check:command-contract",
+    label: "npm run build (hive-app)",
     command: npmCommand,
-    args: ["run", "check:command-contract"],
-    cwd: path.join(repoRoot, "tauri-app", "src-ui"),
+    args: ["run", "build"],
+    cwd: path.join(repoRoot, "hive-app", "src-ui"),
   },
   {
-    label: "npm test",
+    label: "npm test (hive-app)",
     command: npmCommand,
     args: ["test"],
-    cwd: path.join(repoRoot, "tauri-app", "src-ui"),
+    cwd: path.join(repoRoot, "hive-app", "src-ui"),
+  },
+  {
+    label: "npm run build (entity-runtime-app)",
+    command: npmCommand,
+    args: ["run", "build"],
+    cwd: path.join(repoRoot, "entity-runtime-app", "src-ui"),
+  },
+  {
+    label: "npm test (entity-runtime-app)",
+    command: npmCommand,
+    args: ["test"],
+    cwd: path.join(repoRoot, "entity-runtime-app", "src-ui"),
   },
 ];
 

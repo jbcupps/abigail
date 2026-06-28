@@ -29,7 +29,7 @@
 - [ ] `cargo fmt --check` passes
 - [ ] `cargo clippy` passes with no warnings
 - [ ] `cargo test --all` passes
-- [ ] Frontend builds (`cd tauri-app/src-ui && npm run build`)
+- [ ] Split frontend builds (`cd hive-app/src-ui && npm run build`; `cd entity-runtime-app/src-ui && npm run build`)
 - [ ] Manual testing performed (describe below)
 
 ## Screenshots
