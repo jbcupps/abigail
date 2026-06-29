@@ -67,3 +67,18 @@ gh workflow run release-fast.yml --ref main -f release_version=0.0.73 -f publish
 ```
 
 Set `publish_prerelease=true` only when you want those unsigned binaries published as a GitHub pre-release.
+
+Publish the current split Hive + Entity Runtime product as the latest unsigned release:
+
+```bash
+gh workflow run release-fast.yml --ref main -f release_version=0.0.74 -f publish_stable_release=true
+```
+
+The split product release uploads four side-by-side binaries for each platform:
+
+- Abigail Hive app
+- Abigail Entity Runtime app
+- hive-daemon
+- entity-daemon
+
+Users must keep the four files for their platform in the same directory and launch Abigail Hive.

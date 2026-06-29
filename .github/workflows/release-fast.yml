@@ -12,6 +12,11 @@ on:
         required: false
         type: boolean
         default: false
+      publish_stable_release:
+        description: "Publish the unsigned split-product binaries as the latest GitHub release"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -26,14 +31,22 @@ jobs:
             target: x86_64-pc-windows-msvc
             hive_binary: target/release/abigail-hive-app.exe
             runtime_binary: target/release/abigail-entity-runtime-app.exe
+            hive_daemon_binary: target/release/hive-daemon.exe
+            entity_daemon_binary: target/release/entity-daemon.exe
             hive_asset_name: Abigail-Hive-windows-x64.exe
             runtime_asset_name: Abigail-Entity-Runtime-windows-x64.exe
+            hive_daemon_asset_name: hive-daemon-windows-x64.exe
+            entity_daemon_asset_name: entity-daemon-windows-x64.exe
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             hive_binary: target/release/abigail-hive-app
             runtime_binary: target/release/abigail-entity-runtime-app
+            hive_daemon_binary: target/release/hive-daemon
+            entity_daemon_binary: target/release/entity-daemon
             hive_asset_name: Abigail-Hive-linux-x64
             runtime_asset_name: Abigail-Entity-Runtime-linux-x64
+            hive_daemon_asset_name: hive-daemon-linux-x64
+            entity_daemon_asset_name: entity-daemon-linux-x64
 
     runs-on: ${{ matrix.platform }}
 
@@ -83,7 +96,11 @@ jobs:
               VERSION="${MAJOR}.${MINOR}.${PATCH}"
             fi
           fi
-          TAG="v${VERSION}-stabilization.${{ github.run_number }}"
+          if [[ "${{ github.event.inputs.publish_stable_release }}" == "true" ]]; then
+            TAG="v${VERSION}"
+          else
+            TAG="v${VERSION}-stabilization.${{ github.run_number }}"
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
@@ -99,8 +116,8 @@ jobs:
       - name: Verify unsigned stabilization lane
         run: node scripts/check_unsigned_stabilization.mjs
 
-      - name: Build unsigned Hive and Runtime apps
-        run: cargo build --release -p abigail-hive-app -p abigail-entity-runtime-app
+      - name: Build unsigned split product
+        run: cargo build --release -p hive-daemon -p entity-daemon -p abigail-hive-app -p abigail-entity-runtime-app
 
       - name: Stage stabilization binaries
         shell: bash
@@ -108,6 +125,8 @@ jobs:
           mkdir -p stabilization-assets
           cp "${{ matrix.hive_binary }}" "stabilization-assets/${{ matrix.hive_asset_name }}"
           cp "${{ matrix.runtime_binary }}" "stabilization-assets/${{ matrix.runtime_asset_name }}"
+          cp "${{ matrix.hive_daemon_binary }}" "stabilization-assets/${{ matrix.hive_daemon_asset_name }}"
+          cp "${{ matrix.entity_daemon_binary }}" "stabilization-assets/${{ matrix.entity_daemon_asset_name }}"
           ls -la stabilization-assets
 
       - name: Upload stabilization artifacts
@@ -119,7 +138,7 @@ jobs:
 
   publish:
     needs: build
-    if: github.event.inputs.publish_prerelease == 'true' && needs.build.result == 'success'
+    if: (github.event.inputs.publish_prerelease == 'true' || github.event.inputs.publish_stable_release == 'true') && needs.build.result == 'success'
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -156,16 +175,31 @@ jobs:
             git push origin "$TAG"
           fi
 
-      - name: Create GitHub pre-release
+      - name: Create release metadata
+        id: release_meta
+        if: steps.artifacts.outputs.count != '0'
+        shell: bash
+        run: |
+          if [[ "${{ github.event.inputs.publish_stable_release }}" == "true" ]]; then
+            echo "name=Abigail v${{ needs.build.outputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=Abigail Stabilization ${{ needs.build.outputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub release
         if: steps.artifacts.outputs.count != '0'
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           tag_name: ${{ needs.build.outputs.tag }}
-          name: Abigail Stabilization ${{ needs.build.outputs.version }}
-          prerelease: true
+          name: ${{ steps.release_meta.outputs.name }}
+          prerelease: ${{ steps.release_meta.outputs.prerelease }}
           draft: false
           body: |
-            Unsigned stabilization binaries for the split Abigail Hive and Abigail Entity Runtime apps.
+            Unsigned binaries for the split Abigail Hive and Abigail Entity Runtime apps.
+
+            Download all four files for your platform into the same directory, then launch Abigail Hive.
 
             This lane intentionally excludes updater artifacts, installer migration logic, and release signing.
           files: |
