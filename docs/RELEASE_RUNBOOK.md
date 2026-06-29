@@ -55,6 +55,16 @@ gh release view v0.0.75 --json tagName,url,publishedAt,assets
 
 The workflow creates the tag if it does not already exist, uploads stable Windows installer asset names to the GitHub Release, and publishes the release only after the installer build succeeds. `beta` builds are prereleases; `main` and clean `vX.Y.Z` tag builds are stable releases.
 
+For `beta` releases, the workflow also downloads the published Windows installer back from the GitHub prerelease, verifies the expected internal split binaries are present, and uploads a `beta-uat-installer-verification` artifact containing the installer tag/version and inspected payload list.
+
+Run Windows Family Beta UAT against a downloaded installer with Claude CLI system auth:
+
+```powershell
+pwsh ./scripts/uat/run-uat.ps1 -Provider claude-cli -InstallerPath .\Abigail-windows-x64-setup.exe -HivePort 3141
+```
+
+For source-level diagnostics without installing Abigail, omit `-InstallerPath`. The default provider is `claude-cli`; use `-Provider openai -KeysetFile scripts/uat/uat-keys.env` only for legacy API-key diagnostics.
+
 ## Repository Switches
 
 The repeatable stabilization release path keeps signing and updater artifacts opt-in.

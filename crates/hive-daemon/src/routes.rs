@@ -8,13 +8,14 @@ use axum::{
 use hive_core::{
     ApiEnvelope, BestModelResponse, CliDetectResponse, CliProviderDetection, CreateEntityRequest,
     CreateEntityResponse, CreateForgeApprovalJobRequest, EntityInfo, EntityOpenResponse,
-    ForgeApprovalJobsResponse, HelperInfo, HiveDefaultResponse, HiveStatus, OutboxSyncRequest,
-    OutboxSyncResponse, ProviderConfig, ProviderModelInfo, ProviderModelsRequest,
-    ProviderModelsResponse, ProviderProfileResponse, RuntimeHeartbeatRequest,
-    RuntimeHeartbeatResponse, RuntimeRegistrationRequest, RuntimeSessionLease,
-    RuntimeSessionRequest, RuntimeSessionStatus, SecretListResponse, SecretValueResponse,
-    SetHiveDefaultRequest, SetSkillAssignmentsRequest, SignEntityRequest, SkillAssignmentsResponse,
-    StoreSecretRequest, UpdateEntityConfigRequest, UpdateEntityConfigResponse,
+    ExecutionReceiptsResponse, ForgeApprovalJobsResponse, HelperInfo, HiveDefaultResponse,
+    HiveStatus, OutboxSyncRequest, OutboxSyncResponse, ProviderConfig, ProviderModelInfo,
+    ProviderModelsRequest, ProviderModelsResponse, ProviderProfileResponse,
+    RuntimeHeartbeatRequest, RuntimeHeartbeatResponse, RuntimeRegistrationRequest,
+    RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus, SecretListResponse,
+    SecretValueResponse, SetHiveDefaultRequest, SetSkillAssignmentsRequest, SignEntityRequest,
+    SkillAssignmentsResponse, StoreSecretRequest, UpdateEntityConfigRequest,
+    UpdateEntityConfigResponse,
 };
 
 pub(crate) fn provider_config_from_hive_config(
@@ -701,10 +702,28 @@ pub async fn sync_runtime_outbox(
     Json(body): Json<OutboxSyncRequest>,
 ) -> Json<ApiEnvelope<OutboxSyncResponse>> {
     match state.runtime_control.lock() {
-        Ok(mut control) => match control.sync_outbox(body) {
+        Ok(mut control) => match control
+            .sync_outbox(body, |payload| state.identity_manager.sign_payload(payload))
+        {
             Ok(response) => Json(ApiEnvelope::success(response)),
             Err(e) => Json(ApiEnvelope::error(e)),
         },
+        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/entities/:id/execution/receipts
+// ---------------------------------------------------------------------------
+
+pub async fn get_execution_receipts(
+    State(state): State<HiveDaemonState>,
+    Path(entity_id): Path<String>,
+) -> Json<ApiEnvelope<ExecutionReceiptsResponse>> {
+    match state.runtime_control.lock() {
+        Ok(control) => Json(ApiEnvelope::success(
+            control.execution_receipts(&entity_id, 500),
+        )),
         Err(e) => Json(ApiEnvelope::error(e.to_string())),
     }
 }

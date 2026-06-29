@@ -5,6 +5,7 @@
 
 mod backup_ops;
 mod capability_matcher;
+mod execution_ledger;
 mod hive_client;
 mod job_scheduler;
 mod memory_consumer;
@@ -536,6 +537,7 @@ async fn main() -> anyhow::Result<()> {
         .map(|response| response.jobs)
         .unwrap_or_default();
     let outbox = Arc::new(outbox::RuntimeOutbox::load(&entity_dir, 256)?);
+    let execution_ledger = Arc::new(execution_ledger::ExecutionLedger::load(&entity_dir)?);
 
     // Soul reference: hash of the entity's soul documents, stamped on every
     // pipeline envelope so downstream observers know which identity version
@@ -569,6 +571,7 @@ async fn main() -> anyhow::Result<()> {
             abigail_router::ConstraintStore::with_data_dir(entity_dir.clone()),
         )),
         outbox,
+        execution_ledger,
         last_hive_sync_at_utc: Arc::new(tokio::sync::RwLock::new(None)),
         last_hive_error: Arc::new(tokio::sync::RwLock::new(None)),
         runtime_url: Arc::new(tokio::sync::RwLock::new(None)),
@@ -801,6 +804,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/status", get(routes::get_status))
         .route("/v1/session/status", get(routes::get_session_status))
         .route("/v1/outbox/status", get(routes::get_outbox_status))
+        .route("/v1/execution/events", get(routes::get_execution_events))
         .route("/v1/chat", post(routes::chat))
         .route("/v1/chat/stream", post(routes::chat_stream))
         .route("/v1/chat/cancel", post(routes::cancel_chat_stream))

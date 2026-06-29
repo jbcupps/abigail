@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
-use surrealdb::engine::local::{Db, Mem};
+use surrealdb::engine::local::{Db, Mem, SurrealKv};
 use surrealdb::types::{Number as SurrealNumber, RecordIdKey, Value as SurrealValue};
 use surrealdb::Surreal;
 use thiserror::Error;
@@ -354,10 +354,11 @@ fn shared_file_engine(path: &Path) -> Result<Arc<Surreal<Db>>> {
     let runtime = persistence_runtime()?;
     let endpoint_path = local_engine_open_path(path);
     let opened = block_on_runtime(runtime, async move {
-        // Persist the embedded store with the local Mem engine. This keeps the
-        // runtime single-host and avoids SurrealKV's Windows write failures.
-        Surreal::new::<Mem>(endpoint_path)
-            .sync("never")
+        // Persist the embedded store with SurrealKV and sync every committed
+        // write because chat history and execution receipts are part of the
+        // local trust record, not just a cache.
+        Surreal::new::<SurrealKv>(endpoint_path)
+            .sync("every")
             .await
             .map_err(PersistenceError::from)
     })?;
@@ -512,5 +513,79 @@ mod tests {
         assert_eq!(entity_doc.value, "entity");
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn conversation_turn_survives_uncached_reopen() {
+        let root =
+            std::env::temp_dir().join(format!("abigail-persistence-reopen-{}", Uuid::new_v4()));
+        let path = root.join("memory.db");
+
+        let test_bin = std::env::current_exe().unwrap();
+        for action in ["write", "read"] {
+            let status = std::process::Command::new(&test_bin)
+                .env("ABIGAIL_PERSISTENCE_REOPEN_CHILD", action)
+                .env("ABIGAIL_PERSISTENCE_REOPEN_PATH", &path)
+                .arg("--exact")
+                .arg("client::tests::conversation_turn_reopen_child")
+                .arg("--nocapture")
+                .status()
+                .unwrap();
+            assert!(status.success(), "child {action} failed: {status}");
+        }
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn conversation_turn_reopen_child() {
+        let Some(action) = std::env::var_os("ABIGAIL_PERSISTENCE_REOPEN_CHILD") else {
+            return;
+        };
+        let path = PathBuf::from(std::env::var_os("ABIGAIL_PERSISTENCE_REOPEN_PATH").unwrap());
+
+        #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+        struct TurnDoc {
+            id: String,
+            session_id: String,
+            role: String,
+            content: String,
+            created_at: String,
+        }
+
+        match action.to_string_lossy().as_ref() {
+            "write" => {
+                let handle =
+                    PersistenceHandle::open(&path, EntityScope::Entity("entity-a".to_string()))
+                        .unwrap();
+                handle
+                    .create(
+                        "conversation_turn",
+                        "turn-1",
+                        &TurnDoc {
+                            id: "turn-1".to_string(),
+                            session_id: "session-1".to_string(),
+                            role: "user".to_string(),
+                            content: "hello durable store".to_string(),
+                            created_at: "2026-01-01T00:00:00Z".to_string(),
+                        },
+                    )
+                    .unwrap();
+            }
+            "read" => {
+                let reopened =
+                    PersistenceHandle::open(&path, EntityScope::Entity("entity-a".to_string()))
+                        .unwrap();
+                let turns = reopened
+                    .query_vec::<TurnDoc>(
+                        "SELECT * FROM conversation_turn WHERE session_id = $session_id",
+                        &[QueryBinding::new("session_id", "session-1").unwrap()],
+                    )
+                    .unwrap();
+                assert_eq!(turns.len(), 1);
+                assert_eq!(turns[0].content, "hello durable store");
+            }
+            other => panic!("unknown child action {other}"),
+        }
     }
 }

@@ -14,6 +14,7 @@ use entity_core::{
     SubmitJobResponse, ToolExecRequest, ToolExecResponse, ToolInfo, TopicResultsResponse,
 };
 use futures_util::{Stream, StreamExt};
+use serde::Deserialize;
 use std::convert::Infallible;
 use tokio_util::sync::CancellationToken;
 
@@ -122,6 +123,32 @@ pub async fn get_outbox_status(
         Ok(status) => Json(ApiEnvelope::success(status)),
         Err(error) => Json(ApiEnvelope::error(error)),
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ExecutionEventsQuery {
+    session_id: Option<String>,
+    limit: Option<usize>,
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/execution/events
+// ---------------------------------------------------------------------------
+
+pub async fn get_execution_events(
+    State(state): State<EntityDaemonState>,
+    Query(query): Query<ExecutionEventsQuery>,
+) -> Json<ApiEnvelope<hive_core::ExecutionEventsResponse>> {
+    let limit = query.limit.unwrap_or(50).clamp(1, 500);
+    let events = state
+        .execution_ledger
+        .recent(query.session_id.as_deref(), limit);
+    let chain_valid = crate::execution_ledger::verify_chain(&events);
+    Json(ApiEnvelope::success(hive_core::ExecutionEventsResponse {
+        entity_id: state.entity_id.clone(),
+        chain_valid,
+        events,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -987,6 +1014,12 @@ mod tests {
                     64,
                 )
                 .expect("outbox"),
+            ),
+            execution_ledger: Arc::new(
+                crate::execution_ledger::ExecutionLedger::load(test_scratch_dir(
+                    "abigail_routes_test_ledger",
+                ))
+                .expect("execution ledger"),
             ),
             last_hive_sync_at_utc: Arc::new(tokio::sync::RwLock::new(None)),
             last_hive_error: Arc::new(tokio::sync::RwLock::new(None)),

@@ -1,5 +1,6 @@
 //! Entity daemon shared state.
 
+use crate::execution_ledger::ExecutionLedger;
 use crate::outbox::RuntimeOutbox;
 use abigail_core::AppConfig;
 use abigail_memory::{ArchiveExporter, MemoryStore};
@@ -82,6 +83,8 @@ pub struct EntityDaemonState {
     pub constraints: Arc<RwLock<ConstraintStore>>,
     /// Bounded local outbox for entity-scoped writes while Hive is unavailable.
     pub outbox: Arc<RuntimeOutbox>,
+    /// Local hash-chained execution ledger for committed runtime events.
+    pub execution_ledger: Arc<ExecutionLedger>,
     /// Last known successful or failed Hive sync state.
     pub last_hive_sync_at_utc: Arc<RwLock<Option<String>>>,
     pub last_hive_error: Arc<RwLock<Option<String>>>,
@@ -110,7 +113,10 @@ impl EntityDaemonState {
         payload: serde_json::Value,
     ) -> Result<(), String> {
         self.outbox
-            .enqueue(&self.entity_id, kind, payload)
+            .enqueue(&self.entity_id, kind, payload.clone())
+            .map(|_| ())?;
+        self.execution_ledger
+            .append_outbox_event(&self.entity_id, kind, &payload, &self.soul_ref)
             .map(|_| ())
     }
 

@@ -527,6 +527,54 @@ pub struct EntityOutboxRecord {
     pub payload: serde_json::Value,
 }
 
+/// Hash-chained execution event recorded by an Entity runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionEvent {
+    pub schema_version: String,
+    pub event_id: String,
+    pub entity_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    pub event_kind: String,
+    pub payload_digest: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_hash: Option<String>,
+    pub event_hash: String,
+    pub created_at_utc: String,
+    pub soul_ref: String,
+}
+
+/// Hive receipt over a batch of synced execution events.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionReceipt {
+    pub schema_version: String,
+    pub receipt_id: String,
+    pub entity_id: String,
+    pub runtime_id: String,
+    pub lease_id: String,
+    pub batch_hash: String,
+    pub event_count: usize,
+    pub accepted_record_ids: Vec<String>,
+    pub signature: String,
+    pub public_key: String,
+    pub signed_at_utc: String,
+}
+
+/// Diagnostic response for local Entity execution events.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionEventsResponse {
+    pub entity_id: String,
+    pub chain_valid: bool,
+    pub events: Vec<ExecutionEvent>,
+}
+
+/// Diagnostic response for Hive-signed execution receipts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionReceiptsResponse {
+    pub entity_id: String,
+    pub receipts: Vec<ExecutionReceipt>,
+}
+
 /// Batch sync request for runtime outbox records.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutboxSyncRequest {
@@ -541,6 +589,8 @@ pub struct OutboxSyncResponse {
     pub accepted_record_ids: Vec<String>,
     pub pending_records: usize,
     pub server_time_utc: String,
+    #[serde(default)]
+    pub execution_receipts: Vec<ExecutionReceipt>,
 }
 
 #[cfg(test)]

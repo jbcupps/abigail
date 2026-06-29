@@ -338,30 +338,29 @@ const claims = [
   },
   {
     id: "release-signing",
-    description: "Updater verification and platform signing requirements are enforced in release automation.",
+    description: "Updater verification and platform signing remain opt-in while unsigned Windows beta installers are the default stabilization lane.",
     docs: [
       {
         path: "documents/CRYPTO_INVENTORY.md",
         markers: [
-          "`scripts/enforce_release_prereqs.sh` blocks published release builds",
-          "`scripts/prepare_tauri_bundle_config.mjs` injects the updater verification public key",
-          "`scripts/generate_tauri_latest_manifest.mjs` emits `latest.json`",
+          "`scripts/enforce_release_prereqs.sh` blocks release builds only when signing requirements are explicitly enabled",
+          "`scripts/prepare_tauri_bundle_config.mjs` injects the updater verification public key only when updater signing is enabled",
+          "`scripts/generate_tauri_latest_manifest.mjs` emits `latest.json` only for updater-enabled releases",
         ],
       },
       {
         path: "documents/SECURITY_NOTES.md",
         markers: [
-          "Release builds inject the updater verification public key at build time.",
-          "Published updater metadata is generated from the signed updater artifacts attached to the release.",
-          "Official release workflows hard-fail without updater signing inputs.",
-          "Official Windows releases require Authenticode inputs.",
-          "Official macOS releases require Developer ID signing and notarization inputs.",
+          "Updater signing is opt-in during Windows beta stabilization.",
+          "Published updater metadata is generated only when updater signing is enabled.",
+          "Windows Authenticode signing is opt-in and enabled with `ABIGAIL_REQUIRE_WINDOWS_SIGNING=true`.",
+          "macOS releases remain paused while Apple signing is unavailable.",
         ],
       },
       {
         path: ".github/SECURITY.md",
         markers: [
-          "Official release workflows require updater signing inputs, Windows code signing inputs, and macOS signing/notarization inputs.",
+          "Updater signing and Windows code signing are opt-in release hardening paths; macOS signing/notarization is paused.",
         ],
       },
     ],
@@ -369,10 +368,10 @@ const claims = [
       {
         path: "scripts/enforce_release_prereqs.sh",
         markers: [
-          "require_var TAURI_SIGNING_PRIVATE_KEY",
-          "require_var TAURI_UPDATER_PUBKEY",
-          "require_var WINDOWS_SIGNING_CERT_BASE64",
-          "require_var APPLE_CERTIFICATE",
+          "Release prerequisite enforcement skipped (no signing requirements enabled).",
+          "ABIGAIL_REQUIRE_UPDATER_SIGNING",
+          "ABIGAIL_REQUIRE_WINDOWS_SIGNING",
+          "ABIGAIL_REQUIRE_MAC_SIGNING",
         ],
       },
       {
@@ -396,9 +395,10 @@ const claims = [
         path: ".github/workflows/release.yml",
         markers: [
           "Enforce release signing prerequisites",
-          "Configure updater and signing fields in tauri.conf.json",
-          "Assert updater config injection",
-          "Verify updater artifacts",
+          "ABIGAIL_REQUIRE_UPDATER_SIGNING",
+          "ABIGAIL_REQUIRE_WINDOWS_SIGNING",
+          "ABIGAIL_REQUIRE_MAC_SIGNING: \"false\"",
+          "Upload updater artifacts",
         ],
       },
       // release-fast.yml is the unsigned stabilization lane: signing and

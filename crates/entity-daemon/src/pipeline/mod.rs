@@ -309,6 +309,10 @@ mod tests {
             outbox: Arc::new(
                 crate::outbox::RuntimeOutbox::load(docs_dir.join("outbox"), 64).expect("outbox"),
             ),
+            execution_ledger: Arc::new(
+                crate::execution_ledger::ExecutionLedger::load(docs_dir.join("ledger"))
+                    .expect("execution ledger"),
+            ),
             last_hive_sync_at_utc: Arc::new(tokio::sync::RwLock::new(None)),
             last_hive_error: Arc::new(tokio::sync::RwLock::new(None)),
             runtime_url: Arc::new(tokio::sync::RwLock::new(None)),

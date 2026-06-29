@@ -164,6 +164,10 @@ async fn main() -> anyhow::Result<()> {
             post(routes::record_runtime_heartbeat),
         )
         .route("/v1/runtime/outbox/sync", post(routes::sync_runtime_outbox))
+        .route(
+            "/v1/entities/:id/execution/receipts",
+            get(routes::get_execution_receipts),
+        )
         .layer(cors)
         .with_state(state);
 

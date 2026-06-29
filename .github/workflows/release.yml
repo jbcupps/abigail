@@ -370,3 +370,67 @@ jobs:
             - macOS builds remain temporarily unavailable while Apple signing is paused.
             - Linux one-step packaging is planned after the Windows installer lane is stable.
           files: release-assets/*
+
+  verify-beta-installer:
+    needs: [build, publish]
+    if: needs.build.outputs.channel == 'beta'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - name: Install archive tools
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+
+      - name: Download published beta installer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p downloaded
+          gh release download "${{ needs.build.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "Abigail-windows-x64-setup.exe" \
+            --dir downloaded
+
+      - name: Verify bundled internal binaries
+        shell: bash
+        run: |
+          INSTALLER="downloaded/Abigail-windows-x64-setup.exe"
+          test -f "$INSTALLER"
+          7z l "$INSTALLER" > installer-contents.txt
+          for required in \
+            "abigail-entity-runtime-app.exe" \
+            "hive-daemon.exe" \
+            "entity-daemon.exe"
+          do
+            if ! grep -F "$required" installer-contents.txt >/dev/null; then
+              echo "Missing bundled internal binary: $required"
+              exit 1
+            fi
+          done
+
+      - name: Record beta UAT installer metadata
+        shell: bash
+        run: |
+          mkdir -p uat-release
+          node -e "
+            const fs = require('fs');
+            fs.writeFileSync('uat-release/beta-installer.json', JSON.stringify({
+              tag: '${{ needs.build.outputs.tag }}',
+              version: '${{ needs.build.outputs.version }}',
+              installer: 'Abigail-windows-x64-setup.exe',
+              channel: 'beta',
+              prerelease: true,
+              workflow_run_id: '${{ github.run_id }}',
+              repository: '${{ github.repository }}'
+            }, null, 2) + '\n');
+          "
+          cp installer-contents.txt uat-release/installer-contents.txt
+
+      - name: Upload beta UAT verification artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
+        with:
+          name: beta-uat-installer-verification
+          path: uat-release/*
+          if-no-files-found: error

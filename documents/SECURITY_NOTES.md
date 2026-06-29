@@ -72,13 +72,12 @@ Startup and agent load fail closed when any link in that chain fails.
 
 ## Updater and release trust
 
-- Release builds inject the updater verification public key at build time.
+- Updater signing is opt-in during Windows beta stabilization.
 - Release scripts normalize updater minisign key boxes to the base64 format consumed by Tauri 2 before bundling.
 - Windows release signing supports exportable `.pfx` inputs and hardware-token certificate-store signing on a self-hosted runner.
-- Published updater metadata is generated from the signed updater artifacts attached to the release.
-- Official release workflows hard-fail without updater signing inputs.
-- Official Windows releases require Authenticode inputs.
-- Official macOS releases require Developer ID signing and notarization inputs.
+- Published updater metadata is generated only when updater signing is enabled.
+- Windows Authenticode signing is opt-in and enabled with `ABIGAIL_REQUIRE_WINDOWS_SIGNING=true`.
+- macOS releases remain paused while Apple signing is unavailable.
 
 ## Other security controls
 
