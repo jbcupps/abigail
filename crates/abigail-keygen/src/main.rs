@@ -250,7 +250,7 @@ impl KeygenApp {
 }
 
 impl eframe::App for KeygenApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.exit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
@@ -263,145 +263,145 @@ impl eframe::App for KeygenApp {
                 self.copied = false;
             }
         }
+    }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // Error state
-            if let Some(err) = &self.error {
-                ui.heading("Setup Error");
-                ui.separator();
-                ui.colored_label(egui::Color32::RED, err.clone());
-                ui.separator();
-                if ui.button("Close").clicked() {
-                    std::process::exit(1);
-                }
-                return;
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Error state
+        if let Some(err) = &self.error {
+            ui.heading("Setup Error");
+            ui.separator();
+            ui.colored_label(egui::Color32::RED, err.clone());
+            ui.separator();
+            if ui.button("Close").clicked() {
+                std::process::exit(1);
+            }
+            return;
+        }
+
+        let private_key = match &self.private_key {
+            Some(k) => k.clone(),
+            None => return,
+        };
+
+        ui.spacing_mut().item_spacing.y = 8.0;
+
+        // Security warning banner
+        egui::Frame::NONE
+            .fill(egui::Color32::from_rgb(80, 60, 0))
+            .inner_margin(egui::Margin::same(10))
+            .corner_radius(4)
+            .show(ui, |ui| {
+                ui.colored_label(
+                    egui::Color32::YELLOW,
+                    egui::RichText::new("CRITICAL: SAVE YOUR PRIVATE KEY")
+                        .strong()
+                        .size(16.0),
+                );
+                ui.colored_label(
+                    egui::Color32::from_rgb(255, 220, 100),
+                    "This is the ONLY time you will see this key. Abigail does NOT store it.",
+                );
+            });
+
+        ui.add_space(4.0);
+
+        // Private key display
+        ui.label("Your Private Signing Key (Ed25519, Base64):");
+        let mut key_text = private_key.clone();
+        ui.add(
+            egui::TextEdit::multiline(&mut key_text)
+                .desired_rows(2)
+                .desired_width(f32::INFINITY)
+                .font(egui::TextStyle::Monospace)
+                .interactive(false),
+        );
+
+        // Copy + Save buttons
+        ui.horizontal(|ui| {
+            let copy_label = if self.copied {
+                "Copied!"
+            } else {
+                "Copy to Clipboard"
+            };
+            if ui.button(copy_label).clicked() {
+                ui.ctx().copy_text(private_key.clone());
+                self.copied = true;
+                self.copied_timer = 2.0;
             }
 
-            let private_key = match &self.private_key {
-                Some(k) => k.clone(),
-                None => return,
-            };
-
-            ui.spacing_mut().item_spacing.y = 8.0;
-
-            // Security warning banner
-            egui::Frame::none()
-                .fill(egui::Color32::from_rgb(80, 60, 0))
-                .inner_margin(egui::Margin::same(10.0))
-                .rounding(4.0)
-                .show(ui, |ui| {
-                    ui.colored_label(
-                        egui::Color32::YELLOW,
-                        egui::RichText::new("CRITICAL: SAVE YOUR PRIVATE KEY")
-                            .strong()
-                            .size(16.0),
-                    );
-                    ui.colored_label(
-                        egui::Color32::from_rgb(255, 220, 100),
-                        "This is the ONLY time you will see this key. Abigail does NOT store it.",
-                    );
-                });
-
-            ui.add_space(4.0);
-
-            // Private key display
-            ui.label("Your Private Signing Key (Ed25519, Base64):");
-            let mut key_text = private_key.clone();
-            ui.add(
-                egui::TextEdit::multiline(&mut key_text)
-                    .desired_rows(2)
-                    .desired_width(f32::INFINITY)
-                    .font(egui::TextStyle::Monospace)
-                    .interactive(false),
-            );
-
-            // Copy + Save buttons
-            ui.horizontal(|ui| {
-                let copy_label = if self.copied {
-                    "Copied!"
-                } else {
-                    "Copy to Clipboard"
-                };
-                if ui.button(copy_label).clicked() {
-                    ui.output_mut(|o| o.copied_text = private_key.clone());
-                    self.copied = true;
-                    self.copied_timer = 2.0;
-                }
-
-                if ui.button("Save to File...").clicked() {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .set_title("Save Private Key")
-                        .set_file_name("abigail_private_key.txt")
-                        .save_file()
-                    {
-                        if let Err(e) = std::fs::write(&path, &private_key) {
-                            self.error = Some(format!("Failed to save key: {}", e));
-                        }
+            if ui.button("Save to File...").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_title("Save Private Key")
+                    .set_file_name("abigail_private_key.txt")
+                    .save_file()
+                {
+                    if let Err(e) = std::fs::write(&path, &private_key) {
+                        self.error = Some(format!("Failed to save key: {}", e));
                     }
                 }
+            }
+        });
+
+        ui.add_space(4.0);
+
+        // Public key path
+        ui.label("Public key saved to:");
+        let mut path_text = self.public_key_path.clone();
+        ui.add(
+            egui::TextEdit::singleline(&mut path_text)
+                .desired_width(f32::INFINITY)
+                .font(egui::TextStyle::Monospace)
+                .interactive(false),
+        );
+
+        ui.add_space(4.0);
+
+        // Security warnings
+        egui::Frame::NONE
+            .fill(egui::Color32::from_rgb(60, 20, 20))
+            .inner_margin(egui::Margin::same(10))
+            .corner_radius(4)
+            .show(ui, |ui| {
+                ui.colored_label(
+                    egui::Color32::from_rgb(255, 100, 100),
+                    egui::RichText::new("SECURITY WARNINGS").strong(),
+                );
+                ui.colored_label(
+                    egui::Color32::from_rgb(255, 180, 180),
+                    "- This key proves you are Abigail's legitimate mentor.",
+                );
+                ui.colored_label(
+                    egui::Color32::from_rgb(255, 180, 180),
+                    "- Store it securely (password manager, encrypted drive).",
+                );
+                ui.colored_label(
+                    egui::Color32::from_rgb(255, 180, 180),
+                    "- Never share this key with anyone or any service.",
+                );
+                ui.colored_label(
+                    egui::Color32::from_rgb(255, 180, 180),
+                    "- If you lose this key: you cannot re-verify integrity after reinstall.",
+                );
             });
 
-            ui.add_space(4.0);
+        ui.add_space(4.0);
 
-            // Public key path
-            ui.label("Public key saved to:");
-            let mut path_text = self.public_key_path.clone();
-            ui.add(
-                egui::TextEdit::singleline(&mut path_text)
-                    .desired_width(f32::INFINITY)
-                    .font(egui::TextStyle::Monospace)
-                    .interactive(false),
-            );
+        // Checkbox
+        ui.checkbox(
+            &mut self.key_saved,
+            "I have saved my private key securely and understand I will not see it again.",
+        );
 
-            ui.add_space(4.0);
+        ui.add_space(4.0);
 
-            // Security warnings
-            egui::Frame::none()
-                .fill(egui::Color32::from_rgb(60, 20, 20))
-                .inner_margin(egui::Margin::same(10.0))
-                .rounding(4.0)
-                .show(ui, |ui| {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(255, 100, 100),
-                        egui::RichText::new("SECURITY WARNINGS").strong(),
-                    );
-                    ui.colored_label(
-                        egui::Color32::from_rgb(255, 180, 180),
-                        "- This key proves you are Abigail's legitimate mentor.",
-                    );
-                    ui.colored_label(
-                        egui::Color32::from_rgb(255, 180, 180),
-                        "- Store it securely (password manager, encrypted drive).",
-                    );
-                    ui.colored_label(
-                        egui::Color32::from_rgb(255, 180, 180),
-                        "- Never share this key with anyone or any service.",
-                    );
-                    ui.colored_label(
-                        egui::Color32::from_rgb(255, 180, 180),
-                        "- If you lose this key: you cannot re-verify integrity after reinstall.",
-                    );
-                });
-
-            ui.add_space(4.0);
-
-            // Checkbox
-            ui.checkbox(
-                &mut self.key_saved,
-                "I have saved my private key securely and understand I will not see it again.",
-            );
-
-            ui.add_space(4.0);
-
-            // Continue button
-            ui.add_enabled_ui(self.key_saved, |ui| {
-                if ui
-                    .button(egui::RichText::new("Continue").size(16.0).strong())
-                    .clicked()
-                {
-                    self.exit_requested = true;
-                }
-            });
+        // Continue button
+        ui.add_enabled_ui(self.key_saved, |ui| {
+            if ui
+                .button(egui::RichText::new("Continue").size(16.0).strong())
+                .clicked()
+            {
+                self.exit_requested = true;
+            }
         });
     }
 }

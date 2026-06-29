@@ -7,10 +7,11 @@
 //! Scope-specific Data Encryption Keys (DEKs) are derived via HKDF-SHA256
 //! with a scope label as the `info` parameter.
 
-use aes_gcm::aead::{Aead, KeyInit, OsRng};
-use aes_gcm::{AeadCore, Aes256Gcm, Key, Nonce};
+use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::{Aes256Gcm, Nonce};
 use argon2::{Algorithm, Argon2, Params, Version};
 use hkdf::Hkdf;
+use rand::{rngs::OsRng, RngCore};
 use sha2::Sha256;
 
 use crate::error::{CoreError, Result};
@@ -22,15 +23,17 @@ const KEY_LEN: usize = 32;
 /// Encrypt `plaintext` with AES-256-GCM using the given 32-byte key.
 /// Returns a versioned envelope: `[version][nonce][ciphertext+tag]`.
 pub fn seal(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<Vec<u8>> {
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
-    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let cipher = Aes256Gcm::new_from_slice(key).expect("AES-256-GCM accepts exactly 32-byte keys");
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::try_from(&nonce_bytes[..]).expect("AES-GCM nonce is 12 bytes");
     let ciphertext = cipher
         .encrypt(&nonce, plaintext)
         .map_err(|e| CoreError::Crypto(format!("AES-GCM seal failed: {}", e)))?;
 
     let mut envelope = Vec::with_capacity(1 + NONCE_LEN + ciphertext.len());
     envelope.push(ENVELOPE_VERSION);
-    envelope.extend_from_slice(&nonce);
+    envelope.extend_from_slice(&nonce_bytes);
     envelope.extend_from_slice(&ciphertext);
     Ok(envelope)
 }
@@ -51,11 +54,12 @@ pub fn open(key: &[u8; KEY_LEN], envelope: &[u8]) -> Result<Vec<u8>> {
     if envelope.len() < min_len {
         return Err(CoreError::Crypto("Envelope too short".into()));
     }
-    let nonce = Nonce::from_slice(&envelope[1..1 + NONCE_LEN]);
+    let nonce =
+        Nonce::try_from(&envelope[1..1 + NONCE_LEN]).expect("validated AES-GCM nonce length");
     let ciphertext = &envelope[1 + NONCE_LEN..];
 
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
-    cipher.decrypt(nonce, ciphertext).map_err(|_| {
+    let cipher = Aes256Gcm::new_from_slice(key).expect("AES-256-GCM accepts exactly 32-byte keys");
+    cipher.decrypt(&nonce, ciphertext).map_err(|_| {
         CoreError::Crypto("AES-GCM decryption failed (wrong key or tampered data)".into())
     })
 }
@@ -113,7 +117,6 @@ pub fn derive_key_from_passphrase_argon2(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aes_gcm::aead::rand_core::RngCore;
 
     fn test_key() -> [u8; KEY_LEN] {
         let mut k = [0u8; KEY_LEN];
