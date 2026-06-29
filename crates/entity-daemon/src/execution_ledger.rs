@@ -59,16 +59,16 @@ impl ExecutionLedger {
         let created_at_utc = chrono::Utc::now().to_rfc3339();
         let payload_digest = sha256_hex(&serde_json::to_vec(payload).map_err(|e| e.to_string())?);
         let event_id = uuid::Uuid::new_v4().to_string();
-        let event_hash = event_hash(
-            &event_id,
+        let event_hash = event_hash(EventHashInput {
+            event_id: &event_id,
             entity_id,
-            session_id.as_deref(),
+            session_id: session_id.as_deref(),
             event_kind,
-            &payload_digest,
-            previous_hash.as_deref(),
-            &created_at_utc,
+            payload_digest: &payload_digest,
+            previous_hash: previous_hash.as_deref(),
+            created_at_utc: &created_at_utc,
             soul_ref,
-        );
+        });
         let event = ExecutionEvent {
             schema_version: "execution_event_v1".to_string(),
             event_id,
@@ -129,16 +129,16 @@ pub fn verify_chain(events: &[ExecutionEvent]) -> bool {
         if event.previous_hash != previous_hash {
             return false;
         }
-        let expected = event_hash(
-            &event.event_id,
-            &event.entity_id,
-            event.session_id.as_deref(),
-            &event.event_kind,
-            &event.payload_digest,
-            event.previous_hash.as_deref(),
-            &event.created_at_utc,
-            &event.soul_ref,
-        );
+        let expected = event_hash(EventHashInput {
+            event_id: &event.event_id,
+            entity_id: &event.entity_id,
+            session_id: event.session_id.as_deref(),
+            event_kind: &event.event_kind,
+            payload_digest: &event.payload_digest,
+            previous_hash: event.previous_hash.as_deref(),
+            created_at_utc: &event.created_at_utc,
+            soul_ref: &event.soul_ref,
+        });
         if event.event_hash != expected {
             return false;
         }
@@ -147,26 +147,28 @@ pub fn verify_chain(events: &[ExecutionEvent]) -> bool {
     true
 }
 
-fn event_hash(
-    event_id: &str,
-    entity_id: &str,
-    session_id: Option<&str>,
-    event_kind: &str,
-    payload_digest: &str,
-    previous_hash: Option<&str>,
-    created_at_utc: &str,
-    soul_ref: &str,
-) -> String {
+struct EventHashInput<'a> {
+    event_id: &'a str,
+    entity_id: &'a str,
+    session_id: Option<&'a str>,
+    event_kind: &'a str,
+    payload_digest: &'a str,
+    previous_hash: Option<&'a str>,
+    created_at_utc: &'a str,
+    soul_ref: &'a str,
+}
+
+fn event_hash(input: EventHashInput<'_>) -> String {
     let payload = format!(
         "execution_event_v1\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
-        event_id,
-        entity_id,
-        session_id.unwrap_or(""),
-        event_kind,
-        payload_digest,
-        previous_hash.unwrap_or(""),
-        created_at_utc,
-        soul_ref
+        input.event_id,
+        input.entity_id,
+        input.session_id.unwrap_or(""),
+        input.event_kind,
+        input.payload_digest,
+        input.previous_hash.unwrap_or(""),
+        input.created_at_utc,
+        input.soul_ref
     );
     sha256_hex(payload.as_bytes())
 }
