@@ -84,6 +84,18 @@ assert(
   release.includes("tags:"),
   "Beta/release lane must stay explicit via tags or manual dispatch."
 );
+assert(
+  release.includes("branches:") && release.includes("- beta"),
+  "Full installer release must trigger from the permanent beta branch."
+);
+assert(
+  release.includes('-beta.${{ github.run_number }}'),
+  "Beta installer releases must receive run-numbered beta tags."
+);
+assert(
+  release.includes("prerelease: ${{ needs.build.outputs.prerelease }}"),
+  "Beta installer releases must be published as prereleases."
+);
 for (const forbidden of [
   "cd tauri-app",
   "tauri-app/src-ui",

@@ -1,6 +1,6 @@
 # Unified CI quality gate.
 #
-# Runs 5 parallel jobs on push to main and PRs. CodeQL also runs weekly.
+# Runs 5 parallel jobs on push to main/beta and PRs. CodeQL also runs weekly.
 # The "gate" job requires lint, test, and frontend to pass; audit and CodeQL
 # are advisory. Configure branch protection to require the "gate" check.
 
@@ -8,9 +8,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, beta]
   pull_request:
-    branches: [main]
+    branches: [main, beta]
   schedule:
     - cron: '17 4 * * 0'  # Weekly on Sunday at 04:17 UTC (CodeQL)
 

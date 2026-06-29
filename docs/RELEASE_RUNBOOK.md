@@ -2,6 +2,12 @@
 
 This repo has two repeatable GitHub Actions release lanes.
 
+## Branch Channels
+
+- `beta` is the permanent iteration and UAT branch. Merge implementation PRs there first.
+- Every push to `beta` runs the one-step Windows installer workflow and publishes a GitHub prerelease tagged `vX.Y.Z-beta.N`.
+- `main` is the promoted stable branch. Stable releases use clean `vX.Y.Z` tags and are not prereleases.
+
 ## Full Installer Release
 
 Workflow: `Abigail Installer Release` (`.github/workflows/release.yml`)
@@ -12,6 +18,14 @@ Current active platforms:
 - Windows x64 MSI installer: `Abigail-windows-x64.msi`
 
 The Windows installer is the family-facing release lane. It installs one `Abigail` app icon and bundles the internal split runtime pieces (`Abigail Hive`, `Abigail Entity Runtime`, `hive-daemon`, and `entity-daemon`) so users do not download separate binaries.
+
+Run a beta UAT release from the permanent beta branch:
+
+```bash
+git push origin HEAD:beta
+```
+
+The workflow tags the build as `v<next-stable-version>-beta.<run-number>` and publishes it as a prerelease.
 
 Linux one-step packaging is planned after the Windows lane is stable. macOS/Apple builds remain paused until the Apple Developer agreement/signing issue is resolved.
 
@@ -39,7 +53,7 @@ Verify the release:
 gh release view v0.0.75 --json tagName,url,publishedAt,assets
 ```
 
-The workflow creates the `vX.Y.Z` tag if it does not already exist, uploads stable Windows installer asset names to the GitHub Release, and publishes the release only after the installer build succeeds.
+The workflow creates the tag if it does not already exist, uploads stable Windows installer asset names to the GitHub Release, and publishes the release only after the installer build succeeds. `beta` builds are prereleases; `main` and clean `vX.Y.Z` tag builds are stable releases.
 
 ## Repository Switches
 
