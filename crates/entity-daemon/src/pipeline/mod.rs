@@ -269,7 +269,8 @@ mod tests {
         let _ = std::fs::create_dir_all(&docs_dir);
         let stream_broker: Arc<dyn abigail_streaming::StreamBroker> =
             Arc::new(MemoryBroker::new(128));
-        let queue_store = PersistenceHandle::open_ephemeral(EntityScope::Hive).unwrap();
+        let queue_scope = EntityScope::Entity(format!("pipeline-queue-{}", uuid::Uuid::new_v4()));
+        let queue_store = PersistenceHandle::open_ephemeral(queue_scope).unwrap();
         let job_queue = Arc::new(abigail_queue::JobQueue::new(
             queue_store,
             stream_broker.clone(),
