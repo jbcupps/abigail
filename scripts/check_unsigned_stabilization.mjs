@@ -119,7 +119,7 @@ for (const required of [
   );
 }
 assert(
-  release.includes("resources\\\\hive-daemon.exe"),
+  release.includes("resources[\\\\\\\\/]$binary"),
   "Beta installer verification must assert the installed resources path for hive-daemon.exe."
 );
 assert(

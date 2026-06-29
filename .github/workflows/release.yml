@@ -413,13 +413,13 @@ jobs:
           INSTALLER="downloaded/Abigail-windows-x64-setup.exe"
           test -f "$INSTALLER"
           7z l "$INSTALLER" > installer-contents.txt
-          for required in \
-            "resources\\abigail-entity-runtime-app.exe" \
-            "resources\\hive-daemon.exe" \
-            "resources\\entity-daemon.exe"
+          for binary in \
+            "abigail-entity-runtime-app.exe" \
+            "hive-daemon.exe" \
+            "entity-daemon.exe"
           do
-            if ! grep -F "$required" installer-contents.txt >/dev/null; then
-              echo "Missing bundled internal binary at installer resource path: $required"
+            if ! grep -E "resources[\\\\/]$binary" installer-contents.txt >/dev/null; then
+              echo "Missing bundled internal binary at installer resource path: resources/$binary"
               exit 1
             fi
           done
