@@ -126,6 +126,10 @@ assert(
   release.includes("Verify packaged frontend assets"),
   "Beta installer verification must assert packaged frontend assets are relative and include startup video."
 );
+assert(
+  release.includes("data-abigail-app-css") && release.includes("--color-primary"),
+  "Beta installer verification must assert Abigail CSS is bundled into the frontend JavaScript."
+);
 
 for (const app of ["hive-app", "entity-runtime-app"]) {
   const viteConfig = fs.readFileSync(`${app}/src-ui/vite.config.ts`, "utf8");
@@ -137,6 +141,12 @@ for (const app of ["hive-app", "entity-runtime-app"]) {
   assert(
     splash.includes('src="./video/startup.mp4"'),
     `${app} splash video must use a relative packaged asset path.`
+  );
+  const main = fs.readFileSync(`${app}/src-ui/src/main.tsx`, "utf8");
+  assert(
+    main.includes('import appCss from "./index.css?inline"') &&
+      main.includes("data-abigail-app-css"),
+    `${app} must inject the processed CSS from JavaScript so packaged WebViews cannot render unstyled.`
   );
 }
 

@@ -227,8 +227,20 @@ jobs:
               echo "$app is missing dist/video/startup.mp4"
               exit 1
             fi
+            if grep -E 'rel="stylesheet"|href="./assets/.*\.css|href="/assets/.*\.css' "$app/src-ui/dist/index.html"; then
+              echo "$app frontend still depends on an external stylesheet in packaged index.html"
+              exit 1
+            fi
             if grep -E 'src="/assets|href="/assets|src="/video|href="/video' "$app/src-ui/dist/index.html"; then
               echo "$app frontend emitted absolute packaged asset paths"
+              exit 1
+            fi
+            if ! grep -R --include '*.js' -F "data-abigail-app-css" "$app/src-ui/dist/assets" >/dev/null; then
+              echo "$app frontend bundle does not install inline Abigail CSS"
+              exit 1
+            fi
+            if ! grep -R --include '*.js' -F -- "--color-primary" "$app/src-ui/dist/assets" >/dev/null; then
+              echo "$app frontend bundle is missing Abigail theme CSS"
               exit 1
             fi
           done
