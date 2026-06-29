@@ -58,8 +58,25 @@ for (const forbidden of [
   );
 }
 assert(
-  releaseFast.includes("cargo build --release -p abigail-hive-app -p abigail-entity-runtime-app"),
-  "Unsigned stabilization workflow must build the split Hive and Entity Runtime apps."
+  releaseFast.includes(
+    "cargo build --release -p hive-daemon -p entity-daemon -p abigail-hive-app -p abigail-entity-runtime-app"
+  ),
+  "Unsigned stabilization workflow must build the full split product."
+);
+for (const requiredAsset of [
+  "hive-daemon-windows-x64.exe",
+  "entity-daemon-windows-x64.exe",
+  "hive-daemon-linux-x64",
+  "entity-daemon-linux-x64",
+]) {
+  assert(
+    releaseFast.includes(requiredAsset),
+    `Unsigned stabilization workflow must ship side-by-side daemon binary ${requiredAsset}.`
+  );
+}
+assert(
+  releaseFast.includes("publish_stable_release"),
+  "Unsigned stabilization workflow must be able to publish a corrected stable split-product release."
 );
 
 const release = fs.readFileSync(".github/workflows/release.yml", "utf8");
