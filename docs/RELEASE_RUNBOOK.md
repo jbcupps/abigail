@@ -4,20 +4,21 @@ This repo has two repeatable GitHub Actions release lanes.
 
 ## Full Installer Release
 
-Workflow: `Beta Release (Signed)` (`.github/workflows/release.yml`)
+Workflow: `Abigail Installer Release` (`.github/workflows/release.yml`)
 
 Current active platforms:
 
 - Windows x64 NSIS installer: `Abigail-windows-x64-setup.exe`
 - Windows x64 MSI installer: `Abigail-windows-x64.msi`
-- Ubuntu 22.04+ x64 Debian package: `Abigail-linux-x64.deb`
 
-macOS/Apple builds are temporarily removed from the active build matrix. The dormant macOS steps remain in the workflow so the lane can be restored later by re-adding the macOS matrix entry after the Apple Developer agreement/signing issue is resolved.
+The Windows installer is the family-facing release lane. It installs one `Abigail` app icon and bundles the internal split runtime pieces (`Abigail Hive`, `Abigail Entity Runtime`, `hive-daemon`, and `entity-daemon`) so users do not download separate binaries.
+
+Linux one-step packaging is planned after the Windows lane is stable. macOS/Apple builds remain paused until the Apple Developer agreement/signing issue is resolved.
 
 Run a specific release:
 
 ```bash
-gh workflow run release.yml --ref main -f release_version=0.0.73
+gh workflow run release.yml --ref main -f release_version=0.0.75
 ```
 
 Run the next patch release automatically:
@@ -35,10 +36,10 @@ gh run watch --repo jbcupps/abigail
 Verify the release:
 
 ```bash
-gh release view v0.0.73 --json tagName,url,publishedAt,assets
+gh release view v0.0.75 --json tagName,url,publishedAt,assets
 ```
 
-The workflow creates the `vX.Y.Z` tag if it does not already exist, uploads stable asset names to the GitHub Release, and publishes the release only after both active platform builds succeed.
+The workflow creates the `vX.Y.Z` tag if it does not already exist, uploads stable Windows installer asset names to the GitHub Release, and publishes the release only after the installer build succeeds.
 
 ## Repository Switches
 
@@ -55,6 +56,7 @@ Current expected repeat-build posture:
 - Leave `ABIGAIL_REQUIRE_WINDOWS_SIGNING` unset unless the signing machine is ready.
 - Leave `ABIGAIL_REQUIRE_UPDATER_SIGNING` unset until the updater signing lane is intentionally restored.
 - Keep Apple/macOS out of the build matrix until the Apple Developer account agreement/signing problem is fixed.
+- Keep Linux out of the full installer matrix until the one-step Linux package is intentionally added.
 
 ## Unsigned Stabilization Build
 
@@ -68,7 +70,7 @@ gh workflow run release-fast.yml --ref main -f release_version=0.0.73 -f publish
 
 Set `publish_prerelease=true` only when you want those unsigned binaries published as a GitHub pre-release.
 
-Publish the current split Hive + Entity Runtime product as the latest unsigned release:
+Publish the split Hive + Entity Runtime product as a diagnostic unsigned release only:
 
 ```bash
 gh workflow run release-fast.yml --ref main -f release_version=0.0.74 -f publish_stable_release=true
@@ -81,4 +83,4 @@ The split product release uploads four side-by-side binaries for each platform:
 - hive-daemon
 - entity-daemon
 
-Users must keep the four files for their platform in the same directory and launch Abigail Hive.
+This lane is for diagnostics and portable validation. Family-facing releases should use the full Windows installer lane so users install and launch one `Abigail` app.

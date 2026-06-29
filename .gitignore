@@ -25,6 +25,8 @@ hive-app/src-ui/node_modules/
 hive-app/src-ui/dist/
 entity-runtime-app/src-ui/node_modules/
 entity-runtime-app/src-ui/dist/
+hive-app/resources/*
+!hive-app/resources/.gitkeep
 
 # Splash video — large binary asset; the splash falls back to a branded card if
 # absent. Re-add via Git LFS / a build-time fetch rather than committing it.

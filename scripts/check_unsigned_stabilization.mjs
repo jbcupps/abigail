@@ -84,6 +84,28 @@ assert(
   release.includes("tags:"),
   "Beta/release lane must stay explicit via tags or manual dispatch."
 );
+for (const forbidden of [
+  "cd tauri-app",
+  "tauri-app/src-ui",
+  "tauri-app/tauri.conf.json",
+]) {
+  assert(
+    !release.includes(forbidden),
+    `Full installer release must not build the legacy tauri-app path (${forbidden}).`
+  );
+}
+for (const required of [
+  "hive-app/tauri.conf.json",
+  "stage_split_installer_resources.ps1",
+  "hive-app/resources/abigail-entity-runtime-app.exe",
+  "hive-app/resources/hive-daemon.exe",
+  "hive-app/resources/entity-daemon.exe",
+]) {
+  assert(
+    release.includes(required),
+    `Full installer release must stage the split Abigail product (${required}).`
+  );
+}
 
 const prereqs = fs.readFileSync("scripts/enforce_release_prereqs.sh", "utf8");
 assert(

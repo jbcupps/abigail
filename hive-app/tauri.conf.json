@@ -1,7 +1,7 @@
 {
-  "productName": "Abigail Hive",
+  "productName": "Abigail",
   "version": "0.0.1",
-  "identifier": "com.abigail.hive",
+  "identifier": "com.abigail",
   "build": {
     "beforeDevCommand": { "cwd": "src-ui", "script": "npm run dev" },
     "devUrl": "http://localhost:1421",
@@ -23,11 +23,28 @@
     ]
   },
   "bundle": {
-    "active": false,
+    "active": true,
+    "targets": "all",
     "icon": [
       "../tauri-app/icons/32x32.png",
       "../tauri-app/icons/128x128.png",
+      "../tauri-app/icons/128x128@2x.png",
       "../tauri-app/icons/icon.ico"
-    ]
+    ],
+    "resources": [],
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "../tauri-app/nsis-hooks.nsh"
+      }
+    },
+    "longDescription": "Abigail - private family AI Entity coordinator",
+    "shortDescription": "Abigail family AI coordinator",
+    "copyright": "Copyright (c) 2025-2026 Jim Cupps",
+    "category": "Utility"
   }
 }
