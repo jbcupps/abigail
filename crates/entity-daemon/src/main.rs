@@ -489,9 +489,15 @@ async fn main() -> anyhow::Result<()> {
             .map_err(|e| tracing::warn!("Failed to start memory chat-topic subscriber: {}", e))
             .ok();
 
-    let queue_store =
+    let queue_store = if abigail_persistence::ci_mode_enabled()
+        && std::env::var_os("ABIGAIL_DAEMON_INTEGRATION").is_some()
+    {
+        tracing::info!("Using ephemeral Hive queue store for daemon integration tests");
+        PersistenceHandle::open_ephemeral(EntityScope::Hive)
+    } else {
         PersistenceHandle::open(HiveEntity::memory_db_path(&data_root), EntityScope::Hive)
-            .map_err(|e| anyhow::anyhow!("Failed to open Hive queue store: {}", e))?;
+    }
+    .map_err(|e| anyhow::anyhow!("Failed to open Hive queue store: {}", e))?;
     let job_queue = Arc::new(JobQueue::new(queue_store, stream_broker.clone()));
     let recovered = job_queue.recover_running_jobs("entity-daemon restarted")?;
     if recovered > 0 {
