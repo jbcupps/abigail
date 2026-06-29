@@ -10,6 +10,8 @@ Abigail is the private Entity Coordinator and Manager for real homes and familie
 - Abigail Hive should remain visible and usable even while an Entity is open.
 - The active implementation split is two app roots: `hive-app` for control-plane work and `entity-runtime-app` for the chat/runtime surface, but the family-facing product must install and launch as one `Abigail` app.
 - The full installer lane must package Hive, Entity Runtime, `hive-daemon`, and `entity-daemon` together so non-technical families never handle separate binaries.
+- `beta` is the permanent primary iteration branch. Agents should target PRs and automation at `beta` for UAT builds, then promote validated beta changes to `main`.
+- Every push to `beta` must produce a properly tagged beta installer prerelease for UAT using the `vX.Y.Z-beta.N` tag pattern.
 - Mentor chat monitor preprompt flow is in place and out-of-band monitors remain non-blocking.
 - DevOps Forge worker is active and subscribed to `topic.skill.forge.request`.
 - Forge pipeline writes sandbox-gated artifacts to `skills/dynamic/`, updates `skills/registry.toml`, and publishes `topic.skill.forge.response`.
@@ -17,16 +19,18 @@ Abigail is the private Entity Coordinator and Manager for real homes and familie
 ## Active Plan (Family-First Priorities)
 
 1. Keep the always-open Hive shell and Hive-owned model management stable and test-backed.
-2. Keep the one-step installer and one-app launch path repeatable, tested, and aligned with the split runtime architecture.
-3. Harden Forge envelope validation and failure telemetry (keep it invisible and safe for the user).
-4. Expand end-to-end coverage for forge request/response and watcher hot-reload.
-5. Keep memory/safety/id-superego observers out-of-band (non-blocking chat path) so the family experience stays smooth.
-6. Keep the unsigned stabilization lane free of installer upgrade-preserve logic, updater assumptions, and Windows signing dependencies.
+2. Use `beta` as the primary integration and UAT branch; keep `main` as the promoted stable release branch.
+3. Keep the one-step installer and one-app launch path repeatable, tested, and aligned with the split runtime architecture.
+4. Harden Forge envelope validation and failure telemetry (keep it invisible and safe for the user).
+5. Expand end-to-end coverage for forge request/response and watcher hot-reload.
+6. Keep memory/safety/id-superego observers out-of-band (non-blocking chat path) so the family experience stays smooth.
+7. Keep the unsigned stabilization lane free of installer upgrade-preserve logic, updater assumptions, and Windows signing dependencies.
 
 ## Definition of Done for Next Phase
 
 - Forge request envelope accepts code + markdown and persists deterministically.
 - Windows installer installs Abigail as one app and bundles the split Hive/Runtime daemons as internal resources.
+- Merges to `beta` automatically create tagged beta prereleases for UAT; stable releases come only from promoted `main`.
 - Superego and sandbox gates prevent unsafe mutations while staying invisible to the user.
 - Registry update reliably triggers watcher-based hot-reload.
 - End-to-end coverage validates success, blocked, and error fallback behavior.

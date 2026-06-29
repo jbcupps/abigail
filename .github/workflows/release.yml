@@ -5,6 +5,8 @@ name: Abigail Installer Release
 
 on:
   push:
+    branches:
+      - beta
     tags:
       - 'v*'
   workflow_dispatch:
@@ -33,6 +35,9 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      channel: ${{ steps.version.outputs.channel }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      release_name: ${{ steps.version.outputs.release_name }}
 
     steps:
       - name: Checkout
@@ -80,13 +85,18 @@ jobs:
         id: version
         shell: bash
         run: |
+          IS_BETA="false"
+          if [[ "${{ github.ref }}" == "refs/heads/beta" || "${{ github.ref_name }}" == *"-beta."* ]]; then
+            IS_BETA="true"
+          fi
+
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION="${{ github.ref_name }}"
-            VERSION="${VERSION#v}"
+            RAW_VERSION="${{ github.ref_name }}"
+            RAW_VERSION="${RAW_VERSION#v}"
+            VERSION="${RAW_VERSION%%-*}"
             TAG="${{ github.ref_name }}"
           elif [[ -n "${{ github.event.inputs.release_version }}" ]]; then
             VERSION="${{ github.event.inputs.release_version }}"
-            TAG="v${VERSION}"
           else
             git fetch --tags
             LATEST=$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
@@ -98,11 +108,35 @@ jobs:
               PATCH=$((PATCH + 1))
               VERSION="${MAJOR}.${MINOR}.${PATCH}"
             fi
-            TAG="v${VERSION}"
+          fi
+
+          if [[ -z "${TAG:-}" ]]; then
+            if [[ "$IS_BETA" == "true" ]]; then
+              TAG="v${VERSION}-beta.${{ github.run_number }}"
+            else
+              TAG="v${VERSION}"
+            fi
+          fi
+
+          if [[ "$TAG" == *"-beta."* ]]; then
+            IS_BETA="true"
+          fi
+
+          if [[ "$IS_BETA" == "true" ]]; then
+            CHANNEL="beta"
+            PRERELEASE="true"
+            RELEASE_NAME="Abigail ${TAG} (Beta UAT)"
+          else
+            CHANNEL="stable"
+            PRERELEASE="false"
+            RELEASE_NAME="Abigail ${TAG}"
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Building Abigail installer version: $VERSION (tag: $TAG)"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "release_name=$RELEASE_NAME" >> "$GITHUB_OUTPUT"
+          echo "Building Abigail installer version: $VERSION (tag: $TAG, channel: $CHANNEL)"
 
       - name: Update Hive app version
         shell: bash
@@ -311,11 +345,13 @@ jobs:
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           tag_name: ${{ needs.build.outputs.tag }}
-          name: Abigail ${{ needs.build.outputs.tag }}
+          name: ${{ needs.build.outputs.release_name }}
           draft: false
-          prerelease: false
+          prerelease: ${{ needs.build.outputs.prerelease }}
           body: |
-            ## Abigail ${{ needs.build.outputs.tag }}
+            ## ${{ needs.build.outputs.release_name }}
+
+            Release channel: `${{ needs.build.outputs.channel }}`
 
             ### Installation
 
@@ -324,6 +360,10 @@ jobs:
             - **Windows (MSI)**: `Abigail-windows-x64.msi`
 
             Abigail installs as one app icon. Launch **Abigail** to open Abigail Hive; the bundled Hive daemon, Entity Runtime, and Entity daemons start as needed in the background.
+
+            ### Beta UAT
+
+            Builds from the permanent `beta` branch are tagged as `vX.Y.Z-beta.N` and published as prereleases for UAT. Promote validated beta changes to `main` for a stable `vX.Y.Z` release.
 
             ### Platform Notes
 

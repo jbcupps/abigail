@@ -13,6 +13,8 @@ Abigail manages multiple personal AI Entities that the user, mentor, or family h
 - `Abigail Hive` owns the shared embedded SurrealDB persistence root (`memory.db`) and legacy SQLite files are migration inputs only, never active runtime stores.
 - The stable internal direction is two interoperable applications: a Hive control app and a chat-first Entity Runtime app. Prefer explicit local HTTP boundaries over in-process shortcuts.
 - The family-facing direction is one installed `Abigail` app icon. Packaging must hide internal split binaries and start Hive, Entity Runtime, and daemons for the family automatically.
+- `beta` is the permanent primary iteration branch. Target normal implementation PRs to `beta`, use the beta release automation for UAT, and promote only validated beta changes to `main`.
+- Every beta UAT build must be traceable to a GitHub prerelease tag in the form `vX.Y.Z-beta.N`.
 - Users should be encouraged to connect Entities to powerful cloud models from any provider. This multi-provider freedom is a major advantage.
 - Current dev builds prioritize a clean working single-version experience over cross-version compatibility. Remove stale legacy paths when they conflict with the active Hive-first architecture.
 - Unsigned stabilization builds are the default local path. Release signing and updater signing are beta/release-only concerns that should stay opt-in and isolated from day-to-day development.
@@ -25,6 +27,7 @@ Abigail grew from the vision in "Toward a Decentralized Trust Framework for Veri
 
 **How You Should Work**
 - Prefer the simplest solution that feels magical to a busy parent.
+- Prefer `beta` as the base branch for iterative PRs unless the user explicitly asks for a stable hotfix to `main`.
 - When adding capability, always highlight multi-provider flexibility.
 - For authenticated web workflows, prefer Browser skill fallback over protocol-specific mail transport.
 - Never ship complexity for complexity's sake.
