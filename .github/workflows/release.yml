@@ -223,7 +223,10 @@ jobs:
         shell: bash
         run: |
           for app in hive-app entity-runtime-app; do
-            test -f "$app/src-ui/dist/video/startup.mp4"
+            if [[ ! -f "$app/src-ui/dist/video/startup.mp4" ]]; then
+              echo "$app is missing dist/video/startup.mp4"
+              exit 1
+            fi
             if grep -E 'src="/assets|href="/assets|src="/video|href="/video' "$app/src-ui/dist/index.html"; then
               echo "$app frontend emitted absolute packaged asset paths"
               exit 1
