@@ -150,22 +150,11 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
 
-      - name: Install cargo-llvm-cov (ubuntu only)
-        if: matrix.platform == 'ubuntu-22.04'
-        uses: taiki-e/install-action@bffeee26d4db9be238a4ea78d8826604ebcb594d # v2.82.5
-        with:
-          tool: cargo-llvm-cov
-
-      - name: Run tests with coverage (ubuntu)
-        if: matrix.platform == 'ubuntu-22.04'
-        run: cargo llvm-cov --workspace --exclude abigail-app --lcov --output-path lcov.info
-
-      - name: Run tests (non-ubuntu)
-        if: matrix.platform != 'ubuntu-22.04'
+      - name: Run tests
         run: cargo test --workspace --exclude abigail-app
 
       - name: Upload Rust coverage to Codecov
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-22.04' && hashFiles('lcov.info') != ''
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
         with:
           files: lcov.info
