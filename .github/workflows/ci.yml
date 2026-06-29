@@ -46,9 +46,6 @@ jobs:
             hive-app/src-ui/package-lock.json
             entity-runtime-app/src-ui/package-lock.json
 
-      - name: Rust cache
-        uses: swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
-
       - name: Install split frontend dependencies
         shell: bash
         run: |
