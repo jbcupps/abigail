@@ -18,6 +18,13 @@ use std::time::Duration;
 /// In both dev (`target/debug`) and a packaged install the two binaries are
 /// siblings, so this resolves correctly without any configured path.
 fn entity_daemon_binary() -> anyhow::Result<PathBuf> {
+    if let Some(path) = std::env::var_os("ABIGAIL_ENTITY_DAEMON_PATH")
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty() && path.is_file())
+    {
+        return Ok(path);
+    }
+
     let exe = std::env::current_exe().context("resolving current executable")?;
     let dir = exe
         .parent()
@@ -109,6 +116,44 @@ pub async fn spawn_entity_daemon(
             entity_id,
             local_url
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("abigail-hive-daemon-{}-{}", label, nanos))
+    }
+
+    #[test]
+    fn entity_daemon_binary_prefers_packaged_env_override() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = temp_dir("env");
+        fs::create_dir_all(&dir).unwrap();
+        let name = if cfg!(windows) {
+            "entity-daemon.exe"
+        } else {
+            "entity-daemon"
+        };
+        let path = dir.join(name);
+        fs::write(&path, b"daemon").unwrap();
+
+        std::env::set_var("ABIGAIL_ENTITY_DAEMON_PATH", &path);
+        let resolved = entity_daemon_binary().unwrap();
+        std::env::remove_var("ABIGAIL_ENTITY_DAEMON_PATH");
+
+        assert_eq!(resolved, path);
+        let _ = fs::remove_dir_all(dir);
     }
 }
 

@@ -18,10 +18,11 @@ That Hive-owned store now runs on embedded SurrealDB, giving Abigail one local-f
 - **Handles real-world sites safely** - for authenticated flows like webmail, Abigail uses Browser skill fallback instead of fragile IMAP/SMTP plumbing.
 
 ### Quick Start (5 minutes)
-1. Install and open Abigail
-2. Open Abigail Hive and create your first Entity
-3. Configure local or cloud models in the Hive sidebar if you want extra capability
-4. Let your family chat with the selected Entity while the Hive stays open beside it
+1. Download and run the Windows installer
+2. Launch Abigail from the installed app icon
+3. Create your first Entity in Abigail Hive
+4. Configure local or cloud models in the Hive sidebar if you want extra capability
+5. Let your family chat with the selected Entity while the Hive stays open beside it
 
 No accounts. No data sharing. Just your family and the Entities you control.
 
@@ -29,9 +30,9 @@ No accounts. No data sharing. Just your family and the Entities you control.
 
 - Abigail is still in a dev-first phase. A clean working dev instance matters more than cross-version compatibility right now.
 - Legacy migration and upgrade preservation are not current product promises. Remove or replace stale compatibility paths when they get in the way of the active Hive-first design.
-- The stabilization lane is moving toward two parallel desktop app roots: `Abigail Hive` for control-plane/admin work and `Abigail Entity Runtime` for chat/runtime work.
+- The implementation uses two desktop app roots: `Abigail Hive` for control-plane/admin work and `Abigail Entity Runtime` for chat/runtime work. The family-facing installer must still expose one `Abigail` app icon and start the internal pieces automatically.
 - Default local builds and installer validation are intentionally unsigned and updater-free during stabilization. Final OV signing happens later on the dedicated release-signing system.
-- Repeatable release automation is documented in [`docs/RELEASE_RUNBOOK.md`](docs/RELEASE_RUNBOOK.md). The active full installer release lane currently builds Windows and Ubuntu packages only; Apple/macOS builds are temporarily removed from the matrix.
+- Repeatable release automation is documented in [`docs/RELEASE_RUNBOOK.md`](docs/RELEASE_RUNBOOK.md). The active full installer release lane currently builds the Windows one-step installer; Apple/macOS builds are temporarily removed from the matrix.
 - UI and UX work must follow the Abigail design system in [`docs/design/README.md`](docs/design/README.md).
 
 ## Dev Start
@@ -45,6 +46,7 @@ No accounts. No data sharing. Just your family and the Entities you control.
 ## Split Stack Local Dev
 
 - Use `pwsh ./scripts/dev/launch_split_stack.ps1` to build and launch the Hive daemon, Entity Runtime daemon, and the split desktop shells from one command.
+- Use `pwsh ./scripts/stage_split_installer_resources.ps1` when validating the Windows installer payload locally; it stages the internal split binaries that the family installer bundles behind the single Abigail app icon.
 - Those scripts standardize `CARGO_TARGET_DIR` to `%LOCALAPPDATA%\Abigail\cargo-target` on Windows so allow-listing can target one stable developer build path instead of repo-local `target\...`.
 - If Windows policy still blocks desktop-shell builds, run `pwsh ./scripts/diagnose_windows_build_policy.ps1` for a JSON diagnostic summary and use `pwsh ./scripts/dev/launch_split_stack.ps1` to fall back to the browser harness automatically.
 - The browser fallback lives at `dev-harness/` and is served by `node ./scripts/dev/run_browser_harness.mjs`; it talks directly to the local Hive and Runtime daemon APIs.

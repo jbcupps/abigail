@@ -8,7 +8,9 @@ use hive_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use tauri::Manager;
 
 /// Tracks which entities currently have a Runtime window open, so a second
 /// "Open" click focuses the idea of one window per entity rather than spawning
@@ -16,16 +18,83 @@ use std::sync::{Arc, Mutex};
 #[derive(Default)]
 struct OpenEntities(Arc<Mutex<HashSet<String>>>);
 
-/// Locate the Entity Runtime app executable next to this (Hive app) exe.
-fn entity_app_binary() -> Option<std::path::PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
-    let name = if cfg!(windows) {
-        "abigail-entity-runtime-app.exe"
+const ENTITY_RUNTIME_APP_PATH_ENV: &str = "ABIGAIL_ENTITY_RUNTIME_APP_PATH";
+const ENTITY_DAEMON_PATH_ENV: &str = "ABIGAIL_ENTITY_DAEMON_PATH";
+const INTERNAL_BIN_DIR_ENV: &str = "ABIGAIL_INTERNAL_BIN_DIR";
+
+fn platform_binary_name(stem: &str) -> String {
+    if cfg!(windows) {
+        format!("{}.exe", stem)
     } else {
-        "abigail-entity-runtime-app"
-    };
-    Some(dir.join(name))
+        stem.to_string()
+    }
+}
+
+fn current_exe_dir() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+}
+
+fn nonempty_env_path(name: &str) -> Option<PathBuf> {
+    let value = std::env::var_os(name)?;
+    let path = PathBuf::from(value);
+    if path.as_os_str().is_empty() {
+        None
+    } else {
+        Some(path)
+    }
+}
+
+fn resolve_binary_from_dirs(
+    env_override: Option<&str>,
+    binary_name: &str,
+    dirs: &[PathBuf],
+) -> Option<PathBuf> {
+    if let Some(path) = env_override.and_then(nonempty_env_path) {
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    for dir in dirs {
+        let candidate = dir.join(binary_name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    dirs.first().map(|dir| dir.join(binary_name))
+}
+
+fn internal_binary_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(dir) = current_exe_dir() {
+        dirs.push(dir);
+    }
+    if let Some(dir) = nonempty_env_path(INTERNAL_BIN_DIR_ENV) {
+        if !dirs.iter().any(|existing| existing == &dir) {
+            dirs.push(dir);
+        }
+    }
+    dirs
+}
+
+fn resolve_internal_binary(env_override: Option<&str>, stem: &str) -> Option<PathBuf> {
+    resolve_binary_from_dirs(
+        env_override,
+        &platform_binary_name(stem),
+        &internal_binary_dirs(),
+    )
+}
+
+/// Locate the Entity Runtime app executable from an explicit packaged resource
+/// path, the Tauri resource directory, or next to this Hive executable.
+fn entity_app_binary() -> Option<PathBuf> {
+    resolve_internal_binary(
+        Some(ENTITY_RUNTIME_APP_PATH_ENV),
+        "abigail-entity-runtime-app",
+    )
 }
 
 /// Stop tracking an entity as having an open window.
@@ -397,14 +466,8 @@ fn is_daemon_healthy(url: &str) -> bool {
     })
 }
 
-fn hive_daemon_binary() -> Option<std::path::PathBuf> {
-    let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    let name = if cfg!(windows) {
-        "hive-daemon.exe"
-    } else {
-        "hive-daemon"
-    };
-    Some(dir.join(name))
+fn hive_daemon_binary() -> Option<PathBuf> {
+    resolve_internal_binary(None, "hive-daemon")
 }
 
 fn pick_hive_port() -> Option<u16> {
@@ -493,6 +556,32 @@ fn ensure_hive_daemon() {
     }
 }
 
+fn configure_packaged_resource_paths<R: tauri::Runtime>(app: &tauri::App<R>) {
+    let Ok(resource_dir) = app.path().resource_dir() else {
+        return;
+    };
+
+    std::env::set_var(INTERNAL_BIN_DIR_ENV, &resource_dir);
+
+    let dirs = vec![resource_dir];
+    if let Some(path) = resolve_binary_from_dirs(
+        None,
+        &platform_binary_name("abigail-entity-runtime-app"),
+        &dirs,
+    ) {
+        if path.is_file() {
+            std::env::set_var(ENTITY_RUNTIME_APP_PATH_ENV, path);
+        }
+    }
+    if let Some(path) =
+        resolve_binary_from_dirs(None, &platform_binary_name("entity-daemon"), &dirs)
+    {
+        if path.is_file() {
+            std::env::set_var(ENTITY_DAEMON_PATH_ENV, path);
+        }
+    }
+}
+
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -504,7 +593,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(OpenEntities::default())
-        .setup(|_app| {
+        .setup(|app| {
+            configure_packaged_resource_paths(app);
             ensure_hive_daemon();
             Ok(())
         })
@@ -527,4 +617,80 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Abigail Hive app");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("abigail-{}-{}", label, nanos))
+    }
+
+    #[test]
+    fn resolver_prefers_valid_env_override() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let env_dir = temp_dir("env");
+        let sibling_dir = temp_dir("sibling");
+        fs::create_dir_all(&env_dir).unwrap();
+        fs::create_dir_all(&sibling_dir).unwrap();
+        let name = platform_binary_name("entity-daemon");
+        let env_path = env_dir.join(&name);
+        fs::write(&env_path, b"env").unwrap();
+        fs::write(sibling_dir.join(&name), b"sibling").unwrap();
+
+        std::env::set_var(ENTITY_DAEMON_PATH_ENV, &env_path);
+        let resolved =
+            resolve_binary_from_dirs(Some(ENTITY_DAEMON_PATH_ENV), &name, &[sibling_dir.clone()]);
+        std::env::remove_var(ENTITY_DAEMON_PATH_ENV);
+
+        assert_eq!(resolved, Some(env_path));
+        let _ = fs::remove_dir_all(env_dir);
+        let _ = fs::remove_dir_all(sibling_dir);
+    }
+
+    #[test]
+    fn resolver_uses_resource_dir_when_sibling_is_absent() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var(ENTITY_RUNTIME_APP_PATH_ENV);
+        let sibling_dir = temp_dir("missing-sibling");
+        let resource_dir = temp_dir("resource");
+        fs::create_dir_all(&sibling_dir).unwrap();
+        fs::create_dir_all(&resource_dir).unwrap();
+        let name = platform_binary_name("abigail-entity-runtime-app");
+        let resource_path = resource_dir.join(&name);
+        fs::write(&resource_path, b"resource").unwrap();
+
+        let resolved = resolve_binary_from_dirs(
+            Some(ENTITY_RUNTIME_APP_PATH_ENV),
+            &name,
+            &[sibling_dir, resource_dir.clone()],
+        );
+
+        assert_eq!(resolved, Some(resource_path));
+        let _ = fs::remove_dir_all(resource_dir);
+    }
+
+    #[test]
+    fn resolver_falls_back_to_first_candidate_for_clear_spawn_errors() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var(ENTITY_DAEMON_PATH_ENV);
+        let sibling_dir = temp_dir("fallback");
+        fs::create_dir_all(&sibling_dir).unwrap();
+        let name = platform_binary_name("entity-daemon");
+
+        let resolved =
+            resolve_binary_from_dirs(Some(ENTITY_DAEMON_PATH_ENV), &name, &[sibling_dir.clone()]);
+
+        assert_eq!(resolved, Some(sibling_dir.join(name)));
+        let _ = fs::remove_dir_all(sibling_dir);
+    }
 }
