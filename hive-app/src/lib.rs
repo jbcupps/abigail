@@ -70,11 +70,16 @@ fn resolve_binary_from_dirs(
 fn internal_binary_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(dir) = current_exe_dir() {
-        dirs.push(dir);
+        dirs.push(dir.clone());
+        dirs.push(dir.join("resources"));
     }
     if let Some(dir) = nonempty_env_path(INTERNAL_BIN_DIR_ENV) {
         if !dirs.iter().any(|existing| existing == &dir) {
-            dirs.push(dir);
+            dirs.push(dir.clone());
+        }
+        let nested = dir.join("resources");
+        if !dirs.iter().any(|existing| existing == &nested) {
+            dirs.push(nested);
         }
     }
     dirs
@@ -561,9 +566,15 @@ fn configure_packaged_resource_paths<R: tauri::Runtime>(app: &tauri::App<R>) {
         return;
     };
 
-    std::env::set_var(INTERNAL_BIN_DIR_ENV, &resource_dir);
+    let nested_resource_dir = resource_dir.join("resources");
+    let internal_bin_dir = if nested_resource_dir.is_dir() {
+        nested_resource_dir.clone()
+    } else {
+        resource_dir.clone()
+    };
+    std::env::set_var(INTERNAL_BIN_DIR_ENV, &internal_bin_dir);
 
-    let dirs = vec![resource_dir];
+    let dirs = vec![resource_dir, nested_resource_dir];
     if let Some(path) = resolve_binary_from_dirs(
         None,
         &platform_binary_name("abigail-entity-runtime-app"),
@@ -677,6 +688,25 @@ mod tests {
 
         assert_eq!(resolved, Some(resource_path));
         let _ = fs::remove_dir_all(resource_dir);
+    }
+
+    #[test]
+    fn resolver_uses_nested_resources_dir_for_installer_layout() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var(INTERNAL_BIN_DIR_ENV);
+        let install_dir = temp_dir("installer-layout");
+        let resources_dir = install_dir.join("resources");
+        fs::create_dir_all(&resources_dir).unwrap();
+        let name = platform_binary_name("hive-daemon");
+        let nested_path = resources_dir.join(&name);
+        fs::write(&nested_path, b"installer resource").unwrap();
+
+        std::env::set_var(INTERNAL_BIN_DIR_ENV, &install_dir);
+        let resolved = resolve_internal_binary(None, "hive-daemon");
+        std::env::remove_var(INTERNAL_BIN_DIR_ENV);
+
+        assert_eq!(resolved, Some(nested_path));
+        let _ = fs::remove_dir_all(install_dir);
     }
 
     #[test]

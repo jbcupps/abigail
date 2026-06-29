@@ -29,7 +29,7 @@ export default function SplashScreen({ onComplete }: SplashScreenProps) {
       {!videoFailed ? (
         <video
           ref={videoRef}
-          src="/video/startup.mp4"
+          src="./video/startup.mp4"
           autoPlay
           muted
           playsInline

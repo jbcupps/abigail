@@ -219,6 +219,17 @@ jobs:
             }
           }
 
+      - name: Verify packaged frontend assets
+        shell: bash
+        run: |
+          for app in hive-app entity-runtime-app; do
+            test -f "$app/src-ui/dist/video/startup.mp4"
+            if grep -E 'src="/assets|href="/assets|src="/video|href="/video' "$app/src-ui/dist/index.html"; then
+              echo "$app frontend emitted absolute packaged asset paths"
+              exit 1
+            fi
+          done
+
       - name: Configure split installer resources
         shell: bash
         run: |
@@ -400,12 +411,12 @@ jobs:
           test -f "$INSTALLER"
           7z l "$INSTALLER" > installer-contents.txt
           for required in \
-            "abigail-entity-runtime-app.exe" \
-            "hive-daemon.exe" \
-            "entity-daemon.exe"
+            "resources\\abigail-entity-runtime-app.exe" \
+            "resources\\hive-daemon.exe" \
+            "resources\\entity-daemon.exe"
           do
             if ! grep -F "$required" installer-contents.txt >/dev/null; then
-              echo "Missing bundled internal binary: $required"
+              echo "Missing bundled internal binary at installer resource path: $required"
               exit 1
             fi
           done

@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 // Abigail Entity Runtime chat frontend. Dev server runs on 1422 to avoid
 // colliding with the Hive app (1421) and the legacy monolith (1420).
 export default defineConfig({
+  base: "./",
   plugins: [react()],
   clearScreen: false,
   server: {

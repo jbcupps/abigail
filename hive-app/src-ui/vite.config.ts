@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 // Abigail Hive control-plane frontend. Dev server runs on 1421 to avoid
 // colliding with the Entity Runtime app (1422) and the legacy monolith (1420).
 export default defineConfig({
+  base: "./",
   plugins: [react()],
   clearScreen: false,
   server: {

@@ -118,6 +118,27 @@ for (const required of [
     `Full installer release must stage the split Abigail product (${required}).`
   );
 }
+assert(
+  release.includes("resources\\\\hive-daemon.exe"),
+  "Beta installer verification must assert the installed resources path for hive-daemon.exe."
+);
+assert(
+  release.includes("Verify packaged frontend assets"),
+  "Beta installer verification must assert packaged frontend assets are relative and include startup video."
+);
+
+for (const app of ["hive-app", "entity-runtime-app"]) {
+  const viteConfig = fs.readFileSync(`${app}/src-ui/vite.config.ts`, "utf8");
+  assert(
+    viteConfig.includes('base: "./"'),
+    `${app} Vite config must emit relative asset paths for packaged Tauri WebViews.`
+  );
+  const splash = fs.readFileSync(`${app}/src-ui/src/components/SplashScreen.tsx`, "utf8");
+  assert(
+    splash.includes('src="./video/startup.mp4"'),
+    `${app} splash video must use a relative packaged asset path.`
+  );
+}
 
 const prereqs = fs.readFileSync("scripts/enforce_release_prereqs.sh", "utf8");
 assert(
