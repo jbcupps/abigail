@@ -100,6 +100,15 @@ pub async fn spawn_entity_daemon(
         .env_remove("CLAUDECODE")
         .env_remove("CLAUDE_CODE_ENTRYPOINT")
         .env_remove("CLAUDE_CODE_SESSION_ID")
+        // Detach stdio entirely. The entity daemon logs to a file via
+        // `abigail_diag`, its port is passed explicitly, and health is polled
+        // over HTTP — nothing reads its stdout. Inheriting our handles is
+        // actively harmful: when a GUI shell pipes our stdout to parse the
+        // listen line, an inheriting child holds that pipe open forever, and
+        // when we run with no console the child inherits invalid handles.
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .kill_on_drop(false);
 
     let child = command

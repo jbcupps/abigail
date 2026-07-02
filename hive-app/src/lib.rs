@@ -379,9 +379,14 @@ async fn open_entity(
 
     // 2. Launch the Entity Runtime app pointed at that daemon.
     let bin = entity_app_binary().ok_or("Entity Runtime app binary not found")?;
+    // Don't let the runtime app inherit our (possibly invalid, console-less)
+    // stdio handles — it has its own file logging and nothing reads its output.
     let child = tokio::process::Command::new(&bin)
         .env("ABIGAIL_ENTITY_URL", &local_url)
         .env("ABIGAIL_HIVE_URL", &hive)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn()
         .map_err(|e| format!("Failed to launch Entity Runtime app: {}", e));
     let mut child = match child {
@@ -435,6 +440,15 @@ fn runtime_dir() -> std::path::PathBuf {
 
 fn descriptor_path() -> std::path::PathBuf {
     runtime_dir().join("hive.json")
+}
+
+/// Mirrors `hive_daemon::diag::log_dir()` — same base the daemon uses for its
+/// own file logging, so the shell-captured spawn log lands next to it.
+fn logs_dir() -> std::path::PathBuf {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("Abigail").join("logs")
 }
 
 fn read_descriptor() -> Option<HiveRuntimeDescriptor> {
@@ -502,6 +516,25 @@ fn spawn_hive_daemon() -> Result<(String, u32), String> {
     let url = format!("http://127.0.0.1:{}", port);
     let mut command = std::process::Command::new(&bin);
     command.arg("--port").arg(port.to_string());
+
+    // Redirect the child's stdout/stderr to a file instead of inheriting ours.
+    // We're a `windows_subsystem = "windows"` shell with no console, so default
+    // inherited handles are invalid and a console-subsystem child can die in the
+    // loader before `main()` runs — before it even gets a chance to set up its
+    // own `diag` file logging. This catches that window too.
+    let spawn_log_path = logs_dir().join("hive-daemon.spawn.log");
+    if std::fs::create_dir_all(logs_dir()).is_ok() {
+        if let Ok(out) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&spawn_log_path)
+        {
+            if let Ok(err) = out.try_clone() {
+                command.stdout(out).stderr(err);
+            }
+        }
+    }
+
     let child = spawn_clean(&mut command).map_err(|e| e.to_string())?;
     let pid = child.id();
 
@@ -515,7 +548,11 @@ fn spawn_hive_daemon() -> Result<(String, u32), String> {
         }
         std::thread::sleep(std::time::Duration::from_millis(300));
     }
-    Err(format!("Hive daemon did not become healthy at {}", url))
+    Err(format!(
+        "Hive daemon did not become healthy at {} (see {})",
+        url,
+        spawn_log_path.display()
+    ))
 }
 
 fn reap_stale(pid: u32) {

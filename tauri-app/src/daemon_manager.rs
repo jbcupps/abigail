@@ -57,6 +57,10 @@ impl DaemonManager {
         let binary = find_daemon_binary("hive-daemon")?;
         tracing::info!("Starting hive-daemon from {:?}", binary);
 
+        // stdout is piped so we can parse the listen line; stderr must NOT be
+        // inherited — as a `windows_subsystem = "windows"` shell we may have no
+        // console, and an inherited invalid handle can kill the child silently.
+        // The daemon logs to a file via `abigail_diag`, so null is safe.
         let mut child = Command::new(&binary)
             .args([
                 "--port",
@@ -64,8 +68,12 @@ impl DaemonManager {
                 "--data-dir",
                 self.data_dir.to_str().unwrap_or("."),
             ])
+            .env_remove("CLAUDECODE")
+            .env_remove("CLAUDE_CODE_ENTRYPOINT")
+            .env_remove("CLAUDE_CODE_SESSION_ID")
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::null())
             .spawn()
             .map_err(|e| anyhow::anyhow!("Failed to start hive-daemon: {}", e))?;
 
@@ -109,8 +117,12 @@ impl DaemonManager {
 
         let mut child = Command::new(&binary)
             .args(&args)
+            .env_remove("CLAUDECODE")
+            .env_remove("CLAUDE_CODE_ENTRYPOINT")
+            .env_remove("CLAUDE_CODE_SESSION_ID")
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::null())
             .spawn()
             .map_err(|e| anyhow::anyhow!("Failed to start entity-daemon: {}", e))?;
 

@@ -8,6 +8,7 @@ name = "hive-daemon"
 path = "src/main.rs"
 
 [dependencies]
+abigail-diag.workspace = true
 hive-core = { path = "../hive-core" }
 abigail-core = { path = "../abigail-core" }
 abigail-identity = { path = "../abigail-identity" }

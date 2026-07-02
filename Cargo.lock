@@ -158,6 +158,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "abigail-diag"
+version = "0.0.1"
+dependencies = [
+ "tracing",
+ "tracing-subscriber",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "abigail-entity-runtime-app"
 version = "0.0.1"
 dependencies = [
@@ -3654,6 +3663,7 @@ version = "0.0.1"
 dependencies = [
  "abigail-capabilities",
  "abigail-core",
+ "abigail-diag",
  "abigail-hive",
  "abigail-id",
  "abigail-identity",
@@ -5068,6 +5078,7 @@ version = "0.0.1"
 dependencies = [
  "abigail-capabilities",
  "abigail-core",
+ "abigail-diag",
  "abigail-hive",
  "abigail-identity",
  "abigail-runtime",

@@ -68,15 +68,21 @@ struct Cli {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                "entity_daemon=info,abigail_router=info,abigail_skills=info".into()
-            }),
-        )
-        .init();
+async fn main() {
+    // Durable file logging + panic hook FIRST, before any fallible work. Like
+    // hive-daemon, an entity-daemon can end up with invalid inherited stdio
+    // when launched indirectly through a GUI shell, so route logs to a file
+    // independent of `--data-dir`/`directories` resolution. See `abigail_diag`.
+    let component = format!("entity-daemon-{}", Cli::parse().entity_id);
+    abigail_diag::init(&component);
+    if let Err(e) = run().await {
+        tracing::error!("entity-daemon exited with error: {e:#}");
+        abigail_diag::record_fatal(&component, &format!("{e:#}"));
+        std::process::exit(1);
+    }
+}
 
+async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     tracing::info!(
@@ -859,7 +865,10 @@ async fn main() -> anyhow::Result<()> {
     spawn_runtime_supervision(state.clone(), hive_client.clone(), initial_provider_config);
 
     tracing::info!("Entity daemon listening on {}", local_url);
-    println!("Entity daemon listening on {}", local_url);
+    {
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stdout(), "Entity daemon listening on {}", local_url);
+    }
     axum::serve(listener, app).await?;
 
     Ok(())
