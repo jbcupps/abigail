@@ -77,18 +77,33 @@ struct PersistenceInner {
 impl PersistenceHandle {
     pub fn open_ephemeral(scope: EntityScope) -> Result<Self> {
         let runtime = persistence_runtime()?;
-        let init_scope = scope.clone();
-        let db = block_on_runtime(runtime, async move {
-            let db = Surreal::new::<Mem>(())
-                .await
-                .map_err(PersistenceError::from)?;
-            db.use_ns("abigail")
-                .use_db(init_scope.database_name())
-                .await
-                .map_err(PersistenceError::from)?;
-            schema::ensure_schema(&db, &init_scope).await?;
-            Ok::<_, PersistenceError>(db)
-        })?;
+        // The embedded engine occasionally loses the freshly created session
+        // ("Session not found: <uuid>") when many in-memory stores initialize
+        // concurrently. Nothing is kept across attempts, so retry on that
+        // transient error instead of failing the open.
+        let mut attempts = 0;
+        let db = loop {
+            let init_scope = scope.clone();
+            let result = block_on_runtime(runtime, async move {
+                let db = Surreal::new::<Mem>(())
+                    .await
+                    .map_err(PersistenceError::from)?;
+                db.use_ns("abigail")
+                    .use_db(init_scope.database_name())
+                    .await
+                    .map_err(PersistenceError::from)?;
+                schema::ensure_schema(&db, &init_scope).await?;
+                Ok::<_, PersistenceError>(db)
+            });
+            match result {
+                Ok(db) => break db,
+                Err(error) if attempts < 3 && error.to_string().contains("Session not found") => {
+                    attempts += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(50 * attempts));
+                }
+                Err(error) => return Err(error),
+            }
+        };
 
         Ok(Self {
             inner: Arc::new(PersistenceInner {
