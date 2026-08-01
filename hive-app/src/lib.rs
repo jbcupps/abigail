@@ -70,11 +70,16 @@ fn resolve_binary_from_dirs(
 fn internal_binary_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(dir) = current_exe_dir() {
-        dirs.push(dir);
+        dirs.push(dir.clone());
+        dirs.push(dir.join("resources"));
     }
     if let Some(dir) = nonempty_env_path(INTERNAL_BIN_DIR_ENV) {
         if !dirs.iter().any(|existing| existing == &dir) {
-            dirs.push(dir);
+            dirs.push(dir.clone());
+        }
+        let nested = dir.join("resources");
+        if !dirs.iter().any(|existing| existing == &nested) {
+            dirs.push(nested);
         }
     }
     dirs
@@ -374,9 +379,14 @@ async fn open_entity(
 
     // 2. Launch the Entity Runtime app pointed at that daemon.
     let bin = entity_app_binary().ok_or("Entity Runtime app binary not found")?;
+    // Don't let the runtime app inherit our (possibly invalid, console-less)
+    // stdio handles — it has its own file logging and nothing reads its output.
     let child = tokio::process::Command::new(&bin)
         .env("ABIGAIL_ENTITY_URL", &local_url)
         .env("ABIGAIL_HIVE_URL", &hive)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn()
         .map_err(|e| format!("Failed to launch Entity Runtime app: {}", e));
     let mut child = match child {
@@ -430,6 +440,15 @@ fn runtime_dir() -> std::path::PathBuf {
 
 fn descriptor_path() -> std::path::PathBuf {
     runtime_dir().join("hive.json")
+}
+
+/// Mirrors `hive_daemon::diag::log_dir()` — same base the daemon uses for its
+/// own file logging, so the shell-captured spawn log lands next to it.
+fn logs_dir() -> std::path::PathBuf {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("Abigail").join("logs")
 }
 
 fn read_descriptor() -> Option<HiveRuntimeDescriptor> {
@@ -497,6 +516,25 @@ fn spawn_hive_daemon() -> Result<(String, u32), String> {
     let url = format!("http://127.0.0.1:{}", port);
     let mut command = std::process::Command::new(&bin);
     command.arg("--port").arg(port.to_string());
+
+    // Redirect the child's stdout/stderr to a file instead of inheriting ours.
+    // We're a `windows_subsystem = "windows"` shell with no console, so default
+    // inherited handles are invalid and a console-subsystem child can die in the
+    // loader before `main()` runs — before it even gets a chance to set up its
+    // own `diag` file logging. This catches that window too.
+    let spawn_log_path = logs_dir().join("hive-daemon.spawn.log");
+    if std::fs::create_dir_all(logs_dir()).is_ok() {
+        if let Ok(out) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&spawn_log_path)
+        {
+            if let Ok(err) = out.try_clone() {
+                command.stdout(out).stderr(err);
+            }
+        }
+    }
+
     let child = spawn_clean(&mut command).map_err(|e| e.to_string())?;
     let pid = child.id();
 
@@ -510,7 +548,11 @@ fn spawn_hive_daemon() -> Result<(String, u32), String> {
         }
         std::thread::sleep(std::time::Duration::from_millis(300));
     }
-    Err(format!("Hive daemon did not become healthy at {}", url))
+    Err(format!(
+        "Hive daemon did not become healthy at {} (see {})",
+        url,
+        spawn_log_path.display()
+    ))
 }
 
 fn reap_stale(pid: u32) {
@@ -561,9 +603,15 @@ fn configure_packaged_resource_paths<R: tauri::Runtime>(app: &tauri::App<R>) {
         return;
     };
 
-    std::env::set_var(INTERNAL_BIN_DIR_ENV, &resource_dir);
+    let nested_resource_dir = resource_dir.join("resources");
+    let internal_bin_dir = if nested_resource_dir.is_dir() {
+        nested_resource_dir.clone()
+    } else {
+        resource_dir.clone()
+    };
+    std::env::set_var(INTERNAL_BIN_DIR_ENV, &internal_bin_dir);
 
-    let dirs = vec![resource_dir];
+    let dirs = vec![resource_dir, nested_resource_dir];
     if let Some(path) = resolve_binary_from_dirs(
         None,
         &platform_binary_name("abigail-entity-runtime-app"),
@@ -677,6 +725,25 @@ mod tests {
 
         assert_eq!(resolved, Some(resource_path));
         let _ = fs::remove_dir_all(resource_dir);
+    }
+
+    #[test]
+    fn resolver_uses_nested_resources_dir_for_installer_layout() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var(INTERNAL_BIN_DIR_ENV);
+        let install_dir = temp_dir("installer-layout");
+        let resources_dir = install_dir.join("resources");
+        fs::create_dir_all(&resources_dir).unwrap();
+        let name = platform_binary_name("hive-daemon");
+        let nested_path = resources_dir.join(&name);
+        fs::write(&nested_path, b"installer resource").unwrap();
+
+        std::env::set_var(INTERNAL_BIN_DIR_ENV, &install_dir);
+        let resolved = resolve_internal_binary(None, "hive-daemon");
+        std::env::remove_var(INTERNAL_BIN_DIR_ENV);
+
+        assert_eq!(resolved, Some(nested_path));
+        let _ = fs::remove_dir_all(install_dir);
     }
 
     #[test]

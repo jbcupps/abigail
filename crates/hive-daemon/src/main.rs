@@ -4,6 +4,7 @@
 //! Listens on `--port` (default 43141).
 
 mod birth;
+mod doctor;
 mod routes;
 mod runtime_registry;
 mod state;
@@ -29,18 +30,34 @@ struct Cli {
     /// Data directory (defaults to platform-specific app data dir)
     #[arg(long)]
     data_dir: Option<String>,
+
+    /// Run each startup step non-fatally and print [OK]/[FAIL] per step,
+    /// then exit instead of serving. For diagnosing a silent first-run
+    /// failure from a console.
+    #[arg(long)]
+    doctor: bool,
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                "hive_daemon=info,abigail_identity=info,abigail_hive=info".into()
-            }),
-        )
-        .init();
+async fn main() {
+    // Durable file logging + panic hook FIRST, before any fallible work. The GUI
+    // shell spawns us with no console (invalid inherited stdout/stderr), so any
+    // earlier stdout write could kill us silently. See `abigail_diag`.
+    abigail_diag::init("hive-daemon");
 
+    let cli = Cli::parse();
+    if cli.doctor {
+        std::process::exit(doctor::run(cli.data_dir.as_deref(), cli.port));
+    }
+
+    if let Err(e) = run().await {
+        tracing::error!("hive-daemon exited with error: {e:#}");
+        abigail_diag::record_fatal("hive-daemon", &format!("{e:#}"));
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // Resolve data directory
@@ -164,11 +181,22 @@ async fn main() -> anyhow::Result<()> {
             post(routes::record_runtime_heartbeat),
         )
         .route("/v1/runtime/outbox/sync", post(routes::sync_runtime_outbox))
+        .route(
+            "/v1/entities/:id/execution/receipts",
+            get(routes::get_execution_receipts),
+        )
         .layer(cors)
         .with_state(state);
 
     tracing::info!("Hive daemon listening on {}", hive_url);
-    println!("Hive daemon listening on {}", hive_url);
+    // The monolith daemon-manager spawns us with `--port 0` and parses this line
+    // from our piped stdout to discover the chosen port. Use a non-panicking
+    // write so an invalid/!inherited stdout handle (GUI-shell spawn) can't abort
+    // the process the way `println!` would.
+    {
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stdout(), "Hive daemon listening on {}", hive_url);
+    }
     axum::serve(listener, app).await?;
 
     Ok(())

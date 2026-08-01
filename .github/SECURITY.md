@@ -37,4 +37,4 @@ The following are in scope:
 - Passphrase fallback uses Argon2id with per-install metadata for new vaults.
 - Portable archive v2 uses X25519 + HKDF-SHA256 + AES-256-GCM with authenticated headers.
 - Signed skill allowlist entries are verified against `trusted_skill_signers` and fail closed on malformed or untrusted input.
-- Official release workflows require updater signing inputs, Windows code signing inputs, and macOS signing/notarization inputs.
+- Updater signing and Windows code signing are opt-in release hardening paths; macOS signing/notarization is paused.

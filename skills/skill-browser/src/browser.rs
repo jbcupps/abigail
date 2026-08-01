@@ -723,7 +723,7 @@ impl BrowserSkill {
             SkillError::ToolFailed("Missing required parameter: selector".to_string())
         })?;
         let page = self.current_page().await.map_err(SkillError::ToolFailed)?;
-        let locator = page.locator(&selector).await;
+        let locator = page.locator(&selector);
         locator
             .click(None)
             .await
@@ -748,7 +748,7 @@ impl BrowserSkill {
         })?;
         let press_enter = params.get::<bool>("press_enter").unwrap_or(false);
         let page = self.current_page().await.map_err(SkillError::ToolFailed)?;
-        let locator = page.locator(&selector).await;
+        let locator = page.locator(&selector);
         locator
             .fill(&text, None)
             .await
@@ -836,7 +836,7 @@ impl BrowserSkill {
                     }
                 }
                 if let Some(selector) = success_selector {
-                    return page.locator(&selector).await.is_visible().await;
+                    return page.locator(&selector).is_visible().await;
                 }
                 Ok(!page.url().is_empty())
             }
@@ -871,7 +871,6 @@ impl BrowserSkill {
                 .map_err(|err| SkillError::ToolFailed(format!("Failed to get HTML: {err}")))?
         } else {
             page.locator("body")
-                .await
                 .inner_text()
                 .await
                 .map_err(|err| SkillError::ToolFailed(format!("Failed to get page text: {err}")))?
@@ -895,7 +894,6 @@ impl BrowserSkill {
         let page = self.current_page().await.map_err(SkillError::ToolFailed)?;
         for (selector, value) in &fields {
             page.locator(selector)
-                .await
                 .fill(value, None)
                 .await
                 .map_err(|err| {
@@ -922,7 +920,7 @@ impl BrowserSkill {
         wait_for_condition(timeout_ms, || {
             let page = page.clone();
             let selector = selector.clone();
-            async move { page.locator(&selector).await.is_visible().await }
+            async move { page.locator(&selector).is_visible().await }
         })
         .await
         .map_err(|err| SkillError::ToolFailed(format!("Wait failed: {err}")))?;
@@ -1160,7 +1158,7 @@ pub async fn webmail_send(request: WebmailSendRequest) -> Result<WebmailSendResu
         .map_err(|err| format!("webmail navigation failed: {err}"))?;
 
     if let Some(compose_selector) = profile.compose_selector {
-        let compose = page.locator(compose_selector).await;
+        let compose = page.locator(compose_selector);
         if compose.is_visible().await.unwrap_or(false) {
             compose
                 .click(None)
@@ -1172,27 +1170,23 @@ pub async fn webmail_send(request: WebmailSendRequest) -> Result<WebmailSendResu
     wait_for_condition(DEFAULT_WAIT_TIMEOUT_MS, || {
         let page = page.clone();
         let selector = profile.to_selector.to_string();
-        async move { page.locator(&selector).await.is_visible().await }
+        async move { page.locator(&selector).is_visible().await }
     })
     .await?;
 
     page.locator(profile.to_selector)
-        .await
         .fill(&request.to.join(", "), None)
         .await
         .map_err(|err| format!("webmail recipient fill failed: {err}"))?;
     page.locator(profile.subject_selector)
-        .await
         .fill(&request.subject, None)
         .await
         .map_err(|err| format!("webmail subject fill failed: {err}"))?;
     page.locator(profile.body_selector)
-        .await
         .fill(&request.body, None)
         .await
         .map_err(|err| format!("webmail body fill failed: {err}"))?;
     page.locator(profile.send_selector)
-        .await
         .click(None)
         .await
         .map_err(|err| format!("webmail send click failed: {err}"))?;

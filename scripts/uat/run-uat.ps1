@@ -13,7 +13,14 @@
       20 = HARD_FAIL (unrecoverable - fix and restart)
 
 .PARAMETER KeysetFile
-    Path to uat-keys.env (default: scripts/uat/uat-keys.env).
+    Path to uat-keys.env (default: scripts/uat/uat-keys.env). Required only for -Provider openai.
+
+.PARAMETER Provider
+    UAT provider path. claude-cli is the Windows Family Beta default and uses system CLI auth.
+
+.PARAMETER InstallerPath
+    Optional Abigail installer asset. When provided, UAT installs and launches the single Abigail app
+    instead of starting debug daemons directly.
 
 .PARAMETER HivePort
     Hive daemon port (default: 3141).
@@ -31,6 +38,9 @@ param(
     [string]$KeysetFile,
     [int]$HivePort = 3141,
     [int]$EntityPort = 3142,
+    [ValidateSet('claude-cli', 'openai')]
+    [string]$Provider = 'claude-cli',
+    [string]$InstallerPath,
     [switch]$SkipBuild
 )
 
@@ -57,7 +67,10 @@ $EntityName = $RunId
 $SoftRecoveries = 0
 $HiveProc = $null
 $EntityProc = $null
+$AppProc = $null
 $ExitCode = 0
+$InstallerMode = -not [string]::IsNullOrWhiteSpace($InstallerPath)
+$ChatSessionId = "$RunId-chat"
 
 $STUB_SIGNATURE = "I need a cloud API key or local LLM"
 
@@ -114,49 +127,64 @@ try {
 # STAGE 0: PREFLIGHT
 # ===================================================================
 Invoke-StageWithRetry 'preflight' {
-    # Resolve keyset file
-    if (-not $KeysetFile) {
-        $script:KeysetFile = Join-Path $RepoRoot 'scripts/uat/uat-keys.env'
-    }
-    if (-not (Test-Path $KeysetFile)) {
-        throw "Keyset file not found: $KeysetFile. Copy uat-keys.env.template to uat-keys.env and fill in values."
+    if ($InstallerMode) {
+        $script:InstallerPath = (Resolve-Path $InstallerPath).Path
+        if (-not (Test-Path $InstallerPath)) {
+            throw "Installer not found: $InstallerPath"
+        }
     }
 
-    # Parse keyset
     $script:Keys = @{}
-    Get-Content $KeysetFile | ForEach-Object {
-        $line = $_.Trim()
-        if ($line -and -not $line.StartsWith('#')) {
-            $parts = $line -split '=', 2
-            if ($parts.Count -eq 2) {
-                $script:Keys[$parts[0].Trim()] = $parts[1].Trim()
+    if ($Provider -eq 'openai') {
+        if (-not $KeysetFile) {
+            $script:KeysetFile = Join-Path $RepoRoot 'scripts/uat/uat-keys.env'
+        }
+        if (-not (Test-Path $KeysetFile)) {
+            throw "Keyset file not found: $KeysetFile. Copy uat-keys.env.template to uat-keys.env and fill in values."
+        }
+
+        Get-Content $KeysetFile | ForEach-Object {
+            $line = $_.Trim()
+            if ($line -and -not $line.StartsWith('#')) {
+                $parts = $line -split '=', 2
+                if ($parts.Count -eq 2) {
+                    $script:Keys[$parts[0].Trim()] = $parts[1].Trim()
+                }
             }
         }
-    }
 
-    # Validate required keys
-    $required = @('OPENAI_API_KEY')
-    foreach ($k in $required) {
-        if (-not $Keys[$k]) {
-            throw "Required key '$k' is empty or missing in keyset file."
+        if (-not $Keys['OPENAI_API_KEY']) {
+            throw "Required key 'OPENAI_API_KEY' is empty or missing in keyset file."
+        }
+    } else {
+        $claude = Get-Command claude -ErrorAction SilentlyContinue
+        if (-not $claude) {
+            throw "Claude CLI mode requires 'claude' on PATH."
+        }
+        $authOut = & claude auth status 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "Claude CLI is not authenticated. Run 'claude auth login' first. Output: $authOut"
         }
     }
 
-    # Validate ports available
-    foreach ($p in @($HivePort, $EntityPort)) {
+    $portsToCheck = if ($InstallerMode) { @() } else { @($HivePort, $EntityPort) }
+    foreach ($p in $portsToCheck) {
         $conn = Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue
         if ($conn) {
             throw "Port $p is already in use. Free it or use different ports."
         }
     }
 
-    Write-Host "[PREFLIGHT] All checks passed."
+    Write-Host "[PREFLIGHT] Provider=$Provider InstallerMode=$InstallerMode checks passed."
 } -MaxRetries 1
 
 # ===================================================================
 # STAGE 1: BUILD
 # ===================================================================
-if (-not $SkipBuild) {
+if ($InstallerMode) {
+    Write-Timeline $RunRoot "STAGE build SKIPPED (installer mode)"
+    Write-Host "[BUILD] Skipped; using installer $InstallerPath"
+} elseif (-not $SkipBuild) {
     Invoke-StageWithRetry 'build' {
         Push-Location $RepoRoot
         try {
@@ -181,9 +209,57 @@ if (-not $SkipBuild) {
 }
 
 # ===================================================================
+# STAGE 1B: INSTALLER LAUNCH (OPTIONAL FAMILY PATH)
+# ===================================================================
+if ($InstallerMode) {
+    Invoke-StageWithRetry 'installer_launch' {
+        Write-Host "[INSTALLER] Installing Abigail from $InstallerPath..."
+        $extension = [System.IO.Path]::GetExtension($InstallerPath).ToLowerInvariant()
+        if ($extension -eq '.msi') {
+            $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', $InstallerPath, '/qn', '/norestart') -Wait -PassThru
+            if ($proc.ExitCode -ne 0) { throw "MSI install failed with exit code $($proc.ExitCode)" }
+        } elseif ($extension -eq '.exe') {
+            $proc = Start-Process -FilePath $InstallerPath -ArgumentList @('/S') -Wait -PassThru
+            if ($proc.ExitCode -ne 0) { throw "NSIS install failed with exit code $($proc.ExitCode)" }
+        } else {
+            throw "Unsupported installer extension '$extension'. Expected .exe or .msi."
+        }
+
+        $candidates = @(
+            (Join-Path $env:LOCALAPPDATA 'Programs/Abigail/Abigail.exe'),
+            (Join-Path $env:ProgramFiles 'Abigail/Abigail.exe')
+        )
+        if (${env:ProgramFiles(x86)}) {
+            $candidates += (Join-Path ${env:ProgramFiles(x86)} 'Abigail/Abigail.exe')
+        }
+        $appPath = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if (-not $appPath) {
+            throw "Installed Abigail.exe not found. Checked: $($candidates -join ', ')"
+        }
+
+        Write-Host "[INSTALLER] Launching Abigail app: $appPath"
+        $script:AppProc = Start-Process -FilePath $appPath -PassThru
+        $healthy = Wait-ForHealth "$HiveUrl/health" -MaxWaitSec 90
+        if (-not $healthy) { throw "Installed Abigail did not expose Hive health at $HiveUrl/health within 90s" }
+        Write-Timeline $RunRoot "Installed app launched from $appPath"
+    } -MaxRetries 1
+}
+
+# ===================================================================
 # STAGE 2: HIVE BOOTSTRAP
 # ===================================================================
-Invoke-StageWithRetry 'hive_bootstrap' {
+if ($InstallerMode) {
+    Invoke-StageWithRetry 'hive_bootstrap' {
+        Write-Host "[HIVE] Verifying installed Abigail Hive at $HiveUrl..."
+        $healthy = Wait-ForHealth "$HiveUrl/health" -MaxWaitSec 30
+        if (-not $healthy) { throw "Hive did not become healthy within 30s" }
+        $status = Invoke-UatRequest -Uri "$HiveUrl/v1/status"
+        if (-not $status.ok) { throw "Hive /v1/status returned ok=false" }
+        Write-HttpTrace $RunRoot 'hive_bootstrap' 'status' @{url="$HiveUrl/v1/status"; installer=$InstallerPath} $status
+        Write-Host "[HIVE] Installed app Hive is healthy."
+    }
+} else {
+    Invoke-StageWithRetry 'hive_bootstrap' {
     Write-Host "[HIVE] Starting hive-daemon on port $HivePort with data-dir $UatDataDir..."
     $hiveBin = Join-Path $RepoRoot 'target/debug/hive-daemon'
     if ($env:OS -match 'Windows') { $hiveBin += '.exe' }
@@ -200,6 +276,7 @@ Invoke-StageWithRetry 'hive_bootstrap' {
 
     Write-HttpTrace $RunRoot 'hive_bootstrap' 'status' @{url="$HiveUrl/v1/status"} $status
     Write-Host "[HIVE] Healthy and running."
+    }
 }
 
 # ===================================================================
@@ -220,27 +297,52 @@ Invoke-StageWithRetry 'entity_create' {
 # ===================================================================
 # STAGE 4: SECRET SEEDING
 # ===================================================================
-Invoke-StageWithRetry 'secret_seed' {
-    # Seed provider key
-    $providerKey = $Keys['OPENAI_API_KEY']
-    Write-Host "[SECRETS] Seeding openai provider key..."
-    $resp = Invoke-UatRequest -Method POST -Uri "$HiveUrl/v1/secrets" `
-        -Body @{ key = 'openai'; value = $providerKey }
-    if (-not $resp.ok) { throw "Failed to store openai secret: $($resp.error)" }
+Invoke-StageWithRetry 'provider_config' {
+    if ($Provider -eq 'openai') {
+        $providerKey = $Keys['OPENAI_API_KEY']
+        Write-Host "[PROVIDER] Seeding openai provider key..."
+        $resp = Invoke-UatRequest -Method POST -Uri "$HiveUrl/v1/secrets" `
+            -Body @{ key = 'openai'; value = $providerKey }
+        if (-not $resp.ok) { throw "Failed to store openai secret: $($resp.error)" }
 
-    # Verify secrets list
-    $list = Invoke-UatRequest -Uri "$HiveUrl/v1/secrets/list"
-    if (-not $list.ok) { throw "secrets/list failed" }
-    if ($list.data.keys -notcontains 'openai') { throw "openai key not found in secrets list" }
-    Write-HttpTrace $RunRoot 'secret_seed' 'list' @{} $list
+        $list = Invoke-UatRequest -Uri "$HiveUrl/v1/secrets/list"
+        if (-not $list.ok) { throw "secrets/list failed" }
+        if ($list.data.keys -notcontains 'openai') { throw "openai key not found in secrets list" }
+        Write-HttpTrace $RunRoot 'provider_config' 'list' @{} $list
+    }
 
-    Write-Host "[SECRETS] All secrets seeded and verified."
+    $default = Invoke-UatRequest -Method POST -Uri "$HiveUrl/v1/providers/hive-default" `
+        -Body @{ provider = $Provider; model = $null }
+    if (-not $default.ok) { throw "Failed to set Hive default provider: $($default.error)" }
+
+    $patch = Invoke-UatRequest -Method PATCH -Uri "$HiveUrl/v1/entities/$EntityId/config" `
+        -Body @{ active_provider_preference = $Provider; ego_model = $null }
+    if (-not $patch.ok) { throw "Failed to set entity provider config: $($patch.error)" }
+    Write-HttpTrace $RunRoot 'provider_config' 'entity_patch' @{provider=$Provider} $patch
+
+    Write-Host "[PROVIDER] Configured $Provider for UAT."
 }
 
 # ===================================================================
 # STAGE 5: ENTITY BOOTSTRAP
 # ===================================================================
-Invoke-StageWithRetry 'entity_bootstrap' {
+if ($InstallerMode) {
+    Invoke-StageWithRetry 'entity_bootstrap' {
+        Write-Host "[ENTITY] Opening entity $EntityId through installed Hive..."
+        $open = Invoke-UatRequest -Method POST -Uri "$HiveUrl/v1/entities/$EntityId/open" -Body @{}
+        if (-not $open.ok) { throw "Entity open failed: $($open.error)" }
+        $script:EntityUrl = $open.data.local_url
+        if (-not $EntityUrl) { throw "Entity open did not return local_url" }
+        $healthy = Wait-ForHealth "$EntityUrl/health" -MaxWaitSec 45
+        if (-not $healthy) { throw "Entity did not become healthy within 45s at $EntityUrl" }
+        $status = Invoke-UatRequest -Uri "$EntityUrl/v1/status"
+        if (-not $status.ok) { throw "Entity /v1/status returned ok=false" }
+        if (-not $status.data.has_ego) { throw "Entity has_ego=false - provider config not resolved" }
+        Write-HttpTrace $RunRoot 'entity_bootstrap' 'open' @{entity_id=$EntityId} $open
+        Write-Host "[ENTITY] Installed path opened Entity Runtime at $EntityUrl."
+    }
+} else {
+    Invoke-StageWithRetry 'entity_bootstrap' {
     Write-Host "[ENTITY] Starting entity-daemon for $EntityId..."
     $entityBin = Join-Path $RepoRoot 'target/debug/entity-daemon'
     if ($env:OS -match 'Windows') { $entityBin += '.exe' }
@@ -258,6 +360,7 @@ Invoke-StageWithRetry 'entity_bootstrap' {
 
     Write-HttpTrace $RunRoot 'entity_bootstrap' 'status' @{} $status
     Write-Host "[ENTITY] Healthy with Ego provider active."
+    }
 }
 
 # ===================================================================
@@ -267,7 +370,7 @@ Invoke-StageWithRetry 'chat_sanity' {
     # Test 1: hello (verify real LLM, not stub)
     Write-Host "[CHAT] Sending hello..."
     $resp = Invoke-UatRequest -Method POST -Uri "$EntityUrl/v1/chat" `
-        -Body @{ message = "Say exactly one word: hello" } -TimeoutSec 60
+        -Body @{ message = "Say exactly one word: hello"; session_id = $ChatSessionId } -TimeoutSec 60
     if (-not $resp.ok) { throw "Chat hello failed: $($resp.error)" }
     $reply = $resp.data.reply
     if (-not $reply) { throw "Chat hello returned empty reply" }
@@ -288,7 +391,7 @@ Invoke-StageWithRetry 'chat_sanity' {
         $qi++
         Write-Host "[CHAT] Question $qi..."
         $r = Invoke-UatRequest -Method POST -Uri "$EntityUrl/v1/chat" `
-            -Body @{ message = $item.q } -TimeoutSec 60
+            -Body @{ message = $item.q; session_id = $ChatSessionId } -TimeoutSec 60
         if (-not $r.ok) { throw "Chat question $qi failed: $($r.error)" }
         if (-not $r.data.reply) { throw "Chat question $qi returned empty reply" }
         if ($r.data.reply -match [regex]::Escape($STUB_SIGNATURE)) {
@@ -301,6 +404,36 @@ Invoke-StageWithRetry 'chat_sanity' {
     }
 
     Write-Host "[CHAT] All chat tests passed."
+}
+
+# ===================================================================
+# STAGE 6B: DURABLE EXECUTION HISTORY
+# ===================================================================
+Invoke-StageWithRetry 'execution_history' {
+    Write-Host "[HISTORY] Verifying local execution ledger for session $ChatSessionId..."
+    $events = Invoke-UatRequest -Uri "$EntityUrl/v1/execution/events?session_id=$ChatSessionId&limit=20"
+    if (-not $events.ok) { throw "Execution events endpoint failed: $($events.error)" }
+    if ($events.data.events.Count -lt 2) { throw "Expected at least two execution ledger events, found $($events.data.events.Count)" }
+
+    if (-not $InstallerMode -and $EntityProc -and -not $EntityProc.HasExited) {
+        Write-Host "[HISTORY] Restarting debug entity-daemon to verify ledger survives restart..."
+        $EntityProc.Kill()
+        Start-Sleep -Seconds 2
+        $entityBin = Join-Path $RepoRoot 'target/debug/entity-daemon'
+        if ($env:OS -match 'Windows') { $entityBin += '.exe' }
+        $script:EntityProc = Start-DaemonProcess -RunRoot $RunRoot -Name 'entity-restart' `
+            -Command $entityBin `
+            -Arguments @("--entity-id", $EntityId, "--hive-url", $HiveUrl, "--port", $EntityPort, "--data-dir", $UatDataDir) `
+            -WorkingDir $RepoRoot
+        $healthy = Wait-ForHealth "$EntityUrl/health" -MaxWaitSec 45
+        if (-not $healthy) { throw "Entity did not become healthy after restart" }
+        $events = Invoke-UatRequest -Uri "$EntityUrl/v1/execution/events?session_id=$ChatSessionId&limit=20"
+        if (-not $events.ok) { throw "Execution events endpoint failed after restart: $($events.error)" }
+        if ($events.data.events.Count -lt 2) { throw "Execution ledger did not survive restart" }
+    }
+
+    Write-HttpTrace $RunRoot 'execution_history' 'events' @{session_id=$ChatSessionId} $events
+    Write-Host "[HISTORY] Execution events persisted."
 }
 
 # ===================================================================
@@ -325,7 +458,7 @@ Invoke-StageWithRetry 'weather' {
     # Ask entity
     Write-Host "[WEATHER] Asking entity about weather in $city..."
     $resp = Invoke-UatRequest -Method POST -Uri "$EntityUrl/v1/chat" `
-        -Body @{ message = "What is the current weather in $city, TX right now? Include the temperature." } `
+        -Body @{ message = "What is the current weather in $city, TX right now? Include the temperature."; session_id = $ChatSessionId } `
         -TimeoutSec 60
     if (-not $resp.ok) { throw "Weather chat failed: $($resp.error)" }
     $reply = $resp.data.reply
@@ -358,6 +491,10 @@ $summary = @{
     entity_name      = $EntityName
     hive_port        = $HivePort
     entity_port      = $EntityPort
+    provider         = $Provider
+    installer_mode   = $InstallerMode
+    installer_path   = $InstallerPath
+    chat_session_id  = $ChatSessionId
     data_dir         = $UatDataDir
     time             = (Get-Date -Format 'o')
 }

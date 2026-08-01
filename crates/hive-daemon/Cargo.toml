@@ -8,6 +8,7 @@ name = "hive-daemon"
 path = "src/main.rs"
 
 [dependencies]
+abigail-diag.workspace = true
 hive-core = { path = "../hive-core" }
 abigail-core = { path = "../abigail-core" }
 abigail-identity = { path = "../abigail-identity" }
@@ -28,6 +29,7 @@ anyhow.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 reqwest.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 daemon-test-harness = { path = "../daemon-test-harness" }

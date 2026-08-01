@@ -1,9 +1,11 @@
 use hive_core::{
-    CreateForgeApprovalJobRequest, ForgeApprovalJob, ForgeApprovalJobsResponse, OutboxSyncRequest,
-    OutboxSyncResponse, RuntimeHeartbeatRequest, RuntimeHeartbeatResponse, RuntimeRegistration,
-    RuntimeRegistrationRequest, RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus,
-    SetSkillAssignmentsRequest, SkillAssignmentsResponse,
+    CreateForgeApprovalJobRequest, ExecutionReceipt, ExecutionReceiptsResponse, ForgeApprovalJob,
+    ForgeApprovalJobsResponse, OutboxSyncRequest, OutboxSyncResponse, RuntimeHeartbeatRequest,
+    RuntimeHeartbeatResponse, RuntimeRegistration, RuntimeRegistrationRequest, RuntimeSessionLease,
+    RuntimeSessionRequest, RuntimeSessionStatus, SetSkillAssignmentsRequest,
+    SkillAssignmentsResponse,
 };
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -12,6 +14,7 @@ pub struct RuntimeControlPlane {
     assignments: HashMap<String, SkillAssignmentsResponse>,
     forge_jobs: HashMap<String, ForgeApprovalJobsResponse>,
     synced_outbox: HashMap<String, Vec<hive_core::EntityOutboxRecord>>,
+    execution_receipts: HashMap<String, Vec<ExecutionReceipt>>,
 }
 
 impl RuntimeControlPlane {
@@ -173,10 +176,15 @@ impl RuntimeControlPlane {
         job
     }
 
-    pub fn sync_outbox(
+    pub fn sync_outbox<F>(
         &mut self,
         request: OutboxSyncRequest,
-    ) -> Result<OutboxSyncResponse, String> {
+        mut signer: F,
+    ) -> Result<OutboxSyncResponse, String>
+    where
+        F: FnMut(&[u8]) -> (String, String),
+    {
+        let request_records = request.records.clone();
         let Some(session) = self.sessions.get_mut(&request.lease_id) else {
             return Err(format!("Unknown runtime lease '{}'", request.lease_id));
         };
@@ -199,13 +207,94 @@ impl RuntimeControlPlane {
 
         session.outbox_depth = 0;
         session.outbox_oldest_at_utc = None;
+        let server_time_utc = chrono::Utc::now().to_rfc3339();
+        let receipt = if request_records.is_empty() {
+            None
+        } else {
+            let batch_hash = hash_outbox_batch(&request_records);
+            let receipt_payload = format!(
+                "execution_receipt_v1\nentity_id={}\nruntime_id={}\nlease_id={}\nbatch_hash={}\nevent_count={}\naccepted_record_ids={}",
+                session.lease.entity_id,
+                request.runtime_id,
+                request.lease_id,
+                batch_hash,
+                accepted_record_ids.len(),
+                accepted_record_ids.join(",")
+            );
+            let (signature, public_key) = signer(receipt_payload.as_bytes());
+            Some(ExecutionReceipt {
+                schema_version: "execution_receipt_v1".to_string(),
+                receipt_id: uuid::Uuid::new_v4().to_string(),
+                entity_id: session.lease.entity_id.clone(),
+                runtime_id: request.runtime_id,
+                lease_id: request.lease_id,
+                batch_hash,
+                event_count: accepted_record_ids.len(),
+                accepted_record_ids: accepted_record_ids.clone(),
+                signature,
+                public_key,
+                signed_at_utc: server_time_utc.clone(),
+            })
+        };
+        let execution_receipts = receipt.into_iter().collect::<Vec<_>>();
+        if !execution_receipts.is_empty() {
+            self.execution_receipts
+                .entry(session.lease.entity_id.clone())
+                .or_default()
+                .extend(execution_receipts.clone());
+        }
 
         Ok(OutboxSyncResponse {
             accepted_record_ids,
             pending_records: 0,
-            server_time_utc: chrono::Utc::now().to_rfc3339(),
+            server_time_utc,
+            execution_receipts,
         })
     }
+
+    pub fn execution_receipts(&self, entity_id: &str, limit: usize) -> ExecutionReceiptsResponse {
+        let mut receipts = self
+            .execution_receipts
+            .get(entity_id)
+            .cloned()
+            .unwrap_or_default();
+        if receipts.len() > limit {
+            receipts = receipts.split_off(receipts.len() - limit);
+        }
+        ExecutionReceiptsResponse {
+            entity_id: entity_id.to_string(),
+            receipts,
+        }
+    }
+}
+
+fn hash_outbox_batch(records: &[hive_core::EntityOutboxRecord]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"execution_receipt_v1\n");
+    for record in records {
+        hasher.update(record.record_id.as_bytes());
+        hasher.update(b"\n");
+        hasher.update(record.entity_id.as_bytes());
+        hasher.update(b"\n");
+        hasher.update(record.kind.as_bytes());
+        hasher.update(b"\n");
+        hasher.update(record.created_at_utc.as_bytes());
+        hasher.update(b"\n");
+        let payload = serde_json::to_vec(&record.payload).unwrap_or_default();
+        hasher.update(Sha256::digest(payload));
+        hasher.update(b"\n");
+    }
+    to_hex(&hasher.finalize())
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -250,19 +339,23 @@ mod tests {
         assert!(heartbeat.accepted);
 
         let sync = control
-            .sync_outbox(OutboxSyncRequest {
-                lease_id: lease.lease_id.clone(),
-                runtime_id: lease.runtime_id.clone(),
-                records: vec![hive_core::EntityOutboxRecord {
-                    record_id: "record-1".to_string(),
-                    entity_id: "entity-1".to_string(),
-                    kind: "chat_user_turn".to_string(),
-                    created_at_utc: "2026-04-12T12:00:00Z".to_string(),
-                    payload: serde_json::json!({ "message": "hello" }),
-                }],
-            })
+            .sync_outbox(
+                OutboxSyncRequest {
+                    lease_id: lease.lease_id.clone(),
+                    runtime_id: lease.runtime_id.clone(),
+                    records: vec![hive_core::EntityOutboxRecord {
+                        record_id: "record-1".to_string(),
+                        entity_id: "entity-1".to_string(),
+                        kind: "chat_user_turn".to_string(),
+                        created_at_utc: "2026-04-12T12:00:00Z".to_string(),
+                        payload: serde_json::json!({ "message": "hello" }),
+                    }],
+                },
+                |_| ("signature".to_string(), "public-key".to_string()),
+            )
             .unwrap();
         assert_eq!(sync.accepted_record_ids, vec!["record-1".to_string()]);
+        assert_eq!(sync.execution_receipts.len(), 1);
     }
 
     #[test]

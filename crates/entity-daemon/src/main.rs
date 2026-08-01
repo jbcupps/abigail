@@ -5,6 +5,7 @@
 
 mod backup_ops;
 mod capability_matcher;
+mod execution_ledger;
 mod hive_client;
 mod job_scheduler;
 mod memory_consumer;
@@ -67,15 +68,21 @@ struct Cli {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                "entity_daemon=info,abigail_router=info,abigail_skills=info".into()
-            }),
-        )
-        .init();
+async fn main() {
+    // Durable file logging + panic hook FIRST, before any fallible work. Like
+    // hive-daemon, an entity-daemon can end up with invalid inherited stdio
+    // when launched indirectly through a GUI shell, so route logs to a file
+    // independent of `--data-dir`/`directories` resolution. See `abigail_diag`.
+    let component = format!("entity-daemon-{}", Cli::parse().entity_id);
+    abigail_diag::init(&component);
+    if let Err(e) = run().await {
+        tracing::error!("entity-daemon exited with error: {e:#}");
+        abigail_diag::record_fatal(&component, &format!("{e:#}"));
+        std::process::exit(1);
+    }
+}
 
+async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     tracing::info!(
@@ -488,9 +495,15 @@ async fn main() -> anyhow::Result<()> {
             .map_err(|e| tracing::warn!("Failed to start memory chat-topic subscriber: {}", e))
             .ok();
 
-    let queue_store =
+    let queue_store = if abigail_persistence::ci_mode_enabled()
+        && std::env::var_os("ABIGAIL_DAEMON_INTEGRATION").is_some()
+    {
+        tracing::info!("Using ephemeral Hive queue store for daemon integration tests");
+        PersistenceHandle::open_ephemeral(EntityScope::Hive)
+    } else {
         PersistenceHandle::open(HiveEntity::memory_db_path(&data_root), EntityScope::Hive)
-            .map_err(|e| anyhow::anyhow!("Failed to open Hive queue store: {}", e))?;
+    }
+    .map_err(|e| anyhow::anyhow!("Failed to open Hive queue store: {}", e))?;
     let job_queue = Arc::new(JobQueue::new(queue_store, stream_broker.clone()));
     let recovered = job_queue.recover_running_jobs("entity-daemon restarted")?;
     if recovered > 0 {
@@ -536,6 +549,7 @@ async fn main() -> anyhow::Result<()> {
         .map(|response| response.jobs)
         .unwrap_or_default();
     let outbox = Arc::new(outbox::RuntimeOutbox::load(&entity_dir, 256)?);
+    let execution_ledger = Arc::new(execution_ledger::ExecutionLedger::load(&entity_dir)?);
 
     // Soul reference: hash of the entity's soul documents, stamped on every
     // pipeline envelope so downstream observers know which identity version
@@ -569,6 +583,7 @@ async fn main() -> anyhow::Result<()> {
             abigail_router::ConstraintStore::with_data_dir(entity_dir.clone()),
         )),
         outbox,
+        execution_ledger,
         last_hive_sync_at_utc: Arc::new(tokio::sync::RwLock::new(None)),
         last_hive_error: Arc::new(tokio::sync::RwLock::new(None)),
         runtime_url: Arc::new(tokio::sync::RwLock::new(None)),
@@ -801,6 +816,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/status", get(routes::get_status))
         .route("/v1/session/status", get(routes::get_session_status))
         .route("/v1/outbox/status", get(routes::get_outbox_status))
+        .route("/v1/execution/events", get(routes::get_execution_events))
         .route("/v1/chat", post(routes::chat))
         .route("/v1/chat/stream", post(routes::chat_stream))
         .route("/v1/chat/cancel", post(routes::cancel_chat_stream))
@@ -849,7 +865,14 @@ async fn main() -> anyhow::Result<()> {
     spawn_runtime_supervision(state.clone(), hive_client.clone(), initial_provider_config);
 
     tracing::info!("Entity daemon listening on {}", local_url);
-    println!("Entity daemon listening on {}", local_url);
+    {
+        use std::io::Write as _;
+        let _ = writeln!(
+            std::io::stdout(),
+            "Entity daemon listening on {}",
+            local_url
+        );
+    }
     axum::serve(listener, app).await?;
 
     Ok(())

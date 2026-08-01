@@ -269,7 +269,8 @@ mod tests {
         let _ = std::fs::create_dir_all(&docs_dir);
         let stream_broker: Arc<dyn abigail_streaming::StreamBroker> =
             Arc::new(MemoryBroker::new(128));
-        let queue_store = PersistenceHandle::open_ephemeral(EntityScope::Hive).unwrap();
+        let queue_scope = EntityScope::Entity(format!("pipeline-queue-{}", uuid::Uuid::new_v4()));
+        let queue_store = PersistenceHandle::open_ephemeral(queue_scope).unwrap();
         let job_queue = Arc::new(abigail_queue::JobQueue::new(
             queue_store,
             stream_broker.clone(),
@@ -308,6 +309,10 @@ mod tests {
             )),
             outbox: Arc::new(
                 crate::outbox::RuntimeOutbox::load(docs_dir.join("outbox"), 64).expect("outbox"),
+            ),
+            execution_ledger: Arc::new(
+                crate::execution_ledger::ExecutionLedger::load(docs_dir.join("ledger"))
+                    .expect("execution ledger"),
             ),
             last_hive_sync_at_utc: Arc::new(tokio::sync::RwLock::new(None)),
             last_hive_error: Arc::new(tokio::sync::RwLock::new(None)),

@@ -84,6 +84,18 @@ assert(
   release.includes("tags:"),
   "Beta/release lane must stay explicit via tags or manual dispatch."
 );
+assert(
+  release.includes("branches:") && release.includes("- beta"),
+  "Full installer release must trigger from the permanent beta branch."
+);
+assert(
+  release.includes('-beta.${{ github.run_number }}'),
+  "Beta installer releases must receive run-numbered beta tags."
+);
+assert(
+  release.includes("prerelease: ${{ needs.build.outputs.prerelease }}"),
+  "Beta installer releases must be published as prereleases."
+);
 for (const forbidden of [
   "cd tauri-app",
   "tauri-app/src-ui",
@@ -104,6 +116,37 @@ for (const required of [
   assert(
     release.includes(required),
     `Full installer release must stage the split Abigail product (${required}).`
+  );
+}
+assert(
+  release.includes("resources[\\\\\\\\/]$binary"),
+  "Beta installer verification must assert the installed resources path for hive-daemon.exe."
+);
+assert(
+  release.includes("Verify packaged frontend assets"),
+  "Beta installer verification must assert packaged frontend assets are relative and include startup video."
+);
+assert(
+  release.includes("data-abigail-app-css") && release.includes("--color-primary"),
+  "Beta installer verification must assert Abigail CSS is bundled into the frontend JavaScript."
+);
+
+for (const app of ["hive-app", "entity-runtime-app"]) {
+  const viteConfig = fs.readFileSync(`${app}/src-ui/vite.config.ts`, "utf8");
+  assert(
+    viteConfig.includes('base: "./"'),
+    `${app} Vite config must emit relative asset paths for packaged Tauri WebViews.`
+  );
+  const splash = fs.readFileSync(`${app}/src-ui/src/components/SplashScreen.tsx`, "utf8");
+  assert(
+    splash.includes('src="./video/startup.mp4"'),
+    `${app} splash video must use a relative packaged asset path.`
+  );
+  const main = fs.readFileSync(`${app}/src-ui/src/main.tsx`, "utf8");
+  assert(
+    main.includes('import appCss from "./index.css?inline"') &&
+      main.includes("data-abigail-app-css"),
+    `${app} must inject the processed CSS from JavaScript so packaged WebViews cannot render unstyled.`
   );
 }
 

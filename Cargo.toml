@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/abigail-diag",
     "crates/abigail-persistence",
     "crates/abigail-core",
     "crates/abigail-memory",
@@ -85,3 +86,4 @@ hive-core = { path = "crates/hive-core" }
 entity-core = { path = "crates/entity-core" }
 entity-chat = { path = "crates/entity-chat" }
 abigail-identity = { path = "crates/abigail-identity" }
+abigail-diag = { path = "crates/abigail-diag" }

@@ -8,6 +8,7 @@ name = "entity-daemon"
 path = "src/main.rs"
 
 [dependencies]
+abigail-diag.workspace = true
 entity-core = { path = "../entity-core" }
 entity-chat = { path = "../entity-chat" }
 hive-core = { path = "../hive-core" }
@@ -42,6 +43,7 @@ reqwest.workspace = true
 async-trait.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+sha2.workspace = true
 cron = "0.15"
 
 [dev-dependencies]

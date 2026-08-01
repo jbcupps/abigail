@@ -5,6 +5,8 @@ name: Abigail Installer Release
 
 on:
   push:
+    branches:
+      - beta
     tags:
       - 'v*'
   workflow_dispatch:
@@ -33,6 +35,9 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      channel: ${{ steps.version.outputs.channel }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      release_name: ${{ steps.version.outputs.release_name }}
 
     steps:
       - name: Checkout
@@ -80,13 +85,18 @@ jobs:
         id: version
         shell: bash
         run: |
+          IS_BETA="false"
+          if [[ "${{ github.ref }}" == "refs/heads/beta" || "${{ github.ref_name }}" == *"-beta."* ]]; then
+            IS_BETA="true"
+          fi
+
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION="${{ github.ref_name }}"
-            VERSION="${VERSION#v}"
+            RAW_VERSION="${{ github.ref_name }}"
+            RAW_VERSION="${RAW_VERSION#v}"
+            VERSION="${RAW_VERSION%%-*}"
             TAG="${{ github.ref_name }}"
           elif [[ -n "${{ github.event.inputs.release_version }}" ]]; then
             VERSION="${{ github.event.inputs.release_version }}"
-            TAG="v${VERSION}"
           else
             git fetch --tags
             LATEST=$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
@@ -98,11 +108,35 @@ jobs:
               PATCH=$((PATCH + 1))
               VERSION="${MAJOR}.${MINOR}.${PATCH}"
             fi
-            TAG="v${VERSION}"
+          fi
+
+          if [[ -z "${TAG:-}" ]]; then
+            if [[ "$IS_BETA" == "true" ]]; then
+              TAG="v${VERSION}-beta.${{ github.run_number }}"
+            else
+              TAG="v${VERSION}"
+            fi
+          fi
+
+          if [[ "$TAG" == *"-beta."* ]]; then
+            IS_BETA="true"
+          fi
+
+          if [[ "$IS_BETA" == "true" ]]; then
+            CHANNEL="beta"
+            PRERELEASE="true"
+            RELEASE_NAME="Abigail ${TAG} (Beta UAT)"
+          else
+            CHANNEL="stable"
+            PRERELEASE="false"
+            RELEASE_NAME="Abigail ${TAG}"
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Building Abigail installer version: $VERSION (tag: $TAG)"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "release_name=$RELEASE_NAME" >> "$GITHUB_OUTPUT"
+          echo "Building Abigail installer version: $VERSION (tag: $TAG, channel: $CHANNEL)"
 
       - name: Update Hive app version
         shell: bash
@@ -184,6 +218,32 @@ jobs:
               throw "Missing installer payload file: $path"
             }
           }
+
+      - name: Verify packaged frontend assets
+        shell: bash
+        run: |
+          for app in hive-app entity-runtime-app; do
+            if [[ ! -f "$app/src-ui/dist/video/startup.mp4" ]]; then
+              echo "$app is missing dist/video/startup.mp4"
+              exit 1
+            fi
+            if grep -E 'rel="stylesheet"|href="./assets/.*\.css|href="/assets/.*\.css' "$app/src-ui/dist/index.html"; then
+              echo "$app frontend still depends on an external stylesheet in packaged index.html"
+              exit 1
+            fi
+            if grep -E 'src="/assets|href="/assets|src="/video|href="/video' "$app/src-ui/dist/index.html"; then
+              echo "$app frontend emitted absolute packaged asset paths"
+              exit 1
+            fi
+            if ! grep -R --include '*.js' -F "data-abigail-app-css" "$app/src-ui/dist/assets" >/dev/null; then
+              echo "$app frontend bundle does not install inline Abigail CSS"
+              exit 1
+            fi
+            if ! grep -R --include '*.js' -F -- "--color-primary" "$app/src-ui/dist/assets" >/dev/null; then
+              echo "$app frontend bundle is missing Abigail theme CSS"
+              exit 1
+            fi
+          done
 
       - name: Configure split installer resources
         shell: bash
@@ -311,11 +371,13 @@ jobs:
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           tag_name: ${{ needs.build.outputs.tag }}
-          name: Abigail ${{ needs.build.outputs.tag }}
+          name: ${{ needs.build.outputs.release_name }}
           draft: false
-          prerelease: false
+          prerelease: ${{ needs.build.outputs.prerelease }}
           body: |
-            ## Abigail ${{ needs.build.outputs.tag }}
+            ## ${{ needs.build.outputs.release_name }}
+
+            Release channel: `${{ needs.build.outputs.channel }}`
 
             ### Installation
 
@@ -325,8 +387,76 @@ jobs:
 
             Abigail installs as one app icon. Launch **Abigail** to open Abigail Hive; the bundled Hive daemon, Entity Runtime, and Entity daemons start as needed in the background.
 
+            ### Beta UAT
+
+            Builds from the permanent `beta` branch are tagged as `vX.Y.Z-beta.N` and published as prereleases for UAT. Promote validated beta changes to `main` for a stable `vX.Y.Z` release.
+
             ### Platform Notes
 
             - macOS builds remain temporarily unavailable while Apple signing is paused.
             - Linux one-step packaging is planned after the Windows installer lane is stable.
           files: release-assets/*
+
+  verify-beta-installer:
+    needs: [build, publish]
+    if: needs.build.outputs.channel == 'beta'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - name: Install archive tools
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+
+      - name: Download published beta installer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p downloaded
+          gh release download "${{ needs.build.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "Abigail-windows-x64-setup.exe" \
+            --dir downloaded
+
+      - name: Verify bundled internal binaries
+        shell: bash
+        run: |
+          INSTALLER="downloaded/Abigail-windows-x64-setup.exe"
+          test -f "$INSTALLER"
+          7z l "$INSTALLER" > installer-contents.txt
+          for binary in \
+            "abigail-entity-runtime-app.exe" \
+            "hive-daemon.exe" \
+            "entity-daemon.exe"
+          do
+            if ! grep -E "resources[\\\\/]$binary" installer-contents.txt >/dev/null; then
+              echo "Missing bundled internal binary at installer resource path: resources/$binary"
+              exit 1
+            fi
+          done
+
+      - name: Record beta UAT installer metadata
+        shell: bash
+        run: |
+          mkdir -p uat-release
+          node -e "
+            const fs = require('fs');
+            fs.writeFileSync('uat-release/beta-installer.json', JSON.stringify({
+              tag: '${{ needs.build.outputs.tag }}',
+              version: '${{ needs.build.outputs.version }}',
+              installer: 'Abigail-windows-x64-setup.exe',
+              channel: 'beta',
+              prerelease: true,
+              workflow_run_id: '${{ github.run_id }}',
+              repository: '${{ github.repository }}'
+            }, null, 2) + '\n');
+          "
+          cp installer-contents.txt uat-release/installer-contents.txt
+
+      - name: Upload beta UAT verification artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
+        with:
+          name: beta-uat-installer-verification
+          path: uat-release/*
+          if-no-files-found: error

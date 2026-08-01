@@ -217,6 +217,18 @@ impl MemoryStore {
             db_path.display(),
             config.data_dir.display()
         );
+        if abigail_persistence::ci_mode_enabled()
+            && std::env::var_os("ABIGAIL_DAEMON_INTEGRATION").is_some()
+        {
+            tracing::info!(
+                "MemoryStore using ephemeral store for daemon integration test scope={}",
+                entity_id.as_deref().unwrap_or("hive")
+            );
+            return Self::open_in_memory_with_entity_and_unlock(
+                entity_id.as_deref().unwrap_or("hive"),
+                Arc::new(HybridUnlockProvider::new()),
+            );
+        }
         Self::open_internal(
             db_path,
             Arc::new(HybridUnlockProvider::new()),
