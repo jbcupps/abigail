@@ -15,8 +15,16 @@ struct Check {
 
 fn check(name: &'static str, result: anyhow::Result<String>) -> Check {
     match result {
-        Ok(detail) => Check { name, ok: true, detail },
-        Err(e) => Check { name, ok: false, detail: format!("{e:#}") },
+        Ok(detail) => Check {
+            name,
+            ok: true,
+            detail,
+        },
+        Err(e) => Check {
+            name,
+            ok: false,
+            detail: format!("{e:#}"),
+        },
     }
 }
 
@@ -32,10 +40,7 @@ pub fn run(data_dir: Option<&str>, port: u16) -> i32 {
     } else {
         AppConfig::default_paths().data_dir
     };
-    checks.push(check(
-        "data dir writable",
-        check_data_dir(&data_root),
-    ));
+    checks.push(check("data dir writable", check_data_dir(&data_root)));
 
     checks.push(check("port bind", check_port_bind(port)));
 
@@ -58,7 +63,11 @@ pub fn run(data_dir: Option<&str>, port: u16) -> i32 {
         println!("[{status}] {}: {}", c.name, c.detail);
     }
 
-    if all_ok { 0 } else { 1 }
+    if all_ok {
+        0
+    } else {
+        1
+    }
 }
 
 fn check_log_dir() -> anyhow::Result<String> {
@@ -114,7 +123,11 @@ fn check_entity_daemon_binary() -> anyhow::Result<String> {
     let dir = exe
         .parent()
         .ok_or_else(|| anyhow::anyhow!("current executable has no parent directory"))?;
-    let name = if cfg!(windows) { "entity-daemon.exe" } else { "entity-daemon" };
+    let name = if cfg!(windows) {
+        "entity-daemon.exe"
+    } else {
+        "entity-daemon"
+    };
     let path = dir.join(name);
     if path.is_file() {
         Ok(path.display().to_string())

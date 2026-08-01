@@ -867,7 +867,11 @@ async fn run() -> anyhow::Result<()> {
     tracing::info!("Entity daemon listening on {}", local_url);
     {
         use std::io::Write as _;
-        let _ = writeln!(std::io::stdout(), "Entity daemon listening on {}", local_url);
+        let _ = writeln!(
+            std::io::stdout(),
+            "Entity daemon listening on {}",
+            local_url
+        );
     }
     axum::serve(listener, app).await?;
 

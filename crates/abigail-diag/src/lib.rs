@@ -91,7 +91,11 @@ pub fn init(component: &str) {
     let panic_path = dir.join(format!("{component}.panic.log"));
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&panic_path) {
+        if let Ok(mut f) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&panic_path)
+        {
             let _ = writeln!(f, "[panic] {info}");
             let _ = writeln!(f, "{}", std::backtrace::Backtrace::force_capture());
             let _ = f.flush();
@@ -122,9 +126,7 @@ pub fn init(component: &str) {
         // Last resort: if even the log file can't be opened, fall back to the
         // (possibly invalid) stdout so we at least don't change prior behavior.
         Err(_) => {
-            let _ = tracing_subscriber::fmt()
-                .with_env_filter(filter)
-                .try_init();
+            let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
         }
     }
 }
