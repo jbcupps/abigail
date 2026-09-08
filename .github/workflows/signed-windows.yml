@@ -14,16 +14,18 @@ on:
         required: true
         type: string
     secrets:
+      # The mandatory first step reports all missing values together. Optional
+      # declarations let that check run instead of failing caller evaluation.
       ESIGNER_USERNAME:
-        required: true
+        required: false
       ESIGNER_PASSWORD:
-        required: true
+        required: false
       ESIGNER_CREDENTIAL_ID:
-        required: true
+        required: false
       ESIGNER_TOTP_SECRET:
-        required: true
+        required: false
       WINDOWS_CERTIFICATE_THUMBPRINT:
-        required: true
+        required: false
 
 permissions:
   contents: read
