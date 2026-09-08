@@ -9,6 +9,7 @@ anyhow.workspace = true
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+reqwest.workspace = true
 surrealdb.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

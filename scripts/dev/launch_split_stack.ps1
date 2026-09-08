@@ -1,12 +1,7 @@
 param(
     [int]$HivePort = 43141,
-    [int]$RuntimePort = 43142,
-    [int]$HarnessPort = 43143,
     [string]$EntityName = "Stability Reset Test Entity",
-    [switch]$SkipDesktopApps,
-    [switch]$LaunchBrowserHarness,
-    [switch]$NoBrowserFallback,
-    [switch]$OpenBrowser = $true
+    [switch]$SkipDesktopApps
 )
 
 Set-StrictMode -Version Latest
@@ -93,8 +88,8 @@ $sessionPath = Join-Path $sessionRoot "session.json"
 $diagnosticPath = Join-Path $sessionRoot "policy-diagnostic.json"
 $stopScript = Join-Path $PSScriptRoot "stop_split_stack.ps1"
 $hiveUrl = "http://127.0.0.1:$HivePort"
-$runtimeUrl = "http://127.0.0.1:$RuntimePort"
-$harnessUrl = "http://127.0.0.1:$HarnessPort"
+$runtimeUrl = $null
+$harnessUrl = $null
 $targetDir = Get-DevTargetDir
 
 New-Item -ItemType Directory -Force -Path $logsRoot | Out-Null
@@ -154,8 +149,12 @@ $runtimeErr = Join-Path $logsRoot "entity-daemon.err.log"
 $harnessOut = Join-Path $logsRoot "browser-harness.out.log"
 $harnessErr = Join-Path $logsRoot "browser-harness.err.log"
 
-Write-Host "Starting Hive daemon..."
-$hiveProc = Start-Process -FilePath $hiveExe `
+$callerToken = [Guid]::NewGuid().ToString('N') + [Guid]::NewGuid().ToString('N')
+$bootstrapDir = Join-Path $workspaceRoot 'hive-app/resources/bootstrap'
+if (-not (Test-Path (Join-Path $bootstrapDir 'bundle.json'))) { & (Join-Path $workspaceRoot 'scripts/stage_offline_bootstrap.ps1') }
+Write-Host "Starting Abigail daemon..."
+$hiveProc = Start-Process -FilePath $hiveExe -WindowStyle Hidden `
+    -Environment @{ ABIGAIL_LOCAL_AUTH_TOKEN = $callerToken; ABIGAIL_BOOTSTRAP_DIR = $bootstrapDir } `
     -ArgumentList @("--port", "$HivePort", "--data-dir", $dataRoot) `
     -WorkingDirectory $workspaceRoot `
     -RedirectStandardOutput $hiveOut `
@@ -165,7 +164,7 @@ Wait-HttpOk -Url "$hiveUrl/health" -TimeoutSeconds 30
 
 Write-Host "Creating test entity..."
 $entityResponse = Invoke-RestMethod -Method Post `
-    -Uri "$hiveUrl/v1/entities" `
+    -Uri "$hiveUrl/v1/entities" -Headers @{ Authorization = "Bearer $callerToken" } `
     -ContentType "application/json" `
     -Body (@{ name = $EntityName } | ConvertTo-Json)
 if (-not $entityResponse.ok) {
@@ -173,13 +172,12 @@ if (-not $entityResponse.ok) {
 }
 $entityId = $entityResponse.data.id
 
-Write-Host "Starting Entity Runtime daemon..."
-$runtimeProc = Start-Process -FilePath $runtimeExe `
-    -ArgumentList @("--entity-id", $entityId, "--hive-url", $hiveUrl, "--port", "$RuntimePort", "--data-dir", $dataRoot) `
-    -WorkingDirectory $workspaceRoot `
-    -RedirectStandardOutput $runtimeOut `
-    -RedirectStandardError $runtimeErr `
-    -PassThru
+Write-Host "Starting Entity Runtime through Abigail..."
+$opened = Invoke-RestMethod -Method Post -Uri "$hiveUrl/v1/entities/$entityId/open" -Headers @{ Authorization = "Bearer $callerToken" }
+if (-not $opened.ok) { throw "Could not open Entity: $($opened.error)" }
+$runtimeUrl = $opened.data.local_url
+$entityToken = $opened.data.auth_token
+$runtimeProc = $null
 Wait-HttpOk -Url "$runtimeUrl/health" -TimeoutSeconds 45
 
 $browserHarnessProc = $null
@@ -188,11 +186,13 @@ $runtimeAppProc = $null
 $mode = "desktop"
 
 if ($desktopBuildSucceeded -and -not $SkipDesktopApps) {
-    Write-Host "Launching Abigail Hive desktop shell..."
+    Write-Host "Launching Abigail desktop shell..."
     $hiveAppProc = Start-Process -FilePath $hiveAppExe `
         -WorkingDirectory (Join-Path $workspaceRoot "hive-app") `
         -Environment @{
             ABIGAIL_HIVE_URL = $hiveUrl
+            ABIGAIL_LOCAL_AUTH_TOKEN = $callerToken
+            ABIGAIL_BOOTSTRAP_DIR = $bootstrapDir
             CARGO_TARGET_DIR = $targetDir
         } `
         -PassThru
@@ -202,50 +202,13 @@ if ($desktopBuildSucceeded -and -not $SkipDesktopApps) {
         -WorkingDirectory (Join-Path $workspaceRoot "entity-runtime-app") `
         -Environment @{
             ABIGAIL_ENTITY_URL = $runtimeUrl
+            ABIGAIL_ENTITY_AUTH_TOKEN = $entityToken
             CARGO_TARGET_DIR = $targetDir
         } `
         -PassThru
-} elseif (-not $NoBrowserFallback) {
-    $mode = "browser_fallback"
-    Write-Warning "Desktop shells are unavailable on this machine right now; starting the browser harness instead."
-    $browserHarnessProc = Start-Process -FilePath $node `
-        -ArgumentList @(
-            (Join-Path $workspaceRoot "scripts\dev\run_browser_harness.mjs"),
-            "--port",
-            "$HarnessPort",
-            "--hive-url",
-            $hiveUrl,
-            "--runtime-url",
-            $runtimeUrl
-        ) `
-        -WorkingDirectory $workspaceRoot `
-        -RedirectStandardOutput $harnessOut `
-        -RedirectStandardError $harnessErr `
-        -PassThru
-    Wait-HttpOk -Url "$harnessUrl/" -TimeoutSeconds 15
-    if ($OpenBrowser) {
-        Start-Process $harnessUrl | Out-Null
-    }
 } else {
-    throw "Desktop shells failed to build and browser fallback is disabled."
-}
-
-if ($LaunchBrowserHarness -and -not $browserHarnessProc) {
-    $browserHarnessProc = Start-Process -FilePath $node `
-        -ArgumentList @(
-            (Join-Path $workspaceRoot "scripts\dev\run_browser_harness.mjs"),
-            "--port",
-            "$HarnessPort",
-            "--hive-url",
-            $hiveUrl,
-            "--runtime-url",
-            $runtimeUrl
-        ) `
-        -WorkingDirectory $workspaceRoot `
-        -RedirectStandardOutput $harnessOut `
-        -RedirectStandardError $harnessErr `
-        -PassThru
-    Wait-HttpOk -Url "$harnessUrl/" -TimeoutSeconds 15
+    $mode = "daemons_only"
+    Write-Warning "Desktop shells are unavailable. Daemons are running; see the session file. For disposable browser setup checks, use python scripts/test_initial_setup.py --ui."
 }
 
 $session = [ordered]@{
@@ -261,7 +224,7 @@ $session = [ordered]@{
     desktop_build_succeeded = $desktopBuildSucceeded
     desktop_build_error = if ($desktopBuildError) { $desktopBuildError.Exception.Message } else { $null }
     hive_daemon_pid = $hiveProc.Id
-    entity_daemon_pid = $runtimeProc.Id
+    entity_daemon_pid = if ($runtimeProc) { $runtimeProc.Id } else { $null }
     hive_app_pid = if ($hiveAppProc) { $hiveAppProc.Id } else { $null }
     entity_app_pid = if ($runtimeAppProc) { $runtimeAppProc.Id } else { $null }
     browser_harness_pid = if ($browserHarnessProc) { $browserHarnessProc.Id } else { $null }

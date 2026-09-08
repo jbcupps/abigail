@@ -293,10 +293,15 @@ pub async fn get_birth_document(
         .ok()
         .and_then(|json| serde_json::from_str::<BirthCertificate>(&json).ok());
 
-    let provider_config = match state.hive.resolve_config(&config) {
-        Ok(hive_config) => crate::routes::provider_config_from_hive_config(&hive_config),
-        Err(e) => return Json(ApiEnvelope::error(e)),
-    };
+    let provider_config =
+        match crate::routes::get_provider_config(State(state.clone()), Path(entity_id.clone()))
+            .await
+            .0
+            .data
+        {
+            Some(config) => config,
+            None => return Json(ApiEnvelope::error("Provider configuration is unavailable")),
+        };
 
     let assignments = state
         .runtime_control

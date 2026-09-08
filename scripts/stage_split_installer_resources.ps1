@@ -53,7 +53,9 @@ function Build-Frontend {
     Invoke-Checked -FilePath "npm" -Arguments @("run", "build") -WorkingDirectory $uiDir
 }
 
-Build-Frontend -AppDir (Join-Path $repoRoot "hive-app") -Label "Abigail Hive"
+& (Join-Path $PSScriptRoot "stage_offline_bootstrap.ps1")
+
+Build-Frontend -AppDir (Join-Path $repoRoot "hive-app") -Label "Abigail"
 Build-Frontend -AppDir (Join-Path $repoRoot "entity-runtime-app") -Label "Abigail Entity Runtime"
 
 $cargoArgs = @(

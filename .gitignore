@@ -64,3 +64,6 @@ external_pubkey.bin
 .DS_Store
 Thumbs.db
 nul
+
+# Verified build-time offline model cache
+.cache/

@@ -1,6 +1,7 @@
 //! Hive daemon HTTP route handlers.
 
 use crate::state::HiveDaemonState;
+use abigail_persistence::{EntityScope, PersistenceEnvelope, PersistenceRequest};
 use axum::{
     extract::{Path, State},
     Json,
@@ -9,13 +10,12 @@ use hive_core::{
     ApiEnvelope, BestModelResponse, CliDetectResponse, CliProviderDetection, CreateEntityRequest,
     CreateEntityResponse, CreateForgeApprovalJobRequest, EntityInfo, EntityOpenResponse,
     ExecutionReceiptsResponse, ForgeApprovalJobsResponse, HelperInfo, HiveDefaultResponse,
-    HiveStatus, OutboxSyncRequest, OutboxSyncResponse, ProviderConfig, ProviderModelInfo,
-    ProviderModelsRequest, ProviderModelsResponse, ProviderProfileResponse,
-    RuntimeHeartbeatRequest, RuntimeHeartbeatResponse, RuntimeRegistrationRequest,
-    RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus, SecretListResponse,
-    SecretValueResponse, SetHiveDefaultRequest, SetSkillAssignmentsRequest, SignEntityRequest,
-    SkillAssignmentsResponse, StoreSecretRequest, UpdateEntityConfigRequest,
-    UpdateEntityConfigResponse,
+    HiveStatus, OutboxSyncRequest, OutboxSyncResponse, ProviderConfig, ProviderModelsRequest,
+    ProviderModelsResponse, ProviderProfileResponse, RuntimeHeartbeatRequest,
+    RuntimeHeartbeatResponse, RuntimeRegistrationRequest, RuntimeSessionLease,
+    RuntimeSessionRequest, RuntimeSessionStatus, SecretListResponse, SecretValueResponse,
+    SetHiveDefaultRequest, SetSkillAssignmentsRequest, SignEntityRequest, SkillAssignmentsResponse,
+    StoreSecretRequest, UpdateEntityConfigRequest, UpdateEntityConfigResponse,
 };
 
 pub(crate) fn provider_config_from_hive_config(
@@ -65,10 +65,13 @@ pub async fn get_status(State(state): State<HiveDaemonState>) -> Json<ApiEnvelop
                     immortal: a.immortal,
                 })
                 .collect();
-            let any_provider_configured = state.hive.resolve_best_model().is_some();
-            let helper_local_url = state.helper_url.lock().ok().and_then(|g| g.clone());
-            let helper_running = helper_local_url.is_some();
-            let ready_state = if any_provider_configured {
+            let setup = state.bootstrap.snapshot().await;
+            let any_provider_configured = setup.active_provider != "local";
+            let helper_local_url = Some(state.hive_url.clone());
+            let helper_running = setup.phase == "ready";
+            let ready_state = if !helper_running {
+                "loading_model"
+            } else if any_provider_configured {
                 "ready"
             } else {
                 "needs_provider"
@@ -180,6 +183,12 @@ pub async fn get_provider_config(
         Ok(c) => c,
         Err(e) => return Json(ApiEnvelope::error(e)),
     };
+
+    if config.active_provider_preference.is_none() && config.ego_model.is_none() || config.is_hive {
+        if let Some(provider) = state.bootstrap.provider_config().await {
+            return Json(ApiEnvelope::success(provider));
+        }
+    }
 
     // Inherit the Hive-level default provider/model when this entity has none of
     // its own, so a name-only entity "just works" with the family's provider.
@@ -328,10 +337,20 @@ pub async fn open_entity(
     State(state): State<HiveDaemonState>,
     Path(entity_id): Path<String>,
 ) -> Json<ApiEnvelope<EntityOpenResponse>> {
+    match state.identity_manager.load_agent(&entity_id) {
+        Ok(config) if !config.is_hive => {}
+        Ok(_) => {
+            return Json(ApiEnvelope::error(
+                "Abigail is already available in the main window.",
+            ))
+        }
+        Err(_) => return Json(ApiEnvelope::error("Unknown Entity")),
+    }
     match state.supervisor.ensure_entity_running(&entity_id).await {
         Ok(local_url) => Json(ApiEnvelope::success(EntityOpenResponse {
-            entity_id,
+            entity_id: entity_id.clone(),
             local_url,
+            auth_token: state.supervisor.runtime_token(&entity_id),
         })),
         Err(e) => Json(ApiEnvelope::error(format!("{:#}", e))),
     }
@@ -347,7 +366,7 @@ pub async fn close_entity(
     State(state): State<HiveDaemonState>,
     Path(entity_id): Path<String>,
 ) -> Json<ApiEnvelope<String>> {
-    state.supervisor.stop_entity(&entity_id);
+    state.supervisor.stop_entity(&entity_id).await;
     Json(ApiEnvelope::success(format!(
         "Entity {} stopped",
         entity_id
@@ -532,26 +551,12 @@ pub async fn discover_models(
     State(_state): State<HiveDaemonState>,
     Json(body): Json<ProviderModelsRequest>,
 ) -> Json<ApiEnvelope<ProviderModelsResponse>> {
-    match abigail_capabilities::cognitive::validation::discover_models(
-        &body.provider,
-        &body.api_key,
-    )
-    .await
-    {
-        Ok(models) => {
-            let model_infos: Vec<ProviderModelInfo> = models
-                .into_iter()
-                .map(|m| ProviderModelInfo {
-                    model_id: m.id,
-                    display_name: m.display_name,
-                })
-                .collect();
-            Json(ApiEnvelope::success(ProviderModelsResponse {
-                provider: body.provider,
-                models: model_infos,
-            }))
-        }
-        Err(e) => Json(ApiEnvelope::error(e)),
+    match crate::bootstrap::discover_models(&body.provider, &body.api_key).await {
+        Ok(models) => Json(ApiEnvelope::success(ProviderModelsResponse {
+            provider: body.provider,
+            models,
+        })),
+        Err(error) => Json(ApiEnvelope::error(error.to_string())),
     }
 }
 
@@ -728,18 +733,57 @@ pub async fn get_execution_receipts(
     }
 }
 
+// ---------------------------------------------------------------------------
+// POST /v1/persistence/op
+// ---------------------------------------------------------------------------
+
+/// Run one persistence operation against the Hive-owned store on behalf of a
+/// child daemon.
+///
+/// `memory.db` is held under an exclusive OS file lock by this process, so
+/// entity-daemons cannot open it themselves — they send their reads and writes
+/// here instead. Already behind the local Bearer middleware, so only children
+/// the Hive launched (which carry the per-launch token) can reach it.
+pub async fn run_persistence_op(
+    State(state): State<HiveDaemonState>,
+    Json(request): Json<PersistenceRequest>,
+) -> Json<PersistenceEnvelope> {
+    let registry = state.persistence.clone();
+    let scope_label = EntityScope::from(request.scope.clone()).label();
+
+    // Store operations block, so keep them off the async worker threads.
+    let result = tokio::task::spawn_blocking(move || registry.run(request)).await;
+
+    match result {
+        Ok(Ok(outcome)) => Json(PersistenceEnvelope::success(outcome)),
+        Ok(Err(error)) => {
+            tracing::warn!("Persistence op failed for {}: {:#}", scope_label, error);
+            Json(PersistenceEnvelope::failure(format!("{error:#}")))
+        }
+        Err(join_error) => {
+            tracing::error!(
+                "Persistence task panicked for {}: {}",
+                scope_label,
+                join_error
+            );
+            Json(PersistenceEnvelope::failure(format!(
+                "persistence task failed: {join_error}"
+            )))
+        }
+    }
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::runtime_registry::RuntimeControlPlane;
-    use abigail_core::{AppConfig, SecretsVault};
+    use abigail_core::SecretsVault;
     use abigail_hive::Hive;
     use abigail_identity::IdentityManager;
     use std::sync::{Arc, Mutex};
 
-    fn build_state() -> (HiveDaemonState, String) {
-        let data_root = AppConfig::default_paths()
-            .data_dir
+    pub(crate) fn build_state() -> (HiveDaemonState, String) {
+        let data_root = std::env::temp_dir()
             .join("test-hive-daemon-routes")
             .join(uuid::Uuid::new_v4().to_string());
         std::fs::create_dir_all(&data_root).expect("create test data root");
@@ -758,6 +802,11 @@ mod tests {
         let hive_secrets = Arc::new(Mutex::new(SecretsVault::new(hive_secrets_dir)));
         let hive = Arc::new(Hive::new(entity_secrets, hive_secrets.clone()));
 
+        let local_auth = crate::local_auth::LocalAuth::generate();
+        let persistence =
+            crate::persistence::PersistenceRegistry::open(data_root.join("memory.db"))
+                .expect("open test persistence store");
+
         (
             HiveDaemonState {
                 identity_manager,
@@ -765,11 +814,14 @@ mod tests {
                 hive_secrets,
                 hive_url: "http://127.0.0.1:3141".to_string(),
                 runtime_control: Arc::new(Mutex::new(RuntimeControlPlane::default())),
-                helper_url: Arc::new(Mutex::new(None)),
                 supervisor: crate::supervisor::HiveSupervisor::new(
                     "http://127.0.0.1:3141".to_string(),
                     data_root.clone(),
+                    local_auth.clone(),
                 ),
+                local_auth,
+                bootstrap: crate::bootstrap::Bootstrap::open(&data_root, &entity_id, None).unwrap(),
+                persistence,
             },
             entity_id,
         )

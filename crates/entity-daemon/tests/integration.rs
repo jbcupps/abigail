@@ -35,7 +35,7 @@ async fn runtime_exposes_session_and_outbox_status() {
         return;
     }
     let cluster = cluster().await;
-    let client = reqwest::Client::new();
+    let client = cluster.entity.client();
 
     let mut session: serde_json::Value = serde_json::Value::Null;
     for attempt in 0..15u32 {

@@ -1,4 +1,4 @@
-import { resolveHiveUrl } from "./connection";
+import { restartHiveConnection, resolveHiveConnection } from "./connection";
 
 // Thin typed wrapper over the Hive daemon HTTP API. Every JSON route returns the
 // universal `{ ok, data?, error? }` envelope; `/health` returns plain text.
@@ -23,14 +23,22 @@ export interface CreateEntityResult {
 }
 
 async function hiveFetch(path: string, init?: RequestInit): Promise<Response> {
-  const base = await resolveHiveUrl();
-  return fetch(`${base}${path}`, init);
+  const { hiveUrl, authToken } = await resolveHiveConnection();
+  const headers = new Headers(init?.headers ?? undefined);
+  if (authToken && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${authToken}`);
+  }
+  return fetch(`${hiveUrl}${path}`, { ...init, headers });
 }
 
 async function unwrap<T>(res: Response, path: string): Promise<T> {
+  if (!res.ok)
+    throw new Error(`Request failed (HTTP ${res.status}). Please retry.`);
   const envelope = (await res.json()) as ApiEnvelope<T>;
-  if (!envelope.ok) throw new Error(envelope.error ?? `Request to ${path} failed`);
-  if (envelope.data === undefined) throw new Error(`Response from ${path} missing data`);
+  if (!envelope.ok)
+    throw new Error(envelope.error ?? `Request to ${path} failed`);
+  if (envelope.data === undefined)
+    throw new Error(`Response from ${path} missing data`);
   return envelope.data;
 }
 
@@ -43,7 +51,9 @@ export async function hiveHealth(): Promise<boolean> {
 }
 
 export async function listEntities(): Promise<EntityInfo[]> {
-  const res = await hiveFetch("/v1/entities", { headers: { Accept: "application/json" } });
+  const res = await hiveFetch("/v1/entities", {
+    headers: { Accept: "application/json" },
+  });
   return unwrap<EntityInfo[]>(res, "/v1/entities");
 }
 
@@ -80,7 +90,9 @@ export interface HiveStatus {
 }
 
 export async function getStatus(): Promise<HiveStatus> {
-  const res = await hiveFetch("/v1/status", { headers: { Accept: "application/json" } });
+  const res = await hiveFetch("/v1/status", {
+    headers: { Accept: "application/json" },
+  });
   return unwrap<HiveStatus>(res, "/v1/status");
 }
 
@@ -92,7 +104,9 @@ export interface BestModel {
 }
 
 export async function getBestModel(): Promise<BestModel> {
-  const res = await hiveFetch("/v1/providers/best", { headers: { Accept: "application/json" } });
+  const res = await hiveFetch("/v1/providers/best", {
+    headers: { Accept: "application/json" },
+  });
   return unwrap<BestModel>(res, "/v1/providers/best");
 }
 
@@ -105,17 +119,25 @@ export interface CliProviderDetection {
 }
 
 export async function detectCliProviders(): Promise<CliProviderDetection[]> {
-  const res = await hiveFetch("/v1/providers/detect", { headers: { Accept: "application/json" } });
-  const data = await unwrap<{ providers: CliProviderDetection[] }>(res, "/v1/providers/detect");
+  const res = await hiveFetch("/v1/providers/detect", {
+    headers: { Accept: "application/json" },
+  });
+  const data = await unwrap<{ providers: CliProviderDetection[] }>(
+    res,
+    "/v1/providers/detect",
+  );
   return data.providers;
 }
 
 export interface ProviderModel {
-  id: string;
+  model_id: string;
   display_name?: string | null;
 }
 
-export async function discoverModels(provider: string, apiKey: string): Promise<ProviderModel[]> {
+export async function discoverModels(
+  provider: string,
+  apiKey: string,
+): Promise<ProviderModel[]> {
   const data = await hivePost<{ provider: string; models: ProviderModel[] }>(
     "/v1/providers/models",
     { provider, api_key: apiKey },
@@ -132,6 +154,48 @@ export interface HiveDefault {
   model?: string | null;
 }
 
-export async function setHiveDefault(provider?: string, model?: string): Promise<HiveDefault> {
-  return hivePost<HiveDefault>("/v1/providers/hive-default", { provider, model });
+export async function setHiveDefault(
+  provider?: string,
+  model?: string,
+): Promise<HiveDefault> {
+  return hivePost<HiveDefault>("/v1/providers/hive-default", {
+    provider,
+    model,
+  });
 }
+
+export interface SetupStatus {
+  phase: string;
+  message: string;
+  model: string;
+  active_provider: string;
+  active_model: string;
+}
+export interface SetupMessage {
+  role: string;
+  content: string;
+}
+export async function getSetupStatus(): Promise<SetupStatus> {
+  return unwrap(await hiveFetch("/v1/setup"), "/v1/setup");
+}
+export const retrySetup = async () => {
+  await restartHiveConnection();
+  return hivePost<SetupStatus>("/v1/setup/retry", {});
+};
+export const cancelSetup = () => hivePost<SetupStatus>("/v1/setup/cancel", {});
+export const useLocalModel = () => hivePost<SetupStatus>("/v1/setup/local", {});
+export const activateSetupModel = (
+  provider: string,
+  model: string,
+  apiKey: string,
+) =>
+  hivePost<SetupStatus>("/v1/setup/activate", {
+    provider,
+    model,
+    api_key: apiKey,
+  });
+export async function setupHistory(): Promise<{ messages: SetupMessage[] }> {
+  return unwrap(await hiveFetch("/v1/setup/chat"), "/v1/setup/chat");
+}
+export const sendSetupMessage = (message: string) =>
+  hivePost<{ messages: SetupMessage[] }>("/v1/setup/chat", { message });

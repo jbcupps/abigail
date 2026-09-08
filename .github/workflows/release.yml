@@ -211,13 +211,21 @@ jobs:
           $required = @(
             "hive-app/resources/abigail-entity-runtime-app.exe",
             "hive-app/resources/hive-daemon.exe",
-            "hive-app/resources/entity-daemon.exe"
+            "hive-app/resources/entity-daemon.exe",
+            "hive-app/resources/bootstrap/bundle.json",
+            "hive-app/resources/bootstrap/ollama/ollama.exe",
+            "hive-app/resources/bootstrap/MODEL-LICENSE.txt",
+            "hive-app/resources/bootstrap/NOTICE.txt"
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path)) {
               throw "Missing installer payload file: $path"
             }
           }
+
+      - name: Verify offline local inference
+        shell: pwsh
+        run: ./scripts/test_offline_bootstrap.ps1
 
       - name: Verify packaged frontend assets
         shell: bash
@@ -256,7 +264,8 @@ jobs:
             conf.bundle.resources = [
               'resources/abigail-entity-runtime-app.exe',
               'resources/hive-daemon.exe',
-              'resources/entity-daemon.exe'
+              'resources/entity-daemon.exe',
+              'resources/bootstrap/**/*'
             ];
             fs.writeFileSync(path, JSON.stringify(conf, null, 2) + '\n');
           "
@@ -385,7 +394,7 @@ jobs:
             - **Windows**: `Abigail-windows-x64-setup.exe`
             - **Windows (MSI)**: `Abigail-windows-x64.msi`
 
-            Abigail installs as one app icon. Launch **Abigail** to open Abigail Hive; the bundled Hive daemon, Entity Runtime, and Entity daemons start as needed in the background.
+            Abigail installs as one app icon. Launch **Abigail** to start the offline setup conversation; the bundled Hive daemon, Entity Runtime, and Entity daemons start as needed in the background.
 
             ### Beta UAT
 
@@ -435,6 +444,13 @@ jobs:
               exit 1
             fi
           done
+
+            for payload in 'bootstrap[\\/]bundle.json' 'bootstrap[\\/]ollama[\\/]ollama.exe' 'sha256-afb707b6b8fac6e475acc42bc8380fc0b8d2e0e4190be5a969fbf62fcc897db5'; do
+              if ! grep -E "$payload" installer-contents.txt >/dev/null; then
+                echo "Missing offline inference payload: $payload"
+                exit 1
+              fi
+            done
 
       - name: Record beta UAT installer metadata
         shell: bash

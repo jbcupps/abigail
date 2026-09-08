@@ -2,11 +2,12 @@ interface LoaderScreenProps {
   message?: string;
   error?: boolean;
   onRetry?: () => void;
+  onCancel?: () => void;
 }
 
 // Calm post-splash screen shown while local services finish warming up, or a
 // gentle retry prompt if they don't come up within the readiness window.
-export default function LoaderScreen({ message, error, onRetry }: LoaderScreenProps) {
+export default function LoaderScreen({ message, error, onRetry, onCancel }: LoaderScreenProps) {
   return (
     <div className="fixed inset-0 z-[9998] flex flex-col items-center justify-center gap-5 bg-theme-bg">
       <h1 className="text-3xl font-semibold tracking-wide text-theme-text-bright">Abigail</h1>
@@ -35,6 +36,7 @@ export default function LoaderScreen({ message, error, onRetry }: LoaderScreenPr
           )}
         </>
       )}
+      {!error && onCancel && <button type="button" onClick={onCancel} className="text-sm text-theme-primary hover:underline">Pause startup</button>}
     </div>
   );
 }

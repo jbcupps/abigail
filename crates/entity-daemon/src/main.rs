@@ -8,6 +8,7 @@ mod capability_matcher;
 mod execution_ledger;
 mod hive_client;
 mod job_scheduler;
+mod local_auth;
 mod memory_consumer;
 mod outbox;
 mod pipeline;
@@ -39,7 +40,7 @@ use queue_ops::LocalQueueOperations;
 use state::EntityDaemonState;
 use std::sync::{Arc, Mutex};
 use subagent_runner::SubagentRunner;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 
 #[derive(Parser)]
 #[command(name = "entity-daemon", about = "Abigail Entity agent runtime daemon")]
@@ -84,6 +85,9 @@ async fn main() {
 
 async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    let caller_token = std::env::var("ABIGAIL_ENTITY_AUTH_TOKEN")
+        .map_err(|_| anyhow::anyhow!("Entity caller token is required"))?;
+    anyhow::ensure!(caller_token.len() >= 32, "Invalid Entity caller token");
 
     tracing::info!(
         "Entity daemon starting: entity_id={}, hive={}",
@@ -417,11 +421,18 @@ async fn run() -> anyhow::Result<()> {
         }
     }
 
-    // 9b. Open shared memory store (Surreal-backed, auto-creates schema)
-    let memory = Arc::new(
-        MemoryStore::open_with_config(&config)
-            .expect("Failed to open memory store — check db_path permissions"),
-    );
+    // 9b. Open shared memory store (Surreal-backed, auto-creates schema).
+    // Under the Hive this resolves to the Hive-owned store over HTTP; standalone
+    // it opens the file directly. Either way a failure here is fatal but must be
+    // *reported*, not panicked: a panic in a GUI-spawned child with detached
+    // stdio dies silently and the family just sees an Entity that never opens.
+    let memory = Arc::new(MemoryStore::open_with_config(&config).map_err(|error| {
+        anyhow::anyhow!(
+            "Failed to open memory store for {} at {}: {error}",
+            config.data_dir.display(),
+            config.db_path.display()
+        )
+    })?);
     tracing::info!("Memory store opened: {:?}", config.db_path);
 
     let instruction_registry = Arc::new({
@@ -495,15 +506,20 @@ async fn run() -> anyhow::Result<()> {
             .map_err(|e| tracing::warn!("Failed to start memory chat-topic subscriber: {}", e))
             .ok();
 
-    let queue_store = if abigail_persistence::ci_mode_enabled()
-        && std::env::var_os("ABIGAIL_DAEMON_INTEGRATION").is_some()
-    {
-        tracing::info!("Using ephemeral Hive queue store for daemon integration tests");
-        PersistenceHandle::open_ephemeral(EntityScope::Hive)
-    } else {
-        PersistenceHandle::open(HiveEntity::memory_db_path(&data_root), EntityScope::Hive)
-    }
-    .map_err(|e| anyhow::anyhow!("Failed to open Hive queue store: {}", e))?;
+    // The job queue is scoped to THIS Entity, not to the Hive.
+    //
+    // It used to be Hive-scoped, which was survivable only while a single
+    // entity-daemon could exist at a time — the shared store's file lock made
+    // sure of that. Now that Entities run concurrently, one shared queue would
+    // mean every daemon polling every Entity's jobs, `mark_running` racing
+    // between processes (it is a read-check-write, not a compare-and-set), and
+    // worst of all `recover_running_jobs` below marking *another* Entity's
+    // in-flight jobs as failed each time a new Entity opened. Per-Entity scoping
+    // also matches the isolation rule in CLAUDE.md.
+    let queue_scope = EntityScope::Entity(cli.entity_id.clone());
+    let queue_store =
+        PersistenceHandle::open_shared(HiveEntity::memory_db_path(&data_root), queue_scope)
+            .map_err(|e| anyhow::anyhow!("Failed to open entity queue store: {}", e))?;
     let job_queue = Arc::new(JobQueue::new(queue_store, stream_broker.clone()));
     let recovered = job_queue.recover_running_jobs("entity-daemon restarted")?;
     if recovered > 0 {
@@ -805,11 +821,47 @@ async fn run() -> anyhow::Result<()> {
         }
     };
 
-    // Build HTTP router
+    // Local-only runtime API: no wildcard CORS (foreign browser origins denied).
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_origin([
+            "http://tauri.localhost"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid origin"),
+            "http://localhost:1422"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid origin"),
+            "http://localhost:1420"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid origin"),
+            "http://127.0.0.1:1420"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid origin"),
+            "http://localhost:5173"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid origin"),
+            "http://127.0.0.1:5173"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid origin"),
+            "tauri://localhost"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid origin"),
+            "https://tauri.localhost"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid origin"),
+        ])
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::PATCH,
+            axum::http::Method::PUT,
+            axum::http::Method::DELETE,
+            axum::http::Method::OPTIONS,
+        ])
+        .allow_headers([
+            axum::http::header::AUTHORIZATION,
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::ACCEPT,
+        ]);
 
     let app = Router::new()
         .route("/health", get(routes::health))
@@ -842,6 +894,10 @@ async fn run() -> anyhow::Result<()> {
         .route("/v1/memory/search", post(routes::memory_search))
         .route("/v1/memory/recent", get(routes::memory_recent))
         .route("/v1/memory/insert", post(routes::memory_insert))
+        .layer(axum::middleware::from_fn_with_state(
+            caller_token,
+            local_auth::require_auth,
+        ))
         .layer(cors)
         .with_state(state.clone());
 

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("./lib/connection", () => ({
   resolveEntityUrl: mocks.resolveEntityUrl,
+  authenticatedEntityFetch: vi.fn(),
 }));
 
 vi.mock("./lib/daemonClient", () => ({

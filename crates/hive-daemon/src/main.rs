@@ -4,7 +4,10 @@
 //! Listens on `--port` (default 43141).
 
 mod birth;
+mod bootstrap;
 mod doctor;
+mod local_auth;
+mod persistence;
 mod routes;
 mod runtime_registry;
 mod state;
@@ -13,12 +16,23 @@ mod supervisor;
 use abigail_core::{AppConfig, SecretsVault};
 use abigail_hive::Hive;
 use abigail_identity::IdentityManager;
+use axum::http::{header, HeaderValue, Method};
+use axum::middleware;
 use axum::routing::{get, post};
 use axum::Router;
 use clap::Parser;
+
+use local_auth::LocalAuth;
 use state::HiveDaemonState;
 use std::sync::{Arc, Mutex};
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
+
+/// Upper bound on a single persistence request body (64 MiB).
+///
+/// Generous rather than tight: this is loopback traffic from the Hive's own
+/// supervised children, and the cost of being wrong is a family's memory write
+/// failing.
+const PERSISTENCE_BODY_LIMIT: usize = 64 * 1024 * 1024;
 
 #[derive(Parser)]
 #[command(name = "hive-daemon", about = "Abigail Hive control plane daemon")]
@@ -73,23 +87,19 @@ async fn run() -> anyhow::Result<()> {
     // Initialize subsystems
     let identity_manager = Arc::new(IdentityManager::new(data_root.clone())?);
 
+    // `SecretsVault::load` is always the right call: it migrates a legacy
+    // `secrets.bin` when it finds one and yields an empty vault when there is
+    // no file at all. The previous `secrets.bin` existence probe never matched
+    // a modern profile (vaults are written as `secrets.vault`), so every
+    // restart started from an empty vault and the next save silently wiped the
+    // family's stored provider keys.
     let entity_secrets_dir = data_root.join("entity_secrets");
     std::fs::create_dir_all(&entity_secrets_dir)?;
-    let entity_secrets = if entity_secrets_dir.join("secrets.bin").exists() {
-        SecretsVault::load(entity_secrets_dir)?
-    } else {
-        SecretsVault::new(entity_secrets_dir)
-    };
-    let entity_secrets = Arc::new(Mutex::new(entity_secrets));
+    let entity_secrets = Arc::new(Mutex::new(SecretsVault::load(entity_secrets_dir)?));
 
     let hive_secrets_dir = data_root.join("hive_secrets");
     std::fs::create_dir_all(&hive_secrets_dir)?;
-    let hive_secrets = if hive_secrets_dir.join("secrets.bin").exists() {
-        SecretsVault::load(hive_secrets_dir)?
-    } else {
-        SecretsVault::new(hive_secrets_dir)
-    };
-    let hive_secrets = Arc::new(Mutex::new(hive_secrets));
+    let hive_secrets = Arc::new(Mutex::new(SecretsVault::load(hive_secrets_dir)?));
 
     let hive = Arc::new(Hive::new(entity_secrets.clone(), hive_secrets.clone()));
 
@@ -99,9 +109,37 @@ async fn run() -> anyhow::Result<()> {
 
     // Capture the immortal Hive helper's id before `identity_manager` moves into
     // the daemon state.
-    let hive_helper_id = identity_manager.hive_agent_id();
-    let helper_url: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    let supervisor = supervisor::HiveSupervisor::new(hive_url.clone(), data_root.clone());
+    let hive_helper_id = identity_manager
+        .hive_agent_id()
+        .map_err(anyhow::Error::msg)?;
+    let local_auth = LocalAuth::new(std::env::var(hive_core::LOCAL_AUTH_ENV).map_err(|_| {
+        anyhow::anyhow!(
+            "A caller token must be supplied by the desktop launcher in ABIGAIL_LOCAL_AUTH_TOKEN"
+        )
+    })?);
+
+    // Take ownership of the shared store before any child is spawned. The
+    // embedded SurrealKv file lock is exclusive, so the Hive holds it and
+    // serves child daemons over /v1/persistence/op instead of letting each of
+    // them try (and fail) to open the same file.
+    let persistence = persistence::PersistenceRegistry::open(
+        abigail_identity::HiveEntity::memory_db_path(&data_root),
+    )?;
+
+    anyhow::ensure!(
+        local_auth.token().len() >= 32,
+        "Caller token must contain at least 32 characters"
+    );
+    let supervisor =
+        supervisor::HiveSupervisor::new(hive_url.clone(), data_root.clone(), local_auth.clone());
+
+    let active = bootstrap::Bootstrap::saved_connection(
+        &*hive_secrets
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Vault unavailable"))?,
+    )?;
+    let bootstrap = bootstrap::Bootstrap::open(&data_root, &hive_helper_id, active)?;
+    bootstrap.start().await;
 
     let state = HiveDaemonState {
         identity_manager,
@@ -109,33 +147,80 @@ async fn run() -> anyhow::Result<()> {
         hive_secrets,
         hive_url: hive_url.clone(),
         runtime_control: Arc::new(Mutex::new(runtime_registry::RuntimeControlPlane::default())),
-        helper_url: helper_url.clone(),
         supervisor: supervisor.clone(),
+        local_auth: local_auth.clone(),
+        persistence: persistence.clone(),
+        bootstrap,
     };
 
-    // Start the persistent Hive helper out-of-band: the immortal "Abigail Hive"
-    // identity, run as its own entity-daemon. The control plane keeps serving
-    // /health immediately while the helper warms up.
-    match hive_helper_id {
-        Ok(id) => {
-            supervisor::supervise_hive_helper(id, hive_url.clone(), data_root.clone(), helper_url)
-        }
-        Err(e) => tracing::warn!("Hive helper not started: {}", e),
-    }
-
-    // Build router
+    // Local-only control plane: no wildcard CORS. Browsers on foreign origins
+    // cannot invoke privileged routes; authenticated loopback clients still work.
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_origin([
+            // Tauri 2 webviews and local Vite dev servers.
+            "http://tauri.localhost"
+                .parse::<HeaderValue>()
+                .expect("valid origin"),
+            "http://localhost:1421"
+                .parse::<HeaderValue>()
+                .expect("valid origin"),
+            "http://127.0.0.1:1421"
+                .parse::<HeaderValue>()
+                .expect("valid origin"),
+            "http://localhost:1420"
+                .parse::<HeaderValue>()
+                .expect("valid origin"),
+            "http://127.0.0.1:1420"
+                .parse::<HeaderValue>()
+                .expect("valid origin"),
+            "http://localhost:5173"
+                .parse::<HeaderValue>()
+                .expect("valid origin"),
+            "http://127.0.0.1:5173"
+                .parse::<HeaderValue>()
+                .expect("valid origin"),
+            "tauri://localhost"
+                .parse::<HeaderValue>()
+                .expect("valid origin"),
+            "https://tauri.localhost"
+                .parse::<HeaderValue>()
+                .expect("valid origin"),
+        ])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PATCH,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE, header::ACCEPT]);
 
     let app = Router::new()
         .route("/health", get(routes::health))
         .route("/v1/status", get(routes::get_status))
+        .route("/v1/setup", get(bootstrap::status))
+        .route("/v1/setup/retry", post(bootstrap::retry))
+        .route("/v1/setup/cancel", post(bootstrap::cancel))
+        .route(
+            "/v1/setup/chat",
+            get(bootstrap::history).post(bootstrap::chat),
+        )
+        .route("/v1/setup/activate", post(bootstrap::activate))
+        .route("/v1/setup/local", post(bootstrap::use_local))
         .route("/v1/entities", get(routes::list_entities))
         .route("/v1/entities", post(routes::create_entity))
         .route("/v1/entities/:id", get(routes::get_entity))
         .route("/v1/entities/:id/open", post(routes::open_entity))
+        .route(
+            "/v1/persistence/op",
+            post(routes::run_persistence_op)
+                // Records that used to be written straight to a local file now
+                // travel as a request body, and axum's default cap is 2 MiB.
+                // Embeddings, knowledge-base entries and long conversation turns
+                // exceed that, and the family would see them silently rejected.
+                .layer(axum::extract::DefaultBodyLimit::max(PERSISTENCE_BODY_LIMIT)),
+        )
         .route("/v1/entities/:id/close", post(routes::close_entity))
         .route("/v1/birth/scenarios", get(birth::get_scenarios))
         .route(
@@ -185,6 +270,10 @@ async fn run() -> anyhow::Result<()> {
             "/v1/entities/:id/execution/receipts",
             get(routes::get_execution_receipts),
         )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            local_auth::require_local_auth,
+        ))
         .layer(cors)
         .with_state(state);
 
