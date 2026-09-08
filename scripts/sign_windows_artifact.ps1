@@ -20,9 +20,17 @@ foreach ($name in @('WINDOWS_CERTIFICATE_THUMBPRINT','ESIGNER_USERNAME','ESIGNER
 }
 $thumbprint = $env:WINDOWS_CERTIFICATE_THUMBPRINT
 if ($thumbprint -notmatch '^[0-9A-Fa-f]{40}$') { throw 'Invalid expected signing certificate thumbprint.' }
+function Save-SignedMain {
+    # Tauri restores the unsigned main executable after packaging. Keep the exact
+    # signed, bundle-patched bytes for the standalone artifact and payload check.
+    if ([IO.Path]::GetFileName($resolved) -eq 'abigail-hive-app.exe' -and $env:ABIGAIL_SIGNED_MAIN_PATH) {
+        Copy-Item -LiteralPath $resolved -Destination $env:ABIGAIL_SIGNED_MAIN_PATH -Force
+    }
+}
 $existing = Get-AuthenticodeSignature -LiteralPath $resolved
 if ($existing.Status -eq 'Valid' -and $existing.SignerCertificate.Thumbprint -eq $thumbprint) {
     $null = Assert-AbigailSignature -Path $resolved -Thumbprint $thumbprint
+    Save-SignedMain
     Write-Host "Verified existing Abigail signature: $([IO.Path]::GetFileName($resolved))"
     exit 0
 }
@@ -56,6 +64,7 @@ try {
     } finally { Pop-Location }
     if ($exitCode -ne 0) { throw "SSL.com signing failed (exit $exitCode). No artifact will be published." }
     $null = Assert-AbigailSignature -Path $resolved -Thumbprint $thumbprint
+    Save-SignedMain
     Write-Host "Signed and verified: $([IO.Path]::GetFileName($resolved))"
 } finally {
     # These exact files were created above; never recursively remove a computed tree.

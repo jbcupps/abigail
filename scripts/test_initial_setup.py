@@ -22,6 +22,7 @@ TARGET = Path(os.environ.get("CARGO_TARGET_DIR", str(ROOT / "target")))
 if not TARGET.is_absolute():
     TARGET = ROOT / TARGET
 BUNDLE = ROOT / "hive-app/resources/bootstrap"
+BINARIES = TARGET / "debug"
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -54,7 +55,8 @@ def stop(process):
 
 
 class Daemon:
-    def __init__(self, profile, bundle=BUNDLE):
+    def __init__(self, profile, bundle=None):
+        bundle = BUNDLE if bundle is None else bundle
         self.profile = profile
         self.token = uuid.uuid4().hex + uuid.uuid4().hex
         self.env = os.environ.copy()
@@ -63,14 +65,14 @@ class Daemon:
             self.env.pop(key, None)
         self.env.update(ABIGAIL_LOCAL_AUTH_TOKEN=self.token,
                         ABIGAIL_BOOTSTRAP_DIR=str(bundle),
-                        ABIGAIL_ENTITY_DAEMON_PATH=str(TARGET / "debug/entity-daemon.exe"),
+                        ABIGAIL_ENTITY_DAEMON_PATH=str(BINARIES / "entity-daemon.exe"),
                         LOCALAPPDATA=str(profile / "local"), USERPROFILE=str(profile), HOME=str(profile),
                         HTTP_PROXY="http://127.0.0.1:9", HTTPS_PROXY="http://127.0.0.1:9",
                         NO_PROXY="127.0.0.1,localhost")
         self.log = profile / ("daemon-" + uuid.uuid4().hex + ".log")
         with self.log.open("wb") as log:
             self.process = subprocess.Popen(
-                [str(TARGET / "debug/hive-daemon.exe"), "--port", "0",
+                [str(BINARIES / "hive-daemon.exe"), "--port", "0",
                  "--data-dir", str(profile / "data")], cwd=profile, env=self.env,
                 stdout=log, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
         try:
@@ -105,9 +107,14 @@ class Daemon:
 
 
 def main():
+    global BINARIES, BUNDLE
     parser = argparse.ArgumentParser()
     parser.add_argument("--ui", action="store_true")
+    parser.add_argument("--binary-dir", type=Path, default=BINARIES)
+    parser.add_argument("--bundle-dir", type=Path, default=BUNDLE)
     args = parser.parse_args()
+    BINARIES = args.binary_dir.resolve()
+    BUNDLE = args.bundle_dir.resolve()
     profile = Path(tempfile.mkdtemp(prefix="abigail-setup-acceptance-"))
     print("Isolated profile:", profile, flush=True)
     daemon = None

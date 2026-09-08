@@ -66,6 +66,11 @@ without signing secrets and records source commit, version, executable hashes, a
 all offline payload hashes. The signing phase rejects changed inputs. After a
 partially completed signing attempt, run Prepare again before retrying.
 
+The main executable is signed inside Tauri's callback after its NSIS metadata
+patch and before bundling. Because Tauri restores its unsigned build output when
+bundling finishes, the callback saves a separate signed copy and compares it with
+the extracted executable. The other three Abigail programs are signed first.
+
 The SSL.com CodeSignTool 1.3.3 Windows archive is SHA-256 pinned. The mutable vendor
 download fails closed if it changes. Review and update the pin deliberately. The
 vendor archive contains its own Java runtime. The tool uses production SSL.com

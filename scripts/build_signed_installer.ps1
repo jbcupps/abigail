@@ -19,6 +19,7 @@ $resourceRoot = Join-Path $app 'resources'
 $bootstrapRoot = Join-Path $resourceRoot 'bootstrap'
 $statePath = Join-Path $work 'build-state.json'
 $configPath = Join-Path $work 'bundle-config.json'
+$previousSignedMainPath = $env:ABIGAIL_SIGNED_MAIN_PATH
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 $localCli = Join-Path $repoRoot '.cache/signing/tauri-cli/node_modules/.bin/tauri.cmd'
 $cli = if (Test-Path $localCli) { $localCli } else { (Get-Command tauri -ErrorAction Stop).Source }
@@ -78,6 +79,12 @@ try {
     foreach ($name in @('ESIGNER_USERNAME','ESIGNER_PASSWORD','ESIGNER_CREDENTIAL_ID','ESIGNER_TOTP_SECRET','WINDOWS_CERTIFICATE_THUMBPRINT')) {
         if (-not [Environment]::GetEnvironmentVariable($name)) { throw "$name is required. Use encrypted GitHub secrets or the secure local credential prompt." }
     }
+    $sevenZipCommand = Get-Command 7z -ErrorAction SilentlyContinue
+    $sevenZip = if ($env:ABIGAIL_7ZIP_PATH) { (Resolve-Path -LiteralPath $env:ABIGAIL_7ZIP_PATH).Path } elseif ($sevenZipCommand) { $sevenZipCommand.Source } else { $null }
+    foreach ($candidate in @('C:/Program Files/7-Zip/7z.exe', (Join-Path $repoRoot '.cache/signing/7zip/7z.exe'))) {
+        if (-not $sevenZip -and (Test-Path -LiteralPath $candidate)) { $sevenZip = $candidate }
+    }
+    if (-not $sevenZip) { throw '7-Zip is required to verify the actual installer payload.' }
     $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
     if ($state.sourceCommit -ne $commit -or $state.version -ne $Version) { throw 'Prepared source/version does not match this signing run. Run Prepare again.' }
     foreach ($entry in $state.binaries) {
@@ -89,11 +96,16 @@ try {
         if ((Get-FileHash -LiteralPath (Join-Path $bootstrapRoot $entry.path) -Algorithm SHA256).Hash -ne $entry.sha256) { throw "Third-party payload changed: $($entry.path)" }
     }
     $records = @()
-    foreach ($entry in $state.binaries) {
+    # Sign internal programs now. Tauri must sign the main program through its
+    # callback after it patches the NSIS bundle marker and before compression.
+    foreach ($entry in ($state.binaries | Select-Object -Skip 1)) {
         & (Join-Path $PSScriptRoot 'sign_windows_artifact.ps1') -Path $entry.path
         if ($LASTEXITCODE -ne 0) { throw "Signing failed: $($entry.path)" }
         $records += Assert-AbigailSignature -Path $entry.path -Thumbprint $env:WINDOWS_CERTIFICATE_THUMBPRINT
     }
+    $captureDir = Join-Path $work ('signed-main-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $captureDir | Out-Null
+    $env:ABIGAIL_SIGNED_MAIN_PATH = Join-Path $captureDir 'abigail-hive-app.exe'
     $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json -AsHashtable
     $config.bundle.windows.signCommand = @{
         cmd = (Get-Command pwsh).Source
@@ -101,13 +113,10 @@ try {
     }
     Write-Json $config $configPath
     Invoke-Tauri @('bundle','--ci','--bundles','nsis','--config',$configPath)
+    $records += Assert-AbigailSignature -Path $env:ABIGAIL_SIGNED_MAIN_PATH -Thumbprint $env:WINDOWS_CERTIFICATE_THUMBPRINT
     $installer = Join-Path $targetRoot "release/bundle/nsis/Abigail_${Version}_x64-setup.exe"
     $records += Assert-AbigailSignature -Path $installer -Thumbprint $env:WINDOWS_CERTIFICATE_THUMBPRINT
     $extract = Join-Path $work ('extracted-' + [guid]::NewGuid().ToString('N'))
-    $sevenZipCommand = Get-Command 7z -ErrorAction SilentlyContinue
-    $sevenZip = if ($sevenZipCommand) { $sevenZipCommand.Source } else { $null }
-    if (-not $sevenZip -and (Test-Path 'C:/Program Files/7-Zip/7z.exe')) { $sevenZip = 'C:/Program Files/7-Zip/7z.exe' }
-    if (-not $sevenZip) { throw '7-Zip is required to verify the actual installer payload.' }
     & $sevenZip x $installer "-o$extract" -y | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Installer extraction failed.' }
     foreach ($entry in $state.binaries) {
@@ -115,7 +124,7 @@ try {
         $files = @(Get-ChildItem -LiteralPath $extract -Recurse -File -Filter $name)
         if ($files.Count -ne 1) { throw "Installer must contain exactly one $name." }
         $record = Assert-AbigailSignature -Path $files[0].FullName -Thumbprint $env:WINDOWS_CERTIFICATE_THUMBPRINT
-        $sourceRecord = $records | Where-Object { $_.path -eq $entry.path }
+        $sourceRecord = $records | Where-Object { [IO.Path]::GetFileName($_.path) -eq $name }
         if ($record.sha256 -ne $sourceRecord.sha256) { throw "Packaged $name differs from its verified source." }
         $records += $record
     }
@@ -126,7 +135,7 @@ try {
     $output = Join-Path $work 'artifacts'
     New-Item -ItemType Directory -Force -Path $output | Out-Null
     Copy-Item -LiteralPath $installer -Destination (Join-Path $output 'Abigail-windows-x64-setup.exe') -Force
-    Copy-Item -LiteralPath $state.binaries[0].path -Destination (Join-Path $output 'abigail-hive-app.exe') -Force
+    Copy-Item -LiteralPath $env:ABIGAIL_SIGNED_MAIN_PATH -Destination (Join-Path $output 'abigail-hive-app.exe') -Force
     Write-Json @{ sourceCommit = $commit; version = $Version; verifiedUtc = [DateTime]::UtcNow.ToString('o'); artifacts = $records; bootstrapFilesVerified = $state.bootstrap.Count; extractedPayload = $extract } (Join-Path $output 'signature-report.json')
     Write-Host "Verified signed installer and all four Abigail executables: $output"
-} finally { Pop-Location }
+} finally { $env:ABIGAIL_SIGNED_MAIN_PATH = $previousSignedMainPath; Pop-Location }

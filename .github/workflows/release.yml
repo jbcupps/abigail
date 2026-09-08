@@ -318,6 +318,14 @@ jobs:
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
         run: ./scripts/build_signed_installer.ps1 -Phase Sign -Version $env:INSTALLER_VERSION
 
+      - name: Test startup from the signed installer payload
+        if: vars.ABIGAIL_WINDOWS_SIGNING_MODE == 'esigner' && vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          $report = Get-Content target/signed-release/artifacts/signature-report.json -Raw | ConvertFrom-Json
+          python scripts/test_initial_setup.py --binary-dir "$($report.extractedPayload)/resources" --bundle-dir "$($report.extractedPayload)/resources/bootstrap"
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged startup acceptance failed.' }
+
       - name: Build Abigail installer
         if: vars.ABIGAIL_WINDOWS_SIGNING_MODE != 'esigner' || vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING != 'true'
         shell: bash

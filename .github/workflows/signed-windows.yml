@@ -84,6 +84,12 @@ jobs:
           ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
         run: ./scripts/build_signed_installer.ps1 -Phase Sign -Version $env:INSTALLER_VERSION
+      - name: Test startup from the signed installer payload
+        shell: pwsh
+        run: |
+          $report = Get-Content target/signed-release/artifacts/signature-report.json -Raw | ConvertFrom-Json
+          python scripts/test_initial_setup.py --binary-dir "$($report.extractedPayload)/resources" --bundle-dir "$($report.extractedPayload)/resources/bootstrap"
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged startup acceptance failed.' }
       - name: Upload verified signed artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
         with:
