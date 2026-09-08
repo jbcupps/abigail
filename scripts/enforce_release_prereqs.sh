@@ -22,7 +22,7 @@ normalize_windows_signing_mode() {
     ""|off|false|none)
       printf '%s' ""
       ;;
-    pfx|store)
+    pfx|store|esigner)
       printf '%s' "$value"
       ;;
     *)
@@ -52,7 +52,9 @@ fi
 
 if is_truthy "$require_windows_signing"; then
   require_var WINDOWS_CERTIFICATE_THUMBPRINT
-  require_var WINDOWS_TIMESTAMP_URL
+  if [[ "$windows_signing_mode" != "esigner" ]]; then
+    require_var WINDOWS_TIMESTAMP_URL
+  fi
   if [[ -z "$windows_signing_mode" ]]; then
     if [[ -n "${WINDOWS_SIGNING_CERT_BASE64:-}" || -n "${WINDOWS_SIGNING_CERT_PASSWORD:-}" ]]; then
       windows_signing_mode="pfx"
@@ -69,6 +71,16 @@ if is_truthy "$require_windows_signing"; then
       ;;
     store)
       require_var ABIGAIL_WINDOWS_RUNNER
+      ;;
+    esigner)
+      require_var ESIGNER_USERNAME
+      require_var ESIGNER_PASSWORD
+      require_var ESIGNER_CREDENTIAL_ID
+      require_var ESIGNER_TOTP_SECRET
+      if is_truthy "$require_updater_signing"; then
+        echo "ERROR: The eSigner NSIS lane does not yet generate updater artifacts. Disable ABIGAIL_REQUIRE_UPDATER_SIGNING." >&2
+        exit 1
+      fi
       ;;
   esac
 fi

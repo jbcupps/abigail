@@ -24,6 +24,7 @@ Abigail is the private Entity Coordinator and Manager for real homes and familie
 - All privileged local APIs require caller credentials. A separate credential is passed directly to each Runtime window; Entity Hive tokens cannot read another Entity's records or change global setup.
 - Do not expand this slice into household accounts or a new Entity birth conversation. Those remain subsequent product work.
 - Keep unsigned packaging reproducible with the offline runtime/model/licenses and offline WebView2. Full disconnected installer UAT remains required before release; use `docs/INITIAL_SETUP.md` for acceptance commands.
+- The separately authorized SSL.com release lane signs all four Abigail executables before bundling and verifies the actual NSIS payload. Keep signed builds fail-closed and preserve third-party bytes; see `docs/WINDOWS_SIGNING.md`. This does not add signing requirements to the unsigned stabilization lane.
 
 ## Active Plan (Family-First Priorities)
 

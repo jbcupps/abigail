@@ -60,6 +60,7 @@ Build-Frontend -AppDir (Join-Path $repoRoot "entity-runtime-app") -Label "Abigai
 
 $cargoArgs = @(
     "build",
+    "--locked",
     "-p", "hive-daemon",
     "-p", "entity-daemon",
     "-p", "abigail-hive-app",

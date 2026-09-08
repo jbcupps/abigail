@@ -1,0 +1,93 @@
+name: Signed Windows artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Numeric installer version; this workflow never publishes a release'
+        required: true
+        default: '0.0.75'
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+    secrets:
+      ESIGNER_USERNAME:
+        required: true
+      ESIGNER_PASSWORD:
+        required: true
+      ESIGNER_CREDENTIAL_ID:
+        required: true
+      ESIGNER_TOTP_SECRET:
+        required: true
+      WINDOWS_CERTIFICATE_THUMBPRINT:
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: abigail-esigner
+  cancel-in-progress: false
+
+jobs:
+  signed-installer:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: stable
+      - uses: swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+        with:
+          shared-key: signed-windows
+      - name: Validate signing configuration
+        shell: pwsh
+        env:
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          foreach ($name in @('ESIGNER_USERNAME','ESIGNER_PASSWORD','ESIGNER_CREDENTIAL_ID','ESIGNER_TOTP_SECRET','WINDOWS_CERTIFICATE_THUMBPRINT')) {
+            if (-not [Environment]::GetEnvironmentVariable($name)) { throw "Missing encrypted secret: $name" }
+          }
+      - name: Install build and signing tools
+        shell: pwsh
+        run: |
+          npm install -g @tauri-apps/cli@2.11.4
+          if ($LASTEXITCODE -ne 0) { throw 'Tauri CLI installation failed.' }
+          ./scripts/install_esigner.ps1
+      - name: Build current offline installer payload
+        shell: pwsh
+        env:
+          INSTALLER_VERSION: ${{ inputs.version }}
+          CARGO_BUILD_JOBS: '3'
+        run: ./scripts/build_signed_installer.ps1 -Phase Prepare -Version $env:INSTALLER_VERSION
+      - name: Test offline inference
+        shell: pwsh
+        run: ./scripts/test_offline_bootstrap.ps1
+      - name: Sign and verify the installer and extracted payload
+        shell: pwsh
+        env:
+          INSTALLER_VERSION: ${{ inputs.version }}
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: ./scripts/build_signed_installer.ps1 -Phase Sign -Version $env:INSTALLER_VERSION
+      - name: Upload verified signed artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
+        with:
+          name: abigail-signed-windows
+          path: target/signed-release/artifacts/*
+          if-no-files-found: error
+          retention-days: 14

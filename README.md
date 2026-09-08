@@ -26,7 +26,7 @@ The Windows package includes Ollama and Qwen3.5-0.8B. The staged CPU runtime and
 - Legacy migration and upgrade preservation are not current product promises. Remove or replace stale compatibility paths when they get in the way of the active Hive-first design.
 - The implementation uses two desktop app roots: `hive-app` for the Abigail coordinator and `entity-runtime-app` for Entity chat. The family-facing installer must still expose one `Abigail` app icon and start the internal pieces automatically.
 - `beta` is the permanent UAT branch. Iterative work lands there first and produces tagged beta installer prereleases; `main` receives only promoted stable changes.
-- Default local builds and installer validation are intentionally unsigned and updater-free during stabilization. Final OV signing happens later on the dedicated release-signing system.
+- Default local builds remain unsigned and updater-free. The optional [SSL.com signed Windows lane](docs/WINDOWS_SIGNING.md) signs and verifies the full offline installer and its internal Abigail programs before release.
 - Repeatable release automation is documented in [`docs/RELEASE_RUNBOOK.md`](docs/RELEASE_RUNBOOK.md). The active full installer release lane currently builds the Windows one-step installer; Apple/macOS builds are temporarily removed from the matrix.
 - UI and UX work must follow the Abigail design system in [`docs/design/README.md`](docs/design/README.md).
 
