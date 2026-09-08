@@ -2,6 +2,7 @@
 # product. The installed user experience is one app icon: Abigail.
 
 name: Abigail Installer Release
+run-name: ${{ inputs.signed_artifact_only && 'SSL.com signed Windows artifact' || 'Abigail installer release' }} · ${{ github.ref_name }}
 
 on:
   push:
@@ -27,6 +28,8 @@ permissions:
 jobs:
   signed-artifact:
     if: github.event_name == 'workflow_dispatch' && inputs.signed_artifact_only
+    permissions:
+      contents: read
     uses: ./.github/workflows/signed-windows.yml
     with:
       version: ${{ inputs.release_version || '0.0.75' }}

@@ -36,9 +36,15 @@ available. Repository administrators and trusted workflows can use repository se
 
 On a reviewed branch, run **Abigail Installer Release** with
 `signed_artifact_only=true` and a numeric `release_version`, for example `0.0.75`.
-It calls **Signed Windows artifact** from that same commit, with read-only contents
+It calls **SSL.com signed Windows** from that same commit, with read-only contents
 permission. This creates an Actions artifact containing the installer, coordinator
 executable, and signature report; it creates no git tag or public release.
+
+The configuration check runs before checkout or tool installation and lists every
+missing secret in the Actions run summary. Add missing values under repository
+**Settings → Secrets and variables → Actions**, then rerun the failed job. Until
+this workflow is integrated into the default branch, select the reviewed branch
+in **Abigail Installer Release** and enable **signed_artifact_only**.
 
 The coordinator executable requires the bundled resources installed alongside it.
 Use `Abigail-windows-x64-setup.exe` for the complete product.
