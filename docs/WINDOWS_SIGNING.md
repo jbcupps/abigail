@@ -84,7 +84,8 @@ Each first-party PE is checked with Windows Authenticode and
 `signtool verify /pa /all /v /tw`. Verification requires the expected publisher
 certificate, code-signing EKU, a trusted chain, SHA-256, and an RFC 3161/SHA-256
 timestamp. The installer is extracted and all four executable hashes/signatures
-are compared with the signed source payload. Every offline runtime/model/license
+are compared with the signed source payload; the extracted NSIS uninstaller is
+also verified. Every offline runtime/model/license
 file must match its pre-signing hash. The JSON report includes source commit,
 version, hashes, signer, timestamp signer, and verbose SignTool evidence.
 

@@ -128,6 +128,8 @@ try {
         if ($record.sha256 -ne $sourceRecord.sha256) { throw "Packaged $name differs from its verified source." }
         $records += $record
     }
+    # NSIS creates and signs this executable during bundling as well.
+    $records += Assert-AbigailSignature -Path (Join-Path $extract 'uninstall.exe') -Thumbprint $env:WINDOWS_CERTIFICATE_THUMBPRINT
     $packagedBootstrap = Join-Path $extract 'resources/bootstrap'
     foreach ($entry in $state.bootstrap) {
         if ((Get-FileHash -LiteralPath (Join-Path $packagedBootstrap $entry.path) -Algorithm SHA256).Hash -ne $entry.sha256) { throw "Installer altered or omitted third-party payload: $($entry.path)" }

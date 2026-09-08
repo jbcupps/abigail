@@ -284,6 +284,12 @@ impl Bootstrap {
 }
 
 fn bundled_path(root: &std::path::Path, relative: &str) -> anyhow::Result<PathBuf> {
+    // Bundle manifests use portable forward-slash paths. Reject Windows drive
+    // and separator syntax on every host, including Linux/macOS validation.
+    anyhow::ensure!(
+        !relative.contains('\\') && !relative.contains(':'),
+        "Invalid offline package path"
+    );
     let relative = std::path::Path::new(relative);
     anyhow::ensure!(
         !relative.as_os_str().is_empty()
@@ -784,8 +790,20 @@ mod tests {
     }
     #[test]
     fn bundle_paths_cannot_escape_installation() {
-        for invalid in ["../ollama.exe", "/ollama.exe", "C:\\ollama.exe", ""] {
-            assert!(bundled_path(std::path::Path::new("package"), invalid).is_err());
+        for invalid in [
+            "../ollama.exe",
+            "/ollama.exe",
+            "C:\\ollama.exe",
+            "C:/ollama.exe",
+            "C:ollama.exe",
+            "..\\ollama.exe",
+            "ollama/../../ollama.exe",
+            "",
+        ] {
+            assert!(
+                bundled_path(std::path::Path::new("package"), invalid).is_err(),
+                "accepted invalid package path: {invalid}"
+            );
         }
         assert!(bundled_path(std::path::Path::new("package"), "ollama/ollama.exe").is_ok());
     }

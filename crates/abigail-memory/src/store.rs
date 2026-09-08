@@ -1005,7 +1005,12 @@ mod tests {
         let config = test_config(&tmp, db_path.clone());
         let store = MemoryStore::open_with_config(&config).unwrap();
 
-        assert_eq!(store.path(), db_path.as_path());
+        // macOS exposes the temporary directory through /var -> /private/var.
+        // The persistence owner canonicalizes its path before opening the store.
+        assert_eq!(
+            std::fs::canonicalize(store.path()).unwrap(),
+            std::fs::canonicalize(&db_path).unwrap()
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
