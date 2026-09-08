@@ -310,6 +310,7 @@ jobs:
           ./scripts/build_signed_installer.ps1 -Phase Prepare -SkipStage -Version $env:INSTALLER_VERSION
 
       - name: Sign and verify SSL.com release
+        id: signing
         if: vars.ABIGAIL_WINDOWS_SIGNING_MODE == 'esigner' && vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true'
         shell: pwsh
         env:
@@ -324,8 +325,10 @@ jobs:
       - name: Test startup from the signed installer payload
         if: vars.ABIGAIL_WINDOWS_SIGNING_MODE == 'esigner' && vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true'
         shell: pwsh
+        env:
+          SIGNED_ARTIFACT_DIR: ${{ steps.signing.outputs.artifact_dir }}
         run: |
-          $report = Get-Content target/signed-release/artifacts/signature-report.json -Raw | ConvertFrom-Json
+          $report = Get-Content "$env:SIGNED_ARTIFACT_DIR/signature-report.json" -Raw | ConvertFrom-Json
           python scripts/test_initial_setup.py --binary-dir "$($report.extractedPayload)/resources" --bundle-dir "$($report.extractedPayload)/resources/bootstrap"
           if ($LASTEXITCODE -ne 0) { throw 'Packaged startup acceptance failed.' }
 
@@ -343,7 +346,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
         with:
           name: abigail-installer-${{ matrix.platform }}
-          path: ${{ matrix.installer_path }}
+          path: ${{ vars.ABIGAIL_WINDOWS_SIGNING_MODE == 'esigner' && vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true' && format('{0}/Abigail-windows-x64-setup.exe', steps.signing.outputs.artifact_dir) || matrix.installer_path }}
           if-no-files-found: error
 
       - name: Upload MSI installer
@@ -359,7 +362,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
         with:
           name: abigail-signatures-${{ matrix.platform }}
-          path: target/signed-release/artifacts/signature-report.json
+          path: ${{ steps.signing.outputs.artifact_dir }}/signature-report.json
           if-no-files-found: error
 
       - name: Upload updater artifacts

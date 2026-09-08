@@ -1,4 +1,11 @@
 Set-StrictMode -Version Latest
+
+function ConvertTo-AbigailThumbprint {
+    param([Parameter(Mandatory)][string]$Value)
+    $normalized = ($Value -replace '[\s\u200e\u200f]', '').ToUpperInvariant()
+    if ($normalized -notmatch '^[0-9A-F]{40}$') { throw 'Expected a complete certificate SHA-1 thumbprint, not an eSigner credential ID.' }
+    return $normalized
+}
 $ErrorActionPreference = 'Stop'
 
 function Get-AbigailSignTool {
@@ -45,7 +52,7 @@ function Get-AbigailPeSignature {
 function Assert-AbigailSignature {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Thumbprint)
     $resolved = (Resolve-Path -LiteralPath $Path).Path
-    if ($Thumbprint -notmatch '^[0-9A-Fa-f]{40}$') { throw 'Expected a complete certificate SHA-1 thumbprint.' }
+    $Thumbprint = ConvertTo-AbigailThumbprint $Thumbprint
     $signature = Get-AuthenticodeSignature -LiteralPath $resolved
     if ($signature.Status -ne 'Valid') { throw "Untrusted or invalid signature on $resolved ($($signature.Status))." }
     if ($signature.SignerCertificate.Thumbprint -ne $Thumbprint) { throw "Unexpected publisher certificate on $resolved." }
@@ -76,4 +83,4 @@ function Assert-AbigailSignature {
     }
 }
 
-Export-ModuleMember -Function Get-AbigailSignTool, Get-AbigailPeSignature, Assert-AbigailSignature
+Export-ModuleMember -Function ConvertTo-AbigailThumbprint, Get-AbigailSignTool, Get-AbigailPeSignature, Assert-AbigailSignature

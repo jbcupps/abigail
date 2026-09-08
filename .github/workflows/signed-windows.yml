@@ -85,10 +85,17 @@ jobs:
           INSTALLER_VERSION: ${{ inputs.version }}
           CARGO_BUILD_JOBS: '3'
         run: ./scripts/build_signed_installer.ps1 -Phase Prepare -Version $env:INSTALLER_VERSION
+      - name: Test signing verification and private input handling
+        shell: pwsh
+        run: |
+          ./scripts/test_windows_signing.ps1
+          ./scripts/test_windows_signing_state.ps1
+          ./scripts/test_windows_signing_private.ps1
       - name: Test offline inference
         shell: pwsh
         run: ./scripts/test_offline_bootstrap.ps1
       - name: Sign and verify the installer and extracted payload
+        id: signing
         shell: pwsh
         env:
           INSTALLER_VERSION: ${{ inputs.version }}
@@ -100,14 +107,16 @@ jobs:
         run: ./scripts/build_signed_installer.ps1 -Phase Sign -Version $env:INSTALLER_VERSION
       - name: Test startup from the signed installer payload
         shell: pwsh
+        env:
+          SIGNED_ARTIFACT_DIR: ${{ steps.signing.outputs.artifact_dir }}
         run: |
-          $report = Get-Content target/signed-release/artifacts/signature-report.json -Raw | ConvertFrom-Json
+          $report = Get-Content "$env:SIGNED_ARTIFACT_DIR/signature-report.json" -Raw | ConvertFrom-Json
           python scripts/test_initial_setup.py --binary-dir "$($report.extractedPayload)/resources" --bundle-dir "$($report.extractedPayload)/resources/bootstrap"
           if ($LASTEXITCODE -ne 0) { throw 'Packaged startup acceptance failed.' }
       - name: Upload verified signed artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
         with:
           name: abigail-signed-windows
-          path: target/signed-release/artifacts/*
+          path: ${{ steps.signing.outputs.artifact_dir }}/*
           if-no-files-found: error
           retention-days: 14

@@ -25,12 +25,21 @@ Configure encrypted repository Actions secrets:
 
 Do not put secret values into chat, commands, committed files, workflow variables,
 or logs. `scripts/configure_esigner_credentials.ps1 -Destination GitHub` provides
-hidden prompts and sends values on stdin to `gh secret set`; it asks the operator
-to confirm the target repository. Supply the non-secret username, credential ID,
-and thumbprint as parameters. The operator must control the existing signing
+hidden prompts and sends values on stdin to `gh secret set`. It identifies the
+target repository before requesting private inputs. Supply the non-secret username,
+credential ID and thumbprint as parameters, or in an ignored
+`.cache/signing/account.json` containing `username`, `credentialId` and `thumbprint`.
+The operator must control the existing signing
 authenticator. Never reset it or change certificate access merely to make CI work.
 Use a dedicated signer account with only the required certificate access where
 available. Repository administrators and trusted workflows can use repository secrets.
+
+The existing eSigner **secret code** can be revealed by the account owner on the
+certificate order's details page using the existing four-digit enrollment PIN and
+**Show QR Code**. It is neither that PIN nor the changing six-digit authenticator
+code. Reveal/copy it privately; do not share a screenshot or paste it into chat.
+If the existing PIN/seed is unavailable, use supervised local signing below.
+Do not reset an authenticator to make automation work.
 
 ## Build an artifact without publishing
 
@@ -64,6 +73,7 @@ CLI with `npm install -g @tauri-apps/cli@2.11.4`, then:
 ```powershell
 ./scripts/install_esigner.ps1
 ./scripts/build_signed_installer.ps1 -Phase Prepare -Version 0.0.75
+./scripts/build_signed_installer.ps1 -Phase Check -Version 0.0.75
 ./scripts/configure_esigner_credentials.ps1 -Destination Local -Username <account> -CredentialId <credential-id> -Thumbprint <fingerprint> -Version 0.0.75
 ```
 
@@ -71,6 +81,32 @@ Commit tracked source changes before Prepare. The preparation phase runs npm/car
 without signing secrets and records source commit, version, executable hashes, and
 all offline payload hashes. The signing phase rejects changed inputs. After a
 partially completed signing attempt, run Prepare again before retrying.
+
+`Check` performs no signing and needs no signing password/seed. It validates the
+exact commit/version, generated bundle config, ordered first-party paths/hashes,
+complete offline file set, and verification tooling. Added files and links are
+rejected, as are missing or modified files. A relative `CARGO_TARGET_DIR` is
+resolved against the repository root and made absolute for all child builds.
+
+For a first local signature using existing six-digit authenticator codes:
+
+```powershell
+./scripts/configure_esigner_credentials.ps1 -Destination Local -Authentication Manual -UseDialog
+```
+
+This command uses the non-secret account profile described above. Run it in
+PowerShell, including via its absolute path when the terminal is in another
+checkout. A masked window requests the account password. Each signing operation
+then opens **Abigail SSL.com signing code** when CodeSignTool is waiting for a
+fresh code. Codes go to the vendor process on private stdin; passwords use the
+restricted argument file. Cancellation or rejection stops the build; no automatic
+retry, authenticator reset, or CKA installation is needed. Stay available through
+NSIS compression for the final installer approval. This supervised mode cannot
+run unattended on a GitHub-hosted runner.
+
+To configure GitHub privately and start only its artifact build from the reviewed
+branch, use `-Destination GitHub -UseDialog -StartBuild` instead. This requires the
+existing secret code and uses the same account profile. Neither path publishes.
 
 The main executable is signed inside Tauri's callback after its NSIS metadata
 patch and before bundling. Because Tauri restores its unsigned build output when
@@ -82,7 +118,28 @@ download fails closed if it changes. Review and update the pin deliberately. The
 vendor archive contains its own Java runtime. The tool uses production SSL.com
 endpoints and its configured RFC 3161 timestamp service. Password/seed arguments
 are passed through a restricted temporary Java argument file, removed in `finally`;
-vendor logs are never uploaded. No private signing key is downloaded from the HSM.
+vendor file logging is explicitly disabled, and vendor console output is kept
+private. No private signing key is downloaded from the HSM.
+
+Successful outputs go to `target/signed-release/artifacts/<run-id>/` so earlier
+outputs cannot be mistaken for the current attempt. `latest-success.json` points
+to the last successful signature verification. GitHub uploads only the directory
+returned by its current signing step, after packaged startup acceptance passes.
+
+## Entrypoint consolidation
+
+Use `build_signed_installer.ps1` for Prepare, Check and Sign. The hyphenated
+`build-signed-installer.ps1` is only an explicit-phase forwarding name.
+`build-release-windows.ps1` now fails immediately because its retired `tauri-app`
+build omitted the current offline product. Signed release mode must be `esigner`;
+the unverified legacy store/PFX release path is rejected before building.
+
+The earlier uncommitted CKA implementation in another checkout is preserved.
+Its certificate normalization and failure-test ideas were reviewed and adapted;
+its builder, resource list, and verifier were not copied because they lack the
+offline payload, Tauri signed-main capture, and actual installer extraction checks.
+An existing CKA/store installation may support SignTool independently, but it is
+not a substitute for the canonical verified packaging path.
 
 ## Verification and limits
 
