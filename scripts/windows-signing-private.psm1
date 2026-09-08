@@ -12,15 +12,6 @@ function Read-AbigailSigningSecret {
     }
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
-    if (-not ('AbigailSigningWindow' -as [type])) {
-        Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public static class AbigailSigningWindow {
-    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr handle, int command);
-}
-'@
-    }
     $form = [Windows.Forms.Form]::new()
     try {
         $form.Text = $Title
@@ -66,13 +57,7 @@ public static class AbigailSigningWindow {
         $form.Controls.AddRange(@($label, $inputBox, $errorLabel, $ok, $cancel))
         $form.AcceptButton = $ok
         $form.CancelButton = $cancel
-        $form.Add_Shown({
-            # A hidden helper launch can hide its first GUI even after ShowDialog.
-            # Explicitly show only this private, user-facing input window.
-            $null = [AbigailSigningWindow]::ShowWindow($form.Handle, 5)
-            $form.Activate()
-            $null = $inputBox.Focus()
-        }.GetNewClosure())
+        $form.Add_Shown({ $null = $inputBox.Focus() }.GetNewClosure())
         if ($form.ShowDialog() -ne [Windows.Forms.DialogResult]::OK) { throw 'Signing input cancelled. No further signing operation will be started.' }
         $secret = ConvertTo-SecureString -String $inputBox.Text -AsPlainText -Force
         $inputBox.Clear()
