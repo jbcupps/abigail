@@ -14,6 +14,7 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$Host.UI.RawUI.WindowTitle = 'Abigail - Private Signing Setup'
 if (-not [Environment]::UserInteractive) { throw 'This script requires a private interactive terminal.' }
 if ($Destination -eq 'GitHub') {
     Write-Host "This sends your SSL.com signing password and existing eSigner OTP seed to encrypted Actions secrets in $Repository."
