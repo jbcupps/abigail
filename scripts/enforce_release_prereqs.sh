@@ -22,7 +22,7 @@ normalize_windows_signing_mode() {
     ""|off|false|none)
       printf '%s' ""
       ;;
-    pfx|store)
+    pfx|store|esigner)
       printf '%s' "$value"
       ;;
     *)
@@ -51,26 +51,20 @@ if is_truthy "$require_updater_signing"; then
 fi
 
 if is_truthy "$require_windows_signing"; then
-  require_var WINDOWS_CERTIFICATE_THUMBPRINT
-  require_var WINDOWS_TIMESTAMP_URL
-  if [[ -z "$windows_signing_mode" ]]; then
-    if [[ -n "${WINDOWS_SIGNING_CERT_BASE64:-}" || -n "${WINDOWS_SIGNING_CERT_PASSWORD:-}" ]]; then
-      windows_signing_mode="pfx"
-    else
-      echo "ERROR: ABIGAIL_WINDOWS_SIGNING_MODE must be set to 'store' for hardware-token signing or 'pfx' for exportable certificate signing." >&2
-      exit 1
-    fi
+  if [[ "$windows_signing_mode" != "esigner" ]]; then
+    echo "ERROR: Signed split-product releases require ABIGAIL_WINDOWS_SIGNING_MODE=esigner and the verified build_signed_installer.ps1 pipeline." >&2
+    echo "The legacy store/PFX release path does not verify the extracted offline installer payload." >&2
+    exit 1
   fi
-
-  case "$windows_signing_mode" in
-    pfx)
-      require_var WINDOWS_SIGNING_CERT_BASE64
-      require_var WINDOWS_SIGNING_CERT_PASSWORD
-      ;;
-    store)
-      require_var ABIGAIL_WINDOWS_RUNNER
-      ;;
-  esac
+  require_var WINDOWS_CERTIFICATE_THUMBPRINT
+  require_var ESIGNER_USERNAME
+  require_var ESIGNER_PASSWORD
+  require_var ESIGNER_CREDENTIAL_ID
+  require_var ESIGNER_TOTP_SECRET
+  if is_truthy "$require_updater_signing"; then
+    echo "ERROR: The eSigner NSIS lane does not yet generate updater artifacts. Disable ABIGAIL_REQUIRE_UPDATER_SIGNING." >&2
+    exit 1
+  fi
 fi
 
 if is_truthy "$require_mac_signing"; then

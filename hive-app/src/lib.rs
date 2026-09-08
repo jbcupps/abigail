@@ -109,18 +109,40 @@ fn forget(tracking: &Arc<Mutex<HashSet<String>>>, entity_id: &str) {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 struct HiveConnectionInfo {
     hive_url: String,
+    /// Per-launch local control-plane token. In-memory only for the UI process —
+    /// never write this to localStorage.
+    auth_token: Option<String>,
 }
 
 fn hive_url() -> String {
     std::env::var("ABIGAIL_HIVE_URL").unwrap_or_else(|_| "http://127.0.0.1:43141".to_string())
 }
 
+fn hive_auth_token() -> Option<String> {
+    std::env::var(hive_core::LOCAL_AUTH_ENV)
+        .ok()
+        .filter(|t| !t.is_empty())
+}
+
+fn local_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .expect("local HTTP client")
+}
+
+fn hive_client() -> HiveDaemonClient {
+    HiveDaemonClient::with_auth(&hive_url(), hive_auth_token())
+}
+
 #[tauri::command]
 async fn get_hive_status() -> Result<HiveStatus, String> {
-    let client = HiveDaemonClient::new(&hive_url());
+    let client = hive_client();
     let entities = client.list_entities().await.map_err(|e| e.to_string())?;
     Ok(HiveStatus {
         master_key_loaded: true,
@@ -131,21 +153,68 @@ async fn get_hive_status() -> Result<HiveStatus, String> {
 }
 
 #[tauri::command]
-fn get_hive_connection_info() -> HiveConnectionInfo {
-    HiveConnectionInfo {
-        hive_url: hive_url(),
+fn get_hive_connection_info() -> Result<HiveConnectionInfo, String> {
+    // Publish the URL and credential together, only after authenticated startup.
+    let hive_url = std::env::var("ABIGAIL_HIVE_URL").map_err(|_| "Abigail is starting")?;
+    let auth_token = hive_auth_token().ok_or("Abigail is starting")?;
+    Ok(HiveConnectionInfo {
+        hive_url,
+        auth_token: Some(auth_token),
+    })
+}
+
+fn provider_console_url(provider: &str) -> Result<&'static str, String> {
+    match provider {
+        "anthropic" => Ok("https://platform.claude.com/"),
+        "openai" => Ok("https://platform.openai.com/"),
+        _ => Err("Choose Anthropic or OpenAI".into()),
     }
 }
 
 #[tauri::command]
+fn open_provider_console(provider: String) -> Result<(), String> {
+    let url = provider_console_url(&provider)?;
+    #[cfg(windows)]
+    let mut command = {
+        let system =
+            std::env::var_os("SystemRoot").ok_or("Windows system directory is unavailable")?;
+        let mut command =
+            std::process::Command::new(PathBuf::from(system).join("System32/rundll32.exe"));
+        command.args(["url.dll,FileProtocolHandler", url]);
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = std::process::Command::new("open");
+        command.arg(url);
+        command
+    };
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    let mut command = {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(url);
+        command
+    };
+    command
+        .env_remove(hive_core::LOCAL_AUTH_ENV)
+        .env_remove("ABIGAIL_ENTITY_AUTH_TOKEN")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    spawn_clean(&mut command)
+        .map(|_| ())
+        .map_err(|_| "Could not open the provider website".into())
+}
+
+#[tauri::command]
 async fn create_entity(name: String) -> Result<String, String> {
-    let client = HiveDaemonClient::new(&hive_url());
+    let client = hive_client();
     client.create_entity(&name).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn issue_runtime_session(entity_id: String) -> Result<RuntimeSessionLease, String> {
-    let client = HiveDaemonClient::new(&hive_url());
+    let client = hive_client();
     client
         .issue_runtime_session(&entity_id, Some(format!("entity-runtime-{}", entity_id)))
         .await
@@ -154,7 +223,7 @@ async fn issue_runtime_session(entity_id: String) -> Result<RuntimeSessionLease,
 
 #[tauri::command]
 async fn get_provider_config(entity_id: String) -> Result<hive_core::ProviderConfig, String> {
-    let client = HiveDaemonClient::new(&hive_url());
+    let client = hive_client();
     client
         .get_provider_config(&entity_id)
         .await
@@ -170,7 +239,7 @@ async fn update_entity_provider_config(
     routing_mode: Option<String>,
     cli_permission_mode: Option<String>,
 ) -> Result<UpdateEntityConfigResponse, String> {
-    let client = HiveDaemonClient::new(&hive_url());
+    let client = hive_client();
     client
         .update_entity_config(
             &entity_id,
@@ -188,7 +257,7 @@ async fn update_entity_provider_config(
 
 #[tauri::command]
 async fn store_secret(key: String, value: String) -> Result<String, String> {
-    let client = HiveDaemonClient::new(&hive_url());
+    let client = hive_client();
     client
         .store_secret(&key, &value)
         .await
@@ -198,7 +267,7 @@ async fn store_secret(key: String, value: String) -> Result<String, String> {
 
 #[tauri::command]
 async fn list_secrets() -> Result<Vec<String>, String> {
-    let client = HiveDaemonClient::new(&hive_url());
+    let client = hive_client();
     client.list_secrets().await.map_err(|e| e.to_string())
 }
 
@@ -207,7 +276,7 @@ async fn discover_provider_models(
     provider: String,
     api_key: String,
 ) -> Result<hive_core::ProviderModelsResponse, String> {
-    let client = HiveDaemonClient::new(&hive_url());
+    let client = hive_client();
     client
         .discover_provider_models(&provider, &api_key)
         .await
@@ -216,7 +285,7 @@ async fn discover_provider_models(
 
 #[tauri::command]
 async fn list_assignments(entity_id: String) -> Result<SkillAssignmentsResponse, String> {
-    let client = HiveDaemonClient::new(&hive_url());
+    let client = hive_client();
     client
         .get_skill_assignments(&entity_id)
         .await
@@ -230,13 +299,19 @@ async fn approve_forge_job(
     code_path: String,
     markdown_path: String,
 ) -> Result<hive_core::ForgeApprovalJob, String> {
-    let client = reqwest::Client::new();
+    let client = local_http_client();
     let base_url = hive_url();
-    let response: hive_core::ApiEnvelope<hive_core::ForgeApprovalJob> = client
-        .post(format!(
-            "{}/v1/entities/{}/forge-approvals",
-            base_url, entity_id
-        ))
+    let mut req = client.post(format!(
+        "{}/v1/entities/{}/forge-approvals",
+        base_url, entity_id
+    ));
+    if let Some(token) = hive_auth_token() {
+        req = req.header(
+            reqwest::header::AUTHORIZATION,
+            hive_core::local_auth_header_value(&token),
+        );
+    }
+    let response: hive_core::ApiEnvelope<hive_core::ForgeApprovalJob> = req
         .json(&CreateForgeApprovalJobRequest {
             skill_id,
             code_path,
@@ -261,8 +336,14 @@ async fn approve_forge_job(
 }
 
 async fn hive_get<T: serde::de::DeserializeOwned>(path: &str) -> Result<T, String> {
-    let response: hive_core::ApiEnvelope<T> = reqwest::Client::new()
-        .get(format!("{}{}", hive_url(), path))
+    let mut req = local_http_client().get(format!("{}{}", hive_url(), path));
+    if let Some(token) = hive_auth_token() {
+        req = req.header(
+            reqwest::header::AUTHORIZATION,
+            hive_core::local_auth_header_value(&token),
+        );
+    }
+    let response: hive_core::ApiEnvelope<T> = req
         .send()
         .await
         .map_err(|e| e.to_string())?
@@ -284,8 +365,14 @@ async fn hive_post<T: serde::de::DeserializeOwned, B: Serialize>(
     path: &str,
     body: &B,
 ) -> Result<T, String> {
-    let response: hive_core::ApiEnvelope<T> = reqwest::Client::new()
-        .post(format!("{}{}", hive_url(), path))
+    let mut req = local_http_client().post(format!("{}{}", hive_url(), path));
+    if let Some(token) = hive_auth_token() {
+        req = req.header(
+            reqwest::header::AUTHORIZATION,
+            hive_core::local_auth_header_value(&token),
+        );
+    }
+    let response: hive_core::ApiEnvelope<T> = req
         .json(body)
         .send()
         .await
@@ -347,9 +434,14 @@ async fn open_entity(
     let hive = hive_url();
     // 1. Ensure the entity's daemon is running and learn its URL.
     let resp: Result<ApiEnvelope<EntityOpenResponse>, String> = async {
-        reqwest::Client::new()
-            .post(format!("{}/v1/entities/{}/open", hive, entity_id))
-            .send()
+        let mut req = local_http_client().post(format!("{}/v1/entities/{}/open", hive, entity_id));
+        if let Some(token) = hive_auth_token() {
+            req = req.header(
+                reqwest::header::AUTHORIZATION,
+                hive_core::local_auth_header_value(&token),
+            );
+        }
+        req.send()
             .await
             .map_err(|e| e.to_string())?
             .json()
@@ -357,9 +449,15 @@ async fn open_entity(
             .map_err(|e| e.to_string())
     }
     .await;
-    let local_url = match resp {
+    let (local_url, runtime_token) = match resp {
         Ok(env) if env.ok => match env.data {
-            Some(d) => d.local_url,
+            Some(d) => match d.auth_token {
+                Some(token) => (d.local_url, token),
+                None => {
+                    forget(&tracking, &entity_id);
+                    return Err("Missing Entity caller token".into());
+                }
+            },
             None => {
                 forget(&tracking, &entity_id);
                 return Err("Hive returned no runtime URL".to_string());
@@ -378,15 +476,26 @@ async fn open_entity(
     };
 
     // 2. Launch the Entity Runtime app pointed at that daemon.
-    let bin = entity_app_binary().ok_or("Entity Runtime app binary not found")?;
+    let bin = match entity_app_binary() {
+        Some(bin) => bin,
+        None => {
+            forget(&tracking, &entity_id);
+            return Err("Entity Runtime app binary not found".into());
+        }
+    };
     // Don't let the runtime app inherit our (possibly invalid, console-less)
     // stdio handles — it has its own file logging and nothing reads its output.
-    let child = tokio::process::Command::new(&bin)
+    let mut runtime_cmd = tokio::process::Command::new(&bin);
+    runtime_cmd
         .env("ABIGAIL_ENTITY_URL", &local_url)
         .env("ABIGAIL_HIVE_URL", &hive)
+        .env("ABIGAIL_ENTITY_AUTH_TOKEN", &runtime_token)
+        .env_remove(hive_core::LOCAL_AUTH_ENV)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+
+    let child = runtime_cmd
         .spawn()
         .map_err(|e| format!("Failed to launch Entity Runtime app: {}", e));
     let mut child = match child {
@@ -402,10 +511,15 @@ async fn open_entity(
     tauri::async_runtime::spawn(async move {
         let _ = child.wait().await;
         forget(&tracking, &entity_id_for_task);
-        let _ = reqwest::Client::new()
-            .post(format!("{}/v1/entities/{}/close", hive, entity_id_for_task))
-            .send()
-            .await;
+        let mut close_req =
+            local_http_client().post(format!("{}/v1/entities/{}/close", hive, entity_id_for_task));
+        if let Some(token) = hive_auth_token() {
+            close_req = close_req.header(
+                reqwest::header::AUTHORIZATION,
+                hive_core::local_auth_header_value(&token),
+            );
+        }
+        let _ = close_req.send().await;
     });
 
     Ok(())
@@ -429,6 +543,7 @@ struct HiveRuntimeDescriptor {
     hive_url: String,
     pid: u32,
     started_at_epoch: u64,
+    // The bearer is stored in the OS-backed encrypted vault, never this descriptor.
 }
 
 fn runtime_dir() -> std::path::PathBuf {
@@ -475,8 +590,9 @@ fn write_descriptor(url: &str, pid: u32) {
 fn is_daemon_healthy(url: &str) -> bool {
     let url = url.to_string();
     tauri::async_runtime::block_on(async move {
-        reqwest::Client::new()
-            .get(format!("{}/health", url))
+        local_http_client()
+            .get(format!("{}/v1/status", url))
+            .bearer_auth(hive_auth_token().unwrap_or_default())
             .timeout(std::time::Duration::from_secs(2))
             .send()
             .await
@@ -510,12 +626,21 @@ fn spawn_clean(command: &mut std::process::Command) -> std::io::Result<std::proc
     command.spawn()
 }
 
-fn spawn_hive_daemon() -> Result<(String, u32), String> {
+fn spawn_hive_daemon() -> Result<(String, u32, Option<String>), String> {
     let bin = hive_daemon_binary().ok_or("hive-daemon binary not found")?;
     let port = pick_hive_port().ok_or("no free port for the Hive daemon")?;
     let url = format!("http://127.0.0.1:{}", port);
     let mut command = std::process::Command::new(&bin);
-    command.arg("--port").arg(port.to_string());
+    let auth_token = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+    command
+        .arg("--port")
+        .arg(port.to_string())
+        .env(hive_core::LOCAL_AUTH_ENV, &auth_token);
+    std::env::set_var(hive_core::LOCAL_AUTH_ENV, &auth_token);
 
     // Redirect the child's stdout/stderr to a file instead of inheriting ours.
     // We're a `windows_subsystem = "windows"` shell with no console, so default
@@ -523,6 +648,8 @@ fn spawn_hive_daemon() -> Result<(String, u32), String> {
     // loader before `main()` runs — before it even gets a chance to set up its
     // own `diag` file logging. This catches that window too.
     let spawn_log_path = logs_dir().join("hive-daemon.spawn.log");
+    // Truncate prior run so token parsing sees only this spawn.
+    let _ = std::fs::write(&spawn_log_path, b"");
     if std::fs::create_dir_all(logs_dir()).is_ok() {
         if let Ok(out) = std::fs::OpenOptions::new()
             .create(true)
@@ -535,7 +662,7 @@ fn spawn_hive_daemon() -> Result<(String, u32), String> {
         }
     }
 
-    let child = spawn_clean(&mut command).map_err(|e| e.to_string())?;
+    let mut child = spawn_clean(&mut command).map_err(|e| e.to_string())?;
     let pid = child.id();
 
     // Confirm it actually came up (e.g. it lost the port race) before we record
@@ -544,10 +671,12 @@ fn spawn_hive_daemon() -> Result<(String, u32), String> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while std::time::Instant::now() < deadline {
         if is_daemon_healthy(&url) {
-            return Ok((url, pid));
+            return Ok((url, pid, Some(auth_token)));
         }
         std::thread::sleep(std::time::Duration::from_millis(300));
     }
+    let _ = child.kill();
+    let _ = child.wait();
     Err(format!(
         "Hive daemon did not become healthy at {} (see {})",
         url,
@@ -555,42 +684,62 @@ fn spawn_hive_daemon() -> Result<(String, u32), String> {
     ))
 }
 
-fn reap_stale(pid: u32) {
-    #[cfg(windows)]
-    {
-        let mut cmd = std::process::Command::new("taskkill");
-        cmd.args(["/PID", &pid.to_string(), "/F", "/T"]);
-        let _ = spawn_clean(&mut cmd).map(|mut c| c.wait());
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = pid;
-    }
+static STARTUP_LOCK: Mutex<()> = Mutex::new(());
+static MANAGED_HIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[tauri::command]
+async fn retry_hive_startup() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(ensure_hive_daemon)
+        .await
+        .map_err(|_| "Startup task stopped".to_string())
 }
 
 fn ensure_hive_daemon() {
-    // Dev: the split launcher already started the daemon and set this.
-    if std::env::var("ABIGAIL_HIVE_URL")
-        .map(|v| !v.trim().is_empty())
-        .unwrap_or(false)
-    {
+    let Ok(_startup) = STARTUP_LOCK.lock() else {
         return;
+    };
+    if let Ok(url) = std::env::var("ABIGAIL_HIVE_URL") {
+        if !url.is_empty() {
+            if is_daemon_healthy(&url) || !MANAGED_HIVE.load(std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            std::env::remove_var("ABIGAIL_HIVE_URL");
+        }
     }
 
-    // Adopt a healthy recorded daemon if one exists.
-    if let Some(desc) = read_descriptor() {
-        if is_daemon_healthy(&desc.hive_url) {
-            std::env::set_var("ABIGAIL_HIVE_URL", &desc.hive_url);
-            tracing::info!("Adopted running Hive daemon at {}", desc.hive_url);
+    let mut vault = match abigail_core::SecretsVault::load(runtime_dir()) {
+        Ok(vault) => vault,
+        Err(e) => {
+            tracing::error!("Cannot open secure runtime credentials: {e}");
             return;
         }
-        // Recorded but unhealthy — reap the stale process before respawning.
-        reap_stale(desc.pid);
+    };
+    // Adopt a healthy recorded daemon if one exists.
+    if let Some(desc) = read_descriptor() {
+        if let Some(token) = vault.get_secret("desktop_caller").map(str::to_string) {
+            std::env::set_var(hive_core::LOCAL_AUTH_ENV, &token);
+            if is_daemon_healthy(&desc.hive_url) {
+                std::env::set_var("ABIGAIL_HIVE_URL", &desc.hive_url);
+                tracing::info!("Adopted running Abigail daemon at {}", desc.hive_url);
+                return;
+            }
+        }
+        // A stale descriptor is never authority to kill a possibly recycled PID.
     }
 
     match spawn_hive_daemon() {
-        Ok((url, pid)) => {
+        Ok((url, pid, auth_token)) => {
             std::env::set_var("ABIGAIL_HIVE_URL", &url);
+            if let Some(ref token) = auth_token {
+                std::env::set_var(hive_core::LOCAL_AUTH_ENV, token);
+            }
+            if let Some(token) = auth_token {
+                vault.set_secret("desktop_caller", &token);
+                if let Err(e) = vault.save() {
+                    tracing::error!("Could not persist runtime credentials: {e}");
+                    return;
+                }
+            }
             write_descriptor(&url, pid);
             tracing::info!("Started Hive daemon at {} (pid {})", url, pid);
         }
@@ -610,6 +759,9 @@ fn configure_packaged_resource_paths<R: tauri::Runtime>(app: &tauri::App<R>) {
         resource_dir.clone()
     };
     std::env::set_var(INTERNAL_BIN_DIR_ENV, &internal_bin_dir);
+    if std::env::var_os("ABIGAIL_BOOTSTRAP_DIR").is_none() {
+        std::env::set_var("ABIGAIL_BOOTSTRAP_DIR", internal_bin_dir.join("bootstrap"));
+    }
 
     let dirs = vec![resource_dir, nested_resource_dir];
     if let Some(path) = resolve_binary_from_dirs(
@@ -643,11 +795,19 @@ pub fn run() {
         .manage(OpenEntities::default())
         .setup(|app| {
             configure_packaged_resource_paths(app);
-            ensure_hive_daemon();
+            MANAGED_HIVE.store(
+                std::env::var("ABIGAIL_HIVE_URL")
+                    .map(|v| v.is_empty())
+                    .unwrap_or(true),
+                std::sync::atomic::Ordering::SeqCst,
+            );
+            std::thread::spawn(ensure_hive_daemon);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_hive_connection_info,
+            retry_hive_startup,
+            open_provider_console,
             open_entity,
             get_hive_status,
             create_entity,

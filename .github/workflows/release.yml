@@ -2,6 +2,7 @@
 # product. The installed user experience is one app icon: Abigail.
 
 name: Abigail Installer Release
+run-name: ${{ inputs.signed_artifact_only && 'SSL.com signed Windows artifact' || 'Abigail installer release' }} · ${{ github.ref_name }}
 
 on:
   push:
@@ -15,12 +16,30 @@ on:
         description: 'Release version (e.g. 0.0.75). Leave empty for auto-increment.'
         required: false
         type: string
+      signed_artifact_only:
+        description: 'Build a verified SSL.com-signed artifact without creating tags or a release'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
 
 jobs:
+  signed-artifact:
+    if: github.event_name == 'workflow_dispatch' && inputs.signed_artifact_only
+    permissions:
+      contents: read
+    uses: ./.github/workflows/signed-windows.yml
+    with:
+      version: ${{ inputs.release_version || '0.0.75' }}
+    secrets: inherit
+
   build:
+    if: github.event_name != 'workflow_dispatch' || !inputs.signed_artifact_only
+    concurrency:
+      group: ${{ vars.ABIGAIL_WINDOWS_SIGNING_MODE == 'esigner' && 'abigail-esigner' || format('abigail-installer-{0}', github.ref) }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:
@@ -50,7 +69,7 @@ jobs:
         run: choco install nsis --no-progress -y
 
       - name: Install Windows SDK signing tools
-        if: vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true'
+        if: vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true' && vars.ABIGAIL_WINDOWS_SIGNING_MODE != 'esigner'
         shell: pwsh
         run: |
           choco install windows-sdk-10-version-2004-windbg --no-progress -y
@@ -139,6 +158,7 @@ jobs:
           echo "Building Abigail installer version: $VERSION (tag: $TAG, channel: $CHANNEL)"
 
       - name: Update Hive app version
+        if: vars.ABIGAIL_WINDOWS_SIGNING_MODE != 'esigner' || vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING != 'true'
         shell: bash
         run: |
           node -e "
@@ -150,6 +170,7 @@ jobs:
           "
 
       - name: Disable beforeBuildCommand for CI
+        if: vars.ABIGAIL_WINDOWS_SIGNING_MODE != 'esigner' || vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING != 'true'
         shell: bash
         run: |
           node -e "
@@ -178,9 +199,14 @@ jobs:
           WINDOWS_SIGNING_CERT_PEM: ${{ secrets.WINDOWS_SIGNING_CERT_PEM }}
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
           WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
         run: bash scripts/enforce_release_prereqs.sh
 
       - name: Configure updater and signing fields
+        if: vars.ABIGAIL_WINDOWS_SIGNING_MODE != 'esigner' || vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING != 'true'
         shell: bash
         env:
           ABIGAIL_REQUIRE_UPDATER_PUBKEY: ${{ vars.ABIGAIL_REQUIRE_UPDATER_SIGNING == 'true' }}
@@ -211,13 +237,21 @@ jobs:
           $required = @(
             "hive-app/resources/abigail-entity-runtime-app.exe",
             "hive-app/resources/hive-daemon.exe",
-            "hive-app/resources/entity-daemon.exe"
+            "hive-app/resources/entity-daemon.exe",
+            "hive-app/resources/bootstrap/bundle.json",
+            "hive-app/resources/bootstrap/ollama/ollama.exe",
+            "hive-app/resources/bootstrap/MODEL-LICENSE.txt",
+            "hive-app/resources/bootstrap/NOTICE.txt"
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path)) {
               throw "Missing installer payload file: $path"
             }
           }
+
+      - name: Verify offline local inference
+        shell: pwsh
+        run: ./scripts/test_offline_bootstrap.ps1
 
       - name: Verify packaged frontend assets
         shell: bash
@@ -246,6 +280,7 @@ jobs:
           done
 
       - name: Configure split installer resources
+        if: vars.ABIGAIL_WINDOWS_SIGNING_MODE != 'esigner' || vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING != 'true'
         shell: bash
         run: |
           node -e "
@@ -256,15 +291,49 @@ jobs:
             conf.bundle.resources = [
               'resources/abigail-entity-runtime-app.exe',
               'resources/hive-daemon.exe',
-              'resources/entity-daemon.exe'
+              'resources/entity-daemon.exe',
+              'resources/bootstrap/**/*'
             ];
             fs.writeFileSync(path, JSON.stringify(conf, null, 2) + '\n');
           "
 
       - name: Install Tauri CLI
-        run: npm install -g @tauri-apps/cli@v2
+        run: npm install -g @tauri-apps/cli@2.11.4
+
+      - name: Prepare SSL.com signed release
+        if: vars.ABIGAIL_WINDOWS_SIGNING_MODE == 'esigner' && vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        env:
+          INSTALLER_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ./scripts/install_esigner.ps1
+          ./scripts/build_signed_installer.ps1 -Phase Prepare -SkipStage -Version $env:INSTALLER_VERSION
+
+      - name: Sign and verify SSL.com release
+        id: signing
+        if: vars.ABIGAIL_WINDOWS_SIGNING_MODE == 'esigner' && vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        env:
+          INSTALLER_VERSION: ${{ steps.version.outputs.version }}
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: ./scripts/build_signed_installer.ps1 -Phase Sign -Version $env:INSTALLER_VERSION
+
+      - name: Test startup from the signed installer payload
+        if: vars.ABIGAIL_WINDOWS_SIGNING_MODE == 'esigner' && vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        env:
+          SIGNED_ARTIFACT_DIR: ${{ steps.signing.outputs.artifact_dir }}
+        run: |
+          $report = Get-Content "$env:SIGNED_ARTIFACT_DIR/signature-report.json" -Raw | ConvertFrom-Json
+          python scripts/test_initial_setup.py --binary-dir "$($report.extractedPayload)/resources" --bundle-dir "$($report.extractedPayload)/resources/bootstrap"
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged startup acceptance failed.' }
 
       - name: Build Abigail installer
+        if: vars.ABIGAIL_WINDOWS_SIGNING_MODE != 'esigner' || vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING != 'true'
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY || secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -277,15 +346,24 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
         with:
           name: abigail-installer-${{ matrix.platform }}
-          path: ${{ matrix.installer_path }}
+          path: ${{ vars.ABIGAIL_WINDOWS_SIGNING_MODE == 'esigner' && vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true' && format('{0}/Abigail-windows-x64-setup.exe', steps.signing.outputs.artifact_dir) || matrix.installer_path }}
           if-no-files-found: error
 
       - name: Upload MSI installer
+        if: vars.ABIGAIL_WINDOWS_SIGNING_MODE != 'esigner' || vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
         with:
           name: abigail-msi-${{ matrix.platform }}
           path: ${{ matrix.msi_path }}
           if-no-files-found: warn
+
+      - name: Upload signature verification report
+        if: vars.ABIGAIL_WINDOWS_SIGNING_MODE == 'esigner' && vars.ABIGAIL_REQUIRE_WINDOWS_SIGNING == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
+        with:
+          name: abigail-signatures-${{ matrix.platform }}
+          path: ${{ steps.signing.outputs.artifact_dir }}/signature-report.json
+          if-no-files-found: error
 
       - name: Upload updater artifacts
         if: vars.ABIGAIL_REQUIRE_UPDATER_SIGNING == 'true'
@@ -342,6 +420,11 @@ jobs:
           fi
           cp "$INSTALLER" release-assets/Abigail-windows-x64-setup.exe
 
+          REPORT="artifacts/abigail-signatures-windows-latest/signature-report.json"
+          if [ -f "$REPORT" ]; then
+            cp "$REPORT" release-assets/signature-report.json
+          fi
+
           MSI=$(find artifacts/abigail-msi-windows-latest -name "*.msi" -type f 2>/dev/null | head -1 || true)
           if [ -n "$MSI" ]; then
             cp "$MSI" release-assets/Abigail-windows-x64.msi
@@ -385,7 +468,7 @@ jobs:
             - **Windows**: `Abigail-windows-x64-setup.exe`
             - **Windows (MSI)**: `Abigail-windows-x64.msi`
 
-            Abigail installs as one app icon. Launch **Abigail** to open Abigail Hive; the bundled Hive daemon, Entity Runtime, and Entity daemons start as needed in the background.
+            Abigail installs as one app icon. Launch **Abigail** to start the offline setup conversation; the bundled Hive daemon, Entity Runtime, and Entity daemons start as needed in the background.
 
             ### Beta UAT
 
@@ -435,6 +518,13 @@ jobs:
               exit 1
             fi
           done
+
+            for payload in 'bootstrap[\\/]bundle.json' 'bootstrap[\\/]ollama[\\/]ollama.exe' 'sha256-afb707b6b8fac6e475acc42bc8380fc0b8d2e0e4190be5a969fbf62fcc897db5'; do
+              if ! grep -E "$payload" installer-contents.txt >/dev/null; then
+                echo "Missing offline inference payload: $payload"
+                exit 1
+              fi
+            done
 
       - name: Record beta UAT installer metadata
         shell: bash

@@ -26,7 +26,22 @@ impl EntityClient {
     pub fn new(base_url: &str) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
-            client: reqwest::Client::new(),
+            client: {
+                let mut headers = reqwest::header::HeaderMap::new();
+                if let Ok(token) = std::env::var("ABIGAIL_ENTITY_AUTH_TOKEN") {
+                    if let Ok(mut header) =
+                        format!("Bearer {token}").parse::<reqwest::header::HeaderValue>()
+                    {
+                        header.set_sensitive(true);
+                        headers.insert(reqwest::header::AUTHORIZATION, header);
+                    }
+                }
+                reqwest::Client::builder()
+                    .default_headers(headers)
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .expect("HTTP client")
+            },
         }
     }
 

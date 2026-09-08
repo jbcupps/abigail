@@ -1,11 +1,12 @@
 //! HTTP client for hive-daemon.
 
 use hive_core::{
-    ApiEnvelope, EntityInfo, ForgeApprovalJobsResponse, OutboxSyncRequest, OutboxSyncResponse,
-    ProviderConfig, ProviderModelsRequest, ProviderModelsResponse, RuntimeHeartbeatRequest,
-    RuntimeHeartbeatResponse, RuntimeRegistrationRequest, RuntimeSessionLease,
-    RuntimeSessionRequest, RuntimeSessionStatus, SecretListResponse, SecretValueResponse,
-    SkillAssignmentsResponse, UpdateEntityConfigRequest, UpdateEntityConfigResponse,
+    local_auth_header_value, ApiEnvelope, EntityInfo, ForgeApprovalJobsResponse, OutboxSyncRequest,
+    OutboxSyncResponse, ProviderConfig, ProviderModelsRequest, ProviderModelsResponse,
+    RuntimeHeartbeatRequest, RuntimeHeartbeatResponse, RuntimeRegistrationRequest,
+    RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus, SecretListResponse,
+    SecretValueResponse, SkillAssignmentsResponse, UpdateEntityConfigRequest,
+    UpdateEntityConfigResponse, LOCAL_AUTH_ENV,
 };
 
 /// HTTP client wrapping all hive-daemon REST endpoints.
@@ -13,18 +14,49 @@ use hive_core::{
 pub struct HiveDaemonClient {
     base_url: String,
     client: reqwest::Client,
+    auth_token: Option<String>,
 }
 
 impl HiveDaemonClient {
     pub fn new(base_url: &str) -> Self {
+        Self::with_auth(base_url, std::env::var(LOCAL_AUTH_ENV).ok())
+    }
+
+    pub fn with_auth(base_url: &str, auth_token: Option<String>) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(std::time::Duration::from_secs(60))
+                .build()
+                .expect("control-plane client"),
+            auth_token: auth_token.filter(|t| !t.is_empty()),
         }
+    }
+
+    pub fn with_token(mut self, token: impl Into<String>) -> Self {
+        let token = token.into();
+        self.auth_token = if token.is_empty() { None } else { Some(token) };
+        self
     }
 
     pub fn base_url(&self) -> &str {
         &self.base_url
+    }
+
+    pub fn auth_token(&self) -> Option<&str> {
+        self.auth_token.as_deref()
+    }
+
+    fn apply_auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match &self.auth_token {
+            Some(token) => req.header(
+                reqwest::header::AUTHORIZATION,
+                local_auth_header_value(token),
+            ),
+            None => req,
+        }
     }
 
     pub async fn health(&self) -> anyhow::Result<bool> {
@@ -38,8 +70,7 @@ impl HiveDaemonClient {
 
     pub async fn list_entities(&self) -> anyhow::Result<Vec<EntityInfo>> {
         let resp: ApiEnvelope<Vec<EntityInfo>> = self
-            .client
-            .get(format!("{}/v1/entities", self.base_url))
+            .apply_auth(self.client.get(format!("{}/v1/entities", self.base_url)))
             .send()
             .await?
             .json()
@@ -49,8 +80,7 @@ impl HiveDaemonClient {
 
     pub async fn create_entity(&self, name: &str) -> anyhow::Result<String> {
         let resp: ApiEnvelope<serde_json::Value> = self
-            .client
-            .post(format!("{}/v1/entities", self.base_url))
+            .apply_auth(self.client.post(format!("{}/v1/entities", self.base_url)))
             .json(&serde_json::json!({ "name": name }))
             .send()
             .await?
@@ -65,8 +95,10 @@ impl HiveDaemonClient {
 
     pub async fn get_entity(&self, entity_id: &str) -> anyhow::Result<EntityInfo> {
         let resp: ApiEnvelope<EntityInfo> = self
-            .client
-            .get(format!("{}/v1/entities/{}", self.base_url, entity_id))
+            .apply_auth(
+                self.client
+                    .get(format!("{}/v1/entities/{}", self.base_url, entity_id)),
+            )
             .send()
             .await?
             .json()
@@ -76,11 +108,10 @@ impl HiveDaemonClient {
 
     pub async fn get_provider_config(&self, entity_id: &str) -> anyhow::Result<ProviderConfig> {
         let resp: ApiEnvelope<ProviderConfig> = self
-            .client
-            .get(format!(
+            .apply_auth(self.client.get(format!(
                 "{}/v1/entities/{}/provider-config",
                 self.base_url, entity_id
-            ))
+            )))
             .send()
             .await?
             .json()
@@ -94,11 +125,10 @@ impl HiveDaemonClient {
         patch: &UpdateEntityConfigRequest,
     ) -> anyhow::Result<UpdateEntityConfigResponse> {
         let resp: ApiEnvelope<UpdateEntityConfigResponse> = self
-            .client
-            .patch(format!(
+            .apply_auth(self.client.patch(format!(
                 "{}/v1/entities/{}/config",
                 self.base_url, entity_id
-            ))
+            )))
             .json(patch)
             .send()
             .await?
@@ -109,8 +139,7 @@ impl HiveDaemonClient {
 
     pub async fn store_secret(&self, key: &str, value: &str) -> anyhow::Result<()> {
         let resp: ApiEnvelope<String> = self
-            .client
-            .post(format!("{}/v1/secrets", self.base_url))
+            .apply_auth(self.client.post(format!("{}/v1/secrets", self.base_url)))
             .json(&serde_json::json!({ "key": key, "value": value }))
             .send()
             .await?
@@ -122,8 +151,10 @@ impl HiveDaemonClient {
 
     pub async fn get_secret(&self, key: &str) -> anyhow::Result<Option<String>> {
         let resp: ApiEnvelope<SecretValueResponse> = self
-            .client
-            .get(format!("{}/v1/secrets/{}", self.base_url, key))
+            .apply_auth(
+                self.client
+                    .get(format!("{}/v1/secrets/{}", self.base_url, key)),
+            )
             .send()
             .await?
             .json()
@@ -137,8 +168,10 @@ impl HiveDaemonClient {
 
     pub async fn list_secrets(&self) -> anyhow::Result<Vec<String>> {
         let resp: ApiEnvelope<SecretListResponse> = self
-            .client
-            .get(format!("{}/v1/secrets/list", self.base_url))
+            .apply_auth(
+                self.client
+                    .get(format!("{}/v1/secrets/list", self.base_url)),
+            )
             .send()
             .await?
             .json()
@@ -152,8 +185,10 @@ impl HiveDaemonClient {
         api_key: &str,
     ) -> anyhow::Result<ProviderModelsResponse> {
         let resp: ApiEnvelope<ProviderModelsResponse> = self
-            .client
-            .post(format!("{}/v1/providers/models", self.base_url))
+            .apply_auth(
+                self.client
+                    .post(format!("{}/v1/providers/models", self.base_url)),
+            )
             .json(&ProviderModelsRequest {
                 provider: provider.to_string(),
                 api_key: api_key.to_string(),
@@ -171,8 +206,10 @@ impl HiveDaemonClient {
         runtime_id: Option<String>,
     ) -> anyhow::Result<RuntimeSessionLease> {
         let resp: ApiEnvelope<RuntimeSessionLease> = self
-            .client
-            .post(format!("{}/v1/runtime/sessions", self.base_url))
+            .apply_auth(
+                self.client
+                    .post(format!("{}/v1/runtime/sessions", self.base_url)),
+            )
             .json(&RuntimeSessionRequest {
                 entity_id: entity_id.to_string(),
                 runtime_id,
@@ -189,8 +226,10 @@ impl HiveDaemonClient {
         request: &RuntimeRegistrationRequest,
     ) -> anyhow::Result<RuntimeSessionStatus> {
         let resp: ApiEnvelope<RuntimeSessionStatus> = self
-            .client
-            .post(format!("{}/v1/runtime/register", self.base_url))
+            .apply_auth(
+                self.client
+                    .post(format!("{}/v1/runtime/register", self.base_url)),
+            )
             .json(request)
             .send()
             .await?
@@ -204,8 +243,10 @@ impl HiveDaemonClient {
         request: &RuntimeHeartbeatRequest,
     ) -> anyhow::Result<RuntimeHeartbeatResponse> {
         let resp: ApiEnvelope<RuntimeHeartbeatResponse> = self
-            .client
-            .post(format!("{}/v1/runtime/heartbeat", self.base_url))
+            .apply_auth(
+                self.client
+                    .post(format!("{}/v1/runtime/heartbeat", self.base_url)),
+            )
             .json(request)
             .send()
             .await?
@@ -219,11 +260,10 @@ impl HiveDaemonClient {
         entity_id: &str,
     ) -> anyhow::Result<SkillAssignmentsResponse> {
         let resp: ApiEnvelope<SkillAssignmentsResponse> = self
-            .client
-            .get(format!(
+            .apply_auth(self.client.get(format!(
                 "{}/v1/entities/{}/assignments",
                 self.base_url, entity_id
-            ))
+            )))
             .send()
             .await?
             .json()
@@ -236,11 +276,10 @@ impl HiveDaemonClient {
         entity_id: &str,
     ) -> anyhow::Result<ForgeApprovalJobsResponse> {
         let resp: ApiEnvelope<ForgeApprovalJobsResponse> = self
-            .client
-            .get(format!(
+            .apply_auth(self.client.get(format!(
                 "{}/v1/entities/{}/forge-approvals",
                 self.base_url, entity_id
-            ))
+            )))
             .send()
             .await?
             .json()
@@ -253,8 +292,10 @@ impl HiveDaemonClient {
         request: &OutboxSyncRequest,
     ) -> anyhow::Result<OutboxSyncResponse> {
         let resp: ApiEnvelope<OutboxSyncResponse> = self
-            .client
-            .post(format!("{}/v1/runtime/outbox/sync", self.base_url))
+            .apply_auth(
+                self.client
+                    .post(format!("{}/v1/runtime/outbox/sync", self.base_url)),
+            )
             .json(request)
             .send()
             .await?

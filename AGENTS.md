@@ -2,11 +2,11 @@
 
 This file tracks the current plan for agents working in the Abigail repository.
 
-## Current State (2026-03-05)
+## Current State (2026-09-08)
 
 Abigail is the private Entity Coordinator and Manager for real homes and families. Its product mission is to put persistent, highly configurable, ethically governed AI Entities into the hands of everyday people through one easy install and one obvious app launch. The user (mentor/family head) creates individual Entities that the family actually interacts with. Abigail handles coordination, memory, skills, and security in the background.
 
-- Abigail Hive is the only place where provider/model management should live.
+- The coordinator is called **Abigail** in the family-facing experience. Provider/model management stays there; Hive remains the internal component name.
 - Abigail Hive should remain visible and usable even while an Entity is open.
 - The active implementation split is two app roots: `hive-app` for control-plane work and `entity-runtime-app` for the chat/runtime surface, but the family-facing product must install and launch as one `Abigail` app.
 - The full installer lane must package Hive, Entity Runtime, `hive-daemon`, and `entity-daemon` together so non-technical families never handle separate binaries.
@@ -15,6 +15,16 @@ Abigail is the private Entity Coordinator and Manager for real homes and familie
 - Mentor chat monitor preprompt flow is in place and out-of-band monitors remain non-blocking.
 - DevOps Forge worker is active and subscribed to `topic.skill.forge.request`.
 - Forge pipeline writes sandbox-gated artifacts to `skills/dynamic/`, updates `skills/registry.toml`, and publishes `topic.skill.forge.response`.
+
+## Initial Application Setup
+
+- The splash leads to verified local inference from packaged Ollama and Qwen3.5-0.8B; no first-run download is required.
+- Abigail's focused setup chat runs inside the coordinator under its immortal identity and persists in its Entity database. Family runtimes share the Hive-owned store through authenticated scoped requests.
+- Connecting Claude or OpenAI requires a secure form and successful completion from the selected model before an encrypted connection is persisted and activated. The same conversation survives handoff and restart.
+- All privileged local APIs require caller credentials. A separate credential is passed directly to each Runtime window; Entity Hive tokens cannot read another Entity's records or change global setup.
+- Do not expand this slice into household accounts or a new Entity birth conversation. Those remain subsequent product work.
+- Keep unsigned packaging reproducible with the offline runtime/model/licenses and offline WebView2. Full disconnected installer UAT remains required before release; use `docs/INITIAL_SETUP.md` for acceptance commands.
+- The separately authorized SSL.com release lane signs all four Abigail executables before bundling and verifies the actual NSIS payload. Keep signed builds fail-closed and preserve third-party bytes; see `docs/WINDOWS_SIGNING.md`. This does not add signing requirements to the unsigned stabilization lane.
 
 ## Active Plan (Family-First Priorities)
 
@@ -43,3 +53,10 @@ When changing routing or monitor behavior, update:
 - `CLAUDE.md` and `AGENTS.md` (agent constitution / active plan files)
 
 **Remember the Mission**: Abigail coordinates the Entities that families actually talk to. Every change must make the experience warmer, simpler, and more powerful for real homes.
+
+Application-owned setup guidance must remain visible independently of model prose:
+API accounts are provider developer accounts; API keys are separate secrets created
+inside those accounts. Only fixed official provider links and the secure connection
+form direct credential entry. The live connection status and next setup action come
+from application state. Qwen3.5-0.8B free-form explanations can confuse these terms,
+even with examples; never treat its wording as proof of setup completion.

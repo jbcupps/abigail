@@ -17,6 +17,8 @@ tauri-plugin-dialog = "2.0"
 tracing.workspace = true
 tracing-subscriber.workspace = true
 reqwest.workspace = true
+uuid.workspace = true
+abigail-core = { path = "../crates/abigail-core" }
 
 [lib]
 name = "abigail_hive_desktop"

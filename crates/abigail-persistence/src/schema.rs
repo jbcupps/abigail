@@ -23,12 +23,17 @@ DEFINE TABLE IF NOT EXISTS memory_edge SCHEMALESS;
 DEFINE TABLE IF NOT EXISTS calendar_event SCHEMALESS;
 DEFINE TABLE IF NOT EXISTS kb_entry SCHEMALESS;
 DEFINE TABLE IF NOT EXISTS embedding_chunk SCHEMALESS;
+-- Job queues are per-Entity so concurrent Entities cannot see, claim, or fail
+-- each other's work. See entity-daemon's queue setup.
+DEFINE TABLE IF NOT EXISTS job_record SCHEMALESS;
 DEFINE INDEX IF NOT EXISTS idx_memory_entry_created_at ON TABLE memory_entry COLUMNS created_at;
 DEFINE INDEX IF NOT EXISTS idx_conversation_turn_session ON TABLE conversation_turn COLUMNS session_id, turn_number;
 DEFINE INDEX IF NOT EXISTS idx_conversation_turn_created_at ON TABLE conversation_turn COLUMNS created_at;
 DEFINE INDEX IF NOT EXISTS idx_protected_topic_entry_topic ON TABLE protected_topic_entry COLUMNS topic_name, created_at;
 DEFINE INDEX IF NOT EXISTS idx_calendar_event_start_time ON TABLE calendar_event COLUMNS start_time;
 DEFINE INDEX IF NOT EXISTS idx_kb_entry_updated_at ON TABLE kb_entry COLUMNS updated_at;
+DEFINE INDEX IF NOT EXISTS idx_job_record_status ON TABLE job_record COLUMNS status;
+DEFINE INDEX IF NOT EXISTS idx_job_record_topic ON TABLE job_record COLUMNS topic;
 "#;
 
 pub async fn ensure_schema(db: &Surreal<Db>, scope: &EntityScope) -> Result<(), PersistenceError> {

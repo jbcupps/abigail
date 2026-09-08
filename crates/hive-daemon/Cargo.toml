@@ -12,6 +12,7 @@ abigail-diag.workspace = true
 hive-core = { path = "../hive-core" }
 abigail-core = { path = "../abigail-core" }
 abigail-identity = { path = "../abigail-identity" }
+abigail-persistence = { path = "../abigail-persistence" }
 abigail-hive = { path = "../abigail-hive" }
 abigail-capabilities = { path = "../abigail-capabilities" }
 abigail-runtime = { path = "../abigail-runtime" }
@@ -33,3 +34,8 @@ sha2.workspace = true
 
 [dev-dependencies]
 daemon-test-harness = { path = "../daemon-test-harness" }
+uuid.workspace = true
+hive-core = { path = "../hive-core" }
+reqwest.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

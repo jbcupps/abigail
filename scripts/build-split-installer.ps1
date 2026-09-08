@@ -4,9 +4,9 @@
     bundle: the two app shells plus the two daemons in one directory.
 
 .DESCRIPTION
-    Double-clicking "Abigail Hive" (abigail-hive-app.exe) from the staged
+    Double-clicking "Abigail" (abigail-hive-app.exe) from the staged
     directory brings up the whole stack with no terminal — the Hive app spawns
-    (or adopts) the Hive daemon, which in turn starts the helper and family
+    (or adopts) the Hive daemon, which loads the offline setup assistant and starts family
     entity-daemons on demand. All inter-process spawning resolves binaries via
     the executable's own directory, so the four binaries must sit side by side.
 
@@ -48,6 +48,8 @@ function Build-Frontend {
     }
 }
 
+& (Join-Path $PSScriptRoot "stage_offline_bootstrap.ps1")
+
 Write-Host "Building split-app frontends..."
 Build-Frontend -AppDir (Join-Path $repoRoot "hive-app")
 Build-Frontend -AppDir (Join-Path $repoRoot "entity-runtime-app")
@@ -82,6 +84,8 @@ foreach ($bin in $binaries) {
 }
 
 Write-Host ""
+Copy-Item -LiteralPath (Join-Path $repoRoot "hive-app/resources/bootstrap") -Destination $OutputDir -Recurse -Force
+
 Write-Host "Staged unsigned portable build at: $OutputDir"
 Write-Host "Launch by running 'abigail-hive-app.exe' — it starts the whole stack."
 Get-ChildItem $OutputDir | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host

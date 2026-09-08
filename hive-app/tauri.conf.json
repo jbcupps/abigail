@@ -14,7 +14,7 @@
     },
     "windows": [
       {
-        "title": "Abigail Hive",
+        "title": "Abigail",
         "width": 1280,
         "height": 860,
         "resizable": true,
@@ -35,7 +35,7 @@
     "windows": {
       "digestAlgorithm": "sha256",
       "webviewInstallMode": {
-        "type": "embedBootstrapper"
+        "type": "offlineInstaller"
       },
       "nsis": {
         "installMode": "currentUser",

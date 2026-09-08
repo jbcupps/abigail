@@ -1,0 +1,122 @@
+name: SSL.com signed Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Numeric installer version; this workflow never publishes a release'
+        required: true
+        default: '0.0.75'
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+    secrets:
+      # The mandatory first step reports all missing values together. Optional
+      # declarations let that check run instead of failing caller evaluation.
+      ESIGNER_USERNAME:
+        required: false
+      ESIGNER_PASSWORD:
+        required: false
+      ESIGNER_CREDENTIAL_ID:
+        required: false
+      ESIGNER_TOTP_SECRET:
+        required: false
+      WINDOWS_CERTIFICATE_THUMBPRINT:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: abigail-esigner
+  cancel-in-progress: false
+
+jobs:
+  signed-installer:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Validate signing configuration
+        shell: pwsh
+        env:
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          $required = @('ESIGNER_USERNAME','ESIGNER_PASSWORD','ESIGNER_CREDENTIAL_ID','ESIGNER_TOTP_SECRET','WINDOWS_CERTIFICATE_THUMBPRINT')
+          $missing = @($required | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) })
+          if ($missing.Count) {
+            @(
+              '## SSL.com signing needs configuration'
+              'Add the following encrypted repository secrets:'
+              ($missing | ForEach-Object { '- `' + $_ + '`' })
+              ''
+              "[Open Actions secrets](https://github.com/$env:GITHUB_REPOSITORY/settings/secrets/actions)"
+              ''
+              'Use the existing signing TOTP seed, not a six-digit code. Never put passwords or seeds in workflow inputs or logs.'
+              'No build, signing request, artifact upload, tag, or release was started.'
+            ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+            throw "Missing encrypted signing secrets: $($missing -join ', ')"
+          }
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: stable
+      - uses: swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+        with:
+          shared-key: signed-windows
+      - name: Install build and signing tools
+        shell: pwsh
+        run: |
+          npm install -g @tauri-apps/cli@2.11.4
+          if ($LASTEXITCODE -ne 0) { throw 'Tauri CLI installation failed.' }
+          ./scripts/install_esigner.ps1
+      - name: Build current offline installer payload
+        shell: pwsh
+        env:
+          INSTALLER_VERSION: ${{ inputs.version }}
+          CARGO_BUILD_JOBS: '3'
+        run: ./scripts/build_signed_installer.ps1 -Phase Prepare -Version $env:INSTALLER_VERSION
+      - name: Test signing verification and private input handling
+        shell: pwsh
+        run: |
+          ./scripts/test_windows_signing.ps1
+          ./scripts/test_windows_signing_state.ps1
+          ./scripts/test_windows_signing_private.ps1
+      - name: Test offline inference
+        shell: pwsh
+        run: ./scripts/test_offline_bootstrap.ps1
+      - name: Sign and verify the installer and extracted payload
+        id: signing
+        shell: pwsh
+        env:
+          INSTALLER_VERSION: ${{ inputs.version }}
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: ./scripts/build_signed_installer.ps1 -Phase Sign -Version $env:INSTALLER_VERSION
+      - name: Test startup from the signed installer payload
+        shell: pwsh
+        env:
+          SIGNED_ARTIFACT_DIR: ${{ steps.signing.outputs.artifact_dir }}
+        run: |
+          $report = Get-Content "$env:SIGNED_ARTIFACT_DIR/signature-report.json" -Raw | ConvertFrom-Json
+          python scripts/test_initial_setup.py --binary-dir "$($report.extractedPayload)/resources" --bundle-dir "$($report.extractedPayload)/resources/bootstrap"
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged startup acceptance failed.' }
+      - name: Upload verified signed artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
+        with:
+          name: abigail-signed-windows
+          path: ${{ steps.signing.outputs.artifact_dir }}/*
+          if-no-files-found: error
+          retention-days: 14

@@ -5,6 +5,24 @@
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
+// Local control-plane authentication
+// ---------------------------------------------------------------------------
+
+/// Environment variable carrying the per-launch local control-plane token.
+///
+/// Set by the Hive daemon for supervised children and by the desktop shell for
+/// daemon-client calls. Never store this value in web localStorage.
+pub const LOCAL_AUTH_ENV: &str = "ABIGAIL_LOCAL_AUTH_TOKEN";
+
+/// HTTP Authorization scheme for local control-plane calls.
+pub const LOCAL_AUTH_SCHEME: &str = "Bearer";
+
+/// Build an `Authorization` header value for the local token.
+pub fn local_auth_header_value(token: &str) -> String {
+    format!("{LOCAL_AUTH_SCHEME} {token}")
+}
+
+// ---------------------------------------------------------------------------
 // Generic API envelope
 // ---------------------------------------------------------------------------
 
@@ -304,6 +322,7 @@ pub struct HiveDefaultResponse {
 pub struct EntityOpenResponse {
     pub entity_id: String,
     pub local_url: String,
+    pub auth_token: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

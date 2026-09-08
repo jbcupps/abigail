@@ -217,23 +217,13 @@ impl MemoryStore {
             db_path.display(),
             config.data_dir.display()
         );
-        if abigail_persistence::ci_mode_enabled()
-            && std::env::var_os("ABIGAIL_DAEMON_INTEGRATION").is_some()
-        {
-            tracing::info!(
-                "MemoryStore using ephemeral store for daemon integration test scope={}",
-                entity_id.as_deref().unwrap_or("hive")
-            );
-            return Self::open_in_memory_with_entity_and_unlock(
-                entity_id.as_deref().unwrap_or("hive"),
-                Arc::new(HybridUnlockProvider::new()),
-            );
-        }
-        Self::open_internal(
+        Self::open_internal_scoped(
             db_path,
             Arc::new(HybridUnlockProvider::new()),
             entity_id,
             None,
+            // The Hive owns this store; under the Hive this resolves to HTTP.
+            true,
         )
     }
 
@@ -502,11 +492,28 @@ impl MemoryStore {
         entity_id: Option<String>,
         temp_root: Option<PathBuf>,
     ) -> Result<Self> {
+        Self::open_internal_scoped(path, unlock, entity_id, temp_root, false)
+    }
+
+    /// `shared` marks this as the Hive-owned store, which may be served by the
+    /// Hive over HTTP instead of opened from disk. Backups and import sources
+    /// must pass `false` so they are never redirected to the live family store.
+    fn open_internal_scoped(
+        path: PathBuf,
+        unlock: Arc<dyn UnlockProvider>,
+        entity_id: Option<String>,
+        temp_root: Option<PathBuf>,
+        shared: bool,
+    ) -> Result<Self> {
         let scope = match entity_id.as_ref() {
             Some(entity_id) => EntityScope::Entity(entity_id.clone()),
             None => EntityScope::Hive,
         };
-        let persistence = PersistenceHandle::open(&path, scope)?;
+        let persistence = if shared {
+            PersistenceHandle::open_shared(&path, scope)?
+        } else {
+            PersistenceHandle::open(&path, scope)?
+        };
         Ok(Self {
             persistence,
             unlock,
@@ -998,7 +1005,12 @@ mod tests {
         let config = test_config(&tmp, db_path.clone());
         let store = MemoryStore::open_with_config(&config).unwrap();
 
-        assert_eq!(store.path(), db_path.as_path());
+        // macOS exposes the temporary directory through /var -> /private/var.
+        // The persistence owner canonicalizes its path before opening the store.
+        assert_eq!(
+            std::fs::canonicalize(store.path()).unwrap(),
+            std::fs::canonicalize(&db_path).unwrap()
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

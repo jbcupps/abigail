@@ -70,7 +70,7 @@ For source-level diagnostics without installing Abigail, omit `-InstallerPath`. 
 The repeatable stabilization release path keeps signing and updater artifacts opt-in.
 
 - `ABIGAIL_REQUIRE_WINDOWS_SIGNING=true` enables Windows signing checks and signing config.
-- `ABIGAIL_WINDOWS_SIGNING_MODE=store` expects a certificate available on the Windows runner.
+- `ABIGAIL_WINDOWS_SIGNING_MODE=esigner` selects the verified SSL.com cloud signing path documented in [WINDOWS_SIGNING.md](WINDOWS_SIGNING.md). Configure it only after that path is integrated and signing credentials are available. Legacy store/PFX release modes are rejected when signing is required.
 - `ABIGAIL_WINDOWS_RUNNER` can route Windows builds to a self-hosted runner label.
 - `ABIGAIL_REQUIRE_UPDATER_SIGNING=true` enables Tauri updater artifacts and `latest.json`.
 - `NPM_TOKEN` is optional. If present, the workflow attempts to publish `abigail-desktop`; if absent or the version already exists, GitHub release publishing still succeeds.
@@ -81,6 +81,12 @@ Current expected repeat-build posture:
 - Leave `ABIGAIL_REQUIRE_UPDATER_SIGNING` unset until the updater signing lane is intentionally restored.
 - Keep Apple/macOS out of the build matrix until the Apple Developer account agreement/signing problem is fixed.
 - Keep Linux out of the full installer matrix until the one-step Linux package is intentionally added.
+
+For a reviewed branch artifact without publication, dispatch **Abigail Installer
+Release** with `signed_artifact_only=true`. For supervised signing with existing
+authenticator codes, use the local private-input flow in the signing guide.
+`build_signed_installer.ps1` is the canonical Prepare/Check/Sign entrypoint;
+the retired `build-release-windows.ps1` must not build the old `tauri-app`.
 
 ## Unsigned Stabilization Build
 

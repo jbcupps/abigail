@@ -41,7 +41,7 @@ impl CalendarSkill {
     fn open_store(&self) -> SkillResult<PersistenceHandle> {
         std::fs::create_dir_all(&self.data_dir)
             .map_err(|e| SkillError::InitFailed(format!("Cannot create data directory: {}", e)))?;
-        PersistenceHandle::open(shared_db_path(&self.data_dir), infer_scope(&self.data_dir))
+        PersistenceHandle::open_shared(shared_db_path(&self.data_dir), infer_scope(&self.data_dir))
             .map_err(|e| SkillError::InitFailed(format!("Cannot open memory store: {}", e)))
     }
 

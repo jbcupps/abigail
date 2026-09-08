@@ -36,7 +36,7 @@ async fn entity_lifecycle() {
         return;
     }
     let hive = hive().await;
-    let client = reqwest::Client::new();
+    let client = hive.client();
 
     let resp = client
         .post(format!("{}/v1/entities", hive.url()))
@@ -77,7 +77,7 @@ async fn secrets_crud() {
         return;
     }
     let hive = hive().await;
-    let client = reqwest::Client::new();
+    let client = hive.client();
 
     let resp = client
         .post(format!("{}/v1/secrets", hive.url()))
@@ -115,7 +115,7 @@ async fn provider_config() {
         return;
     }
     let hive = hive().await;
-    let client = reqwest::Client::new();
+    let client = hive.client();
 
     let resp = client
         .post(format!("{}/v1/entities", hive.url()))

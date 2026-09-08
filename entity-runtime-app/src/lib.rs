@@ -11,6 +11,7 @@ use tauri::Emitter;
 #[derive(Debug, Serialize)]
 struct RuntimeConnectionInfo {
     runtime_url: String,
+    auth_token: Option<String>,
 }
 
 fn entity_url() -> String {
@@ -21,6 +22,7 @@ fn entity_url() -> String {
 fn get_runtime_connection_info() -> RuntimeConnectionInfo {
     RuntimeConnectionInfo {
         runtime_url: entity_url(),
+        auth_token: std::env::var("ABIGAIL_ENTITY_AUTH_TOKEN").ok(),
     }
 }
 

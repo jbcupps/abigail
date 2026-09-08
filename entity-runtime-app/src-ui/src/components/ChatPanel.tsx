@@ -1,3 +1,4 @@
+import { authenticatedEntityFetch } from "../lib/connection";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EntityHttpChatGateway } from "../chat/EntityHttpChatGateway";
 import type { ChatGatewayStream } from "../chat/chatGateway";
@@ -36,7 +37,7 @@ export default function ChatPanel({ baseUrl, greeting }: ChatPanelProps) {
         requestTimeoutMs: 120_000,
         // Native fetch must be invoked with `window` as its receiver; the gateway
         // stores fetchFn on `this`, so pass a bound copy to avoid "Illegal invocation".
-        fetchFn: globalThis.fetch.bind(globalThis),
+        fetchFn: authenticatedEntityFetch,
       }),
     [baseUrl],
   );
