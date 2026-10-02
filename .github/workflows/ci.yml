@@ -68,13 +68,13 @@ jobs:
       - name: Check Hive and Runtime apps
         run: cargo check -p abigail-hive-app -p abigail-entity-runtime-app
 
-      - name: Run Hive daemon contract tests
-        run: cargo test -p hive-daemon --test integration
-        env:
-          ABIGAIL_DAEMON_INTEGRATION: "1"
-
       - name: Build daemon binaries for integration tests
         run: cargo build -p hive-daemon -p entity-daemon
+
+      - name: Run Hive daemon contract tests
+        run: cargo test -p hive-daemon --test integration --test startup
+        env:
+          ABIGAIL_DAEMON_INTEGRATION: "1"
 
       - name: Run Entity runtime contract tests
         run: cargo test -p entity-daemon --test integration
