@@ -93,6 +93,52 @@ try {
     Add-Content -LiteralPath $configPath ' '
     Assert-Rejected 'changed bundle configuration' { Assert-PreparedState $state } 'configuration changed'
 } finally { [IO.File]::WriteAllBytes($configPath, $originalConfig) }
+foreach ($variant in @('updater', 'other-target', 'other-launcher', 'missing-resource')) {
+    try {
+        $invalidConfig = $config | ConvertTo-Json -Depth 8 | ConvertFrom-Json -AsHashtable
+        switch ($variant) {
+            'updater' { $invalidConfig.bundle.createUpdaterArtifacts = $true }
+            'other-target' { $invalidConfig.bundle.targets = @('msi') }
+            'other-launcher' { $invalidConfig.mainBinaryName = 'Other' }
+            'missing-resource' { $invalidConfig.bundle.resources = @($resources | Select-Object -First 2) }
+        }
+        Write-BuildJson $invalidConfig $configPath
+        $mutated = Copy-TestState
+        $mutated.configSha256 = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
+        Assert-Rejected "semantically invalid $variant configuration" { Assert-PreparedState $mutated } 'one-app NSIS release'
+    } finally { [IO.File]::WriteAllBytes($configPath, $originalConfig) }
+}
 Assert-PreparedState $state
 Write-Host 'PASS restored prepared inputs'
+# Exercise the real phase entrypoint with synthetic secrets. It must stop before
+# discovering tools or touching build files, and must not print secret values.
+$blockedWork = Join-Path $testRoot 'blocked-secret-prepare'
+$passwordSentinel = 'synthetic-password-must-not-be-printed'
+$seedSentinel = 'synthetic-otp-seed-must-not-be-printed'
+$start = [Diagnostics.ProcessStartInfo]::new()
+$start.FileName = (Get-Command pwsh).Source
+$start.UseShellExecute = $false
+$start.RedirectStandardOutput = $true
+$start.RedirectStandardError = $true
+foreach ($argument in @('-NoProfile', '-NonInteractive', '-File', $builder, '-Phase', 'Prepare', '-WorkDir', $blockedWork)) {
+    $start.ArgumentList.Add($argument)
+}
+foreach ($name in @('ESIGNER_USERNAME', 'ESIGNER_PASSWORD', 'ESIGNER_CREDENTIAL_ID', 'ESIGNER_TOTP_SECRET', 'WINDOWS_CERTIFICATE_THUMBPRINT')) {
+    $null = $start.Environment.Remove($name)
+}
+$start.Environment['ESIGNER_PASSWORD'] = $passwordSentinel
+$start.Environment['ESIGNER_TOTP_SECRET'] = $seedSentinel
+$process = [Diagnostics.Process]::Start($start)
+try {
+    if (-not $process.WaitForExit(15000)) {
+        $process.Kill($true)
+        throw 'Credential-free preparation guard did not stop promptly.'
+    }
+    $output = $process.StandardOutput.ReadToEnd() + $process.StandardError.ReadToEnd()
+    if ($process.ExitCode -eq 0 -or $output -notmatch 'Prepare must run without signing passwords or TOTP secrets' -or
+        $output.Contains($passwordSentinel) -or $output.Contains($seedSentinel) -or (Test-Path -LiteralPath $blockedWork)) {
+        throw 'Preparation did not reject signing secrets before builds without exposing their values.'
+    }
+} finally { $process.Dispose() }
+Write-Host 'PASS real Prepare entrypoint rejects synthetic signing secrets before building'
 Write-Host 'Signed installer state tests passed without building, installing, or signing.'
