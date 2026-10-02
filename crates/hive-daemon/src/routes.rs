@@ -1032,10 +1032,37 @@ pub async fn get_execution_receipts(
 mod tests {
     use super::*;
     use crate::runtime_registry::RuntimeControlPlane;
-    use abigail_core::{AppConfig, SecretsVault};
+    use abigail_core::SecretsVault;
     use abigail_hive::Hive;
     use abigail_identity::IdentityManager;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn test_vault_root() -> &'static std::path::Path {
+        static ROOT: OnceLock<std::path::PathBuf> = OnceLock::new();
+        ROOT.get_or_init(|| {
+            // The vault key is process-scoped, so all fixtures in this test binary
+            // must bootstrap it once before creating identities in parallel. A
+            // unique root also keeps sentinels from other workspace test binaries
+            // and the user's installed profile out of these route tests.
+            let root = std::env::temp_dir().join(format!(
+                "abigail_hive_routes_vault_{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&root).expect("create test vault root");
+            abigail_core::vault::unlock::configure_process_vault_data_dir(&root);
+            let previous_raw_key = std::env::var_os("ABIGAIL_VAULT_RAW_KEY");
+            std::env::set_var("ABIGAIL_VAULT_RAW_KEY", "42".repeat(32));
+            use abigail_core::UnlockProvider as _;
+            let result = abigail_core::HybridUnlockProvider::new().root_kek();
+            match previous_raw_key {
+                Some(value) => std::env::set_var("ABIGAIL_VAULT_RAW_KEY", value),
+                None => std::env::remove_var("ABIGAIL_VAULT_RAW_KEY"),
+            }
+            result.expect("bootstrap isolated test vault");
+            root
+        })
+        .as_path()
+    }
 
     #[test]
     fn cli_probe_errors_explain_isolation_without_disclosing_cli_details() {
@@ -1107,9 +1134,8 @@ mod tests {
     }
 
     fn build_state() -> (HiveDaemonState, String) {
-        let data_root = AppConfig::default_paths()
-            .data_dir
-            .join("test-hive-daemon-routes")
+        let data_root = test_vault_root()
+            .join("identity-fixtures")
             .join(uuid::Uuid::new_v4().to_string());
         std::fs::create_dir_all(&data_root).expect("create test data root");
 
@@ -1142,6 +1168,41 @@ mod tests {
             },
             entity_id,
         )
+    }
+
+    #[test]
+    fn parallel_route_fixtures_share_an_isolated_verified_vault() {
+        let start = Arc::new(std::sync::Barrier::new(4));
+        let threads: Vec<_> = (0..4)
+            .map(|_| {
+                let start = start.clone();
+                std::thread::spawn(move || {
+                    start.wait();
+                    let (state, entity_id) = build_state();
+                    assert!(state
+                        .identity_manager
+                        .data_root()
+                        .starts_with(test_vault_root()));
+                    assert!(state.identity_manager.load_agent(&entity_id).is_ok());
+                    state.identity_manager.data_root().to_path_buf()
+                })
+            })
+            .collect();
+        let roots: std::collections::HashSet<_> = threads
+            .into_iter()
+            .map(|thread| thread.join().expect("parallel identity fixture"))
+            .collect();
+        assert_eq!(
+            roots.len(),
+            4,
+            "identity fixtures retain separate data roots"
+        );
+        assert!(test_vault_root().join("vault.sentinel").is_file());
+        assert!(
+            abigail_core::vault::current_runtime_status()
+                .unwrap()
+                .healthy
+        );
     }
 
     fn runtime_headers(token: &str) -> HeaderMap {

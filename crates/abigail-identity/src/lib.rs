@@ -1324,6 +1324,26 @@ mod tests {
     use super::*;
 
     fn test_manager() -> IdentityManager {
+        static VAULT_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+        VAULT_ROOT.get_or_init(|| {
+            // Hybrid unlock caches its key per process. Bootstrap one isolated
+            // vault before parallel fixtures encrypt birth signing keys, rather
+            // than relying on the user's keyring or another test binary's sentinel.
+            let root = std::env::temp_dir()
+                .join(format!("abigail_identity_test_vault_{}", Uuid::new_v4()));
+            std::fs::create_dir_all(&root).expect("create isolated identity test vault");
+            abigail_core::vault::unlock::configure_process_vault_data_dir(&root);
+            let previous_raw_key = std::env::var_os("ABIGAIL_VAULT_RAW_KEY");
+            std::env::set_var("ABIGAIL_VAULT_RAW_KEY", "42".repeat(32));
+            use abigail_core::UnlockProvider as _;
+            let result = abigail_core::HybridUnlockProvider::new().root_kek();
+            match previous_raw_key {
+                Some(value) => std::env::set_var("ABIGAIL_VAULT_RAW_KEY", value),
+                None => std::env::remove_var("ABIGAIL_VAULT_RAW_KEY"),
+            }
+            result.expect("bootstrap isolated identity test vault");
+            root
+        });
         let tmp = std::env::temp_dir().join(format!("abigail_identity_test_{}", Uuid::new_v4()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
