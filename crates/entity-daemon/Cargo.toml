@@ -44,7 +44,7 @@ async-trait.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 sha2.workspace = true
-cron = "0.15"
+cron = "0.17"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
