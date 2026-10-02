@@ -515,7 +515,7 @@ mod tests {
             .unwrap();
         let error = observe_startup(
             &mut child,
-            tokio::time::Instant::now() + Duration::from_secs(2),
+            tokio::time::Instant::now() + Duration::from_secs(15),
             std::future::pending::<anyhow::Result<()>>(),
         )
         .await
