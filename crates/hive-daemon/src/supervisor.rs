@@ -11,8 +11,47 @@
 use anyhow::Context;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
+
+/// One-use launch capabilities are held only in the supervising Hive process.
+/// A child receives its capability through its environment, never an HTTP API.
+fn bootstrap_registry() -> &'static Mutex<HashMap<String, String>> {
+    static REGISTRY: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub(crate) fn issue_runtime_bootstrap(entity_id: &str) -> String {
+    let capability = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+    bootstrap_registry()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(entity_id.to_string(), capability.clone());
+    capability
+}
+
+pub(crate) fn consume_runtime_bootstrap(entity_id: &str, capability: &str) -> bool {
+    let mut registry = bootstrap_registry()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if registry
+        .get(entity_id)
+        .is_some_and(|expected| expected == capability)
+    {
+        registry.remove(entity_id);
+        true
+    } else {
+        false
+    }
+}
+
+fn revoke_runtime_bootstrap(entity_id: &str, capability: &str) {
+    let _ = consume_runtime_bootstrap(entity_id, capability);
+}
 
 /// Locate the `entity-daemon` executable next to the current (hive-daemon) exe.
 /// In both dev (`target/debug`) and a packaged install the two binaries are
@@ -86,6 +125,7 @@ pub async fn spawn_entity_daemon(
     let bin = entity_daemon_binary()?;
     let port = pick_free_port().await?;
     let local_url = format!("http://127.0.0.1:{}", port);
+    let bootstrap = issue_runtime_bootstrap(entity_id);
 
     let mut command = tokio::process::Command::new(&bin);
     command
@@ -97,6 +137,7 @@ pub async fn spawn_entity_daemon(
         .arg(port.to_string())
         .arg("--data-dir")
         .arg(data_root)
+        .env("ABIGAIL_RUNTIME_BOOTSTRAP", &bootstrap)
         .env_remove("CLAUDECODE")
         .env_remove("CLAUDE_CODE_ENTRYPOINT")
         .env_remove("CLAUDE_CODE_SESSION_ID")
@@ -111,11 +152,18 @@ pub async fn spawn_entity_daemon(
         .stderr(std::process::Stdio::null())
         .kill_on_drop(false);
 
-    let child = command
-        .spawn()
-        .with_context(|| format!("spawning entity-daemon at {}", bin.display()))?;
+    let child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            revoke_runtime_bootstrap(entity_id, &bootstrap);
+            return Err(error)
+                .with_context(|| format!("spawning entity-daemon at {}", bin.display()));
+        }
+    };
 
-    if wait_for_health(&local_url, Duration::from_secs(45)).await {
+    let healthy = wait_for_health(&local_url, Duration::from_secs(45)).await;
+    revoke_runtime_bootstrap(entity_id, &bootstrap);
+    if healthy {
         Ok((child, local_url))
     } else {
         // Never reached healthy — don't leak the process.

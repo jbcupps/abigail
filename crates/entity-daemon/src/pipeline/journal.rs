@@ -54,19 +54,7 @@ pub async fn spawn(state: EntityDaemonState) -> anyhow::Result<SubscriptionHandl
 async fn record(state: EntityDaemonState, action: EgoActionPayload) {
     match (action.status.as_str(), action.response) {
         ("success", Some(response)) => {
-            // Archive the assistant turn (async, fire-and-forget via broker).
-            let asst_turn = abigail_memory::ConversationTurn::new(
-                &action.session_id,
-                "assistant",
-                &response.reply,
-            )
-            .with_metadata(
-                response.provider.clone(),
-                response.model_used.clone(),
-                response.tier.clone(),
-                response.complexity_score,
-            );
-            crate::memory_consumer::publish_turn(state.stream_broker.clone(), asst_turn);
+            // The Ego stage persisted this reply before acknowledging the turn.
 
             let _ = state.queue_outbox_record(
                 "chat_assistant_turn",

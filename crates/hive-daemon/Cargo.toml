@@ -11,6 +11,7 @@ path = "src/main.rs"
 abigail-diag.workspace = true
 hive-core = { path = "../hive-core" }
 abigail-core = { path = "../abigail-core" }
+abigail-persistence = { path = "../abigail-persistence" }
 abigail-identity = { path = "../abigail-identity" }
 abigail-hive = { path = "../abigail-hive" }
 abigail-capabilities = { path = "../abigail-capabilities" }

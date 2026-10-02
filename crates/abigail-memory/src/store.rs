@@ -202,15 +202,13 @@ impl MemoryStore {
                 .map_err(|error| StoreError::Migration(error.to_string()))?;
         }
 
-        let entity_id = if config.is_hive {
-            None
-        } else {
-            config
-                .data_dir
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(str::to_string)
-        };
+        // The Hive helper is a runtime identity too. Its chat is scoped to its
+        // own UUID, while the Hive daemon alone owns the control-plane scope.
+        let entity_id = config
+            .data_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string);
         tracing::info!(
             "MemoryStore opening SurrealDB store: scope={} path={} data_dir={}",
             if config.is_hive { "hive" } else { "entity" },
@@ -390,7 +388,15 @@ impl MemoryStore {
             .into_iter()
             .map(TryFrom::try_from)
             .collect::<Result<Vec<_>>>()?;
-        turns.sort_by_key(|turn| turn.turn_number);
+        // Newly recorded turns may share the default number zero. Restore
+        // chronological order within each number rather than preserving the
+        // database's descending order for equal-numbered turns.
+        turns.sort_by(|left, right| {
+            left.turn_number
+                .cmp(&right.turn_number)
+                .then_with(|| left.created_at.cmp(&right.created_at))
+                .then_with(|| left.id.cmp(&right.id))
+        });
         Ok(turns)
     }
 
@@ -967,6 +973,35 @@ mod tests {
         assert!(store.insert_turn_or_ignore(&turn).unwrap());
         assert!(!store.insert_turn_or_ignore(&turn).unwrap());
         assert_eq!(store.total_turn_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn recent_turns_restore_chronology_for_default_numbers_and_stable_timestamp_ties() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        let mut user = ConversationTurn::new("history", "user", "Remember pasta");
+        user.id = "turn-a".into();
+        user.created_at = parse_timestamp("2026-10-02T12:00:00.100Z").unwrap();
+        let mut assistant = ConversationTurn::new("history", "assistant", "I will remember pasta");
+        assistant.id = "turn-b".into();
+        assistant.created_at = parse_timestamp("2026-10-02T12:00:00.200Z").unwrap();
+        let mut followup = ConversationTurn::new("history", "user", "Thank you");
+        followup.id = "turn-c".into();
+        followup.created_at = assistant.created_at;
+        // Insertion order must not decide transcript order, including ties.
+        for turn in [&followup, &user, &assistant] {
+            store.insert_turn(turn).unwrap();
+        }
+        let recent = store.recent_turns("history", 10).unwrap();
+        assert_eq!(
+            recent
+                .iter()
+                .map(|turn| turn.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["turn-a", "turn-b", "turn-c"]
+        );
+        assert_eq!(recent[0].role, "user");
+        assert_eq!(recent[1].role, "assistant");
+        assert!(recent.iter().all(|turn| turn.turn_number == 0));
     }
 
     #[test]

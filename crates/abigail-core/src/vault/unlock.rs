@@ -173,7 +173,7 @@ impl UnlockProvider for HybridUnlockProvider {
             }
         };
         let fallback_persisted = match persist_windows_kek_fallback(&data_root, &kek) {
-            Ok(()) => true,
+            Ok(persisted) => persisted,
             Err(error) => {
                 tracing::warn!(
                     "Stable KEK could not be persisted to DPAPI fallback file: {}",
@@ -184,7 +184,7 @@ impl UnlockProvider for HybridUnlockProvider {
         };
         if !keyring_persisted && !fallback_persisted {
             return Err(CoreError::Vault(format!(
-                "Recovery Mode: failed to persist stable KEK '{}': Windows keyring verification failed and no DPAPI fallback could be written.",
+                "Recovery Mode: failed to persist stable KEK '{}': OS keyring verification failed and no secure fallback could be written.",
                 KEYRING_ACCOUNT
             )));
         }
@@ -405,14 +405,15 @@ fn windows_kek_fallback_path(data_root: &Path) -> PathBuf {
 }
 
 #[cfg(windows)]
-fn persist_windows_kek_fallback(data_root: &Path, kek: &[u8; KEK_LEN]) -> Result<()> {
+fn persist_windows_kek_fallback(data_root: &Path, kek: &[u8; KEK_LEN]) -> Result<bool> {
     let encrypted = crate::dpapi::dpapi_encrypt(kek)?;
-    crate::secure_fs::write_bytes_atomic(&windows_kek_fallback_path(data_root), &encrypted)
+    crate::secure_fs::write_bytes_atomic(&windows_kek_fallback_path(data_root), &encrypted)?;
+    Ok(true)
 }
 
 #[cfg(not(windows))]
-fn persist_windows_kek_fallback(_data_root: &Path, _kek: &[u8; KEK_LEN]) -> Result<()> {
-    Ok(())
+fn persist_windows_kek_fallback(_data_root: &Path, _kek: &[u8; KEK_LEN]) -> Result<bool> {
+    Ok(false)
 }
 
 #[cfg(windows)]
@@ -456,6 +457,21 @@ use base64::Engine as _;
 mod tests {
     use super::*;
 
+    #[cfg(not(windows))]
+    #[test]
+    fn unsupported_dpapi_fallback_never_claims_key_persistence() {
+        let root = std::env::temp_dir().join(format!(
+            "abigail_no_dpapi_fallback_{}_{}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        assert!(!persist_windows_kek_fallback(&root, &[7; KEK_LEN]).unwrap());
+        assert!(load_windows_kek_fallback_optional(&root).unwrap().is_none());
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+        std::fs::remove_dir(&root).unwrap();
+    }
+
     #[test]
     fn passphrase_provider_deterministic() {
         let p = PassphraseUnlockProvider::new("test-phrase");
@@ -481,7 +497,7 @@ mod tests {
         let mut kek = [0u8; KEK_LEN];
         kek.copy_from_slice(&[7u8; KEK_LEN]);
 
-        persist_windows_kek_fallback(&dir, &kek).unwrap();
+        assert!(persist_windows_kek_fallback(&dir, &kek).unwrap());
         let loaded = load_windows_kek_fallback_optional(&dir).unwrap().unwrap();
         assert_eq!(loaded, kek);
 

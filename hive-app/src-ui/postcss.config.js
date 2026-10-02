@@ -1,15 +1,8 @@
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-
-// PostCSS finds this file relative to the Vite root, but Tailwind's own config
-// search starts from process.cwd() (the repo root when the dev server is
-// launched from there), so it would otherwise miss src-ui/tailwind.config.js
-// and emit an empty stylesheet. Point it at the config explicitly.
-const here = dirname(fileURLToPath(import.meta.url));
-
+// Tailwind 4 loads the app's legacy theme through @config in src/index.css.
+// Source paths are anchored there so builds also work from the repository root.
 export default {
   plugins: {
-    "@tailwindcss/postcss": { config: join(here, "tailwind.config.js") },
+    "@tailwindcss/postcss": {},
     autoprefixer: {},
   },
 };

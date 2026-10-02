@@ -314,10 +314,15 @@ async fn perform_birth(
     entity_id: String,
     path: String,
     choices: Vec<(String, String)>,
+    purpose: Option<String>,
 ) -> Result<hive_core::BirthRiteResponse, String> {
     hive_post(
         &format!("/v1/entities/{}/birth", entity_id),
-        &hive_core::BirthRiteRequest { path, choices },
+        &hive_core::BirthRiteRequest {
+            path,
+            choices,
+            purpose,
+        },
     )
     .await
 }
@@ -334,6 +339,7 @@ async fn open_entity(
     entity_id: String,
     open: tauri::State<'_, OpenEntities>,
 ) -> Result<(), String> {
+    let bin = entity_app_binary().ok_or("Entity Runtime app binary not found")?;
     // One window per entity — skip if already open.
     {
         let mut set = open.0.lock().map_err(|e| e.to_string())?;
@@ -378,7 +384,6 @@ async fn open_entity(
     };
 
     // 2. Launch the Entity Runtime app pointed at that daemon.
-    let bin = entity_app_binary().ok_or("Entity Runtime app binary not found")?;
     // Don't let the runtime app inherit our (possibly invalid, console-less)
     // stdio handles — it has its own file logging and nothing reads its output.
     let child = tokio::process::Command::new(&bin)
@@ -393,6 +398,11 @@ async fn open_entity(
         Ok(c) => c,
         Err(e) => {
             forget(&tracking, &entity_id);
+            let _ = reqwest::Client::new()
+                .post(format!("{}/v1/entities/{}/close", hive, entity_id))
+                .timeout(std::time::Duration::from_secs(5))
+                .send()
+                .await;
             return Err(e);
         }
     };
@@ -401,11 +411,12 @@ async fn open_entity(
     let entity_id_for_task = entity_id.clone();
     tauri::async_runtime::spawn(async move {
         let _ = child.wait().await;
-        forget(&tracking, &entity_id_for_task);
         let _ = reqwest::Client::new()
             .post(format!("{}/v1/entities/{}/close", hive, entity_id_for_task))
+            .timeout(std::time::Duration::from_secs(5))
             .send()
             .await;
+        forget(&tracking, &entity_id_for_task);
     });
 
     Ok(())
@@ -432,6 +443,9 @@ struct HiveRuntimeDescriptor {
 }
 
 fn runtime_dir() -> std::path::PathBuf {
+    if let Some(data_dir) = nonempty_env_path("ABIGAIL_DATA_DIR") {
+        return data_dir.join("runtime");
+    }
     let base = std::env::var_os("LOCALAPPDATA")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
@@ -516,6 +530,9 @@ fn spawn_hive_daemon() -> Result<(String, u32), String> {
     let url = format!("http://127.0.0.1:{}", port);
     let mut command = std::process::Command::new(&bin);
     command.arg("--port").arg(port.to_string());
+    if let Some(data_dir) = nonempty_env_path("ABIGAIL_DATA_DIR") {
+        command.arg("--data-dir").arg(data_dir);
+    }
 
     // Redirect the child's stdout/stderr to a file instead of inheriting ours.
     // We're a `windows_subsystem = "windows"` shell with no console, so default
@@ -535,7 +552,7 @@ fn spawn_hive_daemon() -> Result<(String, u32), String> {
         }
     }
 
-    let child = spawn_clean(&mut command).map_err(|e| e.to_string())?;
+    let mut child = spawn_clean(&mut command).map_err(|e| e.to_string())?;
     let pid = child.id();
 
     // Confirm it actually came up (e.g. it lost the port race) before we record
@@ -543,29 +560,25 @@ fn spawn_hive_daemon() -> Result<(String, u32), String> {
     // under a second; the bound only matters on failure.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while std::time::Instant::now() < deadline {
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(format!(
+                "Hive daemon exited with {} (see {})",
+                status,
+                spawn_log_path.display()
+            ));
+        }
         if is_daemon_healthy(&url) {
             return Ok((url, pid));
         }
         std::thread::sleep(std::time::Duration::from_millis(300));
     }
+    let _ = child.kill();
+    let _ = child.wait();
     Err(format!(
         "Hive daemon did not become healthy at {} (see {})",
         url,
         spawn_log_path.display()
     ))
-}
-
-fn reap_stale(pid: u32) {
-    #[cfg(windows)]
-    {
-        let mut cmd = std::process::Command::new("taskkill");
-        cmd.args(["/PID", &pid.to_string(), "/F", "/T"]);
-        let _ = spawn_clean(&mut cmd).map(|mut c| c.wait());
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = pid;
-    }
 }
 
 fn ensure_hive_daemon() {
@@ -584,8 +597,8 @@ fn ensure_hive_daemon() {
             tracing::info!("Adopted running Hive daemon at {}", desc.hive_url);
             return;
         }
-        // Recorded but unhealthy — reap the stale process before respawning.
-        reap_stale(desc.pid);
+        // A recorded PID can be reused by Windows after the daemon exits.
+        // Pick a free port without killing an unrelated process by stale PID.
     }
 
     match spawn_hive_daemon() {

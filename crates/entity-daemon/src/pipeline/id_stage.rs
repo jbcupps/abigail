@@ -122,8 +122,12 @@ async fn curate_and_publish(state: EntityDaemonState, envelope: MentorChatEnvelo
     let mut system_prompt = abigail_router::inject_preprompt(&base_prompt, enriched_preprompt);
 
     // Personality consult on the local Id provider (skipped when no local LLM).
-    let (id_signal, id_consult) =
-        consult_id(&state, status.has_local_http, &envelope.message).await;
+    let (id_signal, id_consult) = consult_id(
+        &state,
+        status.has_local_http && status.has_ego,
+        &envelope.message,
+    )
+    .await;
     if let Some(ref signal) = id_signal {
         system_prompt.push_str("\n\n## Id Signal\n");
         system_prompt.push_str(signal);

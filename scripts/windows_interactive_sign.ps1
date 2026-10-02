@@ -5,11 +5,13 @@ param(
     [string]$CertificateThumbprint,
     [Parameter(Mandatory = $true)]
     [string]$TimestampUrl,
+    [switch]$NoNotice,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Files
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot 'windows_signing_common.ps1')
 
 function Get-NoticeMarkerPath {
     if (-not [string]::IsNullOrWhiteSpace($env:ABIGAIL_WINDOWS_SIGNING_NOTICE_FILE)) {
@@ -49,7 +51,8 @@ Abigail is ready for the final Windows signing step.
 Artifact:
 $artifactSummary
 
-Approve the malware blocker and complete any SSL.com OTP verification now.
+Complete any SSL.com OTP verification in the signing provider now.
+If the malware scan blocks signing, resolve the reported issue before retrying.
 Click OK when you are ready for signing to continue.
 "@
 
@@ -114,7 +117,9 @@ if ($null -eq $Files -or $Files.Count -eq 0) {
 }
 
 $noticeMarkerPath = Get-NoticeMarkerPath
-if (-not (Test-Path $noticeMarkerPath)) {
+$resolved = Resolve-WindowsSigningCertificate -Thumbprint $CertificateThumbprint
+$resolvedFiles = @($Files | ForEach-Object { (Get-Item -LiteralPath $_ -ErrorAction Stop).FullName })
+if (-not $NoNotice -and -not (Test-Path $noticeMarkerPath)) {
     Show-InteractiveSigningNotice -ArtifactPaths $Files
     $markerDir = Split-Path $noticeMarkerPath -Parent
     if (-not [string]::IsNullOrWhiteSpace($markerDir) -and -not (Test-Path $markerDir)) {
@@ -123,19 +128,13 @@ if (-not (Test-Path $noticeMarkerPath)) {
     Set-Content -Path $noticeMarkerPath -Value (Get-Date).ToString("o") -Encoding Ascii
 }
 
-$arguments = @(
-    "sign",
-    "/sha1",
-    $CertificateThumbprint,
-    "/fd",
-    "sha256",
-    "/td",
-    "sha256",
-    "/tr",
-    $TimestampUrl
-) + $Files
+$arguments = @(Get-WindowsSignArguments -Thumbprint $CertificateThumbprint `
+    -StoreLocation $resolved.StoreLocation -TimestampUrl $TimestampUrl -Files $resolvedFiles)
 
 & $SignToolPath @arguments
 if ($LASTEXITCODE -ne 0) {
     throw "SignTool failed with exit code $LASTEXITCODE."
+}
+foreach ($file in $resolvedFiles) {
+    Assert-WindowsArtifactSignature -Path $file -Thumbprint $CertificateThumbprint -SignToolPath $SignToolPath | Out-Null
 }

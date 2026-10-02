@@ -63,7 +63,7 @@ describe("Abigail Hive app", () => {
 
     expect(await screen.findByRole("heading", { name: "Abigail Hive" })).toBeInTheDocument();
     expect(screen.getByText("Your family's private AI coordinator.")).toBeInTheDocument();
-    expect(screen.getByText("Entities (2)")).toBeInTheDocument();
+    expect(screen.getByText("Entities (1)")).toBeInTheDocument();
     expect(screen.getByText("Ada")).toBeInTheDocument();
     expect(mocks.showAppWindow).toHaveBeenCalledOnce();
   });

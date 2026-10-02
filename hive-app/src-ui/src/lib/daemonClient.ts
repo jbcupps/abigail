@@ -24,7 +24,7 @@ export interface CreateEntityResult {
 
 async function hiveFetch(path: string, init?: RequestInit): Promise<Response> {
   const base = await resolveHiveUrl();
-  return fetch(`${base}${path}`, init);
+  return fetch(`${base}${path}`, { ...init, signal: init?.signal ?? AbortSignal.timeout(30_000) });
 }
 
 async function unwrap<T>(res: Response, path: string): Promise<T> {
@@ -36,7 +36,7 @@ async function unwrap<T>(res: Response, path: string): Promise<T> {
 
 export async function hiveHealth(): Promise<boolean> {
   try {
-    return (await hiveFetch("/health")).ok;
+    return (await hiveFetch("/health", { signal: AbortSignal.timeout(2_000) })).ok;
   } catch {
     return false;
   }
@@ -56,11 +56,20 @@ export async function createEntity(name: string): Promise<CreateEntityResult> {
   return unwrap<CreateEntityResult>(res, "/v1/entities");
 }
 
-async function hivePost<T>(path: string, body: unknown): Promise<T> {
+export async function completeEntitySetup(entityId: string, purpose?: string): Promise<void> {
+  await hivePost(`/v1/entities/${encodeURIComponent(entityId)}/birth`, {
+    path: "quickstart",
+    choices: [],
+    purpose: purpose?.trim() || "A helpful, honest companion for everyday family life.",
+  });
+}
+
+async function hivePost<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await hiveFetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
   return unwrap<T>(res, path);
 }
@@ -80,7 +89,7 @@ export interface HiveStatus {
 }
 
 export async function getStatus(): Promise<HiveStatus> {
-  const res = await hiveFetch("/v1/status", { headers: { Accept: "application/json" } });
+  const res = await hiveFetch("/v1/status", { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5_000) });
   return unwrap<HiveStatus>(res, "/v1/status");
 }
 
@@ -116,11 +125,11 @@ export interface ProviderModel {
 }
 
 export async function discoverModels(provider: string, apiKey: string): Promise<ProviderModel[]> {
-  const data = await hivePost<{ provider: string; models: ProviderModel[] }>(
+  const data = await hivePost<{ provider: string; models: { model_id: string; display_name?: string }[] }>(
     "/v1/providers/models",
     { provider, api_key: apiKey },
   );
-  return data.models;
+  return data.models.map((model) => ({ id: model.model_id, display_name: model.display_name }));
 }
 
 export async function storeSecret(key: string, value: string): Promise<void> {
@@ -133,5 +142,9 @@ export interface HiveDefault {
 }
 
 export async function setHiveDefault(provider?: string, model?: string): Promise<HiveDefault> {
-  return hivePost<HiveDefault>("/v1/providers/hive-default", { provider, model });
+  return hivePost<HiveDefault>("/v1/providers/hive-default", { provider, model }, AbortSignal.timeout(75_000));
+}
+
+export async function connectLocalModel(baseUrl: string): Promise<{ base_url: string; model: string }> {
+  return hivePost("/v1/providers/local", { base_url: baseUrl.trim() });
 }

@@ -122,6 +122,9 @@ pub struct BirthRiteRequest {
     /// (scenario_id, choice_id) pairs — required for the "forge" path.
     #[serde(default)]
     pub choices: Vec<(String, String)>,
+    /// The mentor's description of what this Entity is here to help with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
 }
 
 /// The four ethical axes of an entity's soul.
@@ -296,6 +299,18 @@ pub struct SetHiveDefaultRequest {
 pub struct HiveDefaultResponse {
     pub provider: Option<String>,
     pub model: Option<String>,
+}
+
+/// Connect a running local OpenAI-compatible model server from the Hive.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalProviderRequest {
+    pub base_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalProviderResponse {
+    pub base_url: String,
+    pub model: String,
 }
 
 /// Response for `POST /v1/entities/:id/open` — the entity's daemon is running

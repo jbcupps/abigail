@@ -41,6 +41,13 @@ pub struct SessionMessage {
     pub content: String,
 }
 
+/// Durable conversation resumed by the Entity window on startup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatHistoryResponse {
+    pub session_id: Option<String>,
+    pub messages: Vec<SessionMessage>,
+}
+
 /// Chat response from the Entity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatResponse {

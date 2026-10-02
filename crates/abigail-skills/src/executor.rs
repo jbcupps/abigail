@@ -156,7 +156,7 @@ impl SkillExecutor {
         tool_name: &str,
         params: ToolParams,
     ) -> SkillResult<ToolOutput> {
-        self.execute_full(skill_id, tool_name, params, true, None)
+        self.execute_full(skill_id, tool_name, params, false, None)
             .await
     }
 
@@ -170,7 +170,7 @@ impl SkillExecutor {
         params: ToolParams,
         job: Option<&JobContext>,
     ) -> SkillResult<ToolOutput> {
-        self.execute_full(skill_id, tool_name, params, true, job)
+        self.execute_full(skill_id, tool_name, params, false, job)
             .await
     }
 
@@ -527,7 +527,7 @@ mod tests {
             .unwrap();
         let executor = SkillExecutor::new(registry);
         let result = executor
-            .execute(&skill_id, "fetch", ToolParams::new())
+            .execute_with_confirmation(&skill_id, "fetch", ToolParams::new(), true)
             .await;
         let err = result.unwrap_err();
         let msg = err.to_string();
@@ -1116,7 +1116,7 @@ mod tests {
             .unwrap();
         let executor = SkillExecutor::new(registry);
         let result = executor
-            .execute(&skill_id, "shell_exec", ToolParams::new())
+            .execute_with_confirmation(&skill_id, "shell_exec", ToolParams::new(), true)
             .await;
         assert!(
             result.is_ok(),
@@ -1218,6 +1218,19 @@ mod tests {
             .register(skill_id.clone(), Arc::new(skill))
             .unwrap();
         let executor = SkillExecutor::new(registry);
+
+        assert!(matches!(
+            executor
+                .execute(&skill_id, "shell_exec", ToolParams::new())
+                .await,
+            Err(SkillError::ConfirmationRequired(_))
+        ));
+        assert!(matches!(
+            executor
+                .execute_in_job_context(&skill_id, "shell_exec", ToolParams::new(), None)
+                .await,
+            Err(SkillError::ConfirmationRequired(_))
+        ));
 
         let err = executor
             .execute_with_confirmation(&skill_id, "shell_exec", ToolParams::new(), false)

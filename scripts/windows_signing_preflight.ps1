@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot 'windows_signing_common.ps1')
 
 function Coalesce-String {
   param([AllowNull()][string]$Value)
@@ -8,12 +9,6 @@ function Coalesce-String {
   }
 
   return $Value
-}
-
-function Normalize-Thumbprint {
-  param([string]$Value)
-
-  return ((Coalesce-String $Value).Trim().ToUpperInvariant() -replace "[^0-9A-F]", "")
 }
 
 function Write-GitHubOutput {
@@ -45,25 +40,6 @@ function Get-CertificateMatches {
   return @($matches)
 }
 
-function Resolve-Certificate {
-  param([string]$Thumbprint)
-
-  $matches = Get-CertificateMatches -Thumbprint $Thumbprint
-  if ($matches.Count -eq 0) {
-    throw "Windows signing certificate with thumbprint $Thumbprint was not found in Cert:\CurrentUser\My or Cert:\LocalMachine\My."
-  }
-
-  $selected = $matches |
-    Sort-Object @{ Expression = { if ($_.Certificate.HasPrivateKey) { 0 } else { 1 } } } |
-    Select-Object -First 1
-
-  if (-not $selected.Certificate.HasPrivateKey) {
-    throw "Windows signing certificate $Thumbprint was found in $($selected.Store) but does not have an accessible private key. For SSL.com hardware-token signing, install the SSL.com/YubiKey middleware on the self-hosted runner and unlock the token before starting the job."
-  }
-
-  return $selected
-}
-
 function Import-PublicCertificateIfNeeded {
   param([string]$Thumbprint)
 
@@ -76,14 +52,13 @@ function Import-PublicCertificateIfNeeded {
   }
 
   $tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
-  $pemPath = Join-Path $tempRoot "abigail-windows-signing-cert.pem"
-  Set-Content -Path $pemPath -Value ($env:WINDOWS_SIGNING_CERT_PEM.Trim() + "`n") -Encoding Ascii
-  Import-Certificate -FilePath $pemPath -CertStoreLocation "Cert:\CurrentUser\My" | Out-Null
-}
-
-$thumbprint = Normalize-Thumbprint -Value $env:WINDOWS_CERTIFICATE_THUMBPRINT
-if (-not $thumbprint) {
-  throw "WINDOWS_CERTIFICATE_THUMBPRINT is required."
+  $pemPath = Join-Path $tempRoot ("abigail-signing-" + [guid]::NewGuid().ToString('N') + '.pem')
+  try {
+    Set-Content -Path $pemPath -Value ($env:WINDOWS_SIGNING_CERT_PEM.Trim() + "`n") -Encoding Ascii
+    Import-Certificate -FilePath $pemPath -CertStoreLocation "Cert:\CurrentUser\My" | Out-Null
+  } finally {
+    if (Test-Path -LiteralPath $pemPath) { Remove-Item -LiteralPath $pemPath -Force }
+  }
 }
 
 $mode = (Coalesce-String $env:ABIGAIL_WINDOWS_SIGNING_MODE).Trim().ToLowerInvariant()
@@ -96,13 +71,14 @@ if (-not $mode) {
   }
 }
 
-switch ($mode) {
-  "off" {
-    Write-Host "Windows signing preflight skipped."
-    Write-GitHubOutput -Name "mode" -Value $mode
-    exit 0
-  }
+if ($mode -eq 'off') {
+  Write-Host 'Windows signing preflight skipped.'
+  Write-GitHubOutput -Name 'mode' -Value $mode
+  exit 0
+}
+$thumbprint = ConvertTo-WindowsSigningThumbprint $env:WINDOWS_CERTIFICATE_THUMBPRINT
 
+switch ($mode) {
   "pfx" {
     if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_BASE64)) {
       throw "WINDOWS_SIGNING_CERT_BASE64 is required for pfx signing mode."
@@ -112,10 +88,14 @@ switch ($mode) {
     }
 
     $tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
-    $certPath = Join-Path $tempRoot "abigail-signing-cert.pfx"
-    [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERT_BASE64))
-    $password = ConvertTo-SecureString -String $env:WINDOWS_SIGNING_CERT_PASSWORD -AsPlainText -Force
-    Import-PfxCertificate -FilePath $certPath -Password $password -CertStoreLocation "Cert:\CurrentUser\My" | Out-Null
+    $certPath = Join-Path $tempRoot ("abigail-signing-" + [guid]::NewGuid().ToString('N') + '.pfx')
+    try {
+      [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERT_BASE64))
+      $password = ConvertTo-SecureString -String $env:WINDOWS_SIGNING_CERT_PASSWORD -AsPlainText -Force
+      Import-PfxCertificate -FilePath $certPath -Password $password -CertStoreLocation "Cert:\CurrentUser\My" | Out-Null
+    } finally {
+      if (Test-Path -LiteralPath $certPath) { Remove-Item -LiteralPath $certPath -Force }
+    }
   }
 
   "store" {
@@ -127,12 +107,12 @@ switch ($mode) {
   }
 }
 
-$resolved = Resolve-Certificate -Thumbprint $thumbprint
+$resolved = Resolve-WindowsSigningCertificate -Thumbprint $thumbprint
 $cert = $resolved.Certificate
 
 Write-Host "Windows signing certificate ready."
 $cert | Select-Object Thumbprint, Subject, HasPrivateKey | Format-Table -AutoSize
 
 Write-GitHubOutput -Name "mode" -Value $mode
-Write-GitHubOutput -Name "store" -Value $resolved.Store
+Write-GitHubOutput -Name "store" -Value $resolved.StoreLocation
 Write-GitHubOutput -Name "subject" -Value $cert.Subject

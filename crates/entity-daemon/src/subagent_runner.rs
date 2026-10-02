@@ -85,6 +85,12 @@ impl SubagentRunner {
                 return None;
             }
         };
+        if resolved.provider_name.ends_with("-cli")
+            && !crate::router_build::is_supported_cli_provider(&resolved.provider_name)
+        {
+            tracing::warn!("This provider profile has no supported read-only CLI integration");
+            return None;
+        }
         let ego_result = abigail_hive::ProviderRegistry::build_ego(
             Some(&resolved.provider_name),
             resolved.api_key,

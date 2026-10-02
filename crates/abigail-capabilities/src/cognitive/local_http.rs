@@ -174,6 +174,19 @@ impl LocalHttpProvider {
         Self::new(base, model)
     }
 
+    /// Connect only when the server reports a loaded model; setup must not
+    /// accept the placeholder model used by legacy provider construction.
+    pub async fn connect(base_url: impl Into<String>) -> anyhow::Result<Self> {
+        let base = base_url.into();
+        validate_local_llm_url(&base).map_err(|error| anyhow::anyhow!("{}", error))?;
+        let model = Self::detect_model(&base).await?;
+        Self::new(base, model)
+    }
+
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
     /// Query /v1/models and return the first available model ID.
     async fn detect_model(base_url: &str) -> anyhow::Result<String> {
         let client = reqwest::Client::builder()

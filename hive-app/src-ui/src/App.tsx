@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import SplashScreen from "./components/SplashScreen";
 import LoaderScreen from "./components/LoaderScreen";
 import CreateEntityCard from "./components/CreateEntityCard";
 import ProviderWizard from "./components/ProviderWizard";
 import ChatPanel from "./components/ChatPanel";
-import { hiveHealth, getStatus, type HiveStatus } from "./lib/daemonClient";
+import { completeEntitySetup, hiveHealth, getStatus, type EntityInfo, type HiveStatus } from "./lib/daemonClient";
 import { showAppWindow } from "./lib/window";
 import { openEntity } from "./lib/entityWindow";
 
@@ -19,19 +19,32 @@ export default function App() {
   const [status, setStatus] = useState<HiveStatus | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [openingId, setOpeningId] = useState<string | null>(null);
+  const openingRef = useRef(false);
+  const mounted = useRef(true);
 
-  const handleOpen = useCallback(async (entityId: string) => {
+  const handleOpen = useCallback(async (entity: EntityInfo) => {
+    if (openingRef.current) return;
+    openingRef.current = true;
+    setOpeningId(entity.id);
     setOpenError(null);
     try {
-      await openEntity(entityId);
+      if (!entity.birth_complete) await completeEntitySetup(entity.id);
+      await openEntity(entity.id);
+      const next = await getStatus();
+      if (mounted.current) setStatus(next);
     } catch (err) {
-      setOpenError(err instanceof Error ? err.message : String(err));
+      if (mounted.current) setOpenError(err instanceof Error ? err.message : "The Entity could not be opened. Try again.");
+    } finally {
+      openingRef.current = false;
+      if (mounted.current) setOpeningId(null);
     }
   }, []);
 
   const refreshStatus = useCallback(async () => {
     try {
-      setStatus(await getStatus());
+      const next = await getStatus();
+      if (mounted.current) setStatus(next);
     } catch {
       // Keep the prior snapshot on a transient failure.
     }
@@ -40,22 +53,40 @@ export default function App() {
   const checkReadiness = useCallback(async () => {
     setReadiness("pending");
     const deadline = Date.now() + READY_CEILING_MS;
-    while (Date.now() < deadline) {
+    while (mounted.current && Date.now() < deadline) {
       if (await hiveHealth()) {
-        await refreshStatus();
-        setReadiness("ok");
-        return;
+        try {
+          const next = await getStatus();
+          if (!mounted.current) return;
+          setStatus(next);
+          setReadiness("ok");
+          return;
+        } catch {
+          // A live HTTP listener is not ready until its status can be read.
+        }
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    setReadiness("failed");
-  }, [refreshStatus]);
+    if (mounted.current) setReadiness("failed");
+  }, []);
 
   // Reveal the window with the splash already painted, then begin readiness.
   useEffect(() => {
+    mounted.current = true;
     void showAppWindow();
     void checkReadiness();
+    return () => { mounted.current = false; };
   }, [checkReadiness]);
+
+  // The coordinator starts in the background; keep its live connection visible
+  // when it becomes ready or restarts on a different port.
+  useEffect(() => {
+    if (phase !== "ready") return;
+    const timer = setInterval(() => void refreshStatus(), 5_000);
+    return () => clearInterval(timer);
+  }, [phase, refreshStatus]);
+
+  const closeWizard = useCallback(() => setWizardOpen(false), []);
 
   useEffect(() => {
     if (phase !== "loading") return;
@@ -85,12 +116,13 @@ export default function App() {
   }
 
   const entities = status?.entities ?? [];
+  const familyEntities = entities.filter((entity) => !entity.is_hive);
   const helperUrl = status?.helper?.running ? (status.helper.local_url ?? null) : null;
   const needsProvider = status?.ready_state === "needs_provider";
 
   return (
     <div className="theme-modern flex h-screen bg-theme-bg text-theme-text font-primary">
-      <div className="flex-1 overflow-y-auto p-8">
+      <div className="min-w-0 flex-1 overflow-y-auto p-8">
         <header className="mb-6 flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold text-theme-text-bright">Abigail Hive</h1>
@@ -110,8 +142,8 @@ export default function App() {
         {needsProvider && (
           <div className="mb-6 rounded-theme-lg border border-theme-border bg-theme-warning-dim p-4">
             <p className="text-sm text-theme-text">
-              Abigail is running on a local model. Connect a cloud model for more capability —
-              your data still stays on this computer.
+              Connect a local or cloud model before opening an Entity. Abigail stores memory on this computer;
+              cloud models process messages with the provider you choose.
             </p>
             <button
               type="button"
@@ -126,7 +158,7 @@ export default function App() {
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-xs uppercase tracking-wide text-theme-text-dim">
-              Entities ({entities.length})
+              Entities ({familyEntities.length})
             </h2>
             <button
               type="button"
@@ -143,36 +175,33 @@ export default function App() {
             <li>
               <CreateEntityCard onCreated={() => void refreshStatus()} />
             </li>
-            {entities.map((entity) => (
+            {familyEntities.map((entity) => (
               <li
                 key={entity.id}
                 className="flex flex-col rounded-theme-lg border border-theme-border bg-theme-surface p-4"
               >
                 <div className="font-medium text-theme-text-bright">{entity.name}</div>
                 <div className="text-xs text-theme-text-dim mt-1">
-                  {entity.is_hive
-                    ? "Hive coordinator"
-                    : entity.birth_complete
-                      ? "Ready"
-                      : "New"}
+                  {entity.birth_complete
+                    ? "Ready"
+                    : "Setup pending"}
                 </div>
-                {!entity.is_hive && (
-                  <button
-                    type="button"
-                    onClick={() => void handleOpen(entity.id)}
-                    className="mt-3 self-start rounded-theme-md bg-theme-primary px-3 py-1.5 text-xs font-medium text-white"
-                  >
-                    Open
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => void handleOpen(entity)}
+                  disabled={needsProvider || openingId !== null}
+                  className="mt-3 self-start rounded-theme-md bg-theme-primary px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+                >
+                  {openingId === entity.id ? "Opening…" : `Open ${entity.name}`}
+                </button>
               </li>
             ))}
           </ul>
-          {openError && <p className="mt-3 text-xs text-theme-danger">{openError}</p>}
+          {openError && <p role="alert" className="mt-3 text-xs text-theme-danger">{openError}</p>}
         </section>
       </div>
 
-      {helperUrl && (
+      {helperUrl && !needsProvider && (
         <aside className="flex w-[360px] flex-col border-l border-theme-border bg-theme-bg-elevated">
           <div className="border-b border-theme-border px-4 py-3 text-sm font-medium text-theme-text-bright">
             Ask Abigail
@@ -180,6 +209,7 @@ export default function App() {
           <div className="min-h-0 flex-1">
             <ChatPanel
               baseUrl={helperUrl}
+              showHeader={false}
               greeting="Hi! I can help you set up Abigail, create Entities, or connect a model. What would you like to do?"
             />
           </div>
@@ -187,7 +217,7 @@ export default function App() {
       )}
 
       {wizardOpen && (
-        <ProviderWizard onClose={() => setWizardOpen(false)} onComplete={() => void refreshStatus()} />
+        <ProviderWizard onClose={closeWizard} onComplete={refreshStatus} />
       )}
     </div>
   );

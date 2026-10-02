@@ -122,12 +122,29 @@ pub async fn perform_birth(
 
     // 2. Write the soul documents into the entity's docs dir (the same files
     //    entity-daemon builds its system prompt and soul_ref from).
-    if let Err(e) = write_soul_documents(&config.docs_dir, &entity_name, &soul) {
+    if let Err(e) = write_soul_documents(
+        &config.docs_dir,
+        &entity_name,
+        &soul,
+        body.purpose.as_deref(),
+    ) {
         return Json(ApiEnvelope::error(format!(
             "Failed to write soul documents: {}",
             e
         )));
     }
+
+    // Entity keys and all constitutional signatures must exist before the
+    // birth flag becomes visible to the daemon's verified load path.
+    config.external_pubkey_path = match state.identity_manager.sign_birth_documents(&entity_id) {
+        Ok(path) => Some(path),
+        Err(e) => {
+            return Json(ApiEnvelope::error(format!(
+                "Failed to sign Entity identity: {}",
+                e
+            )))
+        }
+    };
 
     // 3. Issue the signed certificate.
     let issued_at_utc = chrono::Utc::now().to_rfc3339();
@@ -163,7 +180,7 @@ pub async fn perform_birth(
     let cert_path = config.docs_dir.join("birth_certificate.json");
     match serde_json::to_string_pretty(&certificate) {
         Ok(json) => {
-            if let Err(e) = std::fs::write(&cert_path, json) {
+            if let Err(e) = abigail_core::secure_fs::write_string_atomic(&cert_path, &json) {
                 return Json(ApiEnvelope::error(format!(
                     "Failed to write birth certificate: {}",
                     e
@@ -206,6 +223,7 @@ fn write_soul_documents(
     docs_dir: &std::path::Path,
     entity_name: &str,
     soul: &SoulOutput,
+    purpose: Option<&str>,
 ) -> std::io::Result<()> {
     std::fs::create_dir_all(docs_dir)?;
 
@@ -233,7 +251,22 @@ fn write_soul_documents(
 
     // soul.md = constitutional template + forged identity. The template part
     // is stable; only the forged section changes on re-tempering.
-    let soul_md = format!("{}{}", abigail_core::templates::SOUL_MD, forged_section);
+    let purpose_section = purpose
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(|text| {
+            format!(
+                "\n\n## Purpose\n\n{}\n",
+                text.chars().take(1000).collect::<String>()
+            )
+        })
+        .unwrap_or_default();
+    let soul_md = format!(
+        "{}{}{}",
+        abigail_core::templates::SOUL_MD,
+        forged_section,
+        purpose_section
+    );
     std::fs::write(docs_dir.join("soul.md"), soul_md)?;
 
     // Seed the remaining constitutional docs if missing (never overwrite —
@@ -289,12 +322,54 @@ pub async fn get_birth_document(
         Err(e) => return Json(ApiEnvelope::error(e)),
     };
 
-    let certificate = std::fs::read_to_string(config.docs_dir.join("birth_certificate.json"))
-        .ok()
-        .and_then(|json| serde_json::from_str::<BirthCertificate>(&json).ok());
+    let certificate_path = config.docs_dir.join("birth_certificate.json");
+    let certificate = if certificate_path.exists() {
+        match std::fs::read_to_string(&certificate_path)
+            .map_err(|error| error.to_string())
+            .and_then(|json| {
+                serde_json::from_str::<BirthCertificate>(&json).map_err(|error| error.to_string())
+            }) {
+            Ok(certificate) => Some(certificate),
+            Err(error) => {
+                return Json(ApiEnvelope::error(format!(
+                    "Birth certificate could not be read: {}",
+                    error
+                )))
+            }
+        }
+    } else if config.birth_complete && !config.is_hive {
+        return Json(ApiEnvelope::error(
+            "This Entity's birth certificate is missing.",
+        ));
+    } else {
+        None
+    };
 
-    let provider_config = match state.hive.resolve_config(&config) {
-        Ok(hive_config) => crate::routes::provider_config_from_hive_config(&hive_config),
+    if let Some(ref certificate) = certificate {
+        let payload = certificate_payload(
+            &certificate.entity_id,
+            &certificate.entity_name,
+            &certificate.archetype,
+            &certificate.soul_hash,
+            &certificate.birth_path,
+            &certificate.issued_at_utc,
+        );
+        if certificate.entity_id != entity_id {
+            return Json(ApiEnvelope::error(
+                "Birth certificate belongs to a different Entity.",
+            ));
+        }
+        if let Err(e) = state.identity_manager.verify_payload(
+            payload.as_bytes(),
+            &certificate.signature,
+            &certificate.master_public_key,
+        ) {
+            return Json(ApiEnvelope::error(e));
+        }
+    }
+
+    let provider_config = match crate::routes::resolve_entity_provider_config(&state, &config) {
+        Ok(provider_config) => provider_config,
         Err(e) => return Json(ApiEnvelope::error(e)),
     };
 
@@ -364,19 +439,20 @@ mod tests {
     fn soul_documents_written_and_retempering_preserves_constitution() {
         let dir = std::env::temp_dir().join(format!("abigail_birth_{}", uuid::Uuid::new_v4()));
         let soul = soul_forge::quickstart_output();
-        write_soul_documents(&dir, "Testling", &soul).unwrap();
+        write_soul_documents(&dir, "Testling", &soul, Some("Help our family plan meals.")).unwrap();
 
         let soul_md = std::fs::read_to_string(dir.join("soul.md")).unwrap();
         assert!(soul_md.contains("## Forged Identity"));
         assert!(soul_md.contains("Testling"));
         assert!(soul_md.contains("The Balanced"));
+        assert!(soul_md.contains("Help our family plan meals."));
         assert!(dir.join("ethics.md").exists());
         assert!(dir.join("instincts.md").exists());
         assert!(dir.join("forge_soul.json").exists());
 
         // Mentor edits ethics.md; a re-run must not clobber it.
         std::fs::write(dir.join("ethics.md"), "mentor-edited ethics").unwrap();
-        write_soul_documents(&dir, "Testling", &soul).unwrap();
+        write_soul_documents(&dir, "Testling", &soul, None).unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.join("ethics.md")).unwrap(),
             "mentor-edited ethics"

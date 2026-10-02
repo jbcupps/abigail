@@ -126,7 +126,6 @@ impl Hive {
     /// 2. Entity-level vault scan (keys pasted in chat or Connectivity)
     /// 3. Trinity config (legacy/manual paths)
     /// 4. Environment variables (last resort)
-    /// 5. Auto-detect installed CLI tools on PATH
     pub fn determine_ego_provider(
         config: &AppConfig,
         vault: &SecretsVault,
@@ -343,35 +342,21 @@ impl Hive {
         None
     }
 
-    /// Detect CLI tools installed on PATH that can serve as Ego providers
-    /// via their own authentication (OAuth / `claude auth login`).
-    fn detect_cli_on_path() -> Option<ProviderSelection> {
-        let cli_binaries = [
-            ("claude-cli", "claude"),
-            ("gemini-cli", "gemini"),
-            ("codex-cli", "codex"),
-            ("grok-cli", "grok"),
-        ];
-        for (provider, binary) in &cli_binaries {
-            if is_binary_on_path(binary) {
-                tracing::info!(
-                    "Auto-detected {} on PATH — selecting {} provider (OAuth auth)",
-                    binary,
-                    provider
-                );
-                return Some(ProviderSelection {
-                    provider: provider.to_string(),
-                    auth: ProviderAuth::System,
-                });
-            }
-        }
-        None
-    }
-
     /// Resolve the full provider configuration from AppConfig + vaults.
     ///
     /// Acquires locks on `secrets` then `hive_secrets` (in documented order).
     pub fn resolve_config(&self, config: &AppConfig) -> Result<HiveConfig, String> {
+        // An explicit local choice must never silently select an installed CLI
+        // or a previously saved cloud key.
+        if config.active_provider_preference.as_deref() == Some("local") {
+            return Ok(HiveConfig {
+                local_llm_base_url: config.local_llm_base_url.clone(),
+                ego_provider: None,
+                ego_model: None,
+                routing_mode: config.routing_mode,
+                cli_permission_mode: config.cli_permission_mode,
+            });
+        }
         let ego_provider = {
             let vault = self.secrets.lock().map_err(|e| e.to_string())?;
             let selection = Self::determine_ego_provider(config, &vault);
@@ -392,8 +377,9 @@ impl Hive {
                     );
                     selection
                 } else {
-                    // Last resort: auto-detect CLI tools on PATH (OAuth auth)
-                    Self::detect_cli_on_path()
+                    // CLI login metadata can outlive an OAuth token. A CLI
+                    // must be explicitly selected and validated in Hive setup.
+                    None
                 }
             }
         };
@@ -579,24 +565,11 @@ mod tests {
         let hive = Hive::new(temp_vault(), temp_vault());
         let built = hive.build_providers_from_config(&config).await.unwrap();
 
-        // If a CLI tool (e.g. `claude`) is on PATH, auto-detection will
-        // select it as the Ego provider even with no stored keys.
-        // Otherwise Ego remains None.
-        if built.ego.is_some() {
-            assert!(
-                matches!(
-                    built.ego_kind,
-                    Some(ProviderKind::ClaudeCli)
-                        | Some(ProviderKind::GeminiCli)
-                        | Some(ProviderKind::CodexCli)
-                        | Some(ProviderKind::GrokCli)
-                ),
-                "auto-detected ego should be a CLI provider, got {:?}",
-                built.ego_kind
-            );
-        } else {
-            assert!(built.ego_kind.is_none());
-        }
+        assert!(
+            built.ego.is_none(),
+            "an installed CLI alone is not a configured model"
+        );
+        assert!(built.ego_kind.is_none());
         assert!(built.local_http.is_none());
     }
 
