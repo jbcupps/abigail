@@ -1,0 +1,21 @@
+# Prompt for the Codex desktop app
+
+Copy the following prompt into the desktop app working on `C:\Repo\Abigail`:
+
+```text
+Finish connecting my existing SSL.com code-signing certificate to Abigail's Windows release process and validate the resulting installer. Use your browser/computer tools to work on the SSL.com account site and the local Windows signing provider; carry the work through the first signed build.
+
+First read AGENTS.md, CLAUDE.md, docs/WINDOWS_SSL_COM_SIGNING.md, and the current git diff. Preserve concurrent/uncommitted work. Target implementation integration at beta. The prepared signing entry point is scripts/build-signed-installer.ps1; do not use the legacy build-release-windows.ps1, which builds the retired tauri-app.
+
+Inspect the current SSL.com account/order through the official site (start at https://www.ssl.com and use its account link). Reuse my existing certificate. Confirm it is Code Signing, issued, unexpired, has the intended publisher, and identify whether the private key is in eSigner or a hardware token. Record non-secret certificate metadata and remaining order/credential status. If login, MFA, PIN, or a hardware touch needs me, let me complete it directly in the provider UI. Never print, copy into chat, or commit passwords, OTP seeds, recovery codes, master keys, or private keys. Do not buy, revoke, or reissue a certificate without my specific approval.
+
+For eSigner, finish the existing certificate's enrollment/credential setup as applicable and configure SSL.com eSigner CKA in Production under the Windows account performing the build. Use the existing token/middleware if the key is hardware-backed instead. Do not use a sandbox certificate or the self-signed Abigail Dev Local certificate. Keep SSL.com's malware blocker enabled; inspect and resolve any reported blocker rather than bypassing it. Consult current official SSL.com instructions for the actual account state.
+
+Discover the real certificate thumbprint and set WINDOWS_CERTIFICATE_THUMBPRINT in the build session. Confirm Windows SDK SignTool and cargo tauri v2 are available; install missing build/provider tooling if needed. Use the intended beta version, run scripts/build-signed-installer.ps1 -Version <X.Y.Z> -DryRun, then run it without -DryRun. Complete provider authorization in the UI. Fix any actual integration/build failures and rerun the affected checks until all four application executables and NSIS/MSI installers pass scripts/verify_windows_signatures.ps1 with the expected publisher and trusted timestamps. Do not silently fall back to unsigned output.
+
+Install the resulting build in a suitable Windows test location and verify the actual installed Hive, Entity Runtime, both daemons, and uninstaller where present. Report the final installer paths, SHA-256 hashes, certificate subject/thumbprint/expiry, and signature evidence files. Test a normal browser download on clean Windows when available. Identify the exact warning if any remains: Unknown publisher, SmartScreen reputation, Smart App Control, or malware detection. Valid signing does not guarantee immediate SmartScreen reputation, so report these outcomes separately and do not disable Windows protections.
+
+Once the local signed build is proven, finish the recurring beta-release configuration using the exact repository variable/secret names in docs/WINDOWS_SSL_COM_SIGNING.md. Configure the signing provider for the actual trusted Windows runner account and unattended operation, and enable ABIGAIL_REQUIRE_WINDOWS_SIGNING last. Prepare the beta integration and release settings as a concrete reviewable result before any publication approval is needed. Keep the unsigned stabilization lane and updater settings unchanged. Do not publish a release or overwrite a published asset without my approval. If a signing runner or a clean Windows test machine is unavailable, complete everything else and identify that specific remaining dependency.
+
+Give me a concise completion report with what was verified, what is still pending, and the paths/links needed to review the signed result. Do not stop at giving me generic SSL.com instructions when you can perform the account and machine setup yourself.
+```

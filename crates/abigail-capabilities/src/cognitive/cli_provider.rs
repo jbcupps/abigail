@@ -2,13 +2,14 @@
 //!
 //! Spawns an external CLI tool (Claude Code, Gemini CLI, OpenAI Codex CLI, or xAI Grok CLI)
 //! as a subprocess and captures its stdout as the completion response. This lets users route
-//! Ego queries through any installed CLI tool using their existing API keys.
+//! Ego queries through supported installed tools using their existing sign-in.
 
 use crate::cognitive::provider::{CompletionRequest, CompletionResponse, LlmProvider};
 use crate::cognitive::validation::is_model_compatible_with_provider;
 use abigail_core::CliPermissionMode;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 use std::time::Duration;
@@ -36,9 +37,9 @@ pub enum CliVariant {
     ClaudeCode,
     /// `gemini "<prompt>"`  — env: GOOGLE_API_KEY
     GeminiCli,
-    /// `codex --quiet "<prompt>"`  — env: OPENAI_API_KEY
+    /// Codex app-server, using its own ChatGPT sign-in.
     OpenAiCodex,
-    /// `grok "<prompt>"`  — env: XAI_API_KEY
+    /// Grok Build ACP, using its own sign-in or XAI_API_KEY.
     XaiGrokCli,
 }
 
@@ -122,20 +123,20 @@ impl CliVariant {
         match self {
             Self::ClaudeCode => "claude",
             Self::GeminiCli => "gemini",
-            Self::OpenAiCodex => "codex",
+            Self::OpenAiCodex => "codex-cli",
             Self::XaiGrokCli => "grok",
         }
     }
 
-    /// Auth command and expected behaviour:
-    ///   - Claude / Gemini: `<binary> auth status` (exit 0 = OK, exit 1 = not authed)
-    ///   - Codex / Grok:    rely on env-var presence (no `auth status` subcommand)
+    /// Passive discovery never makes an inference request or starts a login.
     fn auth_strategy(self) -> CliAuthStrategy {
         match self {
             Self::ClaudeCode => CliAuthStrategy::SubCommand("auth", "status"),
             Self::GeminiCli => CliAuthStrategy::SubCommand("auth", "status"),
-            Self::OpenAiCodex => CliAuthStrategy::EnvVar("OPENAI_API_KEY"),
-            Self::XaiGrokCli => CliAuthStrategy::EnvVar("GROK_API_KEY"),
+            Self::OpenAiCodex => CliAuthStrategy::SubCommand("login", "status"),
+            // Grok does not expose a passive login-status command. Its existing
+            // account is checked through ACP when the user selects it in Hive.
+            Self::XaiGrokCli => CliAuthStrategy::Unknown,
         }
     }
 
@@ -143,15 +144,18 @@ impl CliVariant {
         match self {
             Self::ClaudeCode => "Run `claude auth login` to authenticate",
             Self::GeminiCli => "Run `gemini auth login` to authenticate",
-            Self::OpenAiCodex => "Set OPENAI_API_KEY or store a key in the vault",
-            Self::XaiGrokCli => "Set GROK_API_KEY or store a key in the vault",
+            Self::OpenAiCodex => "Sign in with `codex login`, then check the connection in Hive",
+            Self::XaiGrokCli => {
+                "Check your existing connection in Hive. If needed, sign in with `grok login`"
+            }
         }
     }
 
     /// Detect whether this CLI tool is present, official, and authenticated.
     pub fn detect(self) -> CliDetectionResult {
         let binary = self.binary_name();
-        let on_path = binary_on_path(binary);
+        let resolved = resolve_cli_binary(self);
+        let on_path = resolved.is_ok();
 
         if !on_path {
             return CliDetectionResult {
@@ -165,8 +169,20 @@ impl CliVariant {
             };
         }
 
-        let (is_official, version) = check_version_official(binary, self.official_version_marker());
-        let is_authenticated = check_auth(binary, self.auth_strategy());
+        let resolved = resolved.expect("resolved binary checked above");
+        let (mut is_official, version) =
+            check_version_official(&resolved, self.official_version_marker());
+        if self == Self::XaiGrokCli && is_official {
+            // Official Grok Build prints only `grok <version>` for --version.
+            // Its passive help header distinguishes it from unrelated Grok CLIs.
+            is_official = metadata_output(&resolved, &["--help"]).is_some_and(|output| {
+                output.status.success()
+                    && String::from_utf8_lossy(&output.stdout)
+                        .to_ascii_lowercase()
+                        .contains("grok build")
+            });
+        }
+        let is_authenticated = check_auth(&resolved, self.auth_strategy());
 
         CliDetectionResult {
             provider_name: self.to_string(),
@@ -186,41 +202,143 @@ impl CliVariant {
 
 enum CliAuthStrategy {
     SubCommand(&'static str, &'static str),
-    EnvVar(&'static str),
+    Unknown,
 }
 
-fn binary_on_path(name: &str) -> bool {
+/// Resolve a native executable, without executing npm's shell wrappers. Windows
+/// desktop launches may inherit an older PATH, so include known per-user installs.
+pub(crate) fn resolve_cli_binary(variant: CliVariant) -> anyhow::Result<PathBuf> {
+    let mut directories: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|path| {
+            std::env::split_paths(&path)
+                .filter(|entry| entry.is_absolute())
+                .collect()
+        })
+        .unwrap_or_default();
     #[cfg(windows)]
-    let check = {
-        let mut cmd = std::process::Command::new("where");
-        cmd.arg(name)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        hide_console_window(&mut cmd);
-        cmd.status()
-    };
-    #[cfg(not(windows))]
-    let check = std::process::Command::new("which")
-        .arg(name)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
-
-    check.map(|s| s.success()).unwrap_or(false)
+    {
+        if let Some(profile) = std::env::var_os("USERPROFILE") {
+            let profile = PathBuf::from(profile);
+            directories.extend([
+                profile.join(".local/bin"),
+                profile.join(".grok/bin"),
+                profile.join(".cargo/bin"),
+            ]);
+        }
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            directories.push(PathBuf::from(appdata).join("npm"));
+        }
+    }
+    resolve_from_directories(variant, &directories).ok_or_else(|| anyhow::anyhow!(
+        "{} is not installed in a supported location. Install its official CLI, then reopen Abigail.", variant
+    ))
 }
 
-/// Run `<binary> --version`, capture stdout, verify it contains the expected marker.
-fn check_version_official(binary: &str, marker: &str) -> (bool, Option<String>) {
+fn resolve_from_directories(variant: CliVariant, directories: &[PathBuf]) -> Option<PathBuf> {
+    for directory in directories {
+        let direct = directory.join(if cfg!(windows) {
+            format!("{}.exe", variant.binary_name())
+        } else {
+            variant.binary_name().to_string()
+        });
+        if direct.is_file() {
+            return Some(direct);
+        }
+        #[cfg(windows)]
+        if variant == CliVariant::OpenAiCodex {
+            let target = if cfg!(target_arch = "aarch64") {
+                "aarch64-pc-windows-msvc"
+            } else {
+                "x86_64-pc-windows-msvc"
+            };
+            let package = if cfg!(target_arch = "aarch64") {
+                "codex-win32-arm64"
+            } else {
+                "codex-win32-x64"
+            };
+            let base = directory.join("node_modules/@openai/codex");
+            for candidate in [
+                base.join(format!(
+                    "node_modules/@openai/{package}/vendor/{target}/bin/codex.exe"
+                )),
+                base.join(format!("vendor/{target}/codex/codex.exe")),
+                directory.join(format!(
+                    "node_modules/@openai/{package}/vendor/{target}/bin/codex.exe"
+                )),
+            ] {
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Collect small metadata commands with a deadline; a hung installed tool must
+/// not block Hive's first-run screen. stdout/stderr drain on a worker thread.
+fn metadata_output(binary: &Path, args: &[&str]) -> Option<std::process::Output> {
     let mut cmd = std::process::Command::new(binary);
-    cmd.arg("--version")
+    cmd.args(args)
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     #[cfg(windows)]
     hide_console_window(&mut cmd);
-    let output = cmd.output();
+    let mut child = cmd.spawn().ok()?;
+    let stdout = child.stdout.take()?;
+    let stderr = child.stderr.take()?;
+    let collect = |mut input: Box<dyn std::io::Read + Send>| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            // Read past the retained cap so a verbose child cannot fill its pipe.
+            let mut buffer = [0u8; 4096];
+            while let Ok(count) = input.read(&mut buffer) {
+                if count == 0 {
+                    break;
+                }
+                if bytes.len() < 65536 {
+                    bytes.extend_from_slice(&buffer[..count.min(65536 - bytes.len())]);
+                }
+            }
+            let _ = tx.send(bytes);
+        });
+        rx
+    };
+    let stdout = collect(Box::new(stdout));
+    let stderr = collect(Box::new(stderr));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(25))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+        }
+    }?;
+    let stdout = stdout
+        .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+        .ok()?;
+    let stderr = stderr
+        .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+        .ok()?;
+    Some(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
 
-    match output {
-        Ok(o) if o.status.success() => {
+/// Run `<binary> --version`, capture stdout, verify it contains the expected marker.
+fn check_version_official(binary: &Path, marker: &str) -> (bool, Option<String>) {
+    match metadata_output(binary, &["--version"]) {
+        Some(o) if o.status.success() => {
             let ver_str = String::from_utf8_lossy(&o.stdout).trim().to_string();
             let stderr_str = String::from_utf8_lossy(&o.stderr).trim().to_string();
             let combined = format!("{} {}", ver_str, stderr_str).to_lowercase();
@@ -237,27 +355,27 @@ fn check_version_official(binary: &str, marker: &str) -> (bool, Option<String>) 
 }
 
 /// Check whether the CLI is authenticated using the variant's strategy.
-fn check_auth(binary: &str, strategy: CliAuthStrategy) -> bool {
+fn check_auth(binary: &Path, strategy: CliAuthStrategy) -> bool {
     match strategy {
         CliAuthStrategy::SubCommand(arg1, arg2) => {
-            let mut cmd = std::process::Command::new(binary);
-            cmd.args([arg1, arg2])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null());
-            #[cfg(windows)]
-            hide_console_window(&mut cmd);
-            cmd.status().map(|s| s.success()).unwrap_or(false)
+            metadata_output(binary, &[arg1, arg2]).is_some_and(|output| output.status.success())
         }
-        CliAuthStrategy::EnvVar(var) => std::env::var(var)
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .is_some(),
+        CliAuthStrategy::Unknown => false,
     }
 }
 
 /// Detect all CLI tools in a single pass.
 pub fn detect_all_cli_providers() -> Vec<CliDetectionResult> {
-    ALL_CLI_VARIANTS.iter().map(|v| v.detect()).collect()
+    std::thread::scope(|scope| {
+        let tasks: Vec<_> = ALL_CLI_VARIANTS
+            .iter()
+            .map(|variant| scope.spawn(move || variant.detect()))
+            .collect();
+        tasks
+            .into_iter()
+            .filter_map(|task| task.join().ok())
+            .collect()
+    })
 }
 
 /// An LLM provider that delegates to an external CLI tool.
@@ -269,9 +387,7 @@ pub fn detect_all_cli_providers() -> Vec<CliDetectionResult> {
 pub struct CliLlmProvider {
     variant: CliVariant,
     api_key: String,
-    /// Retained for API compatibility — permission flags are no longer applied
-    /// per-mode; the CLI subprocess always runs with `--dangerously-skip-permissions`.
-    #[allow(dead_code)]
+    /// Native CLI authority is disabled for the family's default chat mode.
     permission_mode: CliPermissionMode,
     /// Claude Code session ID for multi-turn continuity.
     active_session_id: RwLock<Option<String>>,
@@ -335,15 +451,23 @@ impl CliLlmProvider {
 
     fn runtime_permission_posture(&self) -> &'static str {
         match self.variant {
-            CliVariant::ClaudeCode => "claude:--dangerously-skip-permissions",
-            CliVariant::OpenAiCodex => "codex:--full-auto",
+            CliVariant::ClaudeCode if self.permission_mode == CliPermissionMode::AllowListOnly => {
+                "claude:chat-only-no-native-tools"
+            }
+            CliVariant::ClaudeCode if self.permission_mode == CliPermissionMode::Interactive => {
+                "claude:default-permissions"
+            }
+            CliVariant::ClaudeCode => "claude:explicit-permission-bypass",
+            CliVariant::OpenAiCodex => "codex:chat-only-isolated-app-server",
             CliVariant::GeminiCli => "gemini:no-runtime-permission-flag",
-            CliVariant::XaiGrokCli => "grok:no-runtime-permission-flag",
+            CliVariant::XaiGrokCli => "grok:chat-only-isolated-acp",
         }
     }
 
     fn warn_if_permission_mode_not_effective(&self) {
-        if self.permission_mode == CliPermissionMode::DangerousSkipAll {
+        if self.variant != CliVariant::GeminiCli
+            || self.permission_mode == CliPermissionMode::DangerousSkipAll
+        {
             return;
         }
         if !CLI_PERMISSION_MODE_WARNED.swap(true, Ordering::Relaxed) {
@@ -351,20 +475,17 @@ impl CliLlmProvider {
                 configured_mode = ?self.permission_mode,
                 variant = %self.variant,
                 runtime_posture = %self.runtime_permission_posture(),
-                "cli_permission_mode is config-only in this build; runtime uses fixed variant-specific posture"
+                "This CLI variant cannot enforce the family's chat-only permission mode"
             );
         }
     }
 
     /// Check whether the CLI binary is available on PATH (synchronous).
     pub fn is_available(&self) -> bool {
-        let mut cmd = std::process::Command::new(self.variant.binary_name());
-        cmd.arg("--version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        #[cfg(windows)]
-        hide_console_window(&mut cmd);
-        cmd.status().map(|s| s.success()).unwrap_or(false)
+        resolve_cli_binary(self.variant)
+            .ok()
+            .and_then(|binary| metadata_output(&binary, &["--version"]))
+            .is_some_and(|output| output.status.success())
     }
 
     /// Build a single prompt string from the non-system messages.
@@ -394,20 +515,39 @@ impl CliLlmProvider {
         }
     }
 
-    /// Add permission flags for the Claude CLI subprocess.
-    ///
-    /// Entity-level tool permissions are enforced by `SkillSandbox` /
-    /// `SkillExecutor`, not by the CLI tool's permission system.  The CLI
-    /// tool's `--allowedTools` flag expects the CLI's *own* tool names
-    /// (e.g. "Bash", "Read", "Write"), not the entity's qualified skill
-    /// tool names, so passing entity tool names has no effect — and on
-    /// Windows the resulting command-line length overflows the `cmd.exe`
-    /// 8 191-char limit (OS error 206).
-    ///
-    /// For Claude CLI we pass `--dangerously-skip-permissions` and rely on
-    /// the entity's own layered security model.
+    /// Claude's native tools are outside SkillExecutor's approval boundary.
+    /// Disable them and discovered MCP servers for ordinary family chat.
     fn apply_permission_flags(&self, cmd: &mut Command) {
-        cmd.arg("--dangerously-skip-permissions");
+        match self.permission_mode {
+            CliPermissionMode::AllowListOnly => {
+                cmd.args([
+                    "--tools",
+                    "",
+                    "--permission-mode",
+                    "dontAsk",
+                    "--no-session-persistence",
+                    "--setting-sources",
+                    "",
+                    "--strict-mcp-config",
+                    "--mcp-config",
+                    "{\"mcpServers\":{}}",
+                ]);
+                let directory = std::env::temp_dir().join("abigail-cli-chat");
+                if std::fs::create_dir_all(&directory).is_ok() {
+                    cmd.current_dir(directory);
+                }
+            }
+            CliPermissionMode::Interactive => {
+                cmd.args(["--permission-mode", "default"]);
+            }
+            CliPermissionMode::DangerousSkipAll => {
+                cmd.arg("--dangerously-skip-permissions");
+            }
+        }
+        cmd.env_remove("CLAUDECODE")
+            .env_remove("CLAUDE_CODE_ENTRYPOINT")
+            .env_remove("CLAUDE_CODE_SESSION_ID");
+        cmd.kill_on_drop(true);
     }
 
     fn apply_model_override(&self, cmd: &mut Command, model_override: Option<&str>) {
@@ -442,7 +582,9 @@ impl CliLlmProvider {
         system_prompt: Option<&str>,
         model_override: Option<&str>,
     ) -> (Command, Option<String>) {
-        let mut cmd = Command::new(self.variant.binary_name());
+        let binary = resolve_cli_binary(self.variant)
+            .unwrap_or_else(|_| PathBuf::from(self.variant.binary_name()));
+        let mut cmd = Command::new(binary);
 
         self.warn_if_permission_mode_not_effective();
 
@@ -455,14 +597,18 @@ impl CliLlmProvider {
         match self.variant {
             CliVariant::ClaudeCode => {
                 self.apply_model_override(&mut cmd, model_override);
-                let has_session = self.active_session_id.read().ok().and_then(|g| g.clone());
+                let has_session = if self.permission_mode == CliPermissionMode::AllowListOnly {
+                    None
+                } else {
+                    self.active_session_id.read().ok().and_then(|g| g.clone())
+                };
 
                 if let Some(ref sid) = has_session {
                     // Resume existing session — Claude keeps the system
                     // prompt and conversation state. Only send new input.
                     cmd.arg("--resume").arg(sid);
                     cmd.arg("--print");
-                    cmd.arg("--output-format").arg("text");
+                    cmd.arg("--output-format").arg("json");
                     cmd.arg("--max-turns").arg("5");
                     self.apply_permission_flags(&mut cmd);
                     cmd.stdin(std::process::Stdio::piped());
@@ -470,7 +616,7 @@ impl CliLlmProvider {
                 } else {
                     // First message — send system prompt + user prompt.
                     cmd.arg("--print");
-                    cmd.arg("--output-format").arg("text");
+                    cmd.arg("--output-format").arg("json");
                     cmd.arg("--max-turns").arg("5");
                     self.apply_permission_flags(&mut cmd);
 
@@ -496,27 +642,8 @@ impl CliLlmProvider {
                 cmd.arg(prompt);
                 stdin_content = None;
             }
-            CliVariant::OpenAiCodex => {
-                cmd.arg("exec");
-                self.apply_model_override(&mut cmd, model_override);
-                cmd.arg("--full-auto");
-                let full_prompt = if let Some(sp) = system_prompt {
-                    format!("[System Instructions]\n{}\n\n{}", sp, prompt)
-                } else {
-                    prompt.to_string()
-                };
-                cmd.stdin(std::process::Stdio::piped());
-                stdin_content = Some(full_prompt);
-            }
-            CliVariant::XaiGrokCli => {
-                self.apply_model_override(&mut cmd, model_override);
-                let full_prompt = if let Some(sp) = system_prompt {
-                    format!("[System Instructions]\n{}\n\n{}", sp, prompt)
-                } else {
-                    prompt.to_string()
-                };
-                cmd.stdin(std::process::Stdio::piped());
-                stdin_content = Some(full_prompt);
+            CliVariant::OpenAiCodex | CliVariant::XaiGrokCli => {
+                unreachable!("Native account providers use their isolated protocol adapters")
             }
         }
 
@@ -611,21 +738,107 @@ impl CliLlmProvider {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow::anyhow!(
-                "{} CLI exited with {}: {}",
-                self.variant,
-                output.status,
-                stderr.trim()
-            ));
+            return Err(sanitized_cli_failure(self.variant, &stderr));
         }
 
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if self.variant == CliVariant::ClaudeCode {
+            let result: serde_json::Value = serde_json::from_str(stdout.trim())
+                .map_err(|_| anyhow::anyhow!("Claude CLI did not return a valid completion; check its connection and authentication"))?;
+            decode_claude_result(&result)
+        } else if stdout.trim().is_empty() {
+            Err(anyhow::anyhow!(
+                "{} CLI returned an empty reply",
+                self.variant
+            ))
+        } else {
+            Ok(stdout.trim().to_string())
+        }
     }
+}
+
+// Claude can exit successfully even when authentication or inference failed.
+// Only an explicit successful result is a completion that may enter memory.
+fn sanitized_cli_failure(variant: CliVariant, diagnostic: &str) -> anyhow::Error {
+    let text = diagnostic.to_ascii_lowercase();
+    let guidance = if [
+        "authentication required",
+        "failed to authenticate",
+        "unauthorized",
+        "invalid token",
+        "token invalid",
+        "expired token",
+        "token expired",
+        "please log in",
+        "please sign in",
+        "401",
+    ]
+    .iter()
+    .any(|phrase| text.contains(phrase))
+    {
+        "authentication required or expired. Sign in again with the official CLI, then retry."
+    } else if [
+        "rate limit",
+        "rate_limit",
+        "usage limit",
+        "quota",
+        "insufficient credits",
+        "credits exhausted",
+        "429",
+    ]
+    .iter()
+    .any(|phrase| text.contains(phrase))
+    {
+        "account usage limit reached. Wait for the limit to reset or choose another connection in Hive."
+    } else if text.contains("model")
+        && [
+            "unavailable",
+            "not available",
+            "not found",
+            "unsupported model",
+            "unknown model",
+        ]
+        .iter()
+        .any(|phrase| text.contains(phrase))
+    {
+        "selected model is unavailable. Choose another model or connection in Hive."
+    } else {
+        "connection failed. Check its account connection and selected model, then retry."
+    };
+    anyhow::anyhow!("{} CLI {}", variant, guidance)
+}
+
+fn decode_claude_result(result: &serde_json::Value) -> anyhow::Result<String> {
+    if result.get("is_error").and_then(|value| value.as_bool()) == Some(true)
+        || result.get("subtype").and_then(|value| value.as_str()) != Some("success")
+    {
+        let message = result
+            .get("result")
+            .and_then(|value| value.as_str())
+            .filter(|message| !message.trim().is_empty())
+            .unwrap_or("connection or inference failed; check Claude authentication");
+        return Err(sanitized_cli_failure(CliVariant::ClaudeCode, message));
+    }
+    let content = result
+        .get("result")
+        .and_then(|value| value.as_str())
+        .filter(|content| !content.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Claude CLI returned an empty reply"))?;
+    Ok(content.to_string())
 }
 
 #[async_trait]
 impl LlmProvider for CliLlmProvider {
     async fn complete(&self, request: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
+        match self.variant {
+            CliVariant::OpenAiCodex => {
+                return super::codex_cli::complete(&self.api_key, request).await
+            }
+            CliVariant::XaiGrokCli => {
+                return super::grok_cli::complete(&self.api_key, request).await
+            }
+            _ => {}
+        }
         if request.model_override.is_some() {
             return self.complete_via_cli(request).await;
         }
@@ -686,6 +899,15 @@ impl LlmProvider for CliLlmProvider {
         use crate::cognitive::provider::StreamEvent;
         use tokio::io::AsyncBufReadExt;
 
+        match self.variant {
+            CliVariant::OpenAiCodex => {
+                return super::codex_cli::stream(&self.api_key, request, tx).await
+            }
+            CliVariant::XaiGrokCli => {
+                return super::grok_cli::stream(&self.api_key, request, tx).await
+            }
+            _ => {}
+        }
         if self.variant != CliVariant::ClaudeCode {
             return self.complete(request).await.inspect(|resp| {
                 let _ = tx.try_send(StreamEvent::Token(resp.content.clone()));
@@ -696,14 +918,19 @@ impl LlmProvider for CliLlmProvider {
         let system_prompt = Self::extract_system_prompt(&request.messages);
         let prompt = Self::build_prompt(&request.messages);
 
-        let has_session = self.active_session_id.read().ok().and_then(|g| g.clone());
+        let has_session = if self.permission_mode == CliPermissionMode::AllowListOnly {
+            None
+        } else {
+            self.active_session_id.read().ok().and_then(|g| g.clone())
+        };
 
-        let mut cmd = Command::new(self.variant.binary_name());
+        let mut cmd = Command::new(resolve_cli_binary(self.variant)?);
         self.warn_if_permission_mode_not_effective();
         if self.api_key != "system" {
             cmd.env(self.variant.api_key_env_var(), &self.api_key);
         }
         self.apply_model_override(&mut cmd, request.model_override.as_deref());
+        cmd.arg("--verbose").arg("--include-partial-messages");
 
         let piped: String;
         if let Some(ref sid) = has_session {
@@ -749,16 +976,30 @@ impl LlmProvider for CliLlmProvider {
             .stdout
             .take()
             .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout from claude CLI"))?;
+        let stderr = child.stderr.take();
+        let stderr_task = tokio::spawn(async move {
+            use tokio::io::AsyncReadExt;
+            let mut message = String::new();
+            if let Some(mut stderr) = stderr {
+                let _ = stderr.read_to_string(&mut message).await;
+            }
+            message
+        });
 
         let mut reader = tokio::io::BufReader::new(stdout).lines();
         let mut full_content = String::new();
         let mut captured_session_id: Option<String> = None;
+        let mut final_result = None;
 
         while let Ok(Some(line)) = reader.next_line().await {
             if line.trim().is_empty() {
                 continue;
             }
             if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
+                if event.get("type").and_then(|value| value.as_str()) == Some("result") {
+                    final_result = Some(decode_claude_result(&event));
+                    continue;
+                }
                 // Capture session ID from Claude's stream output for reuse.
                 if captured_session_id.is_none() {
                     if let Some(sid) = event
@@ -771,10 +1012,17 @@ impl LlmProvider for CliLlmProvider {
                 }
 
                 if let Some(delta) = event
-                    .get("content_block_delta")
-                    .or_else(|| event.get("delta"))
-                    .and_then(|d| d.get("text"))
-                    .and_then(|t| t.as_str())
+                    .get("event")
+                    .and_then(|event| event.get("delta"))
+                    .and_then(|delta| delta.get("text"))
+                    .and_then(|text| text.as_str())
+                    .or_else(|| {
+                        event
+                            .get("content_block_delta")
+                            .or_else(|| event.get("delta"))
+                            .and_then(|d| d.get("text"))
+                            .and_then(|t| t.as_str())
+                    })
                 {
                     full_content.push_str(delta);
                     let _ = tx.send(StreamEvent::Token(delta.to_string())).await;
@@ -786,10 +1034,18 @@ impl LlmProvider for CliLlmProvider {
             }
         }
 
-        let _ = child.wait().await;
+        let status = child.wait().await?;
+        let stderr = stderr_task.await.unwrap_or_default();
+        if !status.success() {
+            return Err(sanitized_cli_failure(CliVariant::ClaudeCode, &stderr));
+        }
+        full_content = final_result
+            .ok_or_else(|| anyhow::anyhow!("Claude CLI stream ended without a completion"))??;
 
         // Store session ID for subsequent --resume calls.
-        if let Some(sid) = captured_session_id {
+        if let Some(sid) =
+            captured_session_id.filter(|_| self.permission_mode != CliPermissionMode::AllowListOnly)
+        {
             if let Ok(mut guard) = self.active_session_id.write() {
                 *guard = Some(sid);
             }
@@ -877,6 +1133,70 @@ mod tests {
     }
 
     #[test]
+    fn native_resolver_does_not_launch_shell_wrappers() {
+        let directory = std::env::temp_dir().join(format!(
+            "abigail-cli-resolver-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let wrapper = directory.join("codex.cmd");
+        std::fs::write(&wrapper, "do not execute").unwrap();
+        assert!(resolve_from_directories(CliVariant::OpenAiCodex, &[directory.clone()]).is_none());
+        let native = directory.join(if cfg!(windows) { "codex.exe" } else { "codex" });
+        std::fs::write(&native, "native fixture").unwrap();
+        assert_eq!(
+            resolve_from_directories(CliVariant::OpenAiCodex, &[directory.clone()]),
+            Some(native.clone())
+        );
+        std::fs::remove_file(native).unwrap();
+        std::fs::remove_file(wrapper).unwrap();
+        std::fs::remove_dir(directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_resolver_finds_codex_optional_npm_package() {
+        let directory = std::env::temp_dir().join(format!(
+            "abigail-codex-npm-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let target = if cfg!(target_arch = "aarch64") {
+            "aarch64-pc-windows-msvc"
+        } else {
+            "x86_64-pc-windows-msvc"
+        };
+        let package = if cfg!(target_arch = "aarch64") {
+            "codex-win32-arm64"
+        } else {
+            "codex-win32-x64"
+        };
+        let native = directory.join(format!("node_modules/@openai/codex/node_modules/@openai/{package}/vendor/{target}/bin/codex.exe"));
+        std::fs::create_dir_all(native.parent().unwrap()).unwrap();
+        std::fs::write(&native, "native fixture").unwrap();
+        assert_eq!(
+            resolve_from_directories(CliVariant::OpenAiCodex, &[directory.clone()]),
+            Some(native.clone())
+        );
+        std::fs::remove_file(&native).unwrap();
+        let mut empty = native.parent().unwrap().to_path_buf();
+        loop {
+            std::fs::remove_dir(&empty).unwrap();
+            if empty == directory {
+                break;
+            }
+            empty = empty.parent().unwrap().to_path_buf();
+        }
+    }
+
+    #[test]
     fn test_rejects_empty_api_key() {
         assert!(CliLlmProvider::new(CliVariant::ClaudeCode, String::new()).is_err());
         assert!(CliLlmProvider::new(CliVariant::GeminiCli, "   ".to_string()).is_err());
@@ -942,5 +1262,71 @@ mod tests {
         let args = command_args(&cmd);
 
         assert!(!args.iter().any(|arg| arg == "--model"));
+    }
+
+    #[test]
+    fn default_claude_chat_disables_native_tools_and_mcp_without_bypassing_permissions() {
+        let provider = CliLlmProvider::new(CliVariant::ClaudeCode, "system".to_string()).unwrap();
+        let (cmd, _) = provider.build_command("Hello", None, None);
+        let args = command_args(&cmd);
+        assert!(args.windows(2).any(|pair| pair == ["--tools", ""]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--permission-mode", "dontAsk"]));
+        assert!(args.iter().any(|arg| arg == "--strict-mcp-config"));
+        assert!(args.iter().any(|arg| arg == "--no-session-persistence"));
+        assert!(!args
+            .iter()
+            .any(|arg| arg == "--dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn claude_result_rejects_auth_errors_even_with_successful_process_exit() {
+        let error = serde_json::json!({
+            "type": "result", "subtype": "success", "is_error": true,
+            "result": "Failed to authenticate. OAuth access token invalid"
+        });
+        assert!(decode_claude_result(&error).is_err());
+        assert!(decode_claude_result(&serde_json::json!({
+            "type": "result", "subtype": "error_max_turns", "result": "partial"
+        }))
+        .is_err());
+        assert!(decode_claude_result(&serde_json::json!({
+            "type": "result", "subtype": "success", "result": ""
+        }))
+        .is_err());
+        assert_eq!(
+            decode_claude_result(&serde_json::json!({
+                "type": "result", "subtype": "success", "is_error": false,
+                "result": "Hello from Abigail"
+            }))
+            .unwrap(),
+            "Hello from Abigail"
+        );
+    }
+
+    #[test]
+    fn cli_failures_keep_recovery_categories_without_vendor_diagnostics() {
+        for (message, category) in [
+            (
+                "Failed to authenticate: secret-account-path token invalid",
+                "authentication",
+            ),
+            ("Rate limit reached: secret-account-path", "usage limit"),
+            (
+                "Model not found: secret-account-path",
+                "model is unavailable",
+            ),
+            ("Internal error secret-account-path", "connection failed"),
+        ] {
+            let error = sanitized_cli_failure(CliVariant::ClaudeCode, message).to_string();
+            assert!(error.contains(category));
+            assert!(!error.contains("secret-account-path"));
+            let result = serde_json::json!({"is_error":true,"result":message});
+            assert_eq!(
+                decode_claude_result(&result).unwrap_err().to_string(),
+                error
+            );
+        }
     }
 }

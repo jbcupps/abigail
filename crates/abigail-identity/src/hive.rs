@@ -79,13 +79,13 @@ impl HiveEntity {
             known_recipients_by_identity: std::collections::HashMap::new(),
             skill_recovery_budget: 3,
             last_provider_change_at: None,
-            cli_permission_mode: CliPermissionMode::DangerousSkipAll,
+            cli_permission_mode: CliPermissionMode::AllowListOnly,
             runtime_mode: Default::default(),
             hive_daemon_url: "http://127.0.0.1:43141".to_string(),
             entity_daemon_url: "http://127.0.0.1:43142".to_string(),
             iggy_connection: None,
             theme_id: Some(default_theme.to_string()),
-            autonomy_profile: AutonomyProfile::DesktopOperator,
+            autonomy_profile: AutonomyProfile::Strict,
         }
     }
 }

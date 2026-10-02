@@ -617,7 +617,14 @@ impl IdEgoRouter {
         };
 
         let result = self
-            .execute_with_fallback(&request, target, &model_override, req.stream_tx, &mut trace)
+            .execute_with_fallback(
+                &request,
+                target,
+                &model_override,
+                req.stream_tx,
+                &mut trace,
+                !req.force_id_only,
+            )
             .await;
 
         self.record_health_from_trace(&trace);
@@ -637,6 +644,7 @@ impl IdEgoRouter {
         model_override: &Option<String>,
         stream_tx: Option<tokio::sync::mpsc::Sender<StreamEvent>>,
         trace: &mut ExecutionTrace,
+        allow_ego_fallback: bool,
     ) -> anyhow::Result<CompletionResponse> {
         let is_stream = stream_tx.is_some();
 
@@ -692,7 +700,7 @@ impl IdEgoRouter {
             }
             Err(e) => {
                 trace.record_error(self.id_label(), None, &e.to_string(), t0);
-                if let Some(ref ego) = self.ego {
+                if let Some(ref ego) = self.ego.as_ref().filter(|_| allow_ego_fallback) {
                     tracing::warn!(
                         "Id provider failed{}, falling back to Ego: {}",
                         if is_stream { " (stream)" } else { "" },
@@ -1336,6 +1344,53 @@ mod tests {
     use abigail_capabilities::cognitive::Message;
     use abigail_core::RoutingMode;
 
+    struct TestProvider {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl TestProvider {
+        fn new() -> Self {
+            Self {
+                calls: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for TestProvider {
+        async fn complete(
+            &self,
+            _request: &CompletionRequest,
+        ) -> anyhow::Result<CompletionResponse> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(CompletionResponse {
+                content: "A real provider response".to_string(),
+                tool_calls: None,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn forced_local_failure_never_discloses_to_ego() {
+        let mut router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
+        let ego = Arc::new(TestProvider::new());
+        router.ego = Some(ego.clone());
+        let result = router
+            .route_unified(RoutingRequest {
+                messages: vec![Message::new("user", "Private local-only text")],
+                tools: None,
+                model_override: None,
+                stream_tx: None,
+                force_id_only: true,
+            })
+            .await;
+        assert!(
+            result.is_err(),
+            "No connected local model must be an error, not a fabricated response"
+        );
+        assert_eq!(ego.calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
     #[tokio::test]
     async fn test_heartbeat_stub() {
         let router = IdEgoRouter::new(None, None, None, None, RoutingMode::default());
@@ -1392,7 +1447,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_route_with_tools_uses_failsafe() {
-        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
+        let mut router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
+        router.id = Arc::new(TestProvider::new());
         #[allow(deprecated)]
         let response = router
             .route_with_tools(
@@ -1458,7 +1514,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_route_traced_id_only_success() {
-        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
+        let mut router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
+        router.id = Arc::new(TestProvider::new());
         let messages = vec![Message {
             role: "user".to_string(),
             content: "hello".to_string(),
@@ -1476,7 +1533,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_id_only_traced_success() {
-        let router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
+        let mut router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
+        router.id = Arc::new(TestProvider::new());
         let messages = vec![Message {
             role: "user".to_string(),
             content: "hello".to_string(),

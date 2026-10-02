@@ -28,23 +28,18 @@ pub enum RoutingMode {
 
 /// Controls how CLI tools handle permission requests for sensitive actions.
 ///
-/// **Note:** This enum is retained for config serialization compatibility, but
-/// the runtime always passes `--dangerously-skip-permissions` to CLI subprocesses
-/// regardless of the configured mode.  Entity-level tool permissions are enforced
-/// by `SkillSandbox` / `SkillExecutor`, not by the CLI tool's permission system.
-/// The `--allowedTools` flag was removed because it expects the CLI's *own* tool
-/// names (e.g. "Bash", "Read"), not entity skill names, and the resulting
-/// command-line length overflowed the Windows `cmd.exe` 8 191-char limit (OS error 206).
+/// Claude's default mode disables native tools and MCP so they cannot bypass
+/// Entity skill approvals. Other CLI variants require separate enforcement and
+/// are not enabled by the split-family MVP.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum CliPermissionMode {
-    /// Default variant. Previously passed `--allowedTools`; now a no-op at runtime.
+    /// Chat-only Claude inference, with native tools and discovered MCP disabled.
     #[default]
     AllowListOnly,
     /// Reserved for future GUI-relayed permission prompts.
     Interactive,
-    /// Previously the only mode that passed `--dangerously-skip-permissions`;
-    /// now all modes behave identically (always skip).
+    /// Explicit legacy bypass; never selected by the split-family MVP.
     DangerousSkipAll,
 }
 

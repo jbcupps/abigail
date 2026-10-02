@@ -36,16 +36,18 @@ impl HiveDaemonHandle {
                 )
             })?;
 
-        let url = parse_listen_url(child.stdout.take().unwrap(), timeout).await?;
-
-        wait_for_health(&url, timeout).await?;
-        tracing::info!("Hive daemon ready at {}", url);
-
-        Ok(Self {
+        let stdout = child.stdout.take().unwrap();
+        // Own the process before either readiness wait so errors and cancelled
+        // startup futures also clean up their supervisor and managed children.
+        let mut handle = Self {
             child: Some(child),
-            url,
+            url: String::new(),
             _tmp: tmp,
-        })
+        };
+        handle.url = parse_listen_url(stdout, timeout).await?;
+        wait_for_health(&handle.url, timeout).await?;
+        tracing::info!("Hive daemon ready at {}", handle.url);
+        Ok(handle)
     }
 
     pub fn url(&self) -> &str {
@@ -63,67 +65,87 @@ impl Drop for HiveDaemonHandle {
             let _ = child.kill();
             let _ = child.wait();
         }
+        #[cfg(windows)]
+        stop_owned_entity_children(self._tmp.path());
+    }
+}
+
+/// A force-killed Hive cannot reap its helper. Find only children using this
+/// harness's executable and unique temporary data directory, including orphans.
+#[cfg(windows)]
+fn stop_owned_entity_children(data_dir: &std::path::Path) {
+    const CLEANUP: &str = r#"
+$ErrorActionPreference = 'Stop'
+$expected = [IO.Path]::GetFullPath($env:ABIGAIL_HARNESS_ENTITY_EXE)
+$data = [IO.Path]::GetFullPath($env:ABIGAIL_HARNESS_DATA_DIR)
+$pattern = '(?:^|\s)--data-dir(?:\s+|=)(?:"([^"]*)"|(\S+))(?=\s|$)'
+foreach ($snapshot in @(Get-CimInstance Win32_Process -Filter "Name = 'entity-daemon.exe'")) {
+    if (-not $snapshot.ExecutablePath -or -not $expected.Equals([IO.Path]::GetFullPath($snapshot.ExecutablePath), [StringComparison]::OrdinalIgnoreCase)) { continue }
+    if (-not $snapshot.CommandLine -or $snapshot.CommandLine -notmatch $pattern) { continue }
+    $argument = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
+    if (-not $data.Equals([IO.Path]::GetFullPath($argument), [StringComparison]::OrdinalIgnoreCase)) { continue }
+    $process = $null
+    try {
+        $process = [Diagnostics.Process]::GetProcessById($snapshot.ProcessId)
+        [void]$process.Handle
+        $current = Get-CimInstance Win32_Process -Filter "ProcessId = $($snapshot.ProcessId)"
+        if (-not $current -or $current.CreationDate -ne $snapshot.CreationDate -or $current.ExecutablePath -ne $snapshot.ExecutablePath -or $current.CommandLine -ne $snapshot.CommandLine) { continue }
+        $process.Kill()
+        if (-not $process.WaitForExit(5000)) { throw 'Owned Entity daemon failed to stop' }
+    } catch [ArgumentException] {
+    } finally {
+        if ($process) { $process.Dispose() }
+    }
+}
+"#;
+    let result = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", CLEANUP])
+        .env("ABIGAIL_HARNESS_ENTITY_EXE", cargo_bin("entity-daemon"))
+        .env("ABIGAIL_HARNESS_DATA_DIR", data_dir)
+        .output();
+    match result {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => eprintln!(
+            "Harness child cleanup failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ),
+        Err(error) => eprintln!("Harness child cleanup failed: {}", error),
     }
 }
 
 /// Handle for a running entity-daemon process.
 pub struct EntityDaemonHandle {
-    child: Option<Child>,
     url: String,
-    _tmp: Option<tempfile::TempDir>,
+    close_url: String,
 }
 
 impl EntityDaemonHandle {
-    /// Start `entity-daemon` connected to a running hive.
-    ///
-    /// If `data_dir` is None, creates a temp dir. If Some, uses the provided
-    /// path (e.g. the same temp dir the Hive uses for shared identity data).
+    /// Open an Entity through its Hive supervisor, using the same private
+    /// runtime bootstrap authorization as an installed Abigail app.
     pub async fn start(
         entity_id: &str,
         hive_url: &str,
-        data_dir: Option<&std::path::Path>,
+        _data_dir: Option<&std::path::Path>,
         timeout: Duration,
     ) -> anyhow::Result<Self> {
-        let (dir_path, tmp) = match data_dir {
-            Some(p) => (p.to_path_buf(), None),
-            None => {
-                let t = tempfile::tempdir()?;
-                let p = t.path().to_path_buf();
-                (p, Some(t))
-            }
-        };
-
-        let binary = cargo_bin("entity-daemon");
-        let mut child = Command::new(&binary)
-            .args([
-                "--entity-id",
-                entity_id,
-                "--hive-url",
-                hive_url,
-                "--port",
-                "0",
-                "--data-dir",
-                dir_path.to_str().unwrap(),
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to start entity-daemon at {:?}: {}. Run `cargo build -p entity-daemon` first.",
-                    binary, e
-                )
-            })?;
-
-        let url = parse_listen_url(child.stdout.take().unwrap(), timeout).await?;
+        let response: serde_json::Value = reqwest::Client::new()
+            .post(format!("{}/v1/entities/{}/open", hive_url, entity_id))
+            .timeout(timeout)
+            .send()
+            .await?
+            .json()
+            .await?;
+        let url = response["data"]["local_url"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Hive could not open Entity: {}", response))?
+            .to_string();
 
         wait_for_health(&url, timeout).await?;
         tracing::info!("Entity daemon ready at {}", url);
 
         Ok(Self {
-            child: Some(child),
             url,
-            _tmp: tmp,
+            close_url: format!("{}/v1/entities/{}/close", hive_url, entity_id),
         })
     }
 
@@ -134,17 +156,29 @@ impl EntityDaemonHandle {
 
 impl Drop for EntityDaemonHandle {
     fn drop(&mut self) {
-        if let Some(ref mut child) = self.child {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+        let close_url = self.close_url.clone();
+        let _ = std::thread::spawn(move || {
+            if let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                runtime.block_on(async move {
+                    let _ = reqwest::Client::new()
+                        .post(close_url)
+                        .timeout(Duration::from_secs(3))
+                        .send()
+                        .await;
+                });
+            }
+        })
+        .join();
     }
 }
 
 /// Convenience wrapper: spins up hive + creates an entity + starts entity-daemon.
 pub struct TestCluster {
-    pub hive: HiveDaemonHandle,
     pub entity: EntityDaemonHandle,
+    pub hive: HiveDaemonHandle,
     pub entity_id: String,
     pub client: reqwest::Client,
 }

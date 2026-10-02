@@ -1,4 +1,6 @@
 # Build a signed Windows release locally on a Windows machine.
+# LEGACY: This builds the retired tauri-app product. For the family-facing
+# Hive + Entity Runtime installer, use build-signed-installer.ps1 instead.
 #
 # Example using an SSL.com certificate already available in the Windows cert store:
 #   $env:ABIGAIL_WINDOWS_SIGNING_MODE = "store"

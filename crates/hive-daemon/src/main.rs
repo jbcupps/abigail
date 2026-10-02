@@ -5,6 +5,7 @@
 
 mod birth;
 mod doctor;
+mod persistence;
 mod routes;
 mod runtime_registry;
 mod state;
@@ -18,7 +19,7 @@ use axum::Router;
 use clap::Parser;
 use state::HiveDaemonState;
 use std::sync::{Arc, Mutex};
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 #[derive(Parser)]
 #[command(name = "hive-daemon", about = "Abigail Hive control plane daemon")]
@@ -72,6 +73,13 @@ async fn run() -> anyhow::Result<()> {
 
     // Initialize subsystems
     let identity_manager = Arc::new(IdentityManager::new(data_root.clone())?);
+    // Keep the engine in this process for the lifetime of the Hive. Entity
+    // daemons access their scoped databases over HTTP rather than contending
+    // for the embedded engine's filesystem lock.
+    let _shared_store = abigail_persistence::PersistenceHandle::open(
+        abigail_identity::HiveEntity::memory_db_path(&data_root),
+        abigail_persistence::EntityScope::Hive,
+    )?;
 
     let entity_secrets_dir = data_root.join("entity_secrets");
     std::fs::create_dir_all(&entity_secrets_dir)?;
@@ -125,7 +133,18 @@ async fn run() -> anyhow::Result<()> {
 
     // Build router
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(AllowOrigin::predicate(|origin, _| {
+            origin
+                .to_str()
+                .ok()
+                .and_then(|s| reqwest::Url::parse(s).ok())
+                .is_some_and(|url| {
+                    matches!(
+                        url.host_str(),
+                        Some("localhost" | "127.0.0.1" | "tauri.localhost" | "[::1]" | "::1")
+                    )
+                })
+        }))
         .allow_methods(Any)
         .allow_headers(Any);
 
@@ -137,6 +156,7 @@ async fn run() -> anyhow::Result<()> {
         .route("/v1/entities/:id", get(routes::get_entity))
         .route("/v1/entities/:id/open", post(routes::open_entity))
         .route("/v1/entities/:id/close", post(routes::close_entity))
+        .route("/v1/entities/:id/persistence", post(persistence::request))
         .route("/v1/birth/scenarios", get(birth::get_scenarios))
         .route(
             "/v1/entities/:id/birth",
@@ -166,6 +186,7 @@ async fn run() -> anyhow::Result<()> {
         .route("/v1/providers/best", get(routes::get_best_model))
         .route("/v1/providers/detect", get(routes::detect_cli))
         .route("/v1/providers/hive-default", post(routes::set_hive_default))
+        .route("/v1/providers/local", post(routes::set_local_provider))
         .route(
             "/v1/providers/profiles/:name",
             get(routes::get_provider_profile),

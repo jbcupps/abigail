@@ -105,24 +105,17 @@ async fn run() -> anyhow::Result<()> {
 
     // Idempotent birth re-read: the full runtime identity in one shot.
     // Hive-side changes (provider, certificate, assignments) apply on the
-    // next launch with no re-provisioning. Falls back to the older
-    // provider-config endpoint for pre-birth-document hives.
-    let provider_config = match hive_client.get_birth_document(&entity_id).await {
-        Ok(birth_doc) => {
-            if let Some(ref certificate) = birth_doc.certificate {
-                tracing::info!(
-                    "Born as {} — {}",
-                    certificate.archetype,
-                    certificate.epithet
-                );
-            }
-            birth_doc.provider_config
-        }
-        Err(e) => {
-            tracing::debug!("Birth document unavailable ({}); using provider-config", e);
-            hive_client.get_provider_config(&entity_id).await?
-        }
-    };
+    // next launch with no re-provisioning. Invalid identity artifacts must
+    // fail startup rather than falling back to an unchecked config endpoint.
+    let birth_doc = hive_client.get_birth_document(&entity_id).await?;
+    if let Some(ref certificate) = birth_doc.certificate {
+        tracing::info!(
+            "Born as {} — {}",
+            certificate.archetype,
+            certificate.epithet
+        );
+    }
+    let provider_config = birth_doc.provider_config;
     tracing::info!(
         "Provider config: ego={:?}, routing_mode={}",
         provider_config.ego_provider_name,
@@ -133,10 +126,14 @@ async fn run() -> anyhow::Result<()> {
         .issue_runtime_session(&entity_id, Some(format!("entity-runtime-{}", entity_id)))
         .await?;
     tracing::info!(
-        "Issued runtime session lease {} for runtime {}",
-        session_lease.lease_id,
+        "Issued runtime session for runtime {}",
         session_lease.runtime_id
     );
+    abigail_persistence::configure_hive_transport(
+        &cli.hive_url,
+        &entity_id,
+        &session_lease.lease_id,
+    )?;
 
     // 2/3. Build providers + router from the resolved config (shared with the
     // governance hot-swap path). Keep a JSON snapshot so the supervision loop
@@ -146,6 +143,7 @@ async fn run() -> anyhow::Result<()> {
     let ego_key_for_discovery = provider_config.ego_api_key.clone();
     let router = Arc::new(router_build::build_router(provider_config).await);
     let router = Arc::new(state::RouterHandle::new(router));
+    router.remember_provider_config(initial_provider_config.clone());
     tracing::info!("Router built");
 
     // 3b. Background model discovery (non-blocking diagnostic)
@@ -202,11 +200,20 @@ async fn run() -> anyhow::Result<()> {
     config.agent_name = Some(entity_info.name.clone());
     config.birth_complete = entity_info.birth_complete;
     config.is_hive = entity_info.is_hive;
+    // The MVP has no interactive tool approval surface. Automatic execution
+    // therefore uses the strict policy; confirmation-required tools remain
+    // unavailable to model-generated calls.
+    config.autonomy_profile = abigail_core::AutonomyProfile::Strict;
     config.routing_mode = router.current().mode;
     config.data_dir = entity_dir.clone();
     config.docs_dir = docs_dir.clone();
     config.db_path = HiveEntity::memory_db_path(&data_root);
     config.models_dir = entity_dir.join("models");
+    if config.birth_complete && !config.is_hive {
+        abigail_core::verifier::verify_constitutional_integrity(&config).map_err(|error| {
+            anyhow::anyhow!("Entity constitution verification failed: {}", error)
+        })?;
+    }
 
     // 5. Create skill registry with secrets vault and executor.
     //    Vault initialization touches disk and keychain, so keep it off the async scheduler.
@@ -501,7 +508,10 @@ async fn run() -> anyhow::Result<()> {
         tracing::info!("Using ephemeral Hive queue store for daemon integration tests");
         PersistenceHandle::open_ephemeral(EntityScope::Hive)
     } else {
-        PersistenceHandle::open(HiveEntity::memory_db_path(&data_root), EntityScope::Hive)
+        PersistenceHandle::open(
+            HiveEntity::memory_db_path(&data_root),
+            EntityScope::Entity(entity_id.clone()),
+        )
     }
     .map_err(|e| anyhow::anyhow!("Failed to open Hive queue store: {}", e))?;
     let job_queue = Arc::new(JobQueue::new(queue_store, stream_broker.clone()));
@@ -807,7 +817,24 @@ async fn run() -> anyhow::Result<()> {
 
     // Build HTTP router
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(tower_http::cors::AllowOrigin::predicate(|origin, _| {
+            origin.to_str().ok().is_some_and(|value| {
+                value == "tauri://localhost"
+                    || value == "http://tauri.localhost"
+                    || value == "https://tauri.localhost"
+                    || value == "http://localhost:5173"
+                    || value == "http://127.0.0.1:5173"
+                    || value == "http://localhost:1420"
+                    || value == "http://127.0.0.1:1420"
+                    || reqwest::Url::parse(value).ok().is_some_and(|url| {
+                        url.scheme() == "http"
+                            && matches!(
+                                url.host_str(),
+                                Some("localhost" | "127.0.0.1" | "[::1]" | "::1")
+                            )
+                    })
+            })
+        }))
         .allow_methods(Any)
         .allow_headers(Any);
 
@@ -818,6 +845,7 @@ async fn run() -> anyhow::Result<()> {
         .route("/v1/outbox/status", get(routes::get_outbox_status))
         .route("/v1/execution/events", get(routes::get_execution_events))
         .route("/v1/chat", post(routes::chat))
+        .route("/v1/chat/history", get(routes::chat_history))
         .route("/v1/chat/stream", post(routes::chat_stream))
         .route("/v1/chat/cancel", post(routes::cancel_chat_stream))
         .route(
@@ -891,10 +919,10 @@ fn spawn_runtime_supervision(
             ticker.tick().await;
             tick_count += 1;
 
-            // Every 6th tick (~60s): check the Hive for a changed provider
+            // Each tick (~10s): check the Hive for a changed provider
             // config and publish a governance refresh so the router hot-swaps
             // without an entity-daemon restart.
-            if tick_count.is_multiple_of(6) {
+            {
                 if let Ok(fresh) = hive_client.get_provider_config(&state.entity_id).await {
                     let fresh_json = serde_json::to_value(&fresh).unwrap_or_default();
                     if fresh_json != last_provider_config {

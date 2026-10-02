@@ -13,7 +13,7 @@ use abigail_runtime::{
     register_supported_native_skills, supported_native_skill_ids,
 };
 use abigail_skills::manifest::SkillId;
-use abigail_skills::skill::ToolParams;
+use abigail_skills::skill::{SkillError, ToolParams};
 use abigail_skills::{DynamicApiSkill, Skill, SkillExecutor, SkillFactory, SkillRegistry};
 use std::sync::{Arc, Mutex};
 
@@ -127,7 +127,7 @@ fn build_tool_definitions_includes_discovered_skills() {
 }
 
 #[test]
-fn skill_factory_registers_and_lists_tools() {
+fn skill_factory_registers_without_exposing_unconfirmed_tools() {
     let tmp = std::env::temp_dir().join("abigail_daemon_integ_factory");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
@@ -141,6 +141,15 @@ fn skill_factory_registers_and_lists_tools() {
         )
         .unwrap();
 
+    assert!(
+        registry
+            .list()
+            .unwrap()
+            .iter()
+            .any(|manifest| manifest.id.0 == "builtin.skill_factory"),
+        "factory should remain registered for mentor-confirmed execution"
+    );
+
     let defs = entity_chat::build_tool_definitions(&registry);
     let factory_tools: Vec<&str> = defs
         .iter()
@@ -148,13 +157,13 @@ fn skill_factory_registers_and_lists_tools() {
         .map(|d| d.name.as_str())
         .collect();
     assert!(
-        factory_tools.contains(&"builtin.skill_factory::author_skill"),
-        "factory should expose author_skill, got: {:?}",
+        !factory_tools.contains(&"builtin.skill_factory::author_skill"),
+        "unconfirmed chat must not expose author_skill, got: {:?}",
         factory_tools
     );
     assert!(
-        factory_tools.contains(&"builtin.skill_factory::delete_skill"),
-        "factory should expose delete_skill, got: {:?}",
+        !factory_tools.contains(&"builtin.skill_factory::delete_skill"),
+        "unconfirmed chat must not expose delete_skill, got: {:?}",
         factory_tools
     );
 
@@ -175,7 +184,7 @@ async fn skill_factory_author_creates_files() {
             Arc::new(factory),
         )
         .unwrap();
-    let executor = SkillExecutor::new(registry);
+    let executor = SkillExecutor::new(registry.clone());
 
     let params = ToolParams::new()
         .with("id", "custom.greeter")
@@ -186,14 +195,38 @@ async fn skill_factory_author_creates_files() {
         .with("script_filename", "main.py")
         .with("how_to_use_md", "# Greeter\nJust say hello.");
 
-    let result = executor
+    let denied = executor
         .execute(
             &SkillId("builtin.skill_factory".to_string()),
             "author_skill",
-            params,
+            params.clone(),
         )
         .await
-        .unwrap();
+        .expect_err("unconfirmed authoring must require mentor confirmation");
+    assert!(matches!(denied, SkillError::ConfirmationRequired(_)));
+    assert_eq!(
+        std::fs::read_dir(&tmp).unwrap().count(),
+        0,
+        "denied authoring must not write any files"
+    );
+    assert!(
+        !registry
+            .list()
+            .unwrap()
+            .iter()
+            .any(|manifest| manifest.id.0 == "custom.greeter"),
+        "denied authoring must not register the skill"
+    );
+
+    let result = executor
+        .execute_with_confirmation(
+            &SkillId("builtin.skill_factory".to_string()),
+            "author_skill",
+            params,
+            true,
+        )
+        .await
+        .expect("mentor-confirmed authoring should succeed");
     assert!(result.success);
 
     let skill_dir = tmp.join("custom.greeter");
@@ -348,10 +381,29 @@ async fn skill_factory_creates_and_registers_dynamic_skill() {
         .to_string()),
     );
 
-    let result = executor
-        .execute(&factory_id, "author_skill", params)
+    let denied = executor
+        .execute(&factory_id, "author_skill", params.clone())
         .await
-        .expect("author_skill should succeed");
+        .expect_err("unconfirmed dynamic authoring must require mentor confirmation");
+    assert!(matches!(denied, SkillError::ConfirmationRequired(_)));
+    assert_eq!(
+        std::fs::read_dir(&tmp).unwrap().count(),
+        0,
+        "denied dynamic authoring must not write any files"
+    );
+    assert!(
+        !registry
+            .list()
+            .unwrap()
+            .iter()
+            .any(|manifest| manifest.id.0 == "dynamic.roundtrip_test"),
+        "denied dynamic authoring must not register the skill"
+    );
+
+    let result = executor
+        .execute_with_confirmation(&factory_id, "author_skill", params, true)
+        .await
+        .expect("mentor-confirmed author_skill should succeed");
     assert!(result.success, "author_skill should report success");
 
     // Verify the skill was immediately registered
@@ -369,10 +421,17 @@ async fn skill_factory_creates_and_registers_dynamic_skill() {
     delete_params
         .values
         .insert("id".into(), serde_json::json!("dynamic.roundtrip_test"));
-    let delete_result = executor
-        .execute(&factory_id, "delete_skill", delete_params)
+    let denied_delete = executor
+        .execute(&factory_id, "delete_skill", delete_params.clone())
         .await
-        .expect("delete_skill should succeed");
+        .expect_err("unconfirmed deletion must require mentor confirmation");
+    assert!(matches!(denied_delete, SkillError::ConfirmationRequired(_)));
+    assert!(skill_dir.exists(), "denied deletion must preserve files");
+
+    let delete_result = executor
+        .execute_with_confirmation(&factory_id, "delete_skill", delete_params, true)
+        .await
+        .expect("mentor-confirmed delete_skill should succeed");
     assert!(delete_result.success);
     assert!(!skill_dir.exists(), "skill dir should be removed");
 

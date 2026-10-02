@@ -630,10 +630,18 @@ fn build_cli_spillover_file(
 /// which skill to invoke and we can split them back apart in the loop.
 pub fn build_tool_definitions(registry: &SkillRegistry) -> Vec<ToolDefinition> {
     let mut defs = Vec::new();
+    let Ok(policy) = registry.execution_policy() else {
+        return defs;
+    };
     if let Ok(manifests) = registry.list() {
         for manifest in &manifests {
             if let Ok((skill, _)) = registry.get_skill(&manifest.id) {
                 for t in skill.tools() {
+                    // Chat cannot supply a person's approval. Only advertise
+                    // calls the active policy permits without confirmation.
+                    if policy.requires_mentor_confirmation(&manifest.id.0, &t) {
+                        continue;
+                    }
                     let qualified = format!("{}::{}", manifest.id.0, t.name);
                     // Validate: OpenAI requires parameters to have "type":"object"
                     if t.parameters.get("type").and_then(|v| v.as_str()) != Some("object") {
@@ -1142,13 +1150,10 @@ pub struct StreamPipelineResult {
     pub execution_trace: Option<entity_core::ExecutionTrace>,
 }
 
-/// Run the full streaming chat pipeline: tool-use rounds (non-streaming) then
-/// stream the final LLM response through `tx`.
-///
-/// When tool rounds produce a final text response directly (LLM didn't invoke
-/// tools), the function returns immediately without sending any `StreamEvent`s
-/// — the caller should emit the result as a single "done" event. When streaming
-/// does occur, `StreamEvent::Token` values are sent through `tx` as they arrive.
+/// Stream each provider round, executing any requested tools before continuing
+/// the conversation. Available tools never turn an ordinary reply into a
+/// non-streaming completion. Tokens arrive through `tx` as the provider emits
+/// them; only the final reply emits `StreamEvent::Done`.
 pub async fn stream_chat_pipeline(
     router: &IdEgoRouter,
     executor: &SkillExecutor,
@@ -1161,49 +1166,61 @@ pub async fn stream_chat_pipeline(
     let mut messages = messages;
     let mut tool_calls_made = Vec::new();
 
-    // Chat never uses Id; always Ego path. Tool-use loop when tools present.
-    if !tools.is_empty() {
-        let intermediate = run_tool_use_loop_rounds_only(
-            router,
-            executor,
-            &mut messages,
-            &tools,
-            model_override.clone(),
-            job_ctx,
-        )
-        .await?;
-        tool_calls_made = intermediate.tool_calls_made;
-        if let Some(final_text) = intermediate.final_text {
-            drop(tx);
-            return Ok(StreamPipelineResult {
-                content: final_text,
-                tool_calls_made,
-                execution_trace: intermediate.execution_trace,
-            });
+    for round in 0..=MAX_TOOL_ROUNDS {
+        // After the execution budget is exhausted, request a final answer
+        // without tools. Drain round events concurrently to preserve bounded
+        // channel backpressure while suppressing intermediate Done events.
+        let (round_tx, mut round_rx) = tokio::sync::mpsc::channel(64);
+        let provider_call = router.route_unified(abigail_router::RoutingRequest {
+            messages: messages.clone(),
+            tools: if tools.is_empty() || round == MAX_TOOL_ROUNDS {
+                None
+            } else {
+                Some(tools.clone())
+            },
+            model_override: model_override.clone(),
+            stream_tx: Some(round_tx),
+            force_id_only: false,
+        });
+        let relay = async {
+            while let Some(event) = round_rx.recv().await {
+                if let StreamEvent::Token(_) = event {
+                    let _ = tx.send(event).await;
+                }
+            }
+        };
+        let (stream_resp, ()) = tokio::join!(provider_call, relay);
+        let stream_resp = stream_resp?;
+        let response = stream_resp.completion;
+        let tool_calls = match response.tool_calls.as_ref() {
+            Some(calls) if !calls.is_empty() => calls,
+            _ => {
+                let _ = tx.send(StreamEvent::Done(response.clone())).await;
+                return Ok(StreamPipelineResult {
+                    content: response.content,
+                    tool_calls_made,
+                    execution_trace: stream_resp.trace,
+                });
+            }
+        };
+
+        if round == MAX_TOOL_ROUNDS {
+            anyhow::bail!("The model continued requesting tools after the tool-call limit");
+        }
+        messages.push(Message {
+            role: "assistant".into(),
+            content: response.content.clone(),
+            tool_call_id: None,
+            tool_calls: Some(tool_calls.clone()),
+        });
+        for call in tool_calls {
+            let (output_json, record) = execute_single_tool_call(executor, call, job_ctx).await;
+            tool_calls_made.push(record);
+            messages.push(Message::tool_result(&call.id, output_json));
         }
     }
 
-    let stream_resp = router
-        .route_unified(abigail_router::RoutingRequest {
-            messages,
-            tools: if tools.is_empty() { None } else { Some(tools) },
-            model_override,
-            stream_tx: Some(tx.clone()),
-            force_id_only: false,
-        })
-        .await?;
-    let final_response = stream_resp.completion;
-    let trace = stream_resp
-        .trace
-        .unwrap_or_else(|| entity_core::ExecutionTrace::new("unknown", None, None, "unknown"));
-
-    drop(tx);
-
-    Ok(StreamPipelineResult {
-        content: final_response.content,
-        tool_calls_made,
-        execution_trace: Some(trace),
-    })
+    unreachable!("the final round either returns a reply or rejects further tool calls")
 }
 
 /// Human-readable label for the active provider ("openai", "anthropic", etc.
@@ -1347,6 +1364,7 @@ async fn execute_single_tool_call(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use abigail_capabilities::cognitive::{CompletionRequest, CompletionResponse, LlmProvider};
     use abigail_skills::channel::TriggerDescriptor;
     use abigail_skills::manifest::SkillManifest;
     use abigail_skills::skill::{
@@ -1458,6 +1476,191 @@ mod tests {
             autonomous: true,
             requires_confirmation: false,
         }
+    }
+
+    struct StreamingOnlyProvider {
+        requests: std::sync::Mutex<Vec<CompletionRequest>>,
+        request_tool: bool,
+        finish: Option<Arc<tokio::sync::Notify>>,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for StreamingOnlyProvider {
+        async fn complete(&self, _: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
+            anyhow::bail!("streaming chat must call the provider's stream method")
+        }
+
+        async fn stream(
+            &self,
+            request: &CompletionRequest,
+            tx: tokio::sync::mpsc::Sender<StreamEvent>,
+        ) -> anyhow::Result<CompletionResponse> {
+            let round = {
+                let mut requests = self.requests.lock().unwrap();
+                requests.push(request.clone());
+                requests.len()
+            };
+            let response = if self.request_tool && round == 1 {
+                CompletionResponse {
+                    content: String::new(),
+                    tool_calls: Some(vec![ToolCall {
+                        id: "stream-call-1".into(),
+                        name: "test.echo::echo".into(),
+                        arguments: r#"{"input":"hello"}"#.into(),
+                    }]),
+                }
+            } else {
+                tx.send(StreamEvent::Token("A streamed ".into())).await?;
+                if let Some(finish) = self.finish.as_ref() {
+                    finish.notified().await;
+                }
+                tx.send(StreamEvent::Token("reply.".into())).await?;
+                CompletionResponse {
+                    content: "A streamed reply.".into(),
+                    tool_calls: None,
+                }
+            };
+            tx.send(StreamEvent::Done(response.clone())).await?;
+            Ok(response)
+        }
+    }
+
+    fn streaming_test_executor() -> (SkillExecutor, Vec<ToolDefinition>) {
+        let registry = Arc::new(SkillRegistry::new());
+        registry
+            .register(
+                SkillId("test.echo".into()),
+                Arc::new(StubSkill {
+                    manifest: test_manifest("test.echo"),
+                    tool_descriptors: vec![valid_tool("echo")],
+                }),
+            )
+            .unwrap();
+        let tools = build_tool_definitions(&registry);
+        (SkillExecutor::new(registry), tools)
+    }
+
+    #[tokio::test]
+    async fn streaming_local_only_with_available_tools_emits_tokens_before_completion() {
+        let finish = Arc::new(tokio::sync::Notify::new());
+        let provider = Arc::new(StreamingOnlyProvider {
+            requests: std::sync::Mutex::new(Vec::new()),
+            request_tool: false,
+            finish: Some(finish.clone()),
+        });
+        let mut router = IdEgoRouter::new(
+            None,
+            None,
+            None,
+            None,
+            abigail_core::RoutingMode::EgoPrimary,
+        );
+        router.id = provider.clone();
+        assert!(!router.has_ego(), "local-only chat routes directly to Id");
+        let (executor, tools) = streaming_test_executor();
+        assert!(!tools.is_empty());
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+        let pipeline = tokio::spawn(async move {
+            stream_chat_pipeline(
+                &router,
+                &executor,
+                vec![Message::new("user", "hello")],
+                tools,
+                tx,
+                None,
+                None,
+            )
+            .await
+        });
+
+        let first = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("the first token must arrive while inference is still running")
+            .expect("stream remains open");
+        assert!(matches!(first, StreamEvent::Token(ref token) if token == "A streamed "));
+        assert!(!pipeline.is_finished(), "tokens must precede completion");
+        finish.notify_one();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(2), pipeline)
+            .await
+            .expect("stream finishes after the provider is released")
+            .unwrap()
+            .expect("streaming reply");
+        assert_eq!(result.content, "A streamed reply.");
+        assert!(result.tool_calls_made.is_empty());
+        assert!(!result.execution_trace.unwrap().fallback_occurred);
+        assert!(
+            matches!(rx.recv().await, Some(StreamEvent::Token(ref token)) if token == "reply.")
+        );
+        assert!(
+            matches!(rx.recv().await, Some(StreamEvent::Done(ref response)) if response.content == result.content)
+        );
+        assert!(rx.recv().await.is_none());
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(!requests[0].tools.as_ref().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn streaming_tool_round_executes_and_emits_only_the_final_done() {
+        let provider = Arc::new(StreamingOnlyProvider {
+            requests: std::sync::Mutex::new(Vec::new()),
+            request_tool: true,
+            finish: None,
+        });
+        let mut router = IdEgoRouter::new(
+            None,
+            None,
+            None,
+            None,
+            abigail_core::RoutingMode::EgoPrimary,
+        );
+        router.id = provider.clone();
+        assert!(!router.has_ego(), "local-only chat routes directly to Id");
+        let (executor, tools) = streaming_test_executor();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            stream_chat_pipeline(
+                &router,
+                &executor,
+                vec![Message::new("user", "echo hello")],
+                tools,
+                tx,
+                None,
+                None,
+            ),
+        )
+        .await
+        .expect("both streaming rounds complete")
+        .expect("tool then streamed answer");
+        assert_eq!(result.content, "A streamed reply.");
+        assert_eq!(result.tool_calls_made.len(), 1);
+        assert!(result.tool_calls_made[0].success);
+        let mut tokens = String::new();
+        let mut completions = 0;
+        while let Some(event) = rx.recv().await {
+            match event {
+                StreamEvent::Token(token) => tokens.push_str(&token),
+                StreamEvent::Done(response) => {
+                    completions += 1;
+                    assert!(response.tool_calls.is_none());
+                    assert_eq!(response.content, result.content);
+                }
+            }
+        }
+        assert_eq!(tokens, result.content);
+        assert_eq!(completions, 1);
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        let tool_result = requests[1]
+            .messages
+            .iter()
+            .find(|message| message.role == "tool")
+            .expect("the second round includes the actual tool output");
+        assert_eq!(tool_result.tool_call_id.as_deref(), Some("stream-call-1"));
+        let output: serde_json::Value = serde_json::from_str(&tool_result.content).unwrap();
+        assert_eq!(output["success"], true);
+        assert_eq!(output["data"]["echo"], "hello");
     }
 
     // ── split_qualified_tool_name ────────────────────────────────────

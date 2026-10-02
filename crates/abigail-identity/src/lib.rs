@@ -392,10 +392,13 @@ impl IdentityManager {
         }
 
         let config = AppConfig::load(&config_path).map_err(|e| e.to_string())?;
+        // Both verification and Documents setup acquire the registry again.
+        // Never recursively hold a read guard: a waiting creator needs the
+        // write lock, and writer-prioritizing RwLocks then block the next read.
+        drop(gc);
 
         // Only verify signature for born agents (unborn agents don't have keys yet)
         if config.birth_complete && !config.is_hive {
-            drop(gc); // Release read lock before calling verify_agent
             self.verify_agent(agent_id)?;
         } else {
             tracing::info!("Skipping signature verification for entity {}", agent_id);
@@ -537,6 +540,56 @@ impl IdentityManager {
         Ok(())
     }
 
+    /// Complete the local identity trust chain before marking an Entity born.
+    /// The signing key stays in an encrypted recovery file so an explicit
+    /// later birth rite can re-sign documents without replacing the identity.
+    pub fn sign_birth_documents(&self, agent_id: &str) -> Result<PathBuf, String> {
+        let agent_dir = self.agent_dir(agent_id)?;
+        let private_path = agent_dir.join("birth_signing_key.vault");
+        let public_path = agent_dir.join("external_pubkey.bin");
+        let private_key = if private_path.exists() {
+            String::from_utf8(
+                encrypted_storage::read_encrypted(&private_path).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?
+        } else {
+            if public_path.exists() {
+                return Err(
+                    "This Entity's recovery signing key is required to change its constitution."
+                        .to_string(),
+                );
+            }
+            let generated =
+                abigail_core::generate_external_keypair(&agent_dir).map_err(|e| e.to_string())?;
+            if let Err(error) = encrypted_storage::write_encrypted(
+                &private_path,
+                generated.private_key_base64.as_bytes(),
+            ) {
+                let _ = std::fs::remove_file(&public_path);
+                return Err(error.to_string());
+            }
+            generated.private_key_base64
+        };
+        let signing_key =
+            abigail_core::parse_private_key(&private_key).map_err(|e| e.to_string())?;
+        let expected_public = signing_key.verifying_key().to_bytes();
+        if public_path.exists() {
+            let actual_public = std::fs::read(&public_path).map_err(|e| e.to_string())?;
+            if actual_public != expected_public {
+                return Err(
+                    "Entity signing key does not match its registered public key.".to_string(),
+                );
+            }
+        } else {
+            abigail_core::secure_fs::write_bytes_atomic(&public_path, &expected_public)
+                .map_err(|e| e.to_string())?;
+        }
+        abigail_core::sign_constitutional_documents(&signing_key, &agent_dir.join("docs"))
+            .map_err(|e| e.to_string())?;
+        self.sign_agent_after_birth(agent_id)?;
+        Ok(public_path)
+    }
+
     /// Sign an arbitrary payload with the Hive master key.
     ///
     /// Returns `(signature_hex, master_public_key_hex)`. Used for artifacts
@@ -550,6 +603,28 @@ impl IdentityManager {
             to_hex(&signature.to_bytes()),
             to_hex(&self.master_key.verifying_key().to_bytes()),
         )
+    }
+
+    /// Verify an artifact against this Hive's master key, never a key supplied
+    /// by the artifact itself.
+    pub fn verify_payload(
+        &self,
+        payload: &[u8],
+        signature_hex: &str,
+        public_key_hex: &str,
+    ) -> Result<(), String> {
+        use ed25519_dalek::Verifier as _;
+        let public_key = decode_hex(public_key_hex)?;
+        if public_key != self.master_key.verifying_key().to_bytes() {
+            return Err("Artifact was not issued by this Hive.".to_string());
+        }
+        let signature_bytes = decode_hex(signature_hex)?;
+        let signature =
+            ed25519_dalek::Signature::from_slice(&signature_bytes).map_err(|e| e.to_string())?;
+        self.master_key
+            .verifying_key()
+            .verify(payload, &signature)
+            .map_err(|_| "Artifact signature verification failed.".to_string())
     }
 
     /// Get the agent directory path for a given UUID.
@@ -579,8 +654,9 @@ impl IdentityManager {
     }
 
     /// Create (or ensure existence of) the per-agent Documents folder.
-    /// On Windows: `%USERPROFILE%\Documents\Abigail\{agent_name}\`
-    /// On other platforms: `~/Documents/Abigail/{agent_name}/`
+    /// Normal installs use the user's `Documents/Abigail/{agent_name}`.
+    /// Custom data roots keep that tree under their own `Documents`; an
+    /// explicit `ABIGAIL_DOCUMENTS_DIR` overrides the Documents base.
     pub fn create_documents_folder(&self, agent_id: &str) -> Result<PathBuf, String> {
         let agent_name = {
             let gc = self.global_config.read().map_err(|e| e.to_string())?;
@@ -608,16 +684,28 @@ impl IdentityManager {
             safe_name
         };
 
-        #[cfg(windows)]
-        let docs_base = {
-            let profile = std::env::var("USERPROFILE")
-                .map_err(|_| "USERPROFILE environment variable not set")?;
-            PathBuf::from(profile).join("Documents")
-        };
-        #[cfg(not(windows))]
-        let docs_base = {
-            let home = std::env::var("HOME").map_err(|_| "HOME environment variable not set")?;
-            PathBuf::from(home).join("Documents")
+        let isolated_docs = std::env::var_os("ABIGAIL_DOCUMENTS_DIR")
+            .map(PathBuf::from)
+            .filter(|path| !path.as_os_str().is_empty())
+            .or_else(|| {
+                (cfg!(test) || self.data_root != AppConfig::default_paths().data_dir)
+                    .then(|| self.data_root.join("Documents"))
+            });
+        let docs_base = if let Some(path) = isolated_docs {
+            path
+        } else {
+            #[cfg(windows)]
+            {
+                let profile = std::env::var("USERPROFILE")
+                    .map_err(|_| "USERPROFILE environment variable not set")?;
+                PathBuf::from(profile).join("Documents")
+            }
+            #[cfg(not(windows))]
+            {
+                let home =
+                    std::env::var("HOME").map_err(|_| "HOME environment variable not set")?;
+                PathBuf::from(home).join("Documents")
+            }
         };
 
         let agent_docs = docs_base.join("Abigail").join(&safe_name);
@@ -1161,6 +1249,20 @@ impl IdentityManager {
     }
 }
 
+fn decode_hex(input: &str) -> Result<Vec<u8>, String> {
+    if !input.is_ascii() || !input.len().is_multiple_of(2) {
+        return Err("Invalid hexadecimal signature encoding.".to_string());
+    }
+    input
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let pair = std::str::from_utf8(pair).map_err(|e| e.to_string())?;
+            u8::from_str_radix(pair, 16).map_err(|e| e.to_string())
+        })
+        .collect()
+}
+
 /// Recursively copy a directory.
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
@@ -1230,6 +1332,126 @@ mod tests {
             global_config: RwLock::new(GlobalConfig::new(&tmp)),
             master_key: SigningKey::from_bytes(&[9u8; 32]),
         }
+    }
+
+    #[test]
+    fn concurrent_unborn_loads_and_creation_complete_without_registry_deadlock() {
+        use std::sync::{mpsc, Arc, Barrier};
+        use std::time::Duration;
+
+        let manager = Arc::new(test_manager());
+        let (entity_id, _) = manager.create_agent("Concurrent unborn reader").unwrap();
+        let start = Arc::new(Barrier::new(5));
+        let (done_tx, done_rx) = mpsc::channel();
+        let mut threads = Vec::new();
+        for _ in 0..3 {
+            let manager = manager.clone();
+            let entity_id = entity_id.clone();
+            let start = start.clone();
+            let done_tx = done_tx.clone();
+            threads.push(std::thread::spawn(move || {
+                start.wait();
+                let result = (0..200).try_for_each(|_| manager.load_agent(&entity_id).map(|_| ()));
+                let _ = done_tx.send(result);
+            }));
+        }
+        {
+            let manager = manager.clone();
+            let start = start.clone();
+            let done_tx = done_tx.clone();
+            threads.push(std::thread::spawn(move || {
+                start.wait();
+                let result = (0..16).try_for_each(|index| {
+                    manager
+                        .create_agent(&format!("Concurrent creator {}", index))
+                        .map(|_| ())
+                });
+                let _ = done_tx.send(result);
+            }));
+        }
+        drop(done_tx);
+        start.wait();
+        for _ in 0..4 {
+            done_rx
+                .recv_timeout(Duration::from_secs(20))
+                .expect(
+                    "concurrent create/load must finish without a recursive registry-lock deadlock",
+                )
+                .expect("identity operation succeeds");
+        }
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(manager.list_agents().unwrap().len(), 17);
+        let _ = std::fs::remove_dir_all(manager.data_root());
+    }
+
+    #[test]
+    fn custom_data_root_keeps_documents_inside_that_root() {
+        let manager = test_manager();
+        let (id, _) = manager.create_agent("Isolated Documents").unwrap();
+        let documents = manager.create_documents_folder(&id).unwrap();
+        let expected_base = std::env::var_os("ABIGAIL_DOCUMENTS_DIR")
+            .map(PathBuf::from)
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| manager.data_root().join("Documents"));
+        assert_eq!(
+            documents,
+            expected_base.join("Abigail").join("Isolated Documents")
+        );
+        let _ = std::fs::remove_dir_all(manager.data_root());
+    }
+
+    #[test]
+    fn birth_signing_survives_reload_and_detects_document_tampering() {
+        let manager = test_manager();
+        let (id, dir) = manager.create_agent("Birth trust test").unwrap();
+        for name in ["soul.md", "ethics.md", "instincts.md"] {
+            std::fs::write(dir.join("docs").join(name), format!("Original {}", name)).unwrap();
+        }
+        let public_path = manager.sign_birth_documents(&id).unwrap();
+        let original_public = std::fs::read(&public_path).unwrap();
+        let mut config = manager.load_agent(&id).unwrap();
+        config.external_pubkey_path = Some(public_path.clone());
+        config.birth_complete = true;
+        config.save(&config.config_path()).unwrap();
+        manager.verify_agent(&id).unwrap();
+        abigail_core::verifier::verify_constitutional_integrity(&config).unwrap();
+
+        let reopened = IdentityManager {
+            data_root: manager.data_root.clone(),
+            global_config: RwLock::new(GlobalConfig::load(manager.data_root()).unwrap()),
+            master_key: manager.master_key.clone(),
+        };
+        let loaded = reopened.load_agent(&id).unwrap();
+        abigail_core::verifier::verify_constitutional_integrity(&loaded).unwrap();
+        std::fs::write(dir.join("docs/soul.md"), "Mentor-approved new purpose").unwrap();
+        assert!(abigail_core::verifier::verify_constitutional_integrity(&loaded).is_err());
+        reopened.sign_birth_documents(&id).unwrap();
+        assert_eq!(std::fs::read(public_path).unwrap(), original_public);
+        abigail_core::verifier::verify_constitutional_integrity(&loaded).unwrap();
+        let encrypted = std::fs::read(dir.join("birth_signing_key.vault")).unwrap();
+        assert!(abigail_core::vault::crypto::is_vault_envelope(&encrypted));
+        let _ = std::fs::remove_dir_all(manager.data_root());
+    }
+
+    #[test]
+    fn artifact_verification_uses_the_hive_key_and_rejects_tampering() {
+        let manager = test_manager();
+        let (signature, key) = manager.sign_payload(b"birth certificate");
+        manager
+            .verify_payload(b"birth certificate", &signature, &key)
+            .unwrap();
+        assert!(manager
+            .verify_payload(b"changed certificate", &signature, &key)
+            .is_err());
+        assert!(manager
+            .verify_payload(b"birth certificate", &signature, &"00".repeat(32))
+            .is_err());
+        assert!(manager
+            .verify_payload(b"birth certificate", "not hex", &key)
+            .is_err());
+        let _ = std::fs::remove_dir_all(manager.data_root());
     }
 
     #[test]

@@ -157,7 +157,7 @@ async fn respond(
         .await
     };
 
-    let action = match result {
+    let mut action = match result {
         Ok(tool_result) => {
             let tier = tool_result.tier().map(|s| s.to_string());
             let model_used = tool_result.model_used().map(|s| s.to_string());
@@ -255,6 +255,22 @@ async fn respond(
             }
         }
     };
+
+    if let Some(ref response) = action.response {
+        let turn =
+            abigail_memory::ConversationTurn::new(&action.session_id, "assistant", &response.reply)
+                .with_metadata(
+                    response.provider.clone(),
+                    response.model_used.clone(),
+                    response.tier.clone(),
+                    response.complexity_score,
+                );
+        if let Err(error) = crate::memory_consumer::persist_turn(state.memory.clone(), turn).await {
+            action.status = "error".to_string();
+            action.error = Some(format!("Unable to save this conversation: {}", error));
+            action.response = None;
+        }
+    }
 
     // Publish the committed action for the journal, superego, and any other
     // observers — regardless of whether the handler is still waiting.

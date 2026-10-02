@@ -131,6 +131,45 @@ assert(
   "Beta installer verification must assert Abigail CSS is bundled into the frontend JavaScript."
 );
 
+const staging = fs.readFileSync("scripts/stage_split_installer_resources.ps1", "utf8");
+const buildArguments = staging.match(/\$cargoArgs\s*=\s*@\(([\s\S]*?)\n\)/)?.[1] ?? "";
+for (const required of ["--locked", "abigail-hive-app", "abigail-entity-runtime-app", "--features", "tauri/custom-protocol"]) {
+  assert(buildArguments.includes(`"${required}"`), `Installer staging must build ${required} explicitly.`);
+}
+assert(
+  staging.includes("$embeddedAssets.Contains($entry)") && staging.includes("$shellVersion -ne $hiveVersion"),
+  "Staging must reject shells that do not embed current frontend entries and the requested installer version."
+);
+assert(
+  /finally\s*\{\s*\$env:TAURI_CONFIG\s*=\s*\$previousTauriConfig/.test(staging),
+  "Installer staging must restore the caller's Tauri configuration even when the build fails."
+);
+assert(
+  !release.includes("ref: ${{ github.ref }}") && release.includes("ref: ${{ github.sha }}"),
+  "Installer build and publication must use the triggering commit rather than a moving branch."
+);
+const installedVerification = release.indexOf("- name: Verify installed unsigned payload and synthetic contract");
+const installerUpload = release.indexOf("- name: Upload NSIS installer");
+assert(
+  installedVerification >= 0 && installedVerification < installerUpload &&
+    release.includes("./scripts/verify-mvp-windows.ps1") &&
+    release.includes("./scripts/tests/run-mvp-acceptance.ps1 -BinaryDir $installDir"),
+  "Unsigned releases must verify and exercise the actual installed payload before uploading the installer."
+);
+assert(
+  release.includes("../scripts/nsis-mvp-hooks.nsh"),
+  "Unsigned installer acceptance must use the hooks that preserve family data without prompts."
+);
+const ciGate = release.indexOf("- name: Require successful CI gate for this commit");
+const releasePublication = release.indexOf("- name: Create GitHub Release");
+assert(
+  ciGate >= 0 && ciGate < releasePublication &&
+    release.includes('--commit "$RELEASE_SHA"') &&
+    release.includes('.name == "gate"') &&
+    release.includes('[[ "$TAG_SHA" != "${{ github.sha }}" ]]'),
+  "Publication must require the same-commit CI gate and reject an existing tag on another commit."
+);
+
 for (const app of ["hive-app", "entity-runtime-app"]) {
   const viteConfig = fs.readFileSync(`${app}/src-ui/vite.config.ts`, "utf8");
   assert(

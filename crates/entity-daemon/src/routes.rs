@@ -4,14 +4,16 @@ use crate::state::EntityDaemonState;
 use abigail_capabilities::cognitive::StreamEvent;
 use abigail_queue::{JobPriority, JobRecord, JobSpec, RequiredCapability};
 use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::Json;
 use entity_core::{
-    ApiEnvelope, CancelChatStreamResponse, CancelJobResponse, ChatRequest, ChatResponse,
-    EntityOutboxStatus, EntityStatus, JobStatusResponse, ListJobsResponse, MemoryEntry,
-    MemoryInsertRequest, MemorySearchRequest, MemoryStats, QueueJobRecord,
-    RuntimeSessionStatusResponse, SkillApplyAcknowledgementList, SkillInfo, SubmitJobRequest,
-    SubmitJobResponse, ToolExecRequest, ToolExecResponse, ToolInfo, TopicResultsResponse,
+    ApiEnvelope, CancelChatStreamResponse, CancelJobResponse, ChatHistoryResponse, ChatRequest,
+    ChatResponse, EntityOutboxStatus, EntityStatus, JobStatusResponse, ListJobsResponse,
+    MemoryEntry, MemoryInsertRequest, MemorySearchRequest, MemoryStats, QueueJobRecord,
+    RuntimeSessionStatusResponse, SessionMessage, SkillApplyAcknowledgementList, SkillInfo,
+    SubmitJobRequest, SubmitJobResponse, ToolExecRequest, ToolExecResponse, ToolInfo,
+    TopicResultsResponse,
 };
 use futures_util::{Stream, StreamExt};
 use serde::Deserialize;
@@ -20,6 +22,78 @@ use tokio_util::sync::CancellationToken;
 
 const BUS_STREAM: &str = abigail_streaming::BUS_STREAM;
 const BUS_TOPIC: &str = abigail_streaming::Topic::JobEvents.as_str();
+
+/// Settings saved in the Hive apply to the very next turn, including the
+/// helper that was started before first-run model setup. Keep the last router
+/// if the control plane is temporarily unreachable.
+async fn refresh_provider_for_turn(state: &EntityDaemonState) {
+    let refresh = async {
+        let client = crate::hive_client::HiveClient::new(&state.hive_url);
+        let config = client.get_provider_config(&state.entity_id).await?;
+        let snapshot = serde_json::to_value(&config)?;
+        if !state.router.matches_provider_config(&snapshot) {
+            let router = crate::router_build::build_router(config).await;
+            state.router.swap(std::sync::Arc::new(router));
+            state.router.remember_provider_config(snapshot);
+        }
+        Ok::<(), anyhow::Error>(())
+    };
+    match tokio::time::timeout(std::time::Duration::from_secs(3), refresh).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => tracing::debug!(
+            "Provider refresh unavailable; retaining current model: {}",
+            error
+        ),
+        Err(_) => tracing::debug!("Provider refresh timed out; retaining current model"),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ChatHistoryQuery {
+    pub session_id: Option<String>,
+    pub limit: Option<usize>,
+}
+
+pub async fn chat_history(
+    State(state): State<EntityDaemonState>,
+    Query(query): Query<ChatHistoryQuery>,
+) -> Json<ApiEnvelope<ChatHistoryResponse>> {
+    let memory = state.memory.clone();
+    let result = tokio::task::spawn_blocking(move || -> Result<ChatHistoryResponse, String> {
+        let session_id = match query.session_id.filter(|id| !id.trim().is_empty()) {
+            Some(id) => Some(id),
+            None => memory
+                .list_sessions(1)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .next()
+                .map(|session| session.session_id),
+        };
+        let messages = match session_id.as_deref() {
+            Some(id) => memory
+                .recent_turns(id, query.limit.unwrap_or(200).clamp(1, 500))
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .filter(|turn| turn.role == "user" || turn.role == "assistant")
+                .map(|turn| SessionMessage {
+                    role: turn.role,
+                    content: turn.content,
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+        Ok(ChatHistoryResponse {
+            session_id,
+            messages,
+        })
+    })
+    .await;
+    match result {
+        Ok(Ok(history)) => Json(ApiEnvelope::success(history)),
+        Ok(Err(error)) => Json(ApiEnvelope::error(error)),
+        Err(error) => Json(ApiEnvelope::error(error.to_string())),
+    }
+}
 
 pub(crate) fn publish_chat_lifecycle_event(
     broker: std::sync::Arc<dyn abigail_streaming::StreamBroker>,
@@ -96,20 +170,34 @@ pub async fn get_status(State(state): State<EntityDaemonState>) -> Json<ApiEnvel
 
 pub async fn get_session_status(
     State(state): State<EntityDaemonState>,
-) -> Json<ApiEnvelope<RuntimeSessionStatusResponse>> {
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiEnvelope<RuntimeSessionStatusResponse>>) {
+    let bearer = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    if bearer != Some(state.session_lease.lease_id.as_str()) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiEnvelope::error("Runtime authorization required")),
+        );
+    }
     let runtime_url = state.runtime_url.read().await.clone();
     let last_hive_sync_at_utc = state.last_hive_sync_at_utc.read().await.clone();
     let last_hive_error = state.last_hive_error.read().await.clone();
     let assignment_count = state.skill_assignments.read().await.len();
 
-    Json(ApiEnvelope::success(RuntimeSessionStatusResponse {
-        lease: state.session_lease.clone(),
-        connected_to_hive: last_hive_error.is_none(),
-        runtime_url,
-        last_hive_sync_at_utc,
-        last_hive_error,
-        assignment_count,
-    }))
+    (
+        StatusCode::OK,
+        Json(ApiEnvelope::success(RuntimeSessionStatusResponse {
+            lease: state.session_lease.clone(),
+            connected_to_hive: last_hive_error.is_none(),
+            runtime_url,
+            last_hive_sync_at_utc,
+            last_hive_error,
+            assignment_count,
+        })),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -159,6 +247,7 @@ pub async fn chat(
     State(state): State<EntityDaemonState>,
     Json(body): Json<ChatRequest>,
 ) -> Json<ApiEnvelope<ChatResponse>> {
+    refresh_provider_for_turn(&state).await;
     let session_id = body
         .session_id
         .clone()
@@ -181,9 +270,15 @@ pub async fn chat(
         .current()
         .register_selected_model_subscriber(&state.entity_id, model_override.clone());
 
-    // Archive the user turn (async, fire-and-forget via StreamBroker).
+    // Save input before starting a turn; observers stay out-of-band.
     let user_turn = abigail_memory::ConversationTurn::new(&session_id, "user", &body.message);
-    crate::memory_consumer::publish_turn(state.stream_broker.clone(), user_turn);
+    if let Err(error) = crate::memory_consumer::persist_turn(state.memory.clone(), user_turn).await
+    {
+        return Json(ApiEnvelope::error(format!(
+            "Unable to save this conversation: {}",
+            error
+        )));
+    }
     let _ = state.queue_outbox_record(
         "chat_user_turn",
         serde_json::json!({
@@ -233,6 +328,7 @@ pub async fn chat_stream(
     State(state): State<EntityDaemonState>,
     Json(body): Json<ChatRequest>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    refresh_provider_for_turn(&state).await;
     let session_id = body
         .session_id
         .clone()
@@ -255,9 +351,10 @@ pub async fn chat_stream(
         .current()
         .register_selected_model_subscriber(&state.entity_id, model_override.clone());
 
-    // Archive user turn (async, fire-and-forget via StreamBroker).
+    // Save input before streaming so reopening the app resumes this turn.
     let user_turn = abigail_memory::ConversationTurn::new(&session_id, "user", &body.message);
-    crate::memory_consumer::publish_turn(state.stream_broker.clone(), user_turn);
+    let persisted_input =
+        crate::memory_consumer::persist_turn(state.memory.clone(), user_turn).await;
     let _ = state.queue_outbox_record(
         "chat_user_turn",
         serde_json::json!({
@@ -286,8 +383,16 @@ pub async fn chat_stream(
         cancel: Some(cancel_token.clone()),
         done: done_tx,
     };
-    let begin =
-        crate::pipeline::begin_turn(&state, &session_id, &body.message, model_override, ctx).await;
+    let begin = match persisted_input {
+        Ok(()) => {
+            crate::pipeline::begin_turn(&state, &session_id, &body.message, model_override, ctx)
+                .await
+        }
+        Err(error) => Err(anyhow::anyhow!(
+            "Unable to save this conversation: {}",
+            error
+        )),
+    };
 
     let cancel_state = state.active_stream_cancel.clone();
     let turns = state.turns.clone();
@@ -1040,6 +1145,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_diagnostics_never_disclose_lease_without_own_bearer() {
+        let state = build_state();
+        let mut foreign_headers = HeaderMap::new();
+        foreign_headers.insert(
+            axum::http::header::AUTHORIZATION,
+            "Bearer other-entity-lease".parse().unwrap(),
+        );
+        for headers in [HeaderMap::new(), foreign_headers] {
+            let (status, response) = get_session_status(State(state.clone()), headers).await;
+            assert_eq!(status, StatusCode::FORBIDDEN);
+            assert!(response.0.data.is_none());
+        }
+        let mut own_headers = HeaderMap::new();
+        own_headers.insert(
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {}", state.session_lease.lease_id)
+                .parse()
+                .unwrap(),
+        );
+        let (status, response) = get_session_status(State(state), own_headers).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response.0.data.unwrap().lease.lease_id, "lease-test");
+    }
+
+    #[tokio::test]
     async fn chat_lifecycle_event_is_published_with_topic_header() {
         let broker: Arc<dyn abigail_streaming::StreamBroker> = Arc::new(MemoryBroker::new(64));
         broker
@@ -1083,6 +1213,58 @@ mod tests {
             serde_json::from_slice(&first.payload).expect("payload json");
         assert_eq!(payload["phase"], "chat_started");
         assert_eq!(payload["entity_id"], "entity-abc");
+    }
+
+    #[tokio::test]
+    async fn history_resumes_durable_turns_without_client_history() {
+        let state = build_state();
+        let empty = chat_history(
+            State(state.clone()),
+            Query(ChatHistoryQuery {
+                session_id: None,
+                limit: None,
+            }),
+        )
+        .await
+        .0;
+        assert!(empty.ok);
+        assert!(empty.data.unwrap().messages.is_empty());
+        for (role, text) in [
+            ("user", "My favorite dinner is pasta"),
+            ("assistant", "I will remember pasta"),
+        ] {
+            crate::memory_consumer::persist_turn(
+                state.memory.clone(),
+                abigail_memory::ConversationTurn::new("family-session", role, text),
+            )
+            .await
+            .unwrap();
+        }
+        let response = chat_history(
+            State(state.clone()),
+            Query(ChatHistoryQuery {
+                session_id: None,
+                limit: Some(200),
+            }),
+        )
+        .await
+        .0;
+        assert!(response.ok);
+        let history = response.data.unwrap();
+        assert_eq!(history.session_id.as_deref(), Some("family-session"));
+        assert_eq!(history.messages.len(), 2);
+        assert_eq!(history.messages[0].role, "user");
+        assert_eq!(history.messages[1].content, "I will remember pasta");
+        let other = chat_history(
+            State(state),
+            Query(ChatHistoryQuery {
+                session_id: Some("another-session".to_string()),
+                limit: None,
+            }),
+        )
+        .await
+        .0;
+        assert!(other.data.unwrap().messages.is_empty());
     }
 
     #[tokio::test]

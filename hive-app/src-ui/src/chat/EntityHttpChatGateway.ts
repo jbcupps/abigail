@@ -25,6 +25,7 @@ interface EntityHttpChatGatewayOptions {
   idleTimeoutMs?: number;
   maxReconnectAttempts?: number;
   reconnectBackoffMs?: number;
+  allowNonStreamingFallback?: boolean;
   fetchFn?: typeof fetch;
 }
 
@@ -114,6 +115,7 @@ export class EntityHttpChatGateway implements ChatGateway {
   private readonly maxReconnectAttempts: number;
   private readonly reconnectBackoffMs: number;
   private readonly fetchFn: typeof fetch;
+  private readonly allowNonStreamingFallback: boolean;
 
   constructor(options: EntityHttpChatGatewayOptions = {}) {
     this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
@@ -125,6 +127,7 @@ export class EntityHttpChatGateway implements ChatGateway {
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
     this.reconnectBackoffMs = options.reconnectBackoffMs ?? DEFAULT_RECONNECT_BACKOFF_MS;
     this.fetchFn = options.fetchFn ?? fetch;
+    this.allowNonStreamingFallback = options.allowNonStreamingFallback ?? true;
   }
 
   async send(request: ChatGatewayRequest, callbacks: ChatGatewayCallbacks): Promise<ChatGatewayStream> {
@@ -378,7 +381,8 @@ export class EntityHttpChatGateway implements ChatGateway {
             continue;
           }
 
-          await runNonStreamingFallback();
+          if (this.allowNonStreamingFallback) await runNonStreamingFallback();
+          else finalizeError(error);
           return;
         }
       }
@@ -405,6 +409,7 @@ export class EntityHttpChatGateway implements ChatGateway {
                 "Content-Type": "application/json",
               },
               body: JSON.stringify({ session_id: request.sessionId }),
+              signal: AbortSignal.timeout(3_000),
             });
           } catch {
             // Best effort only; local abort already guarantees interruption behavior.

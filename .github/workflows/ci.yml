@@ -55,6 +55,10 @@ jobs:
       - name: Verify unsigned stabilization lane
         run: node scripts/check_unsigned_stabilization.mjs
 
+      - name: Verify Windows signing failure gates without credentials
+        shell: pwsh
+        run: ./scripts/test_windows_signing.ps1
+
       - name: Check Hive and Runtime apps
         run: cargo check -p abigail-hive-app -p abigail-entity-runtime-app
 

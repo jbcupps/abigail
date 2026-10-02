@@ -116,6 +116,15 @@ impl RuntimeControlPlane {
         self.sessions.get(lease_id).cloned()
     }
 
+    /// A family Entity's explicit close ends its local runtime sessions.
+    /// Issuing another lease does not revoke existing independent sessions.
+    pub fn revoke_entity_sessions(&mut self, entity_id: &str) -> usize {
+        let previous_count = self.sessions.len();
+        self.sessions
+            .retain(|_, session| session.lease.entity_id != entity_id);
+        previous_count - self.sessions.len()
+    }
+
     pub fn assignments(&self, entity_id: &str) -> SkillAssignmentsResponse {
         self.assignments
             .get(entity_id)

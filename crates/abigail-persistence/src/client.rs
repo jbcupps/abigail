@@ -1,6 +1,8 @@
+use crate::remote::{configured_transport, HiveTransport, RemoteOperation};
 use crate::schema;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::{Deserialize, Serialize as DeriveSerialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -32,7 +34,7 @@ impl EntityScope {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, DeriveSerialize, Deserialize)]
 pub struct QueryBinding {
     pub key: String,
     pub value: Value,
@@ -57,6 +59,8 @@ pub enum PersistenceError {
     ChannelClosed,
     #[error("Runtime task join failed: {0}")]
     Join(String),
+    #[error("Hive persistence failed: {0}")]
+    Remote(String),
     #[error("I/O failure: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -69,7 +73,8 @@ pub struct PersistenceHandle {
 }
 
 struct PersistenceInner {
-    db: Arc<Surreal<Db>>,
+    db: Option<Arc<Surreal<Db>>>,
+    remote: Option<HiveTransport>,
     path: PathBuf,
     scope: EntityScope,
 }
@@ -107,7 +112,8 @@ impl PersistenceHandle {
 
         Ok(Self {
             inner: Arc::new(PersistenceInner {
-                db: Arc::new(db),
+                db: Some(Arc::new(db)),
+                remote: None,
                 path: PathBuf::from(":memory:"),
                 scope,
             }),
@@ -116,6 +122,17 @@ impl PersistenceHandle {
 
     pub fn open(path: impl AsRef<Path>, scope: EntityScope) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
+        if let Some(transport) = configured_transport() {
+            transport.validate_scope(&scope)?;
+            return Ok(Self {
+                inner: Arc::new(PersistenceInner {
+                    db: None,
+                    remote: Some(transport),
+                    path,
+                    scope,
+                }),
+            });
+        }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -124,16 +141,28 @@ impl PersistenceHandle {
 
         let runtime = persistence_runtime()?;
         let base_db = shared_file_engine(&path)?;
-        let init_scope = scope.clone();
-        let db = block_on_runtime(runtime, async move {
-            let db = base_db.as_ref().clone();
-            db.use_ns("abigail")
-                .use_db(init_scope.database_name())
-                .await
-                .map_err(PersistenceError::from)?;
-            schema::ensure_schema(&db, &init_scope).await?;
-            Ok::<_, PersistenceError>(db)
-        })?;
+        let mut attempts = 0;
+        let db = loop {
+            let init_scope = scope.clone();
+            let engine = base_db.clone();
+            let result = block_on_runtime(runtime, async move {
+                let db = engine.as_ref().clone();
+                db.use_ns("abigail")
+                    .use_db(init_scope.database_name())
+                    .await
+                    .map_err(PersistenceError::from)?;
+                schema::ensure_schema(&db, &init_scope).await?;
+                Ok::<_, PersistenceError>(db)
+            });
+            match result {
+                Ok(db) => break db,
+                Err(error) if attempts < 3 && error.to_string().contains("Session not found") => {
+                    attempts += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(50 * attempts));
+                }
+                Err(error) => return Err(error),
+            }
+        };
         tracing::info!(
             "Persistence scope ready: scope={} path={}",
             scope.label(),
@@ -142,7 +171,8 @@ impl PersistenceHandle {
 
         Ok(Self {
             inner: Arc::new(PersistenceInner {
-                db: Arc::new(db),
+                db: Some(Arc::new(db)),
+                remote: None,
                 path,
                 scope,
             }),
@@ -158,6 +188,13 @@ impl PersistenceHandle {
     }
 
     pub fn execute(&self, sql: &str, bindings: &[QueryBinding]) -> Result<()> {
+        if self.inner.remote.is_some() {
+            self.remote_call(RemoteOperation::Execute {
+                sql: sql.into(),
+                bindings: bindings.to_vec(),
+            })?;
+            return Ok(());
+        }
         let sql = sql.to_string();
         let bindings = bindings.to_vec();
         self.run(move |db| async move {
@@ -174,6 +211,14 @@ impl PersistenceHandle {
     where
         T: DeserializeOwned + Send + 'static,
     {
+        if self.inner.remote.is_some() {
+            return Ok(serde_json::from_value(self.remote_call(
+                RemoteOperation::QueryVec {
+                    sql: sql.into(),
+                    bindings: bindings.to_vec(),
+                },
+            )?)?);
+        }
         let sql = sql.to_string();
         let bindings = bindings.to_vec();
         self.run(move |db| async move {
@@ -196,6 +241,14 @@ impl PersistenceHandle {
     where
         T: DeserializeOwned + Send + 'static,
     {
+        if self.inner.remote.is_some() {
+            return Ok(serde_json::from_value(self.remote_call(
+                RemoteOperation::QueryOne {
+                    sql: sql.into(),
+                    bindings: bindings.to_vec(),
+                },
+            )?)?);
+        }
         let sql = sql.to_string();
         let bindings = bindings.to_vec();
         self.run(move |db| async move {
@@ -217,6 +270,14 @@ impl PersistenceHandle {
     where
         T: Serialize + Send + Sync + 'static,
     {
+        if self.inner.remote.is_some() {
+            self.remote_call(RemoteOperation::Upsert {
+                table: table.into(),
+                id: id.into(),
+                value: serde_json::to_value(value)?,
+            })?;
+            return Ok(());
+        }
         let table = table.to_string();
         let id = id.to_string();
         let value = serde_json::to_value(value)?;
@@ -234,6 +295,14 @@ impl PersistenceHandle {
     where
         T: Serialize + Send + Sync + 'static,
     {
+        if self.inner.remote.is_some() {
+            self.remote_call(RemoteOperation::Create {
+                table: table.into(),
+                id: id.into(),
+                value: serde_json::to_value(value)?,
+            })?;
+            return Ok(());
+        }
         let table = table.to_string();
         let id = id.to_string();
         let value = serde_json::to_value(value)?;
@@ -248,6 +317,13 @@ impl PersistenceHandle {
     }
 
     pub fn delete_record(&self, table: &str, id: &str) -> Result<()> {
+        if self.inner.remote.is_some() {
+            self.remote_call(RemoteOperation::Delete {
+                table: table.into(),
+                id: id.into(),
+            })?;
+            return Ok(());
+        }
         let table = table.to_string();
         let id = id.to_string();
         self.run(move |db| async move {
@@ -263,6 +339,14 @@ impl PersistenceHandle {
     where
         T: DeserializeOwned + Send + 'static,
     {
+        if self.inner.remote.is_some() {
+            return Ok(serde_json::from_value(self.remote_call(
+                RemoteOperation::Select {
+                    table: table.into(),
+                    id: id.into(),
+                },
+            )?)?);
+        }
         let table = table.to_string();
         let id = id.to_string();
         self.run(move |db| async move {
@@ -284,6 +368,17 @@ impl PersistenceHandle {
             .is_some())
     }
 
+    fn remote_call(&self, operation: RemoteOperation) -> Result<Value> {
+        let transport = self
+            .inner
+            .remote
+            .clone()
+            .ok_or_else(|| PersistenceError::Remote("No Hive transport configured".into()))?;
+        block_on_runtime(persistence_runtime()?, async move {
+            transport.call(operation).await
+        })
+    }
+
     fn run<T, F, Fut>(&self, f: F) -> Result<T>
     where
         T: Send + 'static,
@@ -291,7 +386,11 @@ impl PersistenceHandle {
         Fut: std::future::Future<Output = Result<T>> + Send + 'static,
     {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
-        let db = self.inner.db.clone();
+        let db = self.inner.db.clone().ok_or_else(|| {
+            PersistenceError::Remote(
+                "Local database access is unavailable in an Entity runtime".into(),
+            )
+        })?;
         persistence_runtime()?.handle().spawn(async move {
             let out = f(db).await;
             let _ = tx.send(out);
@@ -367,7 +466,10 @@ fn shared_file_engine(path: &Path) -> Result<Arc<Surreal<Db>>> {
         path.display()
     );
     let runtime = persistence_runtime()?;
-    let endpoint_path = local_engine_open_path(path);
+    // SurrealDB's typed local endpoint accepts native paths. A URL-style
+    // /C:/ prefix is not a Windows absolute path: path cleaning drops the drive
+    // and can silently place the store under the process working directory.
+    let endpoint_path = path.to_path_buf();
     let opened = block_on_runtime(runtime, async move {
         // Persist the embedded store with SurrealKV and sync every committed
         // write because chat history and execution receipts are part of the
@@ -389,21 +491,6 @@ fn shared_file_engine(path: &Path) -> Result<Arc<Surreal<Db>>> {
 fn file_engine_cache() -> &'static Mutex<HashMap<PathBuf, Arc<Surreal<Db>>>> {
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<Surreal<Db>>>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn local_engine_open_path(path: &Path) -> String {
-    #[allow(unused_mut)]
-    let mut raw = path.to_string_lossy().replace('\\', "/");
-
-    #[cfg(windows)]
-    {
-        let bytes = raw.as_bytes();
-        if bytes.len() >= 2 && bytes[1] == b':' && !raw.starts_with('/') {
-            raw.insert(0, '/');
-        }
-    }
-
-    raw
 }
 
 fn surreal_value_to_json(value: SurrealValue) -> Value {
@@ -492,6 +579,10 @@ mod tests {
         let path = root.join("memory.db");
 
         let hive = PersistenceHandle::open(&path, EntityScope::Hive).unwrap();
+        assert!(
+            path.join("wal").is_dir(),
+            "the engine must write into the requested absolute data directory"
+        );
         let entity =
             PersistenceHandle::open(&path, EntityScope::Entity("entity-a".to_string())).unwrap();
 
