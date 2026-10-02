@@ -9,7 +9,7 @@ Every install also provisions an immortal local coordinator identity called `Abi
 That Hive-owned store now runs on embedded SurrealDB, giving Abigail one local-first memory substrate for document records, graph links, semantic archives, and queue state without requiring Docker or an external database.
 
 ### Why Families Love Abigail
-- **Complete privacy** - everything stays on your computer. No accounts with big tech companies.
+- **Local ownership** - identities and conversation history stay on your computer. A connected cloud provider receives the messages and context it processes; a connected local model can process them on this computer.
 - **One shared local memory core** - Abigail Hive owns a single embedded SurrealDB store for shared coordination, memory, archives, and queue state.
 - **Real power when you want it** - connect any Entity to the strongest cloud models with one click. You are never locked to one provider.
 - **Hive-owned model control** - provider and model changes happen in Abigail Hive, not inside each individual Entity chat.
@@ -20,11 +20,23 @@ That Hive-owned store now runs on embedded SurrealDB, giving Abigail one local-f
 ### Quick Start (5 minutes)
 1. Download and run the Windows installer
 2. Launch Abigail from the installed app icon
-3. Create your first Entity in Abigail Hive
-4. Configure local or cloud models in the Hive sidebar if you want extra capability
-5. Let your family chat with the selected Entity while the Hive stays open beside it
+3. Connect a model in Abigail Hive: a loaded local Ollama/LM Studio server, a cloud provider key, or an installed official Claude, Codex, or Grok CLI with your existing account
+4. Create your first Entity with a name and purpose
+5. Open the Entity and chat while the Hive stays available beside it; reopen the Entity later to continue its saved conversation
 
-No accounts. No data sharing. Just your family and the Entities you control.
+Hive checks an installed CLI connection with a real model response before saving it. Installed Codex and Grok cards let you check an existing connection even when sign-in cannot be confirmed during discovery; discovery itself never sends a model request. Gemini CLI is not supported in this MVP. A desktop app alone does not establish a working CLI connection.
+
+Local storage belongs to you. Cloud providers and installed CLIs use their own accounts and processing policies. The official CLI keeps control of account sign-in and tokens; Abigail does not extract or forward account OAuth tokens. The MVP requires a connected, working model; it does not bundle model weights or pretend a placeholder is local intelligence.
+
+## Unsigned Windows MVP
+
+- Build the self-contained installer with `pwsh ./scripts/build-mvp-windows.ps1 -VerifyInstall`.
+- The installer is written to `dist/windows-mvp/Abigail-windows-x64-setup.exe`. It bundles Hive, Entity Runtime, and both daemons with embedded frontend assets; no development server, SSL.com certificate, or updater key is required.
+- See [the MVP installation and acceptance guide](docs/MVP_WINDOWS.md) for setup, isolated validation, and current scope.
+- Installed Codex `0.153.4` passed real account inference, live streaming, conversation context, and Entity/Hive restart acceptance without an injected API key. The final unsigned installer and eight-stage desktop workflow are verified. Grok Build `0.2.93` and Claude passed failed-connection checks without saving a default; their real inference awaits user sign-in with `grok login` and `claude auth login`.
+- Hive alone opens the embedded memory store. Runtime processes access only their own Entity database through a Hive-issued lease, avoiding competing filesystem locks.
+- Model setup applies to the next conversation turn. Installed CLI connections are chat-only: native tools and extensions must be disabled or the connection is rejected. Tools requiring mentor confirmation cannot silently execute from chat or background jobs.
+- Claude Code integration uses the unmodified official CLI and each user's own account, subject to [Anthropic's product-use conditions](https://code.claude.com/docs/en/legal-and-compliance#can-customers-offer-claude-code-in-their-products). The current Codex account path is for local or open-source use; commercial or hosted distribution needs the applicable approved [Sign in with ChatGPT integration](https://learn.chatgpt.com/docs/app-server#auth-endpoints).
 
 ## Current Dev Note
 
@@ -33,6 +45,7 @@ No accounts. No data sharing. Just your family and the Entities you control.
 - The implementation uses two desktop app roots: `Abigail Hive` for control-plane/admin work and `Abigail Entity Runtime` for chat/runtime work. The family-facing installer must still expose one `Abigail` app icon and start the internal pieces automatically.
 - `beta` is the permanent UAT branch. Iterative work lands there first and produces tagged beta installer prereleases; `main` receives only promoted stable changes.
 - Default local builds and installer validation are intentionally unsigned and updater-free during stabilization. Final OV signing happens later on the dedicated release-signing system.
+- Signed Windows releases use the [SSL.com signing setup and verification guide](docs/WINDOWS_SSL_COM_SIGNING.md).
 - Repeatable release automation is documented in [`docs/RELEASE_RUNBOOK.md`](docs/RELEASE_RUNBOOK.md). The active full installer release lane currently builds the Windows one-step installer; Apple/macOS builds are temporarily removed from the matrix.
 - UI and UX work must follow the Abigail design system in [`docs/design/README.md`](docs/design/README.md).
 

@@ -3,7 +3,9 @@
 pub mod anthropic;
 pub mod candle;
 pub mod cli_provider;
+mod codex_cli;
 pub mod download;
+mod grok_cli;
 pub mod local_http;
 pub mod openai;
 pub mod openai_compatible;

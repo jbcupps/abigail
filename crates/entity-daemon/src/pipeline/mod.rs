@@ -349,6 +349,13 @@ mod tests {
         let response = outcome.expect("turn should succeed");
         assert_eq!(response.reply, "pipeline says hello");
         assert_eq!(response.session_id.as_deref(), Some("session-1"));
+        let persisted = state.memory.recent_turns("session-1", 10).unwrap();
+        assert!(
+            persisted
+                .iter()
+                .any(|turn| turn.role == "assistant" && turn.content == response.reply),
+            "A completed turn must already be saved before its HTTP/SSE acknowledgement"
+        );
         // The turn context must be consumed by the ego stage.
         assert!(state.turns.take(&correlation_id).is_none());
 

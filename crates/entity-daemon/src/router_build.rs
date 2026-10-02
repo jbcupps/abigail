@@ -7,6 +7,10 @@
 use abigail_router::IdEgoRouter;
 use hive_core::ProviderConfig;
 
+pub(crate) fn is_supported_cli_provider(provider: &str) -> bool {
+    matches!(provider, "claude-cli" | "codex-cli" | "grok-cli")
+}
+
 pub fn parse_routing_mode(s: &str) -> abigail_core::RoutingMode {
     match s {
         "EgoPrimary" | "TierBased" | "IdPrimary" | "Council" => {
@@ -19,13 +23,9 @@ pub fn parse_routing_mode(s: &str) -> abigail_core::RoutingMode {
 
 /// Build providers and a router from the Hive's resolved provider config.
 pub async fn build_router(provider_config: ProviderConfig) -> IdEgoRouter {
-    let cli_permission_mode = provider_config
-        .cli_permission_mode
-        .as_deref()
-        .and_then(|s| {
-            serde_json::from_str::<abigail_core::CliPermissionMode>(&format!("\"{s}\"")).ok()
-        })
-        .unwrap_or_default();
+    // Runtime tool approval is not exposed by the MVP. Never pass a stored
+    // skip-permissions preference to an independently operating CLI model.
+    let cli_permission_mode = abigail_core::CliPermissionMode::AllowListOnly;
 
     let ego_api_key = provider_config
         .ego_api_key
@@ -33,14 +33,26 @@ pub async fn build_router(provider_config: ProviderConfig) -> IdEgoRouter {
         .filter(|key| !key.trim().is_empty());
     let hive_config = abigail_hive::HiveConfig {
         local_llm_base_url: provider_config.local_llm_base_url,
-        ego_provider: provider_config.ego_provider_name.map(|provider| {
-            // API-key providers get their key; CLI providers use system auth.
-            let auth = match ego_api_key {
-                Some(key) => abigail_hive::ProviderAuth::ApiKey(key),
-                None => abigail_hive::ProviderAuth::System,
-            };
-            abigail_hive::ProviderSelection { provider, auth }
-        }),
+        ego_provider: provider_config
+            .ego_provider_name
+            .filter(|provider| {
+                if provider.ends_with("-cli") && !is_supported_cli_provider(provider) {
+                    tracing::warn!(
+                        "This CLI model provider has no supported read-only integration"
+                    );
+                    false
+                } else {
+                    true
+                }
+            })
+            .map(|provider| {
+                // API-key providers get their key; CLI providers use system auth.
+                let auth = match ego_api_key {
+                    Some(key) => abigail_hive::ProviderAuth::ApiKey(key),
+                    None => abigail_hive::ProviderAuth::System,
+                };
+                abigail_hive::ProviderSelection { provider, auth }
+            }),
         ego_model: provider_config.ego_model,
         routing_mode: parse_routing_mode(&provider_config.routing_mode),
         cli_permission_mode,

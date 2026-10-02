@@ -29,7 +29,7 @@ async fn health_returns_200() {
 }
 
 #[tokio::test]
-async fn runtime_exposes_session_and_outbox_status() {
+async fn runtime_protects_session_lease_and_exposes_outbox_status() {
     if std::env::var("ABIGAIL_DAEMON_INTEGRATION").is_err() {
         eprintln!("Skipping: set ABIGAIL_DAEMON_INTEGRATION=1 to run daemon integration tests");
         return;
@@ -37,37 +37,24 @@ async fn runtime_exposes_session_and_outbox_status() {
     let cluster = cluster().await;
     let client = reqwest::Client::new();
 
-    let mut session: serde_json::Value = serde_json::Value::Null;
-    for attempt in 0..15u32 {
-        let resp = client
-            .get(format!("{}/v1/session/status", cluster.entity_url()))
-            .send()
-            .await;
-        if let Ok(r) = resp {
-            if let Ok(v) = r.json::<serde_json::Value>().await {
-                session = v;
-                break;
-            }
-        }
-        if attempt < 14 {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-    }
+    let response = client
+        .get(format!("{}/v1/session/status", cluster.entity_url()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN);
+    let session: serde_json::Value = response.json().await.unwrap();
     assert!(
-        !session.is_null(),
-        "session/status never returned a valid JSON response"
+        session["data"].is_null(),
+        "runtime lease must not be public"
     );
-    assert!(session["ok"].as_bool().unwrap_or(false));
-    assert_eq!(
-        session["data"]["lease"]["entity_id"].as_str(),
-        Some(cluster.entity_id.as_str())
-    );
-    assert!(
-        session["data"]["connected_to_hive"]
-            .as_bool()
-            .unwrap_or(false),
-        "runtime should report a healthy Hive connection after startup"
-    );
+    let response = client
+        .post(format!("{}/v1/runtime/sessions", cluster.hive_url()))
+        .json(&serde_json::json!({"entity_id": cluster.entity_id}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN);
 
     let outbox: serde_json::Value = client
         .get(format!("{}/v1/outbox/status", cluster.entity_url()))

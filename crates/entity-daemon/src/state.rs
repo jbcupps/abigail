@@ -23,12 +23,14 @@ use tokio_util::sync::CancellationToken;
 /// handlers without an entity-daemon restart.
 pub struct RouterHandle {
     inner: std::sync::RwLock<Arc<IdEgoRouter>>,
+    provider_config: std::sync::RwLock<Option<serde_json::Value>>,
 }
 
 impl RouterHandle {
     pub fn new(router: Arc<IdEgoRouter>) -> Self {
         Self {
             inner: std::sync::RwLock::new(router),
+            provider_config: std::sync::RwLock::new(None),
         }
     }
 
@@ -37,6 +39,19 @@ impl RouterHandle {
         match self.inner.read() {
             Ok(guard) => guard.clone(),
             Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    pub fn matches_provider_config(&self, config: &serde_json::Value) -> bool {
+        self.provider_config
+            .read()
+            .ok()
+            .is_some_and(|snapshot| snapshot.as_ref() == Some(config))
+    }
+
+    pub fn remember_provider_config(&self, config: serde_json::Value) {
+        if let Ok(mut snapshot) = self.provider_config.write() {
+            *snapshot = Some(config);
         }
     }
 

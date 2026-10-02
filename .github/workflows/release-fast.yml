@@ -75,7 +75,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
         with:
-          toolchain: stable
+          toolchain: 1.97.0
           targets: ${{ matrix.target }}
 
       - name: Determine version

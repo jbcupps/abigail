@@ -1,38 +1,30 @@
-//! Fire-and-forget memory persistence via StreamBroker topic consumer.
+//! Durable chat-turn commits plus background archive topic consumption.
 //!
-//! Instead of blocking the chat request with synchronous `memory.insert_turn()`,
-//! turns are published to `Topic::MemoryArchive` and consumed
-//! asynchronously by a background task.
+//! Chat awaits persistence on a blocking worker before reporting completion.
+//! A separate consumer also accepts turns published to `Topic::MemoryArchive`.
 
 use abigail_memory::{ConversationTurn, MemoryStore};
-use abigail_streaming::{StreamBroker, StreamMessage, SubscriptionHandle, Topic, BUS_STREAM};
+use abigail_streaming::{StreamBroker, SubscriptionHandle, Topic, BUS_STREAM};
 use std::sync::Arc;
 
 const STREAM: &str = BUS_STREAM;
 const TOPIC: &str = Topic::MemoryArchive.as_str();
 const CONSUMER_GROUP: &str = "memory-consumer";
 
-/// Publish a conversation turn to the StreamBroker for async persistence.
-///
-/// This is fire-and-forget: serialization or publish failures are logged but
-/// never propagate to the caller.
-pub fn publish_turn(broker: Arc<dyn StreamBroker>, turn: ConversationTurn) {
-    tokio::spawn(async move {
-        let payload = match serde_json::to_vec(&turn) {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!("Failed to serialize ConversationTurn: {}", e);
-                return;
-            }
-        };
-        let mut msg = StreamMessage::new(payload);
-        msg.headers
-            .insert("session_id".to_string(), turn.session_id.clone());
-        msg.headers.insert("role".to_string(), turn.role.clone());
-        if let Err(e) = broker.publish(STREAM, TOPIC, msg).await {
-            tracing::warn!("Failed to publish conversation turn: {}", e);
-        }
-    });
+/// Persist a committed turn before the HTTP/SSE completion event.
+pub async fn persist_turn(
+    memory: Arc<MemoryStore>,
+    mut turn: ConversationTurn,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        turn.content = abigail_core::redact_secrets(&turn.content);
+        memory
+            .insert_turn_or_ignore(&turn)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Spawn a background consumer that persists conversation turns from the broker

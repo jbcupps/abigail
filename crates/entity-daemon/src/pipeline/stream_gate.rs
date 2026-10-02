@@ -11,8 +11,8 @@
 //! match — the longest minimum today is a Google API key at 39 bytes
 //! (`AIza` + 35), an SSN needs 11 — so a pure cut-on-detect would still leak
 //! the secret's opening bytes. To close that window the relay holds back the
-//! trailing [`HOLDBACK_BYTES`] of content and only flushes the tail once the
-//! stream completes clean.
+//! trailing [`HOLDBACK_BYTES`] of content and only flushes the tail after a
+//! successfully gated final `Done`. Abrupt closure discards the tail.
 
 use abigail_capabilities::cognitive::StreamEvent;
 use tokio::sync::mpsc;
@@ -75,9 +75,9 @@ pub fn spawn_gated_relay(downstream: mpsc::Sender<StreamEvent>) -> mpsc::Sender<
                 }
             }
         }
-        if let Some(out) = downstream {
-            flush_tail(&out, &acc, &mut forwarded).await;
-        }
+        // Channel closure can mean provider failure or cancellation. Without
+        // a clean final Done, the held-back suffix may be a truncated secret
+        // that has not reached the detector's minimum length yet.
     });
     upstream_tx
 }
@@ -156,17 +156,44 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn short_clean_stream_tail_is_flushed_on_close() {
-        let (text, _) = run_relay(&["hi ", "there"], None).await;
+    async fn short_clean_stream_tail_is_flushed_on_final_done() {
+        let (text, done_events) = run_relay(&["hi ", "there"], Some("hi there")).await;
         assert_eq!(text, "hi there");
+        assert_eq!(done_events, 1);
+    }
+
+    #[tokio::test]
+    async fn interrupted_stream_discards_a_truncated_secret_tail() {
+        let preamble = "Here is a sufficiently long clean preamble to exercise incremental \
+                        forwarding before the provider drops its connection unexpectedly. ";
+        // Too short to match the Google-key detector, so retaining the
+        // holdback window is the protection when inference fails mid-key.
+        let partial_reply = format!("{preamble}AIza{}", "x".repeat(12));
+        let tokens = char_tokens(&partial_reply);
+        let token_refs: Vec<&str> = tokens.iter().map(String::as_str).collect();
+        let (text, done_events) = run_relay(&token_refs, None).await;
+        assert!(!text.is_empty(), "clean preamble should still stream");
+        assert!(
+            preamble.starts_with(&text),
+            "abrupt closure released the held-back secret prefix: {text:?}"
+        );
+        assert_eq!(done_events, 0);
+    }
+
+    #[tokio::test]
+    async fn interrupted_short_stream_has_no_success_or_tail_tokens() {
+        let (text, done_events) = run_relay(&["unfinished reply"], None).await;
+        assert!(text.is_empty());
+        assert_eq!(done_events, 0);
     }
 
     #[tokio::test]
     async fn multibyte_content_never_splits_a_char() {
         let full = "héllo wörld 👋 ".repeat(12);
         let tokens: Vec<&str> = full.split_inclusive(' ').collect();
-        let (text, _) = run_relay(&tokens, None).await;
+        let (text, done_events) = run_relay(&tokens, Some(&full)).await;
         assert_eq!(text, full);
+        assert_eq!(done_events, 1);
     }
 
     #[tokio::test]

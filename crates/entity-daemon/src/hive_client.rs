@@ -120,10 +120,19 @@ impl HiveClient {
         entity_id: &str,
         runtime_id: Option<String>,
     ) -> anyhow::Result<RuntimeSessionLease> {
+        let bootstrap = std::env::var("ABIGAIL_RUNTIME_BOOTSTRAP")
+            .ok()
+            .filter(|token| !token.is_empty())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Open this Entity through the Abigail Hive to authorize its runtime"
+                )
+            })?;
         let url = format!("{}/v1/runtime/sessions", self.base_url);
         let resp: ApiEnvelope<RuntimeSessionLease> = self
             .client
             .post(&url)
+            .bearer_auth(bootstrap)
             .json(&RuntimeSessionRequest {
                 entity_id: entity_id.to_string(),
                 runtime_id,

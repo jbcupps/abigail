@@ -57,14 +57,6 @@ impl LlmProvider for CandleProvider {
             });
         }
 
-        // For actual chat requests, return a helpful message instead of an error.
-        // This ensures the fallback chain always produces a user-visible response
-        // when Ego fails and Id (CandleProvider stub) is the only option.
-        Ok(CompletionResponse {
-            content: "I need a cloud API key or local LLM to answer that. \
-                      You can configure one in Settings or during the birth sequence."
-                .into(),
-            tool_calls: None,
-        })
+        Err(anyhow::anyhow!("No language model is connected. Add a cloud model or connect a running local model in Abigail Hive."))
     }
 }
