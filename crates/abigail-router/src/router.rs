@@ -700,7 +700,7 @@ impl IdEgoRouter {
             }
             Err(e) => {
                 trace.record_error(self.id_label(), None, &e.to_string(), t0);
-                if let Some(ref ego) = self.ego.as_ref().filter(|_| allow_ego_fallback) {
+                if let Some(ego) = self.ego.as_ref().filter(|_| allow_ego_fallback) {
                     tracing::warn!(
                         "Id provider failed{}, falling back to Ego: {}",
                         if is_stream { " (stream)" } else { "" },
