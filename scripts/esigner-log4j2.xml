@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Vendor diagnostic logs can contain authentication details. Disable them;
+     the caller captures console output privately and verifies signed bytes. -->
+<Configuration status="OFF">
+  <Loggers>
+    <Root level="OFF" />
+  </Loggers>
+</Configuration>

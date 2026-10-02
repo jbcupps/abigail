@@ -15,6 +15,9 @@ artifacts/
 release-assets/
 output/
 
+# Verified vendor signing tools; never commit executable downloads or credentials.
+/.cache/signing/
+
 # Staged portable build output (large binaries)
 /dist/
 

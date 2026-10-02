@@ -59,6 +59,12 @@ jobs:
         shell: pwsh
         run: ./scripts/test_windows_signing.ps1
 
+      - name: Verify SSL.com cloud signing failure gates without credentials
+        shell: pwsh
+        run: |
+          ./scripts/test_esigner_cloud.ps1
+          ./scripts/tests/test_signed_installer_state.ps1
+
       - name: Check Hive and Runtime apps
         run: cargo check -p abigail-hive-app -p abigail-entity-runtime-app
 
