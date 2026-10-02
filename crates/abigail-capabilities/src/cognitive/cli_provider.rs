@@ -208,7 +208,7 @@ enum CliAuthStrategy {
 /// Resolve a native executable, without executing npm's shell wrappers. Windows
 /// desktop launches may inherit an older PATH, so include known per-user installs.
 pub(crate) fn resolve_cli_binary(variant: CliVariant) -> anyhow::Result<PathBuf> {
-    let mut directories: Vec<PathBuf> = std::env::var_os("PATH")
+    let directories: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|path| {
             std::env::split_paths(&path)
                 .filter(|entry| entry.is_absolute())
@@ -216,7 +216,8 @@ pub(crate) fn resolve_cli_binary(variant: CliVariant) -> anyhow::Result<PathBuf>
         })
         .unwrap_or_default();
     #[cfg(windows)]
-    {
+    let directories = {
+        let mut directories = directories;
         if let Some(profile) = std::env::var_os("USERPROFILE") {
             let profile = PathBuf::from(profile);
             directories.extend([
@@ -228,7 +229,8 @@ pub(crate) fn resolve_cli_binary(variant: CliVariant) -> anyhow::Result<PathBuf>
         if let Some(appdata) = std::env::var_os("APPDATA") {
             directories.push(PathBuf::from(appdata).join("npm"));
         }
-    }
+        directories
+    };
     resolve_from_directories(variant, &directories).ok_or_else(|| anyhow::anyhow!(
         "{} is not installed in a supported location. Install its official CLI, then reopen Abigail.", variant
     ))
