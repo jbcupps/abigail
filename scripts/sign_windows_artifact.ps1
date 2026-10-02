@@ -14,7 +14,7 @@ if ($name -in @('NSISdl.dll', 'StartMenu.dll', 'System.dll', 'nsDialogs.dll', 'n
     Write-Host "Preserving third-party helper: $name"
     exit 0
 }
-if ([IO.Path]::GetExtension($resolved) -ne '.exe') { throw 'Unexpected cloud-signing input; only Abigail executables and NSIS are supported.' }
+$inputRecord = Assert-AbigailCloudSigningInput -Path $resolved
 if ($env:ABIGAIL_ESIGNER_AUTH_MODE -and $env:ABIGAIL_ESIGNER_AUTH_MODE -ne 'totp') {
     throw 'Cloud signing requires automated TOTP authorization.'
 }
@@ -31,19 +31,38 @@ function Save-SignedMain {
         Copy-Item -LiteralPath $resolved -Destination $capture -Force
     }
 }
-$existing = Get-AuthenticodeSignature -LiteralPath $resolved
-if ($existing.Status -eq 'Valid' -and $existing.SignerCertificate.Thumbprint -eq $thumbprint) {
-    $null = Assert-AbigailSignature -Path $resolved -Thumbprint $thumbprint
-    Save-SignedMain
-    Write-Host "Verified existing Abigail signature: $name"
-    exit 0
+function Copy-VerifiedTemporaryUninstaller {
+    if ($inputRecord.temporaryUninstaller) {
+        $record = Assert-AbigailSignature -Path $signingInput -Thumbprint $thumbprint
+        Copy-Item -LiteralPath $signingInput -Destination $resolved -Force
+        if ((Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash -ne $record.sha256) {
+            throw 'NSIS temporary uninstaller differs from its verified signed executable.'
+        }
+        $null = Assert-AbigailSignature -Path $resolved -Thumbprint $thumbprint
+    }
 }
-if ($existing.SignerCertificate) { throw 'Refusing to replace an unexpected or invalid existing signature.' }
-$toolRoot = if ($env:ESIGNER_TOOL_PATH) { $env:ESIGNER_TOOL_PATH } else { Join-Path $PSScriptRoot '../.cache/signing/CodeSignTool' }
-$tool = Get-AbigailCodeSignTool -ToolRoot $toolRoot
+$temporaryDirectory = $null
+$signingInput = $resolved
 $arguments = $null
 try {
-    $arguments = @('sign', "-username=$env:ESIGNER_USERNAME", "-password=$env:ESIGNER_PASSWORD", "-credential_id=$env:ESIGNER_CREDENTIAL_ID", "-totp_secret=$env:ESIGNER_TOTP_SECRET", "-input_file_path=$resolved", '-override')
+    if ($inputRecord.temporaryUninstaller) {
+        # Give CodeSignTool an explicit executable name; NSIS passes nst*.tmp.
+        $temporaryDirectory = New-AbigailSigningDirectory
+        $signingInput = Join-Path $temporaryDirectory 'uninstaller.exe'
+        Copy-Item -LiteralPath $resolved -Destination $signingInput
+    }
+    $existing = Get-AuthenticodeSignature -LiteralPath $signingInput
+    if ($existing.Status -eq 'Valid' -and $existing.SignerCertificate.Thumbprint -eq $thumbprint) {
+        $null = Assert-AbigailSignature -Path $signingInput -Thumbprint $thumbprint
+        Copy-VerifiedTemporaryUninstaller
+        Save-SignedMain
+        Write-Host "Verified existing Abigail signature: $name"
+        exit 0
+    }
+    if ($existing.SignerCertificate) { throw 'Refusing to replace an unexpected or invalid existing signature.' }
+    $toolRoot = if ($env:ESIGNER_TOOL_PATH) { $env:ESIGNER_TOOL_PATH } else { Join-Path $PSScriptRoot '../.cache/signing/CodeSignTool' }
+    $tool = Get-AbigailCodeSignTool -ToolRoot $toolRoot
+    $arguments = @('sign', "-username=$env:ESIGNER_USERNAME", "-password=$env:ESIGNER_PASSWORD", "-credential_id=$env:ESIGNER_CREDENTIAL_ID", "-totp_secret=$env:ESIGNER_TOTP_SECRET", "-input_file_path=$signingInput", '-override')
     $exitCode = Invoke-AbigailCodeSignTool -Tool $tool -Arguments $arguments
     if ($exitCode -ne 0) {
         $reason = switch ($exitCode) {
@@ -55,9 +74,14 @@ try {
         }
         throw "SSL.com signing failed (exit $exitCode). $reason No artifact will be published."
     }
-    $null = Assert-AbigailSignature -Path $resolved -Thumbprint $thumbprint
+    $null = Assert-AbigailSignature -Path $signingInput -Thumbprint $thumbprint
+    Copy-VerifiedTemporaryUninstaller
     Save-SignedMain
     Write-Host "Signed and verified: $name"
 } finally {
+    if ($temporaryDirectory) {
+        if (Test-Path -LiteralPath $signingInput) { Remove-Item -LiteralPath $signingInput -Force }
+        Remove-Item -LiteralPath $temporaryDirectory -Force
+    }
     $arguments = $null
 }

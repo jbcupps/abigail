@@ -158,6 +158,8 @@ foreach ($resource in $resources) {
 $previousTargetDir = $env:CARGO_TARGET_DIR
 $previousTauriConfig = $env:TAURI_CONFIG
 $previousSignedMainPath = $env:ABIGAIL_SIGNED_MAIN_PATH
+$previousProcessPath = $env:PATH
+$previousSignToolPath = $env:TAURI_WINDOWS_SIGNTOOL_PATH
 $previousSigningEnvironment = @{}
 $restoreFiles = @()
 try {
@@ -231,8 +233,13 @@ try {
     Assert-PreparedState $state
     $tauriCli = Resolve-TauriCli
     Import-Module (Join-Path $PSScriptRoot 'windows-signing.psm1') -Force
-    $null = Get-AbigailSignTool
-    $null = Get-AbigailCodeSignTool
+    $signTool = Get-AbigailSignTool
+    $codeSignToolRoot = if ($env:ESIGNER_TOOL_PATH) { $env:ESIGNER_TOOL_PATH } else { Join-Path $PSScriptRoot '../.cache/signing/CodeSignTool' }
+    $null = Get-AbigailCodeSignTool -ToolRoot $codeSignToolRoot
+    # Tauri verifies resource signatures through its own SDK discovery. Its
+    # resolver uses this explicit path rather than the process PATH alone.
+    $env:TAURI_WINDOWS_SIGNTOOL_PATH = $signTool
+    $env:PATH = (Split-Path $signTool) + [IO.Path]::PathSeparator + $previousProcessPath
     if ($Phase -eq 'Check') {
         Write-Host "Prepared source, configuration, four executables, and signing tools checked: $($state.sourceCommit)"
         return
@@ -349,6 +356,8 @@ try {
         $env:CARGO_TARGET_DIR = $previousTargetDir
         $env:TAURI_CONFIG = $previousTauriConfig
         $env:ABIGAIL_SIGNED_MAIN_PATH = $previousSignedMainPath
+        $env:PATH = $previousProcessPath
+        $env:TAURI_WINDOWS_SIGNTOOL_PATH = $previousSignToolPath
         foreach ($name in $previousSigningEnvironment.Keys) {
             [Environment]::SetEnvironmentVariable($name, $previousSigningEnvironment[$name])
         }

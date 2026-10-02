@@ -8,6 +8,22 @@ function ConvertTo-AbigailCodeSignArgument {
     '"' + $Value.Replace('\', '\\').Replace('"', '\"').Replace("`r", '\r').Replace("`n", '\n').Replace("`t", '\t') + '"'
 }
 
+function New-AbigailSigningDirectory {
+    $directory = Join-Path ([IO.Path]::GetTempPath()) ('abigail-sign-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $directory | Out-Null
+    try {
+        $acl = [Security.AccessControl.DirectorySecurity]::new()
+        $acl.SetAccessRuleProtection($true, $false)
+        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
+        Set-Acl -LiteralPath $directory -AclObject $acl
+        return $directory
+    } catch {
+        Remove-Item -LiteralPath $directory -Force
+        throw 'Could not create a protected temporary signing directory.'
+    }
+}
+
 function Invoke-AbigailSigningProcess {
     param(
         [Parameter(Mandatory)][Diagnostics.ProcessStartInfo]$StartInfo,
@@ -80,15 +96,9 @@ function Invoke-AbigailCodeSignTool {
         [Parameter(Mandatory)][string[]]$Arguments,
         [ValidateRange(1, 1800)][int]$TimeoutSeconds = 600
     )
-    $privateDir = Join-Path ([IO.Path]::GetTempPath()) ('abigail-sign-' + [guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $privateDir | Out-Null
+    $privateDir = New-AbigailSigningDirectory
     $argumentFile = Join-Path $privateDir 'java.args'
     try {
-        $acl = [Security.AccessControl.DirectorySecurity]::new()
-        $acl.SetAccessRuleProtection($true, $false)
-        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
-        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
-        Set-Acl -LiteralPath $privateDir -AclObject $acl
         [IO.File]::WriteAllLines($argumentFile, @($Arguments | ForEach-Object { ConvertTo-AbigailCodeSignArgument $_ }), [Text.UTF8Encoding]::new($false))
         $start = [Diagnostics.ProcessStartInfo]::new()
         $start.FileName = $Tool.java
@@ -102,4 +112,4 @@ function Invoke-AbigailCodeSignTool {
     }
 }
 
-Export-ModuleMember -Function ConvertTo-AbigailCodeSignArgument, Invoke-AbigailSigningProcess, Invoke-AbigailCodeSignTool
+Export-ModuleMember -Function ConvertTo-AbigailCodeSignArgument, New-AbigailSigningDirectory, Invoke-AbigailSigningProcess, Invoke-AbigailCodeSignTool

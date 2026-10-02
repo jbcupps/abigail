@@ -45,6 +45,50 @@ function Get-AbigailCodeSignTool {
     }
 }
 
+function Assert-AbigailCloudSigningInput {
+    param([Parameter(Mandatory)][string]$Path)
+    $resolved = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
+    $item = Get-Item -LiteralPath $resolved -Force
+    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Cloud signing requires a regular executable file.'
+    }
+    $extension = [IO.Path]::GetExtension($resolved)
+    $temporaryUninstaller = $extension -eq '.tmp'
+    if ($temporaryUninstaller) {
+        $tempRoot = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath ([IO.Path]::GetTempPath())).Path).TrimEnd([IO.Path]::DirectorySeparatorChar)
+        $parent = [IO.Path]::GetFullPath([IO.Path]::GetDirectoryName($resolved)).TrimEnd([IO.Path]::DirectorySeparatorChar)
+        if ([IO.Path]::GetFileName($resolved) -notmatch '^nst[0-9a-f]+\.tmp$' -or
+            -not [string]::Equals($parent, $tempRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Only an NSIS uninstaller temporary file directly in Windows Temp is supported.'
+        }
+    } elseif ($extension -ne '.exe') {
+        throw 'Unexpected cloud-signing input; only Abigail executables and NSIS are supported.'
+    }
+    $stream = [IO.File]::OpenRead($resolved)
+    $reader = [IO.BinaryReader]::new($stream)
+    try {
+        if ($stream.Length -lt 64 -or $reader.ReadUInt16() -ne 0x5a4d) { throw 'Cloud signing requires valid PE executable headers.' }
+        $stream.Position = 0x3c
+        $offset = $reader.ReadUInt32()
+        if ($offset -lt 64 -or $offset + [long]24 -gt $stream.Length) { throw 'Cloud signing requires valid PE executable headers.' }
+        $stream.Position = $offset
+        if ($reader.ReadUInt32() -ne 0x4550) { throw 'Cloud signing requires valid PE executable headers.' }
+        $machine = $reader.ReadUInt16()
+        $sections = $reader.ReadUInt16()
+        $stream.Position = $offset + 20
+        $optionalSize = $reader.ReadUInt16()
+        $characteristics = $reader.ReadUInt16()
+        $magic = $reader.ReadUInt16()
+        $minimumOptionalSize = switch ($magic) { 0x10b { 96 }; 0x20b { 112 }; default { 0 } }
+        if ($machine -notin @(0x14c, 0x8664) -or $sections -lt 1 -or $sections -gt 96 -or
+            ($characteristics -band 2) -eq 0 -or $minimumOptionalSize -eq 0 -or $optionalSize -lt $minimumOptionalSize -or
+            $offset + [long]24 + $optionalSize + [long]$sections * 40 -gt $stream.Length) {
+            throw 'Cloud signing requires valid PE executable headers.'
+        }
+    } finally { $reader.Dispose(); $stream.Dispose() }
+    [pscustomobject]@{ path = $resolved; temporaryUninstaller = $temporaryUninstaller }
+}
+
 function Read-AbigailPublicCertificates {
     param([Parameter(Mandatory)][string]$Path)
     $bytes = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $Path).Path)
@@ -213,4 +257,4 @@ function Assert-AbigailSignature {
     }
 }
 
-Export-ModuleMember -Function ConvertTo-AbigailThumbprint, Get-AbigailCodeSignTool, Read-AbigailPublicCertificates, Assert-AbigailPublicSigningCertificate, Get-AbigailSignTool, Get-AbigailPeSignature, Assert-AbigailSignature, Assert-AbigailSha256PeDigest, Assert-AbigailSha256TimestampDigest
+Export-ModuleMember -Function ConvertTo-AbigailThumbprint, Get-AbigailCodeSignTool, Assert-AbigailCloudSigningInput, Read-AbigailPublicCertificates, Assert-AbigailPublicSigningCertificate, Get-AbigailSignTool, Get-AbigailPeSignature, Assert-AbigailSignature, Assert-AbigailSha256PeDigest, Assert-AbigailSha256TimestampDigest
