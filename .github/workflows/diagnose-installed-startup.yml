@@ -1,0 +1,81 @@
+name: Diagnose installed signed startup
+
+on:
+  push:
+    branches:
+      - codex/diagnose-signed-installer-startup
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  installed-startup:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout diagnostic source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '20'
+
+      - name: Download exact verified candidate artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportDir = Join-Path $PWD 'artifacts/installed-startup-diagnostics'
+          $downloadDir = Join-Path $PWD 'target/manual-test/installed-startup-downloads'
+          New-Item -ItemType Directory -Force -Path $reportDir, $downloadDir | Out-Null
+          $status = [ordered]@{ source_run = 37075547249; downloaded = $false }
+          try {
+            $run = (& gh api repos/jbcupps/abigail/actions/runs/37075547249 | ConvertFrom-Json)
+            if ($LASTEXITCODE -ne 0 -or $run.head_sha -ne '93d96f11adb8f1094208e281ad46755b877c5a03' -or
+                $run.status -ne 'completed' -or $run.conclusion -ne 'success') {
+              throw 'The pinned signed candidate run is not the expected successful source.'
+            }
+            $listing = (& gh api repos/jbcupps/abigail/actions/runs/37075547249/artifacts | ConvertFrom-Json)
+            if ($LASTEXITCODE -ne 0) { throw 'Could not list candidate artifacts.' }
+            $limits = @{
+              'abigail-installer-windows-latest' = 300MB
+              'abigail-installer-validation-windows-latest' = 32MB
+              'abigail-signatures-windows-latest' = 2MB
+            }
+            foreach ($name in $limits.Keys) {
+              $matches = @($listing.artifacts | Where-Object { $_.name -eq $name })
+              if ($matches.Count -ne 1 -or $matches[0].expired -or $matches[0].size_in_bytes -gt $limits[$name]) {
+                throw 'A pinned candidate artifact is missing, expired, duplicated, or oversized.'
+              }
+              & gh run download 37075547249 --repo jbcupps/abigail --name $name --dir (Join-Path $downloadDir $name)
+              if ($LASTEXITCODE -ne 0) { throw 'Candidate artifact download failed.' }
+            }
+            [IO.File]::WriteAllText((Join-Path $downloadDir 'run.json'), ($run | ConvertTo-Json -Depth 8))
+            $status.downloaded = $true
+          } finally {
+            [IO.File]::WriteAllText((Join-Path $reportDir 'download-status.json'), ($status | ConvertTo-Json))
+          }
+
+      - name: Compare deep short deep isolated synthetic startup
+        run: |
+          ./scripts/tests/diagnose-installed-startup.ps1 `
+            -DownloadDir (Join-Path $PWD 'target/manual-test/installed-startup-downloads') `
+            -ReportDir (Join-Path $PWD 'artifacts/installed-startup-diagnostics')
+
+      - name: Upload bounded selected startup diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
+        with:
+          name: installed-startup-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/installed-startup-diagnostics
+          if-no-files-found: error
+          retention-days: 7
