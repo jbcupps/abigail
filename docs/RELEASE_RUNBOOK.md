@@ -2,6 +2,14 @@
 
 This repo has two repeatable GitHub Actions release lanes.
 
+Rust is pinned to the tested `1.97.0` compiler in `rust-toolchain.toml` and all
+CI/release setup steps. The repository toolchain uses the minimal profile with
+`rustfmt` and `clippy`; CodeQL autobuild and local Cargo commands also inherit
+the repository pin. This avoids compiler drift between local validation and
+hosted builds: floating `stable` advanced to Rust 1.99 and introduced Clippy
+errors in `async_trait` generated code. Upgrade the pin only with coordinated
+workspace tests, formatting, Clippy, and installer validation.
+
 ## Branch Channels
 
 - `beta` is the permanent iteration and UAT branch. Merge implementation PRs there first.
