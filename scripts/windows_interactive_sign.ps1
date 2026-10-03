@@ -137,4 +137,12 @@ if ($LASTEXITCODE -ne 0) {
 }
 foreach ($file in $resolvedFiles) {
     Assert-WindowsArtifactSignature -Path $file -Thumbprint $CertificateThumbprint -SignToolPath $SignToolPath | Out-Null
+    # Tauri restores the pre-bundle launcher after embedding its NSIS/MSI marker.
+    # Keep the exact signed launcher supplied to the installer for verification.
+    if ([IO.Path]::GetFileName($file) -eq 'Abigail.exe' -and
+        -not [string]::IsNullOrWhiteSpace($env:ABIGAIL_SIGNED_MAIN_PATH)) {
+        $capturePath = [IO.Path]::GetFullPath($env:ABIGAIL_SIGNED_MAIN_PATH)
+        New-Item -ItemType Directory -Path (Split-Path $capturePath -Parent) -Force | Out-Null
+        Copy-Item -LiteralPath $file -Destination $capturePath -Force
+    }
 }

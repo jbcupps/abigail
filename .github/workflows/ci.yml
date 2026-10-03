@@ -59,16 +59,22 @@ jobs:
         shell: pwsh
         run: ./scripts/test_windows_signing.ps1
 
+      - name: Verify SSL.com cloud signing failure gates without credentials
+        shell: pwsh
+        run: |
+          ./scripts/test_esigner_cloud.ps1
+          ./scripts/tests/test_signed_installer_state.ps1
+
       - name: Check Hive and Runtime apps
         run: cargo check -p abigail-hive-app -p abigail-entity-runtime-app
 
-      - name: Run Hive daemon contract tests
-        run: cargo test -p hive-daemon --test integration
-        env:
-          ABIGAIL_DAEMON_INTEGRATION: "1"
-
       - name: Build daemon binaries for integration tests
         run: cargo build -p hive-daemon -p entity-daemon
+
+      - name: Run Hive daemon contract tests
+        run: cargo test -p hive-daemon --test integration --test startup
+        env:
+          ABIGAIL_DAEMON_INTEGRATION: "1"
 
       - name: Run Entity runtime contract tests
         run: cargo test -p entity-daemon --test integration

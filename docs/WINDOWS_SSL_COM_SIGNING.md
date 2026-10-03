@@ -1,5 +1,9 @@
 # SSL.com Windows signing for Abigail
 
+For GitHub Actions using the existing eSigner cloud certificate, follow the
+[automated cloud signing guide](windows-cloud-signing.md). The certificate-store
+instructions below apply to local hardware-token/CKA builds.
+
 The supported local signing entry point is `scripts/build-signed-installer.ps1`.
 It builds `hive-app` plus Entity Runtime and both daemons, signs the three internal
 resources before packaging, uses Tauri's signing hook for Hive and the installers,
