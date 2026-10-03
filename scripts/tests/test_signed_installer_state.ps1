@@ -25,6 +25,18 @@ $Compression = 'zlib'
 $resources = @('resources/abigail-entity-runtime-app.exe', 'resources/hive-daemon.exe', 'resources/entity-daemon.exe')
 $testRoot = Join-Path $repoRoot ('target/manual-test/signed-builder-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Path $testRoot | Out-Null
+$work = $testRoot
+$fixtureModule = Join-Path $PSScriptRoot 'windows_runtime_fixtures.mjs'
+function Write-TestPe([string]$Path, [string]$Import = 'KERNEL32.dll') {
+    $fixtureWriter = @'
+import { writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+const { createPeFixture } = await import(pathToFileURL(process.argv[2]).href);
+writeFileSync(process.argv[3], createPeFixture({ imports: [process.argv[4]], delayImports: [] }));
+'@
+    & node --input-type=module -e $fixtureWriter -- signed-state-fixture-writer $fixtureModule $Path $Import
+    if ($LASTEXITCODE -ne 0) { throw 'Could not write the synthetic Windows executable fixture.' }
+}
 $configPath = Join-Path $testRoot 'config.json'
 $config = @{
     version = $Version; mainBinaryName = 'Abigail'
@@ -34,7 +46,7 @@ Write-BuildJson $config $configPath
 $binaryInputs = @(foreach ($index in 0..3) {
     $source = Join-Path $testRoot "source-$index.exe"
     $prepared = Join-Path $testRoot "prepared-$index.exe"
-    [IO.File]::WriteAllText($source, "synthetic prepared bytes $index")
+    Write-TestPe $source
     Copy-Item -LiteralPath $source -Destination $prepared
     [pscustomobject]@{ source_path = $source; prepared_path = $prepared; relative_path = "payload-$index.exe" }
 })
@@ -87,6 +99,28 @@ foreach ($path in @($binaryInputs[0].source_path, $binaryInputs[0].prepared_path
         [IO.File]::WriteAllText($path, 'changed synthetic bytes')
         Assert-Rejected 'changed executable bytes' { Assert-PreparedState $state } 'bytes changed'
     } finally { [IO.File]::WriteAllBytes($path, $original) }
+}
+$originalSource = [IO.File]::ReadAllBytes($binaryInputs[0].source_path)
+$originalPrepared = [IO.File]::ReadAllBytes($binaryInputs[0].prepared_path)
+try {
+    # Matching file hashes must not make an undeployed CRT dependency safe.
+    Write-TestPe $binaryInputs[0].source_path 'VCRUNTIME140.dll'
+    Copy-Item -LiteralPath $binaryInputs[0].source_path -Destination $binaryInputs[0].prepared_path -Force
+    $mutated = Copy-TestState
+    $mutated.binaries[0].sha256 = (Get-FileHash -LiteralPath $binaryInputs[0].source_path -Algorithm SHA256).Hash
+    Assert-Rejected 'undeployed runtime import with matching hashes' { Assert-PreparedState $mutated } 'node failed with exit code'
+    $runtimeReport = Get-Content -LiteralPath (Join-Path $work 'windows-runtime.json') -Raw | ConvertFrom-Json
+    $changedExecutable = @($runtimeReport.executables | Where-Object { $_.path -eq $binaryInputs[0].prepared_path })
+    if ($runtimeReport.passed -ne $false -or $changedExecutable.Count -ne 1 -or
+        $changedExecutable[0].sha256 -ne $mutated.binaries[0].sha256 -or
+        $changedExecutable[0].requires_external_vc_runtime -ne $true -or
+        'VCRUNTIME140.dll' -notin @($changedExecutable[0].external_vc_runtime) -or
+        @($runtimeReport.errors | Where-Object { $_.code -eq 'EXTERNAL_VC_RUNTIME' }).Count -ne 1) {
+        throw 'The real import checker did not reject the exact synthetic CRT-dependent bytes.'
+    }
+} finally {
+    [IO.File]::WriteAllBytes($binaryInputs[0].source_path, $originalSource)
+    [IO.File]::WriteAllBytes($binaryInputs[0].prepared_path, $originalPrepared)
 }
 $originalConfig = [IO.File]::ReadAllBytes($configPath)
 try {

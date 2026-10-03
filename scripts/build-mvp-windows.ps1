@@ -150,6 +150,10 @@ try {
         }
         $shellBytes = $null
     }
+    $runtimeInputs = @($mainBinary)
+    $runtimeInputs += @('abigail-entity-runtime-app.exe', 'hive-daemon.exe', 'entity-daemon.exe') |
+        ForEach-Object { Join-Path $binaryDir $_ }
+    Invoke-Checked 'node' (@((Join-Path $PSScriptRoot 'check_windows_runtime.mjs')) + $runtimeInputs) $repoRoot
     # bundle targets mainBinaryName directly; build normally does the rename.
     # Copy here because this lane deliberately bundles an already built app.
     $bundledMainBinary = Join-Path $binaryDir 'Abigail.exe'

@@ -52,6 +52,9 @@ jobs:
           cd hive-app/src-ui && npm ci
           cd ../../entity-runtime-app/src-ui && npm ci
 
+      - name: Verify Windows runtime dependency gates
+        run: node --test scripts/tests/test_windows_runtime.mjs
+
       - name: Verify unsigned stabilization lane
         run: node scripts/check_unsigned_stabilization.mjs
 
