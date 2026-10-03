@@ -6,6 +6,22 @@ Windows runner; installing eSigner CKA or exporting a private key is unnecessary
 The unsigned MVP remains available. Cloud signing requires neither an updater
 key nor an MSI build.
 
+## Windows runtime portability
+
+All four product executables link the MSVC runtime statically through the root
+Cargo configuration, including Tauri's `STATIC_VCRUNTIME` setting. This keeps
+the per-user installer independent of a separately installed Visual C++
+Redistributable. A new build of all four executables is required when changing
+these settings; previously built executables cannot be reused.
+
+`scripts/check_windows_runtime.mjs` inspects the actual x64 PE normal and delay
+imports before packaging, when checking frozen signed inputs, and after
+installation. It rejects undeployed Visual C++ runtime DLL dependencies even
+when the build machine already has those DLLs. The installed-payload report
+retains each executable's hash and imports. Ordinary Windows system DLLs remain
+supported. WebView2 is a separate prerequisite: the installer embeds its
+bootstrapper, which needs internet if that runtime is absent.
+
 ## Confirm the account and certificate
 
 In the SSL.com portal, confirm that the intended Code Signing certificate is

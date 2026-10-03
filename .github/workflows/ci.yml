@@ -21,8 +21,10 @@ env:
   ABIGAIL_CI_MODE: "1"
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Each pushed commit needs its own gate for the installer publication step.
+  # New PR updates can still supersede earlier runs of that PR.
+  group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'latest' }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
 
@@ -51,6 +53,9 @@ jobs:
         run: |
           cd hive-app/src-ui && npm ci
           cd ../../entity-runtime-app/src-ui && npm ci
+
+      - name: Verify Windows runtime dependency gates
+        run: node --test scripts/tests/test_windows_runtime.mjs
 
       - name: Verify unsigned stabilization lane
         run: node scripts/check_unsigned_stabilization.mjs

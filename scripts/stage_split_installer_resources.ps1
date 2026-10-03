@@ -88,6 +88,15 @@ try {
 
 $targetRoot = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $repoRoot "target" }
 $binaryDir = Join-Path $targetRoot $Configuration
+$runtimeExecutables = @(
+    'abigail-hive-app.exe',
+    'abigail-entity-runtime-app.exe',
+    'hive-daemon.exe',
+    'entity-daemon.exe'
+) | ForEach-Object { Join-Path $binaryDir $_ }
+# Check the compiled bytes before copying any executable into installer resources.
+# Host-installed VC runtimes can otherwise hide a fresh-machine loader failure.
+Invoke-Checked -FilePath 'node' -Arguments (@((Join-Path $PSScriptRoot 'check_windows_runtime.mjs')) + $runtimeExecutables) -WorkingDirectory $repoRoot
 foreach ($app in @('hive-app', 'entity-runtime-app')) {
     $frontendDir = Join-Path $repoRoot "$app/src-ui/dist"
     $index = Get-Content -LiteralPath (Join-Path $frontendDir 'index.html') -Raw

@@ -1,6 +1,6 @@
 # Abigail Release Runbook
 
-This repo has two repeatable GitHub Actions release lanes.
+This repo has one family-facing installer release lane and one artifact-only diagnostic build lane.
 
 Rust is pinned to the tested `1.97.0` compiler in `rust-toolchain.toml` and all
 CI/release setup steps. The repository toolchain uses the minimal profile with
@@ -35,6 +35,12 @@ git push origin HEAD:beta
 
 The workflow tags the build as `v<next-stable-version>-beta.<run-number>` and publishes it as a prerelease.
 
+Installer runs share a signing concurrency group with `queue: max`, which retains
+up to 100 pending runs while using the certificate serially. Push CI runs use
+separate commit groups so a newer beta push does not cancel the gate needed by
+an earlier installer. PR updates still supersede their older CI runs. See
+[GitHub Actions concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
+
 Linux one-step packaging is planned after the Windows lane is stable. macOS/Apple builds remain paused until the Apple Developer agreement/signing issue is resolved.
 
 Run a specific release:
@@ -61,7 +67,7 @@ Verify the release:
 gh release view v0.0.75 --json tagName,url,publishedAt,assets
 ```
 
-The workflow builds and tags the triggering commit. Both desktop shells embed their production frontend assets and the requested installer version. It refuses an existing tag that identifies another commit.
+The workflow builds and tags the triggering commit. Both desktop shells embed their production frontend assets and the requested installer version. It refuses an existing tag that identifies another commit. Every publishing event validates the release ref; pushed tags must match `vX.Y.Z` or `vX.Y.Z-beta.N` exactly.
 
 Before publishing an unsigned installer, the workflow installs it in a fresh test directory, checks all four payload hashes and Windows daemon loader checks, then runs the synthetic daemon contract against those installed binaries. The contract uses isolated data, Documents, and app profiles, exercises live streaming and durable history across restarts, and does not require a model account or API key. It is a contract check; it does not claim real-model inference. The installed verifier refuses to replace an existing Abigail installation outside the repository's test directory. Validation evidence is uploaded as `abigail-installer-validation-windows-latest`.
 
@@ -105,20 +111,17 @@ Workflow: `Stabilization Build (Unsigned)` (`.github/workflows/release-fast.yml`
 Use it for quick Windows/Linux binary checks without installers, updater artifacts, signing, or Apple notarization:
 
 ```bash
-gh workflow run release-fast.yml --ref main -f release_version=0.0.73 -f publish_prerelease=false
+gh workflow run release-fast.yml --ref beta
 ```
 
-Set `publish_prerelease=true` only when you want those unsigned binaries published as a GitHub pre-release.
+Download the `abigail-stabilization-windows-latest` and
+`abigail-stabilization-ubuntu-22.04` artifacts from the completed Actions run.
+The workflow uses the triggering commit and checked-in dependency lock. It has
+read-only repository access and cannot create tags or GitHub releases.
 
-This older lane builds diagnostic binaries; it does not embed the current desktop frontends or preserve the internal executable names used by the installed app. Do not use `publish_stable_release` for a production release. Use the full installer workflow above for beta UAT and stable releases.
+This lane builds diagnostic binaries; it does not embed the current desktop frontends or preserve the internal executable names used by the installed app. Use the full installer workflow above for beta UAT and stable releases.
 
-The legacy diagnostic command is:
-
-```bash
-gh workflow run release-fast.yml --ref main -f release_version=0.0.74 -f publish_stable_release=true
-```
-
-The split product release uploads four side-by-side binaries for each platform:
+Each platform artifact contains four side-by-side binaries:
 
 - Abigail Hive app
 - Abigail Entity Runtime app

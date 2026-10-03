@@ -404,18 +404,20 @@ async fn run() -> anyhow::Result<()> {
                 }
             }
         }
-        tokio::task::spawn_blocking({
-            let skill_vault = skill_vault.clone();
-            move || -> anyhow::Result<()> {
-                if let Ok(v) = skill_vault.lock() {
-                    v.save()?;
-                }
-                Ok(())
-            }
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to join vault save task: {}", e))??;
+        // Runtimes share this vault with Hive. Avoid replacing unchanged bytes
+        // during startup, which can collide with another process reading it.
         if synced_count > 0 {
+            tokio::task::spawn_blocking({
+                let skill_vault = skill_vault.clone();
+                move || -> anyhow::Result<()> {
+                    if let Ok(v) = skill_vault.lock() {
+                        v.save()?;
+                    }
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to join vault save task: {}", e))??;
             tracing::info!(
                 "Synced {} skill secret(s) from Hive (checked {} declared keys)",
                 synced_count,
