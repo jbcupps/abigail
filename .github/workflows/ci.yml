@@ -60,6 +60,13 @@ jobs:
       - name: Verify unsigned stabilization lane
         run: node scripts/check_unsigned_stabilization.mjs
 
+      - name: Install NSIS for native installer regression
+        run: choco install nsis --version=3.11 --yes --no-progress
+
+      - name: Verify installer and uninstaller reject locked payloads
+        shell: pwsh
+        run: ./scripts/tests/test_mvp_installer_locks.ps1
+
       - name: Verify Windows signing failure gates without credentials
         shell: pwsh
         run: ./scripts/test_windows_signing.ps1

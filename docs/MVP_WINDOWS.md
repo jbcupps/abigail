@@ -18,6 +18,13 @@ internal daemons; no Rust, Node, terminal, or frontend development server is
 required on the machine running the installed app. Tauri's installer includes
 the WebView2 bootstrapper when that Windows runtime is missing.
 
+Before replacing or removing an existing installation, setup checks all four
+executable files, including the background daemons. If a file is still in use,
+setup stops before changing the payload. Close Abigail and all Entity windows
+and retry. If the background services remain running, restart Windows and run
+setup before opening Abigail. Do not ignore file replacement errors from an
+older installer; that can leave an incomplete installation.
+
 Model weights are not included. A local option needs a running server with a
 loaded model (for example Ollama at `http://127.0.0.1:11434` or LM Studio at
 `http://127.0.0.1:1234`). Cloud processing sends messages and context to the
@@ -69,6 +76,17 @@ Outputs:
 - An isolated installed-payload verification report under `target/manual-test/`
 
 ## Acceptance
+
+The Windows installer lock regression compiles the real NSIS hooks and checks
+live file handles, a running executable, and the installer/uninstaller guards
+in isolated directories and a unique fixture registry key:
+
+```powershell
+pwsh ./scripts/tests/test_mvp_installer_locks.ps1
+```
+
+It requires NSIS and does not stop existing Abigail processes or open family
+data. CI runs it before accepting an installer publication commit.
 
 ```powershell
 pwsh ./scripts/tests/run-mvp-acceptance.ps1 -BinaryDir target/debug
