@@ -22,6 +22,9 @@ pub fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         }
     }
 
+    #[cfg(windows)]
+    validate_windows_file_path(path)?;
+
     let parent = path.parent().ok_or_else(|| {
         CoreError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -93,8 +96,24 @@ fn replace_file_atomic(src: &Path, dest: &Path) -> Result<()> {
         MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
 
-    let src_wide = path_to_wide(src);
-    let dest_wide = path_to_wide(dest);
+    // Rust's Windows canonicalize returns extended-length drive/UNC paths.
+    // The temporary file and parent already exist, while the destination may
+    // be a first write. Canonicalizing the parent and joining only the leaf
+    // keeps both MoveFileExW arguments independent of MAX_PATH and OS opt-in.
+    let src_absolute = std::fs::canonicalize(src)?;
+    let dest_parent = dest
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let dest_leaf = dest.file_name().ok_or_else(|| {
+        CoreError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Path '{}' has no file name", dest.display()),
+        ))
+    })?;
+    let dest_absolute = std::fs::canonicalize(dest_parent)?.join(dest_leaf);
+    let src_wide = path_to_wide(&src_absolute);
+    let dest_wide = path_to_wide(&dest_absolute);
     unsafe {
         MoveFileExW(
             PCWSTR(src_wide.as_ptr()),
@@ -109,6 +128,36 @@ fn replace_file_atomic(src: &Path, dest: &Path) -> Result<()> {
                 e
             )))
         })?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn validate_windows_file_path(path: &Path) -> Result<()> {
+    use std::path::Prefix;
+
+    let supported = match path.components().next() {
+        Some(Component::Prefix(prefix)) => {
+            path.is_absolute()
+                && matches!(
+                    prefix.kind(),
+                    Prefix::Disk(_)
+                        | Prefix::UNC(_, _)
+                        | Prefix::VerbatimDisk(_)
+                        | Prefix::VerbatimUNC(_, _)
+                )
+        }
+        Some(Component::RootDir) => false,
+        _ => true,
+    };
+    if !supported {
+        return Err(CoreError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "Windows file path '{}' must be a normal relative path or an absolute drive/UNC path",
+                path.display()
+            ),
+        )));
     }
     Ok(())
 }
@@ -152,5 +201,121 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), b"second");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn atomic_write_replaces_long_windows_path_without_os_opt_in() {
+        use std::os::windows::ffi::OsStrExt;
+        use std::os::windows::fs::MetadataExt;
+        use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+        // Own a unique directory so concurrent test processes cannot delete
+        // each other's files. Revalidate its resolved identity before cleanup.
+        struct TestDirectory {
+            path: PathBuf,
+            canonical_path: PathBuf,
+            canonical_parent: PathBuf,
+            created_at: u64,
+        }
+        impl Drop for TestDirectory {
+            fn drop(&mut self) {
+                let Ok(metadata) = std::fs::symlink_metadata(&self.path) else {
+                    return;
+                };
+                if !metadata.is_dir()
+                    || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
+                    || metadata.creation_time() != self.created_at
+                {
+                    return;
+                }
+                let Ok(resolved) = std::fs::canonicalize(&self.path) else {
+                    return;
+                };
+                if resolved != self.canonical_path
+                    || resolved.parent() != Some(self.canonical_parent.as_path())
+                {
+                    return;
+                }
+                let _ = std::fs::remove_dir_all(&resolved);
+            }
+        }
+        let temp_parent = std::env::temp_dir();
+        let canonical_parent = std::fs::canonicalize(&temp_parent).unwrap();
+        let root_path = unique_temp_path(&temp_parent.join("abigail_secure_fs_long_path"));
+        std::fs::create_dir(&root_path).unwrap(); // Exclusive fixture creation.
+        let canonical_path = std::fs::canonicalize(&root_path).unwrap();
+        assert_eq!(canonical_path.parent(), Some(canonical_parent.as_path()));
+        let root = TestDirectory {
+            created_at: std::fs::symlink_metadata(&root_path)
+                .unwrap()
+                .creation_time(),
+            path: root_path,
+            canonical_path,
+            canonical_parent,
+        };
+        let mut parent = root.path.join("Unicode_\u{5bb6}\u{5ead}_\u{1f3e1}");
+        while parent.as_os_str().encode_wide().count() < 330 {
+            parent = parent.join("nested_directory_for_windows_atomic_replacement");
+        }
+        let path = parent.join("birth_certificate.json");
+        assert!(path.as_os_str().encode_wide().count() > 260);
+        assert!(!path.exists());
+
+        write_string_atomic(&path, "first certificate").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "first certificate");
+        write_string_atomic(&path, "replacement certificate").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "replacement certificate"
+        );
+        assert_eq!(std::fs::read_dir(&parent).unwrap().count(), 1);
+
+        // Exercise an already extended-length input as well as the normal
+        // drive path above. No registry or application manifest is changed.
+        let extended = std::fs::canonicalize(&path).unwrap();
+        assert!(extended
+            .as_os_str()
+            .encode_wide()
+            .take(4)
+            .eq(r"\\?\".encode_utf16()));
+        write_string_atomic(&extended, "extended-path replacement").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "extended-path replacement"
+        );
+        assert_eq!(std::fs::read_dir(&parent).unwrap().count(), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_file_paths_preserve_relative_drive_and_unc_forms() {
+        for path in [
+            r"relative\certificate.json",
+            r".\relative\certificate.json",
+            r"C:\directory\certificate.json",
+            r"\\server\share\directory\certificate.json",
+            r"\\?\C:\directory\certificate.json",
+            r"\\?\UNC\server\share\directory\certificate.json",
+        ] {
+            validate_windows_file_path(Path::new(path)).unwrap();
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn atomic_write_rejects_ambiguous_windows_paths_before_writing() {
+        for path in [
+            r"C:relative\certificate.json",
+            r"\root_relative\certificate.json",
+            r"\\.\C:\directory\certificate.json",
+            r"\\?\GLOBALROOT\Device\HarddiskVolume1\certificate.json",
+        ] {
+            assert!(matches!(
+                write_bytes_atomic(Path::new(path), b"must not be written"),
+                Err(CoreError::Io(error))
+                    if error.kind() == std::io::ErrorKind::InvalidInput
+            ));
+        }
     }
 }
