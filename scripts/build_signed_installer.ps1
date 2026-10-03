@@ -32,6 +32,93 @@ function Resolve-BuildPath([string]$Value, [string]$Fallback) {
 function Write-BuildJson($Value, [string]$Path) {
     [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
 }
+function Assert-DiagnosticPath([string]$Path, [string]$Root) {
+    $rootPath = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    $absolute = [IO.Path]::GetFullPath($Path)
+    if (-not $absolute.StartsWith($rootPath + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Diagnostic path escaped the isolated contract directory.'
+    }
+    $current = $absolute
+    while ($current.Length -ge $rootPath.Length) {
+        if (Test-Path -LiteralPath $current) {
+            if ((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw 'Diagnostic paths cannot contain links or reparse points.'
+            }
+        }
+        if ($current -eq $rootPath) { break }
+        $current = [IO.Path]::GetDirectoryName($current)
+    }
+    $absolute
+}
+function Copy-ContractDiagnostic([string]$Source, [string]$SourceRoot, [string]$Destination, $Budget) {
+    if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) { return }
+    $path = Assert-DiagnosticPath $Source $SourceRoot
+    $null = Assert-DiagnosticPath $Destination $Budget.destinationRoot
+    $file = Get-Item -LiteralPath $path
+    if ($file.Length -gt 2MB -or $Budget.files -ge 64 -or $Budget.bytes + $file.Length -gt 16MB) {
+        $Budget.omitted += [ordered]@{ name = $file.Name; reason = 'diagnostic size/count limit' }
+        return
+    }
+    # Reports contain only the synthetic test. Logs must not expose bearer or
+    # bootstrap credentials if future diagnostic statements include them.
+    $text = [IO.File]::ReadAllText($path)
+    $text = [regex]::Replace($text, '(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+', 'Bearer [REDACTED]')
+    $text = [regex]::Replace($text, '(?i)("(?:lease_id|bootstrap_token|api_key|access_token|refresh_token|password|totp_secret)"\s*:\s*")[^"]*(")', '$1[REDACTED]$2')
+    $text = [regex]::Replace($text, '(?i)\b(?:lease_id|bootstrap_token|api_key|access_token|refresh_token|password|totp_secret)\s*[:=]\s*[^\s,;]+', '[REDACTED]')
+    $bytes = [Text.Encoding]::UTF8.GetByteCount($text)
+    if ($Budget.bytes + $bytes -gt 16MB) {
+        $Budget.omitted += [ordered]@{ name = $file.Name; reason = 'diagnostic total size limit' }
+        return
+    }
+    New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($Destination)) | Out-Null
+    [IO.File]::WriteAllText($Destination, $text, [Text.UTF8Encoding]::new($false))
+    $Budget.bytes += $bytes
+    $Budget.files++
+}
+function Export-ContractDiagnostics([string]$ContractOutput, [string]$ValidationDir) {
+    $budget = @{ files = 0; bytes = 0; omitted = @(); destinationRoot = $ValidationDir }
+    if (-not $ContractOutput -or -not (Test-Path -LiteralPath $ContractOutput -PathType Container)) {
+        return [ordered]@{ files = 0; bytes = 0; omitted = @(); status = 'contract not started' }
+    }
+    $contractRoot = [IO.Path]::GetFullPath($ContractOutput)
+    $destinationRoot = Join-Path $ValidationDir 'contract'
+    $latestPath = Join-Path $contractRoot 'latest.json'
+    $runDirectories = @()
+    if (Test-Path -LiteralPath $latestPath -PathType Leaf) {
+        $null = Assert-DiagnosticPath $latestPath $contractRoot
+        if ((Get-Item -LiteralPath $latestPath).Length -gt 2MB) { throw 'Contract index exceeds the diagnostic limit.' }
+        $latest = Get-Content -LiteralPath $latestPath -Raw | ConvertFrom-Json
+        $runPath = Assert-DiagnosticPath $latest.run_dir $contractRoot
+        if ([IO.Path]::GetDirectoryName($runPath) -ne $contractRoot) { throw 'Contract index must name an immediate isolated run directory.' }
+        $runDirectories = @($runPath)
+        Copy-ContractDiagnostic $latestPath $contractRoot (Join-Path $destinationRoot 'latest.json') $budget
+    } else {
+        # A process can fail before writing its final index. Preserve only the
+        # unique generated run's logs, never a broad working-directory copy.
+        $runDirectories = @(Get-ChildItem -LiteralPath $contractRoot -Directory |
+            Where-Object { $_.Name -match '^\d{4}-\d{2}-\d{2}T[0-9TZ-]+-[0-9a-f]{8}$' } | Select-Object -First 1 -ExpandProperty FullName)
+    }
+    foreach ($runPath in $runDirectories) {
+        $null = Assert-DiagnosticPath $runPath $contractRoot
+        $runName = [IO.Path]::GetFileName($runPath)
+        if ($runName -notmatch '^\d{4}-\d{2}-\d{2}T[0-9TZ-]+-[0-9a-f]{8}$') { throw 'Contract run directory name is invalid.' }
+        $runDestination = Join-Path $destinationRoot $runName
+        foreach ($name in @('result.json', 'timeline.jsonl')) {
+            Copy-ContractDiagnostic (Join-Path $runPath $name) $contractRoot (Join-Path $runDestination $name) $budget
+        }
+        foreach ($file in @(Get-ChildItem -LiteralPath $runPath -File | Where-Object { $_.Name -match '^hive-\d+\.(stdout|stderr)\.txt$' })) {
+            Copy-ContractDiagnostic $file.FullName $contractRoot (Join-Path $runDestination $file.Name) $budget
+        }
+        $logRoot = Join-Path $runPath 'local-app-data/Abigail/logs'
+        if (Test-Path -LiteralPath $logRoot -PathType Container) {
+            $null = Assert-DiagnosticPath $logRoot $contractRoot
+            foreach ($file in @(Get-ChildItem -LiteralPath $logRoot -File | Where-Object { $_.Name -match '^[A-Za-z0-9._-]+\.(log|txt)$' })) {
+                Copy-ContractDiagnostic $file.FullName $contractRoot (Join-Path $runDestination "logs/$($file.Name)") $budget
+            }
+        }
+    }
+    [ordered]@{ files = $budget.files; bytes = $budget.bytes; omitted = $budget.omitted; status = 'selected synthetic reports and daemon logs'; excludes = @('data', 'documents', 'vaults', 'http-traces.json', 'lease files') }
+}
 function Get-TextHash([string]$Text) {
     [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($Text)))
 }
@@ -162,6 +249,9 @@ $previousProcessPath = $env:PATH
 $previousSignToolPath = $env:TAURI_WINDOWS_SIGNTOOL_PATH
 $previousSigningEnvironment = @{}
 $restoreFiles = @()
+$output = $null
+$validationDir = $null
+$contractOutput = $null
 try {
     $env:CARGO_TARGET_DIR = $targetRoot
     if ($Phase -eq 'Prepare') {
@@ -321,8 +411,25 @@ try {
         $records += $record
     }
     $records += Assert-AbigailSignature -Path (Join-Path $installDir 'uninstall.exe') -Thumbprint $thumbprint
-    $contractOutput = Join-Path $validationDir 'contract'
-    & (Join-Path $PSScriptRoot 'tests/run-mvp-acceptance.ps1') -BinaryDir $installDir -OutputDir $contractOutput
+    $preContractReport = [ordered]@{
+        sourceCommit = $state.sourceCommit; sourceStateSha256 = $state.source.sha256; version = $Version
+        verifiedUtc = [DateTime]::UtcNow.ToString('o'); expectedThumbprint = $thumbprint; artifacts = $records
+        installedDirectory = $installDir; installedContract = [ordered]@{ passed = $false; status = 'pending'; stages = 0; realModelValidation = $false }
+    }
+    Write-BuildJson $preContractReport (Join-Path $output 'windows-signatures.json')
+    Write-BuildJson $preContractReport (Join-Path $validationDir 'windows-signatures-pre-contract.json')
+    # Private fixture data and the generated vault stay outside the uploaded
+    # validation tree. Export only bounded reports/logs even when Node fails.
+    $contractOutput = Join-Path $output 'contract-work'
+    $contractFailure = $null
+    try { & (Join-Path $PSScriptRoot 'tests/run-mvp-acceptance.ps1') -BinaryDir $installDir -OutputDir $contractOutput }
+    catch { $contractFailure = $_ }
+    try { Write-BuildJson (Export-ContractDiagnostics $contractOutput $validationDir) (Join-Path $validationDir 'diagnostic-export.json') }
+    catch {
+        if (-not $contractFailure) { throw }
+        Write-Warning 'Selected contract diagnostics could not be fully exported; the original acceptance failure is preserved.'
+    }
+    if ($contractFailure) { throw $contractFailure }
     $latestContract = Get-Content -LiteralPath (Join-Path $contractOutput 'latest.json') -Raw | ConvertFrom-Json
     $contract = Get-Content -LiteralPath (Join-Path $latestContract.run_dir 'result.json') -Raw | ConvertFrom-Json
     if (-not $contract.passed -or @($contract.stages).Count -ne 12 -or @($contract.stages | Where-Object { -not $_.passed }).Count) {
@@ -344,6 +451,23 @@ try {
     Write-BuildJson $latestSuccess (Join-Path $targetRoot 'signed-release/latest-success.json')
     if ($env:GITHUB_OUTPUT) { "artifact_dir=$output" | Add-Content -LiteralPath $env:GITHUB_OUTPUT }
     Write-Host "Verified signed installer, installed executables/uninstaller, and twelve-stage contract: $output"
+} catch {
+    # The workflow collects this invocation's output even when acceptance
+    # throws. Never fall back to a stale latest-success from another build.
+    if ($Phase -eq 'Sign' -and $output -and $validationDir) {
+        $failure = [ordered]@{
+            passed = $false; source_commit = $state.sourceCommit; version = $Version
+            artifact_dir = $output; failed_utc = [DateTime]::UtcNow.ToString('o')
+            status = 'cloud installer build or validation failed; publication blocked'
+            contract_started = [bool]$contractOutput
+        }
+        Write-BuildJson $failure (Join-Path $validationDir 'failure.json')
+        Write-BuildJson $failure (Join-Path $work 'latest-failure.json')
+        New-Item -ItemType Directory -Force -Path (Join-Path $targetRoot 'signed-release') | Out-Null
+        Write-BuildJson $failure (Join-Path $targetRoot 'signed-release/latest-failure.json')
+        if ($env:GITHUB_OUTPUT) { "artifact_dir=$output" | Add-Content -LiteralPath $env:GITHUB_OUTPUT }
+    }
+    throw
 } finally {
     # Restore exactly the unsigned staging files and any pre-existing launcher.
     # A failed signing attempt does not invalidate the frozen preparation state.

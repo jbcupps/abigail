@@ -392,6 +392,7 @@ jobs:
           ./scripts/build_signed_installer.ps1 -Phase Check -Version $env:SIGNED_RELEASE_VERSION
 
       - name: Cloud sign and verify installed full Abigail product
+        id: cloud_sign
         if: env.ABIGAIL_CLOUD_SIGNING == 'true'
         shell: pwsh
         env:
@@ -403,10 +404,49 @@ jobs:
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
         run: |
           ./scripts/build_signed_installer.ps1 -Phase Sign -Version $env:SIGNED_RELEASE_VERSION
-          $success = Get-Content target/signed-release/latest-success.json -Raw | ConvertFrom-Json
+
+      - name: Collect selected cloud installer validation evidence
+        if: always() && env.ABIGAIL_CLOUD_SIGNING == 'true' && steps.cloud_sign.outputs.artifact_dir != ''
+        shell: pwsh
+        env:
+          ABIGAIL_VALIDATION_ARTIFACT_DIR: ${{ steps.cloud_sign.outputs.artifact_dir }}
+        run: |
+          $artifactDir = [IO.Path]::GetFullPath($env:ABIGAIL_VALIDATION_ARTIFACT_DIR)
+          $releaseRoot = [IO.Path]::GetFullPath((Join-Path $PWD 'target/signed-release')).TrimEnd('\') + '\'
+          if (-not $artifactDir.StartsWith($releaseRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Cloud validation evidence must belong to this checkout release directory.'
+          }
           New-Item -ItemType Directory -Force artifacts/installer-validation | Out-Null
-          Copy-Item -LiteralPath (Join-Path $success.artifact_dir 'windows-signatures.json') -Destination artifacts/windows-signatures.json
-          Copy-Item -Path (Join-Path $success.artifact_dir 'validation/*') -Destination artifacts/installer-validation -Recurse
+          $signature = Join-Path $artifactDir 'windows-signatures.json'
+          if (Test-Path -LiteralPath $signature -PathType Leaf) {
+            $signatureFile = Get-Item -LiteralPath $signature
+            if ($signatureFile.Attributes -band [IO.FileAttributes]::ReparsePoint -or $signatureFile.Length -gt 2MB) { throw 'Signature evidence must be a bounded regular file.' }
+            Copy-Item -LiteralPath $signature -Destination artifacts/windows-signatures.json
+          }
+          $validationRoot = Join-Path $artifactDir 'validation'
+          $reports = @('mvp-build.json', 'installed-payload.json', 'windows-signatures-pre-contract.json', 'diagnostic-export.json', 'failure.json')
+          $bytes = 0
+          $count = 0
+          foreach ($file in @(Get-ChildItem -LiteralPath $validationRoot -File -Recurse)) {
+            $relative = [IO.Path]::GetRelativePath($validationRoot, $file.FullName).Replace('\', '/')
+            $allowed = $relative -in $reports -or $relative -eq 'contract/latest.json' -or
+              $relative -match '^contract/[0-9TZ-]+-[0-9a-f]{8}/(result\.json|timeline\.jsonl|hive-\d+\.(stdout|stderr)\.txt|logs/[A-Za-z0-9._-]+\.(log|txt))$'
+            if (-not $allowed) { continue }
+            $current = $file.FullName
+            while ($current.Length -ge $validationRoot.Length) {
+              if ((Get-Item -LiteralPath $current -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Validation evidence cannot traverse links.' }
+              if ($current -eq $validationRoot) { break }
+              $current = [IO.Path]::GetDirectoryName($current)
+            }
+            if ($file.Length -gt 2MB -or $count -ge 72 -or $bytes + $file.Length -gt 32MB) {
+              throw 'Selected validation evidence exceeds its upload bounds.'
+            }
+            $destination = Join-Path 'artifacts/installer-validation' $relative
+            New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($destination)) | Out-Null
+            Copy-Item -LiteralPath $file.FullName -Destination $destination
+            $bytes += $file.Length
+            $count++
+          }
 
       - name: Build Abigail installer
         if: env.ABIGAIL_CLOUD_SIGNING != 'true'
@@ -488,7 +528,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload Windows signature evidence
-        if: env.ABIGAIL_LOCAL_SIGNING == 'true' || env.ABIGAIL_CLOUD_SIGNING == 'true'
+        if: always() && (env.ABIGAIL_LOCAL_SIGNING == 'true' || env.ABIGAIL_CLOUD_SIGNING == 'true') && hashFiles('artifacts/windows-signatures.json') != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
         with:
           name: abigail-signatures-windows-latest

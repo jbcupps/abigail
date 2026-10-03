@@ -70,6 +70,12 @@ verify the candidate installer and test its normal Windows launch before
 publishing. The synthetic contract exercises the product without requiring a
 real model account; it does not validate real model inference.
 
+Failed installed acceptance preserves the current run's signature evidence,
+stage report, and selected daemon logs in the validation artifact. The reports
+retain the failure status; publication still requires all twelve stages to pass.
+The exporter bounds file sizes and counts, redacts launch/session credentials,
+and excludes the private test data, vaults, Documents, and HTTP traces.
+
 After the first verified signed build, configure these **repository variables**:
 
 | Variable | Value |
