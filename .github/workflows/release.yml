@@ -34,8 +34,10 @@ permissions:
   contents: write
 
 # One certificate's OTP and cloud signing requests must remain serial.
+# Preserve queued beta pushes instead of replacing the single pending run.
 concurrency:
   group: abigail-windows-release-signing
+  queue: max
   cancel-in-progress: false
 
 jobs:
@@ -88,7 +90,7 @@ jobs:
           if ($env:ESIGNER_TOTP_SECRET.Trim() -match '^\d{6}$') { throw 'ESIGNER_TOTP_SECRET must be the persistent certificate signing seed, not a changing six-digit code.' }
 
       - name: Validate release publication branch
-        if: github.event_name == 'workflow_dispatch' && inputs.publish_release
+        if: github.event_name != 'workflow_dispatch' || inputs.publish_release
         shell: pwsh
         env:
           RELEASE_REF: ${{ github.ref }}

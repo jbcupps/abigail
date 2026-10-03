@@ -21,8 +21,10 @@ env:
   ABIGAIL_CI_MODE: "1"
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Each pushed commit needs its own gate for the installer publication step.
+  # New PR updates can still supersede earlier runs of that PR.
+  group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'latest' }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
 
