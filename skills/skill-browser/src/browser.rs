@@ -549,7 +549,7 @@ impl BrowserSkill {
         };
         let cookie_count = runtime
             .context
-            .storage_state()
+            .storage_state(None)
             .await
             .map_err(|err| format!("failed capturing browser storage state: {err}"))?;
         persist_storage_state(&self.profile_dir, &cookie_count)?;
@@ -1386,7 +1386,7 @@ async fn snapshot_context_state(
     context: &PlaywrightBrowserContext,
 ) -> Result<(), String> {
     let storage_state = context
-        .storage_state()
+        .storage_state(None)
         .await
         .map_err(|err| format!("failed capturing browser storage state: {err}"))?;
     persist_storage_state(profile_dir, &storage_state)
