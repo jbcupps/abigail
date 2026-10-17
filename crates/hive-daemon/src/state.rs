@@ -10,6 +10,10 @@ use std::sync::{Arc, Mutex};
 /// Shared state for all hive-daemon route handlers.
 #[derive(Clone)]
 pub struct HiveDaemonState {
+    pub genesis: Arc<crate::genesis_store::GenesisStore>,
+    pub genesis_media: Arc<crate::genesis_media::GenesisMediaService>,
+    pub genesis_token: Arc<String>,
+    pub genesis_control: Arc<crate::genesis::GenesisControl>,
     pub identity_manager: Arc<IdentityManager>,
     pub hive: Arc<Hive>,
     /// Hive-level secrets vault (shared across all agents).

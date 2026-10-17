@@ -1,0 +1,210 @@
+# Entity Genesis implementation design
+
+Design recorded before implementation, 2026-10-17.
+
+## Architecture and scope
+
+Genesis lives in the existing React Hive app and Rust Hive daemon. It reuses the
+configured Hive model, the single Hive-owned SurrealKV store, and the signed birth
+ceremony. Entity Runtime stays a separate internal process; the installed product
+remains one Abigail app. No new cloud database, account system, or agent framework
+is introduced.
+
+The canonical, versioned definition separates narrative identity (including
+explicitly fictional memories) from permissions and runtime configuration.
+Schema-validated field changes cannot grant operational authority. AI output and
+Markdown imports are proposals requiring review; existing approved facts survive
+until the mentor explicitly accepts replacement. Definition revisions support undo.
+Sessions preserve input modes, conversation, sources, decisions, and progress.
+
+Hive stores sessions and media job metadata durably. Genesis HTTP endpoints require
+a private local desktop capability token; ownership is the current local household,
+matching Abigail's existing single-user installation. This is not a claim of
+multi-household or child-role account support. Browser development requires an
+explicit token. Assets are fetched through authenticated, ownership-checked routes,
+never from arbitrary file paths or public links.
+
+## Workstreams
+
+1. Domain schema, state machine, import/review/export, history and durable store.
+2. Hive conversation orchestration, authenticated API, activation and runtime identity.
+3. Responsive conversation/constellation/studio UI, voice capability detection and
+   consent, accessible fallback animation, save/resume and review.
+4. Private portrait versions and durable, bounded, confirmed media jobs with a
+   pluggable provider boundary. Rendering failure never prevents activation.
+5. Integration verification, runtime regression checks and user documentation.
+
+## Provider decisions
+
+The model already selected in Hive is authoritative. Genesis will not silently
+switch the user's provider, claim an unverified model works, or change CLI settings.
+The public API model identifier documented for Astra is `gpt-6-astra`; an “Astra
+Ultra” API identifier has not been verified. The five creative responsibilities
+are prompt modules in one tools-disabled model request.
+
+OpenAI's current deprecation notice says the Sora 2 models and Videos API were
+removed on 2026-09-24, with no recommended replacement. Therefore Sora must not be
+offered as an active provider. Portraits use GPT Image 2. The built-in Runway
+Gen-4 Turbo adapter produces 5 or 10 second films using the selected, approved
+portrait as its reference. A free animated emergence is available without a paid
+provider. Provider access and visual quality are separate from fixture acceptance.
+See [media setup, limits, costs and provider evidence](GENESIS_MEDIA.md).
+
+Sources checked 2026-10-17:
+- https://developers.openai.com/api/docs/models/gpt-6-astra
+- https://developers.openai.com/api/docs/deprecations
+- https://developers.openai.com/api/docs/guides/video-generation
+
+## Acceptance strategy
+
+Check domain invariants, malformed and conflicting imports, ownership, concurrency,
+undo and restart persistence. Exercise API creation through activation and actual
+runtime identity loading with an isolated synthetic model. Test UI mode switching,
+review, import and error recovery, then build both existing frontends. Test media
+workers using deterministic transports for success, failure, cancellation and
+idempotency without billing an account. Live voice/device and paid media results
+must be reported separately; unsupported speech engines must show a text fallback.
+
+The supplied attachment ends at “A user can switch input modes without” in its
+acceptance section. All preceding complete requirements inform this design; no
+missing acceptance text is assumed.
+
+## Using Genesis
+
+Connect a real conversation model in Hive, then choose **Create an Entity**.
+Guided, Quick and Deep Genesis share the same draft as Voice, Markdown and Hybrid.
+Describe the Entity or choose a suggested answer, review the resulting proposals,
+and explicitly accept the details to keep. A replacement of an approved fact
+requires a separate confirmation. The six essence scores describe which fields
+are filled; they do not measure character quality or prevent awakening.
+
+Markdown accepts `.md` and `.markdown` up to 256 KiB. Structured headings work
+offline; freeform biographies are interpreted by the selected model. Originals
+and source references remain available until deleted. Unknown sections are kept.
+Exports contain readable narrative plus a typed canonical block for reliable
+reimport. Fictional memories are labeled created lore and never imported as real
+conversation history.
+
+Voice requires explicit session consent. Windows uses native local dictation when
+browser speech recognition is unavailable. Browser speech may use a remote speech
+service. Abigail stores submitted transcripts, not microphone recordings. Spoken
+commands can approve suggestions, review, awaken, skip a question, or save and
+exit; typed input remains available if speech cannot start.
+
+Optional portraits and films use credentials entered under **Genesis media
+connections** in Hive. A CLI conversation connection does not confer image or
+video API access. OpenAI and Runway credentials stay in Hive's existing vault.
+Generation, retries and regeneration each require a displayed cost confirmation.
+Select a portrait before requesting a film, then explicitly compare and approve
+the film's identity. Background work survives leaving the workspace; Hive reports
+completion or a recoverable failure.
+
+Confirm a name and purpose, resolve conflicting proposals, and awaken whenever
+ready, including while a render is pending. Activation reuses the existing signed
+birth ceremony and stores the approved narrative with the Entity. Its personalized
+first greeting is persisted once in real chat history. Later intentional revisions
+apply when the mentor chooses to evolve the Entity; an already running Runtime is
+stopped so its next launch loads the new signed identity.
+
+## Local authorization and retention
+
+Genesis is scoped to the existing local household profile. Its HTTP routes require
+the private `genesis.token` capability; the native app retrieves it through Tauri.
+Browser development needs `VITE_HIVE_DAEMON_URL` and `VITE_GENESIS_TOKEN` for an
+isolated loopback daemon. Never embed a personal token in committed files or URLs.
+This capability is local profile protection, not a multi-user account system.
+
+Drafts have optimistic revisions and exclusive per-draft actions. At most two model
+requests run concurrently, with 20 requests per minute. Limits include 100 sessions,
+20 source documents per session, 500 messages, 500 proposals and 200 definition
+revision snapshots. Session conversation text is capped at 16 KiB per message.
+Original source excerpts sent to a provider are treated as untrusted narrative;
+the model gets no tools, and schema validation rejects permission changes.
+
+Sources, transcripts, generated media and entire Genesis records have explicit
+deletion controls. Deleting a Genesis record also deletes its generated visuals
+and clears their permanent pointers, while preserving its already awakened Entity
+and actual chat history. Minimal media accounting tombstones remain until retention
+policy can expire them without bypassing the daily budget. No automatic deletion
+of personal history is enabled by default.
+
+Each Genesis record can optionally expire after 1–3650 inactive days. The default,
+**Keep until I delete it**, also applies to records saved before this setting
+existed. Inactivity runs from the last saved change (`updated_at`), not the last
+time a record was viewed. Changing the retention setting starts a fresh period.
+Hive checks on startup and approximately once per minute while running. An expired
+record loses its creation transcript, uploaded sources and generated visuals;
+its awakened Entity and actual chat history remain. The worker skips records with
+an action in progress and rechecks the latest policy and timestamp before deletion,
+so a concurrent edit or disabled policy protects the record. Failed deletions are
+retried without logging narrative content.
+
+## Staged enhancements
+
+The initial implementation includes a living-portrait toggle, character seeds,
+versioned alternatives, a creation chronicle and intentional Entity evolution.
+Relationship visualization and dedicated voice casting remain later enhancements,
+as requested in the specification's staged-innovation section. Relationships and
+voice descriptions are already editable canonical fields.
+
+## Verification — 2026-10-17
+
+The final backend regression for `hive-core`, `hive-daemon` and `entity-daemon`
+passed **117 tests**, including **44 Genesis tests**
+(13 core and 31 daemon). Eight pre-existing `daemon_e2e` tests remain ignored;
+the enabled HTTP and subprocess integration suites ran with `ABIGAIL_CI_MODE=1`
+and `ABIGAIL_DAEMON_INTEGRATION=1`. Counts are overlapping scopes, not additive.
+The complete output is `target/genesis-final-regression.log`. This scoped run does
+not replace the earlier whole-workspace MVP totals in `MVP_WINDOWS.md`.
+
+Hive passed **36 frontend tests across 11 files**. Entity Runtime passed **7 tests
+across 3 files**. Both production builds passed. The final Hive entry is
+`index-DJt--cv7.js`; packaged frontends use embedded assets with inline styles.
+`cargo fmt --all -- --check` passed, and Clippy passed with `-D warnings` for
+`hive-core`, both daemons, and both native app packages.
+
+All four executables built with `--locked --features tauri/custom-protocol`.
+The unsigned debug installer is
+`dist/entity-genesis/Abigail-windows-x64-setup.exe` (version `0.0.1`). Its build
+manifest is `dist/entity-genesis/mvp-build.json`; SHA-256 is
+`57AC56328469BFB940B750B400D472244DA934DE4F780EF35F4E9DE28B4E4C9E`.
+Actual installation to `target/manual-test/mvp-installed-e4c76f3d` passed all four
+payload hashes, Windows runtime dependency checks and both daemon loader checks.
+Evidence: `target/manual-test/mvp-installed-e4c76f3d-verification/installed-payload.json`.
+
+The **installed daemons passed 14/14 acceptance stages**: 13 synthetic stages and
+one live Codex stage. Synthetic stages covered authenticated access, proposal
+approval, mode/composer persistence, stale-edit rejection, malformed model output,
+permission injection, structured/freeform/mixed Markdown, preserved partial import
+failure, exact canonical reimport, 256 KiB upload boundaries, undo, deletion,
+retention settings, signed activation, Runtime identity loading, media gating, and
+exact history after Hive/Entity restart. The live stage performed a real Codex
+connection probe, produced schema-valid proposals for Mira, required approval, and
+awakened her. An assertion confirmed that the local synthetic model received no
+director requests during that stage. No API key was injected or CLI configuration
+modified. Report:
+`target/manual-test/genesis-acceptance/2026-10-17T17-09-12-445Z-7710d18b/report.json`.
+
+Reproduce the installed acceptance with:
+
+```powershell
+node scripts/tests/genesis-acceptance.mjs --binary-dir target/manual-test/mvp-installed-e4c76f3d/resources --live-provider codex-cli
+```
+
+Omit `--live-provider` for fixture-only acceptance. The script creates isolated
+profiles and cleans up only daemons whose executable and data-directory ownership
+match that run. Earlier intermediate runs are superseded by this final report.
+
+An isolated browser run verified proposal approval, all six mode choices,
+Hybrid-mode persistence, saving/resuming an exact unsent message, awakening
+without paid media, Markdown conflict review, selective import, and applying
+identity refinements. The narrow view had no horizontal overflow, and the desktop
+view exposed all three workspace regions. No browser console errors were observed.
+Evidence: `target/manual-test/genesis-acceptance/browser-validation.json`,
+`genesis-mobile.jpg`, and `genesis-desktop.jpg` in the same directory. Later import
+error and retention controls are covered by the final UI regression suite.
+
+Live microphone capture, installed speech-engine behavior, billed image/video
+generation, and subjective portrait/film consistency have **not** been accepted.
+Media provider fixtures verify contracts and lifecycle behavior, not visual quality.
+Browser acceptance does not substitute for installed WebView interaction.

@@ -282,3 +282,38 @@ Local evidence:
 - `target/manual-test/mvp-cli-claude-installed/2026-10-02T17-13-46-497Z-2f75d438/result.json`
 - `target/manual-test/mvp-cli-claude-installed/direct-probe-2026-10-02T17-15-23-749Z-9b538960/result.json`
 - `target/manual-test/mvp-vendors-desktop/20261002-170045-c8b0a37e/result.json`
+
+## Entity Genesis installer — 2026-10-17
+
+The Genesis implementation is bundled as an unsigned debug installer at
+`dist/entity-genesis/Abigail-windows-x64-setup.exe`, version `0.0.1`. This is a
+local validation build, not a signed release or a promoted beta tag. Both native
+frontends embed their production assets; Hive, Entity Runtime and both daemons
+remain in one installer with one Abigail launch.
+
+Actual installation to `target/manual-test/mvp-installed-e4c76f3d` passed all four
+payload hash checks, standalone Windows runtime checks and both daemon loader
+checks. The installed daemons then passed **14/14 Genesis acceptance stages**,
+including a real Codex probe, reviewed proposals, and awakening without fallback.
+The synthetic portion covered scoped persistence, signed narrative loading,
+imports, error recovery and exact history after restart.
+
+The scoped backend regression passed **117 tests**, including **44 Genesis tests**;
+eight pre-existing daemon tests remain ignored. Hive and Runtime frontends passed
+**36 and 7 tests**, respectively. Strict Clippy, formatting and the four-package
+custom-protocol build passed. These are Genesis-phase counts, separate from the
+earlier whole-workspace MVP and vendor acceptance results above.
+
+Browser interaction was verified against isolated daemons. Installed WebView
+interaction, real microphone capture and billed portrait/video quality remain
+unaccepted for this phase. See [Genesis architecture and complete evidence](ENTITY_GENESIS.md)
+and [media setup and verification limits](GENESIS_MEDIA.md).
+
+Final evidence:
+
+- `dist/entity-genesis/mvp-build.json`
+- `target/manual-test/mvp-installed-e4c76f3d-verification/installed-payload.json`
+- `target/manual-test/genesis-acceptance/2026-10-17T17-09-12-445Z-7710d18b/report.json`
+- `target/manual-test/genesis-acceptance/browser-validation.json`
+- `target/genesis-final-regression.log`
+- `target/genesis-final-build.log`

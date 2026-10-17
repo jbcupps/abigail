@@ -21,19 +21,42 @@ That Hive-owned store now runs on embedded SurrealDB, giving Abigail one local-f
 1. Download and run the Windows installer
 2. Launch Abigail from the installed app icon
 3. Connect a model in Abigail Hive: a loaded local Ollama/LM Studio server, a cloud provider key, or an installed official Claude, Codex, or Grok CLI with your existing account
-4. Create your first Entity with a name and purpose
+4. Open Entity Genesis: describe a companion, speak with consent, or import Markdown; review the proposed name, purpose, and personality before awakening
 5. Open the Entity and chat while the Hive stays available beside it; reopen the Entity later to continue its saved conversation
 
 Hive checks an installed CLI connection with a real model response before saving it. Installed Codex and Grok cards let you check an existing connection even when sign-in cannot be confirmed during discovery; discovery itself never sends a model request. Gemini CLI is not supported in this MVP. A desktop app alone does not establish a working CLI connection.
 
 Local storage belongs to you. Cloud providers and installed CLIs use their own accounts and processing policies. The official CLI keeps control of account sign-in and tokens; Abigail does not extract or forward account OAuth tokens. The MVP requires a connected, working model; it does not bundle model weights or pretend a placeholder is local intelligence.
 
+### Discover an Entity with Genesis
+
+Start with a spark, take a deeper conversation, or import a `.md` / `.markdown`
+document (up to 256 KiB). Switch modes, save and return later, undo identity edits,
+and review every suggested detail before it becomes part of your Entity. A name
+and purpose are enough to begin; the Essence constellation shows what you have
+defined without requiring you to complete every dimension.
+
+Portraits are optional, versioned, and private. Manifestation jobs continue in
+Hive while you navigate away; a free animated emergence is available without a
+video provider. Each paid generation requires budget confirmation. You can awaken
+and chat while visuals are pending. The first introduction and approved personality
+persist across reopening. Created lore and fictional memories never grant access
+to tools or accounts.
+
+Voice requires explicit consent and a working browser speech service or Windows
+dictation engine; text remains available when speech is unsupported. Abigail
+retains submitted text, not microphone recordings. Delete source documents,
+transcripts, and visuals from Genesis, or explicitly choose an inactivity period
+for deleting the whole creation record while keeping the awakened Entity and its
+real chats. See [Genesis setup and acceptance](docs/ENTITY_GENESIS.md)
+for provider availability, local access controls, and verification limits.
+
 ## Unsigned Windows MVP
 
 - Build the self-contained installer with `pwsh ./scripts/build-mvp-windows.ps1 -VerifyInstall`.
 - The installer is written to `dist/windows-mvp/Abigail-windows-x64-setup.exe`. It bundles Hive, Entity Runtime, and both daemons with embedded frontend assets; no development server, SSL.com certificate, or updater key is required.
 - See [the MVP installation and acceptance guide](docs/MVP_WINDOWS.md) for setup, isolated validation, and current scope.
-- Installed Codex `0.153.4` passed real account inference, live streaming, conversation context, and Entity/Hive restart acceptance without an injected API key. The final unsigned installer and eight-stage desktop workflow are verified. Grok Build `0.2.93` and Claude passed failed-connection checks without saving a default; their real inference awaits user sign-in with `grok login` and `claude auth login`.
+- The prior installed-CLI MVP passed Codex `0.153.4` real account inference, live streaming, conversation context, and Entity/Hive restart acceptance without an injected API key, plus an eight-stage desktop workflow. Genesis validation is tracked separately in [its acceptance record](docs/ENTITY_GENESIS.md). Grok Build `0.2.93` and Claude passed failed-connection checks without saving a default; their real inference awaits user sign-in with `grok login` and `claude auth login`.
 - Hive alone opens the embedded memory store. Runtime processes access only their own Entity database through a Hive-issued lease, avoiding competing filesystem locks.
 - Model setup applies to the next conversation turn. Installed CLI connections are chat-only: native tools and extensions must be disabled or the connection is rejected. Tools requiring mentor confirmation cannot silently execute from chat or background jobs.
 - Claude Code integration uses the unmodified official CLI and each user's own account, subject to [Anthropic's product-use conditions](https://code.claude.com/docs/en/legal-and-compliance#can-customers-offer-claude-code-in-their-products). The current Codex account path is for local or open-source use; commercial or hosted distribution needs the applicable approved [Sign in with ChatGPT integration](https://learn.chatgpt.com/docs/app-server#auth-endpoints).

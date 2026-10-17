@@ -7,6 +7,7 @@ edition.workspace = true
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
+abigail-core = { path = "../crates/abigail-core" }
 daemon-client = { path = "../crates/daemon-client" }
 hive-core = { path = "../crates/hive-core" }
 serde.workspace = true

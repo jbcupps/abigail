@@ -1,8 +1,11 @@
-//! Hive API contracts — pure DTO types shared between hive-daemon, entity-daemon, and CLI clients.
+//! Hive API contracts shared between hive-daemon, entity-daemon, and CLI clients.
 //!
-//! No business logic, no dependencies on `abigail-*` crates.
+//! Genesis additionally provides deterministic schema validation and identity
+//! editing. No I/O or dependencies on `abigail-*` crates.
 
 use serde::{Deserialize, Serialize};
+
+pub mod genesis;
 
 // ---------------------------------------------------------------------------
 // Generic API envelope

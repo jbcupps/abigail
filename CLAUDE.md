@@ -33,6 +33,8 @@ Abigail manages multiple personal AI Entities that the user, mentor, or family h
 Abigail grew from the vision in "Toward a Decentralized Trust Framework for Verifiable and Ethically Aligned AI" (see `documents/DECENTRALIZED_TRUST_PAPER_ALIGNMENT.md`). That remains the philosophical foundation. The current mission is personal and human-scale: give families their own private, multi-capable AI Entities coordinated by Abigail.
 
 **How You Should Work**
+- Genesis lives in Hive, with durable drafts and a private desktop capability. Reuse Hive's selected model and tools-disabled completion path; model suggestions and imported Markdown require explicit mentor review. Approved lore belongs in signed narrative documents and never changes runtime permissions. Portrait/film jobs are optional, cost-confirmed, bounded and reference-coupled. The Sora API retired on 2026-09-24; do not offer it as active. See `docs/ENTITY_GENESIS.md` for architecture and acceptance evidence.
+- Creation-record retention is disabled by default and changes only through explicit mentor action. Expiry preserves the awakened Entity and real chat history; failed imports preserve original documents and surface recovery guidance.
 - Prefer the simplest solution that feels magical to a busy parent.
 - Prefer `beta` as the base branch for iterative PRs unless the user explicitly asks for a stable hotfix to `main`.
 - When adding capability, always highlight multi-provider flexibility.

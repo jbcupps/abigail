@@ -36,3 +36,14 @@ export async function resolveHiveUrl(): Promise<string> {
   cached = url.replace(/\/+$/, "");
   return cached;
 }
+
+// Desktop capability stays in memory, never in a media URL or browser storage.
+export async function resolveGenesisToken(): Promise<string> {
+  if (detectRuntimeMode() === "native") {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<string>("get_genesis_token");
+  }
+  const token = import.meta.env.VITE_GENESIS_TOKEN as string | undefined;
+  if (!token) throw new Error("Open Genesis in the Abigail app, or configure the local development capability.");
+  return token;
+}

@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import SplashScreen from "./components/SplashScreen";
 import LoaderScreen from "./components/LoaderScreen";
 import CreateEntityCard from "./components/CreateEntityCard";
+import GenesisWorkspace from "./components/GenesisWorkspace";
+import GenesisNotifications from "./components/GenesisNotifications";
+import GenesisMediaConnections from "./components/GenesisMediaConnections";
+import GenesisEntityPortrait, { useGenesisEntityPortraits } from "./components/GenesisEntityPortrait";
 import ProviderWizard from "./components/ProviderWizard";
 import ChatPanel from "./components/ChatPanel";
 import { completeEntitySetup, hiveHealth, getStatus, type EntityInfo, type HiveStatus } from "./lib/daemonClient";
@@ -18,10 +22,12 @@ export default function App() {
   const [readiness, setReadiness] = useState<Readiness>("pending");
   const [status, setStatus] = useState<HiveStatus | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [genesisOpen, setGenesisOpen] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const openingRef = useRef(false);
   const mounted = useRef(true);
+  const portraits = useGenesisEntityPortraits(`${genesisOpen}:${status?.entities.map(entity => entity.id).join(",") ?? ""}`);
 
   const handleOpen = useCallback(async (entity: EntityInfo) => {
     if (openingRef.current) return;
@@ -122,7 +128,7 @@ export default function App() {
 
   return (
     <div className="theme-modern flex h-screen bg-theme-bg text-theme-text font-primary">
-      <div className="min-w-0 flex-1 overflow-y-auto p-8">
+      <div className="min-w-0 flex-1 overflow-y-auto p-4 md:p-8">
         <header className="mb-6 flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold text-theme-text-bright">Abigail Hive</h1>
@@ -155,7 +161,10 @@ export default function App() {
           </div>
         )}
 
-        <section>
+        <GenesisNotifications onOpen={() => setGenesisOpen(true)} />
+        <GenesisMediaConnections />
+        {genesisOpen && <GenesisWorkspace onClose={() => setGenesisOpen(false)} onCreated={() => void refreshStatus()} />}
+        <section className={genesisOpen ? "mt-8" : undefined}>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-xs uppercase tracking-wide text-theme-text-dim">
               Entities ({familyEntities.length})
@@ -173,14 +182,15 @@ export default function App() {
             style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}
           >
             <li>
-              <CreateEntityCard onCreated={() => void refreshStatus()} />
+              <CreateEntityCard onOpen={() => setGenesisOpen(true)} />
             </li>
             {familyEntities.map((entity) => (
               <li
                 key={entity.id}
                 className="flex flex-col rounded-theme-lg border border-theme-border bg-theme-surface p-4"
               >
-                <div className="font-medium text-theme-text-bright">{entity.name}</div>
+                <GenesisEntityPortrait entityId={entity.id} name={entity.name} portrait={portraits[entity.id]} />
+                <div className="font-medium text-theme-text-bright mt-3">{entity.name}</div>
                 <div className="text-xs text-theme-text-dim mt-1">
                   {entity.birth_complete
                     ? "Ready"
@@ -201,8 +211,8 @@ export default function App() {
         </section>
       </div>
 
-      {helperUrl && !needsProvider && (
-        <aside className="flex w-[360px] flex-col border-l border-theme-border bg-theme-bg-elevated">
+      {helperUrl && !needsProvider && !genesisOpen && (
+        <aside className="hidden w-[360px] shrink-0 flex-col border-l border-theme-border bg-theme-bg-elevated lg:flex">
           <div className="border-b border-theme-border px-4 py-3 text-sm font-medium text-theme-text-bright">
             Ask Abigail
           </div>

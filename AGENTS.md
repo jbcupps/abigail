@@ -18,6 +18,16 @@ Abigail is the private Entity Coordinator and Manager for real homes and familie
 
 ## Active Plan (Family-First Priorities)
 
+### Entity Genesis (2026-10-17)
+
+- Entity creation now runs through Hive's resumable Genesis workspace and authenticated local Genesis API, using the selected Hive model with tools disabled. AI and Markdown output are reviewable proposals, never silent canonical edits.
+- Canonical schema v1, sources, conversation, revisions, media metadata and generation jobs belong to the Hive store. Local household capability authentication is not multi-account or child-role authorization.
+- Approved narrative is included in signed birth documents; fictional lore and memories never modify operational permissions. Media failures do not prevent activation.
+- Portraits are versioned and films require the approved portrait reference. Media work requires explicit cost confirmation and server-side budget checks. Do not activate the retired Sora API or claim fixture tests prove live model/media/device acceptance.
+- Genesis retention is opt-in per creation record. Expiry rechecks ownership and inactivity under the same action lock, deletes sources/transcript/media, and preserves awakened Entities and real conversations. Canonical Markdown exports restore deterministically; mixed freeform sections yield additional reviewable proposals.
+- Track design, provider configuration and exact acceptance evidence in `docs/ENTITY_GENESIS.md`. Preserve existing installer and CLI safeguards.
+- Final Genesis validation: scoped backend 117 passed (44 Genesis included; eight pre-existing ignored), Hive/Runtime UI 36/7 passed, strict Clippy and all four embedded builds passed. Unsigned installer `dist/entity-genesis/Abigail-windows-x64-setup.exe` passed actual four-payload verification and 14 installed acceptance stages including live Codex with no fixture fallback. Paid media, microphone hardware and installed WebView interaction remain separate unaccepted paths; prior MVP desktop acceptance is not Genesis desktop acceptance.
+
 ### Unsigned MVP implementation (2026-10-02)
 
 - The acceptance path is install -> launch Hive -> connect a real model -> create/name/purpose/sign an Entity -> chat -> close/reopen -> restore conversation.

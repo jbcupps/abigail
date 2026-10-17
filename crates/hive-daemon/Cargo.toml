@@ -8,6 +8,9 @@ name = "hive-daemon"
 path = "src/main.rs"
 
 [dependencies]
+base64.workspace = true
+async-trait.workspace = true
+abigail-memory = { path = "../abigail-memory" }
 abigail-diag.workspace = true
 hive-core = { path = "../hive-core" }
 abigail-core = { path = "../abigail-core" }

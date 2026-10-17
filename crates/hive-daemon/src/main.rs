@@ -5,6 +5,12 @@
 
 mod birth;
 mod doctor;
+mod genesis;
+mod genesis_auth;
+mod genesis_director;
+mod genesis_media;
+mod genesis_retention;
+mod genesis_store;
 mod persistence;
 mod routes;
 mod runtime_registry;
@@ -112,6 +118,13 @@ async fn run() -> anyhow::Result<()> {
     let supervisor = supervisor::HiveSupervisor::new(hive_url.clone(), data_root.clone());
 
     let state = HiveDaemonState {
+        genesis: Arc::new(genesis_store::GenesisStore::new(_shared_store.clone())?),
+        genesis_media: Arc::new(genesis_media::GenesisMediaService::new(
+            &data_root,
+            hive.clone(),
+        )?),
+        genesis_token: Arc::new(genesis_auth::load_or_create_token(&data_root)?),
+        genesis_control: Arc::new(genesis::GenesisControl::default()),
         identity_manager,
         hive,
         hive_secrets,
@@ -120,6 +133,9 @@ async fn run() -> anyhow::Result<()> {
         helper_url: helper_url.clone(),
         supervisor: supervisor.clone(),
     };
+
+    let _genesis_worker = state.genesis_media.clone().start_worker();
+    let _genesis_retention = genesis_retention::start_genesis_retention(state.clone());
 
     // Start the persistent Hive helper out-of-band: the immortal "Abigail Hive"
     // identity, run as its own entity-daemon. The control plane keeps serving
@@ -149,6 +165,7 @@ async fn run() -> anyhow::Result<()> {
         .allow_headers(Any);
 
     let app = Router::new()
+        .merge(genesis::router(state.clone()))
         .route("/health", get(routes::health))
         .route("/v1/status", get(routes::get_status))
         .route("/v1/entities", get(routes::list_entities))

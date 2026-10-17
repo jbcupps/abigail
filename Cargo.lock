@@ -201,6 +201,7 @@ dependencies = [
 name = "abigail-hive-app"
 version = "0.0.1"
 dependencies = [
+ "abigail-core",
  "daemon-client",
  "hive-core",
  "reqwest 0.13.4",
@@ -5022,11 +5023,14 @@ dependencies = [
  "abigail-diag",
  "abigail-hive",
  "abigail-identity",
+ "abigail-memory",
  "abigail-persistence",
  "abigail-runtime",
  "abigail-skills",
  "anyhow",
+ "async-trait",
  "axum 0.7.9",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "daemon-test-harness",
