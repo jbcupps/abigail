@@ -208,3 +208,67 @@ Live microphone capture, installed speech-engine behavior, billed image/video
 generation, and subjective portrait/film consistency have **not** been accepted.
 Media provider fixtures verify contracts and lifecycle behavior, not visual quality.
 Browser acceptance does not substitute for installed WebView interaction.
+
+### Tagged beta.130 installed desktop acceptance
+
+**Passed all 10 stages on 2026-10-17 at 23:23 UTC** using the actual installed
+Hive and Entity Runtime windows and a real, already-authenticated Codex connection.
+This accepts the **Quick Genesis** desktop path on
+[v0.0.76-beta.130](https://github.com/jbcupps/abigail/releases/tag/v0.0.76-beta.130),
+commit `39c334a833fb1762c7d00c939e23d05c18c3ba34`.
+
+The downloaded `Abigail-windows-x64-setup.exe` had SHA-256
+`478D10ADFECA66DF344C4537ADD625B35F14B7BA5099F0DE7D0D974C2FA80AC5`.
+Authenticode validation returned **Valid**, publisher James B Cupps. Actual
+installation to `target/manual-test/beta130-installed` passed all four payload
+hashes against the release manifest, Windows runtime dependency checks and both
+daemon loader checks. The shipped binaries were not modified for acceptance.
+
+| Stage | Verified result |
+| --- | --- |
+| 1. Install tagged beta | Signed installer and all four bundled payloads verified. |
+| 2. Launch Hive | Installed Hive opened in a fresh isolated profile. |
+| 3. Connect a real model | Hive verified and saved the existing Codex connection with a real response. |
+| 4. Create an Entity | Quick Genesis proposed Aster's identity through the selected model. |
+| 5. Review, save and resume | All 11 proposals explicitly accepted; definition, proposals and three discovery messages restored exactly after save/exit/resume. |
+| 6. Activate | Signed birth validated; canonical definition matched the saved identity; awakening appeared once in Runtime chat. |
+| 7. Chat | Real Codex reply recorded the adventure name, mascot and a five-minute activity while Hive remained available. |
+| 8. Close and reopen Runtime | A new Entity daemon restored the same Entity/session and exact three ordered chat turns. |
+| 9. Restart all app processes | New Hive and Entity processes restored identity, selected Codex, Genesis choices/transcript, validated birth signature and exact chat history from disk. |
+| 10. Recall after restart | Aster recalled the earlier name, mascot and activity without those details being repeated in the question. |
+
+Aster's Entity UUID is `bbc1dcd7-0e7f-4d13-a773-5233239a5d18`; Genesis session
+`250becf7-6100-430a-a4f0-691ec5e0fee3` remained Quick/ready at revision 42.
+The chat session was `genesis-awakening`. History checks compared ordered
+role/content pairs, not just message counts. After the full restart, Aster
+correctly recalled **Lantern Orchard 130**, a **teal fox**, and examining a leaf
+for two minutes, sharing observations for two, then drawing it for one. The final
+five-turn history retained the original awakening/prompt/reply as an exact prefix.
+
+The full restart closed both GUIs normally, then stopped only path-validated owned
+daemons after chat completed; Hive has no graceful shutdown endpoint. Zero
+installed app processes remained before relaunch. Data, Documents, LocalAppData
+and Roaming paths were isolated from the normal family profile. Official CLI
+authentication and configuration were unchanged. Runtime status, routing and
+healthy provider records established `codex-cli` use; no exact underlying model
+version or per-turn diagnostic trace capture is claimed.
+
+The first profile was excluded from acceptance: PowerShell 7.6.5 / .NET 10 retained
+present-but-empty variables after `SetEnvironmentVariable(name, $null, 'Process')`,
+inadvertently enabling ephemeral test storage. The successful full rerun removed
+`ABIGAIL_CI_MODE` and `ABIGAIL_DAEMON_INTEGRATION` with
+`ProcessStartInfo.Environment.Remove` and asserted key absence before launch.
+No product change was required.
+
+Local evidence is retained under `target/manual-test/genesis-desktop-beta130/`
+(these generated artifacts are not committed): `acceptance-report.md`, the
+`corrected-profile/` UI transcripts/screenshots and launch/restart records, and
+`read-only-snapshots/CORRECTED-ACCEPTANCE-SUMMARY.md` with exact API comparisons.
+The installed payload report is
+`target/manual-test/beta130-installed-verification/installed-payload.json`.
+
+Other Genesis modes, paid portraits/films, microphone and installed speech-engine
+behavior, multi-account authorization and child-role behavior were outside this
+desktop run. These 10 stages are separate from the earlier backend, browser and
+installed-daemon totals. Desktop acceptance belongs to beta.130 specifically;
+a later installer build or prerelease verification does not by itself repeat it.
