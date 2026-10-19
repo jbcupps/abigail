@@ -45,7 +45,7 @@ describe("Abigail Entity Runtime app", () => {
     mocks.fetch.mockResolvedValue({ ok: true, json: async () => ({ ok: true, data: profile }) });
   });
 
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   it("opens from splash into the chat runtime", async () => {
     render(<App />);
@@ -78,6 +78,20 @@ describe("Abigail Entity Runtime app", () => {
 
     await screen.findByText("Explore ideas together.");
     expect(mocks.fetch).toHaveBeenCalledWith("http://127.0.0.1:43151/v1/entities/entity-123/presence", expect.any(Object));
+  });
+
+  it.each(["query", "environment"])("restores from a %s override without waiting on session discovery", async (source) => {
+    const hiveUrl = "http://127.0.0.1:43151";
+    if (source === "query") window.history.replaceState({}, "", `/?hiveUrl=${encodeURIComponent(hiveUrl)}`);
+    else vi.stubEnv("VITE_HIVE_DAEMON_URL", hiveUrl);
+    mocks.getSessionStatus.mockReturnValue(new Promise(() => {}));
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /skip/i }));
+
+    expect(await screen.findByText("Explore ideas together.")).toBeInTheDocument();
+    expect(mocks.fetch).toHaveBeenCalledWith(`${hiveUrl}/v1/entities/entity-123/presence`, expect.any(Object));
+    expect(mocks.getSessionStatus).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "YOUR MESSAGE" })).toBeInTheDocument();
   });
 
   it("uses the native runtime session's Hive address when no override is provided", async () => {

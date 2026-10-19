@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../lib/presenceApi", () => mocks);
 vi.mock("../../../../entity-runtime-app/src-ui/src/components/ChatPanel", () => ({
-  default: ({ profile, baseUrl, onBack }: { profile: EntityProfile; baseUrl: string; onBack: () => void }) => <section aria-label="Opened conversation"><h1>{profile.name} conversation</h1><p>{baseUrl}</p><button onClick={onBack}>Return from conversation</button></section>,
+  default: ({ profile, baseUrl, profileNotice, onBack }: { profile: EntityProfile; baseUrl: string; profileNotice?: string; onBack: () => void }) => <section aria-label="Opened conversation"><h1>{profile.name} conversation</h1><p>{baseUrl}</p>{profileNotice && <p>{profileNotice}</p>}<button onClick={onBack}>Return from conversation</button></section>,
 }));
 
 function deferred<T>() {
@@ -108,7 +108,7 @@ describe("Presence Home pending operations", () => {
     mocks.openPresence.mockReturnValueOnce(opening.promise);
     render(<PresenceHome preview={false} status={status} onRefresh={vi.fn()} onProviders={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Open conversation/ }));
-    await waitFor(() => expect(mocks.openPresence).toHaveBeenCalledExactlyOnceWith("ada"));
+    await waitFor(() => expect(mocks.openPresence).toHaveBeenCalledWith("ada", expect.any(AbortSignal)));
 
     fireEvent.click(screen.getByRole("button", { name: "Your Entities" }));
     await act(async () => { opening.resolve("http://127.0.0.1:43201"); });
@@ -117,7 +117,7 @@ describe("Presence Home pending operations", () => {
     expect(screen.getByRole("button", { name: /Open conversation/ })).toBeEnabled();
   });
 
-  it("does not start an entity when a delayed profile load completes after navigation", async () => {
+  it("ignores a delayed profile after navigation while opening text independently", async () => {
     const loading = deferred<EntityProfile>();
     render(<PresenceHome preview={false} status={status} onRefresh={vi.fn()} onProviders={vi.fn()} />);
     await waitFor(() => expect(mocks.loadPresence).toHaveBeenCalledOnce());
@@ -126,7 +126,7 @@ describe("Presence Home pending operations", () => {
     fireEvent.click(screen.getByRole("link", { name: "Abigail Hive home" }));
 
     await act(async () => { loading.resolve(defaultProfile("Ada")); });
-    expect(mocks.openPresence).not.toHaveBeenCalled();
+    expect(mocks.openPresence).toHaveBeenCalledOnce();
     expect(screen.queryByRole("region", { name: "Opened conversation" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Your Entities 1" })).toBeInTheDocument();
   });
@@ -174,5 +174,64 @@ describe("Presence Home pending operations", () => {
     expect(screen.getByRole("heading", { name: "Abigail Hive conversation" })).toBeInTheDocument();
     expect(screen.getByText("http://127.0.0.1:43200")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Ada conversation" })).not.toBeInTheDocument();
+  });
+
+  it("opens text immediately while appearance is loading, then restores the saved identity", async () => {
+    const loading = deferred<EntityProfile>();
+    render(<PresenceHome preview={false} status={status} onRefresh={vi.fn()} onProviders={vi.fn()} />);
+    await waitFor(() => expect(mocks.loadPresence).toHaveBeenCalledOnce());
+    mocks.loadPresence.mockReturnValueOnce(loading.promise);
+    fireEvent.click(screen.getByRole("button", { name: /Open conversation/ }));
+    expect(await screen.findByRole("heading", { name: "Ada conversation" })).toBeInTheDocument();
+    expect(screen.getByText("Loading saved appearance…")).toBeInTheDocument();
+
+    await act(async () => { loading.resolve({ ...defaultProfile("Vesper"), identity: "ember" }); });
+    expect(screen.getByRole("heading", { name: "Vesper conversation" })).toBeInTheDocument();
+    expect(screen.queryByText("Loading saved appearance…")).not.toBeInTheDocument();
+  });
+
+  it("keeps the conversation usable with an explicit fallback when saved appearance fails", async () => {
+    mocks.loadPresence.mockRejectedValue(new Error("Appearance service unavailable"));
+    render(<PresenceHome preview={false} status={status} onRefresh={vi.fn()} onProviders={vi.fn()} />);
+    expect(await screen.findByText("Saved appearance unavailable. Default shown.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Open conversation/ }));
+    expect(await screen.findByRole("heading", { name: "Ada conversation" })).toBeInTheDocument();
+    expect(await screen.findByText(/your saved brief has not been changed/)).toBeInTheDocument();
+    expect(mocks.savePresence).not.toHaveBeenCalled();
+  });
+
+  it("does not offer a default edit form when the saved profile cannot be read", async () => {
+    mocks.loadPresence.mockRejectedValue(new Error("Appearance service unavailable"));
+    render(<PresenceHome preview={false} status={status} onRefresh={vi.fn()} onProviders={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit identity" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Appearance service unavailable");
+    expect(screen.queryByRole("textbox", { name: "What should we call them?" })).not.toBeInTheDocument();
+    expect(mocks.openPresence).not.toHaveBeenCalled();
+  });
+
+  it("restores other cards without waiting for a slow profile", async () => {
+    const loading = deferred<EntityProfile>();
+    mocks.loadPresence.mockImplementation((id: string) => id === "ada" ? loading.promise : Promise.resolve(defaultProfile("Vesper")));
+    const twoEntities = { ...status, entities: [...status.entities, { ...status.entities[0], id: "second", name: "Second" }] };
+    render(<PresenceHome preview={false} status={twoEntities} onRefresh={vi.fn()} onProviders={vi.fn()} />);
+    expect(await screen.findByRole("heading", { name: "Vesper" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Ada" })).toBeInTheDocument();
+  });
+
+  it("shows a newly saved preview when returning home directly from the reveal", async () => {
+    mocks.previewEntities.mockReturnValue([]);
+    mocks.savePresence.mockImplementation(async () => {
+      mocks.previewEntities.mockReturnValue([{ ...status.entities[0], id: "created-entity", name: "Sol" }]);
+      mocks.loadPresence.mockResolvedValue(defaultProfile("Sol"));
+    });
+    render(<PresenceHome preview status={null} onRefresh={vi.fn()} onProviders={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /A new presence/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "What should we call them?" }), { target: { value: "Sol" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save preview identity" }));
+    expect(await screen.findByRole("heading", { name: "Meet Sol." })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Your Entities" }));
+    expect(await screen.findByRole("heading", { name: "Sol" })).toBeInTheDocument();
   });
 });

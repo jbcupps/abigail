@@ -3,8 +3,8 @@ import Presence from "../../../../entity-runtime-app/src-ui/src/presence/Presenc
 import { defaultProfile, extractProfile, identities, profileMarkdown, temperaments, type EntityProfile } from "../../../../entity-runtime-app/src-ui/src/presence/profile";
 import { createPresenceEntity, savePresence, type SavedPresence } from "../lib/presenceApi";
 
-interface Props { preview: boolean; existing?: SavedPresence; onClose: () => void; onSaved: (value: SavedPresence) => void; onBusyChange?: (busy: boolean) => void }
-export default function FirstSignal({ preview, existing, onClose, onSaved, onBusyChange }: Props) {
+interface Props { preview: boolean; existing?: SavedPresence; onClose: () => void; onSaved: (value: SavedPresence) => void; onPersisted?: () => void; onBusyChange?: (busy: boolean) => void }
+export default function FirstSignal({ preview, existing, onClose, onSaved, onPersisted, onBusyChange }: Props) {
   const [profile, setProfile] = useState<EntityProfile>(existing?.profile ?? defaultProfile());
   const [step, setStep] = useState(0);
   const [proposal, setProposal] = useState<Partial<EntityProfile> | null>(null);
@@ -27,7 +27,8 @@ export default function FirstSignal({ preview, existing, onClose, onSaved, onBus
       await savePresence(id, clean, preview);
       setProfile(clean);
       setRevealed({ id, profile: clean });
-    } catch (err) { setError(`${createdId.current && !existing ? "Entity created; its brief has not been saved. Retry will reuse this entity. " : ""}${err instanceof Error ? err.message : err}`); }
+      onPersisted?.();
+    } catch (err) { setError(`${createdId.current && !existing && !preview ? "Entity created; saving its brief is not confirmed. Retry will reuse this entity. " : ""}${err instanceof Error ? err.message : err}`); }
     finally { setBusy(false); onBusyChange?.(false); inFlight.current = false; }
   };
   const importFile = async (file?: File) => {

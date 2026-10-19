@@ -167,4 +167,97 @@ describe("embodied Entity conversation", () => {
     expect(screen.getByText("Ready when you are")).toBeInTheDocument();
     expect(screen.getByRole("textbox")).toBeInTheDocument();
   });
+
+  it.each(["unmount", "reconnect"])("disposes a stopped turn's delayed handle after %s", async (transition) => {
+    let resolveStream!: (stream: ChatGatewayStream) => void;
+    mocks.send.mockImplementation(() => new Promise<ChatGatewayStream>((resolve) => { resolveStream = resolve; }));
+    const { unmount, rerender } = render(<ChatPanel baseUrl="http://127.0.0.1:43142" />);
+    sendMessage();
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+
+    if (transition === "unmount") unmount();
+    else rerender(<ChatPanel baseUrl="http://127.0.0.1:43143" />);
+    await act(async () => resolveStream({ cancel: mocks.cancel, dispose: mocks.dispose }));
+
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+    expect(mocks.cancel).not.toHaveBeenCalled();
+  });
+
+  it("does not carry an unsent draft into a replacement connection", () => {
+    const { rerender } = render(<ChatPanel baseUrl="http://127.0.0.1:43142" />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Draft for the first Entity" } });
+
+    rerender(<ChatPanel baseUrl="http://127.0.0.1:43143" />);
+
+    expect(screen.getByRole("textbox")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it("keeps a new turn active when a stopped turn emits late terminal callbacks", async () => {
+    render(<ChatPanel baseUrl="http://127.0.0.1:43142" />);
+    sendMessage("First turn");
+    const firstCallbacks = callbacks;
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    sendMessage("Second turn");
+    const secondCallbacks = callbacks;
+
+    await act(async () => {
+      firstCallbacks.onToken?.("Stale text");
+      firstCallbacks.onDone?.({ reply: "Stale completion" });
+      firstCallbacks.onError?.({ code: "transport", message: "Stale failure", interrupted: false });
+    });
+
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(screen.getByText("Awaiting response")).toBeInTheDocument();
+    expect(screen.queryByText(/Stale/)).not.toBeInTheDocument();
+    await act(async () => secondCallbacks.onDone?.({ reply: "Current reply" }));
+    expect(screen.getByText("Current reply")).toBeInTheDocument();
+  });
+
+  it("does not report receiving text for an empty token, and explains an empty completion", async () => {
+    render(<ChatPanel baseUrl="http://127.0.0.1:43142" profile={profile} />);
+    sendMessage();
+    await act(async () => callbacks.onToken?.(""));
+    expect(screen.getByText("Awaiting response")).toBeInTheDocument();
+
+    await act(async () => callbacks.onDone?.({ reply: "" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("The Entity finished without a text response. Try again.");
+    expect(screen.getByTestId("presence")).toHaveAttribute("data-state", "error");
+    expect(within(screen.getByRole("log")).queryByText("Vesper")).not.toBeInTheDocument();
+    sendMessage("Try again");
+    expect(screen.getByText("Awaiting response")).toBeInTheDocument();
+  });
+
+  it.each(["", " \n"])("uses streamed text for a blank completion %j and restores text-focus state", async (reply) => {
+    render(<ChatPanel baseUrl="http://127.0.0.1:43142" />);
+    act(() => screen.getByRole("textbox").focus());
+    sendMessage();
+    await act(async () => {
+      callbacks.onToken?.("Streamed reply");
+      callbacks.onDone?.({ reply });
+    });
+
+    expect(screen.getByText("Streamed reply")).toBeInTheDocument();
+    expect(screen.getByText(/Composing text/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    act(() => screen.getByRole("textbox").blur());
+    expect(screen.getByText("Ready when you are")).toBeInTheDocument();
+  });
+
+  it("preserves partial text on failure and ignores a later success callback", async () => {
+    render(<ChatPanel baseUrl="http://127.0.0.1:43142" />);
+    sendMessage();
+    await act(async () => {
+      callbacks.onToken?.("Partial result");
+      callbacks.onError?.({ code: "transport", message: "Connection lost during the reply.", interrupted: false });
+      callbacks.onDone?.({ reply: "Late success" });
+    });
+
+    expect(screen.getByText("Partial result")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Connection lost during the reply.");
+    expect(screen.getByTestId("presence")).toHaveAttribute("data-state", "error");
+    expect(screen.queryByText("Late success")).not.toBeInTheDocument();
+  });
 });

@@ -63,3 +63,32 @@ In the dedicated dev/first-signal worktree, the parameterized storage check was
 rerun with explicit matching dependency and native-library directories: all 6
 tests passed. The full daemon metadata results above remain historical evidence;
 no live daemon HTTP integration test was run during publication preparation.
+
+Reliability follow-up - 2026-10-19:
+The current production profile router was extracted into presence::router and
+mounted by main.rs. IdentityManager still resolves the registered Entity name
+and guarded directory exactly as before. Tests substitute only registered
+identity lookup and import presence.rs/presence_profile.rs directly.
+
+check-presence-routes.ps1 compiled and ran 11 tests: 5 actual in-process Axum
+route cases plus the 6 production storage unit tests. Result: 11 passed, 0 failed.
+Coverage includes initial defaults, first profile save, persisted values after
+router recreation, invalid/malformed/body-limit updates preserving saved bytes,
+corrupt storage errors, retry after failed save, and unregistered identities.
+The body-limit test uses a valid profile plus excessive JSON whitespace, so it
+cannot pass merely because field-length validation rejects the input.
+
+All requests are HTTP Request/Body objects dispatched through the real Router;
+no sockets, daemon startup, keyring, Documents, actual POST /v1/entities, provider,
+or model is used. An initial loopback-client attempt encountered Windows socket
+error 10013 and was abandoned without escalation. The final direct route tests
+pass under the existing sandbox. Outputs and temporary test files are beneath
+the worktree's ignored target/presence-route-check directory.
+
+Full current main.rs metadata compilation also passed exit 0 with the same
+coherent cached dependency graph. rustfmt --check and git diff --check passed.
+Dependencies and lockfiles are unchanged. The exact cached hashes are recorded
+in crates/hive-daemon/tests/check-presence-routes.ps1; matching native libraries
+and dependency paths must be supplied explicitly. These results improve source
+and route/storage evidence; they do not represent a clean Cargo build or resolve
+the full daemon startup/Entity-creation integration gap above.

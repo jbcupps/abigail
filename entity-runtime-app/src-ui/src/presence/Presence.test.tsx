@@ -109,7 +109,7 @@ describe("presence media and motion", () => {
       preferenceListeners.forEach(listener => listener());
     });
     expect(container.firstElementChild).toHaveClass("motion-paused");
-    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledOnce();
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
     expect(container.querySelector("video")).not.toHaveAttribute("autoplay");
 
     unmount();
@@ -123,6 +123,68 @@ describe("presence media and motion", () => {
     expect(container.firstElementChild).toHaveClass("motion-paused");
     expect(container.querySelector("video")).not.toHaveAttribute("autoplay");
     expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
+    expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+  });
+
+  it("ignores a previous clip's play rejection after the source changes", async () => {
+    let rejectPrevious!: (error: Error) => void;
+    vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectPrevious = reject; }));
+    const { container, rerender } = render(<Presence media={{ kind: "video", src: "/idle.mp4" }} />);
+    const previousVideo = container.querySelector("video");
+
+    rerender(<Presence media={{ kind: "video", src: "/receiving.mp4" }} />);
+    await act(async () => rejectPrevious(new Error("Old playback was interrupted")));
+
+    expect(container.querySelector("video")).toHaveAttribute("src", new URL("/receiving.mp4", window.location.href).href);
+    expect(container.querySelector("video")).not.toBe(previousVideo);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("does not mistake a pause-induced play rejection for missing media", async () => {
+    let rejectPlayback!: (error: Error) => void;
+    vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectPlayback = reject; }));
+    const media: PresenceMedia = { kind: "video", src: "/presence.mp4" };
+    const { container, rerender } = render(<Presence media={media} />);
+
+    rerender(<Presence media={media} reducedMotion />);
+    await act(async () => rejectPlayback(new DOMException("Playback interrupted by pause", "AbortError")));
+
+    expect(container.querySelector("video")).toBeInTheDocument();
+    expect(container.firstElementChild).toHaveClass("motion-paused");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("starts the media adapter when a portrait is replaced with video at the same URL", () => {
+    const { container, rerender } = render(<Presence media={{ kind: "portrait", src: "/presence" }} />);
+    expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+
+    rerender(<Presence media={{ kind: "video", src: "/presence" }} />);
+
+    expect(container.querySelector("video")).toBeInTheDocument();
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce();
+  });
+
+  it("recovers from failure when the media kind changes at the same URL", async () => {
+    vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValueOnce(new Error("Not a video"));
+    const { container, rerender } = render(<Presence media={{ kind: "video", src: "/presence" }} />);
+    await screen.findByRole("status");
+
+    rerender(<Presence media={{ kind: "portrait", src: "/presence" }} />);
+
+    expect(container.querySelector("img")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("keeps failed-media fallback and its replacement paused under reduced motion", () => {
+    const { container, rerender } = render(<Presence media={{ kind: "video", src: "/missing.mp4" }} reducedMotion />);
+    fireEvent.error(container.querySelector("video")!);
+    expect(screen.getByRole("status")).toHaveTextContent(/procedural fallback/);
+    expect(container.firstElementChild).toHaveClass("motion-paused");
+
+    rerender(<Presence media={{ kind: "video", src: "/replacement.mp4" }} reducedMotion />);
+
+    expect(container.querySelector("video")).not.toHaveAttribute("autoplay");
+    expect(container.firstElementChild).toHaveClass("motion-paused");
     expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
   });
 });

@@ -101,7 +101,7 @@ describe("First Signal creation and editing", () => {
     continueStep();
     fireEvent.click(screen.getByRole("button", { name: "Create Entity" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Entity created; its brief has not been saved. Retry will reuse this entity. Disk full");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Entity created; saving its brief is not confirmed. Retry will reuse this entity. Disk full");
     expect(screen.queryByRole("heading", { name: /^Meet / })).not.toBeInTheDocument();
     expect(screen.queryByText("FIRST SIGNAL / IDENTITY SAVED")).not.toBeInTheDocument();
     expect(onSaved).not.toHaveBeenCalled();
@@ -116,6 +116,22 @@ describe("First Signal creation and editing", () => {
     expect(onSaved).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Skip reveal" }));
     expect(onSaved).toHaveBeenCalledExactlyOnceWith({ id: "created-entity", profile: defaultProfile("Sol") });
+  });
+
+  it("reports a failed preview save without claiming a runtime entity was created", async () => {
+    const onPersisted = vi.fn();
+    mocks.savePresence.mockRejectedValueOnce(new Error("Browser storage is full"));
+    render(<FirstSignal preview onClose={vi.fn()} onSaved={vi.fn()} onPersisted={onPersisted} />);
+    changeName("Sol");
+    continueStep();
+    continueStep();
+    fireEvent.click(screen.getByRole("button", { name: "Save preview identity" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Browser storage is full");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("Entity created");
+    expect(screen.queryByRole("heading", { name: /^Meet / })).not.toBeInTheDocument();
+    expect(onPersisted).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("persists edited fields and appearance on the existing entity", async () => {

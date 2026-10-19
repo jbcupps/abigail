@@ -13,7 +13,7 @@ type Readiness = "pending" | "ok" | "failed";
 const READY_CEILING_MS = 20_000;
 const PROFILE_TIMEOUT_MS = 5_000;
 
-function hiveProfileUrl(entityId: string, session: unknown): string {
+function hiveProfileUrl(entityId: string, session: unknown, override?: string): string {
   // The existing session lease carries the actual native Hive address. Only
   // use it when it belongs to this Entity, with explicit developer overrides
   // retaining precedence for browser runs.
@@ -22,10 +22,7 @@ function hiveProfileUrl(entityId: string, session: unknown): string {
     const lease = session.lease;
     if ("entity_id" in lease && lease.entity_id === entityId && "hive_url" in lease && typeof lease.hive_url === "string") leasedHiveUrl = lease.hive_url;
   }
-  const configured = new URLSearchParams(window.location.search).get("hiveUrl")
-    || import.meta.env.VITE_HIVE_DAEMON_URL
-    || leasedHiveUrl
-    || "http://127.0.0.1:43141";
+  const configured = override || leasedHiveUrl || "http://127.0.0.1:43141";
   const base = new URL(configured);
   if (!/^https?:$/.test(base.protocol) || base.username || base.password) {
     throw new Error("The Hive address must be an HTTP or HTTPS URL without credentials.");
@@ -57,8 +54,11 @@ export default function App() {
         if (!disposed && "name" in status && typeof status.name === "string") {
           setProfile(defaultProfile(status.name));
         }
-        const session = await getSessionStatus(controller.signal).catch(() => null);
-        const response = await fetch(hiveProfileUrl(status.entity_id, session), {
+        const override = new URLSearchParams(window.location.search).get("hiveUrl") || import.meta.env.VITE_HIVE_DAEMON_URL;
+        // An explicit address is sufficient; optional session discovery must not
+        // consume the profile deadline when no lease lookup is needed.
+        const session = override ? null : await getSessionStatus(controller.signal).catch(() => null);
+        const response = await fetch(hiveProfileUrl(status.entity_id, session, override), {
           headers: { Accept: "application/json" }, signal: controller.signal,
         });
         const envelope: unknown = await response.json();

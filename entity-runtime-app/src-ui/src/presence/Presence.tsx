@@ -34,10 +34,12 @@ function localMedia(src?: string): string | undefined {
 }
 export default function Presence({ identity = "aether", state = "idle", label = "Procedural portrait", reducedMotion = false, compact = false, media, muted = true }: Props) {
   const id = useId().replace(/:/g, "");
-  const [failed, setFailed] = useState(false);
+  const [failedMedia, setFailedMedia] = useState<string | null>(null);
   const [systemReduced, setSystemReduced] = useState(() => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
   const video = useRef<HTMLVideoElement>(null);
   const source = localMedia(media?.loops?.[state] ?? media?.src);
+  const mediaKey = source && media ? `${media.kind}:${source}` : null;
+  const failed = mediaKey !== null && failedMedia === mediaKey;
   const paused = reducedMotion || systemReduced;
   useEffect(() => {
     const query = window.matchMedia?.("(prefers-reduced-motion: reduce)");
@@ -46,17 +48,24 @@ export default function Presence({ identity = "aether", state = "idle", label = 
     update(); query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
   }, []);
-  useEffect(() => { setFailed(false); }, [source]);
+  useEffect(() => { setFailedMedia(null); }, [mediaKey]);
   useEffect(() => {
-    if (!video.current) return;
-    if (paused) video.current.pause();
-    else void video.current.play().catch(() => setFailed(true));
-  }, [paused, source, failed]);
+    const element = video.current;
+    if (!element) return;
+    let current = true;
+    if (paused) element.pause();
+    else void element.play().catch(() => {
+      // play() can reject after pause, unmount, or a different state loop has
+      // replaced this clip. Only the current playback attempt owns fallback.
+      if (current) setFailedMedia(mediaKey);
+    });
+    return () => { current = false; element.pause(); };
+  }, [paused, mediaKey, failed]);
   return <div className={`presence-art identity-${identity} state-${state}${paused ? " motion-paused" : ""}${compact ? " is-compact" : ""}`}>
     <div className="presence-halo" aria-hidden="true" />
     {source && !failed ? media?.kind === "video" ?
-      <video ref={video} className="presence-media" src={source} poster={localMedia(media.poster)} muted={muted} loop playsInline autoPlay={!paused} onError={() => setFailed(true)} aria-label={label} /> :
-      <img className="presence-media" src={source} alt={label} onError={() => setFailed(true)} /> :
+      <video key={mediaKey} ref={video} className="presence-media" src={source} poster={localMedia(media.poster)} muted={muted} loop playsInline autoPlay={!paused} onError={() => setFailedMedia(mediaKey)} aria-label={label} /> :
+      <img key={mediaKey} className="presence-media" src={source} alt={label} onError={() => setFailedMedia(mediaKey)} /> :
       <svg viewBox="0 0 500 560" role="img" aria-label={label} className="presence-figure">
         <defs>
           <linearGradient id={`${id}line`} x1="0" y1="0" x2="1" y2="1"><stop stopColor="var(--presence-bright)" /><stop offset=".45" stopColor="var(--presence-color)" /><stop offset="1" stopColor="var(--presence-secondary)" /></linearGradient>

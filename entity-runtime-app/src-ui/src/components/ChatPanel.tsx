@@ -26,7 +26,6 @@ interface ActiveTurn {
   assistantId: string;
   stream: ChatGatewayStream | null;
   canceled: boolean;
-  disposed: boolean;
 }
 
 const PREVIEW_STATES: Array<{ state: PresenceState; name: string; label: string }> = [
@@ -53,6 +52,7 @@ export default function ChatPanel({ baseUrl, greeting, profile, profileNotice, o
   // A ref closes the gap before React renders a disabled Send button. It also
   // prevents late callbacks from a canceled/replaced turn changing the UI.
   const turnRef = useRef<ActiveTurn | null>(null);
+  const connectionRef = useRef({ disposed: false });
   const sessionIdRef = useRef<string>(crypto.randomUUID());
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -69,18 +69,23 @@ export default function ChatPanel({ baseUrl, greeting, profile, profileNotice, o
   );
 
   useEffect(() => {
+    const connection = { disposed: false };
+    connectionRef.current = connection;
     // A replacement connection is a new conversation. Do not mix identities or
     // deliver a response from the previous daemon into this transcript.
     sessionIdRef.current = crypto.randomUUID();
     setMessages([]);
+    setInput("");
     setStreaming(false);
     setActivity("idle");
     setNotice(null);
     return () => {
+      // Stopped turns no longer own the visible activity, but their delayed
+      // transport handles still belong to this connection's lifetime.
+      connection.disposed = true;
       const turn = turnRef.current;
       turnRef.current = null;
       if (!turn) return;
-      turn.disposed = true;
       void turn.stream?.dispose().catch(() => undefined);
     };
   }, [gateway]);
@@ -91,13 +96,13 @@ export default function ChatPanel({ baseUrl, greeting, profile, profileNotice, o
 
   const send = useCallback(async () => {
     const text = input.trim();
-    if (!text || turnRef.current || !gateway) return;
+    const connection = connectionRef.current;
+    if (!text || turnRef.current || !gateway || connection.disposed) return;
 
     const turn: ActiveTurn = {
       assistantId: crypto.randomUUID(),
       stream: null,
       canceled: false,
-      disposed: false,
     };
     turnRef.current = turn;
     setNotice(null);
@@ -111,14 +116,15 @@ export default function ChatPanel({ baseUrl, greeting, profile, profileNotice, o
     setStreaming(true);
     setActivity("thinking");
 
-    const isCurrent = () => turnRef.current === turn;
+    let receivedContent = "";
+    const isCurrent = () => !connection.disposed && turnRef.current === turn;
     const setAssistant = (updater: (current: string) => string) => {
       setMessages((prev) => prev.map((message) => message.id === turn.assistantId
         ? { ...message, content: updater(message.content) }
         : message));
     };
     const removeEmptyReply = () => setMessages((prev) => prev.filter(
-      (message) => message.id !== turn.assistantId || message.content !== "",
+      (message) => message.id !== turn.assistantId || message.content.trim() !== "",
     ));
 
     try {
@@ -126,17 +132,22 @@ export default function ChatPanel({ baseUrl, greeting, profile, profileNotice, o
         { message: text, sessionId: sessionIdRef.current },
         {
           onToken: (token) => {
-            if (!isCurrent()) return;
+            if (!isCurrent() || !token) return;
+            receivedContent += token;
             setReceivedText(true);
             setAssistant((current) => current + token);
           },
           onDone: (response) => {
             if (!isCurrent()) return;
-            setAssistant((current) => response.reply || current);
+            const reply = response.reply.trim() ? response.reply : receivedContent;
+            setAssistant(() => reply);
             turnRef.current = null;
             setStreaming(false);
-            setActivity("idle");
-            if (!response.reply) removeEmptyReply();
+            setActivity(reply.trim() ? "idle" : "error");
+            if (!reply.trim()) {
+              removeEmptyReply();
+              setNotice("The Entity finished without a text response. Try again.");
+            }
           },
           onError: (error) => {
             if (!isCurrent()) return;
@@ -149,7 +160,7 @@ export default function ChatPanel({ baseUrl, greeting, profile, profileNotice, o
         },
       );
       turn.stream = stream;
-      if (turn.disposed) void stream.dispose().catch(() => undefined);
+      if (connection.disposed) void stream.dispose().catch(() => undefined);
       else if (turn.canceled) void stream.cancel().catch(() => undefined);
     } catch (error) {
       if (!isCurrent()) return;
@@ -171,7 +182,7 @@ export default function ChatPanel({ baseUrl, greeting, profile, profileNotice, o
     setStreaming(false);
     setActivity("interrupted");
     setMessages((prev) => prev.filter((message) =>
-      message.id !== turn.assistantId || message.content !== ""));
+      message.id !== turn.assistantId || message.content.trim() !== ""));
     setNotice("Response stopped. You can continue whenever you like.");
     void turn.stream?.cancel().catch(() => undefined);
   }, []);

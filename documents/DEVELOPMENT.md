@@ -35,7 +35,7 @@ npm test
 npm run build
 ```
 
-See [First Signal](FIRST_SIGNAL.md) for the browser preview, synthetic transport fixture, and the unrun real-daemon integration test. Use invented test content. The cached Rust validation helper requires explicit local dependency paths and does not replace a clean build.
+See [First Signal](FIRST_SIGNAL.md) for the browser preview, synthetic transport fixture, actual in-process route/storage tests, and the unrun full-daemon integration test. Use invented test content. The cached Rust validation helpers require explicit local dependency paths and do not replace a clean build. The focused route runner is `crates/hive-daemon/tests/check-presence-routes.ps1`; it imports the production handlers and avoids daemon startup.
 
 ## Publish development changes only
 
