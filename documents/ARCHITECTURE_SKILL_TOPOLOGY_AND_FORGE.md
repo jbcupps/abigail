@@ -1,8 +1,9 @@
 # Architecture: Skill Topology and Forge
 
 **Status:** Canonical specification  
-**Version:** 1.3  
-**Date:** 2026-03-05
+**Version:** 1.4
+
+**Date:** 2026-10-19
 
 This document is the single source of truth for skill topology provisioning and Forge orchestration across the Sovereign stack.
 
@@ -59,25 +60,29 @@ Provisioning is idempotent and safe to run repeatedly.
 - Passive Memory/Id/Superego observers consume enriched envelopes and publish side-channel signals.
 - Include mentor chat monitor and passive Id/Superego/Memory observers.
 
-### Forge (authoring plane)
+### Forge (proposal validation and separate host authoring)
 
-- Creates/updates/removes skills through controlled factory tools.
-- Produces artifacts that must round-trip through the registry contract.
-- Never bypasses registry consistency checks.
+- The DevOps Forge broker validates proposed code and markdown without writing skill or registry artifacts.
+- `builtin.skill_factory` retains its separate create/delete authoring tools; the broker boundary does not govern that path.
+- The direct `process_forge_request` writer requires `ForgeWriteAuthorization` from a trusted Rust caller and writes artifacts through sandbox checks and the registry contract. This non-deserializable parameter is not authentication; no runtime host approval route is connected to it.
 
 ## 4. Forge Pipeline (Canonical)
 
 1. Intent classification identifies a persistent capability need.
 2. Entity publishes code + markdown envelope to `topic.skill.forge.request`.
-3. DevOps Forge worker performs sandbox checks and Superego gate scan.
-4. Forge writes artifacts to `skills/dynamic/` and mirrors instruction markdown for prompt loading.
-5. Forge updates/touches `skills/registry.toml` and publishes `topic.skill.forge.response`.
-6. Watcher detects registry change and re-provisions persistent topology from registry.
-7. Skill worker becomes available via request/response topics.
+3. DevOps Forge worker checks strict JSON, byte/field bounds, identifiers, and static Superego patterns. Unknown fields, including `mentor_approved`, permissions, scores, and adoption flags, are rejected.
+4. Worker publishes a bounded diagnostic and `topic.skill.forge.response`. Passing proposals receive `status=validated`, `applied=false`, `fitness_evaluated=false`, and `hot_reload_triggered=false`.
+5. No skill or registry writes follow from broker validation. The worker holds no skills-root write capability.
+
+Validation does not compile or execute code, establish behavioral gain, or authorize application. Host-owned baseline comparisons, no-gain/regression rejection, authenticated application, and adoption/rollback records remain gaps. A model's claimed score or improvement cannot fill them.
+
+An explicit trusted host caller can still use the separate writer to save code/markdown under `skills/dynamic/`, mirror instructions, and touch `skills/registry.toml`. Its hot-reload flag records the registry touch, not a watcher acknowledgement or proof that the skill is usable. This helper is not a broker adoption path.
+
+New Forge and memory subscriber diagnostic records contain only fixed outcome codes and bounded byte counts. They omit source content, identifiers, and freeform error text. Historical log entries are unchanged.
 
 ## 5. Superego Gates (Policy Boundaries)
 
-Superego gates are modeled as policy decisions at execution boundaries:
+The following are policy requirements for mutation/execution boundaries; the validation-only broker does not implement an authenticated approval or fitness gate. Its static pattern scan is not proof of code safety.
 
 - **Gate A: Registry mutation**
   Require elevated approval for high-risk additions (shell/network-wide/system scope).
@@ -118,7 +123,7 @@ On registry removal:
 - No dynamic-only runtime assumption is allowed in architecture docs or planning artifacts.
 - Persistent topology is startup- and registry-driven, not message-driven.
 - Registry is authoritative for skill topology scope.
-- Forge outputs are invalid unless reflected in the registry contract.
+- Applied skill artifacts must be reflected in the registry contract; validated proposals are not applied artifacts.
 - Re-provision must be safe under repeated or bursty file events.
 
 ## 8. Diagram
@@ -138,9 +143,10 @@ flowchart LR
     IdOob --> IdSignals[entity/id-signals]
     SuperegoOob --> EthicalSignals[entity/ethical-signals]
     Entity --> ForgeReq[topic.skill.forge.request]
-    ForgeReq --> ForgeWorker[DevOps Forge Worker]
-    ForgeWorker --> Dynamic[skills/dynamic]
-    ForgeWorker --> Registry
+    ForgeReq --> ForgeWorker[DevOps Forge Static Validation]
+    HostCaller[Explicit trusted Rust caller] --> Writer[Separate Forge Writer]
+    Writer --> Dynamic[skills/dynamic]
+    Writer --> Registry
     Registry --> Watcher[Hot-Reload Re-provision]
     ForgeWorker --> ForgeResp[topic.skill.forge.response]
 ```

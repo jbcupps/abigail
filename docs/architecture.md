@@ -17,14 +17,15 @@ flowchart LR
     IdOob --> IdSignals["entity/id-signals"]
     SuperegoOob --> EthicalSignals["entity/ethical-signals"]
     Entity --> ForgeReq["topic.skill.forge.request"]
-    ForgeReq --> ForgeWorker["DevOps Forge Worker<br/>(sandbox + superego gate)"]
-    ForgeWorker --> Dynamic["skills/dynamic/*"]
-    ForgeWorker --> Registry
+    ForgeReq --> ForgeWorker["DevOps Forge Worker<br/>(static validation only)"]
+    Host["Explicit trusted Rust caller"] --> Writer["Separate Forge writer"]
+    Writer --> Dynamic["skills/dynamic/*"]
+    Writer --> Registry
     Registry --> Watcher["SkillsWatcher Hot-Reload"]
     ForgeWorker --> ForgeResp["topic.skill.forge.response"]
 ```
 
-This diagram is the canonical high-level flow for persistent skill topology provisioning and Forge-driven capability evolution.
+This diagram separates proposal validation from host-authorized writes. A Forge response does not apply or activate a skill, measure improvement, or establish adoption. Behavioral evaluation and an authenticated application/rollback route remain unimplemented. The separate skill factory keeps its existing authoring path; see the [Forge specification](../documents/ARCHITECTURE_SKILL_TOPOLOGY_AND_FORGE.md).
 
 ## Hive-Owned Memory Store
 

@@ -30,3 +30,6 @@ reqwest = { workspace = true, optional = true }
 [features]
 default = []
 postgres = ["sqlx", "tokio", "async-trait", "reqwest"]
+
+[dev-dependencies]
+tokio.workspace = true

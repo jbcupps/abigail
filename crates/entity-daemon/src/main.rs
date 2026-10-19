@@ -482,13 +482,11 @@ async fn run() -> anyhow::Result<()> {
         .await
         .map_err(|e| tracing::warn!("Failed to start id monitor: {}", e))
         .ok();
-    let _devops_forge_worker_handle = soul_forge::worker::spawn_persistent_worker(
-        stream_broker.clone(),
-        shared_skills_base.clone(),
-    )
-    .await
-    .map_err(|e| tracing::warn!("Failed to start DevOps forge worker: {}", e))
-    .ok();
+    let _devops_forge_worker_handle =
+        soul_forge::worker::spawn_persistent_worker(stream_broker.clone())
+            .await
+            .map_err(|e| tracing::warn!("Failed to start DevOps forge worker: {}", e))
+            .ok();
     let _memory_chat_topic_handle =
         abigail_memory::subscriber::start(stream_broker.clone(), memory.clone())
             .await

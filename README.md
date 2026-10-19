@@ -36,6 +36,8 @@ No accounts. No data sharing. Just your family and the Entities you control.
 - Repeatable release automation is documented in [`docs/RELEASE_RUNBOOK.md`](docs/RELEASE_RUNBOOK.md). The active full installer release lane currently builds the Windows one-step installer; Apple/macOS builds are temporarily removed from the matrix.
 - UI and UX work must follow the Abigail design system in [`docs/design/README.md`](docs/design/README.md).
 
+DevOps Forge currently validates skill proposals and returns a result without installing them. A `validated` response means the envelope and static checks passed; it does not establish that the code works or improves an Entity. Host authorization, behavioral evaluation, and adoption/rollback are not connected to this broker path. The separate `builtin.skill_factory` tools retain their existing authoring behavior. See the [Forge architecture](documents/ARCHITECTURE_SKILL_TOPOLOGY_AND_FORGE.md) for these boundaries.
+
 ## Dev Start
 
 - From the repo root, start the desktop app with `cargo tauri dev`.
@@ -60,6 +62,7 @@ No accounts. No data sharing. Just your family and the Entities you control.
 - Per-Entity state is isolated into `abigail/entity_<uuid>` databases inside the same local store.
 - Research-era SQLite artifacts such as `abigail_seed.db`, `abigail_memory.db`, `jobs.db`, `calendar.db`, and `kb.db` are legacy-only and should not be treated as active runtime stores.
 - Browser, mentor-monitor, Id, Superego, and memory enrichment flows stay out-of-band so the family chat path remains responsive.
+- New memory subscriber diagnostic entries contain only fixed outcome codes and bounded byte counts; they exclude conversation content, identifiers, and error text. Existing log entries are not rewritten.
 
 ### For the Curious: Where Abigail Came From
 Abigail began as part of a larger research vision for trustworthy, decentralized AI. We took the best parts of that vision and made them simple, safe, and useful for real families.

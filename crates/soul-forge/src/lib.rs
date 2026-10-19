@@ -7,7 +7,11 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+pub mod validation;
 pub mod worker;
+pub use validation::{
+    parse_forge_request, validate_forge_request, ForgeDiagnostic, ForgeDiagnosticCode,
+};
 
 /// A soul forge scenario presenting an ethical dilemma.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -439,6 +443,7 @@ pub const FORGE_RESPONSE_TOPIC: &str = "topic.skill.forge.response";
 pub const FORGE_WORKER_GROUP: &str = "skill-worker.forge";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ForgeRequestEnvelope {
     #[serde(default)]
     pub correlation_id: Option<String>,
@@ -457,8 +462,14 @@ pub struct ForgeRequestEnvelope {
     pub keywords: Vec<String>,
     #[serde(default)]
     pub topics: Vec<String>,
-    #[serde(default)]
-    pub mentor_approved: bool,
+}
+
+/// A trusted in-process caller's decision, never deserialized from a proposal
+/// or broker header. This contract does not authenticate a mentor by itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForgeWriteAuthorization {
+    Unapproved,
+    MentorApproved,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -483,6 +494,9 @@ pub struct ForgeResponseEnvelope {
     #[serde(default)]
     pub superego_rule: Option<String>,
     pub hot_reload_triggered: bool,
+    pub applied: bool,
+    pub fitness_evaluated: bool,
+    pub diagnostic: ForgeDiagnostic,
     pub created_at_utc: chrono::DateTime<chrono::Utc>,
 }
 
@@ -494,6 +508,7 @@ pub struct ForgeWriteResult {
     pub registry_path: String,
     pub sandbox_audit_entries: usize,
     pub registry_entry_added: bool,
+    /// Registry was touched for watchers; this is not activation acknowledgement.
     pub hot_reload_triggered: bool,
 }
 
@@ -514,136 +529,82 @@ impl std::fmt::Display for ForgePipelineError {
 
 impl std::error::Error for ForgePipelineError {}
 
-struct ForgeSuperegoVerdict {
-    rule: &'static str,
-    reason: &'static str,
-}
-
-/// Persistent worker that processes skill forge envelopes from stream topics.
+/// Broker proposals receive static evaluation only. This channel has no
+/// authenticated host authorization or behavioral fitness evaluator.
 pub struct DevopsForgeWorker {
     broker: std::sync::Arc<dyn abigail_streaming::StreamBroker>,
-    skills_root: std::path::PathBuf,
+    diagnostics_dir: std::path::PathBuf,
 }
 
 impl DevopsForgeWorker {
-    pub fn new(
-        broker: std::sync::Arc<dyn abigail_streaming::StreamBroker>,
-        skills_root: std::path::PathBuf,
-    ) -> Self {
+    pub fn new(broker: std::sync::Arc<dyn abigail_streaming::StreamBroker>) -> Self {
         Self {
             broker,
-            skills_root,
+            diagnostics_dir: std::env::var("HIVE_DOCUMENTS_PATH")
+                .unwrap_or_else(|_| "hive/documents".to_string())
+                .into(),
         }
     }
 
     pub async fn spawn(self) -> anyhow::Result<abigail_streaming::SubscriptionHandle> {
-        self.broker
-            .ensure_topic(
-                FORGE_STREAM,
-                FORGE_REQUEST_TOPIC,
-                abigail_streaming::TopicConfig::default(),
-            )
-            .await?;
-        self.broker
-            .ensure_topic(
-                FORGE_STREAM,
-                FORGE_RESPONSE_TOPIC,
-                abigail_streaming::TopicConfig::default(),
-            )
-            .await?;
+        for topic in [FORGE_REQUEST_TOPIC, FORGE_RESPONSE_TOPIC] {
+            self.broker
+                .ensure_topic(
+                    FORGE_STREAM,
+                    topic,
+                    abigail_streaming::TopicConfig::default(),
+                )
+                .await?;
+        }
         self.broker
             .ensure_consumer_group(FORGE_STREAM, FORGE_REQUEST_TOPIC, FORGE_WORKER_GROUP)
             .await?;
 
         let broker = self.broker.clone();
-        let skills_root = self.skills_root.clone();
+        let diagnostics_dir = self.diagnostics_dir.clone();
         let handler: abigail_streaming::broker::MessageHandler = Box::new(move |msg| {
             let broker = broker.clone();
-            let skills_root = skills_root.clone();
+            let diagnostics_dir = diagnostics_dir.clone();
             Box::pin(async move {
-                let mut correlation_id = msg
-                    .headers
-                    .get("correlation_id")
-                    .cloned()
-                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-
-                let request = serde_json::from_slice::<ForgeRequestEnvelope>(&msg.payload);
-                let response = match request {
-                    Ok(mut req) => {
-                        if let Some(corr) = req.correlation_id.clone() {
-                            correlation_id = corr;
-                        } else {
-                            req.correlation_id = Some(correlation_id.clone());
-                        }
-                        match process_forge_request(&req, &skills_root) {
-                            Ok(wrote) => ForgeResponseEnvelope {
-                                correlation_id,
-                                session_id: req.session_id.clone(),
-                                entity_id: req.entity_id.clone(),
-                                skill_id: Some(req.skill_id.clone()),
-                                status: "success".to_string(),
-                                message: format!("Skill {} forged and hot-reloaded", req.skill_id),
-                                code_path: Some(wrote.code_path),
-                                markdown_path: Some(wrote.markdown_path),
-                                instruction_path: Some(wrote.instruction_path),
-                                registry_path: Some(wrote.registry_path),
-                                superego_rule: None,
-                                hot_reload_triggered: wrote.hot_reload_triggered,
-                                created_at_utc: chrono::Utc::now(),
-                            },
-                            Err(ForgePipelineError::Blocked { rule, reason }) => {
-                                ForgeResponseEnvelope {
-                                    correlation_id,
-                                    session_id: req.session_id.clone(),
-                                    entity_id: req.entity_id.clone(),
-                                    skill_id: Some(req.skill_id.clone()),
-                                    status: "blocked".to_string(),
-                                    message: reason,
-                                    code_path: None,
-                                    markdown_path: None,
-                                    instruction_path: None,
-                                    registry_path: None,
-                                    superego_rule: Some(rule),
-                                    hot_reload_triggered: false,
-                                    created_at_utc: chrono::Utc::now(),
-                                }
-                            }
-                            Err(ForgePipelineError::Failed(err)) => ForgeResponseEnvelope {
-                                correlation_id,
-                                session_id: req.session_id.clone(),
-                                entity_id: req.entity_id.clone(),
-                                skill_id: Some(req.skill_id.clone()),
-                                status: "error".to_string(),
-                                message: err,
-                                code_path: None,
-                                markdown_path: None,
-                                instruction_path: None,
-                                registry_path: None,
-                                superego_rule: None,
-                                hot_reload_triggered: false,
-                                created_at_utc: chrono::Utc::now(),
-                            },
-                        }
-                    }
-                    Err(e) => ForgeResponseEnvelope {
-                        correlation_id,
-                        session_id: None,
-                        entity_id: None,
-                        skill_id: None,
-                        status: "error".to_string(),
-                        message: format!("Invalid forge envelope: {}", e),
-                        code_path: None,
-                        markdown_path: None,
-                        instruction_path: None,
-                        registry_path: None,
-                        superego_rule: None,
-                        hot_reload_triggered: false,
-                        created_at_utc: chrono::Utc::now(),
-                    },
+                // Preserve bounded routing independently of the proposal verdict:
+                // valid body ID > valid header ID > host-generated fallback.
+                let correlation_id = validation::response_correlation_id(
+                    &msg.payload,
+                    msg.headers.get("correlation_id").map(String::as_str),
+                )
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                let parsed = parse_forge_request(&msg.payload);
+                let (request, code) = match parsed {
+                    Ok(request) => (Some(request), ForgeDiagnosticCode::ValidatedNotApplied),
+                    Err(code) => (None, code),
                 };
-
-                append_forge_superego_decision_log(&response);
-                publish_forge_response(broker.clone(), response).await;
+                // Other metadata is returned only for validated proposals.
+                // Correlation never affects validation, authority, or diagnostics.
+                let response = ForgeResponseEnvelope {
+                    correlation_id,
+                    session_id: request.as_ref().and_then(|r| r.session_id.clone()),
+                    entity_id: request.as_ref().and_then(|r| r.entity_id.clone()),
+                    skill_id: request.as_ref().map(|r| r.skill_id.clone()),
+                    status: code.status().to_string(),
+                    message: if code == ForgeDiagnosticCode::ValidatedNotApplied {
+                        "Proposal passed static validation; not built, fitness-tested, applied, or activated."
+                            .to_string()
+                    } else {
+                        format!("Forge proposal rejected: {:?}", code)
+                    },
+                    code_path: None,
+                    markdown_path: None,
+                    instruction_path: None,
+                    registry_path: None,
+                    superego_rule: code.rule().map(str::to_string),
+                    hot_reload_triggered: false,
+                    applied: false,
+                    fitness_evaluated: false,
+                    diagnostic: ForgeDiagnostic::new(code, msg.payload.len()),
+                    created_at_utc: chrono::Utc::now(),
+                };
+                append_forge_superego_decision_log(&diagnostics_dir, &response.diagnostic);
+                publish_forge_response(broker, response).await;
             })
         });
 
@@ -656,11 +617,7 @@ impl DevopsForgeWorker {
                 handler,
             )
             .await?;
-        tracing::info!(
-            "DevopsForgeWorker subscribed to {}/{}",
-            FORGE_STREAM,
-            FORGE_REQUEST_TOPIC
-        );
+        tracing::info!("DevopsForgeWorker subscribed for proposal validation only");
         Ok(handle)
     }
 }
@@ -670,7 +627,7 @@ async fn publish_forge_response(
     response: ForgeResponseEnvelope,
 ) {
     let Ok(payload) = serde_json::to_vec(&response) else {
-        tracing::warn!("forge worker: failed to serialize response");
+        tracing::warn!("forge worker: response_serialization_failed");
         return;
     };
     let mut headers = std::collections::HashMap::new();
@@ -679,66 +636,44 @@ async fn publish_forge_response(
         "correlation_id".to_string(),
         response.correlation_id.clone(),
     );
-    if let Some(skill_id) = response.skill_id.clone() {
-        headers.insert("skill_id".to_string(), skill_id);
-    }
     headers.insert("worker_group".to_string(), FORGE_WORKER_GROUP.to_string());
-    if let Some(rule) = response.superego_rule.clone() {
-        headers.insert("superego_rule".to_string(), rule);
-    }
-
-    if let Err(e) = broker
+    if broker
         .publish(
             FORGE_STREAM,
             FORGE_RESPONSE_TOPIC,
             abigail_streaming::StreamMessage::with_headers(payload, headers),
         )
         .await
+        .is_err()
     {
-        tracing::warn!("forge worker: failed to publish response: {}", e);
+        tracing::warn!("forge worker: response_publish_failed");
     }
 }
 
-fn append_forge_superego_decision_log(response: &ForgeResponseEnvelope) {
+fn append_forge_superego_decision_log(dir: &std::path::Path, diagnostic: &ForgeDiagnostic) {
     use std::io::Write as _;
-
-    let base =
-        std::env::var("HIVE_DOCUMENTS_PATH").unwrap_or_else(|_| "hive/documents".to_string());
-    let dir = std::path::Path::new(&base);
-    if let Err(e) = std::fs::create_dir_all(dir) {
-        tracing::warn!(
-            "forge worker: failed to create hive documents dir {}: {}",
-            dir.display(),
-            e
-        );
+    if std::fs::create_dir_all(dir).is_err() {
+        tracing::warn!("forge worker: diagnostic_directory_failed");
         return;
     }
-
-    let path = dir.join("superego_decisions.log");
-    let entry = format!(
-        "{} | source=forge_worker | correlation_id={} | skill_id={} | decision={} | rule={} | message={}",
-        chrono::Utc::now().to_rfc3339(),
-        response.correlation_id,
-        response.skill_id.as_deref().unwrap_or("unknown"),
-        response.status,
-        response.superego_rule.as_deref().unwrap_or("none"),
-        response.message.replace('\n', " ")
-    );
-
-    match std::fs::OpenOptions::new()
+    // Only a closed enum and capped byte count are persisted. Do not log routing
+    // metadata, model text, paths, headers, or freeform parser/transport errors.
+    let Ok(entry) = serde_json::to_string(diagnostic) else {
+        return;
+    };
+    let result = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&path)
-    {
-        Ok(mut file) => {
-            if let Err(e) = writeln!(file, "{}", entry) {
-                tracing::warn!("forge worker: failed writing log {}: {}", path.display(), e);
-            }
-        }
-        Err(e) => tracing::warn!("forge worker: failed opening log {}: {}", path.display(), e),
+        .open(dir.join("superego_decisions.log"))
+        .and_then(|mut file| writeln!(file, "{}", entry));
+    if result.is_err() {
+        tracing::warn!("forge worker: diagnostic_write_failed");
     }
 }
-
+/// Trusted host-only write helper. The broker worker never calls this: no
+/// authenticated approval/fitness/adoption route exists there yet. The caller
+/// must obtain authorization outside proposal data. Writes are not transactional
+/// and do not establish behavioral improvement or verified activation.
 /// Runs the forge pipeline:
 /// 1) validate/superego gate
 /// 2) sandbox permission checks for writes
@@ -748,31 +683,17 @@ fn append_forge_superego_decision_log(response: &ForgeResponseEnvelope) {
 pub fn process_forge_request(
     request: &ForgeRequestEnvelope,
     skills_root: &std::path::Path,
+    authorization: ForgeWriteAuthorization,
 ) -> Result<ForgeWriteResult, ForgePipelineError> {
-    let skill_id = request.skill_id.trim();
-    if skill_id.is_empty() {
-        return Err(ForgePipelineError::Failed(
-            "forge request missing skill_id".to_string(),
-        ));
-    }
-    if request.code.trim().is_empty() {
-        return Err(ForgePipelineError::Failed(
-            "forge request missing code payload".to_string(),
-        ));
-    }
-    if request.markdown.trim().is_empty() {
-        return Err(ForgePipelineError::Failed(
-            "forge request missing markdown payload".to_string(),
-        ));
-    }
-
-    if let Some(v) = superego_scan(&request.code, &request.markdown) {
-        return Err(ForgePipelineError::Blocked {
-            rule: v.rule.to_string(),
-            reason: v.reason.to_string(),
-        });
-    }
-    if !request.mentor_approved {
+    validate_forge_request(request).map_err(|code| match code.rule() {
+        Some(rule) => ForgePipelineError::Blocked {
+            rule: rule.to_string(),
+            reason: "Forge proposal blocked by static policy".to_string(),
+        },
+        None => ForgePipelineError::Failed(format!("forge validation: {:?}", code)),
+    })?;
+    let skill_id = &request.skill_id;
+    if authorization != ForgeWriteAuthorization::MentorApproved {
         return Err(ForgePipelineError::Blocked {
             rule: "require_mentor_approval".to_string(),
             reason: "Forge request requires explicit mentor approval".to_string(),
@@ -944,26 +865,20 @@ fn sanitize_filename(raw: Option<&str>, fallback: &str) -> String {
     out
 }
 
-fn superego_scan(code: &str, markdown: &str) -> Option<ForgeSuperegoVerdict> {
+fn superego_scan(code: &str, markdown: &str) -> Option<ForgeDiagnosticCode> {
     let payload = format!("{}\n{}", code, markdown).to_lowercase();
 
     if payload.contains("rm -rf")
         || payload.contains("drop table")
         || payload.contains("delete all")
     {
-        return Some(ForgeSuperegoVerdict {
-            rule: "destructive-pattern",
-            reason: "Forge payload contains destructive execution patterns",
-        });
+        return Some(ForgeDiagnosticCode::DestructivePattern);
     }
     if payload.contains("invoke-expression")
         || payload.contains("curl | sh")
         || payload.contains("wget | sh")
     {
-        return Some(ForgeSuperegoVerdict {
-            rule: "remote-code-exec-pattern",
-            reason: "Forge payload contains unsafe remote execution pattern",
-        });
+        return Some(ForgeDiagnosticCode::RemoteExecutionPattern);
     }
     if (payload.contains("soul.md")
         || payload.contains("ethics.md")
@@ -972,10 +887,7 @@ fn superego_scan(code: &str, markdown: &str) -> Option<ForgeSuperegoVerdict> {
             || payload.contains("delete")
             || payload.contains("truncate"))
     {
-        return Some(ForgeSuperegoVerdict {
-            rule: "constitutional-doc-target",
-            reason: "Forge payload targets constitutional documents, which is disallowed",
-        });
+        return Some(ForgeDiagnosticCode::ConstitutionalDocumentTarget);
     }
     None
 }
@@ -1249,7 +1161,6 @@ mod forge_worker_tests {
             markdown_filename: Some("how_to_use.md".to_string()),
             keywords: vec!["ping".to_string(), "devops".to_string()],
             topics: vec!["forge".to_string()],
-            mentor_approved: true,
         }
     }
 
@@ -1257,7 +1168,8 @@ mod forge_worker_tests {
     fn process_forge_request_writes_artifacts_and_registry() {
         let root = temp_skills_root("process_forge_request");
         let request = sample_request();
-        let wrote = process_forge_request(&request, &root).unwrap();
+        let wrote = process_forge_request(&request, &root, ForgeWriteAuthorization::MentorApproved)
+            .unwrap();
 
         assert!(std::path::Path::new(&wrote.code_path).exists());
         assert!(std::path::Path::new(&wrote.markdown_path).exists());
@@ -1277,7 +1189,8 @@ mod forge_worker_tests {
         let mut request = sample_request();
         request.code = "fn main() { let _ = \"rm -rf /\"; }".to_string();
 
-        let err = process_forge_request(&request, &root).unwrap_err();
+        let err = process_forge_request(&request, &root, ForgeWriteAuthorization::MentorApproved)
+            .unwrap_err();
         match err {
             ForgePipelineError::Blocked { rule, .. } => {
                 assert_eq!(rule, "destructive-pattern");
@@ -1289,69 +1202,475 @@ mod forge_worker_tests {
     #[test]
     fn process_forge_request_requires_mentor_approval() {
         let root = temp_skills_root("approval_gate");
-        let mut request = sample_request();
-        request.mentor_approved = false;
+        let request = sample_request();
 
-        let err = process_forge_request(&request, &root).unwrap_err();
+        let err = process_forge_request(&request, &root, ForgeWriteAuthorization::Unapproved)
+            .unwrap_err();
         match err {
             ForgePipelineError::Blocked { rule, .. } => {
                 assert_eq!(rule, "require_mentor_approval");
             }
             other => panic!("expected approval gate, got {:?}", other),
         }
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
     }
 
     #[tokio::test]
-    async fn forge_worker_roundtrip_success_response() {
-        let root = temp_skills_root("worker_roundtrip");
+    async fn forge_worker_validates_without_applying_and_rejects_untrusted_authority() {
+        let root = temp_skills_root("worker_validation");
+        let request = sample_request();
+        // A host-written baseline exists before broker proposals arrive.
+        let wrote = process_forge_request(&request, &root, ForgeWriteAuthorization::MentorApproved)
+            .unwrap();
+        let baseline_code = std::fs::read(&wrote.code_path).unwrap();
+        let baseline_markdown = std::fs::read(&wrote.markdown_path).unwrap();
+        let baseline_instruction = std::fs::read(&wrote.instruction_path).unwrap();
+        let baseline_registry = std::fs::read(&wrote.registry_path).unwrap();
+
         let broker: Arc<dyn StreamBroker> = Arc::new(MemoryBroker::default());
-
-        let worker = DevopsForgeWorker::new(broker.clone(), root.clone());
+        let mut worker = DevopsForgeWorker::new(broker.clone());
+        worker.diagnostics_dir = root.join("diagnostics");
         let _worker_handle = worker.spawn().await.unwrap();
-
-        let (tx, rx) = tokio::sync::oneshot::channel::<ForgeResponseEnvelope>();
-        let tx_cell = Arc::new(tokio::sync::Mutex::new(Some(tx)));
-        let tx_cell_for_cb = tx_cell.clone();
-
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<ForgeResponseEnvelope>(1);
         let _response_sub = broker
             .subscribe(
                 FORGE_STREAM,
                 FORGE_RESPONSE_TOPIC,
-                "forge-worker-test-reader",
+                "forge-validation-test-reader",
                 Box::new(move |msg| {
-                    let tx_cell = tx_cell_for_cb.clone();
+                    let tx = tx.clone();
                     Box::pin(async move {
-                        let Ok(env) = serde_json::from_slice::<ForgeResponseEnvelope>(&msg.payload)
-                        else {
-                            return;
-                        };
-                        if let Some(sender) = tx_cell.lock().await.take() {
-                            let _ = sender.send(env);
-                        }
+                        let response = serde_json::from_slice(&msg.payload).unwrap();
+                        tx.send(response).await.unwrap();
                     })
                 }),
             )
             .await
             .unwrap();
 
-        let request = sample_request();
-        let payload = serde_json::to_vec(&request).unwrap();
-        broker
-            .publish(
+        const SECRET: &str = "synthetic-secret-do-not-log";
+        let valid = serde_json::to_vec(&request).unwrap();
+        let mut cases = vec![
+            (
+                br#"[null,null,null,"dynamic.test","code","docs",null,null,[],[]]"#.to_vec(),
+                ForgeDiagnosticCode::InvalidSchema,
+            ),
+            (valid.clone(), ForgeDiagnosticCode::ValidatedNotApplied),
+            // A repeated/baseline-equivalent proposal is not improvement evidence.
+            (valid.clone(), ForgeDiagnosticCode::ValidatedNotApplied),
+            (
+                br#"{"skill_id":"synthetic-secret-do-not-log""#.to_vec(),
+                ForgeDiagnosticCode::IncompleteJson,
+            ),
+            (
+                br#"{"synthetic-secret-do-not-log":true}"#.to_vec(),
+                ForgeDiagnosticCode::InvalidSchema,
+            ),
+            (
+                b"not-json-synthetic-secret-do-not-log".to_vec(),
+                ForgeDiagnosticCode::InvalidJson,
+            ),
+            (
+                [valid.clone(), b" {}".to_vec()].concat(),
+                ForgeDiagnosticCode::InvalidJson,
+            ),
+            (
+                format!(
+                    "\u{0060}\u{0060}\u{0060}json\n{}\n\u{0060}\u{0060}\u{0060}",
+                    String::from_utf8_lossy(&valid)
+                )
+                .into_bytes(),
+                ForgeDiagnosticCode::InvalidJson,
+            ),
+            (
+                vec![b'x'; validation::MAX_FORGE_REQUEST_BYTES + 1],
+                ForgeDiagnosticCode::RequestTooLarge,
+            ),
+        ];
+        // Suggested approval, score gains, permissions and adoption instructions
+        // cannot affect static evaluation or confer write authority.
+        for field in [
+            "mentor_approved",
+            "score",
+            "aggregate_gain",
+            "permissions",
+            "adopt",
+            "evaluator",
+        ] {
+            let mut value = serde_json::to_value(&request).unwrap();
+            value[field] = match field {
+                "mentor_approved" | "adopt" => serde_json::json!(true),
+                "score" | "aggregate_gain" => serde_json::json!(100),
+                "permissions" => serde_json::json!(["filesystem:*"]),
+                _ => serde_json::json!({"claim": SECRET, "approved": true}),
+            };
+            cases.push((
+                serde_json::to_vec(&value).unwrap(),
+                ForgeDiagnosticCode::InvalidSchema,
+            ));
+        }
+        let duplicate = format!(
+            "{{\"skill_id\":\"first\",{}",
+            String::from_utf8_lossy(&valid).trim_start_matches('{')
+        );
+        cases.push((duplicate.into_bytes(), ForgeDiagnosticCode::InvalidSchema));
+        let mut invalid_metadata = request.clone();
+        invalid_metadata.correlation_id = Some(SECRET.repeat(100));
+        cases.push((
+            serde_json::to_vec(&invalid_metadata).unwrap(),
+            ForgeDiagnosticCode::InvalidFields,
+        ));
+        invalid_metadata = request.clone();
+        invalid_metadata.code_filename = Some("../escape.rs".into());
+        cases.push((
+            serde_json::to_vec(&invalid_metadata).unwrap(),
+            ForgeDiagnosticCode::InvalidFields,
+        ));
+        let mut changed = request.clone();
+        changed.code = format!("// {}\npub fn run() {{}}", SECRET);
+        cases.push((
+            serde_json::to_vec(&changed).unwrap(),
+            ForgeDiagnosticCode::ValidatedNotApplied,
+        ));
+        changed.code = format!("// {}\n// drop table", SECRET);
+        cases.push((
+            serde_json::to_vec(&changed).unwrap(),
+            ForgeDiagnosticCode::DestructivePattern,
+        ));
+        changed.code = "x".repeat(64 * 1024 + 1);
+        cases.push((
+            serde_json::to_vec(&changed).unwrap(),
+            ForgeDiagnosticCode::InvalidFields,
+        ));
+
+        let case_count = cases.len();
+        for (payload, expected) in cases {
+            let mut headers = std::collections::HashMap::new();
+            headers.insert("correlation_id".into(), SECRET.repeat(1000));
+            headers.insert("mentor_approved".into(), "true".into());
+            broker
+                .publish(
+                    FORGE_STREAM,
+                    FORGE_REQUEST_TOPIC,
+                    StreamMessage::with_headers(payload, headers),
+                )
+                .await
+                .unwrap();
+            let response = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(response.diagnostic.code, expected);
+            assert!(!response.applied);
+            assert!(!response.fitness_evaluated);
+            assert!(!response.hot_reload_triggered);
+            assert!(response.code_path.is_none());
+            assert!(response.markdown_path.is_none());
+            assert!(response.instruction_path.is_none());
+            assert!(response.registry_path.is_none());
+            assert!(response.message.len() < 160);
+            assert!(!serde_json::to_string(&response).unwrap().contains(SECRET));
+        }
+
+        assert_eq!(std::fs::read(&wrote.code_path).unwrap(), baseline_code);
+        assert_eq!(
+            std::fs::read(&wrote.markdown_path).unwrap(),
+            baseline_markdown
+        );
+        assert_eq!(
+            std::fs::read(&wrote.instruction_path).unwrap(),
+            baseline_instruction
+        );
+        assert_eq!(
+            std::fs::read(&wrote.registry_path).unwrap(),
+            baseline_registry
+        );
+        let log = std::fs::read_to_string(root.join("diagnostics/superego_decisions.log")).unwrap();
+        assert_eq!(log.lines().count(), case_count);
+        assert!(!log.contains(SECRET));
+        assert!(!log.contains("session-1"));
+        assert!(!log.contains("dynamic.devops_ping"));
+        assert!(log.lines().all(|line| line.len() < 128));
+        for line in log.lines() {
+            let diagnostic: ForgeDiagnostic = serde_json::from_str(line).unwrap();
+            assert!(diagnostic.payload_bytes <= validation::MAX_FORGE_REQUEST_BYTES + 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn forge_worker_preserves_bounded_correlation_independently_of_acceptance() {
+        const BODY_ID: &str = "synthetic-body-correlation";
+        const HEADER_ID: &str = "synthetic-header-correlation";
+        let root = temp_skills_root("worker_correlation");
+        let broker: Arc<dyn StreamBroker> = Arc::new(MemoryBroker::default());
+        let mut worker = DevopsForgeWorker::new(broker.clone());
+        worker.diagnostics_dir = root.join("diagnostics");
+        let _worker_handle = worker.spawn().await.unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamMessage>(1);
+        let _response_sub = broker
+            .subscribe(
                 FORGE_STREAM,
-                FORGE_REQUEST_TOPIC,
-                StreamMessage::new(payload),
+                FORGE_RESPONSE_TOPIC,
+                "forge-correlation-test-reader",
+                Box::new(move |msg| {
+                    let tx = tx.clone();
+                    Box::pin(async move { tx.send(msg).await.unwrap() })
+                }),
             )
             .await
             .unwrap();
 
-        let response = tokio::time::timeout(Duration::from_secs(2), rx)
-            .await
-            .unwrap()
-            .unwrap();
+        let case = |name: String, payload, header: Option<&str>, expected: Option<&str>, code| {
+            (
+                name,
+                payload,
+                header.map(str::to_string),
+                expected.map(str::to_string),
+                code,
+            )
+        };
+        let mut request = sample_request();
+        request.correlation_id = Some(BODY_ID.into());
+        let valid = serde_json::to_value(&request).unwrap();
+        let mut blocked = valid.clone();
+        blocked["code"] = serde_json::json!("// drop table");
+        let mut authority = valid.clone();
+        authority["mentor_approved"] = serde_json::json!(true);
+        let mut invalid_fields = valid.clone();
+        invalid_fields["code"] = serde_json::json!("");
+        let mut cases = Vec::new();
+        for (name, body, code) in [
+            (
+                "valid",
+                valid.clone(),
+                ForgeDiagnosticCode::ValidatedNotApplied,
+            ),
+            ("policy", blocked, ForgeDiagnosticCode::DestructivePattern),
+            ("authority", authority, ForgeDiagnosticCode::InvalidSchema),
+            ("fields", invalid_fields, ForgeDiagnosticCode::InvalidFields),
+        ] {
+            // Both accepted and rejected proposals must remain routable. Body
+            // precedence is identical regardless of the strict proposal verdict.
+            cases.push(case(
+                format!("{name}/body"),
+                serde_json::to_vec(&body).unwrap(),
+                None,
+                Some(BODY_ID),
+                code,
+            ));
+            cases.push(case(
+                format!("{name}/both"),
+                serde_json::to_vec(&body).unwrap(),
+                Some(HEADER_ID),
+                Some(BODY_ID),
+                code,
+            ));
+            let mut header_only = body;
+            header_only
+                .as_object_mut()
+                .unwrap()
+                .remove("correlation_id");
+            cases.push(case(
+                format!("{name}/header"),
+                serde_json::to_vec(&header_only).unwrap(),
+                Some(HEADER_ID),
+                Some(HEADER_ID),
+                code,
+            ));
+        }
 
-        assert_eq!(response.status, "success");
-        assert!(response.hot_reload_triggered);
-        assert!(response.code_path.unwrap_or_default().contains("dynamic"));
+        let max_id = "i".repeat(128);
+        let oversized_id = "i".repeat(129);
+        for (name, id, code, expected) in [
+            (
+                "null",
+                serde_json::Value::Null,
+                ForgeDiagnosticCode::ValidatedNotApplied,
+                HEADER_ID,
+            ),
+            (
+                "max",
+                serde_json::json!(max_id),
+                ForgeDiagnosticCode::ValidatedNotApplied,
+                max_id.as_str(),
+            ),
+            (
+                "oversized",
+                serde_json::json!(oversized_id),
+                ForgeDiagnosticCode::InvalidFields,
+                HEADER_ID,
+            ),
+            (
+                "control",
+                serde_json::json!("invalid\nid"),
+                ForgeDiagnosticCode::InvalidFields,
+                HEADER_ID,
+            ),
+            (
+                "empty",
+                serde_json::json!(""),
+                ForgeDiagnosticCode::InvalidFields,
+                HEADER_ID,
+            ),
+            (
+                "wrong-type",
+                serde_json::json!(true),
+                ForgeDiagnosticCode::InvalidSchema,
+                HEADER_ID,
+            ),
+        ] {
+            let mut body = valid.clone();
+            body["correlation_id"] = id;
+            cases.push(case(
+                format!("body-id/{name}"),
+                serde_json::to_vec(&body).unwrap(),
+                Some(HEADER_ID),
+                Some(expected),
+                code,
+            ));
+        }
+        for (name, payload, code) in [
+            (
+                "truncated",
+                br#"{"correlation_id":"synthetic-body-correlation","code":"#.to_vec(),
+                ForgeDiagnosticCode::IncompleteJson,
+            ),
+            (
+                "trailing",
+                [serde_json::to_vec(&valid).unwrap(), b" {}".to_vec()].concat(),
+                ForgeDiagnosticCode::InvalidJson,
+            ),
+            (
+                "oversized",
+                vec![b'x'; validation::MAX_FORGE_REQUEST_BYTES + 1],
+                ForgeDiagnosticCode::RequestTooLarge,
+            ),
+            (
+                "array",
+                br#"["synthetic-body-correlation"]"#.to_vec(),
+                ForgeDiagnosticCode::InvalidSchema,
+            ),
+            (
+                "duplicate",
+                br#"{"correlation_id":"synthetic-body-correlation","correlation_id":"second"}"#
+                    .to_vec(),
+                ForgeDiagnosticCode::InvalidSchema,
+            ),
+            (
+                "escaped-duplicate-null",
+                br#"{"correlation_id":null,"correlation\u005fid":"synthetic-body-correlation"}"#
+                    .to_vec(),
+                ForgeDiagnosticCode::InvalidSchema,
+            ),
+        ] {
+            cases.push(case(
+                name.into(),
+                payload,
+                Some(HEADER_ID),
+                Some(HEADER_ID),
+                code,
+            ));
+        }
+        let mut header_only = valid.clone();
+        header_only
+            .as_object_mut()
+            .unwrap()
+            .remove("correlation_id");
+        for (name, header, expected) in [
+            ("max", Some(max_id.as_str()), Some(max_id.as_str())),
+            ("oversized", Some(oversized_id.as_str()), None),
+            ("control", Some("invalid\nid"), None),
+            ("empty", Some(""), None),
+            ("missing", None, None),
+        ] {
+            cases.push(case(
+                format!("header-id/{name}"),
+                serde_json::to_vec(&header_only).unwrap(),
+                header,
+                expected,
+                ForgeDiagnosticCode::ValidatedNotApplied,
+            ));
+        }
+        cases.push(case(
+            "invalid-body-and-header".into(),
+            b"{".to_vec(),
+            Some("invalid\nid"),
+            None,
+            ForgeDiagnosticCode::IncompleteJson,
+        ));
+
+        let case_count = cases.len();
+        for (name, payload, header, expected_id, expected_code) in cases {
+            let mut headers = std::collections::HashMap::new();
+            if let Some(header) = header {
+                headers.insert("correlation_id".into(), header);
+            }
+            broker
+                .publish(
+                    FORGE_STREAM,
+                    FORGE_REQUEST_TOPIC,
+                    StreamMessage::with_headers(payload, headers),
+                )
+                .await
+                .unwrap();
+            let message = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let response: ForgeResponseEnvelope = serde_json::from_slice(&message.payload).unwrap();
+            match expected_id {
+                Some(id) => assert_eq!(response.correlation_id, id, "{name}"),
+                None => {
+                    assert!(
+                        uuid::Uuid::parse_str(&response.correlation_id).is_ok(),
+                        "{name}"
+                    );
+                    assert_eq!(response.correlation_id.len(), 36, "{name}");
+                }
+            }
+            assert_eq!(
+                message.headers.get("correlation_id"),
+                Some(&response.correlation_id),
+                "{name}"
+            );
+            assert_eq!(response.diagnostic.code, expected_code, "{name}");
+            assert_eq!(response.status, expected_code.status(), "{name}");
+            assert!(
+                !response.applied && !response.fitness_evaluated && !response.hot_reload_triggered,
+                "{name}"
+            );
+            assert!(
+                response.code_path.is_none()
+                    && response.markdown_path.is_none()
+                    && response.instruction_path.is_none()
+                    && response.registry_path.is_none(),
+                "{name}"
+            );
+        }
+        let log = std::fs::read_to_string(root.join("diagnostics/superego_decisions.log")).unwrap();
+        assert_eq!(log.lines().count(), case_count);
+        for id in [BODY_ID, HEADER_ID, max_id.as_str(), "session-1", "entity-1"] {
+            assert!(!log.contains(id));
+        }
+        for line in log.lines() {
+            let entry: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert_eq!(entry.as_object().unwrap().len(), 2);
+            let diagnostic: ForgeDiagnostic = serde_json::from_str(line).unwrap();
+            assert!(diagnostic.payload_bytes <= validation::MAX_FORGE_REQUEST_BYTES + 1);
+            assert!(line.len() < 128);
+        }
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1); // diagnostics only
+    }
+
+    #[test]
+    fn trusted_writer_also_rejects_out_of_bounds_proposals_without_writes() {
+        let root = temp_skills_root("writer_bounds");
+        let mut request = sample_request();
+        request.topics = vec!["topic".into(); 33];
+        assert!(
+            process_forge_request(&request, &root, ForgeWriteAuthorization::MentorApproved)
+                .is_err()
+        );
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
     }
 }

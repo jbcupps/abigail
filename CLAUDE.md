@@ -19,6 +19,8 @@ Abigail manages multiple personal AI Entities that the user, mentor, or family h
 - Current dev builds prioritize a clean working single-version experience over cross-version compatibility. Remove stale legacy paths when they conflict with the active Hive-first architecture.
 - Unsigned stabilization builds are the default local path. Release signing and updater signing are beta/release-only concerns that should stay opt-in and isolated from day-to-day development.
 - Privacy and local-first are non-negotiable. Cloud models are optional power-ups, never required.
+- Treat DevOps Forge broker output as static proposal validation only: `validated` does not mean built, improved, applied, or activated. Model fields cannot grant host approval, permissions, or scores. The direct writer's non-deserializable authorization parameter is a trusted-caller contract, not an authenticated runtime approval channel; behavioral adoption and rollback remain unimplemented.
+- Keep `builtin.skill_factory` authoring separate from the Forge broker boundary. Keep new Forge and memory subscriber diagnostics limited to fixed codes and bounded counts, without payload content or freeform errors; do not imply historical logs were sanitized.
 - Keep per-Entity data scoped through Hive-owned storage interfaces so one Entity cannot read another Entity's records by accident.
 - Keep everything dead-simple for the family user. Delight and ease of use come first.
 

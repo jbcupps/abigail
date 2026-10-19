@@ -1,23 +1,22 @@
 //! Persistent DevOps Forge worker entrypoint.
 //!
-//! Canonical forge pipeline is implemented in `crate::DevopsForgeWorker` and
-//! `crate::process_forge_request`. This module provides a dedicated worker path
-//! so runtime callers can depend on `soul_forge::worker::*`.
+//! Runtime entrypoint for static proposal validation in `crate::DevopsForgeWorker`.
+//! The separate trusted `crate::process_forge_request` writer is never invoked
+//! by broker messages. Validation does not imply fitness or application.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use abigail_streaming::{StreamBroker, SubscriptionHandle};
 
-/// Compatibility wrapper around the canonical DevOps Forge worker.
+/// Runtime wrapper around the validation-only DevOps Forge worker.
 pub struct PersistentForgeWorker {
     inner: crate::DevopsForgeWorker,
 }
 
 impl PersistentForgeWorker {
-    pub fn new(broker: Arc<dyn StreamBroker>, skills_root: PathBuf) -> Self {
+    pub fn new(broker: Arc<dyn StreamBroker>) -> Self {
         Self {
-            inner: crate::DevopsForgeWorker::new(broker, skills_root),
+            inner: crate::DevopsForgeWorker::new(broker),
         }
     }
 
@@ -27,19 +26,13 @@ impl PersistentForgeWorker {
 }
 
 /// Minimal worker entrypoint for runtime callers that want a single start API.
-pub async fn start(
-    broker: Arc<dyn StreamBroker>,
-    skills_root: PathBuf,
-) -> anyhow::Result<SubscriptionHandle> {
-    spawn_persistent_worker(broker, skills_root).await
+pub async fn start(broker: Arc<dyn StreamBroker>) -> anyhow::Result<SubscriptionHandle> {
+    spawn_persistent_worker(broker).await
 }
 
 /// Spawn the persistent forge worker subscribed to `topic.skill.forge.request`.
 pub async fn spawn_persistent_worker(
     broker: Arc<dyn StreamBroker>,
-    skills_root: PathBuf,
 ) -> anyhow::Result<SubscriptionHandle> {
-    PersistentForgeWorker::new(broker, skills_root)
-        .spawn()
-        .await
+    PersistentForgeWorker::new(broker).spawn().await
 }
