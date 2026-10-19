@@ -1,6 +1,6 @@
 # Abigail Release Runbook
 
-This repo has one family-facing installer release lane and one artifact-only diagnostic build lane.
+This repo has one family-facing installer release lane and one artifact-only diagnostic build lane. Follow the [Windows release checklist](WINDOWS_RELEASE_CHECKLIST.md) to review a candidate, publish an approved revision, and verify the public download.
 
 Rust is pinned to the tested `1.97.0` compiler in `rust-toolchain.toml` and all
 CI/release setup steps. The repository toolchain uses the minimal profile with
@@ -23,7 +23,7 @@ Workflow: `Abigail Installer Release` (`.github/workflows/release.yml`)
 Current active platforms:
 
 - Windows x64 NSIS installer: `Abigail-windows-x64-setup.exe`
-- Windows x64 MSI installer: `Abigail-windows-x64.msi`
+- Windows x64 MSI installer: `Abigail-windows-x64.msi` (local signing and unsigned lanes; the cloud lane publishes NSIS only)
 
 The Windows installer is the family-facing release lane. It installs one `Abigail` app icon and bundles the internal split runtime pieces (`Abigail Hive`, `Abigail Entity Runtime`, `hive-daemon`, and `entity-daemon`) so users do not download separate binaries.
 
@@ -72,6 +72,10 @@ The workflow builds and tags the triggering commit. Both desktop shells embed th
 Before publishing an unsigned installer, the workflow installs it in a fresh test directory, checks all four payload hashes and Windows daemon loader checks, then runs the synthetic daemon contract against those installed binaries. The contract uses isolated data, Documents, and app profiles, exercises live streaming and durable history across restarts, and does not require a model account or API key. It is a contract check; it does not claim real-model inference. The installed verifier refuses to replace an existing Abigail installation outside the repository's test directory. Validation evidence is uploaded as `abigail-installer-validation-windows-latest`.
 
 Publication also requires the `gate` job from the `CI` workflow to pass for the exact release commit on `beta` or `main`. The wait is bounded to one hour. Advisory audit or CodeQL results do not override a successful gate. `beta` builds are prereleases; promoted `main` and clean `vX.Y.Z` tag builds are stable releases. Stable publication requires a successfully verified Windows signing lane before creating a tag or release. Unsigned candidate builds (`publish_release=false`) and beta stabilization remain available; updater signing remains opt-in.
+
+Before upload, the workflow stages the canonical public filenames once and verifies their final Windows signatures, expected publisher certificate, timestamps, and SHA-256 hashes. The single `abigail-release-assets-windows` artifact contains those exact bytes, `windows-signature-evidence.json`, and `release-provenance.json`. The publish job verifies them again on Windows, rejects an existing release, and uploads without renaming or rebuilding files. Stable releases explicitly become latest; beta releases do not.
+
+Publication is complete only after `verify-published-download` passes. It resolves the remote tag to the exact source commit, compares GitHub asset metadata and every downloaded asset with the original build artifact, and verifies the downloaded installer signatures on Windows. Stable verification also downloads the exact `/releases/latest/download/Abigail-windows-x64-setup.exe` route used by the website and checks that its bytes match. The `published-download-verification` Actions artifact preserves the result and metadata. A failure after publication can leave a public release; use the checklist's recovery procedure.
 
 Windows Authenticode validation and Microsoft SmartScreen reputation are separate. A valid publisher signature and timestamp do not guarantee the absence of an "unrecognized app" warning. The public `/releases/latest` download selects stable releases, so publishing a signed beta does not repair an older unsigned stable download. See the [2026-10-19 artifact diagnosis](WINDOWS_SIGNING_DIAGNOSIS_2026-10-19.md) for verified examples and primary-source guidance.
 

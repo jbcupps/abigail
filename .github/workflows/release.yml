@@ -537,40 +537,44 @@ jobs:
           path: artifacts/windows-signatures.json
           if-no-files-found: error
 
-      - name: Upload NSIS installer
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
-        with:
-          name: abigail-installer-${{ matrix.platform }}
-          path: ${{ matrix.installer_path }}
-          if-no-files-found: error
+      - name: Stage and verify exact release assets
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_CHANNEL: ${{ github.event_name == 'workflow_dispatch' && !inputs.publish_release && 'candidate' || steps.version.outputs.channel }}
+          RELEASE_SHA: ${{ github.sha }}
+          WINDOWS_SIGNED: ${{ env.ABIGAIL_LOCAL_SIGNING == 'true' || env.ABIGAIL_CLOUD_SIGNING == 'true' }}
+          UPDATER_SIGNED: ${{ env.ABIGAIL_CLOUD_SIGNING != 'true' && inputs.windows_signing != 'unsigned' && vars.ABIGAIL_REQUIRE_UPDATER_SIGNING == 'true' }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          ./scripts/stage_release_assets.ps1 -Version $env:RELEASE_VERSION -Tag $env:RELEASE_TAG -Repository $env:GITHUB_REPOSITORY -WindowsSigned $env:WINDOWS_SIGNED -UpdaterSigned $env:UPDATER_SIGNED -CloudSigning $env:ABIGAIL_CLOUD_SIGNING
+          ./scripts/verify_release_artifacts.ps1 -AssetsDirectory release-assets -SourceCommit $env:RELEASE_SHA -Tag $env:RELEASE_TAG -Channel $env:RELEASE_CHANNEL -WindowsSigned $env:WINDOWS_SIGNED
+          $policyArgs = @('--assets-dir', 'release-assets', '--source-commit', $env:RELEASE_SHA, '--tag', $env:RELEASE_TAG, '--channel', $env:RELEASE_CHANNEL, '--windows-signed', $env:WINDOWS_SIGNED)
+          if ($env:WINDOWS_SIGNED -eq 'true') { $policyArgs += @('--expected-thumbprint', $env:WINDOWS_CERTIFICATE_THUMBPRINT) }
+          node scripts/release_provenance.mjs create @policyArgs
+          if ($LASTEXITCODE -ne 0) { throw 'Release provenance creation failed.' }
 
-      - name: Upload MSI installer
-        if: env.ABIGAIL_CLOUD_SIGNING != 'true'
+      - name: Upload verified release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
         with:
-          name: abigail-msi-${{ matrix.platform }}
-          path: ${{ matrix.msi_path }}
-          if-no-files-found: warn
-
-      - name: Upload updater artifacts
-        if: env.ABIGAIL_CLOUD_SIGNING != 'true' && inputs.windows_signing != 'unsigned' && vars.ABIGAIL_REQUIRE_UPDATER_SIGNING == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
-        with:
-          name: abigail-updater-${{ matrix.platform }}
-          path: |
-            target/**/bundle/**/*.nsis.zip
-            target/**/bundle/**/*.nsis.zip.sig
-            target/**/bundle/**/*.msi.zip
-            target/**/bundle/**/*.msi.zip.sig
+          name: abigail-release-assets-windows
+          path: release-assets/*
           if-no-files-found: error
 
   publish:
     needs: build
     if: needs.build.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.publish_release)
-    runs-on: ubuntu-22.04
+    runs-on: windows-latest
     permissions:
       contents: write
       actions: read
+    env:
+      RELEASE_TAG: ${{ needs.build.outputs.tag }}
+      RELEASE_CHANNEL: ${{ needs.build.outputs.channel }}
+      RELEASE_SHA: ${{ github.sha }}
+      WINDOWS_SIGNED: ${{ needs.build.outputs.windows_signed }}
+      WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
     steps:
       - name: Require Windows signing for stable publication
         shell: bash
@@ -589,12 +593,34 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - name: Download installer artifacts
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "20"
+
+      - name: Download verified release assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          path: artifacts
-          pattern: abigail-*
-          merge-multiple: false
+          name: abigail-release-assets-windows
+          path: release-assets
+
+      - name: Reverify exact bytes before publication
+        shell: pwsh
+        run: |
+          $policyArgs = @('--assets-dir', 'release-assets', '--source-commit', $env:RELEASE_SHA, '--tag', $env:RELEASE_TAG, '--channel', $env:RELEASE_CHANNEL, '--windows-signed', $env:WINDOWS_SIGNED)
+          if ($env:WINDOWS_SIGNED -eq 'true') { $policyArgs += @('--expected-thumbprint', $env:WINDOWS_CERTIFICATE_THUMBPRINT) }
+          node scripts/release_provenance.mjs verify @policyArgs
+          if ($LASTEXITCODE -ne 0) { throw 'Downloaded build artifacts do not match verified provenance.' }
+          ./scripts/verify_release_artifacts.ps1 -AssetsDirectory release-assets -SourceCommit $env:RELEASE_SHA -Tag $env:RELEASE_TAG -Channel $env:RELEASE_CHANNEL -WindowsSigned $env:WINDOWS_SIGNED -ReportPath "$env:RUNNER_TEMP/pre-publication-signatures.json"
+
+      - name: Refuse replacement of an existing release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $result = (& gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" 2>&1 | Out-String)
+          if ($LASTEXITCODE -eq 0) { throw 'This release already exists. Verify it or choose a new version; never overwrite released assets.' }
+          if ($result -notmatch 'HTTP 404') { throw 'Unable to confirm that the release version is unused.' }
 
       - name: Require successful CI gate for this commit
         shell: bash
@@ -639,38 +665,6 @@ jobs:
             git push origin "$TAG"
           fi
 
-      - name: Rename release assets
-        shell: bash
-        run: |
-          mkdir -p release-assets
-
-          INSTALLER=$(find artifacts/abigail-installer-windows-latest -name "*.exe" -type f 2>/dev/null | head -1 || true)
-          if [ -z "$INSTALLER" ]; then
-            echo "ERROR: No Windows installer found in artifacts"
-            exit 1
-          fi
-          cp "$INSTALLER" release-assets/Abigail-windows-x64-setup.exe
-
-          MSI=$(find artifacts/abigail-msi-windows-latest -name "*.msi" -type f 2>/dev/null | head -1 || true)
-          if [ -n "$MSI" ]; then
-            cp "$MSI" release-assets/Abigail-windows-x64.msi
-          fi
-
-          if [[ "${{ needs.build.outputs.windows_signed }}" == "true" ]]; then
-            cp artifacts/abigail-signatures-windows-latest/windows-signatures.json release-assets/windows-signatures.json
-          fi
-
-          if [[ "${{ needs.build.outputs.updater_signed }}" == "true" ]]; then
-            find artifacts/abigail-updater-windows-latest -type f -name "*.zip*" -exec cp {} release-assets/ \;
-            node scripts/generate_tauri_latest_manifest.mjs \
-              --version "${{ needs.build.outputs.version }}" \
-              --assets-dir release-assets \
-              --base-url "https://github.com/${{ github.repository }}/releases/download/${{ needs.build.outputs.tag }}" \
-              --output release-assets/latest.json
-          fi
-
-          ls -la release-assets
-
       - name: Count release assets
         id: assets
         shell: bash
@@ -684,15 +678,21 @@ jobs:
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           tag_name: ${{ needs.build.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           name: ${{ needs.build.outputs.release_name }}
           draft: false
           prerelease: ${{ needs.build.outputs.prerelease }}
+          make_latest: ${{ needs.build.outputs.channel == 'stable' && 'true' || 'false' }}
+          overwrite_files: false
+          fail_on_unmatched_files: true
           body: |
             ## ${{ needs.build.outputs.release_name }}
 
             Release channel: `${{ needs.build.outputs.channel }}`
 
             Windows Authenticode signatures verified: `${{ needs.build.outputs.windows_signed }}`.
+
+            `release-provenance.json` records the source commit and SHA-256 of every other published asset. `windows-signature-evidence.json` records verification of the final installer bytes. The published-download job also checks the manifest's own bytes. See that job's result before treating distribution as complete.
 
             ### Installation
 
@@ -711,6 +711,49 @@ jobs:
             - macOS builds remain temporarily unavailable while Apple signing is paused.
             - Linux one-step packaging is planned after the Windows installer lane is stable.
           files: release-assets/*
+
+  verify-published-download:
+    needs: [build, publish]
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "20"
+
+      - name: Download original verified build assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: abigail-release-assets-windows
+          path: release-assets
+
+      - name: Verify public download bytes signatures and channel
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_CHANNEL: ${{ needs.build.outputs.channel }}
+          RELEASE_SHA: ${{ github.sha }}
+          WINDOWS_SIGNED: ${{ needs.build.outputs.windows_signed }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          ./scripts/verify_published_release.ps1 -Repository $env:GITHUB_REPOSITORY -Tag $env:RELEASE_TAG -SourceCommit $env:RELEASE_SHA -Channel $env:RELEASE_CHANNEL -WindowsSigned $env:WINDOWS_SIGNED
+
+      - name: Preserve published download verification result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
+        with:
+          name: published-download-verification
+          path: published-verification/*.json
+          if-no-files-found: warn
 
   verify-beta-installer:
     needs: [build, publish]

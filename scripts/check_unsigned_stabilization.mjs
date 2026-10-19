@@ -189,7 +189,7 @@ assert(
   "Installer build and publication must use the triggering commit rather than a moving branch."
 );
 const installedVerification = release.indexOf("- name: Verify installed unsigned payload and synthetic contract");
-const installerUpload = release.indexOf("- name: Upload NSIS installer");
+const installerUpload = release.indexOf("- name: Upload verified release assets");
 assert(
   installedVerification >= 0 && installedVerification < installerUpload &&
     release.includes("./scripts/verify-mvp-windows.ps1") &&
@@ -210,6 +210,27 @@ assert(
     release.includes('WINDOWS_SIGNED: ${{ needs.build.outputs.windows_signed }}') &&
     release.includes('[[ "$RELEASE_CHANNEL" == "stable" && "$WINDOWS_SIGNED" != "true" ]]'),
   "Stable publication must reject unsigned builds before creating tags or releases; unsigned candidates and beta stabilization remain available."
+);
+const finalStaging = release.indexOf('- name: Stage and verify exact release assets');
+const publishReverification = release.indexOf('- name: Reverify exact bytes before publication');
+assert(
+  finalStaging > installedVerification && finalStaging < installerUpload &&
+    publishReverification > installerUpload && publishReverification < releaseTagCreation &&
+    release.includes('name: abigail-release-assets-windows') &&
+    !release.includes('head -1 || true') &&
+    release.includes('overwrite_files: false') &&
+    release.includes("make_latest: ${{ needs.build.outputs.channel == 'stable' && 'true' || 'false' }}"),
+  'Only the exact staged, verified bytes may be published; refuse ambiguous installer selection and existing asset replacement.'
+);
+assert(
+  release.includes('verify-published-download:') &&
+    release.includes('./scripts/verify_published_release.ps1') &&
+    release.includes("!inputs.publish_release && 'candidate'") &&
+    ci.includes('node --test scripts/tests/test_release_provenance.mjs') &&
+    ci.includes('./scripts/tests/test_release_artifacts.ps1') &&
+    ci.includes('./scripts/tests/test_stage_release_assets.ps1') &&
+    ci.includes('./scripts/tests/test_published_release.ps1'),
+  'Release completion must verify public downloads and channels, preserve candidates, and run negative-path policy tests in CI.'
 );
 assert(
   ciGate >= 0 && ciGate < releasePublication &&
