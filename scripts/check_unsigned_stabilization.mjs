@@ -202,6 +202,15 @@ assert(
 );
 const ciGate = release.indexOf("- name: Require successful CI gate for this commit");
 const releasePublication = release.indexOf("- name: Create GitHub Release");
+const stableSigningGate = release.indexOf("- name: Require Windows signing for stable publication");
+const releaseTagCreation = release.indexOf("- name: Create git tag if needed");
+assert(
+  stableSigningGate > release.indexOf("\n  publish:") &&
+    stableSigningGate < releaseTagCreation && releaseTagCreation < releasePublication &&
+    release.includes('WINDOWS_SIGNED: ${{ needs.build.outputs.windows_signed }}') &&
+    release.includes('[[ "$RELEASE_CHANNEL" == "stable" && "$WINDOWS_SIGNED" != "true" ]]'),
+  "Stable publication must reject unsigned builds before creating tags or releases; unsigned candidates and beta stabilization remain available."
+);
 assert(
   ciGate >= 0 && ciGate < releasePublication &&
     release.includes('--commit "$RELEASE_SHA"') &&

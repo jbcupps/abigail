@@ -572,6 +572,17 @@ jobs:
       contents: write
       actions: read
     steps:
+      - name: Require Windows signing for stable publication
+        shell: bash
+        env:
+          RELEASE_CHANNEL: ${{ needs.build.outputs.channel }}
+          WINDOWS_SIGNED: ${{ needs.build.outputs.windows_signed }}
+        run: |
+          if [[ "$RELEASE_CHANNEL" == "stable" && "$WINDOWS_SIGNED" != "true" ]]; then
+            echo "::error::Stable releases require verified Windows Authenticode signatures. Enable a supported signing lane, or use publish_release=false for an unsigned candidate."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
