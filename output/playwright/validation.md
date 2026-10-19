@@ -37,6 +37,18 @@ Current-source checks after the reliability changes on 2026-10-19:
 
 The cached-graph reproduction script is `crates/hive-daemon/tests/check-presence-routes.ps1`; supply matching dependency and native-library directories. It writes outputs and synthetic temporary directories only beneath this worktree's ignored `target/presence-route-check`. This is not a clean Cargo build or a full daemon startup test.
 
+## Bounded creation follow-up
+
+- Hive: all 188 tests across seven files passed; TypeScript and Vite production build passed.
+- Entity Runtime: all 59 tests across four files passed; TypeScript and Vite production build passed.
+- Fixture syntax and whitespace checks passed. The earlier 11-test Rust result is unchanged historical evidence; no Rust code changed or daemon started for this follow-up.
+
+Creation now uses a 30-second total deadline with immediate client cancellation, a pre-dispatch tab journal, exact-ID late confirmation, and explicit candidate review. The entered brief survives reload in the same tab. An unknown POST outcome cannot cause a repeat POST. Candidate recovery does not silently settle the original attempt; the original and selected IDs remain distinct. Recovery reads, writes, and conversation continuation are pinned to the original Hive.
+
+Focused transport, storage, and UI regression coverage includes cancellation before and after dispatch, total deadline accounting, malformed/rejected responses, late callbacks, remounts, unavailable storage, empty/ambiguous candidate lists, exact-ID retries, selected-candidate conflicts, and stale imports. A review caught and fixed continuation losing the pinned Hive and editable earlier steps during a pending recovery save. No backend or dependency files changed in this follow-up.
+
+The delayed browser fixture used `node scripts/presence-fixture.mjs 1531 35000`. Its invented Entity was registered in memory before the response delay. Stop waiting released controls; Check Hive found the possible match; review showed the existing brief; explicit save produced a reveal that still reported the original creation as unconfirmed. Returning home showed one Entity. Reload and Resume creation preserved the brief and selected candidate, with Create still disabled. At 390 px, document width was 382 px, with no horizontal overflow. The viewport override was reset. No actual daemon, model, provider, credentials, microphone, or user Documents directory were used. The fixture was stopped after validation.
+
 ## Browser evidence
 
 The Chrome preview used `http://127.0.0.1:1522/?presencePreview=1`. It saves identity drafts in that browser origin only, creates no runtime Entity, and does not send conversations.
@@ -53,6 +65,9 @@ The Chrome preview used `http://127.0.0.1:1522/?presencePreview=1`. It saves ide
 | `08-http-recovery-fixture.jpg` | Subsequent request completes after error |
 | `09-saved-grid.jpg` | Newly saved Vesper appears after direct home navigation from reveal, without Refresh |
 | `10-restored-presence.jpg` | Vesper's Ember appearance and synthetic purpose restored after reload; motion paused |
+| `11-creation-recovery.jpg` | Explicit candidate review with unknown original outcome; synthetic delayed fixture |
+| `12-recovery-saved.jpg` | Confirmed profile save while original creation remains visibly unconfirmed |
+| `13-recovery-mobile.jpg` | Resumed brief and preserved uncertainty at 390 px; no horizontal overflow |
 
 Created Lyra, saved, reloaded, and reopened the same appearance. Checked pause, text-only mode, responsive layout, and keyboard Enter submission. The temporary viewport override was reset.
 
@@ -64,6 +79,6 @@ The separate transport browser used `?hiveUrl=http://127.0.0.1:1531` with `scrip
 
 The added real Rust HTTP integration test has not run. Existing daemon startup reads the OS keyring before configuration overrides, and creation can write the user's Documents directory even with a separate data root. We stopped before launching it; this was a scope/isolation choice, not a denied operation. Rebuild the existing daemons and run the gated HTTP test in a suitably isolated environment before release.
 
-The later direct in-process Axum suite passes without those startup side effects. Its initial loopback-client approach encountered Windows socket error 10013 and was abandoned without escalation; the successful tests call the same production Router with HTTP Request/Body objects directly. The existing Entity-creation client still lacks timeout/cancellation; an unknown creation result requires checking the Entity list before retrying.
+The later direct in-process Axum suite passes without those startup side effects. Its initial loopback-client approach encountered Windows socket error 10013 and was abandoned without escalation; the successful tests call the same production Router with HTTP Request/Body objects directly. The client now bounds and cancels waiting, but the existing server has no idempotency/attempt lookup. Matching candidates and empty lists cannot settle an uncertain POST. The unresolved journal blocks repeat creation in its tab; closing the tab, clearing storage, or using another tab/device falls outside that protection.
 
 Video and audio adapters are interfaces and local-media fallbacks; this delivery uses procedural visuals with audio off. Purpose, temperament, and boundaries remain explicitly labeled metadata, not runtime model instructions or enforced policy. No production deployment or installer was performed.

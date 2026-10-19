@@ -32,6 +32,7 @@ describe("First Signal creation and editing", () => {
     mocks.createPresenceEntity.mockReset().mockResolvedValue("created-entity");
     mocks.savePresence.mockReset().mockResolvedValue(undefined);
     localStorage.clear();
+    sessionStorage.clear();
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Unexpected network request")));
     vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
   });
@@ -39,6 +40,7 @@ describe("First Signal creation and editing", () => {
   afterEach(() => {
     cleanup();
     localStorage.clear();
+    sessionStorage.clear();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -105,14 +107,14 @@ describe("First Signal creation and editing", () => {
     expect(screen.queryByRole("heading", { name: /^Meet / })).not.toBeInTheDocument();
     expect(screen.queryByText("FIRST SIGNAL / IDENTITY SAVED")).not.toBeInTheDocument();
     expect(onSaved).not.toHaveBeenCalled();
-    expect(mocks.createPresenceEntity).toHaveBeenCalledExactlyOnceWith("Sol", false);
-    expect(mocks.savePresence).toHaveBeenCalledExactlyOnceWith("created-entity", defaultProfile("Sol"), false);
+    expect(mocks.createPresenceEntity).toHaveBeenCalledExactlyOnceWith("Sol", false, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(mocks.savePresence).toHaveBeenCalledExactlyOnceWith("created-entity", defaultProfile("Sol"), false, expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Create Entity" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save brief to confirmed Entity" }));
     expect(await screen.findByRole("heading", { name: "Meet Sol." })).toBeInTheDocument();
     expect(mocks.createPresenceEntity).toHaveBeenCalledOnce();
     expect(mocks.savePresence).toHaveBeenCalledTimes(2);
-    expect(mocks.savePresence).toHaveBeenLastCalledWith("created-entity", defaultProfile("Sol"), false);
+    expect(mocks.savePresence).toHaveBeenLastCalledWith("created-entity", defaultProfile("Sol"), false, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(onSaved).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Skip reveal" }));
     expect(onSaved).toHaveBeenCalledExactlyOnceWith({ id: "created-entity", profile: defaultProfile("Sol") });
@@ -150,7 +152,7 @@ describe("First Signal creation and editing", () => {
     expect(await screen.findByRole("heading", { name: "Meet Lyra." })).toBeInTheDocument();
     const expected = { name: "Lyra", purpose: "Explore new ideas together.", temperament: "curious", boundaries: "Ask before changing files.", identity: "ember" };
     expect(mocks.createPresenceEntity).not.toHaveBeenCalled();
-    expect(mocks.savePresence).toHaveBeenCalledExactlyOnceWith("existing-entity", expected, false);
+    expect(mocks.savePresence).toHaveBeenCalledExactlyOnceWith("existing-entity", expected, false, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to conversation" }));
     expect(onSaved).toHaveBeenCalledExactlyOnceWith({ id: "existing-entity", profile: expected });
   });

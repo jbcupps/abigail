@@ -2,7 +2,9 @@
 /**
  * SYNTHETIC DEVELOPMENT FIXTURE — no model, provider, microphone, or file access.
  *
- * Run: node scripts/presence-fixture.mjs [port]  (default: 1531)
+ * Run: node scripts/presence-fixture.mjs [port] [creation-delay-ms]
+ * Defaults: 1531 and 0. A delay holds the response after memory-only creation,
+ * allowing cancellation/uncertain-result recovery to be inspected.
  * Hive UI: ?hiveUrl=http://127.0.0.1:1531
  * Runtime UI: ?entityUrl=http://127.0.0.1:1531/runtime/<created-id>
  *
@@ -16,8 +18,13 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 
 const port = Number(process.argv[2] ?? 1531);
+const creationDelayMs = Number(process.argv[3] ?? 0);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   console.error("Usage: node scripts/presence-fixture.mjs [port: 1-65535]");
+  process.exit(1);
+}
+if (!Number.isInteger(creationDelayMs) || creationDelayMs < 0 || creationDelayMs > 60_000) {
+  console.error("Creation delay must be an integer from 0 to 60000 ms.");
   process.exit(1);
 }
 const baseUrl = `http://127.0.0.1:${port}`;
@@ -25,6 +32,7 @@ const maxBodyBytes = 32 * 1024;
 const entities = new Map();
 const profiles = new Map();
 const streams = new Set();
+const pendingCreations = new Set();
 const fixtureError = "Synthetic transport fixture: requested error. No model was called.";
 
 function json(response, status, data, error) {
@@ -171,6 +179,11 @@ async function route(request, response) {
       const id = randomUUID();
       entities.set(id, { id, name: input.name.trim(), birth_complete: false, birth_date: null, is_hive: false, immortal: false });
       profiles.set(id, { name: input.name.trim(), purpose: "", temperament: "gentle", boundaries: "", identity: "aether" });
+      if (creationDelayMs) await new Promise(resolve => {
+        const timer = setTimeout(() => { pendingCreations.delete(timer); resolve(); }, creationDelayMs);
+        pendingCreations.add(timer);
+      });
+      if (response.destroyed || response.writableEnded) return;
       return json(response, 201, { id, directory: "synthetic:memory-only" });
     }
   }
@@ -233,8 +246,11 @@ server.on("error", error => {
 server.listen(port, "127.0.0.1", () => {
   console.log(`SYNTHETIC DEVELOPMENT FIXTURE: ${baseUrl}`);
   console.log("No model/provider/microphone/files. In-memory invented test data only. Stop with Ctrl+C.");
+  if (creationDelayMs) console.log(`Creation responses delayed ${creationDelayMs} ms after memory-only registration.`);
 });
 const shutdown = () => {
+  for (const timer of pendingCreations) clearTimeout(timer);
+  pendingCreations.clear();
   for (const stream of streams) stream.stop();
   server.close();
   server.closeAllConnections();

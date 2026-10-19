@@ -4,11 +4,9 @@ import { createPresenceEntity, loadPresence, openPresence, previewProfiles, save
 
 const mocks = vi.hoisted(() => ({
   resolveHiveUrl: vi.fn<() => Promise<string>>(),
-  createEntity: vi.fn(),
   fetch: vi.fn<typeof fetch>(),
 }));
 vi.mock("./connection", () => ({ resolveHiveUrl: mocks.resolveHiveUrl }));
-vi.mock("./daemonClient", () => ({ createEntity: mocks.createEntity }));
 
 const PREVIEW_KEY = "abigail.first-signal.preview.v1";
 const HIVE_URL = "http://127.0.0.1:43141";
@@ -52,13 +50,11 @@ function stallRequest(stage: typeof stages[number], data: unknown): () => void {
 function expectNoRuntimeCalls() {
   expect(mocks.resolveHiveUrl).not.toHaveBeenCalled();
   expect(mocks.fetch).not.toHaveBeenCalled();
-  expect(mocks.createEntity).not.toHaveBeenCalled();
 }
 
 beforeEach(() => {
   localStorage.clear();
   mocks.resolveHiveUrl.mockReset().mockResolvedValue(HIVE_URL);
-  mocks.createEntity.mockReset().mockResolvedValue({ id: "created-entity", directory: "unused" });
   mocks.fetch.mockReset().mockRejectedValue(new Error("Unexpected network request"));
   vi.stubGlobal("fetch", mocks.fetch);
 });
@@ -88,6 +84,21 @@ describe("presence HTTP response validation", () => {
     }));
     expect(mocks.fetch).toHaveBeenNthCalledWith(2, endpoint, expect.any(Object));
     expect(localStorage.getItem(PREVIEW_KEY)).toBeNull();
+  });
+
+  it("pins a recovered profile save and reload to the attempt's Hive address", async () => {
+    const pinnedUrl = "http://127.0.0.1:43151";
+    mocks.resolveHiveUrl.mockResolvedValue("http://127.0.0.1:43161");
+    mocks.fetch.mockResolvedValue(response({ ok: true, data: profile }));
+    const controller = new AbortController();
+
+    await savePresence("sol", profile, false, { signal: controller.signal, hiveUrl: pinnedUrl });
+    await expect(loadPresence("sol", false, controller.signal, pinnedUrl)).resolves.toEqual(profile);
+
+    expect(mocks.fetch.mock.calls.map(([url]) => url)).toEqual([
+      `${pinnedUrl}/v1/entities/sol/presence`, `${pinnedUrl}/v1/entities/sol/presence`,
+    ]);
+    expect(mocks.resolveHiveUrl).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -135,42 +146,43 @@ describe("presence HTTP response validation", () => {
     await expect(savePresence("sol", profile, false)).rejects.toThrow(/did not confirm/);
   });
 
-  it("keeps the save confirmation deadline at five seconds", async () => {
-    vi.useFakeTimers();
-    const release = stallRequest("fetch", profile);
-    const settled = vi.fn();
-    const outcome = savePresence("sol", profile, false).then(() => null, (error: unknown) => error);
-    void outcome.then(settled);
-
-    await vi.advanceTimersByTimeAsync(4_999);
-    expect(settled).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
-    const error = await outcome;
-    expect(error).toBeInstanceOf(DOMException);
-    expect(error).toMatchObject({ name: "TimeoutError" });
-    expect(mocks.fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
-    expect(vi.getTimerCount()).toBe(0);
-
-    release();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(await outcome).toBe(error);
-  });
-
-  it("returns the actual created entity ID", async () => {
+  it("re-exports creation with a baseline read before the actual POST", async () => {
+    mocks.fetch.mockResolvedValueOnce(response({ ok: true, data: [] }))
+      .mockResolvedValueOnce(response({ ok: true, data: { id: "created-entity" } }));
     await expect(createPresenceEntity("Sol", false)).resolves.toBe("created-entity");
-    expect(mocks.createEntity).toHaveBeenCalledExactlyOnceWith("Sol");
-    expect(mocks.fetch).not.toHaveBeenCalled();
-  });
-
-  it.each([null, {}, { id: "" }, { id: "   " }, { id: " padded " }, { id: 42 }])("rejects an unconfirmed creation result %j", async (result) => {
-    mocks.createEntity.mockResolvedValue(result);
-    await expect(createPresenceEntity("Sol", false)).rejects.toThrow(/valid Entity ID/);
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.fetch).toHaveBeenLastCalledWith(`${HIVE_URL}/v1/entities`, expect.objectContaining({ method: "POST", body: JSON.stringify({ name: "Sol" }) }));
   });
 
   it.each(["http://127.0.0.1:45123", "https://entity.example.test/runtime/"])("opens a validated HTTP(S) address %s", async (local_url) => {
     mocks.fetch.mockResolvedValue(response({ ok: true, data: { local_url } }));
     await expect(openPresence("entity/with spaces")).resolves.toBe(local_url);
     expect(mocks.fetch).toHaveBeenCalledWith(`${HIVE_URL}/v1/entities/entity%2Fwith%20spaces/open`, expect.objectContaining({ method: "POST" }));
+  });
+
+  it("opens only the supplied Hive even when the current connection points elsewhere", async () => {
+    const hiveA = "http://127.0.0.1:43151";
+    const runtimeA = "http://127.0.0.1:45151";
+    mocks.resolveHiveUrl.mockResolvedValue("http://127.0.0.1:43152");
+    mocks.fetch.mockResolvedValue(response({ ok: true, data: { local_url: runtimeA } }));
+
+    await expect(openPresence("same-entity-id", undefined, hiveA)).resolves.toBe(runtimeA);
+
+    expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith(`${hiveA}/v1/entities/same-entity-id/open`, expect.objectContaining({ method: "POST" }));
+    expect(mocks.resolveHiveUrl).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back to the current Hive when the supplied Hive fails to open", async () => {
+    const hiveA = "http://127.0.0.1:43151";
+    mocks.resolveHiveUrl.mockResolvedValue("http://127.0.0.1:43152");
+    mocks.fetch
+      .mockRejectedValueOnce(new Error("Pinned Hive unavailable"))
+      .mockResolvedValue(response({ ok: true, data: { local_url: "http://127.0.0.1:45152" } }));
+
+    await expect(openPresence("same-entity-id", undefined, hiveA)).rejects.toThrow("Pinned Hive unavailable");
+
+    expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith(`${hiveA}/v1/entities/same-entity-id/open`, expect.objectContaining({ method: "POST" }));
+    expect(mocks.resolveHiveUrl).not.toHaveBeenCalled();
   });
 
   it.each([null, {}, { local_url: "" }, { local_url: "   " }, { local_url: " http://127.0.0.1:45123 " }, { local_url: 42 }, { local_url: "/runtime" }, { local_url: "javascript:alert(1)" }, { local_url: "file:///runtime" }])("rejects an unusable open result %j", async (data) => {
@@ -239,6 +251,7 @@ describe("preview storage remains local and recoverable", () => {
 
 const operations = [
   { label: "load", deadline: 5_000, data: profile, run: (signal?: AbortSignal) => loadPresence("sol", false, signal) },
+  { label: "save", deadline: 5_000, data: profile, run: (signal?: AbortSignal) => savePresence("sol", profile, false, { signal }) },
   { label: "open", deadline: 55_000, data: { local_url: "http://127.0.0.1:45123" }, run: (signal?: AbortSignal) => openPresence("sol", signal) },
 ];
 

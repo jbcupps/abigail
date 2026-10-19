@@ -66,7 +66,7 @@
 .signal-file:focus-within { outline: 2px solid #b8dfff; outline-offset: 4px; }
 .signal-file input { opacity: 0; width: 100%; height: 100%; position: absolute; inset: 0; cursor: pointer; }
 .signal-editor-footer { border-top: 1px solid #293443; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 24px 0 28px; }
-.signal-editor-footer > div { display: flex; gap: 20px; }
+.signal-editor-footer > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px 20px; min-width: 0; }
 .signal-editor-footer > span { font-size: 9px; }
 .signal-choice-group { padding: 0; border: 0; margin: 24px 0 0; }
 .signal-choice-group legend { font-size: 12px; margin-bottom: 9px; color: #d5dfee; }
@@ -88,7 +88,7 @@
 .signal-summary dd, .signal-proposal dd { margin: 0; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .signal-scope { display: flex; gap: 13px; padding: 14px; border: 1px solid #364256; border-radius: 6px; background: #1c2637; }
 .signal-scope p { font-size: 10px; color: #b3c2d6; line-height: 1.8; }
-.signal-proposal { margin-top: 18px; padding: 16px; background: #1c293b; border: 1px solid #526483; border-radius: 6px; }
+.signal-proposal { margin-top: 18px; padding: 16px; background: #1c293b; border: 1px solid #526483; border-radius: 6px; overflow-wrap: anywhere; }
 .signal-proposal h3 { font-size: 14px; }.signal-proposal p { font-size: 11px; color: #bfcdde; margin-bottom: 12px; }
 .signal-error { border: 1px solid #9f6568; color: #ffd9d9; padding: 12px; background: #391e29; margin-top: 15px!important; font-size: 12px; }
 .signal-global-error { position: fixed; right: 24px; bottom: 24px; max-width: min(480px, calc(100vw - 48px)); border: 1px solid #a6797b; background: #2b1825; border-radius: 8px; padding: 20px; z-index: 10; box-shadow: 0 10px 40px #0009; }

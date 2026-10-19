@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultProfile, type EntityProfile } from "../../../../entity-runtime-app/src-ui/src/presence/profile";
 import type { HiveStatus } from "../lib/daemonClient";
+import { writeCreationDraft } from "../lib/creationDraft";
 import PresenceHome from "./PresenceHome";
 
 const mocks = vi.hoisted(() => ({
@@ -37,6 +38,7 @@ describe("Presence Home pending operations", () => {
   let originalUrl: string;
 
   beforeEach(() => {
+    sessionStorage.clear();
     originalUrl = window.location.href;
     mocks.loadPresence.mockReset().mockResolvedValue(defaultProfile("Ada"));
     mocks.openPresence.mockReset().mockResolvedValue("http://127.0.0.1:43201");
@@ -48,6 +50,7 @@ describe("Presence Home pending operations", () => {
 
   afterEach(() => {
     cleanup();
+    sessionStorage.clear();
     window.history.replaceState({}, "", originalUrl);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -81,7 +84,7 @@ describe("Presence Home pending operations", () => {
     expect(mocks.openPresence).not.toHaveBeenCalled();
 
     await act(async () => { creation.resolve("created-entity"); });
-    expect(mocks.savePresence).toHaveBeenCalledExactlyOnceWith("created-entity", defaultProfile("Sol"), false);
+    expect(mocks.savePresence).toHaveBeenCalledExactlyOnceWith("created-entity", defaultProfile("Sol"), false, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(screen.getByRole("button", { name: "Your Entities" })).toBeDisabled();
     expect(home).toHaveAttribute("aria-disabled", "true");
 
@@ -108,7 +111,7 @@ describe("Presence Home pending operations", () => {
     mocks.openPresence.mockReturnValueOnce(opening.promise);
     render(<PresenceHome preview={false} status={status} onRefresh={vi.fn()} onProviders={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Open conversation/ }));
-    await waitFor(() => expect(mocks.openPresence).toHaveBeenCalledWith("ada", expect.any(AbortSignal)));
+    await waitFor(() => expect(mocks.openPresence).toHaveBeenCalledWith("ada", expect.any(AbortSignal), undefined));
 
     fireEvent.click(screen.getByRole("button", { name: "Your Entities" }));
     await act(async () => { opening.resolve("http://127.0.0.1:43201"); });
@@ -233,5 +236,32 @@ describe("Presence Home pending operations", () => {
     expect(await screen.findByRole("heading", { name: "Meet Sol." })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Your Entities" }));
     expect(await screen.findByRole("heading", { name: "Sol" })).toBeInTheDocument();
+  });
+
+  it("continues a recovered creation through its original Hive when the current Hive has the same Entity ID", async () => {
+    const originalHive = "http://127.0.0.1:43151";
+    const currentHive = "http://127.0.0.1:43161";
+    const originalRuntime = "http://127.0.0.1:43251";
+    const otherRuntime = "http://127.0.0.1:43261";
+    window.history.replaceState({}, "", `/?hiveUrl=${encodeURIComponent(currentHive)}`);
+    writeCreationDraft({
+      version: 1, profile: defaultProfile("Sol"), entityId: "ada",
+      attempt: { attemptId: "resume-on-original-hive", hiveUrl: originalHive, name: "Sol", baselineIds: [] },
+    });
+    mocks.openPresence.mockImplementation(async (_id: string, _signal: AbortSignal, hiveUrl?: string) => hiveUrl === originalHive ? originalRuntime : otherRuntime);
+    render(<PresenceHome preview={false} status={status} onRefresh={vi.fn()} onProviders={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /An unfinished presence/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save brief to confirmed Entity" }));
+    expect(await screen.findByRole("heading", { name: "Meet Sol." })).toBeInTheDocument();
+    expect(mocks.savePresence).toHaveBeenCalledExactlyOnceWith("ada", defaultProfile("Sol"), false, expect.objectContaining({ hiveUrl: originalHive }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to conversation" }));
+
+    expect(await screen.findByRole("heading", { name: "Sol conversation" })).toBeInTheDocument();
+    expect(mocks.openPresence).toHaveBeenCalledExactlyOnceWith("ada", expect.any(AbortSignal), originalHive);
+    expect(screen.getByText(originalRuntime)).toBeInTheDocument();
+    expect(screen.queryByText(otherRuntime)).not.toBeInTheDocument();
+    expect(mocks.createPresenceEntity).not.toHaveBeenCalled();
+    expect(new URLSearchParams(window.location.search).get("hiveUrl")).toBe(currentHive);
   });
 });
