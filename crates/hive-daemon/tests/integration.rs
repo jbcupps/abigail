@@ -72,6 +72,106 @@ async fn entity_lifecycle() {
 }
 
 #[tokio::test]
+async fn presence_roundtrip_is_scoped_and_does_not_change_runtime_config() {
+    if !should_run() {
+        return;
+    }
+    let hive = hive().await;
+    let client = reqwest::Client::new();
+    let created: serde_json::Value = client
+        .post(format!("{}/v1/entities", hive.url()))
+        .json(&serde_json::json!({ "name": "Juniper" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["data"]["id"].as_str().unwrap();
+    let url = format!("{}/v1/entities/{id}/presence", hive.url());
+    let config_path = hive
+        .data_dir()
+        .join("identities")
+        .join(id)
+        .join("config.json");
+    let original_config = std::fs::read(&config_path).unwrap();
+    let defaults: serde_json::Value = client.get(&url).send().await.unwrap().json().await.unwrap();
+    assert_eq!(defaults["data"]["name"], "Juniper");
+    let profile = serde_json::json!({
+        "name": "Juni", "purpose": "Help me plan", "temperament": "curious",
+        "boundaries": "Ask before acting", "identity": "lumen"
+    });
+    let saved: serde_json::Value = client
+        .put(&url)
+        .json(&profile)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(saved["ok"], true);
+    let reopened: serde_json::Value = client.get(&url).send().await.unwrap().json().await.unwrap();
+    assert_eq!(reopened["data"], profile);
+    assert_eq!(std::fs::read(&config_path).unwrap(), original_config);
+    let entity: serde_json::Value = client
+        .get(format!("{}/v1/entities/{id}", hive.url()))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(entity["data"]["name"], "Juniper");
+
+    for invalid in [
+        serde_json::json!({ "name": "Juni", "purpose": "", "temperament": "curious", "boundaries": "", "identity": "unknown" }),
+        serde_json::json!({ "name": "Juni", "purpose": "", "temperament": "curious", "boundaries": "", "identity": "lumen", "permissions": "all" }),
+        serde_json::json!({ "name": "Juni", "purpose": "x".repeat(33 * 1024), "temperament": "curious", "boundaries": "", "identity": "lumen" }),
+    ] {
+        let rejected: serde_json::Value = client
+            .put(&url)
+            .json(&invalid)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(rejected["ok"], false);
+        assert!(rejected["error"].is_string());
+    }
+    let reopened: serde_json::Value = client.get(&url).send().await.unwrap().json().await.unwrap();
+    assert_eq!(reopened["data"], profile);
+    let missing_url = format!(
+        "{}/v1/entities/{}/presence",
+        hive.url(),
+        uuid::Uuid::new_v4()
+    );
+    for response in [
+        client.get(&missing_url).send().await.unwrap(),
+        client
+            .put(&missing_url)
+            .json(&profile)
+            .send()
+            .await
+            .unwrap(),
+        client
+            .get(format!("{}/v1/entities/not-an-id/presence", hive.url()))
+            .send()
+            .await
+            .unwrap(),
+    ] {
+        let rejected: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(rejected["ok"], false);
+    }
+    std::fs::write(config_path.with_file_name("presence.json"), "{invalid").unwrap();
+    let corrupt: serde_json::Value = client.get(&url).send().await.unwrap().json().await.unwrap();
+    assert_eq!(corrupt["ok"], false);
+    assert!(corrupt["error"].as_str().unwrap().contains("invalid"));
+}
+
+#[tokio::test]
 async fn secrets_crud() {
     if !should_run() {
         return;

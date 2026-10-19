@@ -26,6 +26,8 @@ Abigail manages multiple personal AI Entities that the user, mentor, or family h
 Abigail grew from the vision in "Toward a Decentralized Trust Framework for Verifiable and Ethically Aligned AI" (see `documents/DECENTRALIZED_TRUST_PAPER_ALIGNMENT.md`). That remains the philosophical foundation. The current mission is personal and human-scale: give families their own private, multi-capable AI Entities coordinated by Abigail.
 
 **How You Should Work**
+
+The First Signal presence slice uses Hive-owned `presence.json` presentation metadata and the existing Entity text gateway. Appearance, imported briefs, and demonstration animation never grant permissions or indicate model reasoning. Keep actual request, input, and playback signals separate. See `documents/FIRST_SIGNAL.md` before extending its media or persona adapters.
 - Prefer the simplest solution that feels magical to a busy parent.
 - Prefer `beta` as the base branch for iterative PRs unless the user explicitly asks for a stable hotfix to `main`.
 - When adding capability, always highlight multi-provider flexibility.

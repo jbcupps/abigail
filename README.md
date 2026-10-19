@@ -28,6 +28,8 @@ No accounts. No data sharing. Just your family and the Entities you control.
 
 ## Current Dev Note
 
+- **First Signal UI slice:** guided Entity creation, reviewed Markdown briefs, and a persistent procedural presence are available in the active Hive/Runtime frontends. See [the local preview and validation guide](documents/FIRST_SIGNAL.md). Appearance and brief metadata do not change model instructions or permissions; voice/video assets remain adapter integrations.
+
 - Abigail is still in a dev-first phase. A clean working dev instance matters more than cross-version compatibility right now.
 - Legacy migration and upgrade preservation are not current product promises. Remove or replace stale compatibility paths when they get in the way of the active Hive-first design.
 - The implementation uses two desktop app roots: `Abigail Hive` for control-plane/admin work and `Abigail Entity Runtime` for chat/runtime work. The family-facing installer must still expose one `Abigail` app icon and start the internal pieces automatically.

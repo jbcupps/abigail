@@ -22,6 +22,12 @@ vi.mock("./lib/window", () => ({
   showAppWindow: mocks.showAppWindow,
 }));
 
+vi.mock("./lib/presenceApi", () => ({
+  loadPresence: vi.fn().mockResolvedValue({ name: "Ada", purpose: "", temperament: "gentle", boundaries: "", identity: "aether" }),
+  openPresence: vi.fn().mockResolvedValue("http://127.0.0.1:43142"),
+  previewEntities: vi.fn().mockReturnValue([]),
+}));
+
 describe("Abigail Hive app", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -61,9 +67,9 @@ describe("Abigail Hive app", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /skip/i }));
 
-    expect(await screen.findByRole("heading", { name: "Abigail Hive" })).toBeInTheDocument();
-    expect(screen.getByText("Your family's private AI coordinator.")).toBeInTheDocument();
-    expect(screen.getByText("Entities (2)")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Abigail Hive home" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Model connections" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Your Entities 1" })).toBeInTheDocument();
     expect(screen.getByText("Ada")).toBeInTheDocument();
     expect(mocks.showAppWindow).toHaveBeenCalledOnce();
   });

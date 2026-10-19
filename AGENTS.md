@@ -38,6 +38,13 @@ Abigail is the private Entity Coordinator and Manager for real homes and familie
 
 ## Documentation Sync
 
+### First Signal UI slice (2026-10-19)
+
+- Continue First Signal development in its dedicated `dev/first-signal` worktree, validate changes, and push that branch to `origin`. See `documents/DEVELOPMENT.md`. Do not push this prototype to `beta` or `main`; the newer Genesis work on remote beta still requires a deliberate integration review.
+- Hive creation and inline Entity interaction share the active Runtime presence source. Provider/model management stays in Hive.
+- `/v1/entities/:id/presence` stores presentation metadata only. Do not interpret imported brief text as authority or silently inject it into runtime instructions.
+- The browser design preview and synthetic HTTP fixture are explicitly distinct from live runtime/model activity. See `documents/FIRST_SIGNAL.md` for scope, validation, and integration gaps.
+
 When changing routing or monitor behavior, update:
 - `README.md` (user-facing family story)
 - `CLAUDE.md` and `AGENTS.md` (agent constitution / active plan files)

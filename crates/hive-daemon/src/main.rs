@@ -5,6 +5,8 @@
 
 mod birth;
 mod doctor;
+mod presence;
+mod presence_profile;
 mod routes;
 mod runtime_registry;
 mod state;
@@ -135,6 +137,14 @@ async fn run() -> anyhow::Result<()> {
         .route("/v1/entities", get(routes::list_entities))
         .route("/v1/entities", post(routes::create_entity))
         .route("/v1/entities/:id", get(routes::get_entity))
+        .route(
+            "/v1/entities/:id/presence",
+            get(presence::get_presence)
+                .put(presence::put_presence)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    presence_profile::MAX_PROFILE_BYTES,
+                )),
+        )
         .route("/v1/entities/:id/open", post(routes::open_entity))
         .route("/v1/entities/:id/close", post(routes::close_entity))
         .route("/v1/birth/scenarios", get(birth::get_scenarios))
