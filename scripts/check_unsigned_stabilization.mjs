@@ -51,17 +51,24 @@ for (const forbidden of [
   "windows_signing_preflight",
   "generate_tauri_latest_manifest",
   "createUpdaterArtifacts must be true",
+  "publish_stable_release",
+  "publish_prerelease",
+  "softprops/action-gh-release",
+  "contents: write",
+  "git tag",
+  "git push",
+  "cargo generate-lockfile",
 ]) {
   assert(
     !releaseFast.includes(forbidden),
-    `Unsigned stabilization workflow must not require updater/signing logic (${forbidden}).`
+    `Diagnostic stabilization workflow must not publish releases or bypass the installer build policy (${forbidden}).`
   );
 }
 assert(
   releaseFast.includes(
-    "cargo build --release -p hive-daemon -p entity-daemon -p abigail-hive-app -p abigail-entity-runtime-app"
+    "cargo build --release --locked -p hive-daemon -p entity-daemon -p abigail-hive-app -p abigail-entity-runtime-app"
   ),
-  "Unsigned stabilization workflow must build the full split product."
+  "Unsigned stabilization workflow must build the split product with its checked-in dependency lock."
 );
 for (const requiredAsset of [
   "hive-daemon-windows-x64.exe",
@@ -75,8 +82,8 @@ for (const requiredAsset of [
   );
 }
 assert(
-  releaseFast.includes("publish_stable_release"),
-  "Unsigned stabilization workflow must be able to publish a corrected stable split-product release."
+  releaseFast.includes("contents: read") && releaseFast.includes("ref: ${{ github.sha }}"),
+  "Diagnostic stabilization workflow must check out the triggering commit with read-only repository access."
 );
 
 const release = fs.readFileSync(".github/workflows/release.yml", "utf8");
@@ -102,6 +109,24 @@ assert(
 assert(
   release.includes("branches:") && release.includes("- beta"),
   "Full installer release must trigger from the permanent beta branch."
+);
+const releaseConcurrency = release.match(/^concurrency:\r?\n([\s\S]*?)(?=^\S)/m)?.[1] ?? "";
+assert(
+  releaseConcurrency.includes("group: abigail-windows-release-signing") &&
+    releaseConcurrency.includes("queue: max") &&
+    releaseConcurrency.includes("cancel-in-progress: false"),
+  "Installer releases must queue beta pushes while serializing certificate signing."
+);
+const ci = fs.readFileSync(".github/workflows/ci.yml", "utf8");
+const ciConcurrency = ci.match(/^concurrency:\r?\n([\s\S]*?)(?=^\S)/m)?.[1] ?? "";
+assert(
+  ciConcurrency.includes("github.event_name == 'push' && github.sha") &&
+    ciConcurrency.includes("cancel-in-progress: ${{ github.event_name != 'push' }}"),
+  "Push CI must retain the gate for each commit required by installer publication; only PR/scheduled runs may be superseded."
+);
+assert(
+  /- name: Validate release publication branch\r?\n\s+if: github.event_name != 'workflow_dispatch' \|\| inputs.publish_release/.test(release),
+  "Every publishing event must validate its branch and exact stable/beta tag pattern."
 );
 assert(
   release.includes('-beta.${{ github.run_number }}'),
@@ -164,7 +189,7 @@ assert(
   "Installer build and publication must use the triggering commit rather than a moving branch."
 );
 const installedVerification = release.indexOf("- name: Verify installed unsigned payload and synthetic contract");
-const installerUpload = release.indexOf("- name: Upload NSIS installer");
+const installerUpload = release.indexOf("- name: Upload verified release assets");
 assert(
   installedVerification >= 0 && installedVerification < installerUpload &&
     release.includes("./scripts/verify-mvp-windows.ps1") &&
@@ -177,6 +202,36 @@ assert(
 );
 const ciGate = release.indexOf("- name: Require successful CI gate for this commit");
 const releasePublication = release.indexOf("- name: Create GitHub Release");
+const stableSigningGate = release.indexOf("- name: Require Windows signing for stable publication");
+const releaseTagCreation = release.indexOf("- name: Create git tag if needed");
+assert(
+  stableSigningGate > release.indexOf("\n  publish:") &&
+    stableSigningGate < releaseTagCreation && releaseTagCreation < releasePublication &&
+    release.includes('WINDOWS_SIGNED: ${{ needs.build.outputs.windows_signed }}') &&
+    release.includes('[[ "$RELEASE_CHANNEL" == "stable" && "$WINDOWS_SIGNED" != "true" ]]'),
+  "Stable publication must reject unsigned builds before creating tags or releases; unsigned candidates and beta stabilization remain available."
+);
+const finalStaging = release.indexOf('- name: Stage and verify exact release assets');
+const publishReverification = release.indexOf('- name: Reverify exact bytes before publication');
+assert(
+  finalStaging > installedVerification && finalStaging < installerUpload &&
+    publishReverification > installerUpload && publishReverification < releaseTagCreation &&
+    release.includes('name: abigail-release-assets-windows') &&
+    !release.includes('head -1 || true') &&
+    release.includes('overwrite_files: false') &&
+    release.includes("make_latest: ${{ needs.build.outputs.channel == 'stable' && 'true' || 'false' }}"),
+  'Only the exact staged, verified bytes may be published; refuse ambiguous installer selection and existing asset replacement.'
+);
+assert(
+  release.includes('verify-published-download:') &&
+    release.includes('./scripts/verify_published_release.ps1') &&
+    release.includes("!inputs.publish_release && 'candidate'") &&
+    ci.includes('node --test scripts/tests/test_release_provenance.mjs') &&
+    ci.includes('./scripts/tests/test_release_artifacts.ps1') &&
+    ci.includes('./scripts/tests/test_stage_release_assets.ps1') &&
+    ci.includes('./scripts/tests/test_published_release.ps1'),
+  'Release completion must verify public downloads and channels, preserve candidates, and run negative-path policy tests in CI.'
+);
 assert(
   ciGate >= 0 && ciGate < releasePublication &&
     release.includes('--commit "$RELEASE_SHA"') &&

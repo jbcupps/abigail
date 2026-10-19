@@ -21,8 +21,9 @@ env:
   ABIGAIL_CI_MODE: "1"
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Preserve the same-commit push gate required by installer publication.
+  group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'latest' }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
 
@@ -54,6 +55,21 @@ jobs:
 
       - name: Verify unsigned stabilization lane
         run: node scripts/check_unsigned_stabilization.mjs
+
+      - name: Verify release provenance and channel failure paths
+        run: node --test scripts/tests/test_release_provenance.mjs
+
+      - name: Verify final release signatures without signing credentials
+        shell: pwsh
+        run: ./scripts/tests/test_release_artifacts.ps1
+
+      - name: Verify release staging failure paths
+        shell: pwsh
+        run: ./scripts/tests/test_stage_release_assets.ps1
+
+      - name: Verify published download failure paths without network access
+        shell: pwsh
+        run: ./scripts/tests/test_published_release.ps1
 
       - name: Verify Windows signing failure gates without credentials
         shell: pwsh
