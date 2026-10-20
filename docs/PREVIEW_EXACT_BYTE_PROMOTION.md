@@ -106,10 +106,13 @@ local test against the operator's account.
 The reviewed source-CI branch is pushed. Default-branch registration is a
 workflow-only patch based on main `8b68506b9443df59e486e181d81e998ec4596d62`,
 on `dev/register-preview-source-ci` at
-`fd3f7a02ba81d5d5325f86d9e9dc3a7a5f9656ea`. Opening its PR was rejected by
-automatic approval review under the earlier dev-only boundary. No PR or
-manual source-CI run was created by that attempt; registration remains pending.
-Do not use a beta/tag push or alternate dispatch route to bypass that block.
+`fd3f7a02ba81d5d5325f86d9e9dc3a7a5f9656ea`. The first PR-opening attempt was
+rejected under the earlier dev-only boundary and did not execute. After the
+parent supplied Jim's later repository authorization, one permitted retry
+created [PR #299](https://github.com/jbcupps/abigail/pull/299).
+Normal PR CI run `39479148145` started. Registration merge and the separate
+manual exact-product source-CI run remain pending; this PR run tests the normal
+PR merge source and must not be reported as product f7 source CI.
 
 There is no reviewed full-compatibility binding yet. All ten existing
 acceptance stages and the actual ongoing Entity/history/settings/seed/snapshot
@@ -132,6 +135,11 @@ observations and does not turn the old sanitized report into a full pass.
   still produces no installer link or public network requests.
 
 ## Remaining functional acceptance
+
+The finite [remaining acceptance checklist](PREVIEW_REMAINING_ACCEPTANCE.md)
+maps all ten existing stages to observed results and specific missing
+assertions. It separates required visible GUI smoke from optional unsupported
+claims, and records the exact available registry/UI discovery evidence.
 
 Six exact signed-Hive preflight refusal checks passed locally: future marker,
 malformed marker, duplicate marker field, newer root config, newer active Entity
