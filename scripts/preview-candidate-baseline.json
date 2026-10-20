@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "repository": "jbcupps/abigail",
+  "productSourceCommit": "f7c7848d25726480b253ec1ca637c3ffa5ea3c77",
+  "version": "0.0.76",
+  "certificateThumbprint": "69BE78FD201A59A29C46F5D37097E0C6DDA04A41",
+  "stable": {
+    "tag": "v0.0.76",
+    "sourceCommit": "e3ad51181da1ea11bded24ca0c39e2dcfe5fa944",
+    "releaseId": 418137720,
+    "assets": [
+      {
+        "name": "Abigail-windows-x64-setup.exe",
+        "assetId": 658665197,
+        "size": 86983472,
+        "sha256": "791b97fb9c5c7ef2c776c52a5e2b41071bb7cf40fcd3226099cdf693185acbb1"
+      },
+      {
+        "name": "release-provenance.json",
+        "assetId": 658665198,
+        "size": 789,
+        "sha256": "c68564f76053cc0a5b3b6831d00c2fcb9146e9930454316880ca1b4dacd53037"
+      },
+      {
+        "name": "windows-signatures.json",
+        "assetId": 658665199,
+        "size": 29074,
+        "sha256": "6e6c13a800da24371ba6933f787b4dbe9f1a28d491f763e2d0acec47db611cc2"
+      },
+      {
+        "name": "windows-signature-evidence.json",
+        "assetId": 658665200,
+        "size": 950,
+        "sha256": "0157177b44c3190ffd5075b50fe0fb8bd85f693f5e0354a8436100a4f1e255a9"
+      }
+    ],
+    "payload": [
+      {
+        "relative_path": "Abigail.exe",
+        "sha256": "c9dd205bdd99dcf8babc9e66c16363d0c8136c86e2359bc4b220a7c8eb684e7c"
+      },
+      {
+        "relative_path": "resources/abigail-entity-runtime-app.exe",
+        "sha256": "5f9434adc66d37c1c866ada322857f9f069a7c06eb705c07ef17d501301dde70"
+      },
+      {
+        "relative_path": "resources/hive-daemon.exe",
+        "sha256": "2d4390e4a24ce58d69493bc7646d4746f0c14b46b7f35c0edad3576c46f37e88"
+      },
+      {
+        "relative_path": "resources/entity-daemon.exe",
+        "sha256": "826b8b3fa0458a9710db42c9ddf7689b0ba552effa855f9dbd13849affdfb119"
+      }
+    ]
+  }
+}

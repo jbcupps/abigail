@@ -157,8 +157,10 @@ coordination explicitly instead of rebuilding, relabelling, or replacing assets.
 
 ## Combined development status
 
-The selector remains unavailable. `dev/preview-combined-0.0.76` combines
-published application `ca6a7527da8787be6b5315e13e4fc228287ce15d` with packaging
+The selector remains unavailable. Combined product source
+`f7c7848d25726480b253ec1ca637c3ffa5ea3c77` on `dev/preview-combined-0.0.76` combines
+published application `ca6a7527da8787be6b5315e13e4fc228287ce15d`, its cold-recovery
+descendant `4558fe68d9812998eb53a94ba157970af552f923`, and packaging
 `de65e7e47fa35c7b742421274db5e1fac4720f8d`, including release scaffold
 `6b246d3ab07322a899106d1198bfafba3a7b2309`. The shared stable-main base is
 `17b636b9e5f10b812deb287ad2c6637188991ec2`. This dev source selection does not
@@ -175,14 +177,27 @@ values. Changed overlays or contract require fresh preparation and hashes.
 Prior application and packaging test totals are separate component evidence,
 not proof of the combined candidate's lifecycle or installation.
 
-Complete-profile cold snapshot/restore is assigned to a separate application
-slice and is not implemented by this integration. Actual combined GUI/daemon
+The published [cold-profile recovery source](../documents/PREVIEW_COLD_RECOVERY.md)
+is included. Its offline snapshot/verify/restore utility preserves whole-profile
+data and UUIDs with cold leases and existing same-user/device credentials;
+it remains separate from the four packaged application binaries. Actual combined GUI/daemon
 lifecycle, real Windows credential integration, install/upgrade/uninstall,
 continuing-Entity reopen/restore and all ten exact-installer stages remain open.
 Use only separate synthetic fixtures for the later acceptance. Beta Genesis,
 static-runtime and installer-lock changes at
 `ea92effd31f554f74bb5e109deaa42876ec4f06f` remain separate for explicit later
 comparison; do not merge beta blindly.
+
+The separate [hosted acceptance harness](PREVIEW_HOSTED_ACCEPTANCE.md) is currently
+authorized for source preparation, review, tests and dev push only. Its manual
+GitHub-hosted Windows run is not yet authorized or dispatched. The harness commit
+and pinned product source are separate inputs; a hosted build creates new bytes
+whose evidence cannot be inherited from local preparation. Fixture identities and
+DPAPI operations for both stable and preview, installer execution and one signing
+pass require a later explicit approval for the reviewed workflow. Both approval
+booleans default false. New manual-workflow registration on the default branch
+also needs separate authorization; pushing a dev branch does not supply it.
+The existing release workflow and preview selector remain unchanged.
 
 The helper prepares candidate-to-beta assets but does not create a tag/release
 or advance the pointer. Coordinate the publication source and exact staged
