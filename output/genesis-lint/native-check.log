@@ -1,0 +1,7 @@
+    Checking abigail-core v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\abigail-core)
+    Checking hive-core v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\hive-core)
+    Checking entity-core v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\entity-core)
+    Checking daemon-client v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\daemon-client)
+    Checking abigail-entity-runtime-app v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\entity-runtime-app)
+    Checking abigail-hive-app v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\hive-app)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 13.01s

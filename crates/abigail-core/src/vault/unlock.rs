@@ -433,8 +433,8 @@ fn root_kek_with_backend(
     }
 
     let data_root = &context.data_root;
-    std::fs::create_dir_all(&data_root)?;
-    let sentinel_path = super::sentinel_path(&data_root);
+    std::fs::create_dir_all(data_root)?;
+    let sentinel_path = super::sentinel_path(data_root);
     let has_sentinel = sentinel_path.exists();
 
     // paper Sections 22-27 runtime verification:
@@ -475,7 +475,7 @@ fn root_kek_with_backend(
 
         if let Some(passphrase) = backend.environment(PASSPHRASE_ENV) {
             if !passphrase.trim().is_empty() {
-                let kek = derive_passphrase_kek(&data_root, &passphrase, has_sentinel)?;
+                let kek = derive_passphrase_kek(data_root, &passphrase, has_sentinel)?;
                 let sentinel_value = verify_context_sentinel(context, &kek)?;
                 super::cache_session_root_kek(cache_key, kek, sentinel_value);
                 return Ok(kek);

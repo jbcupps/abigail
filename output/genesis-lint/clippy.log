@@ -1,0 +1,63 @@
+    Checking abigail-core v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\abigail-core)
+    Checking sysinfo v0.37.2
+    Checking iggy_binary_protocol v0.8.0
+    Checking chromiumoxide v0.8.0
+    Checking tauri-winrt-notification v0.7.2
+    Checking sysinfo v0.39.5
+    Checking notify-rust v4.12.0
+    Checking surrealdb-core v3.0.5
+    Checking iggy v0.8.0
+    Checking abigail-auth v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\abigail-auth)
+    Checking abigail-capabilities v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\abigail-capabilities)
+    Checking hive-core v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\hive-core)
+    Checking abigail-identity v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\abigail-identity)
+    Checking abigail-hive v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\abigail-hive)
+    Checking abigail-streaming v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\abigail-streaming)
+    Checking surrealdb v3.0.5
+    Checking abigail-persistence v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\abigail-persistence)
+    Checking abigail-queue v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\abigail-queue)
+    Checking abigail-memory v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\abigail-memory)
+    Checking abigail-skills v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\abigail-skills)
+    Checking skill-browser v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\skills\skill-browser)
+    Checking skill-code-analysis v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\skills\skill-code-analysis)
+    Checking skill-web-search v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\skills\skill-web-search)
+    Checking skill-system-monitor v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\skills\skill-system-monitor)
+    Checking skill-http v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\skills\skill-http)
+    Checking skill-shell v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\skills\skill-shell)
+    Checking skill-git v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\skills\skill-git)
+    Checking skill-document v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\skills\skill-document)
+    Checking skill-filesystem v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\skills\skill-filesystem)
+    Checking skill-calendar v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\skills\skill-calendar)
+    Checking skill-knowledge-base v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\skills\skill-knowledge-base)
+    Checking skill-notification v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\skills\skill-notification)
+    Checking skill-image v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\skills\skill-image)
+    Checking skill-perplexity-search v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\skills\skill-perplexity-search)
+    Checking skill-clipboard v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\skills\skill-clipboard)
+    Checking skill-database v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\skills\skill-database)
+    Checking soul-forge v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\soul-forge)
+    Checking abigail-runtime v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\abigail-runtime)
+    Checking hive-daemon v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\hive-daemon)
+error: function `entity_daemon_binary` is never used
+  --> crates\hive-daemon\src\supervisor.rs:67:4
+   |
+67 | fn entity_daemon_binary() -> anyhow::Result<PathBuf> {
+   |    ^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `-D dead-code` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[expect(dead_code)]` or `#[allow(dead_code)]`
+
+error: function `spawn_entity_daemon` is never used
+   --> crates\hive-daemon\src\supervisor.rs:433:14
+    |
+433 | pub async fn spawn_entity_daemon(
+    |              ^^^^^^^^^^^^^^^^^^^
+
+error: associated function `new` is never used
+    --> crates\hive-daemon\src\supervisor.rs:1016:12
+     |
+1015 | impl HiveSupervisor {
+     | ------------------- associated function in this implementation
+1016 |     pub fn new(hive_url: String, data_root: PathBuf) -> Arc<Self> {
+     |            ^^^
+
+error: could not compile `hive-daemon` (bin "hive-daemon") due to 3 previous errors

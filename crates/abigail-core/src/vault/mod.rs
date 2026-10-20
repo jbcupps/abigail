@@ -77,6 +77,8 @@ pub(crate) fn sentinel_path(data_root: &Path) -> PathBuf {
     data_root.join(SENTINEL_FILE_NAME)
 }
 
+// The legacy convenience wrapper is used only by the compatibility test.
+#[cfg(test)]
 pub(crate) fn write_encrypted_sentinel(
     data_root: &Path,
     root_kek: &[u8; VAULT_KEK_LEN],

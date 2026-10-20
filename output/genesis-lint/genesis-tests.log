@@ -1,0 +1,22 @@
+   Compiling hive-core v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\hive-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.43s
+     Running unittests src\lib.rs (target\debug\deps\hive_core-9553282ca136517a.exe)
+
+running 15 tests
+test genesis::tests::existing_long_ascii_genesis_names_remain_readable ... ok
+test genesis::tests::activation_does_not_require_video_or_portrait ... ok
+test genesis::tests::source_and_voice_transcript_deletion_preserve_confirmed_identity ... ok
+test genesis::tests::document_conflicts_and_cross_source_commit_are_explicit ... ok
+test genesis::tests::completeness_uses_confirmed_fields_and_mode_switch_preserves_draft ... ok
+test genesis::tests::invalid_patch_is_atomic ... ok
+test genesis::tests::markdown_size_extension_and_paths_are_enforced ... ok
+test genesis::tests::import_requires_review_and_explicit_conflict_resolution ... ok
+test genesis::tests::whitelist_rejects_operational_mutations_and_unknown_personality_keys ... ok
+test genesis::tests::code_fenced_key_value_examples_are_preserved_without_extraction ... ok
+test genesis::tests::proposals_do_not_become_canon_without_approval ... ok
+test genesis::tests::export_roundtrip_preserves_multiline_lore_without_reinterpreting_headings ... ok
+test genesis::tests::export_roundtrip_preserves_personality_and_unrecognized_sources ... ok
+test genesis::tests::repeated_undo_preserves_the_audit_and_operational_identity ... ok
+test genesis::tests::quick_creation_unicode_name_survives_canonical_validation_and_round_trip ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s

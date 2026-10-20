@@ -1,0 +1,5 @@
+    Blocking waiting for file lock on build directory
+   Compiling abigail-core v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\abigail-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3m 08s
+  Executable unittests src\lib.rs (target\debug\deps\abigail_core-3d3218926937c3e7.exe)
+  Executable tests\vault_stability.rs (target\debug\deps\vault_stability-cee6bc2c04f3e112.exe)
