@@ -35,6 +35,7 @@ const maxBodyBytes = 32 * 1024;
 const entities = new Map();
 const profiles = new Map();
 const creations = new Map();
+const genesisSessions = new Map();
 const conversations = new Map();
 const streams = new Set();
 const pendingCreations = new Set();
@@ -159,7 +160,7 @@ async function route(request, response) {
   if (request.method === "OPTIONS") {
     response.writeHead(204, {
       "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Accept",
+      "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
       "Access-Control-Max-Age": "600",
     });
     return response.end();
@@ -180,6 +181,52 @@ async function route(request, response) {
   if (request.method === "GET" && path === "/health") {
     response.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
     return response.end("ok — synthetic transport fixture; no model connected");
+  }
+  // Deliberately synthetic Genesis transport. The literal fixture marker is
+  // public test data, never a generated credential or a real Hive capability.
+  // Start the dev UI with VITE_GENESIS_TOKEN=synthetic-genesis-fixture.
+  if (path.startsWith("/v1/genesis/")) {
+    if (request.headers.authorization !== "Bearer synthetic-genesis-fixture") return fail(response, 401, "Use the public synthetic Genesis fixture marker for this fixture.");
+    if (request.method === "GET" && path === "/v1/genesis/media/capabilities") return json(response, 200, { portrait_available: false, video_available: false, portrait_model: "none", video_model: "none", portrait_reservation_usd: 0, video_reservation_usd: 0, daily_budget_usd: 0, daily_job_limit: 0, video_seconds: [], notice: "Synthetic fixture: no media providers or generation." });
+    if (request.method === "GET" && path === "/v1/genesis/media/activity") return json(response, 200, []);
+    if (path === "/v1/genesis/sessions") {
+      if (request.method === "GET") return json(response, 200, [...genesisSessions.values()]);
+      if (request.method !== "POST") return fail(response, 405, "Unsupported fixture operation.");
+      const input = await body(request), seed = input.seed;
+      if (!validCreationKey(input.creation_key) || !validName(seed?.name) || !seed?.purpose?.trim() || seed.mode !== "quick") return fail(response, 400, "Fixture requires the reviewed First Signal name, purpose and creation key.");
+      const old = genesisSessions.get(input.creation_key);
+      if (old) return JSON.stringify(old.creation_seed) === JSON.stringify(seed) ? json(response, 200, old) : fail(response, 409, "Original input differs. Resume the same draft.");
+      const time = new Date().toISOString();
+      const value = { id: input.creation_key, owner_id: "synthetic-household", mode: "quick", state: "draft", revision: 0, created_at: time, updated_at: time, composer_draft: "", creation_seed: seed,
+        messages: [{ id: "synthetic-guide", role: "assistant", content: "Synthetic fixture: your chosen name and purpose are saved in memory. No model was called.", created_at: time }], proposals: [], conflicts: [], sources: [], revisions: [], asset_ids: [], job_ids: [], choices: [],
+        definition: { schema_version: 1, owner_id: "synthetic-household", name: seed.name, purpose: seed.purpose, status: "draft", identity: "", personality: { description: "", fears: [], aspirations: [], communication_style: "", response_patterns: [] }, values: [], boundaries: [], appearance: "", visual_style: "", voice_profile: "", lore: [], relationships: [], fictional_memories: [], capabilities: [], permissions: {}, runtime_configuration: {}, created_at: time, updated_at: time, revision: 0 } };
+      genesisSessions.set(value.id, value);
+      if (creationDelayMs) await new Promise(resolve => setTimeout(resolve, creationDelayMs));
+      return json(response, 200, value);
+    }
+    const match = path.match(/^\/v1\/genesis\/sessions\/([^/]+)(?:\/(actions|media))?$/u);
+    const value = match && genesisSessions.get(match[1]);
+    if (!value) return fail(response, 404, "Unknown synthetic creation.");
+    if (!match[2] && request.method === "GET") return json(response, 200, value);
+    if (match[2] === "media" && request.method === "GET") return json(response, 200, { assets: [], jobs: [] });
+    if (match[2] !== "actions" || request.method !== "POST") return fail(response, 400, "This fixture does not call models, generate media, or interpret documents.");
+    const input = await body(request);
+    if (input.expected_revision !== value.revision) return fail(response, 409, "This synthetic draft changed. Reload it.");
+    if (input.action === "activate") {
+      if (!value.definition.entity_id) {
+        const id = randomUUID(); value.definition.entity_id = id;
+        entities.set(id, { id, name: value.definition.name, birth_complete: true, is_hive: false, immortal: false });
+        profiles.set(id, { name: value.definition.name, purpose: "", temperament: "gentle", boundaries: "", identity: "aether" });
+        appendTurn(id, "genesis-awakening", "assistant", `Synthetic awakening for ${value.definition.name}. No signed birth or model inference occurred.`);
+      }
+      value.state = "ready"; value.definition.status = "ready";
+    } else if (input.action === "save_draft") value.composer_draft = input.text;
+    else if (input.action === "review") value.state = "review";
+    else if (input.action === "update" && Array.isArray(input.updates) && input.updates.every(update => ["name", "purpose"].includes(update.field) && typeof update.value === "string")) {
+      for (const update of input.updates) value.definition[update.field] = update.value;
+    } else return fail(response, 400, "This bounded synthetic fixture supports awakening, name/purpose review and draft save only.");
+    value.revision++; value.updated_at = new Date().toISOString();
+    return json(response, 200, value);
   }
   if (request.method === "GET" && path === "/v1/status") {
     return json(response, 200, entityId ? {

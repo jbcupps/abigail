@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod genesis_voice;
 
 use abigail_core::profile::{self, ProcessIdentity, ProfileContext};
 use daemon_client::HiveDaemonClient;
@@ -270,6 +271,27 @@ async fn get_hive_status() -> Result<HiveStatus, String> {
 #[tauri::command]
 async fn get_hive_connection_info(hive_url: Option<String>) -> Result<HiveConnectionInfo, String> {
     verified_connection(hive_url.as_deref()).await
+}
+
+#[tauri::command]
+async fn get_genesis_token() -> Result<String, String> {
+    verified_connection(None).await?;
+    let context = preview()?;
+    let data_root = context
+        .as_ref()
+        .map(|context| context.root().to_path_buf())
+        .unwrap_or_else(|| {
+            nonempty_env_path("ABIGAIL_DATA_DIR")
+                .unwrap_or_else(|| abigail_core::AppConfig::default_paths().data_dir)
+        });
+    if let Some(context) = context {
+        context
+            .validate_path(&data_root.join("genesis.token"))
+            .map_err(|e| e.to_string())?;
+    }
+    let token = std::fs::read_to_string(data_root.join("genesis.token"))
+        .map_err(|_| "Genesis is starting. Try again when Hive is ready.".to_string())?;
+    Ok(token.trim().to_string())
 }
 
 #[tauri::command]
@@ -1281,6 +1303,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_genesis_token,
+            genesis_voice::transcribe_genesis_speech,
+            genesis_voice::cancel_genesis_speech,
             get_hive_connection_info,
             open_entity_connection,
             get_entity_connection_info,

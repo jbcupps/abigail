@@ -80,6 +80,10 @@ jobs:
           cd hive-app/src-ui && npm ci
           cd ../../entity-runtime-app/src-ui && npm ci
 
+      - name: Verify Windows runtime dependency gates
+        if: github.event_name != 'workflow_dispatch'
+        run: node --test scripts/tests/test_windows_runtime.mjs
+
       - name: Verify unsigned stabilization lane
         run: node scripts/check_unsigned_stabilization.mjs
 
@@ -120,6 +124,14 @@ jobs:
       - name: Verify pinned stable recovery failure gates
         shell: pwsh
         run: ./scripts/tests/test_stable_recovery.ps1
+      - name: Install NSIS for native installer regression
+        if: github.event_name != 'workflow_dispatch'
+        run: choco install nsis --version=3.11 --yes --no-progress
+
+      - name: Verify installer and uninstaller reject locked payloads
+        if: github.event_name != 'workflow_dispatch'
+        shell: pwsh
+        run: ./scripts/tests/test_mvp_installer_locks.ps1
 
       - name: Verify Windows signing failure gates without credentials
         shell: pwsh

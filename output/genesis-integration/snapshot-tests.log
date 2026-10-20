@@ -1,0 +1,39 @@
+warning: function `write_encrypted_sentinel` is never used
+  --> crates\abigail-core\src\vault\mod.rs:80:15
+   |
+80 | pub(crate) fn write_encrypted_sentinel(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling abigail-core v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\abigail-core)
+warning: `abigail-core` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.33s
+     Running unittests src\lib.rs (target\debug\deps\abigail_core-3d3218926937c3e7.exe)
+
+running 17 tests
+test profile_snapshot::tests::cold_snapshot_io_existing_destinations_are_never_overwritten ... ok
+test profile_snapshot::tests::cold_snapshot_io_existing_writer_handle_prevents_snapshot_publication ... ok
+test profile_snapshot::tests::cold_snapshot_io_forbidden_destination_preserves_source_and_bundle ... ok
+test profile_snapshot::tests::cold_snapshot_io_preserves_uuid_receipts_documents_webview_and_rebases_only_paths ... ok
+test profile_snapshot::tests::cold_snapshot_io_publication_race_preserves_the_new_destination ... ok
+test profile_snapshot::tests::cold_snapshot_io_refuses_live_profile_lease_then_succeeds_after_release ... ok
+test profile_snapshot::tests::cold_snapshot_io_refuses_overlapping_source_bundle_or_restore_roots ... ok
+test profile_snapshot::tests::cold_snapshot_io_rejects_changed_extra_missing_files_and_extra_bundle_content ... ok
+test profile_snapshot::tests::cold_snapshot_io_rejects_declared_root_or_identity_summary_mismatch ... ok
+test profile_snapshot::tests::cold_snapshot_io_rejects_malformed_newer_duplicate_or_unknown_manifest_fields ... ok
+test profile_snapshot::tests::cold_snapshot_io_rejects_traversal_absolute_and_case_colliding_inventory_paths ... ok
+test profile_snapshot::tests::cold_snapshot_io_restore_does_not_require_original_root_to_exist ... ok
+test profile_snapshot::tests::cold_snapshot_io_restore_refuses_a_live_original_owner_without_publishing_clone ... ok
+test profile_snapshot::tests::cold_snapshot_io_stale_partial_is_not_a_completed_bundle_or_active_profile ... ok
+test profile_snapshot::tests::cold_snapshot_io_valid_bundle_recovers_without_repairing_damaged_original_config ... ok
+test profile_snapshot::tests::cold_snapshot_io_wrong_or_missing_credentials_leave_no_destination_and_preserve_bundle ... ok
+test profile_snapshot::tests::cold_snapshot_preserves_genesis_capability_assets_and_signed_narrative_as_opaque_bytes ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 174 filtered out; finished in 11.64s
+
+     Running tests\vault_stability.rs (target\debug\deps\vault_stability-cee6bc2c04f3e112.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s

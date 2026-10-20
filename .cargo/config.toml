@@ -1,0 +1,8 @@
+# Families should not need the Visual C++ Redistributable to launch Abigail.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# Direct Cargo builds also need Tauri's native WebView loader CRT workaround.
+# tauri-build applies this setting only to Windows MSVC builds.
+[env]
+STATIC_VCRUNTIME = { value = "true", force = true }

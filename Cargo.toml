@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["vendor/tauri-plugin-updater"]
 members = [
     "crates/abigail-diag",
     "crates/abigail-persistence",
@@ -31,6 +32,7 @@ members = [
     "crates/abigail-runtime",
     "crates/daemon-test-harness",
     "crates/daemon-client",
+    "crates/dependency-security-tests",
     "hive-app",
     "entity-runtime-app",
     "skills/skill-web-search",
@@ -88,3 +90,8 @@ entity-core = { path = "crates/entity-core" }
 entity-chat = { path = "crates/entity-chat" }
 abigail-identity = { path = "crates/abigail-identity" }
 abigail-diag = { path = "crates/abigail-diag" }
+
+# Keep signed ZIP updater support while upstream still requires vulnerable zip 4.
+# See vendor/tauri-plugin-updater/ABIGAIL_PATCH.md for provenance and removal criteria.
+[patch.crates-io]
+tauri-plugin-updater = { path = "vendor/tauri-plugin-updater" }

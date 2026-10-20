@@ -1,0 +1,143 @@
+   Compiling proc-macro2 v1.0.106
+   Compiling unicode-ident v1.0.24
+   Compiling getrandom v0.4.2
+   Compiling bytes v1.11.1
+   Compiling subtle v2.6.1
+   Compiling quote v1.0.45
+   Compiling getrandom v0.3.4
+   Compiling dunce v1.0.5
+   Compiling windows-sys v0.61.2
+   Compiling zeroize v1.8.2
+   Compiling aws-lc-rs v1.18.1
+   Compiling windows-sys v0.60.2
+   Compiling smallvec v1.15.1
+   Compiling crypto-common v0.1.7
+   Compiling tracing-core v0.1.36
+   Compiling getrandom v0.2.17
+   Compiling hashbrown v0.16.1
+   Compiling futures-task v0.3.32
+   Compiling rustls v0.23.46
+   Compiling serde_core v1.0.228
+   Compiling rustls-pki-types v1.14.0
+   Compiling jobserver v0.1.34
+   Compiling futures-util v0.3.32
+   Compiling rand_core v0.6.4
+   Compiling digest v0.10.7
+   Compiling memchr v2.8.0
+   Compiling cc v1.2.56
+   Compiling crypto-common v0.2.2
+   Compiling http v1.4.0
+   Compiling zerocopy v0.8.40
+   Compiling windows-sys v0.59.0
+   Compiling indexmap v2.13.0
+   Compiling futures-channel v0.3.32
+   Compiling socket2 v0.6.3
+   Compiling serde v1.0.228
+   Compiling syn v2.0.117
+   Compiling syn v3.0.3
+   Compiling num-traits v0.2.19
+   Compiling log v0.4.29
+   Compiling cmake v0.1.57
+   Compiling http-body v1.0.1
+   Compiling universal-hash v0.6.1
+   Compiling cipher v0.5.2
+   Compiling mio v1.2.2
+   Compiling digest v0.11.3
+   Compiling serde_json v1.0.150
+   Compiling polyval v0.7.1
+   Compiling aho-corasick v1.1.4
+   Compiling form_urlencoded v1.2.2
+   Compiling base64ct v1.8.3
+   Compiling hmac v0.13.0
+   Compiling ghash v0.6.0
+   Compiling aes v0.9.1
+   Compiling password-hash v0.5.0
+   Compiling ctr v0.10.1
+   Compiling http-body-util v0.1.3
+   Compiling aead v0.6.1
+   Compiling aws-lc-sys v0.45.0
+   Compiling sha2 v0.10.9
+   Compiling blake2 v0.10.6
+   Compiling aes-gcm v0.11.0
+   Compiling hkdf v0.13.0
+   Compiling sha2 v0.11.0
+   Compiling keyring v3.6.3
+   Compiling regex-automata v0.4.14
+   Compiling dirs-sys v0.5.0
+   Compiling argon2 v0.5.3
+   Compiling directories v6.0.0
+   Compiling ppv-lite86 v0.2.21
+   Compiling tokio-macros v2.7.2
+   Compiling rand_chacha v0.3.1
+   Compiling rand v0.8.8
+   Compiling synstructure v0.13.2
+   Compiling tokio v1.53.1
+   Compiling regex v1.12.3
+   Compiling zerofrom-derive v0.1.6
+   Compiling yoke-derive v0.8.1
+   Compiling zerovec-derive v0.11.2
+   Compiling displaydoc v0.2.5
+   Compiling tracing-attributes v0.1.31
+   Compiling serde_derive v1.0.228
+   Compiling curve25519-dalek-derive v0.1.1
+   Compiling thiserror-impl v1.0.69
+   Compiling curve25519-dalek v4.1.3
+   Compiling zerofrom v0.1.6
+   Compiling tracing v0.1.44
+   Compiling yoke v0.8.1
+   Compiling thiserror v1.0.69
+   Compiling zerovec v0.11.5
+   Compiling zerotrie v0.2.3
+   Compiling ed25519-dalek v2.2.0
+   Compiling tinystr v0.8.2
+   Compiling potential_utf v0.1.4
+   Compiling icu_collections v2.1.1
+   Compiling icu_locale_core v2.1.1
+   Compiling chrono v0.4.44
+   Compiling icu_provider v2.1.1
+   Compiling icu_properties v2.1.2
+   Compiling icu_normalizer v2.1.1
+   Compiling tokio-util v0.7.18
+   Compiling tower v0.5.3
+   Compiling idna_adapter v1.2.1
+   Compiling idna v1.1.0
+   Compiling h2 v0.4.16
+   Compiling url v2.5.8
+   Compiling tower-http v0.6.8
+   Compiling hyper v1.8.1
+   Compiling hyper-util v0.1.20
+   Compiling rustls-webpki v0.103.15
+   Compiling tokio-rustls v0.26.4
+   Compiling rustls-platform-verifier v0.7.0
+   Compiling hyper-rustls v0.27.7
+   Compiling reqwest v0.13.4
+   Compiling abigail-core v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\abigail-core)
+warning: function `write_encrypted_sentinel` is never used
+  --> crates\abigail-core\src\vault\mod.rs:80:15
+   |
+80 | pub(crate) fn write_encrypted_sentinel(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `abigail-core` (lib) generated 1 warning
+   Compiling hive-core v0.0.1 (C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\crates\hive-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 38.41s
+     Running unittests src\lib.rs (target\debug\deps\hive_core-9553282ca136517a.exe)
+
+running 13 tests
+test genesis::tests::activation_does_not_require_video_or_portrait ... ok
+test genesis::tests::code_fenced_key_value_examples_are_preserved_without_extraction ... ok
+test genesis::tests::completeness_uses_confirmed_fields_and_mode_switch_preserves_draft ... ok
+test genesis::tests::document_conflicts_and_cross_source_commit_are_explicit ... ok
+test genesis::tests::export_roundtrip_preserves_multiline_lore_without_reinterpreting_headings ... ok
+test genesis::tests::export_roundtrip_preserves_personality_and_unrecognized_sources ... ok
+test genesis::tests::import_requires_review_and_explicit_conflict_resolution ... ok
+test genesis::tests::invalid_patch_is_atomic ... ok
+test genesis::tests::markdown_size_extension_and_paths_are_enforced ... ok
+test genesis::tests::proposals_do_not_become_canon_without_approval ... ok
+test genesis::tests::repeated_undo_preserves_the_audit_and_operational_identity ... ok
+test genesis::tests::source_and_voice_transcript_deletion_preserve_confirmed_identity ... ok
+test genesis::tests::whitelist_rejects_operational_mutations_and_unknown_personality_keys ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s

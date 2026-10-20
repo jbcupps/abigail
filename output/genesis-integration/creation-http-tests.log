@@ -1,0 +1,32 @@
+warning: function `write_encrypted_sentinel` is never used
+  --> crates\abigail-core\src\vault\mod.rs:80:15
+   |
+80 | pub(crate) fn write_encrypted_sentinel(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `abigail-core` (lib) generated 1 warning
+warning: function `spawn_entity_daemon` is never used
+   --> crates\hive-daemon\src\supervisor.rs:433:14
+    |
+433 | pub async fn spawn_entity_daemon(
+    |              ^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `hive-daemon` (bin "hive-daemon" test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.13s
+     Running unittests src\main.rs (target\debug\deps\hive_daemon-656c42d17e12e236.exe)
+
+running 8 tests
+test routes::creation_http_tests::creation_absent_capability_probe_is_read_only ... ok
+test routes::creation_http_tests::creation_bad_request_conflict_and_deleted_completion_have_distinct_statuses ... ok
+test routes::creation_http_tests::creation_concurrent_handler_replay_and_restart_return_one_entity ... ok
+test routes::creation_http_tests::creation_legacy_post_keeps_the_old_response_shape ... ok
+test routes::creation_http_tests::creation_reserved_recovery_resumes_the_persisted_id ... ok
+test routes::creation_http_tests::creation_storage_failure_is_never_a_success_envelope ... ok
+test routes::creation_http_tests::preview_shutdown_acknowledges_only_after_owned_supervisor_is_closed ... ok
+test routes::creation_http_tests::preview_shutdown_refuses_a_stable_owner_without_stopping_it ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 77 filtered out; finished in 3.53s

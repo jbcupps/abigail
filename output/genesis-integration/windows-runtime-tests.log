@@ -1,0 +1,22 @@
+Γ£ö allowed Windows OS imports produce canonical path and whole-file SHA256 report (7.7919ms)
+Γ£ö all import directories can be absent without inventing a dependency (0.2246ms)
+Γ£ö normal redist and debug CRT imports reject an otherwise valid executable (15.8004ms)
+Γ£ö a runtime present only in delay imports is also rejected (1.663ms)
+Γ£ö legacy delay-import VAs map correctly and cannot conceal a runtime dependency (2.2248ms)
+Γ£ö truncation, architecture and optional-header mismatches fail closed (0.8386ms)
+Γ£ö section file bounds and non-unique virtual/file ranges fail closed (0.3972ms)
+Γ£ö normal/delay directory zero semantics, declared spans and termination are enforced (2.7404ms)
+Γ£ö names must be terminated inside mapped file bytes and be plain ASCII DLL names (0.9928ms)
+Γ£ö delay attributes, VA conversion and IAT/INT pointers fail closed when invalid (1.3616ms)
+Γ£ö oversized files and non-executable paths are rejected before PE parsing (2.5639ms)
+Γ£ö CLI writes required success/failure schema and rejects missing/unknown arguments (301.1481ms)
+Γ£ö CLI report cannot overwrite an executable by path, case alias, symlink or hard link (191.9996ms)
+∩╣ú exact previously accepted signed candidate is rejected for its actual external CRT imports (0.6164ms) # The local signed acceptance artifact is not present on this runner.
+Γä╣ tests 14
+Γä╣ suites 0
+Γä╣ pass 13
+Γä╣ fail 0
+Γä╣ cancelled 0
+Γä╣ skipped 1
+Γä╣ todo 0
+Γä╣ duration_ms 612.1747

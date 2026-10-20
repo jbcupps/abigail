@@ -4,6 +4,8 @@ use surrealdb::Surreal;
 
 const HIVE_SCHEMA: &str = r#"
 DEFINE TABLE IF NOT EXISTS hive_meta SCHEMALESS;
+DEFINE TABLE IF NOT EXISTS genesis_session SCHEMALESS;
+DEFINE INDEX IF NOT EXISTS idx_genesis_session_owner ON TABLE genesis_session COLUMNS owner_id;
 DEFINE TABLE IF NOT EXISTS migration_log SCHEMALESS;
 DEFINE TABLE IF NOT EXISTS job_record SCHEMALESS;
 DEFINE TABLE IF NOT EXISTS reflection_run SCHEMALESS;

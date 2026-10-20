@@ -63,6 +63,12 @@ function Invoke-Fixture(
         $context.calls.Add([pscustomobject]@{ tool = 'npm'; arguments = @($args); tauri = $env:TAURI_CONFIG; target = $env:CARGO_TARGET_DIR; buildProfile = $env:ABIGAIL_BUILD_PROFILE })
         $global:LASTEXITCODE = if ($context.fault -eq 'npm-failure') { 17 } else { 0 }
     }
+    function node {
+        $arguments = @($args)
+        Assert-Test ($arguments.Count -eq 5 -and [IO.Path]::GetFileName($arguments[0]) -eq 'check_windows_runtime.mjs') 'Unexpected staging node invocation.'
+        $context.calls.Add([pscustomobject]@{ tool = 'runtime-check'; arguments = $arguments })
+        $global:LASTEXITCODE = if ($context.fault -eq 'runtime-dependency-failure') { 1 } else { 0 }
+    }
     function cargo {
         $arguments = @($args)
         $context.calls.Add([pscustomobject]@{ tool = 'cargo'; arguments = $arguments; tauri = $env:TAURI_CONFIG; target = $env:CARGO_TARGET_DIR; buildProfile = $env:ABIGAIL_BUILD_PROFILE })
@@ -131,6 +137,12 @@ function Invoke-Fixture(
 
 try {
     $preview = Invoke-Fixture 'preview-separated'
+    $runtimeCheck = @($preview.calls | Where-Object tool -EQ 'runtime-check')
+    Assert-Test ($runtimeCheck.Count -eq 1) 'Preview must check all four compiled runtime imports before copying.'
+    foreach ($path in $runtimeCheck[0].arguments[1..4]) {
+        Assert-Test ($path.StartsWith((Join-Path $preview.root 'target/preview'))) 'Runtime check escaped the isolated preview build.'
+    }
+    $null = Invoke-Fixture 'reject-runtime-dependency' -Fault 'runtime-dependency-failure' -ExpectedError 'failed'
     $cargo = @($preview.calls | Where-Object tool -EQ 'cargo')
     Assert-Test ($cargo.Count -eq 3) 'Preview must build daemons and both shells separately.'
     Assert-Test (-not $cargo[0].tauri) 'Daemons must not inherit Tauri configuration.'

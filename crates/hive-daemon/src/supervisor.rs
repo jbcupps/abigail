@@ -1192,6 +1192,29 @@ impl HiveSupervisor {
     }
 
     /// Stop and forget the entity-daemon for `entity_id`, if running.
+    /// Genesis is a Hive-owned operation. Capture the currently owned instance
+    /// and still use the ordinary checked stop; a replacement racing this read
+    /// must be refused, never stopped under the earlier instance's authority.
+    pub async fn stop_for_genesis(
+        &self,
+        entity_id: &str,
+        revoke_sessions: impl FnOnce() -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        let expected = self
+            .lock()
+            .get(entity_id)
+            .and_then(|entry| {
+                entry
+                    .process_identity
+                    .as_ref()
+                    .map(|identity| identity.instance_id.clone())
+            })
+            .unwrap_or_else(|| "no-owned-instance".to_string());
+        self.stop_entity(entity_id, Some(&expected), revoke_sessions)
+            .await
+    }
+
+    /// Client-initiated close retains its explicit expected-instance contract.
     pub async fn stop_entity(
         &self,
         entity_id: &str,

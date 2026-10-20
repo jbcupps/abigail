@@ -22,11 +22,26 @@ impl Fixture {
         // These constructors only hold empty values. No load/save/unlock is called.
         let entity_secrets = Arc::new(Mutex::new(SecretsVault::new(self.0.join("entity-secrets"))));
         let hive_secrets = Arc::new(Mutex::new(SecretsVault::new(self.0.join("hive-secrets"))));
+        let hive = Arc::new(Hive::new(entity_secrets, hive_secrets.clone()));
         HiveDaemonState {
+            genesis: Arc::new(
+                crate::genesis_store::GenesisStore::new(
+                    abigail_persistence::PersistenceHandle::open_ephemeral(
+                        abigail_persistence::EntityScope::Hive,
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+            ),
+            genesis_media: Arc::new(
+                crate::genesis_media::GenesisMediaService::new(&self.0, hive.clone()).unwrap(),
+            ),
+            genesis_token: Arc::new("synthetic-test-token".into()),
+            genesis_control: Arc::new(crate::genesis::GenesisControl::default()),
             process_identity: None,
             shutdown: Arc::new(tokio::sync::Notify::new()),
             identity_manager,
-            hive: Arc::new(Hive::new(entity_secrets, hive_secrets.clone())),
+            hive,
             hive_secrets,
             hive_url: "http://127.0.0.1:43141".to_string(),
             runtime_control: Arc::new(Mutex::new(

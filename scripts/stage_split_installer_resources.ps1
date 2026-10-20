@@ -119,6 +119,9 @@ try {
         $targetRoot = Join-Path $repoRoot $targetRoot
     }
     $binaryDir = Join-Path $targetRoot $Configuration
+    $runtimeExecutables = @('abigail-hive-app.exe', 'abigail-entity-runtime-app.exe', 'hive-daemon.exe', 'entity-daemon.exe') | ForEach-Object { Join-Path $binaryDir $_ }
+    # Verify compiled bytes before copying any stable or preview payload.
+    Invoke-Checked -FilePath 'node' -Arguments (@((Join-Path $PSScriptRoot 'check_windows_runtime.mjs')) + $runtimeExecutables) -WorkingDirectory $repoRoot
     foreach ($app in @('hive-app', 'entity-runtime-app')) {
         $frontendDir = Join-Path $repoRoot "$app/src-ui/dist"
         $index = Get-Content -LiteralPath (Join-Path $frontendDir 'index.html') -Raw

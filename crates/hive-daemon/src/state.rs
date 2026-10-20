@@ -12,6 +12,10 @@ use std::sync::{Arc, Mutex};
 pub struct HiveDaemonState {
     pub process_identity: Option<abigail_core::profile::ProcessIdentity>,
     pub shutdown: Arc<tokio::sync::Notify>,
+    pub genesis: Arc<crate::genesis_store::GenesisStore>,
+    pub genesis_media: Arc<crate::genesis_media::GenesisMediaService>,
+    pub genesis_token: Arc<String>,
+    pub genesis_control: Arc<crate::genesis::GenesisControl>,
     pub identity_manager: Arc<IdentityManager>,
     pub hive: Arc<Hive>,
     /// Hive-level secrets vault (shared across all agents).

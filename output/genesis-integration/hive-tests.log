@@ -1,0 +1,12 @@
+
+> abigail-hive-ui@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.11 C:/Users/jbcup/Documents/Codex/2026-10-20/task/abigail-genesis-integration/hive-app/src-ui
+
+
+ Test Files  19 passed (19)
+      Tests  323 passed (323)
+   Start at  17:14:56
+   Duration  4.69s (transform 1.98s, setup 3.84s, import 4.46s, tests 10.26s, environment 30.21s)

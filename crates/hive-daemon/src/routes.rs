@@ -1343,6 +1343,21 @@ mod tests {
             HiveDaemonState {
                 process_identity: None,
                 shutdown: Arc::new(tokio::sync::Notify::new()),
+                genesis: Arc::new(
+                    crate::genesis_store::GenesisStore::new(
+                        abigail_persistence::PersistenceHandle::open_ephemeral(
+                            abigail_persistence::EntityScope::Hive,
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap(),
+                ),
+                genesis_media: Arc::new(
+                    crate::genesis_media::GenesisMediaService::new(&data_root, hive.clone())
+                        .unwrap(),
+                ),
+                genesis_token: Arc::new("test-genesis-token".into()),
+                genesis_control: Arc::new(crate::genesis::GenesisControl::default()),
                 identity_manager,
                 hive,
                 hive_secrets,

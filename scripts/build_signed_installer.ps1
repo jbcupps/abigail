@@ -244,6 +244,10 @@ function Get-SignedBundleConfiguration {
     $config.plugins.updater = $null
     $config
 }
+function Assert-WindowsRuntime([string[]]$Paths, [string]$ReportPath) {
+    if ($Paths.Count -ne 4) { throw 'Exactly four executables are required for Windows runtime verification.' }
+    Invoke-Checked 'node' (@((Join-Path $repoRoot 'scripts/check_windows_runtime.mjs'), '--report', $ReportPath) + $Paths) $repoRoot
+}
 function Assert-PreparedState($State) {
     $currentSource = Get-SourceState
     if ($State.sourceCommit -ne $currentSource.commit -or $State.source.sha256 -ne $currentSource.sha256) {
@@ -291,6 +295,9 @@ function Assert-PreparedState($State) {
             }
         }
     }
+    # Re-read the frozen executable imports rather than trusting a previous report
+    # or the signing host's installed Visual C++ Redistributable.
+    Assert-WindowsRuntime @($binaryInputs | ForEach-Object { $_.prepared_path }) (Join-Path $work 'windows-runtime.json')
 }
 
 if ($env:OS -ne 'Windows_NT') { throw 'Cloud installer signing requires Windows.' }
@@ -380,6 +387,7 @@ try {
                 sha256 = (Get-FileHash -LiteralPath $binaryInput.prepared_path -Algorithm SHA256).Hash
             }
         })
+        Assert-WindowsRuntime @($binaryInputs | ForEach-Object { $_.prepared_path }) (Join-Path $work 'windows-runtime.json')
         $config = Get-SignedBundleConfiguration
         Write-BuildJson $config $configPath
         if ((Get-SourceState).sha256 -ne $source.sha256) { throw 'Source changed during preparation. Run Prepare again.' }

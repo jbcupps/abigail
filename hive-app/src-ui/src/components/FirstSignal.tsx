@@ -5,13 +5,14 @@ import { createPresenceEntity, loadPresence, savePresence, type SavedPresence } 
 import { CreationError, listCreationCandidates, lookupCreationAttempt, withCreationLock, type CreationAttempt, type CreationCandidate, type CreationLease, type CreationLookup } from "../lib/presenceCreation";
 import { CREATION_DRAFT_EVENT, CREATION_DRAFT_KEY, readCreationDraft, migrateCreationDraft, writeCreationDraft, confirmCreationDraft, clearCreationDraft, type CreationDraft } from "../lib/creationDraft";
 
-interface Props { preview: boolean; existing?: SavedPresence; onClose: () => void; onSaved: (value: SavedPresence) => void; onPersisted?: () => void; onBusyChange?: (busy: boolean) => void }
-export default function FirstSignal({ preview, existing, onClose, onSaved, onPersisted, onBusyChange }: Props) {
+interface Props { preview: boolean; existing?: SavedPresence; onClose: () => void; onSaved: (value: SavedPresence) => void; onPersisted?: () => void; onBusyChange?: (busy: boolean) => void; onCanonicalCreate?: (profile: EntityProfile, explore: boolean) => void }
+export default function FirstSignal({ preview, existing, onClose, onSaved, onPersisted, onBusyChange, onCanonicalCreate }: Props) {
   const [restored] = useState(() => {
     try { return { draft: !preview && !existing ? readCreationDraft() : null, error: "" }; }
     catch { return { draft: null, error: "The unfinished creation record could not be read. Creation is paused to avoid duplicates. Export your brief and check Your Entities." }; }
   });
   const [profile, setProfile] = useState<EntityProfile>(existing?.profile ?? restored.draft?.profile ?? defaultProfile());
+  const canonical = !!onCanonicalCreate && !preview && !existing && !restored.draft && !restored.error;
   const [step, setStep] = useState(restored.draft ? 2 : 0);
   const [proposal, setProposal] = useState<Partial<EntityProfile> | null>(null);
   const [busy, setBusy] = useState(false);
@@ -151,6 +152,7 @@ export default function FirstSignal({ preview, existing, onClose, onSaved, onPer
     }
   };
   const save = async (selected?: SavedPresence) => {
+    if (canonical) { if (profile.name.trim() && profile.purpose.trim()) onCanonicalCreate?.({ ...profile, name: profile.name.trim(), purpose: profile.purpose.trim() }, false); return; }
     if (!profile.name.trim() || restored.error || lookupResult?.state === "unavailable" || (!selected && draftRef.current && !createdId.current)) return;
     const current = begin(selected?.id || createdId.current ? "Saving brief" : "Checking creation support");
     if (!current) return;
@@ -322,7 +324,8 @@ export default function FirstSignal({ preview, existing, onClose, onSaved, onPer
         {step === 2 && <><p className="signal-eyebrow">YOUR IDENTITY BRIEF</p><h2 ref={heading} tabIndex={-1}>Make it yours.</h2><p className="signal-description">Review what you're saving. A visual identity and intention, ready to return to.</p>
           <dl className="signal-summary"><div><dt>Name</dt><dd>{profile.name}</dd></div><div><dt>Purpose</dt><dd>{profile.purpose || "Still to be discovered."}</dd></div><div><dt>Presence</dt><dd>{profile.identity} / {profile.temperament}</dd></div></dl>
           <label className="signal-field">What should they keep in mind?<textarea disabled={busy} rows={3} maxLength={2000} value={profile.boundaries} onChange={e => update("boundaries", e.target.value)} /></label>
-          <div className="signal-scope"><span aria-hidden="true">◇</span><p>This brief is saved as design metadata. Purpose, temperament, and boundaries do not yet change model instructions or tool permissions. Your existing Hive settings still apply.</p></div>
+          <div className="signal-scope"><span aria-hidden="true">◇</span><p>{canonical ? "Awaken approves this name and purpose as part of their identity. Portrait, response style examples, and notes here remain presentation preferences. Explore further to review more identity details. Permissions stay with Hive." : "This brief is saved as design metadata. Purpose, temperament, and boundaries do not yet change model instructions or tool permissions. Your existing Hive settings still apply."}</p></div>
+          {canonical && <><p className="signal-fine">A name and purpose are enough to begin. No model call is needed to awaken.</p><button className="signal-secondary" disabled={!profile.name.trim() || !profile.purpose.trim()} onClick={() => onCanonicalCreate?.({ ...profile, name: profile.name.trim(), purpose: profile.purpose.trim() }, true)}>Explore this character first</button></>}
           <button className="signal-link" disabled={busy} onClick={exportBrief}>↓ Export Markdown brief</button>
         </>}
         {draft && <section className="signal-proposal" aria-label="Creation recovery">
@@ -352,7 +355,7 @@ export default function FirstSignal({ preview, existing, onClose, onSaved, onPer
         {storageError && <p role="alert" className="signal-error">{storageError}</p>}
         {error && <p ref={errorHeading} tabIndex={-1} role="alert" className="signal-error">{error}</p>}
       </div>
-      <footer className="signal-editor-footer"><span className="signal-fine">{step === 0 ? "01 / A name and an intention" : step === 1 ? "02 / Appearance and character" : "03 / Ready when you are"}</span><div>{busy && <button className="signal-secondary" onClick={stopWaiting}>Stop waiting</button>}{step > 0 && <button className="signal-link" disabled={busy} onClick={() => setStep(step - 1)}>Back</button>}{step < 2 ? <button className="signal-primary" disabled={busy || !profile.name.trim()} onClick={() => setStep(step + 1)}>Continue <span aria-hidden="true">→</span></button> : <button className="signal-primary" disabled={busy || storageChanged || lookupResult?.state === "unavailable" || !profile.name.trim() || !!restored.error || (!!draft && !createdId.current)} onClick={() => void save()}>{busy ? "Saving…" : existing ? "Save identity" : preview ? "Save preview identity" : createdId.current ? "Save brief to confirmed Entity" : "Create Entity"} <span aria-hidden="true">✧</span></button>}</div></footer>
+      <footer className="signal-editor-footer"><span className="signal-fine">{step === 0 ? "01 / A name and an intention" : step === 1 ? "02 / Appearance and character" : "03 / Ready when you are"}</span><div>{busy && <button className="signal-secondary" onClick={stopWaiting}>Stop waiting</button>}{step > 0 && <button className="signal-link" disabled={busy} onClick={() => setStep(step - 1)}>Back</button>}{step < 2 ? <button className="signal-primary" disabled={busy || !profile.name.trim()} onClick={() => setStep(step + 1)}>Continue <span aria-hidden="true">→</span></button> : <button className="signal-primary" disabled={busy || storageChanged || lookupResult?.state === "unavailable" || !profile.name.trim() || (canonical && !profile.purpose.trim()) || !!restored.error || (!!draft && !createdId.current)} onClick={() => void save()}>{busy ? "Saving…" : existing ? "Save identity" : preview ? "Save preview identity" : canonical ? "Awaken Entity" : createdId.current ? "Save brief to confirmed Entity" : "Create Entity"} <span aria-hidden="true">✧</span></button>}</div></footer>
     </section>
   </main>;
 }

@@ -1,0 +1,12 @@
+
+> abigail-entity-runtime-ui@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.11 C:/Users/jbcup/Documents/Codex/2026-10-20/task/abigail-genesis-integration/entity-runtime-app/src-ui
+
+
+ Test Files  7 passed (7)
+      Tests  107 passed (107)
+   Start at  16:59:44
+   Duration  5.30s (transform 1.55s, setup 1.59s, import 3.18s, tests 4.04s, environment 12.83s)

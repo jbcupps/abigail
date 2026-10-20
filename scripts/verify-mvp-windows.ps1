@@ -1,9 +1,10 @@
 <#
 .SYNOPSIS
-Verify an unsigned MVP installer by installing and checking its real payload.
+Verify an MVP installer by installing and checking its real payload.
 .DESCRIPTION
 Uses an isolated install directory and compares all four executables with the
-build manifest. Runs both daemons with --help to prove Windows can load them.
+build manifest. Inspects the installed PE imports to reject undeployed C++
+runtime dependencies, then runs both daemons with --help to check the loader.
 This check leaves the installed files and logs available for runtime acceptance;
 it does not launch Hive or open the user's personal data.
 #>
@@ -20,6 +21,11 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $installer = (Resolve-Path -LiteralPath $InstallerPath).Path
 if (-not $ManifestPath) { $ManifestPath = Join-Path (Split-Path $installer -Parent) 'mvp-build.json' }
 $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+$expectedPayload = @('Abigail.exe', 'resources/abigail-entity-runtime-app.exe', 'resources/hive-daemon.exe', 'resources/entity-daemon.exe')
+if (@($manifest.payload).Count -ne 4 -or
+    (@($manifest.payload.relative_path | Sort-Object) -join '|') -ne (($expectedPayload | Sort-Object) -join '|')) {
+    throw 'Installer verification requires the four exact Abigail executable paths.'
+}
 if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash -ne $manifest.installer_sha256) {
     throw 'Installer SHA256 differs from the build manifest.'
 }
@@ -64,6 +70,25 @@ $checks = @(foreach ($item in $manifest.payload) {
     if ($actualHash -ne $item.sha256) { throw "Installed binary SHA256 mismatch: $installedPath" }
     [ordered]@{ path = $installedPath; sha256 = $actualHash; matches_build = $true }
 })
+$runtimeReportPath = Join-Path $logDir 'windows-runtime.json'
+$runtimePaths = @($checks | ForEach-Object { $_.path })
+& node (Join-Path $PSScriptRoot 'check_windows_runtime.mjs') --report $runtimeReportPath @runtimePaths
+if ($LASTEXITCODE -ne 0) { throw 'Installed executables failed standalone Windows runtime verification.' }
+$runtimeReport = Get-Content -LiteralPath $runtimeReportPath -Raw | ConvertFrom-Json
+if ($runtimeReport.schema_version -ne 1 -or $runtimeReport.passed -ne $true -or
+    $runtimeReport.architecture -ne 'x64' -or @($runtimeReport.executables).Count -ne 4) {
+    throw 'Installed Windows runtime evidence has an invalid schema or executable count.'
+}
+$runtimeReportedPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($runtimeExecutable in $runtimeReport.executables) {
+    $runtimePath = [IO.Path]::GetFullPath($runtimeExecutable.path)
+    if (-not $runtimeReportedPaths.Add($runtimePath)) { throw 'Installed Windows runtime evidence repeats an executable.' }
+    $matchingPayload = @($checks | Where-Object { [IO.Path]::GetFullPath($_.path) -eq $runtimePath })
+    if ($matchingPayload.Count -ne 1 -or $matchingPayload[0].sha256 -ne $runtimeExecutable.sha256 -or
+        $runtimeExecutable.requires_external_vc_runtime -ne $false) {
+        throw 'Installed Windows runtime evidence differs from the verified payload bytes.'
+    }
+}
 foreach ($binary in @('hive-daemon.exe', 'entity-daemon.exe')) {
     $exe = Join-Path $InstallDir "resources/$binary"
     $stdout = Join-Path $logDir "$binary.stdout.txt"
@@ -85,6 +110,7 @@ $reportPath = Join-Path $logDir 'installed-payload.json'
 $report = [ordered]@{
     verified_at_utc = [DateTime]::UtcNow.ToString('o'); installer = $installer
     install_dir = $InstallDir; payload = $checks; daemon_loader_checks = 'passed'
+    windows_runtime = $runtimeReport
     runtime_acceptance = 'pending; this check does not launch the application'
 }
 [IO.File]::WriteAllText($reportPath, ($report | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))

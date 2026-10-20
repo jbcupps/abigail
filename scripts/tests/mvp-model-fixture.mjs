@@ -3,7 +3,7 @@ import http from 'node:http';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-export async function startModelFixture({ port = 0, logPath } = {}) {
+export async function startModelFixture({ port = 0, logPath, respond } = {}) {
   const model = 'abigail-mvp-contract-fixture';
   const server = http.createServer(async (request, response) => {
     try {
@@ -23,7 +23,7 @@ export async function startModelFixture({ port = 0, logPath } = {}) {
       }
       const data = JSON.parse(body);
       const user = [...(data.messages ?? [])].reverse().find(message => message.role === 'user');
-      const content = `Contract fixture reply: ${typeof user?.content === 'string' ? user.content : 'hello'}`;
+      const content = respond ? await respond(data) : `Contract fixture reply: ${typeof user?.content === 'string' ? user.content : 'hello'}`;
       if (logPath) appendFileSync(logPath, JSON.stringify({ at: new Date().toISOString(), stream: Boolean(data.stream), model: data.model, user: user?.content }) + '\n');
       const common = { id: 'mvp-contract-completion', created: 1, model };
       if (data.stream) {

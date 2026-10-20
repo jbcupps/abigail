@@ -18,6 +18,13 @@ internal daemons; no Rust, Node, terminal, or frontend development server is
 required on the machine running the installed app. Tauri's installer includes
 the WebView2 bootstrapper when that Windows runtime is missing.
 
+Before replacing or removing an existing installation, setup checks all four
+executable files, including the background daemons. If a file is still in use,
+setup stops before changing the payload. Close Abigail and all Entity windows
+and retry. If the background services remain running, restart Windows and run
+setup before opening Abigail. Do not ignore file replacement errors from an
+older installer; that can leave an incomplete installation.
+
 Model weights are not included. A local option needs a running server with a
 loaded model (for example Ollama at `http://127.0.0.1:11434` or LM Studio at
 `http://127.0.0.1:1234`). Cloud processing sends messages and context to the
@@ -69,6 +76,17 @@ Outputs:
 - An isolated installed-payload verification report under `target/manual-test/`
 
 ## Acceptance
+
+The Windows installer lock regression compiles the real NSIS hooks and checks
+live file handles, a running executable, and the installer/uninstaller guards
+in isolated directories and a unique fixture registry key:
+
+```powershell
+pwsh ./scripts/tests/test_mvp_installer_locks.ps1
+```
+
+It requires NSIS and does not stop existing Abigail processes or open family
+data. CI runs it before accepting an installer publication commit.
 
 ```powershell
 pwsh ./scripts/tests/run-mvp-acceptance.ps1 -BinaryDir target/debug
@@ -264,3 +282,38 @@ Local evidence:
 - `target/manual-test/mvp-cli-claude-installed/2026-10-02T17-13-46-497Z-2f75d438/result.json`
 - `target/manual-test/mvp-cli-claude-installed/direct-probe-2026-10-02T17-15-23-749Z-9b538960/result.json`
 - `target/manual-test/mvp-vendors-desktop/20261002-170045-c8b0a37e/result.json`
+
+## Entity Genesis installer — 2026-10-17
+
+The Genesis implementation is bundled as an unsigned debug installer at
+`dist/entity-genesis/Abigail-windows-x64-setup.exe`, version `0.0.1`. This is a
+local validation build, not a signed release or a promoted beta tag. Both native
+frontends embed their production assets; Hive, Entity Runtime and both daemons
+remain in one installer with one Abigail launch.
+
+Actual installation to `target/manual-test/mvp-installed-e4c76f3d` passed all four
+payload hash checks, standalone Windows runtime checks and both daemon loader
+checks. The installed daemons then passed **14/14 Genesis acceptance stages**,
+including a real Codex probe, reviewed proposals, and awakening without fallback.
+The synthetic portion covered scoped persistence, signed narrative loading,
+imports, error recovery and exact history after restart.
+
+The scoped backend regression passed **117 tests**, including **44 Genesis tests**;
+eight pre-existing daemon tests remain ignored. Hive and Runtime frontends passed
+**36 and 7 tests**, respectively. Strict Clippy, formatting and the four-package
+custom-protocol build passed. These are Genesis-phase counts, separate from the
+earlier whole-workspace MVP and vendor acceptance results above.
+
+Browser interaction was verified against isolated daemons. Installed WebView
+interaction, real microphone capture and billed portrait/video quality remain
+unaccepted for this phase. See [Genesis architecture and complete evidence](ENTITY_GENESIS.md)
+and [media setup and verification limits](GENESIS_MEDIA.md).
+
+Final evidence:
+
+- `dist/entity-genesis/mvp-build.json`
+- `target/manual-test/mvp-installed-e4c76f3d-verification/installed-payload.json`
+- `target/manual-test/genesis-acceptance/2026-10-17T17-09-12-445Z-7710d18b/report.json`
+- `target/manual-test/genesis-acceptance/browser-validation.json`
+- `target/genesis-final-regression.log`
+- `target/genesis-final-build.log`

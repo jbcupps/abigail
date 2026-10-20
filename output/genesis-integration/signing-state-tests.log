@@ -1,0 +1,45 @@
+PASS full source commit and source-state hash
+Windows x64 runtime inspection passed for 4 executable(s).
+PASS unchanged prepared inputs
+PASS rejected legacy preparation without channel binding
+PASS rejected different packaging channel
+PASS rejected different compiled Runtime identity
+PASS rejected different source commit
+PASS rejected changed source bytes
+PASS rejected different version
+PASS rejected different compression
+PASS rejected missing executable
+PASS rejected substituted executable path
+PASS rejected invalid recorded hash
+PASS rejected changed executable bytes
+PASS rejected changed executable bytes
+EXTERNAL_VC_RUNTIME: C:\Users\jbcup\Documents\Codex\2026-10-20\task\abigail-genesis-integration\target\manual-test\signed-builder-state-24ca6d1c\prepared-0.exe: Executable requires a separately deployed Microsoft Visual C++ runtime.
+PASS rejected undeployed runtime import with matching hashes
+PASS rejected changed bundle configuration
+PASS rejected semantically invalid updater configuration
+PASS rejected semantically invalid other-target configuration
+PASS rejected semantically invalid other-launcher configuration
+PASS rejected semantically invalid missing-resource configuration
+Windows x64 runtime inspection passed for 4 executable(s).
+PASS restored prepared inputs
+PASS rejected stable preparation reused as preview
+PASS stable and explicit/default preview target paths
+Windows x64 runtime inspection passed for 4 executable(s).
+PASS unchanged preview preparation and merged bundle configuration
+PASS rejected unsafe preview product
+PASS rejected unsafe preview identifier
+PASS rejected unsafe preview install-mode
+PASS rejected unsafe preview shortcut
+PASS rejected unsafe preview hook
+PASS rejected unsafe preview root
+PASS rejected changed preview overlay bytes
+PASS rejected changed launch contract
+Windows x64 runtime inspection passed for 4 executable(s).
+PASS rejected preview preparation reused as stable
+PASS preview candidate stops before installer execution and success marker
+PASS rejected preview Prepare overwrites stable work directory
+PASS rejected stable Prepare overwrites preview work directory
+PASS rejected preview Prepare overwrites legacy stable work directory
+PASS new/same-channel preparation and legacy stable reprepare
+PASS real Prepare entrypoint rejects synthetic signing secrets before building
+Signed installer state tests passed without building, installing, or signing.

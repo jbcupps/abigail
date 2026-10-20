@@ -223,6 +223,45 @@ fn tree_files(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
 }
 
 #[test]
+fn cold_snapshot_preserves_genesis_capability_assets_and_signed_narrative_as_opaque_bytes() {
+    let f = Fixture::new();
+    let narrative = format!("identities/{}/docs/genesis.json", f.entity_id);
+    for (path, bytes) in [
+        (
+            "genesis.token",
+            b"public-synthetic-capability-fixture".as_slice(),
+        ),
+        (
+            "genesis_assets/fixture/portrait.png",
+            b"synthetic-not-an-image".as_slice(),
+        ),
+        (
+            narrative.as_str(),
+            br#"{"name":"Vesper","purpose":"Explore","revision":3}"#.as_slice(),
+        ),
+    ] {
+        f.write(path, bytes);
+    }
+    let manifest = f.snapshot();
+    f.restore().unwrap();
+    for path in [
+        "genesis.token",
+        "genesis_assets/fixture/portrait.png",
+        narrative.as_str(),
+    ] {
+        assert!(manifest.entries.iter().any(|entry| entry.path == path));
+        assert_eq!(
+            fs::read(f.source.join(path)).unwrap(),
+            fs::read(f.destination.join(path)).unwrap()
+        );
+    }
+    assert_eq!(
+        read_json(&f.source.join("global_settings.json"))["creation_attempts"],
+        read_json(&f.destination.join("global_settings.json"))["creation_attempts"]
+    );
+}
+
+#[test]
 fn cold_snapshot_io_preserves_uuid_receipts_documents_webview_and_rebases_only_paths() {
     let f = Fixture::new();
     let marker = fs::read(f.source.join("profile.json")).unwrap();

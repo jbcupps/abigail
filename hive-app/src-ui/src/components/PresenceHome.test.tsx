@@ -5,6 +5,8 @@ import { defaultProfile, type EntityProfile } from "../../../../entity-runtime-a
 import type { HiveStatus } from "../lib/daemonClient";
 import { writeCreationDraft } from "../lib/creationDraft";
 import PresenceHome from "./PresenceHome";
+import { createOrResumeGenesis, genesisAction, resolveGenesisConnection, type GenesisSession } from "../lib/genesisClient";
+vi.mock("../lib/genesisClient", async original => ({ ...await original<typeof import("../lib/genesisClient")>(), createOrResumeGenesis: vi.fn(), genesisAction: vi.fn(), resolveGenesisConnection: vi.fn() }));
 
 const mocks = vi.hoisted(() => ({
   loadPresence: vi.fn(),
@@ -66,6 +68,9 @@ describe("Presence Home pending operations", () => {
     mocks.savePresence.mockReset().mockResolvedValue(undefined);
     mocks.chatMounted.mockReset();
     mocks.chatDisposed.mockReset();
+    vi.mocked(resolveGenesisConnection).mockReset().mockResolvedValue({ base: currentHive, token: "fixture", connection: { hiveUrl: currentHive, profileId: null } });
+    vi.mocked(createOrResumeGenesis).mockReset();
+    vi.mocked(genesisAction).mockReset();
     const heldLocks = new Set<string>();
     vi.stubGlobal("navigator", { locks: { request: async (name: string, _options: unknown, callback: (lock: object | null) => unknown) => {
       if (heldLocks.has(name)) return callback(null);
@@ -152,34 +157,38 @@ describe("Presence Home pending operations", () => {
   });
 
   it("keeps navigation blocked throughout both entity creation and profile saving", async () => {
-    const creation = deferred<string>();
+    const creation = deferred<void>();
     const saving = deferred<void>();
-    mocks.createPresenceEntity.mockReturnValueOnce(creation.promise);
+    vi.mocked(createOrResumeGenesis).mockImplementationOnce(async (id, seed, options) => {
+      await creation.promise;
+      return { id, state: "ready", connection: options.connection, definition: { entity_id: "created-entity", name: seed.name, purpose: seed.purpose } } as GenesisSession;
+    });
     mocks.savePresence.mockReturnValueOnce(saving.promise);
     const onProviders = vi.fn();
     render(<PresenceHome preview={false} status={status} onRefresh={vi.fn()} onProviders={onProviders} />);
     fireEvent.click(screen.getByRole("button", { name: /A new presence/ }));
     fireEvent.change(screen.getByRole("textbox", { name: "What should we call them?" }), { target: { value: "Sol" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "What would you like to explore together?" }), { target: { value: "Explore" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    fireEvent.click(screen.getByRole("button", { name: "Create Entity" }));
+    fireEvent.click(screen.getByRole("button", { name: "Awaken Entity" }));
 
     const home = screen.getByRole("link", { name: "Abigail Hive home" });
     expect(home).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByRole("button", { name: "Your Entities" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Model connections" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Ask Abigail" })).toBeDisabled();
-    expect(screen.getByRole("textbox", { name: "What should they keep in mind?" })).toBeDisabled();
+    expect(screen.queryByRole("textbox", { name: "What should they keep in mind?" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Your Entities" }));
     fireEvent.click(screen.getByRole("button", { name: "Model connections" }));
     fireEvent.click(screen.getByRole("button", { name: "Ask Abigail" }));
     expect(fireEvent.click(home)).toBe(false);
-    expect(screen.getByRole("heading", { name: "Make it yours." })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop waiting" })).toBeInTheDocument();
     expect(onProviders).not.toHaveBeenCalled();
     expect(mocks.openPresence).not.toHaveBeenCalled();
 
-    await act(async () => { creation.resolve("created-entity"); });
-    await waitFor(() => expect(mocks.savePresence).toHaveBeenCalledExactlyOnceWith("created-entity", defaultProfile("Sol"), false, expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    await act(async () => { creation.resolve(); });
+    await waitFor(() => expect(mocks.savePresence).toHaveBeenCalledExactlyOnceWith("created-entity", { ...defaultProfile("Sol"), purpose: "Explore" }, false, expect.objectContaining({ signal: expect.any(AbortSignal) })));
     expect(screen.getByRole("button", { name: "Your Entities" })).toBeDisabled();
     expect(home).toHaveAttribute("aria-disabled", "true");
 
@@ -247,7 +256,7 @@ describe("Presence Home pending operations", () => {
     render(<PresenceHome preview={false} status={status} onRefresh={vi.fn()} onProviders={vi.fn()} />);
     await waitFor(() => expect(mocks.loadPresence).toHaveBeenCalledOnce());
     mocks.loadPresence.mockReturnValueOnce(loading.promise);
-    fireEvent.click(screen.getByRole("button", { name: "Edit identity" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit appearance" }));
     fireEvent.click(screen.getByRole("button", { name: /A new presence/ }));
     fireEvent.change(screen.getByRole("textbox", { name: "What should we call them?" }), { target: { value: "Sol" } });
 
@@ -256,7 +265,7 @@ describe("Presence Home pending operations", () => {
     expect(screen.getByRole("textbox", { name: "What should we call them?" })).toHaveValue("Sol");
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    expect(screen.getByRole("button", { name: "Create Entity" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Awaken Entity" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save identity" })).not.toBeInTheDocument();
   });
 
@@ -301,7 +310,7 @@ describe("Presence Home pending operations", () => {
   it("does not offer a default edit form when the saved profile cannot be read", async () => {
     mocks.loadPresence.mockRejectedValue(new Error("Appearance service unavailable"));
     render(<PresenceHome preview={false} status={status} onRefresh={vi.fn()} onProviders={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Edit identity" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit appearance" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Appearance service unavailable");
     expect(screen.queryByRole("textbox", { name: "What should we call them?" })).not.toBeInTheDocument();
     expect(mocks.openPresence).not.toHaveBeenCalled();
@@ -404,7 +413,7 @@ describe("Presence Home pending operations", () => {
 
   it("keeps identity editing and saving available without checking a model", async () => {
     render(<PresenceHome preview={false} status={{ ...status, ready_state: "needs_provider", any_provider_configured: false }} onRefresh={vi.fn()} onProviders={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Edit identity" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit appearance" }));
     expect(await screen.findByRole("textbox", { name: "What should we call them?" })).toHaveValue("Ada");
     fireEvent.change(screen.getByRole("textbox", { name: "What should we call them?" }), { target: { value: "Edited Ada" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
