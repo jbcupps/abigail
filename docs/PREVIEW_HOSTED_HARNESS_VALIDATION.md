@@ -1,8 +1,9 @@
 # Hosted preview harness preparation evidence
 
 2026-10-20, isolated `dev/preview-combined-0.0.76` checkout on Newused.
-This records **code review and credential-free harness checks**, not an executed
-hosted acceptance run. The approval scope is in
+This records **code review and credential-free harness checks**, followed by
+the first hosted attempt and its preparation repair below. No completed hosted
+acceptance is claimed. The approval scope is in
 [PREVIEW_HOSTED_ACCEPTANCE.md](PREVIEW_HOSTED_ACCEPTANCE.md).
 
 ## Immutable product inputs
@@ -88,3 +89,35 @@ KnownFolder bootstrap, native Credential Manager support, stable-active
 installer behavior, a prior-preview migration, cross-user/device recovery,
 newer-schema refusal, or all ten publication acceptance stages. Reports retain
 `publicationEligible: false` and `fullAcceptance: false`.
+
+## First hosted attempt and dependency bootstrap repair
+
+After separately approved workflow registration through
+[PR #298](https://github.com/jbcupps/abigail/pull/298), run
+[`39467855613`](https://github.com/jbcupps/abigail/actions/runs/39467855613)
+executed harness `77f08ae6abb228b30df153c65cd1646557d6fb08`, attempt 1,
+against the unchanged product and stable pins above.
+
+Hosted scope checks, harness tests, existing WebView2 prerequisite detection,
+pinned stable downloads/signature verification, and tool setup passed.
+Preparation failed when Hive compiled imported Runtime source before Runtime's
+dependencies existed: TypeScript could not resolve `@tauri-apps/api/core`.
+Signing, fixture installation/lifecycle and artifact upload were skipped.
+This run made no SSL.com signing operations and created no fixture identities.
+
+The workflow now installs Runtime's locked dependency tree before invoking the
+unchanged product preparation script. Product source, dependency lockfiles,
+signing implementation, approval guards and fixture scope remain unchanged.
+
+A fresh extraction of both frontends from product
+`f7c7848d25726480b253ec1ca637c3ffa5ea3c77`, using Node 24.13.1 and npm 11.8.0,
+reproduced the exact missing-module failure with only Hive dependencies
+installed. Installing Runtime dependencies with `npm ci` then made both
+`tsc && vite build` commands pass. No application or installer was executed.
+Independent review found no blocking repair defects.
+
+The repaired workflow passes **45** credential-free policy, scope and inline
+PowerShell parser checks, including removal, unlocked-install, ignored-failure
+and late-install mutations for the new bootstrap. No audit remediation was
+performed. Native builds, signing and installed lifecycle acceptance remain
+pending a subsequent reviewed dispatch.

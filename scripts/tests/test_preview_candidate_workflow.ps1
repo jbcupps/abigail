@@ -39,6 +39,13 @@ function Assert-Policy([string]$Text) {
     $preflight = @($steps | Where-Object { $_.Groups[1].Value -ceq 'Check harness policy and syntax without credentials' })
     $prepare = @($steps | Where-Object { $_.Groups[1].Value -ceq 'Prepare four preview binaries from clean hosted source' })
     if ($preflight.Count -ne 1 -or $prepare.Count -ne 1 -or $preflight[0].Index -ge $prepare[0].Index -or $preflight[0].Index -ge $sign[0].Index) { throw 'Credential-free preflight must precede building and signing.' }
+    $runtimeInstallIndex = $prepare[0].Value.IndexOf('npm --prefix entity-runtime-app/src-ui ci', [StringComparison]::Ordinal)
+    $prepareBuildIndex = $prepare[0].Value.IndexOf('./scripts/build_signed_installer.ps1 -Phase Prepare', [StringComparison]::Ordinal)
+    if ($runtimeInstallIndex -lt 0 -or $runtimeInstallIndex -ge $prepareBuildIndex -or
+        $prepare[0].Value -notmatch '(?m)^        working-directory: product$' -or
+        -not $prepare[0].Value.Contains("if (`$LASTEXITCODE -ne 0) { throw 'Shared Runtime frontend dependency installation failed.' }")) {
+        throw 'Install locked Runtime dependencies before Hive compiles shared Runtime source, and fail on installation errors.'
+    }
     foreach ($command in @(
         './scripts/tests/test_preview_candidate_workflow.ps1',
         './scripts/tests/test_preview_candidate_runner.ps1',
@@ -103,6 +110,12 @@ Test-PolicyMutation 'profile upload' ($workflow.Replace('preview-public/hosted-p
 Test-PolicyMutation 'false publication eligibility' ($workflow.Replace('publicationEligible = $false', 'publicationEligible = $true'))
 Test-PolicyMutation 'omitted lifecycle unit tests' ($workflow.Replace('node --test scripts/tests/test_preview_candidate_lifecycle.mjs', 'Write-Host skipped'))
 Test-PolicyMutation 'omitted WebView2 prerequisite gate' ($workflow.Replace('./scripts/run-preview-candidate.ps1 -CheckPrerequisites -HarnessSourceCommit $env:GITHUB_SHA', 'Write-Host skipped'))
+Test-PolicyMutation 'omitted shared Runtime dependency install' ($workflow.Replace('npm --prefix entity-runtime-app/src-ui ci', 'Write-Host skipped'))
+Test-PolicyMutation 'unlocked shared Runtime dependency install' ($workflow.Replace('npm --prefix entity-runtime-app/src-ui ci', 'npm --prefix entity-runtime-app/src-ui install'))
+Test-PolicyMutation 'ignored shared Runtime install failure' ($workflow.Replace("if (`$LASTEXITCODE -ne 0) { throw 'Shared Runtime frontend dependency installation failed.' }", 'Write-Host skipped'))
+$runtimeInstallLine = "          npm --prefix entity-runtime-app/src-ui ci`n"
+$prepareLine = [regex]::Match($workflow, '(?m)^          \./scripts/build_signed_installer\.ps1 -Phase Prepare[^\n]+\n').Value
+Test-PolicyMutation 'shared Runtime dependencies installed too late' ($workflow.Replace($runtimeInstallLine, '').Replace($prepareLine, $prepareLine + $runtimeInstallLine))
 
 # Parse every actual inline PowerShell block, without running its body.
 $blocks = @([regex]::Matches($workflow, '(?m)^        run: \|\n((?:^          .*\n|^\n)+)'))

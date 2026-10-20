@@ -144,6 +144,10 @@ jobs:
       - name: Prepare four preview binaries from clean hosted source
         working-directory: product
         run: |
+          # Hive imports Runtime source. Install its locked dependencies before
+          # the pinned staging script builds Hive ahead of Runtime.
+          npm --prefix entity-runtime-app/src-ui ci
+          if ($LASTEXITCODE -ne 0) { throw 'Shared Runtime frontend dependency installation failed.' }
           ./scripts/build_signed_installer.ps1 -Phase Prepare -Channel preview -Version 0.0.76 -TargetDir (Join-Path $env:RUNNER_TEMP 'abigail-preview-build')
 
       - name: Build separate recovery CLI and verify frozen preparation
