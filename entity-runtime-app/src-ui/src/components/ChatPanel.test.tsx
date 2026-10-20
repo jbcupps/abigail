@@ -145,7 +145,7 @@ describe("embodied Entity conversation", () => {
     await renderReady(<ChatPanel baseUrl="http://127.0.0.1:43142" profile={profile} />);
     sendMessage();
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
-    expect(screen.getByText("Response stopped")).toBeInTheDocument();
+    expect(screen.getByText("Reply paused here")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
     await act(async () => {
       callbacks.onToken?.("This must be ignored");
@@ -293,7 +293,7 @@ describe("embodied Entity conversation", () => {
 
     await act(async () => callbacks.onDone?.({ reply: "" }));
 
-    expect(screen.getByRole("alert")).toHaveTextContent("The Entity finished without a text response. Try again.");
+    expect(screen.getByRole("alert")).toHaveTextContent("The Entity finished without a text response. Check the saved conversation before sending again.");
     expect(screen.getByTestId("presence")).toHaveAttribute("data-state", "error");
     expect(within(screen.getByRole("log")).queryByText("Vesper")).not.toBeInTheDocument();
     sendMessage("Try again");
@@ -329,5 +329,161 @@ describe("embodied Entity conversation", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Connection lost during the reply.");
     expect(screen.getByTestId("presence")).toHaveAttribute("data-state", "error");
     expect(screen.queryByText("Late success")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["gentle", "Find one small next step", "Help me make a manageable plan."],
+    ["direct", "Turn a goal into a plan", "Help me turn a goal into three practical next steps."],
+    ["curious", "Try a tiny experiment", "Help me design a small experiment"],
+  ] as const)("offers an optional %s first task even after a persisted greeting, without sending or overwriting a draft", async (temperament, title, draft) => {
+    mocks.loadConversation.mockResolvedValue({ entity_id: "entity-123", session_id: "restored-session", messages: [
+      { role: "assistant", content: "A saved welcome from your Entity." },
+    ] });
+    await renderReady(<ChatPanel baseUrl="http://127.0.0.1:43142" profile={{ ...profile, temperament }} />);
+    fireEvent.click(screen.getByRole("button", { name: title }));
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toContain(draft);
+    expect(screen.getByRole("textbox")).toHaveFocus();
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: title })).toBeDisabled();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "My own mission" } });
+    fireEvent.click(screen.getByRole("button", { name: title }));
+    expect(screen.getByRole("textbox")).toHaveValue("My own mission");
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(mocks.send).toHaveBeenCalledWith({ message: "My own mission", sessionId: "restored-session" }, expect.any(Object));
+    expect(screen.queryByRole("heading", { name: "Where shall we begin?" })).not.toBeInTheDocument();
+  });
+
+  it("shows only saved user context on return and lets the user continue without inserting or sending text", async () => {
+    mocks.loadConversation.mockResolvedValue({ entity_id: "entity-123", session_id: "restored-session", messages: [
+      { role: "user", content: "Explore a\nmoon garden" },
+      { role: "assistant", content: "Invented fixture reply." },
+    ] });
+    await renderReady(<ChatPanel baseUrl="http://127.0.0.1:43142" profile={profile} />);
+    const context = screen.getByRole("complementary", { name: "Saved conversation context" });
+    expect(context).toHaveTextContent("Last time, you asked: “Explore a moon garden”");
+    expect(screen.queryByRole("heading", { name: "Where shall we begin?" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Keep my draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pick up from here" }));
+    expect(screen.getByRole("textbox")).toHaveFocus();
+    expect(screen.getByRole("textbox")).toHaveValue("Keep my draft");
+    expect(mocks.send).not.toHaveBeenCalled();
+    sendMessage("A new unsaved question");
+    expect(screen.queryByRole("complementary", { name: "Saved conversation context" })).not.toBeInTheDocument();
+  });
+
+  it("explains a slow first response, clears the wait on actual text, and resets the timer for the next turn", async () => {
+    vi.useFakeTimers();
+    await renderReady(<ChatPanel baseUrl="http://127.0.0.1:43142" />);
+    sendMessage();
+    expect(screen.getByText("Opening a reply").closest('[role="status"]')).toHaveAttribute("aria-atomic", "true");
+    await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+    expect(screen.getByText("Still waiting for a reply")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+    await act(async () => callbacks.onToken?.("A first word"));
+    expect(screen.getByText("Reply arriving")).toBeInTheDocument();
+    expect(screen.queryByText("Still waiting for a reply")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(screen.queryByText("Reply arriving")).not.toBeInTheDocument();
+    sendMessage("Next request");
+    expect(screen.getByText("Opening a reply")).toBeInTheDocument();
+    await act(async () => callbacks.onDone?.({ reply: "Done" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+    expect(screen.queryByText("Still waiting for a reply")).not.toBeInTheDocument();
+  });
+
+  it("checks saved history after Stop without replaying, preserves the draft, and blocks a concurrent send", async () => {
+    await renderReady(<ChatPanel baseUrl="http://127.0.0.1:43142" profile={profile} />);
+    sendMessage("Original request");
+    const oldCallbacks = callbacks;
+    await act(async () => callbacks.onToken?.("Visible partial"));
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(screen.getByText(/Stop was requested; remote work may still finish/)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "My next draft" } });
+    let resolve!: (snapshot: ConversationSnapshot) => void;
+    mocks.loadConversation.mockReturnValueOnce(new Promise<ConversationSnapshot>(r => { resolve = r; }));
+    fireEvent.click(screen.getByRole("button", { name: "Check saved conversation" }));
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(screen.getByRole("textbox")).toBeEnabled();
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    expect(screen.getByText("Visible partial")).toBeInTheDocument();
+    await act(async () => resolve({ entity_id: "entity-123", session_id: "restored-session", messages: [
+      { role: "user", content: "Original request" }, { role: "assistant", content: "Saved final reply" },
+    ] }));
+    await act(async () => oldCallbacks.onDone?.({ reply: "Late callback" }));
+    expect(screen.getByText("Saved final reply")).toBeInTheDocument();
+    expect(screen.queryByText("Late callback")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toHaveValue("My next draft");
+    expect(mocks.send).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Check saved conversation" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+  });
+
+  it("never turns the Stop click into submitting a draft already in the composer", async () => {
+    await renderReady(<ChatPanel baseUrl="http://127.0.0.1:43142" />);
+    sendMessage("Request in progress");
+    await act(async () => callbacks.onToken?.("Partial reply"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Do not send this draft" } });
+    const stopButton = screen.getByRole("button", { name: "Stop" });
+    fireEvent.click(stopButton);
+    expect(screen.getByRole("textbox")).toHaveValue("Do not send this draft");
+    expect(screen.getByRole("textbox")).toHaveFocus();
+    expect(mocks.send).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Send" })).not.toBe(stopButton);
+    expect(screen.getByText(/Stop was requested; remote work may still finish/)).toBeInTheDocument();
+  });
+
+  it.each(["failure", "timeout"])("keeps partial text and a draft after a saved-history %s, without accepting late history", async (failure) => {
+    vi.useFakeTimers();
+    await renderReady(<ChatPanel baseUrl="http://127.0.0.1:43142" />);
+    sendMessage();
+    await act(async () => {
+      callbacks.onToken?.("Partial text to keep");
+      callbacks.onError?.({ code: "transport", message: "Offline", interrupted: false });
+    });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Draft to keep" } });
+    let resolve!: (snapshot: ConversationSnapshot) => void;
+    if (failure === "failure") mocks.loadConversation.mockRejectedValueOnce(new Error("offline"));
+    else mocks.loadConversation.mockReturnValueOnce(new Promise<ConversationSnapshot>(r => { resolve = r; }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Check saved conversation" })));
+    if (failure === "timeout") {
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+      await act(async () => resolve({ entity_id: "entity-123", session_id: "restored-session", messages: [{ role: "assistant", content: "Too late" }] }));
+    }
+    expect(screen.getByRole("alert")).toHaveTextContent("Nothing was resent");
+    expect(screen.getByText("Partial text to keep")).toBeInTheDocument();
+    expect(screen.queryByText("Too late")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toHaveValue("Draft to keep");
+    expect(screen.getByRole("button", { name: "Check saved conversation" })).toBeEnabled();
+    expect(mocks.send).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { entity_id: "wrong-entity", session_id: "restored-session" },
+    { entity_id: "entity-123", session_id: "wrong-session" },
+  ])("fails closed when rechecking returns another identity or session: %j", async (identity) => {
+    await renderReady(<ChatPanel baseUrl="http://127.0.0.1:43142" />);
+    sendMessage();
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    mocks.loadConversation.mockResolvedValueOnce({ ...identity, messages: [{ role: "assistant", content: "Must not expose" }] });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Check saved conversation" })));
+    expect(screen.getByRole("alert")).toHaveTextContent("changed identity or session");
+    expect(screen.queryByText("Must not expose")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeDisabled();
+    expect(mocks.send).toHaveBeenCalledOnce();
+  });
+
+  it("ignores a saved-history check after changing connections", async () => {
+    const view = await renderReady(<ChatPanel baseUrl="http://127.0.0.1:43142" />);
+    sendMessage();
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    let resolve!: (snapshot: ConversationSnapshot) => void;
+    mocks.loadConversation.mockReturnValueOnce(new Promise<ConversationSnapshot>(r => { resolve = r; }));
+    fireEvent.click(screen.getByRole("button", { name: "Check saved conversation" }));
+    view.rerender(<ChatPanel baseUrl="http://127.0.0.1:43143" />);
+    await act(async () => resolve({ entity_id: "entity-123", session_id: "restored-session", messages: [{ role: "assistant", content: "Old connection history" }] }));
+    expect(screen.queryByText("Old connection history")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Nothing was resent/)).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeEnabled();
+    expect(mocks.send).toHaveBeenCalledOnce();
   });
 });

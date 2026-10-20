@@ -10,6 +10,43 @@ const base = "http://127.0.0.1:43142";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Durable Entity conversations", () => {
+  it("reconciles a result saved after Stop with GETs only, retaining the next draft", async () => {
+    let saved = false;
+    const requests: Array<{ url: string; method: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      requests.push({ url, method: init?.method || "GET" });
+      if (url.includes("/v1/status")) return json({ entity_id: "ada", name: "Ada" });
+      if (url.includes("/history")) return json({ session_id: "entity-ada", messages: saved ? [
+        { role: "user", content: "Original request" }, { role: "assistant", content: "Result saved by the fixture" },
+      ] : [] });
+      if (url.endsWith("/cancel")) {
+        saved = true;
+        return json({ cancelled: true });
+      }
+      expect(url).toContain("/v1/chat/stream");
+      return new Response(new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode("event: token\ndata: A partial reply\n\n"));
+        init?.signal?.addEventListener("abort", () => controller.close(), { once: true });
+      } }), { headers: { "Content-Type": "text/event-stream" } });
+    }));
+    render(<ChatPanel baseUrl={base} expectedEntityId="ada" />);
+    await screen.findByRole("heading", { name: "Where shall we begin?" });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Original request" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByText("A partial reply");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "A draft to keep" } });
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(screen.getByText("A partial reply")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Check saved conversation" }));
+    await screen.findByText("Result saved by the fixture");
+    expect(screen.getByRole("textbox")).toHaveValue("A draft to keep");
+    expect(requests.filter(request => request.url.endsWith("/v1/chat/stream"))).toHaveLength(1);
+    expect(requests.filter(request => request.method === "POST")).toEqual([
+      { url: `${base}/v1/chat/stream`, method: "POST" }, { url: `${base}/v1/chat/cancel`, method: "POST" },
+    ]);
+    expect(requests.filter(request => request.url.includes("/history"))).toHaveLength(2);
+  });
+
   it("restores named history, streams a reply, and resumes the same conversation after reopening on a new port", async () => {
     const history = [{ role: "user", content: "Remember our appointment" }, { role: "assistant", content: "Friday at 3 PM." }];
     let calls = 0;

@@ -4,6 +4,7 @@ import type { ChatGatewayStream } from "../chat/chatGateway";
 import { loadConversation, type ConversationMessage } from "../lib/conversation";
 import Presence from "../presence/Presence";
 import type { EntityProfile } from "../presence/profile";
+import ConversationEntry from "./ConversationEntry";
 
 interface ChatPanelProps {
   baseUrl: string;
@@ -37,6 +38,15 @@ const PREVIEW_STATES: Array<{ state: PresenceState; name: string; label: string 
   { state: "error", name: "Error", label: "Error · demonstration" },
 ];
 
+const STOP_NOTICE = "Reply paused here. Stop was requested; remote work may still finish. Check the saved conversation before repeating an action.";
+
+function lastSavedQuestion(messages: ConversationMessage[]): string | null {
+  const last = [...messages].reverse().find(message => message.role === "user" && message.content.trim());
+  if (!last) return null;
+  const text = Array.from(last.content.trim().replace(/\s+/g, " "));
+  return text.length > 180 ? `${text.slice(0, 180).join("")}…` : text.join("");
+}
+
 function cancelStream(stream: ChatGatewayStream) {
   // Start backend cancellation before disposal, without holding the UI or
   // cleanup hostage to a slow cancel response.
@@ -59,14 +69,21 @@ export default function ChatPanel({ baseUrl, expectedEntityId, greeting, showHea
   const [paused, setPaused] = useState(false);
   const [textOnly, setTextOnly] = useState(false);
   const [previewState, setPreviewState] = useState<PresenceState>("idle");
+  const [savedQuestion, setSavedQuestion] = useState<string | null>(null);
+  const [slowResponse, setSlowResponse] = useState(false);
+  const [needsRecheck, setNeedsRecheck] = useState(false);
+  const [rechecking, setRechecking] = useState(false);
+  const [turnNumber, setTurnNumber] = useState(0);
 
   // A ref closes the gap before React renders a disabled Send button. It also
   // prevents late callbacks from a canceled/replaced turn changing the UI.
   const turnRef = useRef<ActiveTurn | null>(null);
   const connectionRef = useRef({ disposed: false, ready: false });
   const sessionIdRef = useRef("");
+  const entityIdRef = useRef("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const recheckRef = useRef<AbortController | null>(null);
   const name = profile?.name || runtimeName;
 
   const gateway = useMemo(
@@ -91,6 +108,7 @@ export default function ChatPanel({ baseUrl, expectedEntityId, greeting, showHea
     // A daemon may move ports after restart. Restore its persisted session and
     // transcript before sending rather than inventing a new conversation.
     sessionIdRef.current = "";
+    entityIdRef.current = "";
     setMessages([]);
     setInput("");
     setRuntimeName("Your Entity");
@@ -101,6 +119,9 @@ export default function ChatPanel({ baseUrl, expectedEntityId, greeting, showHea
     setInputFocused(false);
     setActivity("idle");
     setNotice(null);
+    setSavedQuestion(null);
+    setNeedsRecheck(false);
+    setRechecking(false);
     if (!demo) {
       const interrupted = new Promise<never>((_, reject) => {
         controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true });
@@ -115,8 +136,10 @@ export default function ChatPanel({ baseUrl, expectedEntityId, greeting, showHea
         }
         setRuntimeName(snapshot.name || "Your Entity");
         sessionIdRef.current = snapshot.session_id;
+        entityIdRef.current = snapshot.entity_id;
         connection.ready = true;
         setMessages(snapshot.messages.map((message, index) => ({ ...message, id: `history-${index}` })));
+        setSavedQuestion(lastSavedQuestion(snapshot.messages));
       }).catch(() => {
         if (connection.disposed) return;
         setLoadError("Your conversation could not be restored. Retry to continue where you left off.");
@@ -133,6 +156,8 @@ export default function ChatPanel({ baseUrl, expectedEntityId, greeting, showHea
       connection.ready = false;
       controller.abort();
       clearTimeout(timer);
+      recheckRef.current?.abort();
+      recheckRef.current = null;
       const turn = turnRef.current;
       turnRef.current = null;
       if (!turn) return;
@@ -141,13 +166,21 @@ export default function ChatPanel({ baseUrl, expectedEntityId, greeting, showHea
   }, [baseUrl, expectedEntityId, demo, gateway, loadAttempt]);
 
   useEffect(() => {
+    setSlowResponse(false);
+    if (!streaming || receivedText) return;
+    const timer = setTimeout(() => setSlowResponse(true), 12_000);
+    return () => clearTimeout(timer);
+  }, [streaming, receivedText, turnNumber]);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages]);
 
   const send = useCallback(async () => {
     const text = input.trim();
     const connection = connectionRef.current;
-    if (!text || turnRef.current || !gateway || connection.disposed || !connection.ready || loading || loadError) return;
+    if (!text || turnRef.current || recheckRef.current || !gateway || connection.disposed || !connection.ready || loading || loadError) return;
 
     const turn: ActiveTurn = {
       assistantId: crypto.randomUUID(),
@@ -155,7 +188,10 @@ export default function ChatPanel({ baseUrl, expectedEntityId, greeting, showHea
       canceled: false,
     };
     turnRef.current = turn;
+    setTurnNumber(number => number + 1);
     setNotice(null);
+    setNeedsRecheck(false);
+    setSavedQuestion(null);
     setInput("");
     setReceivedText(false);
     setMessages((prev) => [
@@ -197,7 +233,8 @@ export default function ChatPanel({ baseUrl, expectedEntityId, greeting, showHea
             void turn.stream?.dispose().catch(() => undefined);
             if (!reply.trim()) {
               removeEmptyReply();
-              setNotice("The Entity finished without a text response. Try again.");
+              setNeedsRecheck(true);
+              setNotice("The Entity finished without a text response. Check the saved conversation before sending again.");
             }
           },
           onError: (error) => {
@@ -206,8 +243,9 @@ export default function ChatPanel({ baseUrl, expectedEntityId, greeting, showHea
             setStreaming(false);
             removeEmptyReply();
             setActivity(error.interrupted ? "interrupted" : "error");
-            setNotice(error.interrupted ? "Response stopped. You can continue whenever you like."
-              : `The reply could not be completed. Check the model connection in Abigail Hive, then try again. ${error.message}`);
+            setNeedsRecheck(true);
+            setNotice(error.interrupted ? STOP_NOTICE
+              : `The reply could not be completed. Its saved result may differ from what is shown here. ${error.message}`);
             void turn.stream?.dispose().catch(() => undefined);
           },
         },
@@ -221,7 +259,8 @@ export default function ChatPanel({ baseUrl, expectedEntityId, greeting, showHea
       setStreaming(false);
       setActivity("error");
       removeEmptyReply();
-      setNotice(error instanceof Error ? error.message : String(error));
+      setNeedsRecheck(true);
+      setNotice(`The reply could not be completed. Its saved result may differ from what is shown here. ${error instanceof Error ? error.message : String(error)}`);
     }
   }, [input, gateway, loading, loadError]);
 
@@ -236,9 +275,48 @@ export default function ChatPanel({ baseUrl, expectedEntityId, greeting, showHea
     setActivity("interrupted");
     setMessages((prev) => prev.filter((message) =>
       message.id !== turn.assistantId || message.content.trim() !== ""));
-    setNotice("Response stopped. You can continue whenever you like.");
+    setNeedsRecheck(true);
+    setNotice(STOP_NOTICE);
     if (turn.stream) cancelStream(turn.stream);
+    inputRef.current?.focus();
   }, []);
+
+  const recheckSavedConversation = useCallback(async () => {
+    const connection = connectionRef.current;
+    if (demo || turnRef.current || recheckRef.current || connection.disposed || !connection.ready) return;
+    const controller = new AbortController();
+    recheckRef.current = controller;
+    setRechecking(true);
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    const interrupted = new Promise<never>((_, reject) => {
+      controller.signal.addEventListener("abort", () => reject(new Error("Saved conversation check timed out.")), { once: true });
+    });
+    try {
+      const snapshot = await Promise.race([loadConversation(baseUrl, controller.signal), interrupted]);
+      if (connection.disposed || controller.signal.aborted) return;
+      // A read-only refresh must not silently switch identity or conversation.
+      if (snapshot.entity_id !== entityIdRef.current
+        || snapshot.session_id !== sessionIdRef.current) {
+        connection.ready = false;
+        setNotice(null);
+        setLoadError("The saved conversation changed identity or session. Return to Hive and reopen this Entity. No message was resent.");
+        setActivity("error");
+        return;
+      }
+      setMessages(snapshot.messages.map((message, index) => ({ ...message, id: `history-${index}` })));
+      setSavedQuestion(lastSavedQuestion(snapshot.messages));
+      setActivity("idle");
+      setNotice("Saved conversation reloaded. Nothing was resent; your draft is unchanged. Remote work may still be finishing.");
+    } catch {
+      if (connection.disposed) return;
+      setActivity("error");
+      setNotice("The saved conversation could not be checked. Your visible reply and draft are still here. Nothing was resent.");
+    } finally {
+      clearTimeout(timer);
+      if (recheckRef.current === controller) recheckRef.current = null;
+      if (!connection.disposed) setRechecking(false);
+    }
+  }, [baseUrl, demo]);
 
   const presenceState: PresenceState = demo
     ? previewState
@@ -246,9 +324,10 @@ export default function ChatPanel({ baseUrl, expectedEntityId, greeting, showHea
   const stateLabel = demo
     ? PREVIEW_STATES.find((item) => item.state === previewState)!.label
     : loading ? "Restoring your conversation"
+    : rechecking ? "Checking saved conversation"
     : presenceState === "thinking" ? receivedText ? "Receiving text" : "Awaiting response"
     : presenceState === "listening" ? "Composing text · microphone off"
-    : presenceState === "interrupted" ? "Response stopped"
+    : presenceState === "interrupted" ? "Reply paused here"
     : presenceState === "error" ? "Connection needs attention"
     : "Ready when you are";
 
@@ -274,8 +353,8 @@ export default function ChatPanel({ baseUrl, expectedEntityId, greeting, showHea
         <p className="runtime-state-note" role="status">{stateLabel}</p>
         <p className="runtime-stage-copy runtime-signal-note">
           {demo ? "Demonstration only · these controls preview animation states."
-            : streaming ? "Activity reflects the text request, not an internal mental state."
-            : "Procedural visual · microphone off · no audio playback"}
+            : streaming ? "A text reply is in progress. Stop is always available."
+            : "Text chat · microphone off · no audio playback"}
         </p>
         {demo && <div className="runtime-preview-controls" aria-label="Animation state preview">
           {PREVIEW_STATES.map((item) => <button
@@ -304,26 +383,43 @@ export default function ChatPanel({ baseUrl, expectedEntityId, greeting, showHea
           <span className="runtime-eyebrow">{demo ? "DESIGN PREVIEW" : "TEXT CONNECTION"}</span>
         </header>}
         {demo && <p className="runtime-demo-note">Design preview · no model connected. You can compose a draft; messages are not sent.</p>}
-        <div ref={scrollRef} className="runtime-transcript" role="log" aria-label="Conversation transcript" aria-live="polite" aria-relevant="additions text" aria-busy={loading || streaming}>
+        {!loading && !loadError && savedQuestion && <aside className="runtime-return" aria-label="Saved conversation context">
+          <span className="runtime-eyebrow">YOUR LAST SAVED THREAD</span>
+          <p>Last time, you asked: “{savedQuestion}”</p>
+          <button type="button" className="runtime-back" onClick={() => inputRef.current?.focus()}>Pick up from here <span aria-hidden="true">↗</span></button>
+        </aside>}
+        <div ref={scrollRef} className="runtime-transcript" role="log" aria-label="Conversation transcript" aria-live="polite" aria-relevant="additions text" aria-busy={loading || rechecking}>
           {loading && <p className="runtime-notice" role="status">Restoring your conversation…</p>}
           {loadError && <div className="runtime-notice" role="alert"><p>{loadError}</p><button type="button" className="runtime-back" onClick={() => setLoadAttempt(attempt => attempt + 1)}>Retry</button></div>}
           {!loading && !loadError && messages.length === 0 && <div className="runtime-empty">
             <span className="runtime-eyebrow">A NEW CONVERSATION</span>
             <p>{greeting ?? `Hi, I'm ${name}. What can I help you with today?`}</p>
-            <div className="runtime-starters">
-              {["Help me untangle an idea", "Let's make a plan", "Explore something with me"].map((suggestion) =>
-                <button type="button" key={suggestion} onClick={() => {
-                  setInput(suggestion);
-                  inputRef.current?.focus();
-                }}>{suggestion} <span aria-hidden="true">↗</span></button>)}
-            </div>
           </div>}
           {messages.map((message) => <article key={message.id} className={`runtime-message is-${message.role}`}>
             <span className="runtime-message-label">{message.role === "user" ? "You" : name}</span>
-            <p>{message.content || "Awaiting response…"}</p>
+            <p className={message.content ? undefined : "runtime-message-pending"}>{message.content || "Waiting for the first words…"}</p>
           </article>)}
-          {notice && <p className="runtime-notice" role={activity === "error" ? "alert" : "status"}>{notice}</p>}
+          {!loading && !loadError && !needsRecheck && !messages.some(message => message.role === "user") && <ConversationEntry
+            profile={profile}
+            hasDraft={input.length > 0}
+            onChoose={draft => { setInput(draft); inputRef.current?.focus(); }}
+          />}
+          {notice && <div className="runtime-notice">
+            <p role={activity === "error" ? "alert" : "status"}>{notice}</p>
+            {needsRecheck && !loadError && <button type="button" className="runtime-recheck" disabled={rechecking} onClick={() => void recheckSavedConversation()}>
+              {rechecking ? "Checking saved conversation…" : "Check saved conversation"}
+            </button>}
+          </div>}
         </div>
+
+        {streaming && <div className="runtime-progress" role="status" aria-live="polite" aria-atomic="true">
+          <span className="runtime-progress-marker" aria-hidden="true">{receivedText ? "↘" : "◇"}</span>
+          <div><strong>{receivedText ? "Reply arriving" : slowResponse ? "Still waiting for a reply" : "Opening a reply"}</strong>
+            <p>{receivedText ? "Text is arriving in the conversation. You can keep drafting while it comes in."
+              : slowResponse ? "No text has arrived yet. You can wait, or use Stop to pause here."
+              : "Waiting for the first text from your Entity. You can use Stop at any time."}</p>
+          </div>
+        </div>}
 
         <form className="runtime-composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
           <label className="runtime-eyebrow" htmlFor="entity-message">YOUR MESSAGE</label>
@@ -350,8 +446,8 @@ export default function ChatPanel({ baseUrl, expectedEntityId, greeting, showHea
             <span id="entity-composer-hint" className="runtime-input-hint">
               {demo ? "Preview draft · sending is unavailable" : "Enter to send · Shift + Enter for a new line"}
             </span>
-            {streaming ? <button type="button" className="runtime-send" onClick={stop}>Stop</button>
-              : <button type="submit" className="runtime-send" disabled={!input.trim() || demo || loading || loadError !== null}>Send <span aria-hidden="true">↗</span></button>}
+            {streaming ? <button key="stop" type="button" className="runtime-send" onClick={event => { event.preventDefault(); stop(); }}>Stop</button>
+              : <button key="send" type="submit" className="runtime-send" disabled={!input.trim() || demo || loading || rechecking || loadError !== null}>Send <span aria-hidden="true">↗</span></button>}
           </div>
         </form>
       </section>
