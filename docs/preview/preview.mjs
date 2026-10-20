@@ -1,6 +1,7 @@
 // Shared, dependency-free descriptor policy for the page and the offline tests.
 // The checked-in descriptor is the curated authority. Hashes bind exact public
 // report bytes; they are not a replacement for the reported Windows checks.
+import { REVIEWED_WORKFLOW_BINDINGS, REVIEWED_CANDIDATE_ORIGINS } from "./execution-bindings.mjs";
 export const REPOSITORY = "jbcupps/abigail";
 export const INSTALLER_NAME = "Abigail-windows-x64-setup.exe";
 export const EXPECTED_CERTIFICATE_THUMBPRINT = "69BE78FD201A59A29C46F5D37097E0C6DDA04A41";
@@ -64,8 +65,51 @@ export async function sha256Text(value) {
 }
 export function releaseAssetUrl(tag, name) {
   requireCondition(BETA_TAG.test(tag), "Preview tags must use the beta convention.");
-  requireCondition([INSTALLER_NAME, "release-provenance.json", "windows-signature-evidence.json"].includes(name), "Unexpected preview asset.");
+  requireCondition([INSTALLER_NAME, "release-provenance.json", "windows-signature-evidence.json", "hosted-provenance.json"].includes(name), "Unexpected preview asset.");
   return `https://github.com/${REPOSITORY}/releases/download/${tag}/${name}`;
+}
+export function reviewedExecutionBinding(execution, sourceCommit, purpose) {
+  object(execution, "Workflow execution");
+  requireCondition(typeof execution.sourceBinding === "string" &&
+    Object.hasOwn(REVIEWED_WORKFLOW_BINDINGS, execution.sourceBinding),
+    "Workflow product checkout has no matching reviewed execution binding.");
+  const binding = REVIEWED_WORKFLOW_BINDINGS[execution.sourceBinding];
+  requireCondition(binding && binding.purpose === purpose &&
+    binding.productSourceCommit === sourceCommit && execution.sourceCommit === sourceCommit &&
+    execution.harnessRevision === binding.harnessRevision &&
+    execution.workflowPath === binding.workflowPath && execution.event === binding.event &&
+    (binding.branch === undefined || execution.branch === binding.branch),
+    "Workflow product checkout has no matching reviewed execution binding.");
+  return binding;
+}
+async function validateCandidateOrigin(origin, release) {
+  object(origin, "Candidate origin");
+  const binding = reviewedExecutionBinding(origin, release.sourceCommit, "candidate-origin");
+  const reviewed = REVIEWED_CANDIDATE_ORIGINS[origin.sourceBinding];
+  requireCondition(reviewed && ["workflowRunId", "runAttempt", "artifactId", "artifactName", "artifactSha256"]
+    .every((name) => origin[name] === reviewed[name]), "Candidate origin run or artifact differs from the reviewed bytes.");
+  requireCondition(release.installer.sha256 === reviewed.installerSha256 &&
+    release.installer.size === reviewed.installerSize, "Candidate origin installer differs from the preview.");
+  object(origin.hostedProvenance, "Original hosted provenance");
+  const original = origin.hostedProvenance;
+  text(original.content, "Original hosted provenance content", MAX_EVIDENCE_BYTES);
+  requireCondition(original.sha256 === reviewed.provenanceSha256 &&
+    ENCODER.encode(original.content).length === reviewed.provenanceSize &&
+    await sha256Text(original.content) === reviewed.provenanceSha256,
+    "Original hosted provenance bytes differ from the reviewed candidate.");
+  let provenance;
+  try { provenance = JSON.parse(original.content); } catch { throw new Error("Original hosted provenance is not JSON."); }
+  requireCondition(provenance.schemaVersion === 1 && provenance.repository === REPOSITORY &&
+    provenance.productSourceCommit === release.sourceCommit &&
+    provenance.harnessSourceCommit === binding.harnessRevision &&
+    provenance.workflowRunId === String(reviewed.workflowRunId) &&
+    provenance.workflowRunAttempt === String(reviewed.runAttempt) &&
+    provenance.acceptanceOutcome === "success" &&
+    provenance.publicationEligible === false && provenance.realModelValidation === false &&
+    Array.isArray(provenance.files), "Original candidate provenance must retain its actual execution and limited claims.");
+  const installers = provenance.files.filter((file) => file.name === INSTALLER_NAME);
+  requireCondition(installers.length === 1 && installers[0].sha256 === release.installer.sha256 &&
+    installers[0].size === release.installer.size, "Original candidate provenance does not identify this installer.");
 }
 function assertReportIdentity(report, release, kind) {
   object(report, kind);
@@ -99,9 +143,20 @@ async function validateEvidence(envelope, release, key) {
     positiveInteger(report.sourceCi.workflowRunId, "Source CI run");
     positiveInteger(report.sourceCi.runAttempt, "Source CI run attempt");
     requireCondition(report.sourceCi.sourceCommit === release.sourceCommit &&
-      report.sourceCi.workflowPath === ".github/workflows/ci.yml" &&
-      report.sourceCi.branch === "beta" && report.sourceCi.event === "push",
-      "Source CI evidence must identify the exact beta push.");
+      report.sourceCi.workflowPath === ".github/workflows/ci.yml",
+      "Source CI evidence must identify the exact product and CI workflow.");
+    if (report.sourceCi.sourceBinding !== undefined) {
+      reviewedExecutionBinding(report.sourceCi, release.sourceCommit, "source-ci");
+      text(report.sourceCi.branch, "Source CI dispatch branch", 200);
+    } else {
+      requireCondition(report.sourceCi.branch === "beta" && report.sourceCi.event === "push",
+        "Unbound source CI evidence must identify the exact beta push.");
+    }
+    const knownCandidate = Object.values(REVIEWED_CANDIDATE_ORIGINS)
+      .some((origin) => origin.installerSha256 === release.installer.sha256);
+    if (report.candidateOrigin !== undefined || knownCandidate) {
+      await validateCandidateOrigin(report.candidateOrigin, release);
+    }
     // These two documents retain the existing verification scripts' schemas.
     const verification = report.verification;
     object(verification, "Published-download result");
@@ -157,6 +212,9 @@ async function validateEvidence(envelope, release, key) {
     requireCondition(SHA40.test(report.execution.harnessRevision) &&
       /^\.github\/workflows\/[A-Za-z0-9_-]+\.ya?ml$/.test(report.execution.workflowPath),
       "Compatibility evidence must identify its immutable harness and workflow.");
+    if (report.execution.sourceBinding !== undefined || report.execution.harnessRevision !== release.sourceCommit) {
+      reviewedExecutionBinding(report.execution, release.sourceCommit, "compatibility");
+    }
     textList(report.execution.commands, "Compatibility harness commands", 1);
     // Bind the reported ongoing Entity and restored snapshot. This checks
     // recorded observations, not actual profile contents or runtime behavior.

@@ -6,7 +6,7 @@ import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import {
   validatePreviewDescriptor, MAX_DESCRIPTOR_BYTES, MAX_EVIDENCE_BYTES, sha256Text,
-  REPOSITORY, STABLE_BASELINE, releaseAssetUrl,
+  REPOSITORY, STABLE_BASELINE, releaseAssetUrl, reviewedExecutionBinding,
 } from "../docs/preview/preview.mjs";
 import { validatePublishedRelease } from "./release_provenance.mjs";
 
@@ -59,25 +59,46 @@ export async function verifyPublicPreviewEvidence(descriptor, fetcher = globalTh
   }
   await verifyTag(preview.release.tag, preview.release.sourceCommit);
   await verifyTag(STABLE_BASELINE.tag, STABLE_BASELINE.sourceCommit);
-  async function verifyRun(execution, requireConclusion) {
+  const verifiedWorkflows = new Set();
+  async function verifyRun(execution, requireConclusion, purpose) {
+    const binding = execution.sourceBinding === undefined ? undefined
+      : reviewedExecutionBinding(execution, preview.release.sourceCommit, purpose);
+    const expectedHead = binding?.harnessRevision ?? preview.release.sourceCommit;
     const run = await readJson(`${api}/actions/runs/${execution.workflowRunId}`);
     requireCondition(run.id === execution.workflowRunId && run.repository?.full_name === REPOSITORY &&
-      run.head_repository?.full_name === REPOSITORY && run.head_sha === preview.release.sourceCommit &&
+      run.head_repository?.full_name === REPOSITORY && run.head_sha === expectedHead &&
       run.path === execution.workflowPath && run.run_attempt === execution.runAttempt && run.status === "completed",
       "Evidence workflow execution does not match its recorded source, attempt or workflow.");
     if (requireConclusion) requireCondition(run.conclusion === "success", "Compatibility workflow did not succeed.");
+    if (binding) {
+      requireCondition(run.event === binding.event, "Bound workflow event differs from its reviewed execution mode.");
+      const url = `https://raw.githubusercontent.com/${REPOSITORY}/${binding.harnessRevision}/${binding.workflowPath}`;
+      if (!verifiedWorkflows.has(url)) {
+        const workflow = await publicText(url, fetcher);
+        requireCondition(await sha256Text(workflow) === binding.workflowSha256,
+          "Immutable workflow bytes differ from the reviewed product-checkout proof.");
+        verifiedWorkflows.add(url);
+      }
+    }
     return run;
   }
   const publicReport = preview.evidence.publicVerification.report;
   const ci = publicReport.sourceCi;
-  const ciRun = await verifyRun(ci, false);
-  requireCondition(ciRun.event === "push" && ciRun.head_branch === "beta", "Source CI must be a beta push.");
+  const ciRun = await verifyRun(ci, false, "source-ci");
+  if (ci.sourceBinding === undefined) {
+    requireCondition(ciRun.event === "push" && ciRun.head_branch === "beta", "Unbound source CI must be a beta push.");
+  } else {
+    requireCondition(ciRun.head_branch === ci.branch, "Source CI dispatch branch differs from its recorded execution.");
+  }
   const jobs = await readJson(`${api}/actions/runs/${ci.workflowRunId}/attempts/${ci.runAttempt}/jobs?per_page=100`);
   requireCondition(Array.isArray(jobs.jobs) && jobs.total_count === jobs.jobs.length, "Source CI job metadata is incomplete.");
   const gates = jobs.jobs.filter((job) => job.name === "gate");
   requireCondition(gates.length === 1 && gates[0].status === "completed" && gates[0].conclusion === "success",
     "The exact source CI gate did not succeed.");
-  await verifyRun(preview.evidence.compatibility.report.execution, true);
+  await verifyRun(preview.evidence.compatibility.report.execution, true, "compatibility");
+  if (publicReport.candidateOrigin !== undefined) {
+    await verifyRun(publicReport.candidateOrigin, true, "candidate-origin");
+  }
   const manifestContent = await publicText(releaseAssetUrl(preview.release.tag, "release-provenance.json"), fetcher);
   const manifest = JSON.parse(manifestContent);
   requireCondition(JSON.stringify(manifest) === JSON.stringify(preview.evidence.publicVerification.report.provenance),
@@ -92,6 +113,17 @@ export async function verifyPublicPreviewEvidence(descriptor, fetcher = globalTh
     signaturesAsset.size === Buffer.byteLength(signaturesContent, "utf8"), "Public signature evidence differs from release metadata.");
   requireCondition(JSON.stringify(JSON.parse(signaturesContent)) === JSON.stringify(preview.evidence.publicVerification.report.signatures),
     "Public signature evidence differs from the recorded native verification.");
+  if (publicReport.candidateOrigin !== undefined) {
+    // The expiring Actions archive is recorded by its reviewed identity, not
+    // treated as a permanent public download. Preserve its original public
+    // provenance in the immutable release and compare those exact bytes.
+    const original = publicReport.candidateOrigin.hostedProvenance;
+    const content = await publicText(releaseAssetUrl(preview.release.tag, "hosted-provenance.json"), fetcher);
+    const asset = release.assets.find((item) => item.name === "hosted-provenance.json");
+    requireCondition(content === original.content && await sha256Text(content) === original.sha256 &&
+      asset?.digest === `sha256:${original.sha256}` && asset.size === Buffer.byteLength(content, "utf8"),
+      "Published original hosted provenance differs from the reviewed candidate.");
+  }
   return preview;
 }
 

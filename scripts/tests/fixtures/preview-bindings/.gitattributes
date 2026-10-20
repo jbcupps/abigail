@@ -1,0 +1,4 @@
+# These are captured public proof bytes; preserve their exact reviewed digests.
+* -text
+# The original JSON has intentional CRLF; retain every other whitespace check.
+hosted-provenance-39468905473.json whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

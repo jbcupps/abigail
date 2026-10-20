@@ -1,0 +1,276 @@
+# This new manual workflow requires separate default-branch registration before
+# its first dispatch. A dev push does not authorize or start acceptance/signing.
+name: Abigail Preview Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_harness_commit:
+        description: 'Exact reviewed dev harness commit (40 lowercase hex; must match this dispatch)'
+        required: true
+        type: string
+      approve_fixture_dpapi:
+        description: 'Approve disposable preview and stable test identities/DPAPI files on this hosted runner'
+        required: true
+        default: false
+        type: boolean
+      approve_signing_quota:
+        description: 'Approve six expected SSL.com signing operations using existing quota; no purchase or upgrade'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+# Share the stable signing lane's serialization; never cancel an active signer.
+concurrency:
+  group: abigail-windows-release-signing
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PRODUCT_SOURCE: f7c7848d25726480b253ec1ca637c3ffa5ea3c77
+    steps:
+      - name: Require reviewed hosted scope and explicit approvals
+        id: scope
+        env:
+          REVIEWED_HARNESS_COMMIT: ${{ inputs.reviewed_harness_commit }}
+          APPROVE_FIXTURE_DPAPI: ${{ inputs.approve_fixture_dpapi }}
+          APPROVE_SIGNING_QUOTA: ${{ inputs.approve_signing_quota }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_EVENT_NAME -cne 'workflow_dispatch') { throw 'Manual dispatch required.' }
+          if ($env:GITHUB_REPOSITORY -cne 'jbcupps/abigail') { throw 'Unexpected repository.' }
+          if ($env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows') { throw 'Ephemeral GitHub-hosted Windows required.' }
+          if ($env:GITHUB_REF -notmatch '^refs/heads/dev/[A-Za-z0-9._/-]+$') { throw 'Dispatch a reviewed development branch.' }
+          if ($env:REVIEWED_HARNESS_COMMIT -cnotmatch '^[a-f0-9]{40}$' -or $env:REVIEWED_HARNESS_COMMIT -cne $env:GITHUB_SHA) { throw 'Reviewed harness commit must equal the dispatched commit.' }
+          if ($env:APPROVE_FIXTURE_DPAPI -cne 'true') { throw 'Disposable preview and stable identity/DPAPI approval is required.' }
+          if ($env:APPROVE_SIGNING_QUOTA -cne 'true') { throw 'Existing SSL.com quota/cost approval is required.' }
+          if ($env:GITHUB_RUN_ATTEMPT -cne '1') { throw 'A new reviewed dispatch is required instead of repeating signing through rerun.' }
+          if ($env:PRODUCT_SOURCE -cne 'f7c7848d25726480b253ec1ca637c3ffa5ea3c77') { throw 'Product source pin changed.' }
+
+      - name: Checkout reviewed acceptance harness
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout fixed product source separately
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: f7c7848d25726480b253ec1ca637c3ffa5ea3c77
+          path: product
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.13.1'
+
+      - name: Check harness policy and syntax without credentials
+        working-directory: harness
+        run: |
+          ./scripts/tests/test_preview_candidate_workflow.ps1
+          ./scripts/tests/test_preview_candidate_runner.ps1
+          ./scripts/tests/test_preview_owned_job.ps1
+          $scriptFiles = @('scripts/run-preview-candidate.ps1')
+          foreach ($file in $scriptFiles) {
+            $tokens = $null
+            $parseErrors = $null
+            $null = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD $file), [ref]$tokens, [ref]$parseErrors)
+            if ($parseErrors.Count) { throw 'Acceptance runner PowerShell syntax failed.' }
+          }
+          node --check scripts/tests/preview-candidate-lifecycle.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Lifecycle runner JavaScript syntax failed.' }
+          node --test scripts/tests/test_preview_candidate_lifecycle.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Lifecycle credential-free unit tests failed.' }
+          # Read only on this hosted runner. Missing/invalid WebView2 stops here;
+          # installing or updating OS prerequisites is outside fixture approval.
+          ./scripts/run-preview-candidate.ps1 -CheckPrerequisites -HarnessSourceCommit $env:GITHUB_SHA
+
+      - name: Verify fixed sources and download pinned public stable fixture
+        id: stable
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $baseline = Get-Content -LiteralPath harness/scripts/preview-candidate-baseline.json -Raw | ConvertFrom-Json
+          if ($baseline.repository -cne 'jbcupps/abigail' -or $baseline.productSourceCommit -cne $env:PRODUCT_SOURCE -or $baseline.version -cne '0.0.76') { throw 'Unexpected candidate baseline.' }
+          if ((git -C product rev-parse HEAD) -cne $env:PRODUCT_SOURCE -or (git -C harness rev-parse HEAD) -cne $env:GITHUB_SHA) { throw 'Checkout identity differs from reviewed pins.' }
+          if (@(git -C product status --porcelain).Count) { throw 'Product checkout must start clean.' }
+          if ($baseline.stable.tag -cne 'v0.0.76' -or $baseline.stable.releaseId -ne 418137720 -or $baseline.stable.sourceCommit -cne 'e3ad51181da1ea11bded24ca0c39e2dcfe5fa944') { throw 'Unexpected stable release pin.' }
+          $expectedNames = @('Abigail-windows-x64-setup.exe', 'release-provenance.json', 'windows-signatures.json', 'windows-signature-evidence.json')
+          if (@($baseline.stable.assets).Count -ne 4 -or @(Compare-Object $expectedNames @($baseline.stable.assets.name)).Count) { throw 'Stable fixture asset allowlist differs.' }
+          $stableDirectory = Join-Path $env:RUNNER_TEMP 'abigail-preview-stable'
+          if (Test-Path -LiteralPath $stableDirectory) { throw 'Stable fixture download directory must be fresh.' }
+          New-Item -ItemType Directory -Path $stableDirectory | Out-Null
+          foreach ($asset in $baseline.stable.assets) {
+            if ($asset.sha256 -cnotmatch '^[a-f0-9]{64}$' -or $asset.size -le 0) { throw 'Malformed stable asset pin.' }
+            $destination = Join-Path $stableDirectory $asset.name
+            $uri = 'https://github.com/jbcupps/abigail/releases/download/v0.0.76/' + [Uri]::EscapeDataString($asset.name)
+            Invoke-WebRequest -Uri $uri -OutFile $destination
+            if ((Get-Item -LiteralPath $destination).Length -ne $asset.size -or (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne $asset.sha256) { throw 'Stable public download failed its pinned size/SHA256 check.' }
+          }
+          $signature = Get-AuthenticodeSignature -LiteralPath (Join-Path $stableDirectory 'Abigail-windows-x64-setup.exe')
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Thumbprint -cne $baseline.certificateThumbprint) { throw 'Pinned stable installer signature failed.' }
+          "artifact_dir=$stableDirectory" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: '1.97.0'
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install fixed Tauri CLI and verified official signing tool
+        working-directory: product
+        run: |
+          npm install --prefix .cache/signing/tauri-cli --no-save --package-lock=false @tauri-apps/cli@2.11.4
+          if ($LASTEXITCODE -ne 0) { throw 'Tauri CLI installation failed.' }
+          ./scripts/install_esigner.ps1
+          . ./scripts/windows_signing_common.ps1
+          $signTool = Resolve-WindowsSignToolPath
+          Split-Path $signTool -Parent | Add-Content -LiteralPath $env:GITHUB_PATH
+          "TAURI_WINDOWS_SIGNTOOL_PATH=$signTool" | Add-Content -LiteralPath $env:GITHUB_ENV
+
+      - name: Prepare four preview binaries from clean hosted source
+        working-directory: product
+        run: |
+          # Hive imports Runtime source. Install its locked dependencies before
+          # the pinned staging script builds Hive ahead of Runtime.
+          npm --prefix entity-runtime-app/src-ui ci
+          if ($LASTEXITCODE -ne 0) { throw 'Shared Runtime frontend dependency installation failed.' }
+          ./scripts/build_signed_installer.ps1 -Phase Prepare -Channel preview -Version 0.0.76 -TargetDir (Join-Path $env:RUNNER_TEMP 'abigail-preview-build')
+
+      - name: Build separate recovery CLI and verify frozen preparation
+        id: prepared
+        working-directory: product
+        env:
+          ABIGAIL_BUILD_PROFILE: preview
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:CARGO_TARGET_DIR = Join-Path $env:RUNNER_TEMP 'abigail-preview-build/preview'
+          cargo build --locked --release -p abigail-profile
+          if ($LASTEXITCODE -ne 0) { throw 'Separate recovery CLI build failed.' }
+          $cli = Join-Path $env:CARGO_TARGET_DIR 'release/abigail-profile.exe'
+          $cliHash = (Get-FileHash -LiteralPath $cli -Algorithm SHA256).Hash.ToLowerInvariant()
+          ./scripts/build_signed_installer.ps1 -Phase Check -Channel preview -Version 0.0.76 -TargetDir (Join-Path $env:RUNNER_TEMP 'abigail-preview-build')
+          $state = Join-Path $env:CARGO_TARGET_DIR 'signed-release/0.0.76/build-state.json'
+          "recovery_cli=$cli" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+          "recovery_cli_sha256=$cliHash" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+          "prepared_state_sha256=$((Get-FileHash -LiteralPath $state -Algorithm SHA256).Hash.ToLowerInvariant())" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+
+      # The only step that receives existing signing secrets. The unchanged
+      # product signer makes ~6 operations (3 resources, Hive, uninstaller, setup).
+      # It cannot buy quota or upgrade the account. Failure requires a new review.
+      - name: Sign exact prepared preview candidate with existing SSL.com account
+        id: sign
+        working-directory: product
+        env:
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @('ESIGNER_USERNAME', 'ESIGNER_PASSWORD', 'ESIGNER_CREDENTIAL_ID', 'ESIGNER_TOTP_SECRET', 'WINDOWS_CERTIFICATE_THUMBPRINT')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw "Existing signing secret is unavailable: $name" }
+          }
+          $baseline = Get-Content -LiteralPath ../harness/scripts/preview-candidate-baseline.json -Raw | ConvertFrom-Json
+          if ($env:WINDOWS_CERTIFICATE_THUMBPRINT -cne $baseline.certificateThumbprint) { throw 'Existing signing certificate does not match the reviewed public pin.' }
+          ./scripts/check_esigner_credentials.ps1
+          ./scripts/build_signed_installer.ps1 -Phase Sign -Channel preview -Version 0.0.76 -TargetDir (Join-Path $env:RUNNER_TEMP 'abigail-preview-build')
+
+      - name: Accept exact signed candidate in disposable hosted fixtures
+        id: acceptance
+        working-directory: harness
+        env:
+          CANDIDATE_ARTIFACT_DIR: ${{ steps.sign.outputs.artifact_dir }}
+          STABLE_ARTIFACT_DIR: ${{ steps.stable.outputs.artifact_dir }}
+          RECOVERY_CLI: ${{ steps.prepared.outputs.recovery_cli }}
+          RECOVERY_CLI_SHA256: ${{ steps.prepared.outputs.recovery_cli_sha256 }}
+        run: |
+          $baseline = Get-Content -LiteralPath scripts/preview-candidate-baseline.json -Raw | ConvertFrom-Json
+          $stableInstaller = @($baseline.stable.assets | Where-Object name -CEQ 'Abigail-windows-x64-setup.exe')[0]
+          ./scripts/run-preview-candidate.ps1 `
+            -CandidateArtifactDir $env:CANDIDATE_ARTIFACT_DIR -ProductSourceCommit $env:PRODUCT_SOURCE -HarnessSourceCommit $env:GITHUB_SHA `
+            -RecoveryCliPath $env:RECOVERY_CLI -RecoveryCliSha256 $env:RECOVERY_CLI_SHA256 `
+            -ExpectedCertificateThumbprint $baseline.certificateThumbprint `
+            -StableArtifactDir $env:STABLE_ARTIFACT_DIR -StableSourceCommit $baseline.stable.sourceCommit -StableInstallerSha256 $stableInstaller.sha256 `
+            -OutputDirectory (Join-Path $env:GITHUB_WORKSPACE 'preview-public-report') -Execute -ApproveDpapiFixtures
+
+      - name: Stage only public candidate files and fresh hosted provenance
+        id: public
+        if: always() && steps.sign.outcome == 'success'
+        env:
+          CANDIDATE_ARTIFACT_DIR: ${{ steps.sign.outputs.artifact_dir }}
+          RECOVERY_CLI_SHA256: ${{ steps.prepared.outputs.recovery_cli_sha256 }}
+          PREPARED_STATE_SHA256: ${{ steps.prepared.outputs.prepared_state_sha256 }}
+          ACCEPTANCE_OUTCOME: ${{ steps.acceptance.outcome }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidateRoot = [IO.Path]::GetFullPath($env:CANDIDATE_ARTIFACT_DIR)
+          $expectedRoot = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP 'abigail-preview-build/preview/signed-release/0.0.76/artifacts')).TrimEnd('\') + '\'
+          if (-not $candidateRoot.StartsWith($expectedRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Candidate output escaped this hosted preparation.' }
+          $publicRoot = Join-Path $env:GITHUB_WORKSPACE 'preview-public'
+          if (Test-Path -LiteralPath $publicRoot) { throw 'Public staging directory must be fresh.' }
+          New-Item -ItemType Directory -Path $publicRoot | Out-Null
+          function Copy-PublicFile([string]$Source, [string]$Name, [long]$MaximumBytes) {
+            $file = Get-Item -LiteralPath $Source -Force
+            if ($file.PSIsContainer -or $file.Length -gt $MaximumBytes) { throw 'Public candidate file has an invalid type or size.' }
+            $cursor = $file.FullName
+            while ($cursor) {
+              if ((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Public candidate files cannot traverse reparse points.' }
+              $cursor = [IO.Path]::GetDirectoryName($cursor)
+            }
+            Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $publicRoot $Name)
+          }
+          foreach ($name in @('Abigail-windows-x64-setup.exe', 'Abigail Preview.exe')) {
+            Copy-PublicFile (Join-Path $candidateRoot $name) $name 1GB
+          }
+          foreach ($name in @('mvp-build.json', 'signature-report.json', 'windows-signatures.json', 'prepared-build-state.json')) {
+            Copy-PublicFile (Join-Path $candidateRoot $name) $name 8MB
+          }
+          $reportSource = Join-Path $env:GITHUB_WORKSPACE 'preview-public-report/preview-candidate-acceptance.json'
+          if (Test-Path -LiteralPath $reportSource) { Copy-PublicFile $reportSource 'preview-candidate-acceptance.json' 1MB }
+          $manifest = Get-Content -LiteralPath (Join-Path $publicRoot 'mvp-build.json') -Raw | ConvertFrom-Json
+          if ($manifest.source_commit -cne $env:PRODUCT_SOURCE -or $manifest.packaging.channel -cne 'preview') { throw 'Public candidate identity mismatch.' }
+          $preparedHash = (Get-FileHash -LiteralPath (Join-Path $publicRoot 'prepared-build-state.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($preparedHash -cne $env:PREPARED_STATE_SHA256) { throw 'Fresh hosted preparation state changed.' }
+          $files = @(Get-ChildItem -LiteralPath $publicRoot -File | Sort-Object Name | ForEach-Object {
+            [ordered]@{ name = $_.Name; size = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+          })
+          $provenance = [ordered]@{
+            schemaVersion = 1; repository = 'jbcupps/abigail'; productSourceCommit = $env:PRODUCT_SOURCE; harnessSourceCommit = $env:GITHUB_SHA
+            sourceStateSha256 = $manifest.source_state_sha256; hostedPreparedStateSha256 = $preparedHash; recoveryCliSha256 = $env:RECOVERY_CLI_SHA256
+            baselineSha256 = (Get-FileHash -LiteralPath harness/scripts/preview-candidate-baseline.json -Algorithm SHA256).Hash.ToLowerInvariant()
+            workflowRunId = $env:GITHUB_RUN_ID; workflowRunAttempt = $env:GITHUB_RUN_ATTEMPT; runnerImage = $env:ImageOS; runnerImageVersion = $env:ImageVersion
+            acceptanceOutcome = $env:ACCEPTANCE_OUTCOME; publicationEligible = $false; realModelValidation = $false; files = $files
+          }
+          $provenance | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $publicRoot 'hosted-provenance.json') -Encoding utf8NoBOM
+
+      - name: Upload allowlisted signed candidate and public reports
+        if: always() && steps.public.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
+        with:
+          name: abigail-preview-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            preview-public/Abigail-windows-x64-setup.exe
+            preview-public/Abigail Preview.exe
+            preview-public/mvp-build.json
+            preview-public/signature-report.json
+            preview-public/windows-signatures.json
+            preview-public/prepared-build-state.json
+            preview-public/preview-candidate-acceptance.json
+            preview-public/hosted-provenance.json

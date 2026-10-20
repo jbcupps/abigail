@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "repository": "jbcupps/abigail",
+  "productSourceCommit": "f7c7848d25726480b253ec1ca637c3ffa5ea3c77",
+  "harnessSourceCommit": "dfebfb8b589bbf3f8275eff5547e1e7c8d7b91c4",
+  "sourceStateSha256": "92690DA45313ABD7387724DE9A3948D800B81C5A73A9FD10AD7B21E410276F9D",
+  "hostedPreparedStateSha256": "5f415ccc3fe8e22202ac6990cc9bc3cb675eafb8f568359c21216424589b8b0a",
+  "recoveryCliSha256": "2bbc67f66d9b3506274f45d4ac74f35014fd9aa1e982b56fe67435970f70119f",
+  "baselineSha256": "1c64c904e21b14fcbdfff7bddb7951c96b306e1d2052d0b64cdab6448eb74adc",
+  "workflowRunId": "39468905473",
+  "workflowRunAttempt": "1",
+  "runnerImage": "win25-vs2026",
+  "runnerImageVersion": "20261007.264.1",
+  "acceptanceOutcome": "success",
+  "publicationEligible": false,
+  "realModelValidation": false,
+  "files": [
+    {
+      "name": "Abigail Preview.exe",
+      "size": 27659080,
+      "sha256": "1933d48cea9a1c20aaa670fbc618a87704f9a1054caa4b631eda4f76c5408162"
+    },
+    {
+      "name": "Abigail-windows-x64-setup.exe",
+      "size": 87408680,
+      "sha256": "a59580764b7cf072cf7c6eeccf040f5c934c5b0c5c164cfe5338e2ccfe5199d1"
+    },
+    {
+      "name": "mvp-build.json",
+      "size": 2168,
+      "sha256": "c414a18173d0850106071bbc502b3762365dbfb296da8085d7159cc487fca3b9"
+    },
+    {
+      "name": "prepared-build-state.json",
+      "size": 172746,
+      "sha256": "5f415ccc3fe8e22202ac6990cc9bc3cb675eafb8f568359c21216424589b8b0a"
+    },
+    {
+      "name": "preview-candidate-acceptance.json",
+      "size": 6568,
+      "sha256": "705f86995444db15e1da77aa1827b8a6c6c565c80136d3aa8ec996b6a150a032"
+    },
+    {
+      "name": "signature-report.json",
+      "size": 15316,
+      "sha256": "f2bf4a630eb1cf23a5029d9748389618614a8817c5def5611ebb871ed2919af4"
+    },
+    {
+      "name": "windows-signatures.json",
+      "size": 15316,
+      "sha256": "f2bf4a630eb1cf23a5029d9748389618614a8817c5def5611ebb871ed2919af4"
+    }
+  ]
+}

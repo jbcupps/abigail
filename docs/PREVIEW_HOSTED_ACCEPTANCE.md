@@ -1,6 +1,12 @@
 # Hosted preview candidate acceptance
 
-2026-10-20. This is the review and approval scope for a separate, nonpublishing
+2026-10-20. **Historical preparation scope:** the separately approved hosted run
+has since completed. See [the signed run result](PREVIEW_HOSTED_HARNESS_VALIDATION.md#successful-signed-hosted-candidate)
+and [the current exact-byte continuation](PREVIEW_EXACT_BYTE_PROMOTION.md).
+The original preparation/approval boundary below is retained as history; it is
+not a request to repeat the completed signing run.
+
+This is the review and approval scope for a separate, nonpublishing
 manual Windows runner. Current authorization covers preparing, reviewing,
 testing and pushing its development source. **No hosted dispatch, signing,
 installer execution or fixture credential/DPAPI operation is authorized yet.**

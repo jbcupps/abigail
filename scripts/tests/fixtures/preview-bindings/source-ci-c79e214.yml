@@ -1,0 +1,506 @@
+# Unified CI quality gate.
+#
+# Runs 5 parallel jobs on push to main/beta and PRs. CodeQL also runs weekly.
+# The "gate" job requires lint, test, and frontend to pass; audit and CodeQL
+# are advisory. Configure branch protection to require the "gate" check.
+
+name: CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_harness_commit:
+        description: 'Reviewed dev workflow commit; manual CI checks fixed preview product f7c7848 without signing'
+        required: true
+        type: string
+  push:
+    branches: [main, beta]
+  pull_request:
+    branches: [main, beta]
+  schedule:
+    - cron: '17 4 * * 0'  # Weekly on Sunday at 04:17 UTC (CodeQL)
+
+permissions:
+  contents: read
+
+env:
+  ABIGAIL_CI_MODE: "1"
+  # Manual acceptance CI tests immutable product source, independently of this
+  # reviewed workflow revision. Push/PR/schedule retain their original checkout.
+  ABIGAIL_SOURCE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && 'f7c7848d25726480b253ec1ca637c3ffa5ea3c77' || github.sha }}
+  REVIEWED_HARNESS_COMMIT: ${{ inputs.reviewed_harness_commit }}
+
+concurrency:
+  # Preserve the same-commit push gate required by installer publication.
+  group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'latest' }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+jobs:
+
+  stability:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - name: Verify exact checked-out source and reviewed manual scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ABIGAIL_SOURCE_COMMIT"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "$GITHUB_REPOSITORY" == "jbcupps/abigail" ]]
+            [[ "$GITHUB_REF" == refs/heads/dev/* ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+          fi
+          printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: 1.97.0
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            hive-app/src-ui/package-lock.json
+            entity-runtime-app/src-ui/package-lock.json
+
+      - name: Install split frontend dependencies
+        shell: bash
+        run: |
+          cd hive-app/src-ui && npm ci
+          cd ../../entity-runtime-app/src-ui && npm ci
+
+      - name: Verify unsigned stabilization lane
+        run: node scripts/check_unsigned_stabilization.mjs
+
+      - name: Verify release provenance and channel failure paths
+        run: node --test scripts/tests/test_release_provenance.mjs
+
+      - name: Verify preview selection failure paths
+        run: node --test scripts/tests/test_preview_channel.mjs
+
+      - name: Verify preview packaging with synthetic inputs
+        shell: pwsh
+        run: |
+          ./scripts/tests/test_preview_packaging.ps1
+          ./scripts/tests/test_preview_staging.ps1
+          ./scripts/tests/test_preview_nsis_hooks.ps1
+          ./scripts/tests/test_preview_signed_capture.ps1
+
+      - name: Verify final release signatures without signing credentials
+        shell: pwsh
+        run: ./scripts/tests/test_release_artifacts.ps1
+
+      - name: Verify release staging failure paths
+        shell: pwsh
+        run: ./scripts/tests/test_stage_release_assets.ps1
+
+      - name: Verify candidate to beta staging without signing credentials
+        shell: pwsh
+        run: ./scripts/tests/test_prepare_preview_assets.ps1
+
+      - name: Verify published download failure paths without network access
+        shell: pwsh
+        run: ./scripts/tests/test_published_release.ps1
+
+      - name: Verify release absence guard without network access
+        shell: pwsh
+        run: ./scripts/tests/test_release_absence_guard.ps1
+
+      - name: Verify pinned stable recovery failure gates
+        shell: pwsh
+        run: ./scripts/tests/test_stable_recovery.ps1
+
+      - name: Verify Windows signing failure gates without credentials
+        shell: pwsh
+        run: ./scripts/test_windows_signing.ps1
+
+      - name: Verify SSL.com cloud signing failure gates without credentials
+        shell: pwsh
+        run: |
+          ./scripts/test_esigner_cloud.ps1
+          ./scripts/tests/test_signed_installer_state.ps1
+
+      - name: Check Hive and Runtime apps
+        run: cargo check -p abigail-hive-app -p abigail-entity-runtime-app
+
+      - name: Build daemon binaries for integration tests
+        run: cargo build -p hive-daemon -p entity-daemon
+
+      - name: Verify startup preserves an unchanged shared vault
+        run: cargo test --locked -p entity-daemon --test integration startup_preserves_an_unchanged_skill_vault_without_delete_sharing -- --exact
+        env:
+          ABIGAIL_DAEMON_INTEGRATION: "1"
+
+      - name: Run Hive daemon HTTP contract tests
+        run: cargo test --locked -p hive-daemon --test integration
+        env:
+          ABIGAIL_DAEMON_INTEGRATION: "1"
+
+      - name: Run Hive cold-start regression
+        run: cargo test --locked -p hive-daemon --test startup
+        env:
+          ABIGAIL_DAEMON_INTEGRATION: "1"
+
+      - name: Run Entity runtime contract tests
+        run: cargo test -p entity-daemon --test integration
+        env:
+          ABIGAIL_DAEMON_INTEGRATION: "1"
+
+      # Keep these commands in the same order as check_stability.mjs. Separate
+      # steps expose the failing check in job metadata without downloading logs.
+      - name: Stability - check Entity daemon
+        run: cargo check -p entity-daemon
+
+      - name: Stability - check Hive and Runtime apps
+        run: cargo check -p abigail-hive-app -p abigail-entity-runtime-app
+
+      - name: Stability - compile soul-forge and skills tests
+        run: cargo test -p soul-forge -p abigail-skills --no-run
+
+      - name: Stability - check existing crypto claims
+        run: node scripts/check_crypto_claims.mjs
+
+      - name: Stability - build Hive frontend
+        working-directory: hive-app/src-ui
+        run: cmd.exe /d /s /c npm.cmd run build
+
+      - name: Stability - test Hive frontend
+        working-directory: hive-app/src-ui
+        run: cmd.exe /d /s /c npm.cmd test
+
+      - name: Stability - build Runtime frontend
+        working-directory: entity-runtime-app/src-ui
+        run: cmd.exe /d /s /c npm.cmd run build
+
+      - name: Stability - test Runtime frontend
+        working-directory: entity-runtime-app/src-ui
+        run: cmd.exe /d /s /c npm.cmd test
+
+  # -- Lint ----------------------------------------------------------------
+  # Checks formatting, clippy, and split desktop app compilation.
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - name: Verify exact checked-out source and reviewed manual scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ABIGAIL_SOURCE_COMMIT"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "$GITHUB_REPOSITORY" == "jbcupps/abigail" ]]
+            [[ "$GITHUB_REF" == refs/heads/dev/* ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+          fi
+          printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: 1.97.0
+          components: rustfmt, clippy
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libgtk-3-dev libdbus-1-dev pkg-config
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --exclude abigail-app -- -D warnings
+
+      - name: Check split desktop apps compile
+        run: cargo check -p abigail-hive-app -p abigail-entity-runtime-app
+
+      - name: Test release signing key validator script
+        shell: bash
+        run: bash scripts/test_validate_tauri_signing_key.sh
+
+  # -- Tests (3-platform matrix) ----------------------------------------------
+  test:
+    name: Test (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - name: Verify exact checked-out source and reviewed manual scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ABIGAIL_SOURCE_COMMIT"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "$GITHUB_REPOSITORY" == "jbcupps/abigail" ]]
+            [[ "$GITHUB_REF" == refs/heads/dev/* ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+          fi
+          printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
+
+      - name: Install Linux dependencies (Tauri 2 / Debian)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libgtk-3-dev libdbus-1-dev pkg-config
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        with:
+          toolchain: 1.97.0
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+
+      - name: Run tests
+        run: cargo test --workspace --exclude abigail-app
+
+      - name: Upload Rust coverage to Codecov
+        if: matrix.platform == 'ubuntu-22.04' && hashFiles('lcov.info') != ''
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        with:
+          files: lcov.info
+          flags: rust
+          fail_ci_if_error: false
+
+  # -- Frontend build --------------------------------------------------------
+  frontend:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - name: Verify exact checked-out source and reviewed manual scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ABIGAIL_SOURCE_COMMIT"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "$GITHUB_REPOSITORY" == "jbcupps/abigail" ]]
+            [[ "$GITHUB_REF" == refs/heads/dev/* ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+          fi
+          printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            hive-app/src-ui/package-lock.json
+            entity-runtime-app/src-ui/package-lock.json
+
+      - name: Install split frontend dependencies
+        shell: bash
+        run: |
+          cd hive-app/src-ui && npm ci
+          cd ../../entity-runtime-app/src-ui && npm ci
+
+      - name: Build split frontends
+        shell: bash
+        run: |
+          cd hive-app/src-ui && npm run build
+          cd ../../entity-runtime-app/src-ui && npm run build
+
+      - name: Run split frontend tests
+        shell: bash
+        run: |
+          cd hive-app/src-ui && npm test
+          cd ../../entity-runtime-app/src-ui && npm test
+
+  # -- Security audit (advisory) ----------------------------------------------
+  audit:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - name: Verify exact checked-out source and reviewed manual scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ABIGAIL_SOURCE_COMMIT"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "$GITHUB_REPOSITORY" == "jbcupps/abigail" ]]
+            [[ "$GITHUB_REF" == refs/heads/dev/* ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+          fi
+          printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Cargo audit
+        # RUSTSEC-2026-0194/0195 (quick-xml): fixed releases are outside the
+        # semver ranges parent crates allow; drop the ignores once parents bump.
+        run: cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2024-0363 --ignore RUSTSEC-2024-0421 --ignore RUSTSEC-2026-0041 --ignore RUSTSEC-2026-0044 --ignore RUSTSEC-2026-0045 --ignore RUSTSEC-2026-0046 --ignore RUSTSEC-2026-0047 --ignore RUSTSEC-2026-0048 --ignore RUSTSEC-2026-0049 --ignore RUSTSEC-2026-0067 --ignore RUSTSEC-2026-0068 --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            hive-app/src-ui/package-lock.json
+            entity-runtime-app/src-ui/package-lock.json
+
+      - name: npm audit split frontends
+        shell: bash
+        run: |
+          cd hive-app/src-ui && npm ci && npm audit --audit-level=high
+          cd ../../entity-runtime-app/src-ui && npm ci && npm audit --audit-level=high
+
+  # -- CodeQL static analysis -------------------------------------------------
+  # Does not block gate when code scanning is not enabled for the repo.
+  codeql:
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - name: Verify exact checked-out source and reviewed manual scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ABIGAIL_SOURCE_COMMIT"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "$GITHUB_REPOSITORY" == "jbcupps/abigail" ]]
+            [[ "$GITHUB_REF" == refs/heads/dev/* ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+          fi
+          printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript, rust
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v4
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        continue-on-error: true
+        with:
+          category: "/language:javascript-typescript"
+
+  # -- Gate (aggregator) -----------------------------------------------------
+  # Requires lint, test, and frontend to succeed. Audit and CodeQL are
+  # advisory (warn but don't block). This is the single required status
+  # check for branch protection.
+  gate:
+    needs: [stability, lint, test, frontend, audit, codeql]
+    if: always()
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Evaluate upstream results
+        shell: bash
+        run: |
+          echo "stability:${{ needs.stability.result }}"
+          echo "lint:     ${{ needs.lint.result }}"
+          echo "test:     ${{ needs.test.result }}"
+          echo "frontend: ${{ needs.frontend.result }}"
+          echo "audit:    ${{ needs.audit.result }}"
+          echo "codeql:   ${{ needs.codeql.result }}"
+
+          failed=false
+
+          # Critical jobs -- must succeed
+          for job in stability lint test frontend; do
+            case "$job" in
+              stability) result="${{ needs.stability.result }}" ;;
+              lint)     result="${{ needs.lint.result }}" ;;
+              test)     result="${{ needs.test.result }}" ;;
+              frontend) result="${{ needs.frontend.result }}" ;;
+              *)        result="unknown" ;;
+            esac
+            if [[ "$result" != "success" ]]; then
+              echo "::error::Required job '$job' did not succeed (result: $result)"
+              failed=true
+            fi
+          done
+
+          # Advisory jobs -- warn but don't block
+          for job in audit codeql; do
+            case "$job" in
+              audit)  result="${{ needs.audit.result }}" ;;
+              codeql) result="${{ needs.codeql.result }}" ;;
+              *)      result="unknown" ;;
+            esac
+            if [[ "$result" != "success" ]]; then
+              echo "::warning::Advisory job '$job' did not succeed (result: $result)"
+            fi
+          done
+
+          if [[ "$failed" == "true" ]]; then
+            echo "::error::One or more required jobs failed."
+            exit 1
+          fi
+
+          echo "Gate passed -- all required jobs succeeded."

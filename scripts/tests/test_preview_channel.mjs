@@ -13,7 +13,9 @@ import {
   validatePreviewDescriptor, loadPreviewDescriptor, renderPreview, startPreviewPage,
   REPOSITORY, INSTALLER_NAME, EXPECTED_CERTIFICATE_THUMBPRINT, PUBLIC_STAGES,
   COMPATIBILITY_STAGES, STABLE_BASELINE, releaseAssetUrl, MAX_DESCRIPTOR_BYTES,
+  reviewedExecutionBinding,
 } from "../../docs/preview/preview.mjs";
+import { REVIEWED_WORKFLOW_BINDINGS, REVIEWED_CANDIDATE_ORIGINS } from "../../docs/preview/execution-bindings.mjs";
 import { verifyPublicPreviewEvidence } from "../preview_channel.mjs";
 
 const SOURCE = "a".repeat(40);
@@ -38,47 +40,47 @@ function editReport(descriptor, key, change) {
   change(report);
   descriptor.evidence[key] = envelope(report);
 }
-function fixture() {
+function fixture({ source = SOURCE, installerHash = INSTALLER_HASH, installerSize = 123456 } = {}) {
   const signature = {
-    name: INSTALLER_NAME, sha256: INSTALLER_HASH, signatureStatus: "Valid",
+    name: INSTALLER_NAME, sha256: installerHash, signatureStatus: "Valid",
     publisher: "Synthetic fixture publisher", certificateThumbprint: EXPECTED_CERTIFICATE_THUMBPRINT,
     timestampType: "RFC3161",
   };
   const signatures = {
-    schemaVersion: 1, sourceCommit: SOURCE, tag: TAG, channel: "beta",
+    schemaVersion: 1, sourceCommit: source, tag: TAG, channel: "beta",
     windowsSigned: true, expectedThumbprint: EXPECTED_CERTIFICATE_THUMBPRINT, artifacts: [signature],
   };
   const signaturesContent = json(signatures);
   const provenance = {
-    schemaVersion: 1, sourceCommit: SOURCE, tag: TAG, channel: "beta",
+    schemaVersion: 1, sourceCommit: source, tag: TAG, channel: "beta",
     windowsSigned: true, expectedThumbprint: EXPECTED_CERTIFICATE_THUMBPRINT,
     verificationReport: "windows-signature-evidence.json",
     assets: [
-      { name: INSTALLER_NAME, size: 123456, sha256: INSTALLER_HASH },
+      { name: INSTALLER_NAME, size: installerSize, sha256: installerHash },
       { name: "windows-signature-evidence.json", size: Buffer.byteLength(signaturesContent), sha256: hash(signaturesContent) },
     ],
   };
   const common = {
     schemaVersion: 1, repository: REPOSITORY, channel: "beta", tag: TAG,
-    sourceCommit: SOURCE, releaseId: 123, installerSha256: INSTALLER_HASH,
+    sourceCommit: source, releaseId: 123, installerSha256: installerHash,
     certificateThumbprint: EXPECTED_CERTIFICATE_THUMBPRINT, verifiedUtc: "2026-10-20T12:00:00Z",
   };
   const descriptor = {
     schemaVersion: 1, status: "ready", updatePolicy: "manual-opt-in",
     release: {
-      tag: TAG, sourceCommit: SOURCE, releaseId: 123,
+      tag: TAG, sourceCommit: source, releaseId: 123,
       certificateThumbprint: EXPECTED_CERTIFICATE_THUMBPRINT,
-      installer: { name: INSTALLER_NAME, size: 123456, sha256: INSTALLER_HASH },
+      installer: { name: INSTALLER_NAME, size: installerSize, sha256: installerHash },
     },
     knownGaps: ["Synthetic fixture only; never select for publication."],
     checklist: ["Use a disposable test profile.", "Close the preview before installing another build."],
     evidence: {
       publicVerification: envelope({
         ...common, kind: "preview-public-verification", stages: stages(PUBLIC_STAGES),
-        sourceCi: { workflowRunId: 1233, runAttempt: 1, sourceCommit: SOURCE, workflowPath: ".github/workflows/ci.yml", branch: "beta", event: "push" },
+        sourceCi: { workflowRunId: 1233, runAttempt: 1, sourceCommit: source, workflowPath: ".github/workflows/ci.yml", branch: "beta", event: "push" },
         verification: {
-          verified: true, repository: REPOSITORY, tag: TAG, sourceCommit: SOURCE, channel: "beta",
-          installerSha256: INSTALLER_HASH, downloadUrl: releaseAssetUrl(TAG, INSTALLER_NAME), verifiedUtc: common.verifiedUtc,
+          verified: true, repository: REPOSITORY, tag: TAG, sourceCommit: source, channel: "beta",
+          installerSha256: installerHash, downloadUrl: releaseAssetUrl(TAG, INSTALLER_NAME), verifiedUtc: common.verifiedUtc,
         },
         signatures, provenance,
         stableRoute: Object.fromEntries(["before", "after"].map((phase) => [phase, {
@@ -91,12 +93,12 @@ function fixture() {
         baseline: { ...STABLE_BASELINE }, profileData: "synthetic-disposable",
         returnToStablePolicy: "preserved-stable-profile-and-restored-compatible-snapshot",
         execution: {
-          workflowRunId: 1234, runAttempt: 1, sourceCommit: SOURCE, environment: "disposable-windows",
-          harnessRevision: SOURCE, workflowPath: ".github/workflows/preview-compatibility.yml",
+          workflowRunId: 1234, runAttempt: 1, sourceCommit: source, environment: "disposable-windows",
+          harnessRevision: source, workflowPath: ".github/workflows/preview-compatibility.yml",
           commands: ["Synthetic fixture: run compatibility harness"],
         },
         continuity: {
-          baseline: { kind: "seeded-first-preview", sourceCommit: SOURCE, seedSha256: "1".repeat(64) },
+          baseline: { kind: "seeded-first-preview", sourceCommit: source, seedSha256: "1".repeat(64) },
           entityIdBefore: "11111111-2222-3333-4444-555555555555",
           entityIdAfter: "11111111-2222-3333-4444-555555555555",
           restoredEntityId: "11111111-2222-3333-4444-555555555555",
@@ -110,7 +112,7 @@ function fixture() {
   };
   const provenanceContent = json(provenance);
   const release = {
-    id: 123, tag_name: TAG, target_commitish: SOURCE, draft: false, prerelease: true,
+    id: 123, tag_name: TAG, target_commitish: source, draft: false, prerelease: true,
     assets: [
       ...provenance.assets.map((asset) => ({ name: asset.name, size: asset.size, digest: `sha256:${asset.sha256}`, state: "uploaded" })),
       { name: "release-provenance.json", size: Buffer.byteLength(provenanceContent), digest: `sha256:${hash(provenanceContent)}`, state: "uploaded" },
@@ -126,7 +128,7 @@ function fixture() {
       target_commitish: STABLE_BASELINE.sourceCommit, draft: false, prerelease: false,
       assets: [{ name: INSTALLER_NAME, size: STABLE_BASELINE.installerSize, digest: `sha256:${STABLE_BASELINE.installerSha256}`, state: "uploaded" }],
     })],
-    [`${api}/git/ref/tags/${TAG}`, json({ object: { type: "commit", sha: SOURCE } })],
+    [`${api}/git/ref/tags/${TAG}`, json({ object: { type: "commit", sha: source } })],
     [`${api}/git/ref/tags/${STABLE_BASELINE.tag}`, json({ object: { type: "commit", sha: STABLE_BASELINE.sourceCommit } })],
     [releaseAssetUrl(TAG, "release-provenance.json"), provenanceContent],
     [releaseAssetUrl(TAG, "windows-signature-evidence.json"), signaturesContent],
@@ -134,7 +136,7 @@ function fixture() {
   for (const [id, workflow] of [[1233, "ci"], [1234, "preview-compatibility"]]) {
     responses.set(`${api}/actions/runs/${id}`, json({
       id, repository: { full_name: REPOSITORY }, head_repository: { full_name: REPOSITORY },
-      head_sha: SOURCE, run_attempt: 1, status: "completed", conclusion: "success",
+      head_sha: source, run_attempt: 1, status: "completed", conclusion: "success",
       path: `.github/workflows/${workflow}.yml`, event: "push", head_branch: "beta",
     }));
   }
@@ -148,6 +150,236 @@ function fixture() {
   };
   return { descriptor, responses, fetcher, release, api };
 }
+
+function candidateOriginFixture() {
+  // Real public source/hash pins exercise proof verification. All release,
+  // source-CI and full compatibility observations are still synthetic fixtures.
+  const bindingId = "preview-candidate-39468905473";
+  const binding = REVIEWED_WORKFLOW_BINDINGS[bindingId];
+  const originPin = REVIEWED_CANDIDATE_ORIGINS[bindingId];
+  const f = fixture({
+    source: binding.productSourceCommit,
+    installerHash: originPin.installerSha256,
+    installerSize: originPin.installerSize,
+  });
+  const content = fs.readFileSync(new URL("./fixtures/preview-bindings/hosted-provenance-39468905473.json", import.meta.url), "utf8");
+  const workflow = fs.readFileSync(new URL("./fixtures/preview-bindings/preview-candidate-dfeb.yml", import.meta.url), "utf8");
+  const origin = {
+    sourceBinding: bindingId, sourceCommit: binding.productSourceCommit,
+    harnessRevision: binding.harnessRevision, workflowPath: binding.workflowPath, event: binding.event,
+    ...Object.fromEntries(["workflowRunId", "runAttempt", "artifactId", "artifactName", "artifactSha256"]
+      .map((name) => [name, originPin[name]])),
+    hostedProvenance: { sha256: originPin.provenanceSha256, content },
+  };
+  editReport(f.descriptor, "publicVerification", (report) => {
+    report.candidateOrigin = origin;
+    report.provenance.assets.push({ name: "hosted-provenance.json", size: Buffer.byteLength(content), sha256: hash(content) });
+  });
+  const report = JSON.parse(f.descriptor.evidence.publicVerification.content);
+  const manifestContent = json(report.provenance);
+  f.responses.set(f.descriptor.evidence.publicVerification.url, f.descriptor.evidence.publicVerification.content);
+  f.responses.set(releaseAssetUrl(TAG, "release-provenance.json"), manifestContent);
+  f.responses.set(releaseAssetUrl(TAG, "hosted-provenance.json"), content);
+  f.release.assets = [
+    ...report.provenance.assets.map((asset) => ({ ...asset, digest: `sha256:${asset.sha256}`, state: "uploaded" })),
+    { name: "release-provenance.json", size: Buffer.byteLength(manifestContent), digest: `sha256:${hash(manifestContent)}`, state: "uploaded" },
+  ];
+  f.responses.set(`${f.api}/releases/123`, json(f.release));
+  f.responses.set(`${f.api}/actions/runs/${origin.workflowRunId}`, json({
+    id: origin.workflowRunId, repository: { full_name: REPOSITORY }, head_repository: { full_name: REPOSITORY },
+    head_sha: binding.harnessRevision, run_attempt: origin.runAttempt, status: "completed", conclusion: "success",
+    path: binding.workflowPath, event: binding.event, head_branch: "dev/preview-combined-0.0.76",
+  }));
+  f.workflowUrl = `https://raw.githubusercontent.com/${REPOSITORY}/${binding.harnessRevision}/${binding.workflowPath}`;
+  f.responses.set(f.workflowUrl, workflow);
+  return { ...f, binding, origin, originPin };
+}
+
+function sourceCiFixture() {
+  const f = candidateOriginFixture();
+  const bindingId = "preview-source-ci-c79e214";
+  const sourceBinding = REVIEWED_WORKFLOW_BINDINGS[bindingId];
+  editReport(f.descriptor, "publicVerification", (report) => {
+    Object.assign(report.sourceCi, {
+      sourceBinding: bindingId, sourceCommit: sourceBinding.productSourceCommit,
+      harnessRevision: sourceBinding.harnessRevision, workflowPath: sourceBinding.workflowPath,
+      branch: sourceBinding.branch, event: sourceBinding.event,
+    });
+  });
+  f.responses.set(f.descriptor.evidence.publicVerification.url, f.descriptor.evidence.publicVerification.content);
+  const sourceRunUrl = `${f.api}/actions/runs/1233`;
+  const run = JSON.parse(f.responses.get(sourceRunUrl));
+  Object.assign(run, { head_sha: sourceBinding.harnessRevision, head_branch: sourceBinding.branch, event: sourceBinding.event });
+  f.responses.set(sourceRunUrl, json(run));
+  const sourceWorkflowUrl = `https://raw.githubusercontent.com/${REPOSITORY}/${sourceBinding.harnessRevision}/${sourceBinding.workflowPath}`;
+  f.responses.set(sourceWorkflowUrl,
+    fs.readFileSync(new URL("./fixtures/preview-bindings/source-ci-c79e214.yml", import.meta.url), "utf8"));
+  return { ...f, sourceBinding, sourceRunUrl, sourceWorkflowUrl };
+}
+
+test("reviewed manual source CI binds its exact product checkout independently of its run head", async () => {
+  const f = sourceCiFixture();
+  assert.notEqual(f.sourceBinding.productSourceCommit, f.sourceBinding.harnessRevision);
+  assert.equal((await verifyPublicPreviewEvidence(f.descriptor, f.fetcher)).status, "ready");
+});
+
+test("reviewed source CI retains the existing required gate and advisory failure policy", async () => {
+  const f = sourceCiFixture();
+  const run = JSON.parse(f.responses.get(f.sourceRunUrl));
+  run.conclusion = "failure"; // Synthetic advisory audit failure; gate remains successful.
+  f.responses.set(f.sourceRunUrl, json(run));
+  assert.equal((await verifyPublicPreviewEvidence(f.descriptor, f.fetcher)).status, "ready");
+});
+
+for (const [name, mutate] of [
+  ["unreviewed binding", (ci) => { ci.sourceBinding = "caller-invented"; }],
+  ["candidate-origin authority substituted", (ci) => { ci.sourceBinding = "preview-candidate-39468905473"; }],
+  ["missing binding", (ci) => { delete ci.sourceBinding; }],
+  ["product substitution", (ci) => { ci.sourceCommit = SOURCE; }],
+  ["harness substitution", (ci) => { ci.harnessRevision = SOURCE; }],
+  ["workflow substitution", (ci) => { ci.workflowPath = ".github/workflows/preview-candidate.yml"; }],
+  ["branch substitution", (ci) => { ci.branch = "dev/other-source-ci"; }],
+  ["PR event substituted", (ci) => { ci.event = "pull_request"; }],
+  ["push event substituted", (ci) => { ci.event = "push"; }],
+]) {
+  test(`reviewed source CI rejects ${name}`, async () => {
+    const f = sourceCiFixture();
+    editReport(f.descriptor, "publicVerification", (report) => mutate(report.sourceCi));
+    await assert.rejects(validatePreviewDescriptor(f.descriptor));
+  });
+}
+
+for (const [name, mutate] of [
+  ["changed immutable workflow", (f) => { f.responses.set(f.sourceWorkflowUrl, `${f.responses.get(f.sourceWorkflowUrl)}\n# changed`); }],
+  ["product incorrectly reported as run head", (f, run) => { run.head_sha = f.sourceBinding.productSourceCommit; }],
+  ["another harness head", (_f, run) => { run.head_sha = SOURCE; }],
+  ["another branch", (_f, run) => { run.head_branch = "dev/other-source-ci"; }],
+  ["another workflow", (_f, run) => { run.path = ".github/workflows/preview-candidate.yml"; }],
+  ["PR merge event", (_f, run) => { run.event = "pull_request"; }],
+  ["different run attempt", (_f, run) => { run.run_attempt++; }],
+  ["foreign repository", (_f, run) => { run.head_repository.full_name = "other/project"; }],
+  ["unfinished run", (_f, run) => { run.status = "in_progress"; }],
+  ["failed required gate", (f) => {
+    f.responses.set(`${f.api}/actions/runs/1233/attempts/1/jobs?per_page=100`,
+      json({ total_count: 1, jobs: [{ name: "gate", status: "completed", conclusion: "failure" }] }));
+  }],
+  ["skipped required gate", (f) => {
+    f.responses.set(`${f.api}/actions/runs/1233/attempts/1/jobs?per_page=100`,
+      json({ total_count: 1, jobs: [{ name: "gate", status: "completed", conclusion: "skipped" }] }));
+  }],
+]) {
+  test(`online reviewed source CI rejects ${name}`, async () => {
+    const f = sourceCiFixture();
+    const run = JSON.parse(f.responses.get(f.sourceRunUrl));
+    mutate(f, run);
+    f.responses.set(f.sourceRunUrl, json(run));
+    await assert.rejects(verifyPublicPreviewEvidence(f.descriptor, f.fetcher));
+  });
+}
+
+test("reviewed source CI cannot replace candidate origin or full compatibility acceptance", async () => {
+  const f = sourceCiFixture();
+  const ci = JSON.parse(f.descriptor.evidence.publicVerification.content).sourceCi;
+  for (const purpose of ["candidate-origin", "compatibility"]) {
+    assert.throws(() => reviewedExecutionBinding(ci, f.sourceBinding.productSourceCommit, purpose), /no matching reviewed/);
+  }
+  editReport(f.descriptor, "compatibility", (report) => {
+    report.execution = { ...ci, environment: "disposable-windows", commands: ["Synthetic source regression only"] };
+  });
+  await assert.rejects(validatePreviewDescriptor(f.descriptor), /no matching reviewed/);
+});
+
+test("reviewed candidate-origin proof binds separate product/harness without replacing compatibility", async () => {
+  const f = candidateOriginFixture();
+  assert.notEqual(f.binding.productSourceCommit, f.binding.harnessRevision);
+  assert.equal((await verifyPublicPreviewEvidence(f.descriptor, f.fetcher)).status, "ready");
+});
+for (const [name, mutate] of [
+  ["omitted required candidate origin", (r) => { delete r.candidateOrigin; }],
+  ["unreviewed binding", (r) => { r.candidateOrigin.sourceBinding = "caller-invented"; }],
+  ["non-string binding", (r) => { r.candidateOrigin.sourceBinding = ["preview-candidate-39468905473"]; }],
+  ["inherited binding", (r) => { r.candidateOrigin.sourceBinding = "__proto__"; }],
+  ["candidate product substitution", (r) => { r.candidateOrigin.sourceCommit = SOURCE; }],
+  ["candidate harness substitution", (r) => { r.candidateOrigin.harnessRevision = SOURCE; }],
+  ["candidate workflow substitution", (r) => { r.candidateOrigin.workflowPath = ".github/workflows/ci.yml"; }],
+  ["candidate event substitution", (r) => { r.candidateOrigin.event = "pull_request"; }],
+  ["candidate run substitution", (r) => { r.candidateOrigin.workflowRunId++; }],
+  ["candidate attempt substitution", (r) => { r.candidateOrigin.runAttempt++; }],
+  ["candidate artifact substitution", (r) => { r.candidateOrigin.artifactId++; }],
+  ["candidate artifact name substitution", (r) => { r.candidateOrigin.artifactName += "-other"; }],
+  ["candidate artifact digest substitution", (r) => { r.candidateOrigin.artifactSha256 = "d".repeat(64); }],
+  ["candidate original provenance rewritten", (r) => { r.candidateOrigin.hostedProvenance.content += "\n"; }],
+  ["candidate original provenance relabelled as accepted", (r) => {
+    const original = JSON.parse(r.candidateOrigin.hostedProvenance.content);
+    original.publicationEligible = true;
+    r.candidateOrigin.hostedProvenance.content = json(original);
+    r.candidateOrigin.hostedProvenance.sha256 = hash(json(original));
+  }],
+]) {
+  test(`candidate-origin binding rejects ${name}`, async () => {
+    const f = candidateOriginFixture();
+    editReport(f.descriptor, "publicVerification", mutate);
+    await assert.rejects(validatePreviewDescriptor(f.descriptor));
+  });
+}
+for (const [name, mutate] of [
+  ["changed immutable workflow source", (f) => { f.responses.set(f.workflowUrl, `${f.responses.get(f.workflowUrl)}\n# changed`); }],
+  ["candidate remote head incorrectly labelled as product", (f) => {
+    const url = `${f.api}/actions/runs/${f.origin.workflowRunId}`;
+    const run = JSON.parse(f.responses.get(url)); run.head_sha = f.binding.productSourceCommit;
+    f.responses.set(url, json(run));
+  }],
+  ["candidate remote dispatch mismatch", (f) => {
+    const url = `${f.api}/actions/runs/${f.origin.workflowRunId}`;
+    const run = JSON.parse(f.responses.get(url)); run.event = "push";
+    f.responses.set(url, json(run));
+  }],
+  ["published original provenance differs", (f) => { f.responses.set(releaseAssetUrl(TAG, "hosted-provenance.json"), "{}"); }],
+  ["missing published original provenance", (f) => {
+    f.release.assets = f.release.assets.filter((asset) => asset.name !== "hosted-provenance.json");
+    f.responses.set(`${f.api}/releases/123`, json(f.release));
+  }],
+]) {
+  test(`online candidate-origin verification rejects ${name}`, async () => {
+    const f = candidateOriginFixture();
+    mutate(f);
+    await assert.rejects(verifyPublicPreviewEvidence(f.descriptor, f.fetcher));
+  });
+}
+test("reviewed candidate-origin proof cannot serve as source CI or full compatibility", () => {
+  const f = candidateOriginFixture();
+  for (const purpose of ["source-ci", "compatibility"]) {
+    assert.throws(() => reviewedExecutionBinding(f.origin, f.binding.productSourceCommit, purpose), /no matching reviewed/);
+  }
+});
+test("candidate origin does not supply missing continuity or acceptance stages", async () => {
+  for (const change of [
+    (report) => { delete report.continuity; },
+    (report) => { report.stages = []; },
+    (report) => { report.execution = { ...candidateOriginFixture().origin, environment: "disposable-windows", commands: ["Synthetic only"] }; },
+  ]) {
+    const f = candidateOriginFixture();
+    editReport(f.descriptor, "compatibility", change);
+    await assert.rejects(validatePreviewDescriptor(f.descriptor));
+  }
+});
+test("an arbitrary separate compatibility harness cannot assert its own checkout binding", async () => {
+  const f = fixture();
+  editReport(f.descriptor, "compatibility", (report) => {
+    report.execution.harnessRevision = "d".repeat(40);
+    report.execution.sourceBinding = "unreviewed-caller-proof";
+    report.execution.event = "workflow_dispatch";
+  });
+  await assert.rejects(validatePreviewDescriptor(f.descriptor), /no matching reviewed/);
+});
+test("a PR merge run cannot be substituted for exact-product CI", async () => {
+  const f = fixture();
+  editReport(f.descriptor, "publicVerification", (report) => {
+    report.sourceCi.event = "pull_request";
+    report.sourceCi.branch = "dev/preview-combined-0.0.76";
+  });
+  await assert.rejects(validatePreviewDescriptor(f.descriptor), /exact beta push/);
+});
 
 test("checked-in descriptor satisfies the local policy for either allowed status", async () => {
   const descriptor = JSON.parse(fs.readFileSync(new URL("../../docs/preview/current.json", import.meta.url), "utf8"));

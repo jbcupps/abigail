@@ -157,6 +157,13 @@ coordination explicitly instead of rebuilding, relabelling, or replacing assets.
 
 ## Combined development status
 
+The hosted signed candidate has now completed its bounded synthetic installed
+checks. [Exact-byte continuation](PREVIEW_EXACT_BYTE_PROMOTION.md) records the
+original artifact, metadata import, reviewed product/harness bindings and the
+remaining functional acceptance. Earlier preparation-only statements below are
+historical; neither a passing hosted run nor the metadata adapters completes
+all ten acceptance stages or changes the unavailable selector.
+
 The selector remains unavailable. Combined product source
 `f7c7848d25726480b253ec1ca637c3ffa5ea3c77` on `dev/preview-combined-0.0.76` combines
 published application `ca6a7527da8787be6b5315e13e4fc228287ce15d`, its cold-recovery
