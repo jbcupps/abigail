@@ -21,5 +21,7 @@ Decision A: First Signal remains the visual creation shell; Genesis owns newly a
 - Journal storage failure prevents dispatch; uncertain outcomes preserve the same key and pinned Hive; late responses do not open another Entity.
 - Genesis JSON/assets carry verified native profile/process ownership alongside the existing local capability. No fallback to another profile.
 - Profile isolation, whole-profile recovery, conversation session restoration, optional first tasks, honest Stop/error/recheck, and static Windows runtime checks retain regression coverage.
+- An allocated Genesis Entity cannot use generic birth or open its first conversation before awakening completes, including interruption before the session link is saved. Existing awakened Entities remain reopenable during later draft refinements.
+- Presentation excerpts respect sidecar limits without changing canonical narrative. All accepted quick-creation Unicode names must survive canonical validation; older valid names remain readable.
 
 Validation records must distinguish source/unit/fixture evidence from real model, native GUI, credentials, media billing, installer and release acceptance. The prior branches' evidence does not transfer to new integrated bytes.

@@ -37,6 +37,22 @@ async function start(onClose = vi.fn()) {
 }
 
 describe("Genesis creation workflow", () => {
+  it("does not offer a conversation for an allocated Entity whose awakening is unfinished", async () => {
+    saved.definition.entity_id = "reserved-entity";
+    const meet = vi.fn();
+    render(<GenesisWorkspace initialSession={saved} onClose={vi.fn()} onCreated={vi.fn()} onMeet={meet} />);
+    expect(screen.queryByRole("button", { name: "Meet Nova" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Awaken Entity" })).toBeEnabled();
+    expect(meet).not.toHaveBeenCalled();
+  });
+  it("can return to an already awakened Entity while later refinements remain a draft", async () => {
+    saved.state = "review"; saved.definition.entity_id = "existing-entity"; saved.awakening = "Original greeting";
+    const meet = vi.fn();
+    render(<GenesisWorkspace initialSession={saved} onClose={vi.fn()} onCreated={vi.fn()} onMeet={meet} />);
+    fireEvent.click(screen.getByRole("button", { name: "Meet Nova" }));
+    await waitFor(() => expect(meet).toHaveBeenCalledWith(saved));
+    expect(genesisAction).not.toHaveBeenCalled();
+  });
   it("returns an existing ready Entity without creating or activating again", async () => {
     saved.state = "ready"; saved.definition.entity_id = "existing-entity";
     const meet = vi.fn(); render(<GenesisWorkspace initialSession={saved} onClose={vi.fn()} onCreated={vi.fn()} onMeet={meet} />);

@@ -701,6 +701,16 @@ pub async fn open_entity(
     State(state): State<HiveDaemonState>,
     Path(entity_id): Path<String>,
 ) -> Json<ApiEnvelope<EntityOpenResponse>> {
+    match crate::genesis_creation::session_for_entity(&state, &entity_id) {
+        Ok(Some(draft))
+            if draft.awakening.is_none()
+                && draft.state != hive_core::genesis::GenesisState::Ready =>
+        {
+            return Json(ApiEnvelope::error("Resume this Entity's saved Genesis creation before opening its first conversation. Awakening has not finished."));
+        }
+        Err(error) => return Json(ApiEnvelope::error(error)),
+        _ => {}
+    }
     match state.supervisor.ensure_entity_running(&entity_id).await {
         Ok(opened) => Json(ApiEnvelope::success(opened)),
         Err(e) => Json(ApiEnvelope::error(format!("{:#}", e))),

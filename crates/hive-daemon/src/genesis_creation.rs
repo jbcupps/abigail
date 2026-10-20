@@ -2,6 +2,41 @@
 use abigail_identity::{AgentCreationStatus, IdentityManager};
 use hive_core::genesis::GenesisSession;
 
+/// Find the canonical creation even if allocation completed before the session
+/// link could be saved. Legacy First Signal receipts have no Genesis session.
+pub fn session_for_entity(
+    state: &crate::state::HiveDaemonState,
+    entity_id: &str,
+) -> Result<Option<GenesisSession>, String> {
+    let sessions = state
+        .genesis
+        .list(crate::genesis_auth::OWNER)
+        .map_err(|e| e.to_string())?;
+    for draft in sessions {
+        if draft.definition.entity_id.as_deref() == Some(entity_id) {
+            return Ok(Some(draft));
+        }
+        if draft.definition.entity_id.is_none()
+            && uuid::Uuid::parse_str(&draft.id).is_ok_and(|id| id.to_string() == draft.id)
+        {
+            match state
+                .identity_manager
+                .entity_creation_status(&draft.id)
+                .map_err(|e| e.to_string())?
+            {
+                AgentCreationStatus::Complete { id, .. }
+                | AgentCreationStatus::Unavailable { id, .. }
+                    if id == entity_id =>
+                {
+                    return Ok(Some(draft))
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(None)
+}
+
 pub fn ensure_entity_link(
     identities: &IdentityManager,
     draft: &mut GenesisSession,

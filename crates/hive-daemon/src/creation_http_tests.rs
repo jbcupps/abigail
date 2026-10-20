@@ -70,6 +70,84 @@ fn request(name: &str, key: &str) -> Json<CreateEntityRequest> {
 }
 
 #[tokio::test]
+async fn genesis_allocation_cannot_fall_back_to_generic_birth_before_or_after_link_save() {
+    let fixture = Fixture::new();
+    let state = fixture.state();
+    let mut draft = hive_core::genesis::GenesisSession::new(
+        uuid::Uuid::new_v4().to_string(),
+        crate::genesis_auth::OWNER.into(),
+        hive_core::genesis::GenesisMode::Quick,
+        "2026-10-20T00:00:00Z".into(),
+    );
+    draft.definition.name = "Vesper".into();
+    draft.definition.purpose = "Explore tiny worlds".into();
+    state.genesis.create(&draft).unwrap();
+    let (id, directory) = state
+        .identity_manager
+        .create_agent_idempotent("Vesper", &draft.id)
+        .unwrap();
+    let original_config = std::fs::read(directory.join("config.json")).unwrap();
+    for linked in [false, true] {
+        if linked {
+            draft.definition.entity_id = Some(id.clone());
+            draft.touch("2026-10-20T00:01:00Z");
+            state.genesis.save(&draft, 0).unwrap();
+        }
+        let Json(result) = crate::birth::perform_birth(
+            State(state.clone()),
+            Path(id.clone()),
+            Json(hive_core::BirthRiteRequest {
+                path: "quickstart".into(),
+                choices: vec![],
+                purpose: Some("Generic fallback".into()),
+            }),
+        )
+        .await;
+        assert!(!result.ok);
+        assert!(result
+            .error
+            .unwrap()
+            .contains("Resume this Entity's saved Genesis creation"));
+        let Json(opened) = open_entity(State(state.clone()), Path(id.clone())).await;
+        assert!(!opened.ok);
+        assert!(opened.error.unwrap().contains("Awakening has not finished"));
+        assert_eq!(
+            std::fs::read(directory.join("config.json")).unwrap(),
+            original_config
+        );
+        assert!(!directory.join("docs/birth_certificate.json").exists());
+        assert_eq!(state.identity_manager.list_agents().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn genesis_lookup_keeps_legacy_receipts_and_presentation_only_entities_on_their_old_path() {
+    let fixture = Fixture::new();
+    let state = fixture.state();
+    let (id, directory) = state
+        .identity_manager
+        .create_agent_idempotent("Legacy", &uuid::Uuid::new_v4().to_string())
+        .unwrap();
+    let brief = br#"{"name":"Display alias","purpose":"Presentation only"}"#;
+    std::fs::write(directory.join("presence.json"), brief).unwrap();
+    // An unrelated saved Genesis draft must not claim this old Entity.
+    let draft = hive_core::genesis::GenesisSession::new(
+        uuid::Uuid::new_v4().to_string(),
+        crate::genesis_auth::OWNER.into(),
+        hive_core::genesis::GenesisMode::Quick,
+        "2026-10-20T00:00:00Z".into(),
+    );
+    state.genesis.create(&draft).unwrap();
+    assert!(crate::genesis_creation::session_for_entity(&state, &id)
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        std::fs::read(directory.join("presence.json")).unwrap(),
+        brief
+    );
+}
+
+#[tokio::test]
 async fn preview_shutdown_refuses_a_stable_owner_without_stopping_it() {
     let fixture = Fixture::new();
     let state = fixture.state();

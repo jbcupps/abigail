@@ -10,6 +10,10 @@ import FirstSignal from "./FirstSignal";
 import GenesisWorkspace from "./GenesisWorkspace";
 
 interface Props { preview: boolean; existing?: SavedPresence; browse?: boolean; onClose: () => void; onSaved: (value: SavedPresence) => void; onReturn: (id: string, hiveUrl?: string) => void; onPersisted: () => void; onBusyChange: (busy: boolean) => void }
+function displayExcerpt(text: string, limit: number): string {
+  const characters = Array.from(text);
+  return characters.length > limit ? characters.slice(0, limit - 1).join("") + "…" : text;
+}
 export default function GenesisCreation(props: Props) {
   const [initial] = useState(() => {
     if (props.preview || props.existing) return { legacy: true, draft: null, error: "" };
@@ -52,7 +56,9 @@ export default function GenesisCreation(props: Props) {
     if (record) assertGenesisDraft(record);
     setStage("Saving the familiar face");
     const presentation = record?.profile ?? await loadPresence(id, false, control.signal, current.connection.hiveUrl);
-    const profile = { ...presentation, name: current.definition.name, purpose: current.definition.purpose };
+    // Genesis permits a detailed purpose; the visual brief is only a card-sized
+    // excerpt. Never shorten the approved narrative in the canonical session.
+    const profile = { ...presentation, name: displayExcerpt(current.definition.name, 80), purpose: displayExcerpt(current.definition.purpose, 2000) };
     if (!active(control)) return;
     await savePresence(id, profile, false, { signal: control.signal, hiveUrl: current.connection.hiveUrl });
     if (!active(control)) return;

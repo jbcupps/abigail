@@ -2,6 +2,8 @@
 
 Development integration `dev/genesis-first-signal-integration` brings First Signal and Genesis together: review a name and purpose, choose a visual presence, then awaken directly or explore the same character draft further. Appearance edits stay separate from approved identity. Interrupted creation resumes the same reserved Entity, while existing conversations keep their Entity and session selection. See the [integration contract](documents/GENESIS_FIRST_SIGNAL_CONTRACT.md) and [source validation](documents/GENESIS_FIRST_SIGNAL_VALIDATION.md). Installed-release acceptance is still pending for this development source.
 
+Interrupted Genesis creation now directs you back to the same saved beginning before the first conversation. Long approved descriptions stay intact while cards show a short excerpt. See the [bounded correctness review](documents/GENESIS_FIRST_SIGNAL_REVIEW.md) for checks and remaining preview gates.
+
 **The private coordinator that manages your family's personal AI Entities.**
 
 Abigail is the smart, private manager that lives in your home. You, the mentor or family head, create and customize individual **Entities** - each one a unique AI companion tailored to a person or purpose.

@@ -20,6 +20,8 @@ Abigail is the private Entity Coordinator and Manager for real homes and familie
 
 ### First Signal / Genesis integration (2026-10-20)
 
+- The [bounded correctness review](documents/GENESIS_FIRST_SIGNAL_REVIEW.md) fixes legacy-birth/premature-open routing for Genesis reservations and canonical-to-presentation text boundaries. Preserve old receipts and names. No exact-commit CI ran for the dev push; inherited strict compiler-lint failures remain a gate blocker. Do not confuse the old manually pinned harness with validation of this source or resume paused security work.
+
 - Architecture A is selected: First Signal presentation with Genesis as the canonical backend for newly reviewed identity. The bounded branch `dev/genesis-first-signal-integration` merges `dev/first-conversation-return` at `e11d108dc3b44a1afca0a7f61a54ec47bb6eb737` with beta `ea92effd31f554f74bb5e109deaa42876ec4f06f`. This supersedes the earlier instruction to keep beta separate for comparison, without changing the dev-only publication boundary.
 - Quick creation approves name/purpose without inference. Optional discovery uses the same durable Genesis draft; original keyed input is immutable and retries must not overwrite later reviewed edits. Entity allocation uses the existing durable receipt before the Genesis link is saved. Unavailable receipts never authorize a replacement UUID.
 - Old visual briefs and unfinished First Signal receipts stay presentation-only and use their existing recovery flow. Existing Genesis links, Entity IDs, real history and selected sessions survive ordinary return. Appearance preferences do not become operational permissions or silently become signed narrative.

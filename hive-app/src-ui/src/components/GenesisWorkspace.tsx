@@ -142,6 +142,7 @@ export default function GenesisWorkspace({ onClose, onCreated, initialSession, r
   const pending = session.proposals.filter((proposal) => proposal.status === "pending");
   const unresolved = session.conflicts.filter((conflict) => !conflict.resolved);
   const creationReady = Boolean(definition.name.trim() && definition.purpose.trim()) && unresolved.length === 0;
+  const awakened = Boolean(definition.entity_id && (session.state === "ready" || session.awakening));
   const latestAssistant = [...session.messages].reverse().find((message) => message.role !== "user");
   const latestResponse = latestAssistant && (!session.awakening || latestAssistant.created_at > definition.updated_at)
     ? latestAssistant.content
@@ -171,8 +172,8 @@ export default function GenesisWorkspace({ onClose, onCreated, initialSession, r
         {DIMENSIONS.map(([key, label]) => <div className="genesis-dimension" key={key}><div><span>{label}</span><span>{essence[key]}%</span></div><progress max={100} value={essence[key]} aria-label={`${label} defined`} /></div>)}
         <p className="genesis-muted">Your constellation grows as you add details. A name and purpose are enough to begin.</p>
         <div className="genesis-readiness"><strong>{creationReady ? "A coherent beginning is ready." : "The essentials"}</strong><p>{!definition.name.trim() ? "Choose a name. " : ""}{!definition.purpose.trim() ? "Give your Entity a purpose. " : ""}{unresolved.length > 0 ? `Resolve ${unresolved.length} conflicting ${unresolved.length === 1 ? "choice" : "choices"}. ` : ""}{creationReady ? "You can awaken your Entity now and keep refining later. Portraits and films are optional." : "Everything else can evolve together."}</p></div>
-        <button type="button" className="genesis-primary" disabled={busy || !creationReady} onClick={() => void awaken()}>{definition.entity_id ? "Apply identity refinements" : "Awaken Entity"}</button>
-        {definition.entity_id && <button type="button" disabled={busy} onClick={() => void operation(async () => { if (onMeet) onMeet(session); else await openEntity(definition.entity_id!); })}>Meet {definition.name}</button>}
+        <button type="button" className="genesis-primary" disabled={busy || !creationReady} onClick={() => void awaken()}>{awakened ? "Apply identity refinements" : "Awaken Entity"}</button>
+        {awakened && <button type="button" disabled={busy} onClick={() => void operation(async () => { if (onMeet) onMeet(session); else await openEntity(definition.entity_id!); })}>Meet {definition.name}</button>}
         <button type="button" disabled={busy} onClick={() => { setTab("definition"); void change("review"); }}>Review definition</button>
         <p className="genesis-muted">Fictional traits and lore never grant permission to use tools or connected accounts.</p>
       </aside>

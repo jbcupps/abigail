@@ -4,7 +4,7 @@ import GenesisCreation from "./GenesisCreation";
 import { createOrResumeGenesis, genesisAction, resolveGenesisConnection, type GenesisSession } from "../lib/genesisClient";
 import { savePresence } from "../lib/presenceApi";
 import { readGenesisDraft } from "../lib/genesisDraft";
-import { defaultProfile } from "../../../../entity-runtime-app/src-ui/src/presence/profile";
+import { defaultProfile, isEntityProfile } from "../../../../entity-runtime-app/src-ui/src/presence/profile";
 
 vi.mock("../lib/genesisClient", async original => ({ ...await original<typeof import("../lib/genesisClient")>(), createOrResumeGenesis: vi.fn(), genesisAction: vi.fn(), resolveGenesisConnection: vi.fn() }));
 vi.mock("../lib/presenceApi", async original => ({ ...await original<typeof import("../lib/presenceApi")>(), savePresence: vi.fn() }));
@@ -73,6 +73,40 @@ it("keeps the confirmed Entity and draft when appearance saving fails", async ()
   await screen.findByRole("heading", { name: "Meet Vesper." });
   expect(genesisAction).toHaveBeenCalledTimes(1); expect(savePresence).toHaveBeenCalledTimes(2);
   expect(vi.mocked(savePresence).mock.calls.map(call => call[0])).toEqual(["entity-one", "entity-one"]);
+});
+it("reveals a long approved purpose using a bounded display excerpt without changing canon", async () => {
+  const purpose = "Explore 🌟 ".repeat(220);
+  vi.mocked(genesisAction).mockImplementationOnce(async session => {
+    server = { ...session, state: "ready", definition: { ...session.definition, entity_id: "entity-one", purpose } };
+    return structuredClone(server);
+  });
+  vi.mocked(savePresence).mockImplementation(async (_id, profile) => {
+    if (!isEntityProfile(profile)) throw new Error("The visual profile is invalid and was not saved.");
+  });
+  render(<GenesisCreation {...props()} />); review();
+  fireEvent.click(screen.getByRole("button", { name: "Awaken Entity" }));
+  await screen.findByRole("heading", { name: "Meet Vesper." });
+  const profile = vi.mocked(savePresence).mock.calls[0][1];
+  expect(Array.from(profile.purpose)).toHaveLength(2000);
+  expect(profile.purpose).toBe(Array.from(purpose).slice(0, 1999).join("") + "…");
+  expect(server!.definition.purpose).toBe(purpose);
+  expect(readGenesisDraft()).toBeNull();
+});
+it("can finish returning to a legacy Genesis identity whose approved name exceeds the card limit", async () => {
+  const name = "Legacy approved name ".repeat(6);
+  vi.mocked(genesisAction).mockImplementationOnce(async session => {
+    server = { ...session, state: "ready", definition: { ...session.definition, entity_id: "entity-one", name } };
+    return structuredClone(server);
+  });
+  vi.mocked(savePresence).mockImplementation(async (_id, profile) => {
+    if (!isEntityProfile(profile)) throw new Error("The visual profile is invalid and was not saved.");
+  });
+  render(<GenesisCreation {...props()} />); review();
+  fireEvent.click(screen.getByRole("button", { name: "Awaken Entity" }));
+  await screen.findByRole("button", { name: "Start a conversation" });
+  expect(vi.mocked(savePresence).mock.calls[0][1].name).toBe(name.slice(0, 79) + "…");
+  expect(server!.definition.name).toBe(name);
+  expect(readGenesisDraft()).toBeNull();
 });
 it("stopping waiting ignores late success and retains the same recovery key", async () => {
   let release!: (session: GenesisSession) => void;

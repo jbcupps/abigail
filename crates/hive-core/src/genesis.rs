@@ -323,14 +323,19 @@ impl FieldUpdate {
         {
             return Err("An Entity name must fit on one line".into());
         }
-        validate_text(
-            &string_value(self.value.clone())?,
-            if self.field == GenesisField::Name {
-                160
+        let text = string_value(self.value.clone())?;
+        let limit = if self.field == GenesisField::Name {
+            // New creation accepts 80 Unicode characters, not 160 UTF-8 bytes.
+            // Keep previously valid (up to 160-byte) legacy names readable too.
+            if text.chars().count() <= 80 {
+                320
             } else {
-                MAX_FIELD_BYTES
-            },
-        )
+                160
+            }
+        } else {
+            MAX_FIELD_BYTES
+        };
+        validate_text(&text, limit)
     }
 }
 
@@ -1295,6 +1300,35 @@ fn markdown_value(field: GenesisField, body: &str) -> Result<Value, String> {
 mod tests {
     use super::*;
     const NOW: &str = "2026-10-17T12:00:00Z";
+    #[test]
+    fn quick_creation_unicode_name_survives_canonical_validation_and_round_trip() {
+        let seed = GenesisCreationSeed {
+            mode: GenesisMode::Quick,
+            name: "🌟".repeat(80),
+            purpose: "Explore".into(),
+        };
+        seed.validate().unwrap();
+        let mut draft = session();
+        draft.definition.name = seed.name.clone();
+        draft.definition.purpose = seed.purpose.clone();
+        draft.creation_seed = Some(seed);
+        draft.validate().unwrap();
+        let saved = serde_json::to_string(&draft).unwrap();
+        let restored: GenesisSession = serde_json::from_str(&saved).unwrap();
+        restored.validate().unwrap();
+        assert_eq!(restored.definition.name, draft.definition.name);
+        assert!(update(GenesisField::Name, json!("🌟".repeat(81)))
+            .validate()
+            .is_err());
+    }
+
+    #[test]
+    fn existing_long_ascii_genesis_names_remain_readable() {
+        let mut draft = session();
+        draft.definition.name = "a".repeat(160);
+        draft.validate().unwrap();
+        assert!(draft.creation_seed.is_none());
+    }
     fn session() -> GenesisSession {
         GenesisSession::new(
             "draft-a".into(),

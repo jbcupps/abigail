@@ -95,6 +95,13 @@ pub async fn perform_birth(
     Path(entity_id): Path<String>,
     Json(body): Json<BirthRiteRequest>,
 ) -> Json<ApiEnvelope<BirthRiteResponse>> {
+    match crate::genesis_creation::session_for_entity(&state, &entity_id) {
+        Ok(Some(_)) => return Json(ApiEnvelope::error(
+            "Resume this Entity's saved Genesis creation to finish or refine its approved identity. Generic setup was not run.",
+        )),
+        Err(error) => return Json(ApiEnvelope::error(error)),
+        Ok(None) => {}
+    }
     perform_birth_with_genesis(state, entity_id, body, None).await
 }
 
