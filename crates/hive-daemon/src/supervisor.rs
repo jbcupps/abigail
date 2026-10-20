@@ -64,6 +64,7 @@ fn revoke_runtime_bootstrap(entity_id: &str, capability: &str) {
 /// Locate the `entity-daemon` executable next to the current (hive-daemon) exe.
 /// In both dev (`target/debug`) and a packaged install the two binaries are
 /// siblings, so this resolves correctly without any configured path.
+#[cfg(test)]
 fn entity_daemon_binary() -> anyhow::Result<PathBuf> {
     entity_daemon_binary_for_profile(false)
 }
@@ -426,29 +427,6 @@ impl Drop for StartupGuard {
             }
         }
     }
-}
-
-/// Spawn an `entity-daemon` for `entity_id` on a free local port, returning its
-/// child handle and base URL once it reports healthy.
-pub async fn spawn_entity_daemon(
-    entity_id: &str,
-    hive_url: &str,
-    data_root: &Path,
-) -> anyhow::Result<(tokio::process::Child, String)> {
-    anyhow::ensure!(
-        abigail_core::profile::current()?.is_none(),
-        "Preview spawning requires an explicit supervisor ownership context"
-    );
-    let (child, url, _) = spawn_entity_with_profile(
-        entity_id,
-        hive_url,
-        data_root,
-        None,
-        None,
-        &Arc::new(CleanupTracker::default()),
-    )
-    .await?;
-    Ok((child, url))
 }
 
 async fn spawn_entity_with_profile(
@@ -1013,6 +991,7 @@ pub struct HiveSupervisor {
 }
 
 impl HiveSupervisor {
+    #[cfg(test)]
     pub fn new(hive_url: String, data_root: PathBuf) -> Arc<Self> {
         Self::with_profile(hive_url, data_root, None, None)
     }
