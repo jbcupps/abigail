@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       reviewed_harness_commit:
-        description: 'Reviewed dev workflow commit; manual CI checks fixed preview product f7c7848 without signing'
+        description: 'Expected dev workflow commit; confirms dispatch revision, not review approval'
         required: true
         type: string
   push:
@@ -25,8 +25,11 @@ permissions:
 
 env:
   ABIGAIL_CI_MODE: "1"
-  # Manual acceptance CI tests immutable product source, independently of this
-  # reviewed workflow revision. Push/PR/schedule retain their original checkout.
+  # Manual CI tests immutable product source. The caller input checks dispatch
+  # revision consistency only; it is not independent harness approval.
+  # Preview evidence additionally requires the separately reviewed immutable
+  # execution binding and online GitHub run/workflow verification.
+  # Push/PR/schedule retain their original checkout.
   ABIGAIL_SOURCE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && 'f7c7848d25726480b253ec1ca637c3ffa5ea3c77' || github.sha }}
   REVIEWED_HARNESS_COMMIT: ${{ inputs.reviewed_harness_commit }}
 
@@ -46,7 +49,7 @@ jobs:
           ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
           persist-credentials: false
 
-      - name: Verify exact checked-out source and reviewed manual scope
+      - name: Verify exact source and caller-confirmed dispatch revision
         shell: bash
         run: |
           set -euo pipefail
@@ -183,7 +186,7 @@ jobs:
           ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
           persist-credentials: false
 
-      - name: Verify exact checked-out source and reviewed manual scope
+      - name: Verify exact source and caller-confirmed dispatch revision
         shell: bash
         run: |
           set -euo pipefail
@@ -250,7 +253,7 @@ jobs:
           ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
           persist-credentials: false
 
-      - name: Verify exact checked-out source and reviewed manual scope
+      - name: Verify exact source and caller-confirmed dispatch revision
         shell: bash
         run: |
           set -euo pipefail
@@ -303,7 +306,7 @@ jobs:
           ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
           persist-credentials: false
 
-      - name: Verify exact checked-out source and reviewed manual scope
+      - name: Verify exact source and caller-confirmed dispatch revision
         shell: bash
         run: |
           set -euo pipefail
@@ -354,7 +357,7 @@ jobs:
           ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
           persist-credentials: false
 
-      - name: Verify exact checked-out source and reviewed manual scope
+      - name: Verify exact source and caller-confirmed dispatch revision
         shell: bash
         run: |
           set -euo pipefail
@@ -407,7 +410,7 @@ jobs:
           ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
           persist-credentials: false
 
-      - name: Verify exact checked-out source and reviewed manual scope
+      - name: Verify exact source and caller-confirmed dispatch revision
         shell: bash
         run: |
           set -euo pipefail
