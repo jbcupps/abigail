@@ -143,6 +143,9 @@ for (const [label, mutate] of Object.entries(mutations)) {
   });
 }
 
+// The historical c79 guard proves consistency, not approval. An arbitrary
+// matching dev revision is accepted here but rejected as preview evidence by
+// the independent binding/run checks in test_preview_channel.mjs.
 const harness = "a".repeat(40);
 const fixture = {
   ABIGAIL_SOURCE_COMMIT: product,
@@ -169,10 +172,20 @@ function executeGuard(guard, overrides) {
 
 for (const name of checkoutJobs) {
   const guard = workflow.jobs[name].steps[1].run;
-  test(`${name}: actual guard accepts distinct reviewed workflow/product pins`, () => {
+  test(`${name}: actual guard accepts an arbitrary matching caller revision`, () => {
     const result = executeGuard(guard, {});
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, new RegExp(`Verified product source: ${product}; workflow revision: ${harness}`));
+  });
+  test(`${name}: actual guard accepts the separately reviewed c79 revision`, () => {
+    const reviewed = "c79e21442143829f4611e48d9ec193089b759c67";
+    const result = executeGuard(guard, {
+      GITHUB_REF: "refs/heads/dev/preview-source-ci-0.0.76",
+      REVIEWED_HARNESS_COMMIT: reviewed,
+      GITHUB_SHA: reviewed,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, new RegExp(`Verified product source: ${product}; workflow revision: ${reviewed}`));
   });
   const invalid = {
     "wrong checkout": { MOCK_CHECKOUT_SHA: "b".repeat(40) },

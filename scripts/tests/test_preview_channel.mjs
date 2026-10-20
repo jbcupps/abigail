@@ -217,11 +217,54 @@ function sourceCiFixture() {
   return { ...f, sourceBinding, sourceRunUrl, sourceWorkflowUrl };
 }
 
-test("reviewed manual source CI binds its exact product checkout independently of its run head", async () => {
-  const f = sourceCiFixture();
-  assert.notEqual(f.sourceBinding.productSourceCommit, f.sourceBinding.harnessRevision);
-  assert.equal((await verifyPublicPreviewEvidence(f.descriptor, f.fetcher)).status, "ready");
-});
+for (const [name, mutate, localError, onlineError] of [
+  ["approved c79 execution", () => {}, null, null],
+  ["self-asserted arbitrary harness and matching caller input", (ci, run) => {
+    ci.harnessRevision = SOURCE;
+    run.head_sha = SOURCE;
+  }, /no matching reviewed execution binding/, /no matching reviewed execution binding/],
+  ["claimed c79 with another actual harness", (_ci, run) => {
+    run.head_sha = SOURCE;
+  }, null, /Evidence workflow execution does not match/],
+  ["stripped binding and beta-push relabel of another harness", (ci, run) => {
+    delete ci.sourceBinding;
+    ci.branch = "beta";
+    ci.event = "push";
+    run.head_sha = SOURCE;
+  }, null, /Evidence workflow execution does not match/],
+  ["stripped binding and beta-push relabel of a manual product-head run", (ci, run) => {
+    delete ci.sourceBinding;
+    ci.branch = "beta";
+    ci.event = "push";
+    run.head_sha = ci.sourceCommit;
+    run.head_branch = "beta"; // Even matching legacy source/branch cannot turn dispatch into push.
+  }, null, /Unbound source CI must be a beta push/],
+]) {
+  test(`source CI acceptance distinguishes ${name}`, async () => {
+    const f = sourceCiFixture();
+    const run = JSON.parse(f.responses.get(f.sourceRunUrl));
+    editReport(f.descriptor, "publicVerification", (report) => {
+      mutate(report.sourceCi, run);
+      // These are caller claims, not GitHub API proof or reviewed authority.
+      // Keep the claimed product fixed and the caller input consistent with
+      // the actual run head even when that head is an unapproved harness.
+      report.sourceCi.checkoutProof = { sourceCommit: report.sourceCi.sourceCommit, verified: true };
+      report.sourceCi.dispatchInputs = { reviewed_harness_commit: run.head_sha };
+      assert.equal(report.sourceCi.sourceCommit, f.sourceBinding.productSourceCommit);
+    });
+    f.responses.set(f.descriptor.evidence.publicVerification.url, f.descriptor.evidence.publicVerification.content);
+    f.responses.set(f.sourceRunUrl, json(run));
+    assert.equal(run.conclusion, "success");
+    const jobs = JSON.parse(f.responses.get(`${f.api}/actions/runs/1233/attempts/1/jobs?per_page=100`));
+    assert.equal(jobs.jobs[0].conclusion, "success");
+
+    // The browser checks curated claims; actual execution is checked online.
+    if (localError) await assert.rejects(validatePreviewDescriptor(f.descriptor), localError);
+    else assert.equal((await validatePreviewDescriptor(f.descriptor)).status, "ready");
+    if (onlineError) await assert.rejects(verifyPublicPreviewEvidence(f.descriptor, f.fetcher), onlineError);
+    else assert.equal((await verifyPublicPreviewEvidence(f.descriptor, f.fetcher)).status, "ready");
+  });
+}
 
 test("reviewed source CI retains the existing required gate and advisory failure policy", async () => {
   const f = sourceCiFixture();
@@ -236,7 +279,6 @@ for (const [name, mutate] of [
   ["candidate-origin authority substituted", (ci) => { ci.sourceBinding = "preview-candidate-39468905473"; }],
   ["missing binding", (ci) => { delete ci.sourceBinding; }],
   ["product substitution", (ci) => { ci.sourceCommit = SOURCE; }],
-  ["harness substitution", (ci) => { ci.harnessRevision = SOURCE; }],
   ["workflow substitution", (ci) => { ci.workflowPath = ".github/workflows/preview-candidate.yml"; }],
   ["branch substitution", (ci) => { ci.branch = "dev/other-source-ci"; }],
   ["PR event substituted", (ci) => { ci.event = "pull_request"; }],
@@ -252,7 +294,6 @@ for (const [name, mutate] of [
 for (const [name, mutate] of [
   ["changed immutable workflow", (f) => { f.responses.set(f.sourceWorkflowUrl, `${f.responses.get(f.sourceWorkflowUrl)}\n# changed`); }],
   ["product incorrectly reported as run head", (f, run) => { run.head_sha = f.sourceBinding.productSourceCommit; }],
-  ["another harness head", (_f, run) => { run.head_sha = SOURCE; }],
   ["another branch", (_f, run) => { run.head_branch = "dev/other-source-ci"; }],
   ["another workflow", (_f, run) => { run.path = ".github/workflows/preview-candidate.yml"; }],
   ["PR merge event", (_f, run) => { run.event = "pull_request"; }],

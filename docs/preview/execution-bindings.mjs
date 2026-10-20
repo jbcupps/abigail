@@ -12,9 +12,11 @@ export const REVIEWED_WORKFLOW_BINDINGS = Object.freeze({
     event: "workflow_dispatch",
     branch: "dev/preview-source-ci-0.0.76",
     productCheckoutPath: ".",
-    // Six checkout guards verify the fixed product HEAD and reviewed workflow
-    // revision before existing source regression. This uses the default build
-    // profile and establishes no preview or signed-installer acceptance.
+    // Six checkout guards verify the fixed product HEAD and caller-declared
+    // dispatch revision consistency. They do not establish harness approval;
+    // this reviewed record and online run/workflow verification bind acceptance.
+    // Source regression uses the default build profile and establishes no
+    // preview or signed-installer acceptance.
   }),
   "preview-candidate-39468905473": Object.freeze({
     purpose: "candidate-origin",

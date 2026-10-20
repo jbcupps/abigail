@@ -94,8 +94,13 @@ Two records are currently reviewed:
 
 The source-CI workflow blob SHA-256 is
 `72d101c7913da15d1fb7d1af610a85b3ababbb23427215426b5e1b740ba75cd9`.
-All six checkout jobs verify the fixed product HEAD and reviewed harness before
-executing existing tests. Ordinary push, pull-request and scheduled behavior,
+All six checkout jobs verify the fixed product HEAD and caller-confirmed
+dispatch revision before executing existing tests. That consistency check does
+not establish harness approval. The reviewed binding plus online GitHub
+run/workflow verification establishes which executions qualify as evidence;
+an arbitrary green development run or offline-only descriptor check does not.
+See the [PR #299 review assessment](PREVIEW_SOURCE_CI_REVIEW.md).
+Ordinary push, pull-request and scheduled behavior,
 permissions, required gates and advisory audit treatment are unchanged.
 Source regression uses the normal build profile; it does not validate the
 signed preview artifact or GUI. Existing Windows integration tests may create
@@ -105,14 +110,18 @@ local test against the operator's account.
 
 The reviewed source-CI branch is pushed. Default-branch registration is a
 workflow-only patch based on main `8b68506b9443df59e486e181d81e998ec4596d62`,
-on `dev/register-preview-source-ci` at
+on `dev/register-preview-source-ci`, initially at
 `fd3f7a02ba81d5d5325f86d9e9dc3a7a5f9656ea`. The first PR-opening attempt was
 rejected under the earlier dev-only boundary and did not execute. After the
 parent supplied Jim's later repository authorization, one permitted retry
 created [PR #299](https://github.com/jbcupps/abigail/pull/299).
-Normal PR CI run `39479148145` started. Registration merge and the separate
-manual exact-product source-CI run remain pending; this PR run tests the normal
-PR merge source and must not be reported as product f7 source CI.
+Normal PR CI run `39479148145` completed: the required gate and all required
+jobs passed; the existing advisory audit failed, leaving the overall run
+conclusion failed. The parent held registration merge for unresolved review
+comment `4329007814`; the linked assessment records the correction and proposed
+disposition. Any new PR head needs its own normal checks. The separate manual
+exact-product source-CI run remains pending; normal PR CI tests the PR merge
+source and must not be reported as product f7 source CI.
 
 The separately reviewed [source CI execution scope](PREVIEW_SOURCE_CI_SCOPE.md)
 records the actual native DPAPI and disposable local key fixtures, the Linux
@@ -131,13 +140,17 @@ observations and does not turn the old sanitized report into a full pass.
 - Importer: 47 passed, one environment-dependent junction test skipped;
   independently rerun and reviewed. Synthetic tests mock only the adjacent
   native verifier; the real import/staging above used the actual verifier.
-- Preview descriptor/online binding: 107 passed, independently rerun and
-  reviewed, including missing continuity and stage failures.
-- Preview plus release-provenance regression: 124 passed, one Windows junction
-  test skipped. These totals include the 107 preview tests, not additional
+- Preview descriptor/online binding: 109 passed, independently rerun and
+  reviewed, including combined harness substitution and legacy fallback cases,
+  missing continuity and stage failures.
+- Preview plus release-provenance regression: 126 passed, one Windows junction
+  test skipped. These totals include the 109 preview tests, not additional
   independent acceptance cases.
-- Exact-source CI policy: 119 passed, including all six extracted Bash guards
-  and mutations that preserve prior required gates and ordinary triggers.
+- Exact-source CI policy: 125 passed, including all six extracted Bash guards,
+  both approved and arbitrary matching caller revisions, and mutations that
+  preserve prior required gates and ordinary triggers. The wording-only
+  registration correction preserves all six guards exactly; removing manual
+  additions reproduces parsed main CI at `8b68506` exactly.
 - Syntax and whitespace checks passed. The checked-in unavailable descriptor
   still produces no installer link or public network requests.
 

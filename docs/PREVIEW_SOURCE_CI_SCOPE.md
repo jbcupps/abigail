@@ -11,7 +11,10 @@ it is not dispatch approval or an executed result.
   `72d101c7913da15d1fb7d1af610a85b3ababbb23427215426b5e1b740ba75cd9`.
 
 The six checkout jobs verify the fixed product HEAD independently of the
-workflow revision. This is ordinary source regression with the normal build
+workflow revision. Their caller-input comparison establishes revision
+consistency, not review approval. The [review assessment](PREVIEW_SOURCE_CI_REVIEW.md)
+records the separate immutable binding and online verification required to use
+a run as evidence. This is ordinary source regression with the normal build
 profile. It is not acceptance of the signed preview installer or native GUI.
 
 ## Dispatch boundary
