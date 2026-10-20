@@ -13,8 +13,10 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use uuid::Uuid;
 
+mod creation;
 mod hive;
 
+pub use creation::{AgentCreationError, AgentCreationStatus};
 pub use hive::{HiveEntity, HIVE_ENTITY_NAME};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -415,7 +417,53 @@ impl IdentityManager {
     /// Returns (uuid, agent_dir).
     pub fn create_agent(&self, name: &str) -> Result<(String, PathBuf), String> {
         let uuid = Uuid::new_v4().to_string();
+        let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
         let agent_dir = self.identities_dir().join(&uuid);
+        if gc
+            .creation_attempts
+            .values()
+            .any(|attempt| attempt.entity_id == uuid)
+            || agent_dir.try_exists().map_err(|e| e.to_string())?
+        {
+            return Err("New entity directory already exists.".to_string());
+        }
+        self.initialize_agent_files(&uuid, name, &gc.default_theme)?;
+
+        // Publish in memory only after the atomic registry write succeeds.
+        let mut next = gc.clone();
+        next.register_agent(AgentEntry {
+            id: uuid.clone(),
+            name: name.to_string(),
+            is_hive: false,
+            directory: self.registry_directory_for(&uuid),
+        })
+        .map_err(|e| e.to_string())?;
+        next.save(&self.data_root).map_err(|e| e.to_string())?;
+        *gc = next;
+        drop(gc);
+        let _ = self.create_documents_folder(&uuid);
+        tracing::info!("Created new agent: {} ({})", name, uuid);
+        Ok((uuid, agent_dir))
+    }
+
+    /// Initialize a reserved directory, preserving an existing valid config on replay.
+    fn initialize_agent_files(&self, uuid: &str, name: &str, theme: &str) -> Result<(), String> {
+        let agent_dir = self.identities_dir().join(uuid);
+        let config_path = agent_dir.join("config.json");
+        if config_path.try_exists().map_err(|e| e.to_string())? {
+            // Reading directly avoids AppConfig::load's migration/write side effect.
+            let content = std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+            let existing: AppConfig = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+            if existing.is_hive
+                || existing.data_dir != agent_dir
+                || existing.agent_name.as_deref() != Some(name)
+            {
+                return Err(
+                    "Reserved entity config does not match the creation attempt.".to_string(),
+                );
+            }
+            return Ok(());
+        }
 
         // Create agent directory structure
         std::fs::create_dir_all(&agent_dir).map_err(|e| e.to_string())?;
@@ -469,33 +517,11 @@ impl IdentityManager {
             hive_daemon_url: "http://127.0.0.1:43141".to_string(),
             entity_daemon_url: "http://127.0.0.1:43142".to_string(),
             iggy_connection: None,
-            theme_id: {
-                let gc = self.global_config.read().map_err(|e| e.to_string())?;
-                Some(gc.default_theme.clone())
-            },
+            theme_id: Some(theme.to_string()),
             autonomy_profile: Default::default(),
         };
-        let config_path = agent_dir.join("config.json");
         config.save(&config_path).map_err(|e| e.to_string())?;
-
-        // Register in global config
-        {
-            let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
-            gc.register_agent(AgentEntry {
-                id: uuid.clone(),
-                name: name.to_string(),
-                is_hive: false,
-                directory: self.registry_directory_for(&uuid),
-            })
-            .map_err(|e| e.to_string())?;
-            gc.save(&self.data_root).map_err(|e| e.to_string())?;
-        }
-
-        // Create per-agent Documents folder
-        let _ = self.create_documents_folder(&uuid);
-
-        tracing::info!("Created new agent: {} ({})", name, uuid);
-        Ok((uuid, agent_dir))
+        Ok(())
     }
 
     /// Sign an agent's public key with the Hive master key after birth completes.

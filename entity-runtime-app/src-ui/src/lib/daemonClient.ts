@@ -21,8 +21,9 @@ export async function entityHealth(): Promise<boolean> {
   }
 }
 
-export async function getStatus(): Promise<unknown> {
-  const res = await entityFetch("/v1/status", { headers: { Accept: "application/json" } });
+async function getEntityJson(path: string, signal?: AbortSignal): Promise<unknown> {
+  const res = await entityFetch(path, { headers: { Accept: "application/json" }, signal });
+  if (!res.ok) throw new Error(`Entity status request failed (${res.status}).`);
   const json: unknown = await res.json();
   // Status may or may not be wrapped in the standard envelope; handle both.
   if (json && typeof json === "object" && "ok" in json) {
@@ -31,4 +32,12 @@ export async function getStatus(): Promise<unknown> {
     return envelope.data ?? {};
   }
   return json;
+}
+
+export function getStatus(signal?: AbortSignal): Promise<unknown> {
+  return getEntityJson("/v1/status", signal);
+}
+
+export function getSessionStatus(signal?: AbortSignal): Promise<unknown> {
+  return getEntityJson("/v1/session/status", signal);
 }

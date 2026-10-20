@@ -3,6 +3,9 @@ name = "abigail-identity"
 version.workspace = true
 edition.workspace = true
 
+[features]
+test-fixtures = []
+
 [dependencies]
 abigail-core = { path = "../abigail-core" }
 ed25519-dalek.workspace = true

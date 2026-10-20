@@ -1,0 +1,38 @@
+Runtime frontend final validation
+UTC: 2026-10-20T08:32:20.3335240Z
+Workspace: <workspace>\entity-runtime-app\src-ui
+
+$ npm test
+
+> abigail-entity-runtime-ui@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.8 <workspace>/entity-runtime-app/src-ui
+
+
+ Test Files  6 passed (6)
+      Tests  68 passed (68)
+   Start at  04:32:21
+   Duration  4.74s (transform 1.25s, setup 3.01s, import 2.78s, tests 2.36s, environment 14.28s)
+
+TEST_EXIT_CODE=0
+
+$ npm run build
+
+> abigail-entity-runtime-ui@0.1.0 build
+> tsc && vite build
+
+vite v8.0.16 building client environment for production...
+
+transforming...Γ£ô 40 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.40 kB Γöé gzip:  0.27 kB
+dist/assets/index-Bqe3qvNS.css   22.55 kB Γöé gzip:  5.96 kB
+dist/assets/core-CYtF6UP-.js      1.07 kB Γöé gzip:  0.53 kB
+dist/assets/window-ChqIDTcg.js   14.17 kB Γöé gzip:  3.47 kB
+dist/assets/index-DPhaUW0d.js   236.17 kB Γöé gzip: 74.18 kB
+
+Γ£ô built in 1.37s
+BUILD_EXIT_CODE=0

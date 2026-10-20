@@ -86,7 +86,10 @@ async fn main() -> anyhow::Result<()> {
         Commands::Create { name } => {
             let resp: ApiEnvelope<CreateEntityResponse> = client
                 .post(format!("{}/v1/entities", base))
-                .json(&CreateEntityRequest { name })
+                .json(&CreateEntityRequest {
+                    name,
+                    creation_key: None,
+                })
                 .send()
                 .await?
                 .json()

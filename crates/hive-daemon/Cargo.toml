@@ -33,4 +33,5 @@ reqwest.workspace = true
 sha2.workspace = true
 
 [dev-dependencies]
+abigail-identity = { path = "../abigail-identity", features = ["test-fixtures"] }
 daemon-test-harness = { path = "../daemon-test-harness" }

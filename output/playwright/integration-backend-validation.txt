@@ -1,0 +1,92 @@
+First Signal integration: current-source backend validation
+Recorded: 2026-10-20
+Branch: dev/first-signal-integration-0.0.76
+Base HEAD: 17b636b9e5f10b812deb287ad2c6637188991ec2
+Scope: uncommitted integration sources in this worktree; no release or deployment.
+
+ISOLATION
+All commands below used --locked --offline and one Cargo job.
+Test TEMP/TMP were process-scoped to children of this worktree's target directory.
+Profile checks use the actual Axum router and actual presence.json storage with a
+synthetic identity resolver and unique temporary directories. Requests are sent
+directly to the service; no TCP listener or daemon process is started.
+Creation tests use the actual IdentityManager with a test-only, fixed-key fixture
+and temporary registry/config/Documents paths. They do not initialize the normal
+credential/vault startup path. No provider, real conversation, OS keyring, or user
+Documents access is part of these test runs.
+
+CURRENT PROFILE ROUTER AND STORAGE CHECK
+Command:
+  cargo test --locked --offline -p hive-daemon --test presence_routes -j 1
+Retained raw log: target/presence-routes-tests.log
+Finished test profile [unoptimized + debuginfo] in 40.58s.
+Result: 11 passed; 0 failed; 0 ignored; 0 filtered out; finished in 0.05s.
+
+Router tests (5):
+  first_profile_save_survives_router_recreation
+  rejected_http_updates_keep_the_saved_profile
+  corrupt_saved_profile_returns_a_visible_error
+  failed_save_reports_error_and_can_be_retried
+  unregistered_identity_has_no_profile
+Included source storage tests (6):
+  missing_profile_defaults_to_the_registered_name
+  save_reopen_and_replace_preserve_only_the_profile
+  invalid_updates_leave_previous_profile_intact
+  unicode_limits_count_characters_and_accept_document_whitespace
+  unknown_enums_and_authority_fields_are_rejected
+  corrupt_or_oversized_saved_profile_is_not_silently_reset
+The target includes the storage unit tests directly; no second storage run was
+needed and no tests are counted twice.
+
+CREATION CHECKS ALREADY COMPLETED ON THESE SOURCES
+Command:
+  cargo test -p abigail-identity --locked --offline -j 1 creation::tests
+Retained raw log: target/creation-identity-tests.log
+Result: 15 passed; 0 failed; 0 ignored; 11 filtered out; finished in 0.08s.
+Coverage: concurrent same-key replay, conflict rejection, absent lookup,
+reservation and completion reload, deleted completion, malformed partial config,
+preserving existing files, registry/file write failures, and legacy callers.
+
+Command:
+  cargo test -p hive-daemon --bin hive-daemon --locked --offline -j 1 creation_http_tests -- --nocapture
+Retained raw log: target/creation-handler-tests.log
+Result: 6 passed; 0 failed; 0 ignored; 27 filtered out; finished in 0.05s.
+Coverage: actual creation handlers with real isolated registry storage, exact
+lookup, concurrent replay and manager reload, reserved recovery, conflict/deletion
+status codes, storage-error envelopes, and legacy response compatibility.
+
+Command (rechecked while recording this artifact):
+  cargo test --locked --offline -p hive-core -j 1
+Retained raw log: target/creation-core-tests.log
+Result: 3 passed; 0 failed; 0 ignored; 0 filtered out; finished in 0.00s.
+Doc tests: 0 tests.
+Coverage: optional creation key compatibility, discriminated recovery DTO shapes,
+and the existing entity-config patch serialization check.
+
+Targeted creation subtotal: 24 distinct tests passed.
+Profile router/storage subtotal: 11 distinct tests passed.
+Combined targeted total: 35 distinct tests passed, 0 failures.
+
+NORMAL BINARY BUILDS ALREADY COMPLETED
+Command:
+  cargo build -p hive-daemon -p entity-daemon --locked --offline -j 1
+Retained raw log: target/creation-daemon-binaries.log
+Finished dev profile [unoptimized + debuginfo] in 14m 49s.
+Outputs: target/debug/hive-daemon.exe and target/debug/entity-daemon.exe.
+Normal abigail-identity build fingerprint: features=[].
+These binaries were built, not launched.
+
+The earlier compile-only check also succeeded:
+  cargo test -p hive-daemon --locked --offline -j 1 creation_http_tests --no-run
+Retained raw log: target/creation-daemon-build-approved.log
+Finished test profile [unoptimized + debuginfo] in 26m 25s.
+This compiled integration/startup test executables but did not execute them.
+
+LIMITS
+This is targeted source and in-process router/storage evidence, not full-daemon
+startup, desktop, live-provider, installer, or real network acceptance.
+Restart coverage reloads registry/storage through new manager/router instances;
+it does not launch or terminate daemon processes. Creation serialization assumes
+one Hive owner per data root; independent Hive processes sharing a root remain
+unsupported. Cargo emitted incremental hard-link fallback warnings and copied
+cache files successfully; all recorded commands above completed successfully.

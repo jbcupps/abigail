@@ -1,0 +1,94 @@
+Presence backend checks — 2026-10-19
+
+Source checked:
+crates/hive-daemon/src/presence_profile.rs
+crates/hive-daemon/src/presence.rs
+crates/hive-daemon/src/main.rs
+
+Focused test executable compiled directly from current presence_profile.rs with
+rustc 1.96.0, using read-only cached dependencies and abigail_core's existing real
+Windows atomic writer. No shared-target changes, dependency build, installer,
+provider connection or service startup was needed.
+
+Result: 6 passed; 0 failed; 0 ignored.
+- unicode_limits_count_characters_and_accept_document_whitespace
+- unknown_enums_and_authority_fields_are_rejected
+- missing_profile_defaults_to_the_registered_name
+- invalid_updates_leave_previous_profile_intact
+- corrupt_or_oversized_saved_profile_is_not_silently_reset
+- save_reopen_and_replace_preserve_only_the_profile
+
+The initial test run placed files in Windows sandbox's redirected temporary
+directory: 4 passed, 2 atomic-write cases received Access denied. Running the same
+executable with TEMP/TMP explicitly inside the authorized workspace passed all 6.
+
+Full current hive-daemon main.rs Rust metadata type check: exit 0, no diagnostics.
+Dependencies were the coherent cached .rmeta graph from existing hive-daemon
+fingerprint ec5fccde04a9f4cd. This validates source and route wiring; it is not a
+fresh daemon binary or a live HTTP integration run.
+
+Added integration test presence_roundtrip_is_scoped_and_does_not_change_runtime_config
+is gated by the repository's existing ABIGAIL_DAEMON_INTEGRATION convention and
+requires a newly built hive-daemon binary before execution. It was not run.
+
+git diff --check -- crates/hive-daemon: exit 0 (line-ending advisory only).
+
+Follow-up link preflight:
+The current complete daemon source also passed rustc --emit metadata against the
+fully linkable, coherent cached .rlib graph from hive-daemon-c658a33622b77892
+(July 2026; same Rust 1.96.0 toolchain): exit 0, no diagnostics. This was a source
+compatibility preflight only. No newly linked daemon binary was produced.
+
+Live daemon integration was NOT attempted after inspection found that even with
+--data-dir pointing to a synthetic test directory:
+- IdentityManager::new calls HybridUnlockProvider::root_kek.
+- root_kek reads the actual OS keyring before raw/passphrase environment overrides.
+- create_agent calls create_documents_folder, resolving USERPROFILE/Documents.
+The validation scope excluded launching the full daemon under these conditions
+or substituting a fake-handler harness for the unrun integration test. No OS
+keyring access, provider configuration, real user data access, or model turn was
+needed or attempted for the focused profile checks. No approval denial occurred.
+
+The parameterized reproduction helper is backend-check-source.ps1. Supply a
+cached Rust dependency directory and, for storage checks, the matching Windows
+native-library directories explicitly. Its help comments show portable examples.
+The exact dependency hashes record the historical coherent graph used above;
+arbitrary or fresh caches will not necessarily contain those artifacts. This
+helper is evidence tooling, not a substitute for a clean Cargo build in CI.
+It compiles current source into this output directory and only reads the supplied
+dependency caches; it does not run a daemon.
+
+Publication recheck - 2026-10-19:
+In the dedicated dev/first-signal worktree, the parameterized storage check was
+rerun with explicit matching dependency and native-library directories: all 6
+tests passed. The full daemon metadata results above remain historical evidence;
+no live daemon HTTP integration test was run during publication preparation.
+
+Reliability follow-up - 2026-10-19:
+The current production profile router was extracted into presence::router and
+mounted by main.rs. IdentityManager still resolves the registered Entity name
+and guarded directory exactly as before. Tests substitute only registered
+identity lookup and import presence.rs/presence_profile.rs directly.
+
+check-presence-routes.ps1 compiled and ran 11 tests: 5 actual in-process Axum
+route cases plus the 6 production storage unit tests. Result: 11 passed, 0 failed.
+Coverage includes initial defaults, first profile save, persisted values after
+router recreation, invalid/malformed/body-limit updates preserving saved bytes,
+corrupt storage errors, retry after failed save, and unregistered identities.
+The body-limit test uses a valid profile plus excessive JSON whitespace, so it
+cannot pass merely because field-length validation rejects the input.
+
+All requests are HTTP Request/Body objects dispatched through the real Router;
+no sockets, daemon startup, keyring, Documents, actual POST /v1/entities, provider,
+or model is used. An initial loopback-client attempt encountered Windows socket
+error 10013 and was abandoned without escalation. The final direct route tests
+pass under the existing sandbox. Outputs and temporary test files are beneath
+the worktree's ignored target/presence-route-check directory.
+
+Full current main.rs metadata compilation also passed exit 0 with the same
+coherent cached dependency graph. rustfmt --check and git diff --check passed.
+Dependencies and lockfiles are unchanged. The exact cached hashes are recorded
+in crates/hive-daemon/tests/check-presence-routes.ps1; matching native libraries
+and dependency paths must be supplied explicitly. These results improve source
+and route/storage evidence; they do not represent a clean Cargo build or resolve
+the full daemon startup/Entity-creation integration gap above.

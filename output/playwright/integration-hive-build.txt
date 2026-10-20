@@ -1,0 +1,18 @@
+
+> abigail-hive-ui@0.1.0 build
+> tsc && vite build
+
+vite v8.0.16 building client environment for production...
+[2K
+transforming...Γ£ô 46 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.41 kB Γöé gzip:  0.28 kB
+dist/assets/index-Q89kigJl.css   22.84 kB Γöé gzip:  6.01 kB
+dist/assets/core-CYtF6UP-.js      1.07 kB Γöé gzip:  0.53 kB
+dist/assets/window-ChqIDTcg.js   14.17 kB Γöé gzip:  3.47 kB
+dist/assets/index-DS-LQVKS.js   294.93 kB Γöé gzip: 89.67 kB
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `vite:build-html`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+Γ£ô built in 4.92s

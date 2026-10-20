@@ -320,6 +320,7 @@ impl HiveOperations for HttpHiveOps {
         let url = format!("{}/v1/entities", self.client.base_url);
         let body = hive_core::CreateEntityRequest {
             name: name.to_string(),
+            creation_key: None,
         };
         let resp: ApiEnvelope<CreateEntityResponse> = self
             .client

@@ -32,7 +32,13 @@ Abigail manages multiple personal AI Entities that the user, mentor, or family h
 **Origin Story (Respect This Link)**
 Abigail grew from the vision in "Toward a Decentralized Trust Framework for Verifiable and Ethically Aligned AI" (see `documents/DECENTRALIZED_TRUST_PAPER_ALIGNMENT.md`). That remains the philosophical foundation. The current mission is personal and human-scale: give families their own private, multi-capable AI Entities coordinated by Abigail.
 
+**Current bounded integration (2026-10-20)**
+
+`dev/first-signal-integration-0.0.76` integrates First Signal onto signed-stable main `17b636b` under the current product task. Preserve release safeguards, current conversation history, provider checks, and the original development branches. Creation recovery uses the exact persisted key; presentation metadata remains separate from birth/model instructions. Integration validation and independent review passed; the development commit/push is authorized. Main/beta merges and release remain held while acceptance gaps are open. The existing bus and incomplete skill lifecycle are mapped in `documents/BUS_AND_SKILL_SOURCE_MAP.md`; this task does not implement skill promotion or access Iris's library.
+
 **How You Should Work**
+
+The First Signal presence slice uses Hive-owned `presence.json` presentation metadata and the existing Entity text gateway. Appearance, imported briefs, and demonstration animation never grant permissions or indicate model reasoning. Keep actual request, input, and playback signals separate. See `documents/FIRST_SIGNAL.md` before extending its media or persona adapters.
 - Prefer the simplest solution that feels magical to a busy parent.
 - Prefer `beta` as the base branch for iterative PRs unless the user explicitly asks for a stable hotfix to `main`.
 - When adding capability, always highlight multi-provider flexibility.

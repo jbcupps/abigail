@@ -57,6 +57,8 @@ pub struct EntityInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateEntityRequest {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_key: Option<String>,
 }
 
 /// Response after creating a new entity.
@@ -64,6 +66,34 @@ pub struct CreateEntityRequest {
 pub struct CreateEntityResponse {
     pub id: String,
     pub directory: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_key: Option<String>,
+}
+
+/// Exact creation-key recovery. An explicit absent result proves API support.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityCreationResponse {
+    pub creation_key: String,
+    #[serde(flatten)]
+    pub status: EntityCreationState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum EntityCreationState {
+    Absent,
+    Reserved {
+        name: String,
+    },
+    Complete {
+        name: String,
+        id: String,
+        directory: String,
+    },
+    Unavailable {
+        name: String,
+        id: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -611,6 +641,70 @@ pub struct OutboxSyncResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn entity_creation_preserves_legacy_json_and_optional_key() {
+        let request: CreateEntityRequest =
+            serde_json::from_value(serde_json::json!({"name":"Legacy"})).unwrap();
+        assert!(request.creation_key.is_none());
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            serde_json::json!({"name":"Legacy"})
+        );
+        let response = CreateEntityResponse {
+            id: "id".to_string(),
+            directory: "identities/id".to_string(),
+            creation_key: None,
+        };
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            serde_json::json!({"id":"id","directory":"identities/id"})
+        );
+        let keyed: CreateEntityRequest =
+            serde_json::from_value(serde_json::json!({"name":"Signal","creation_key":"key"}))
+                .unwrap();
+        assert_eq!(keyed.creation_key.as_deref(), Some("key"));
+    }
+
+    #[test]
+    fn entity_creation_recovery_has_discriminated_exact_shapes() {
+        let cases = [
+            (
+                EntityCreationState::Absent,
+                serde_json::json!({"creation_key":"key","state":"absent"}),
+            ),
+            (
+                EntityCreationState::Reserved {
+                    name: "Signal".into(),
+                },
+                serde_json::json!({"creation_key":"key","state":"reserved","name":"Signal"}),
+            ),
+            (
+                EntityCreationState::Complete {
+                    name: "Signal".into(),
+                    id: "id".into(),
+                    directory: "directory".into(),
+                },
+                serde_json::json!({"creation_key":"key","state":"complete","name":"Signal","id":"id","directory":"directory"}),
+            ),
+            (
+                EntityCreationState::Unavailable {
+                    name: "Signal".into(),
+                    id: "id".into(),
+                },
+                serde_json::json!({"creation_key":"key","state":"unavailable","name":"Signal","id":"id"}),
+            ),
+        ];
+        for (status, expected) in cases {
+            let value = serde_json::to_value(EntityCreationResponse {
+                creation_key: "key".into(),
+                status,
+            })
+            .unwrap();
+            assert_eq!(value, expected);
+            serde_json::from_value::<EntityCreationResponse>(value).unwrap();
+        }
+    }
 
     #[test]
     fn update_entity_config_request_serializes_patch_fields() {

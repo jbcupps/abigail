@@ -37,3 +37,8 @@ When the docs and implementation disagree, fix the implementation or update this
 - Accessibility baseline: [WCAG 2.2 AA](https://www.w3.org/TR/WCAG22/).
 - Security baseline: [OWASP ASVS](https://owasp.org/www-project-application-security-verification-standard/), [OWASP Cheat Sheet Series](https://cheatsheetseries.owasp.org/), and Abigail's local-first privacy model.
 - Privacy baseline: data minimization, purpose limitation, storage limitation, and user control.
+
+
+## First Signal presence study
+
+The user-directed First Signal study is a deliberate cinematic variant under development: an original procedural portrait with restrained light and spatial framing. It preserves readable system controls, local-data explanations, keyboard focus, reduced motion, and text-only operation. The portrait can reflect documented request/token/playback events only; a timer is not a reasoning signal. Video and speech remain adapter work unless actual assets/playback are connected. See `documents/FIRST_SIGNAL_INTEGRATION.md` for validation and scope; this is not a claim that the existing default design system has shipped this variant.

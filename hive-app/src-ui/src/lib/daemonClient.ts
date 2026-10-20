@@ -86,6 +86,7 @@ export interface HiveStatus {
   any_provider_configured: boolean;
   setup_complete: boolean;
   helper?: HelperInfo | null;
+  fixture?: boolean;
 }
 
 export async function getStatus(): Promise<HiveStatus> {

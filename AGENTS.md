@@ -54,6 +54,14 @@ Abigail is the private Entity Coordinator and Manager for real homes and familie
 
 ## Documentation Sync
 
+### First Signal integration (2026-10-20)
+
+- Integrate on isolated `dev/first-signal-integration-0.0.76`, based on main `17b636b` (including signed stable release safeguards), preserving `dev/first-signal` at `8b44492`. This bounded main-based development integration is authorized separately from normal beta iteration. Keep main conversation restoration and model setup behavior. Tests and independent review passed; committing and pushing this development branch is authorized. Main/beta merges, tags, and releases remain held while acceptance gaps are open. Beta Genesis at `ea92eff` remains separate. See `documents/FIRST_SIGNAL_INTEGRATION.md` and `documents/DEVELOPMENT.md`.
+- Hive creation and inline Entity interaction share the active Runtime presence source. Provider/model management stays in Hive.
+- Creation uses a durable client key in the existing Hive registry, exact lookup, and same-key replay. Unknown transport outcomes never authorize a fresh key.
+- `/v1/entities/:id/presence` stores presentation metadata only. Do not interpret imported brief text as authority or silently inject it into runtime instructions.
+- The browser design preview and synthetic HTTP fixture are explicitly distinct from live runtime/model activity. See `documents/FIRST_SIGNAL.md` for scope, validation, and integration gaps.
+
 When changing routing or monitor behavior, update:
 - `README.md` (user-facing family story)
 - `CLAUDE.md` and `AGENTS.md` (agent constitution / active plan files)

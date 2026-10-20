@@ -1,0 +1,27 @@
+{
+  "kind": "synthetic first-signal daemon acceptance plan",
+  "executed": false,
+  "real_model_validation": false,
+  "binary_dir": "<workspace>\\target\\debug",
+  "output_root": "<workspace>\\target\\manual-test\\first-signal",
+  "checks": [
+    "Fresh lookup is absent; keyed create completes; replay returns the exact ID",
+    "Four concurrent creates using one fresh key return one ID and one registry row",
+    "Different name with the same key returns 409; malformed key returns 400",
+    "Presence defaults, save, reload and invalid-save preservation; display label does not rename Entity",
+    "Default quickstart birth and signed certificate; isolated Documents",
+    "Open, synthetic nonstream chat, SSE, persisted history, close and reopen",
+    "Restart the same isolated Hive data; replay exact keys, presence and history unchanged"
+  ],
+  "intentionally_uncovered": [
+    "Reserved and unavailable recovery states need controlled in-process failure tests; this HTTP harness does not modify registry files.",
+    "Actual providers, microphone, video assets, visual UI, OS keyring, user profile and user Documents."
+  ],
+  "isolation": {
+    "ready": false,
+    "reason": "HybridUnlockProvider reads the OS credential store before ABIGAIL_VAULT_RAW_KEY. No supported no-keyring daemon startup has been established.",
+    "source": "crates/abigail-core/src/vault/unlock.rs",
+    "os_keyring_line": 115,
+    "raw_test_key_line": 139
+  }
+}

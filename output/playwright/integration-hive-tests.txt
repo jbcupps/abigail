@@ -1,0 +1,19 @@
+Hive frontend full test validation
+UTC: 2026-10-20T08:41:03.2109319Z
+Workspace: <workspace>\hive-app\src-ui
+
+$ npm test
+
+> abigail-hive-ui@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.8 <workspace>/hive-app/src-ui
+
+
+ Test Files  10 passed (10)
+      Tests  264 passed (264)
+   Start at  04:41:04
+   Duration  6.96s (transform 2.93s, setup 4.95s, import 6.14s, tests 7.04s, environment 29.62s)
+
+TEST_EXIT_CODE=0
