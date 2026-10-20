@@ -1,0 +1,2 @@
+# Preview evidence filenames and descriptors bind exact bytes, including newlines.
+docs/preview/evidence/*.json -text

@@ -117,7 +117,9 @@ real-model acceptance must be labelled separately.
    evidence from actual successful checks. Do not publish credentials, personal
    paths, model conversations, or full workflow logs. Store those JSON reports
    at `docs/preview/evidence/<sha256>.json` in a reviewed repository commit.
-   Reference their exact commit-pinned raw GitHub URLs. Public verification
+   The `.gitattributes` rule preserves exact report bytes instead of converting
+   line endings. Verify the committed raw report hash, then reference its exact
+   commit-pinned raw GitHub URL. Public verification
    happens after release creation, so do not append it to finalized release
    assets or change their original provenance.
 5. Prepare a `ready` descriptor with the pinned reports, their exact content and
