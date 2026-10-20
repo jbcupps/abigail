@@ -17,6 +17,7 @@ mod routes;
 mod state;
 mod subagent_runner;
 
+use abigail_core::profile::{ProcessIdentity, ProfileContext};
 use abigail_core::{AppConfig, SecretsVault};
 use abigail_identity::{HiveEntity, IdentityManager};
 use abigail_memory::MemoryStore;
@@ -25,7 +26,7 @@ use abigail_queue::JobQueue;
 use abigail_runtime::{
     collect_declared_secret_keys, register_dynamic_api_skills, register_hive_management_skill,
     register_identity_bound_skills, register_preloaded_skills, register_skill_factory,
-    register_supported_native_skills,
+    register_supported_native_skills_with_profile,
 };
 use abigail_skills::{Skill, SkillExecutionPolicy, SkillExecutor, SkillRegistry};
 use abigail_streaming::{MemoryBroker, StreamBroker};
@@ -50,8 +51,8 @@ struct Cli {
     entity_id: String,
 
     /// Hive daemon URL
-    #[arg(long, default_value = "http://127.0.0.1:43141")]
-    hive_url: String,
+    #[arg(long)]
+    hive_url: Option<String>,
 
     /// Port to listen on
     #[arg(long, default_value = "43142")]
@@ -62,6 +63,10 @@ struct Cli {
     #[arg(long)]
     data_dir: Option<String>,
 
+    /// Explicit application profile. Preview launches require a matching root.
+    #[arg(long)]
+    profile: Option<String>,
+
     /// Reserved for a future external broker.
     /// The current dev build always uses the in-process MemoryBroker.
     #[arg(long)]
@@ -70,17 +75,176 @@ struct Cli {
 
 #[tokio::main]
 async fn main() {
-    // Durable file logging + panic hook FIRST, before any fallible work. Like
-    // hive-daemon, an entity-daemon can end up with invalid inherited stdio
-    // when launched indirectly through a GUI shell, so route logs to a file
-    // independent of `--data-dir`/`directories` resolution. See `abigail_diag`.
-    let component = format!("entity-daemon-{}", Cli::parse().entity_id);
-    abigail_diag::init(&component);
-    if let Err(e) = run().await {
+    let cli = Cli::parse();
+    // Preview preflight must precede diagnostics, credentials, persistence, and
+    // even the first Hive request. Rejected launches do not write fatal logs.
+    let startup = match prepare_startup(&cli) {
+        Ok(startup) => startup,
+        Err(error) => {
+            report_preflight_error(&error);
+            std::process::exit(1);
+        }
+    };
+    let component = format!("entity-daemon-{}", startup.entity_id);
+    if let Some(profile) = startup.profile.as_ref() {
+        if let Err(error) = abigail_diag::init_with_log_dir(&component, &profile.logs_dir()) {
+            report_preflight_error(&error.into());
+            std::process::exit(1);
+        }
+    } else {
+        abigail_diag::init(&component);
+    }
+    if let Err(e) = run(cli, startup).await {
         tracing::error!("entity-daemon exited with error: {e:#}");
         abigail_diag::record_fatal(&component, &format!("{e:#}"));
         std::process::exit(1);
     }
+}
+
+fn report_preflight_error(error: &anyhow::Error) {
+    use std::io::Write as _;
+    let _ = writeln!(std::io::stderr(), "Entity startup refused: {error:#}");
+}
+
+struct StartupContext {
+    profile: Option<Arc<ProfileContext>>,
+    process_identity: Option<ProcessIdentity>,
+    entity_id: String,
+    hive_url: String,
+}
+
+struct PreviewLaunch {
+    hive_url: String,
+    process_instance: String,
+    hive_instance: String,
+}
+
+fn required_launch_uuid(value: Option<&str>, name: &str) -> anyhow::Result<String> {
+    let value = value.ok_or_else(|| anyhow::anyhow!("Preview launch requires {name}"))?;
+    let parsed = uuid::Uuid::parse_str(value)
+        .map_err(|_| anyhow::anyhow!("Preview launch requires a valid {name} UUID"))?;
+    if parsed.to_string() != value {
+        anyhow::bail!("Preview launch requires a canonical {name} UUID");
+    }
+    Ok(value.to_string())
+}
+
+impl PreviewLaunch {
+    fn validate(
+        cli_hive_url: Option<&str>,
+        env_hive_url: Option<&str>,
+        profile_id: Option<&str>,
+        process_instance: Option<&str>,
+        hive_instance: Option<&str>,
+    ) -> anyhow::Result<Self> {
+        required_launch_uuid(profile_id, "ABIGAIL_PROFILE_ID")?;
+        let process_instance =
+            required_launch_uuid(process_instance, "ABIGAIL_PROCESS_INSTANCE_ID")?;
+        let hive_instance = required_launch_uuid(hive_instance, "ABIGAIL_HIVE_INSTANCE_ID")?;
+        if process_instance == hive_instance {
+            anyhow::bail!("Entity and Hive must have distinct process instance IDs");
+        }
+        let hive_url = cli_hive_url
+            .ok_or_else(|| anyhow::anyhow!("Preview Entity launch requires --hive-url"))?;
+        hive_client::validate_preview_hive_url(hive_url)?;
+        if env_hive_url != Some(hive_url) {
+            anyhow::bail!("Preview --hive-url must match ABIGAIL_HIVE_URL exactly");
+        }
+        Ok(Self {
+            hive_url: hive_url.to_string(),
+            process_instance,
+            hive_instance,
+        })
+    }
+}
+
+fn prepare_startup(cli: &Cli) -> anyhow::Result<StartupContext> {
+    let entity_id = uuid::Uuid::parse_str(&cli.entity_id)
+        .context("--entity-id must be a valid UUID")?
+        .to_string();
+    let env_profile = std::env::var("ABIGAIL_PROFILE").ok();
+    let preview_requested = cli.profile.as_deref() == Some("preview")
+        || env_profile.as_deref() == Some("preview")
+        || abigail_core::profile::compiled_preview();
+    let preview_launch = if preview_requested {
+        require_preview_cli(cli.profile.as_deref(), cli.data_dir.as_deref())?;
+        validate_preview_port(cli.port)?;
+        require_persistent_preview(
+            std::env::var_os("ABIGAIL_CI_MODE").is_some(),
+            std::env::var_os("ABIGAIL_DAEMON_INTEGRATION").is_some(),
+        )?;
+        Some(PreviewLaunch::validate(
+            cli.hive_url.as_deref(),
+            std::env::var("ABIGAIL_HIVE_URL").ok().as_deref(),
+            std::env::var("ABIGAIL_PROFILE_ID").ok().as_deref(),
+            std::env::var("ABIGAIL_PROCESS_INSTANCE_ID").ok().as_deref(),
+            std::env::var("ABIGAIL_HIVE_INSTANCE_ID").ok().as_deref(),
+        )?)
+    } else {
+        None
+    };
+    let profile = abigail_core::profile::initialize_process(
+        cli.profile.as_deref(),
+        cli.data_dir.as_deref().map(std::path::Path::new),
+    )?;
+    let (hive_url, process_identity) = match (&profile, preview_launch) {
+        (Some(profile), Some(launch)) => (
+            launch.hive_url,
+            Some(profile.process_identity(&launch.process_instance, &launch.hive_instance)?),
+        ),
+        (None, None) => (
+            cli.hive_url
+                .clone()
+                .unwrap_or_else(|| "http://127.0.0.1:43141".into()),
+            None,
+        ),
+        _ => anyhow::bail!("Preview launch context is inconsistent"),
+    };
+    Ok(StartupContext {
+        profile,
+        process_identity,
+        entity_id,
+        hive_url,
+    })
+}
+
+fn require_preview_cli(profile: Option<&str>, root: Option<&str>) -> anyhow::Result<()> {
+    if profile != Some("preview") || root.is_none_or(|root| root.trim().is_empty()) {
+        anyhow::bail!("Preview Entity launch requires --profile preview and --data-dir");
+    }
+    Ok(())
+}
+
+fn require_persistent_preview(ci_mode: bool, daemon_integration: bool) -> anyhow::Result<()> {
+    if ci_mode || daemon_integration {
+        anyhow::bail!("Preview launch refuses ephemeral CI or daemon integration modes");
+    }
+    Ok(())
+}
+
+fn validate_preview_port(port: u16) -> anyhow::Result<()> {
+    if (43141..=43150).contains(&port) {
+        anyhow::bail!("Preview Entity launch cannot use a reserved stable port; use --port 0");
+    }
+    Ok(())
+}
+
+async fn bind_runtime_listener(
+    port: u16,
+    preview: bool,
+) -> anyhow::Result<tokio::net::TcpListener> {
+    if preview {
+        validate_preview_port(port)?;
+    }
+    for _ in 0..10 {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
+        if !preview || validate_preview_port(listener.local_addr()?.port()).is_ok() {
+            return Ok(listener);
+        }
+        // Drop only our new listener, then request another ephemeral port.
+        drop(listener);
+    }
+    anyhow::bail!("No preview listener outside the reserved stable ports was available")
 }
 
 fn load_entity_config(entity_dir: &std::path::Path) -> anyhow::Result<AppConfig> {
@@ -194,20 +358,23 @@ mod config_loading_tests {
     }
 }
 
-async fn run() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+async fn run(cli: Cli, startup: StartupContext) -> anyhow::Result<()> {
+    let StartupContext {
+        profile,
+        process_identity,
+        entity_id,
+        hive_url,
+    } = startup;
 
     tracing::info!(
         "Entity daemon starting: entity_id={}, hive={}",
-        cli.entity_id,
-        cli.hive_url
+        entity_id,
+        hive_url
     );
-    let entity_id = uuid::Uuid::parse_str(&cli.entity_id)
-        .map(|id| id.to_string())
-        .map_err(|e| anyhow::anyhow!("--entity-id must be a valid UUID: {}", e))?;
 
     // 1. Fetch provider config from Hive
-    let hive_client = HiveClient::new(&cli.hive_url);
+    let hive_client = HiveClient::for_runtime(&hive_url, process_identity.as_ref())?;
+    hive_client.verify_identity().await?;
     let entity_info = hive_client.get_entity(&entity_id).await?;
     tracing::info!(
         "Entity '{}' (birth_complete={})",
@@ -227,7 +394,11 @@ async fn run() -> anyhow::Result<()> {
             certificate.epithet
         );
     }
-    let provider_config = birth_doc.provider_config;
+    let provider_config = if profile.is_some() {
+        router_build::preview_provider_config(birth_doc.provider_config)
+    } else {
+        birth_doc.provider_config
+    };
     tracing::info!(
         "Provider config: ego={:?}, routing_mode={}",
         provider_config.ego_provider_name,
@@ -241,11 +412,22 @@ async fn run() -> anyhow::Result<()> {
         "Issued runtime session for runtime {}",
         session_lease.runtime_id
     );
-    abigail_persistence::configure_hive_transport(
-        &cli.hive_url,
-        &entity_id,
-        &session_lease.lease_id,
-    )?;
+    if let Some(identity) = &process_identity {
+        let mut hive_identity = identity.clone();
+        hive_identity.instance_id = identity.hive_instance_id.clone();
+        abigail_persistence::configure_hive_transport_with_identity(
+            &hive_url,
+            &entity_id,
+            &session_lease.lease_id,
+            &hive_identity,
+        )?;
+    } else {
+        abigail_persistence::configure_hive_transport(
+            &hive_url,
+            &entity_id,
+            &session_lease.lease_id,
+        )?;
+    }
 
     // 2/3. Build providers + router from the resolved config (shared with the
     // governance hot-swap path). Keep a JSON snapshot so the supervision loop
@@ -282,7 +464,9 @@ async fn run() -> anyhow::Result<()> {
     }
 
     // 4. Compute per-entity paths: {data_root}/identities/{entity_id}/
-    let data_root = if let Some(dir) = &cli.data_dir {
+    let data_root = if let Some(profile) = &profile {
+        profile.root().to_path_buf()
+    } else if let Some(dir) = &cli.data_dir {
         std::path::PathBuf::from(dir)
     } else {
         AppConfig::default_paths().data_dir
@@ -297,6 +481,9 @@ async fn run() -> anyhow::Result<()> {
 
     // Load entity config when present so policy fields are enforced in runtime.
     let mut config = load_entity_config(&entity_dir)?;
+    if let Some(profile) = &profile {
+        profile.validate_config_paths(&config)?;
+    }
     config.agent_name = Some(entity_info.name.clone());
     config.birth_complete = entity_info.birth_complete;
     config.is_hive = entity_info.is_hive;
@@ -424,7 +611,7 @@ async fn run() -> anyhow::Result<()> {
     }
 
     // 6. Register HiveManagementSkill (built-in)
-    let http_hive_ops = Arc::new(hive_client::HttpHiveOps::new(&cli.hive_url));
+    let http_hive_ops = Arc::new(hive_client::HttpHiveOps::from_client(hive_client.clone()));
     register_hive_management_skill(&registry, http_hive_ops);
 
     // 6b. Register SkillFactory (allows entity to author skills via chat)
@@ -459,12 +646,15 @@ async fn run() -> anyhow::Result<()> {
             Some(entity_id.clone()),
             allow_local_network,
         );
-        register_supported_native_skills(
+        register_supported_native_skills_with_profile(
             &registry,
             &entity_dir,
             allow_local_network,
             skill_vault.clone(),
-        );
+            &entity_id,
+            profile.as_deref(),
+        )
+        .map_err(anyhow::Error::msg)?;
 
         tracing::info!("Native skills registered for entity-daemon");
     }
@@ -546,8 +736,13 @@ async fn run() -> anyhow::Result<()> {
     let archive_exporter = {
         let pk_path = config.data_dir.join("external_pubkey.bin");
         if pk_path.exists() {
-            abigail_memory::ArchiveExporter::with_defaults(pk_path, config.agent_name.as_deref())
-                .map(Arc::new)
+            abigail_memory::ArchiveExporter::with_profile(
+                pk_path,
+                config.agent_name.as_deref(),
+                &entity_id,
+                profile.clone(),
+            )?
+            .map(Arc::new)
         } else {
             tracing::info!("No external_pubkey.bin found — archive export disabled");
             None
@@ -634,11 +829,15 @@ async fn run() -> anyhow::Result<()> {
 
     // 11b. Register BackupManagementSkill (backup list/preview/import tools).
     {
-        let backup_ops = Arc::new(backup_ops::LocalBackupOps::new(
-            memory.clone(),
-            data_root.clone(),
-            config.agent_name.clone(),
-        ));
+        let backup_ops = Arc::new(
+            backup_ops::LocalBackupOps::new_with_profile(
+                memory.clone(),
+                data_root.clone(),
+                config.agent_name.clone(),
+                profile.clone(),
+            )
+            .map_err(anyhow::Error::msg)?,
+        );
         let backup_skill = abigail_skills::BackupManagementSkill::new(backup_ops);
         let _ = registry.register(
             abigail_skills::manifest::SkillId("builtin.backup_management".to_string()),
@@ -674,9 +873,10 @@ async fn run() -> anyhow::Result<()> {
     };
 
     let state = EntityDaemonState {
+        process_identity,
         entity_id: entity_id.clone(),
         config,
-        hive_url: cli.hive_url.clone(),
+        hive_url: hive_url.clone(),
         runtime_id: session_lease.runtime_id.clone(),
         session_lease,
         router,
@@ -972,10 +1172,14 @@ async fn run() -> anyhow::Result<()> {
         .route("/v1/memory/search", post(routes::memory_search))
         .route("/v1/memory/recent", get(routes::memory_recent))
         .route("/v1/memory/insert", post(routes::memory_insert))
+        .layer(axum::middleware::from_fn_with_state(
+            state.process_identity.clone(),
+            routes::require_preview_identity,
+        ))
         .layer(cors)
         .with_state(state.clone());
 
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", cli.port)).await?;
+    let listener = bind_runtime_listener(cli.port, profile.is_some()).await?;
     let local_addr = listener.local_addr()?;
     let local_url = format!("http://{}", local_addr);
     {
@@ -1129,4 +1333,102 @@ fn spawn_runtime_supervision(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod preview_startup_tests {
+    use super::*;
+
+    const PROFILE: &str = "4fa59494-7704-4fae-bfbf-1e7a325a7664";
+    const ENTITY: &str = "57fbb3e7-e715-4c9a-a04f-31036f1c7f6c";
+    const HIVE: &str = "253b0b3d-31f6-41c2-afd2-cae7b5316376";
+    const URL: &str = "http://127.0.0.1:51111";
+
+    #[test]
+    fn preview_never_selects_a_reserved_stable_port() {
+        for port in 43141..=43150 {
+            assert!(validate_preview_port(port).is_err());
+        }
+        for port in [0, 80, 43140, 43151, 51111, u16::MAX] {
+            validate_preview_port(port).unwrap();
+        }
+    }
+
+    #[test]
+    fn preview_refuses_every_ephemeral_test_mode_before_preflight() {
+        for (ci, integration) in [(true, false), (false, true), (true, true)] {
+            assert!(require_persistent_preview(ci, integration).is_err());
+        }
+        require_persistent_preview(false, false).unwrap();
+    }
+
+    #[test]
+    fn preview_requires_explicit_daemon_mode_and_root_before_preflight() {
+        for (profile, root) in [
+            (None, None),
+            (None, Some("/synthetic/preview")),
+            (Some("preview"), None),
+            (Some("preview"), Some(" ")),
+            (Some("stable"), Some("/synthetic/preview")),
+        ] {
+            assert!(require_preview_cli(profile, root).is_err());
+        }
+        require_preview_cli(Some("preview"), Some("/synthetic/preview")).unwrap();
+    }
+
+    #[test]
+    fn preview_launch_requires_profile_and_distinct_live_instances() {
+        let good = [Some(PROFILE), Some(ENTITY), Some(HIVE)];
+        for missing in 0..3 {
+            let mut fields = good;
+            fields[missing] = None;
+            assert!(
+                PreviewLaunch::validate(Some(URL), Some(URL), fields[0], fields[1], fields[2])
+                    .is_err()
+            );
+        }
+        assert!(PreviewLaunch::validate(
+            Some(URL),
+            Some(URL),
+            Some(PROFILE),
+            Some(HIVE),
+            Some(HIVE)
+        )
+        .is_err());
+        assert!(required_launch_uuid(Some("not-a-uuid"), "fixture").is_err());
+        assert!(required_launch_uuid(Some(&PROFILE.to_uppercase()), "fixture").is_err());
+        let launch = PreviewLaunch::validate(
+            Some(URL),
+            Some(URL),
+            Some(PROFILE),
+            Some(ENTITY),
+            Some(HIVE),
+        )
+        .unwrap();
+        assert_eq!(launch.hive_url, URL);
+        assert_eq!(launch.process_instance, ENTITY);
+        assert_eq!(launch.hive_instance, HIVE);
+    }
+
+    #[test]
+    fn preview_launch_never_substitutes_a_default_or_conflicting_hive() {
+        for (cli_url, env_url) in [
+            (None, Some(URL)),
+            (Some(URL), None),
+            (Some(URL), Some("http://127.0.0.1:43142")),
+            (
+                Some("http://localhost:43141"),
+                Some("http://localhost:43141"),
+            ),
+        ] {
+            assert!(PreviewLaunch::validate(
+                cli_url,
+                env_url,
+                Some(PROFILE),
+                Some(ENTITY),
+                Some(HIVE)
+            )
+            .is_err());
+        }
+    }
 }

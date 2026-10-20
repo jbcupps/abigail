@@ -181,7 +181,48 @@ pub fn register_supported_native_skills(
     skills_secrets: SkillSecrets,
 ) {
     let allowed_roots = default_allowed_roots(entity_dir);
+    register_native_skills_with_roots(
+        registry,
+        entity_dir,
+        allow_local_network,
+        skills_secrets,
+        allowed_roots,
+    );
+}
 
+pub fn register_supported_native_skills_with_profile(
+    registry: &Arc<SkillRegistry>,
+    entity_dir: &Path,
+    allow_local_network: bool,
+    skills_secrets: SkillSecrets,
+    entity_id: &str,
+    profile: Option<&abigail_core::profile::ProfileContext>,
+) -> Result<(), String> {
+    let allowed_roots = allowed_roots_with_profile(entity_dir, entity_id, profile)?;
+    if let Some(profile) = profile {
+        for root in &allowed_roots {
+            profile.validate_path(root).map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
+            profile.validate_path(root).map_err(|e| e.to_string())?;
+        }
+    }
+    register_native_skills_with_roots(
+        registry,
+        entity_dir,
+        allow_local_network,
+        skills_secrets,
+        allowed_roots,
+    );
+    Ok(())
+}
+
+fn register_native_skills_with_roots(
+    registry: &Arc<SkillRegistry>,
+    entity_dir: &Path,
+    allow_local_network: bool,
+    skills_secrets: SkillSecrets,
+    allowed_roots: Vec<PathBuf>,
+) {
     macro_rules! register_skill {
         ($skill:expr) => {{
             let skill = $skill;
@@ -346,10 +387,95 @@ fn default_allowed_roots(entity_dir: &Path) -> Vec<PathBuf> {
     allowed_roots
 }
 
+fn allowed_roots_with_profile(
+    entity_dir: &Path,
+    entity_id: &str,
+    profile: Option<&abigail_core::profile::ProfileContext>,
+) -> Result<Vec<PathBuf>, String> {
+    let Some(profile) = profile else {
+        return Ok(default_allowed_roots(entity_dir));
+    };
+    let documents = profile
+        .entity_documents(entity_id)
+        .map_err(|e| e.to_string())?;
+    let temporary = profile.entity_tmp(entity_id).map_err(|e| e.to_string())?;
+    if !abigail_core::profile::same_path(entity_dir, &profile.identities_dir().join(entity_id)) {
+        return Err("Entity directory does not match the validated preview profile.".into());
+    }
+    profile
+        .validate_path(entity_dir)
+        .map_err(|e| e.to_string())?;
+    profile
+        .validate_path(&documents)
+        .map_err(|e| e.to_string())?;
+    profile
+        .validate_path(&temporary)
+        .map_err(|e| e.to_string())?;
+    Ok(vec![documents, temporary])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn preview_tool_roots_exclude_identity_os_and_sibling_entity_directories() {
+        let fixture = tempfile::tempdir().unwrap();
+        let stable = fixture.path().join("stable-sentinel");
+        let profile = abigail_core::profile::ProfileContext::preflight(
+            &fixture.path().join("preview"),
+            std::slice::from_ref(&stable),
+        )
+        .unwrap();
+        let first = "11111111-1111-4111-8111-111111111111";
+        let other = "22222222-2222-4222-8222-222222222222";
+        let roots = allowed_roots_with_profile(
+            &profile.identities_dir().join(first),
+            first,
+            Some(&profile),
+        )
+        .unwrap();
+        assert_eq!(
+            roots,
+            vec![
+                profile.entity_documents(first).unwrap(),
+                profile.entity_tmp(first).unwrap()
+            ]
+        );
+        assert!(!roots.contains(&profile.identities_dir().join(first)));
+        assert!(!roots.contains(&profile.entity_documents(other).unwrap()));
+        assert!(!roots.contains(&profile.entity_tmp(other).unwrap()));
+        assert!(!roots.contains(&std::env::temp_dir()));
+        assert!(!roots.contains(&stable));
+    }
+
+    #[test]
+    fn preview_tool_roots_reject_wrong_entity_directory_and_invalid_id() {
+        let fixture = tempfile::tempdir().unwrap();
+        let profile =
+            abigail_core::profile::ProfileContext::preflight(fixture.path(), &[]).unwrap();
+        let id = "11111111-1111-4111-8111-111111111111";
+        assert!(
+            allowed_roots_with_profile(&fixture.path().join("outside"), id, Some(&profile),)
+                .is_err()
+        );
+        assert!(allowed_roots_with_profile(
+            &profile.identities_dir().join(id),
+            "../escape",
+            Some(&profile),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn stable_tool_roots_keep_existing_resolution() {
+        let fixture = tempfile::tempdir().unwrap();
+        assert_eq!(
+            allowed_roots_with_profile(fixture.path(), "legacy-entity", None).unwrap(),
+            default_allowed_roots(fixture.path())
+        );
+    }
 
     #[test]
     fn removed_email_secret_keys_are_rejected() {

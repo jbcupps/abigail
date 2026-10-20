@@ -1,0 +1,39 @@
+Extracted actual Cargo records from target/preview-profile-hive-daemon-build.jsonl. Dependency records omitted; selected executable artifact and final build status retained. Machine paths sanitized.
+
+{
+  "reason": "compiler-artifact",
+  "package_id": "path+file:///<repository>/crates/hive-daemon#0.0.1",
+  "manifest_path": "<repository>\\crates\\hive-daemon\\Cargo.toml",
+  "target": {
+    "kind": [
+      "bin"
+    ],
+    "crate_types": [
+      "bin"
+    ],
+    "name": "hive-daemon",
+    "src_path": "<repository>\\crates\\hive-daemon\\src\\main.rs",
+    "edition": "2021",
+    "doc": true,
+    "doctest": false,
+    "test": true
+  },
+  "profile": {
+    "opt_level": "0",
+    "debuginfo": 2,
+    "debug_assertions": true,
+    "overflow_checks": true,
+    "test": true
+  },
+  "features": [],
+  "filenames": [
+    "<repository>\\target\\debug\\deps\\hive_daemon-7e32357362c589b2.exe"
+  ],
+  "executable": "<repository>\\target\\debug\\deps\\hive_daemon-7e32357362c589b2.exe",
+  "fresh": false
+}
+
+{
+  "reason": "build-finished",
+  "success": true
+}

@@ -262,6 +262,9 @@ pub struct UpdateEntityConfigResponse {
 /// Overall Hive status snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HiveStatus {
+    /// Validated preview profile and live process identity. Absent for stable compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_identity: Option<abigail_core::profile::ProcessIdentity>,
     pub master_key_loaded: bool,
     pub entity_count: usize,
     pub entities: Vec<EntityInfo>,
@@ -285,6 +288,8 @@ pub struct HelperInfo {
     pub running: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_identity: Option<abigail_core::profile::ProcessIdentity>,
 }
 
 /// Best available provider/model, ranked by capability. Fields are `None` when
@@ -347,6 +352,9 @@ pub struct LocalProviderResponse {
 /// and reachable at `local_url`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityOpenResponse {
+    /// Exact runtime instance opened by this Hive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_identity: Option<abigail_core::profile::ProcessIdentity>,
     pub entity_id: String,
     pub local_url: String,
 }

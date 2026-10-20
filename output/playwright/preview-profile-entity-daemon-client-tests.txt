@@ -1,0 +1,7 @@
+
+running 3 tests
+test hive_client::preview_client_tests::preview_hive_url_requires_exact_local_endpoint ... ok
+test hive_client::preview_client_tests::preview_identity_requires_all_fields_and_exact_live_instance ... ok
+test hive_client::preview_client_tests::runtime_client_pins_parent_hive_instance_on_every_request ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 45 filtered out; finished in 0.00s

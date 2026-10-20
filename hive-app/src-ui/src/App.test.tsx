@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
 const mocks = vi.hoisted(() => ({
@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   hiveHealth: vi.fn(),
   openEntity: vi.fn(),
   showAppWindow: vi.fn(),
+  invoke: vi.fn(),
 }));
 
 vi.mock("./lib/daemonClient", () => ({
@@ -32,6 +33,7 @@ vi.mock("./lib/presenceApi", () => ({
 describe("Abigail Hive app", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete window.isTauri;
     mocks.hiveHealth.mockResolvedValue(true);
     mocks.getStatus.mockResolvedValue({
       entity_count: 2,
@@ -61,6 +63,22 @@ describe("Abigail Hive app", () => {
         local_url: null,
       },
     });
+  });
+
+  afterEach(() => { delete window.isTauri; Reflect.deleteProperty(window, "__TAURI_INTERNALS__"); });
+
+  it("shows native startup refusal without opening the dashboard or falling back", async () => {
+    window.isTauri = true;
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: { invoke: mocks.invoke } });
+    mocks.invoke.mockRejectedValue(new Error("Preview Hive failed. Cleanup unconfirmed; no automatic restart."));
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /skip/i }));
+    expect(await screen.findByText(/Cleanup unconfirmed; no automatic restart/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
+    expect(mocks.hiveHealth).not.toHaveBeenCalled();
+    expect(mocks.getStatus).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Create an Entity" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Model connections" })).not.toBeInTheDocument();
   });
 
   it("opens from splash into the Hive dashboard", async () => {

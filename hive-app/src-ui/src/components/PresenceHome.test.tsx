@@ -53,6 +53,7 @@ describe("Presence Home pending operations", () => {
   let originalUrl: string;
 
   beforeEach(() => {
+    delete window.isTauri;
     sessionStorage.clear();
     localStorage.clear();
     originalUrl = window.location.href;
@@ -76,6 +77,7 @@ describe("Presence Home pending operations", () => {
   });
 
   afterEach(() => {
+    delete window.isTauri;
     cleanup();
     sessionStorage.clear();
     localStorage.clear();
@@ -90,6 +92,30 @@ describe("Presence Home pending operations", () => {
     fireEvent.click(screen.getByRole("button", { name: /Open conversation/ }));
     expect(await screen.findByRole("region", { name: "Opened conversation" })).toHaveAttribute("data-expected-entity-id", "ada");
     expect(await screen.findByRole("heading", { name: "Renamed visual identity conversation" })).toBeInTheDocument();
+  });
+
+  it("opens and pins the native helper through the Entity connection command", async () => {
+    window.isTauri = true;
+    mocks.openPresence.mockResolvedValue("http://127.0.0.1:44200");
+    const view = render(<PresenceHome preview={false} status={status} onRefresh={vi.fn()} onProviders={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Abigail" }));
+    await screen.findByRole("heading", { name: "Abigail Hive conversation" });
+    expect(mocks.openPresence).toHaveBeenCalledWith("hive-entity", expect.any(AbortSignal));
+    expect(screen.getByText("http://127.0.0.1:44200")).toBeInTheDocument();
+    view.rerender(<PresenceHome preview={false} status={{ ...status, helper: { running: true, local_url: "http://127.0.0.1:49999" } }} onRefresh={vi.fn()} onProviders={vi.fn()} />);
+    expect(screen.getByText("http://127.0.0.1:44200")).toBeInTheDocument();
+    expect(screen.queryByText("http://127.0.0.1:49999")).not.toBeInTheDocument();
+    expect(mocks.openPresence).toHaveBeenCalledOnce();
+  });
+
+  it("shows a refused native helper connection without opening its reported port", async () => {
+    window.isTauri = true;
+    mocks.openPresence.mockRejectedValue(new Error("Pinned Entity instance changed. Reopen Hive."));
+    render(<PresenceHome preview={false} status={status} onRefresh={vi.fn()} onProviders={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Abigail" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Pinned Entity instance changed");
+    expect(screen.queryByRole("region", { name: "Opened conversation" })).not.toBeInTheDocument();
+    expect(mocks.chatMounted).not.toHaveBeenCalled();
   });
 
   it("pins the helper's authoritative Hive Entity ID across port changes", async () => {

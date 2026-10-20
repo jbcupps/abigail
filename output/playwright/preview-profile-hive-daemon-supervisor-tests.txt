@@ -1,0 +1,13 @@
+
+running 9 tests
+test supervisor::tests::cancelling_startup_kills_owned_child_and_revokes_bootstrap ... ok
+test supervisor::tests::dropping_incomplete_startup_revokes_only_its_bootstrap_capability ... ok
+test supervisor::tests::entity_daemon_binary_prefers_packaged_env_override ... ok
+test supervisor::tests::health_phase_does_not_reset_the_announcement_deadline ... ok
+test supervisor::tests::listen_announcement_accepts_only_canonical_entity_loopback_url ... ok
+test supervisor::tests::listen_reader_bounds_unterminated_lines_and_rejects_early_eof ... ok
+test supervisor::tests::observe_startup_reports_early_process_exit_without_waiting_for_health ... ok
+test supervisor::tests::readiness_does_not_follow_a_redirect_to_another_server ... ok
+test supervisor::tests::readiness_rejects_another_entity_even_when_health_succeeds ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 41 filtered out; finished in 0.25s

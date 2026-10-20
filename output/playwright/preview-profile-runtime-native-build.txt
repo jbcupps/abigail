@@ -1,0 +1,2 @@
+   Compiling abigail-entity-runtime-app v0.0.1 (<repository>\entity-runtime-app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.92s

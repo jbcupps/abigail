@@ -1,0 +1,32 @@
+[
+  {
+    "Filter": "profile_runtime::tests",
+    "Matched": 5,
+    "Log": "target/preview-profile-hive-daemon-profile_runtime__tests-tests.log",
+    "ExitCode": 0
+  },
+  {
+    "Filter": "supervisor::preview_identity_tests",
+    "Matched": 9,
+    "Log": "target/preview-profile-hive-daemon-supervisor__preview_identity_tests-tests.log",
+    "ExitCode": 0
+  },
+  {
+    "Filter": "preview_provider_connection",
+    "Matched": 1,
+    "Log": "target/preview-profile-hive-daemon-preview_provider_connection-tests.log",
+    "ExitCode": 0
+  },
+  {
+    "Filter": "creation_http_tests::preview_shutdown",
+    "Matched": 2,
+    "Log": "target/preview-profile-hive-daemon-creation_http_tests__preview_shutdown-tests.log",
+    "ExitCode": 0
+  },
+  {
+    "Filter": "supervisor::tests::",
+    "Matched": 9,
+    "Log": "target/preview-profile-hive-daemon-supervisor__tests__-tests.log",
+    "ExitCode": 0
+  }
+]

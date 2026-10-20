@@ -1,0 +1,39 @@
+Extracted actual Cargo records from target/preview-profile-entity-daemon-build.jsonl. Dependency records omitted; selected executable artifact and final build status retained. Machine paths sanitized.
+
+{
+  "reason": "compiler-artifact",
+  "package_id": "path+file:///<repository>/crates/entity-daemon#0.0.1",
+  "manifest_path": "<repository>\\crates\\entity-daemon\\Cargo.toml",
+  "target": {
+    "kind": [
+      "bin"
+    ],
+    "crate_types": [
+      "bin"
+    ],
+    "name": "entity-daemon",
+    "src_path": "<repository>\\crates\\entity-daemon\\src\\main.rs",
+    "edition": "2021",
+    "doc": true,
+    "doctest": false,
+    "test": true
+  },
+  "profile": {
+    "opt_level": "0",
+    "debuginfo": 2,
+    "debug_assertions": true,
+    "overflow_checks": true,
+    "test": true
+  },
+  "features": [],
+  "filenames": [
+    "<repository>\\target\\debug\\deps\\entity_daemon-e5727577633d7cd5.exe"
+  ],
+  "executable": "<repository>\\target\\debug\\deps\\entity_daemon-e5727577633d7cd5.exe",
+  "fresh": false
+}
+
+{
+  "reason": "build-finished",
+  "success": true
+}

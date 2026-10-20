@@ -1,0 +1,9 @@
+
+running 5 tests
+test preview_startup_tests::preview_launch_never_substitutes_a_default_or_conflicting_hive ... ok
+test preview_startup_tests::preview_launch_requires_profile_and_distinct_live_instances ... ok
+test preview_startup_tests::preview_never_selects_a_reserved_stable_port ... ok
+test preview_startup_tests::preview_refuses_every_ephemeral_test_mode_before_preflight ... ok
+test preview_startup_tests::preview_requires_explicit_daemon_mode_and_root_before_preflight ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 43 filtered out; finished in 0.00s

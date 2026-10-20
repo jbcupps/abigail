@@ -1,74 +1,78 @@
-# Proposed persistent preview profile boundary
+# Persistent preview profile boundary
 
-Source review and packaging contract proposal, 2026-10-20. **This contract is not implemented yet.** Setting the variables below on the current application does not establish the proposed isolation. No real user data, credentials, profile directories, or release routing were changed during this review.
+Application implementation status, 2026-10-20. The accepted profile contract is implemented in the current development source. [Final component validation](../output/playwright/preview-profile-isolation-validation.md) records 167 selected Rust tests, 373 frontend tests, both frontend builds, and independent review. These results are separate from installed acceptance. No normal preview startup, real profile migration, OS credential operation, or signed-installer acceptance is claimed by this document.
 
-The goal is one persistent preview profile containing an ongoing Entity and separate disposable Entities. Updating the preview application must preserve that profile. Normal production behavior and existing production data must remain unchanged.
+The goal is one persistent preview profile containing an ongoing Entity and separate disposable Entities. Updating the preview application must preserve that profile. Stable defaults and existing stable data remain unchanged. A preview profile belongs to a selected beta release, not a third release channel.
 
-The [release alignment](PREVIEW_RELEASE_ALIGNMENT.md) maps this proposal to release scaffolding `6b246d3`, its ten exact acceptance stage IDs, proposed packaging identifiers, and the smallest application implementation sequence. A preview profile belongs to a selected beta release, not a third release channel.
+The [release alignment](PREVIEW_RELEASE_ALIGNMENT.md) records the exact launcher contract, packaging ownership, and ten required installer acceptance stages. Complete-profile cold backup/restore is the next application slice and remains unimplemented.
 
-## Current paths that prevent an isolation claim
+## Implemented application boundary
 
-| Source | Current behavior |
+`abigail-core::profile` supplies one immutable `ProfileContext` per preview process. The four active entry points validate it before logging, WebView creation, credential loading, database initialization, descriptor adoption, or requests. A compiled-preview Hive launcher supplies only absent mode/root defaults; blank, invalid, or conflicting values fail. Daemons additionally require explicit matching arguments.
+
+Preflight validates an absolute local root, existing path components, production-path overlap, marker identity/schema, active configs, and registry paths. It refuses symlinks/reparse points rather than following them. Existing profiles are inspected without migration. A new marker is published atomically without replacing an existing marker, only after validating an empty root. A populated unmarked root requires explicit import; a child cannot initialize a missing parent marker.
+
+The marker at `R/profile.json` contains `schema_version: 1`, `kind: "preview"`, `channel: "beta"`, and a persistent non-nil canonical `profile_id` UUID. Profile schema 1 and Entity config schema 27 are separate contracts. Startup rejects unsupported marker/config schemas before startup consumers initialize. Active configs are the root config and `identities/<UUID>/config.json`; foreign WebView, skill, and archived `config.json` files are not interpreted as active Entity configs. Explicit restore validates a selected backup before consuming it.
+
+| Source boundary | Implemented preview behavior |
 | --- | --- |
-| `hive-app/src/lib.rs:445,533` | `ABIGAIL_DATA_DIR` changes the runtime descriptor path and is forwarded as Hive `--data-dir`. Missing/empty overrides fall back to normal locations. |
-| `crates/abigail-core/src/config.rs:524,589` | Active `default_paths` uses the platform application directory, not `ABIGAIL_DATA_DIR`. `trusted_config_path` defines the same fallback but has no active caller in the inspected source. Windows Known Folder resolution is not reliably redirected by changing `LOCALAPPDATA`. |
-| `crates/abigail-identity/src/lib.rs:686-742` | A genuinely custom root uses `<root>/Documents`; `ABIGAIL_DOCUMENTS_DIR` can override it. The normal root uses the user's Documents. Subfolders use sanitized names, not Entity UUIDs. |
-| `crates/abigail-runtime/src/lib.rs:339-346` | Native filesystem allowed roots include the OS temporary directory and normal `Documents/Abigail`, ignoring both data/Documents overrides. This grants reach outside a custom profile. |
-| `crates/entity-daemon/src/main.rs:446-450`; `crates/abigail-memory/src/archive.rs:84-87` | When an Entity public key exists, archive startup uses OS Documents and creates `Documents/Abigail/archives`, regardless of the custom data root. |
-| `crates/abigail-memory/src/backup_import.rs:116-123`; `crates/entity-daemon/src/backup_ops.rs:26` | Backup discovery scans both a data-root directory and normal `Documents/Abigail/backups`. |
-| `hive-app/src/lib.rs:461`; `crates/abigail-diag/src/lib.rs:20` | Desktop/daemon logs have independent normal-profile defaults. |
-| `hive-app/src/lib.rs:584-610`; both apps' `src-ui/src/lib/connection.ts` | The shell adopts a healthy recorded daemon without verifying a profile identity. A supplied `ABIGAIL_HIVE_URL` bypasses descriptor discovery. Spawn failure is logged without failing setup, and native connection resolution can fall back to query/environment overrides or normal default ports. |
-| `hive-app/tauri.conf.json:4`; `entity-runtime-app/tauri.conf.json:4` | Current identifiers are production identifiers, with no explicit preview WebView storage root. The browser's creation journal/session hints need a stable, separate preview store too. Cached Tauri 2.11.3 exposes `WebviewWindowBuilder::data_directory` for an explicit absolute directory. |
-| `crates/hive-daemon/src/birth.rs:123-129,180,196-197` | Birth writes through saved config paths. A copied config can still point outside a new profile even when daemon startup has a custom root. |
-| `hive-app/src-ui/src/lib/presenceCreation.ts:122,160-181`; `components/FirstSignal.tsx:182-183` | Creation recovery and subsequent profile save can use the journal's retained `hiveUrl`, independently of initial shell endpoint discovery. |
-| `crates/abigail-core/src/vault/unlock.rs:18-19,347,383`; `vault/mod.rs:29` | The OS keyring service/account and process-wide unlock cache are not keyed by profile. Root-relative vault/DPAPI files alone do not create a separate credential namespace. |
-| `crates/abigail-hive/src/hive.rs:289-339` | Provider lookup can fall back to ambient API-key variables or installed CLI accounts. A separate local vault does not isolate those accounts. |
+| `abigail-core` config and registry | Derive defaults from the validated root. Validate saved paths before load/migration/save. Bind an active Entity config's data directory to its actual UUID directory so it cannot select another Entity's paths. |
+| `abigail-identity` | Capture the context before vault initialization. Use UUID-scoped Documents and root-only backup discovery/output. Validate restored configuration before copying or registering it. Preview refuses implicit legacy root-identity migration. |
+| `abigail-runtime` | Filesystem-tool allowances contain only the selected Entity's preview Documents and temporary directories; OS Documents and OS temporary roots are absent from preview allowances. |
+| `abigail-memory` and Entity backup operations | Revalidate archive destinations and selected backup paths before I/O. Preview discovery stays under `R/backups`. |
+| `abigail-diag` and native apps | Use explicit profile log paths and separate Hive/Runtime WebView data directories. |
+| Vault, master-key and encrypted-storage callers | Use a profile-specific credential namespace and root-bound cache. Fake backend seams allow tests without calling the OS keyring or DPAPI. |
+| Hive/provider setup | Reject ambient API-key and installed-CLI account reuse in preview. Explicitly configured preview credentials or local URLs remain the setup path. |
+| Native apps, daemon clients and supervisor | Verify channel, profile UUID, canonical root and live process instances before adoption/use. Pin HTTP ownership headers and fail closed when native verification fails. |
 
-## Proposed configuration contract for packaging
+## Paths
 
-1. A dedicated preview entry point/build requires preview mode, proposed as `ABIGAIL_PROFILE=preview`, and an absolute `ABIGAIL_DATA_DIR=<preview-root>`. The variable name is a proposal until application/release owners agree. Missing mode must not turn a preview binary into production mode. The default production entry point retains its existing behavior.
-2. `<preview-root>` is stable across preview versions and independent of the versioned installation directory. It must not equal, contain, or sit inside normal production-owned data, Documents/Abigail, runtime, logs, or WebView storage directories. Resolve canonical/reparse-point identity before accepting it, including the existing parent of a new root. Missing, blank, relative, invalid, inaccessible, or production-overlapping roots stop preview startup before credential loading, default config loading, logging, WebView creation, descriptor access, requests, or helper launch.
-3. An atomic `profile.json` marker stores a schema version, `kind: "preview"`, and a generated profile UUID. The UUID is a non-secret identity, never an encryption key. An existing populated directory without a valid matching marker requires an explicit migration/import decision; do not silently adopt it. Keep that UUID unchanged during updates.
-4. Derive all preview-owned paths from the same immutable context:
+All paths below derive from the same validated root `R`:
 
-   | Purpose | Proposed location |
-   | --- | --- |
-   | Registry, master key and vault files | Existing filenames beneath `<preview-root>` |
-   | Entity configuration/identity/presentation | `<preview-root>/identities/<entity-uuid>` |
-   | Shared conversation store | `<preview-root>/memory.db` |
-   | Entity Documents and filesystem-tool allowance | `<preview-root>/Documents/<entity-uuid>` |
-   | Entity archives | `<preview-root>/archives/<entity-uuid>` |
-   | Backup discovery/output | `<preview-root>/backups` only |
-   | Runtime descriptors and sessions | `<preview-root>/runtime` |
-   | Logs | `<preview-root>/logs` |
-   | Tool temporary files | `<preview-root>/tmp/<entity-uuid>` |
-   | Hive and Runtime WebView data | Separate role directories beneath `<preview-root>/webview` |
+| Purpose | Preview location |
+| --- | --- |
+| Registry, master key and vault files | Existing filenames beneath `R` |
+| Entity configuration, identity and presentation | `R/identities/<entity-uuid>` |
+| Entity internal identity documents and models | `R/identities/<entity-uuid>/docs` and `/models` |
+| Shared conversation store | `R/memory.db` |
+| Entity user Documents and filesystem-tool allowance | `R/Documents/<entity-uuid>` |
+| Entity archives | `R/archives/<entity-uuid>` |
+| Backup discovery/output | `R/backups` only |
+| Runtime descriptors, ownership lock and sessions | `R/runtime` |
+| Logs | `R/logs` |
+| Tool temporary files | `R/tmp/<entity-uuid>` |
+| Hive and Runtime WebView data | Separate role directories beneath `R/webview` |
 
-   For preview, either derive `ABIGAIL_DOCUMENTS_DIR` internally or accept only the exact agreed preview Documents root. Never honor an outside override or fall back to OS Documents. Validate persisted path-valued settings before using them; copying an old config must not redirect the new profile to production files.
-5. Propagate the same profile/root explicitly to Hive, its helper, each Entity process, and both native UIs; reject conflicting arguments or inherited values. Descriptor and status/connection handshakes verify channel, profile UUID, expected root ownership, and live process-instance identity before endpoint adoption. A copied UUID alone cannot distinguish an active original from a restored root. Do not accept an arbitrary healthy production daemon, including through URL overrides. Propagate startup failure to the UI and disable native fallback to normal default ports or browser overrides. One immutable profile per process is the minimum cache/ownership model.
+If supplied, `ABIGAIL_DOCUMENTS_DIR` must equal `R/Documents`. Copied absolute config paths are validated before use; they cannot silently redirect a preview to stable files or another Entity. Existing stable Documents are not moved. UUID-based preview Documents avoid same-name collisions. Existing experimental roots need an explicit backed-up migration decision.
 
-   Verify retained creation-journal endpoints before lookup, replay, or profile save too. Preserve the exact creation key; never replay it against a different profile. A changed port can be rebound only after verifying that the new endpoint owns the same intended profile/root.
+## Credentials and providers
 
-   Scope close/restart to the verified instance and owned child handles. Never kill a stale descriptor PID. Pass packaged executable paths explicitly and reject inherited overrides that select a different channel's executables.
-6. Preview uses a distinct OS keyring account bound to its profile UUID. Production retains its existing account. Preview must not read, repair, fall back to, or migrate the production entry implicitly. Root-relative DPAPI fallback and every master-key/encrypted-storage helper must receive the same context. This requires coordinated dependency plumbing; changing only the first constructor is insufficient.
-7. Provider reuse is explicit. Do not silently inherit production provider settings, ambient API keys, or CLI accounts. A user may separately choose to connect an existing provider account, with the same visible verification and data-flow explanation used by normal model setup.
-8. Packaging supplies separate preview identity/shortcut/update routing and preserves this root and WebView data. Those release/channel changes belong to the release-engineering owner. Application code must enforce the boundary even when an environment variable or launcher argument is missing.
+Preview credential namespace `preview.<profile_id>` is used in keyring service/account selection and encrypted scope labels. The unlock cache also binds the canonical root, so a copied UUID does not make a different root the same cache entry. Preview DPAPI fallback is root-relative and includes its namespace in the protected payload; raw legacy fallback bytes and another profile's payload are refused. Stable account names and legacy behavior are retained for stable mode.
 
-## Narrow implementation ownership
+Preview IdentityManager refuses automatic identity reset after decryption failure. It also rejects a missing master key when a registry or existing identity files are present, before its own unlock/bootstrap operations. Fresh empty profiles remain eligible for initialization; these guards do not establish whole-process OS credential acceptance.
 
-Use one shared profile/path context in `abigail-core`, then wire the active native apps, Hive/Entity startup and supervisor, runtime filesystem roots, archive/backup operations, diagnostics, and vault constructors through it. Do not add parallel ad hoc path fallbacks. Coordinate shared `main.rs`/status DTO changes with the release owner; leave release workflows and channel routing out of this application worktree.
+Preview does not import legacy credentials or read ambient raw-key/passphrase fallbacks. It also does not silently use ambient provider API keys or installed CLI sessions. The fake credential tests exercise namespace selection, cache separation, fallback handling and ciphertext separation; they do not validate Windows Credential Manager or DPAPI integration.
 
-For a fresh preview profile, UUID-based Documents avoid the inherited same-name collision. Do not move existing production Documents. Existing experimental roots need an explicit, backed-up migration plan rather than silently changing their path/key namespace.
+No cryptographic key is derived from the public profile UUID alone. A whole-root file copy does not prove the encryption key will be available at recovery time. Credential availability and actual OS integration remain separate acceptance work.
 
-## Required synthetic acceptance and migration evidence
+## Process and connection ownership
 
-- Pure path/context tests reject missing/relative roots, root overlap, mismatched markers, outside Documents/config paths, and a wrong-profile daemon. Invalid configuration must perform no fallback filesystem or credential operation.
-- Startup preflight rejects unsupported profile/config schemas before writes. Config loader/save tests are component evidence; the exact installer must also preserve all fixture bytes during the `newer-schema-refusal` stage.
-- Use fake credential-provider/keyring adapters to prove namespace selection and absence of calls to the production account. Run no actual credential operation until the concrete plan is reviewed.
-- Create a synthetic maintained Entity plus a disposable Entity. Exercise create, profile save, native tool root selection, archive destination, backup enumeration, reopen, and runtime restart. Sentinel files representing production data must remain byte-identical and absent from allowed roots/discovery results.
-- Stop all owners before a consistent whole-root snapshot. Inventory external artifacts and credential dependencies too: current Documents/archive output, WebView state, and OS credential entries are not all inside the root. Even after the proposed path changes, a root copy alone does not establish availability of the required encryption key.
-- Restore into an explicitly designated isolated recovery root. Rebase persisted absolute config paths through a reviewed import step or reject them; never follow paths back to the source profile. Invalidate copied PID/URL runtime descriptors. Keep the original profile stopped during recovery validation, then verify expected root ownership, profile identity, credential/decryption availability, registered UUIDs, exact committed transcript and presentation before allowing mutations. A file copy alone is not restore verification.
-- Verify the actual signed candidate update preserves the same profile UUID/root and maintained Entity while its binary revisions change. Disposable Entity maintenance must not alter the maintained Entity. Do not run old/new application owners concurrently against one store.
-- Run fresh-install creation acceptance in a separate disposable profile from the continuing-profile upgrade fixture. Keep the within-profile Entity isolation tests as an additional check.
+The launcher passes explicit packaged executable paths and profile/root/instance context. Preview endpoints use verified loopback URLs outside stable's reserved ports `43141..43150`. Hive holds an OS file lock for the selected profile before opening the store. The supervisor uses owned child handles; a stale descriptor PID never authorizes termination.
 
-These tests separate application profile isolation from real-provider inference, installed OS credential integration, and installer/channel acceptance. The latter remain separately scoped activities. The current First Signal source/tests do not yet satisfy this complete preview contract.
+Status and descriptor `process_identity` values contain `channel`, `profile_id`, `canonical_data_root`, `instance_id`, and `hive_instance_id`. Callers compare them with the intended live owner. Verified clients pin `x-abigail-profile-id` and `x-abigail-process-instance-id`. Preview middleware requires these except for GET health/status and OPTIONS; current stable middleware rejects preview ownership headers. These non-secret fields guard accidental routing and stale ownership. They are not local-client authentication or executable provenance.
+
+Native transport resolves and revalidates IPC metadata before HTTP/SSE use. A failed native handshake never falls back to a browser query, environment URL, or stable default port. The Runtime also requires the selected Entity ID. Startup/cleanup failure is visible in the UI with connection actions unavailable.
+
+Preview shutdown requires acknowledgement that owned Entity children were drained/reaped and then the owned Hive child must exit. An uncertain drain does not authorize force-killing Hive or launching a replacement owner. Installer and actual process-lifecycle acceptance still need to exercise these source contracts.
+
+Creation lookup, replay and profile save use the same verified transport. If a retained creation-journal URL differs from the pinned endpoint, recovery fails explicitly and preserves the exact creation key. Automatic same-profile endpoint rebinding is not implemented. Never replace an uncertain attempt with a fresh key or silently retarget it.
+
+## Remaining acceptance and next slice
+
+- The [recorded component results](../output/playwright/preview-profile-isolation-validation.md) cover preflight rejection, sentinel preservation, UUID path scopes, fake credential calls and ownership checks. They do not substitute for the exact installed candidate.
+- Implement complete-profile cold backup/restore: stop all owners, inventory persistent files and required credentials, snapshot the shared store with the rest of the root, and restore into a designated isolated recovery root.
+- Rebase approved absolute paths during that explicit restore, invalidate copied runtime descriptors, and verify the same profile UUID, registered Entities, exact committed transcript, presentation and credential/decryption availability before mutations. Existing per-Entity restore creates a new UUID and does not satisfy this requirement.
+- Exercise OS credential integration using a reviewed isolated test plan, without the operator's existing credentials. See [STARTUP_TEST_ISOLATION_PLAN.md](STARTUP_TEST_ISOLATION_PLAN.md).
+- Verify all ten [release stages](PREVIEW_RELEASE_ALIGNMENT.md#release-stage-evidence-mapping) against the final signed installer bytes. Fresh creation uses a separate fixture from the continuing-profile upgrade fixture. Keep old/new owners from opening one store concurrently.
+
+The packaging worker owns application identifiers, overlays, staging, signing and installer tests on a separate branch. This application work does not alter those files, promote main/beta, or establish acceptance for an ongoing real profile.

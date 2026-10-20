@@ -1,6 +1,7 @@
 //! Backup import logic for Surreal-backed memory snapshots.
 
 use crate::store::MemoryStore;
+use abigail_core::profile::ProfileContext;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -102,19 +103,55 @@ pub fn import_from_store(
 }
 
 pub fn find_memory_db(backup_dir: &Path) -> Option<PathBuf> {
-    let candidates = [
+    memory_db_candidates(backup_dir)
+        .into_iter()
+        .find(|path| path.exists())
+}
+
+fn memory_db_candidates(backup_dir: &Path) -> [PathBuf; 6] {
+    [
         backup_dir.join("memory.db"),
         backup_dir.join("entity").join("memory.db"),
         backup_dir.join("entity").join("abigail_memory.db"),
         backup_dir.join("abigail_memory.db"),
         backup_dir.join("abigail_seed.db"),
         backup_dir.join("entity").join("abigail_seed.db"),
-    ];
-    candidates.into_iter().find(|path| path.exists())
+    ]
+}
+
+/// Validate a preview backup path before enumeration or database access.
+pub fn validate_preview_backup_path(profile: &ProfileContext, path: &Path) -> anyhow::Result<()> {
+    let backup_root = profile.backups_dir();
+    profile.validate_path(&backup_root)?;
+    profile.validate_path(path)?;
+    let canonical_root = abigail_core::profile::canonical_without_links(&backup_root)?;
+    let canonical_path = abigail_core::profile::canonical_without_links(path)?;
+    abigail_core::path_guard::ensure_path_within_root(
+        &canonical_root,
+        &canonical_path,
+        "Preview backup",
+    )?;
+    Ok(())
+}
+
+pub fn find_memory_db_with_profile(
+    backup_dir: &Path,
+    profile: Option<&ProfileContext>,
+) -> anyhow::Result<Option<PathBuf>> {
+    let Some(profile) = profile else {
+        return Ok(find_memory_db(backup_dir));
+    };
+    validate_preview_backup_path(profile, backup_dir)?;
+    for path in memory_db_candidates(backup_dir) {
+        validate_preview_backup_path(profile, &path)?;
+        if path.exists() {
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
 }
 
 pub fn scan_backup_dirs(data_root: &Path, agent_name: Option<&str>) -> Vec<BackupEntry> {
-    let mut entries = Vec::new();
     let mut scan_dirs = vec![data_root.join("backups")];
 
     if let Some(user_dirs) = directories::UserDirs::new() {
@@ -123,13 +160,43 @@ pub fn scan_backup_dirs(data_root: &Path, agent_name: Option<&str>) -> Vec<Backu
         }
     }
 
-    for base_dir in &scan_dirs {
+    // Stable discovery retains its historical best-effort behavior.
+    scan_backup_roots(&scan_dirs, agent_name, None).unwrap_or_default()
+}
+
+pub fn scan_backup_dirs_with_profile(
+    data_root: &Path,
+    agent_name: Option<&str>,
+    profile: Option<&ProfileContext>,
+) -> anyhow::Result<Vec<BackupEntry>> {
+    let Some(profile) = profile else {
+        return Ok(scan_backup_dirs(data_root, agent_name));
+    };
+    if !abigail_core::profile::same_path(data_root, profile.root()) {
+        anyhow::bail!("Backup data root does not match the validated preview profile.");
+    }
+    scan_backup_roots(&[profile.backups_dir()], agent_name, Some(profile))
+}
+
+fn scan_backup_roots(
+    scan_dirs: &[PathBuf],
+    agent_name: Option<&str>,
+    profile: Option<&ProfileContext>,
+) -> anyhow::Result<Vec<BackupEntry>> {
+    let mut entries = Vec::new();
+    for base_dir in scan_dirs {
+        if let Some(profile) = profile {
+            validate_preview_backup_path(profile, base_dir)?;
+        }
         if !base_dir.exists() {
             continue;
         }
 
         let agent_dirs: Vec<PathBuf> = if let Some(name) = agent_name {
             let specific = base_dir.join(name);
+            if let Some(profile) = profile {
+                validate_preview_backup_path(profile, &specific)?;
+            }
             if specific.exists() {
                 vec![specific]
             } else {
@@ -146,6 +213,9 @@ pub fn scan_backup_dirs(data_root: &Path, agent_name: Option<&str>) -> Vec<Backu
         };
 
         for agent_dir in agent_dirs {
+            if let Some(profile) = profile {
+                validate_preview_backup_path(profile, &agent_dir)?;
+            }
             let timestamp_dirs: Vec<_> = std::fs::read_dir(&agent_dir)
                 .into_iter()
                 .flatten()
@@ -155,17 +225,18 @@ pub fn scan_backup_dirs(data_root: &Path, agent_name: Option<&str>) -> Vec<Backu
 
             for ts_entry in timestamp_dirs {
                 let ts_path = ts_entry.path();
+                let memory_db = find_memory_db_with_profile(&ts_path, profile)?;
                 entries.push(BackupEntry {
                     path: ts_path.to_string_lossy().to_string(),
                     timestamp: ts_entry.file_name().to_string_lossy().to_string(),
-                    has_memory_db: find_memory_db(&ts_path).is_some(),
+                    has_memory_db: memory_db.is_some(),
                 });
             }
         }
     }
 
     entries.sort_by(|left, right| right.timestamp.cmp(&left.timestamp));
-    entries
+    Ok(entries)
 }
 
 #[cfg(test)]
@@ -175,6 +246,81 @@ mod tests {
         store::{MemoryStore, MemoryWeight},
         ConversationTurn, Memory,
     };
+
+    #[test]
+    fn preview_backup_scan_uses_only_profile_backups_and_preserves_sibling_fixture() {
+        let fixture =
+            std::env::temp_dir().join(format!("preview-backups-{}", uuid::Uuid::new_v4()));
+        let stable = fixture.join("stable-sentinel");
+        let stable_backup = stable.join("backups/Signal/20990101");
+        std::fs::create_dir_all(&stable_backup).unwrap();
+        let sentinel = stable_backup.join("memory.db");
+        std::fs::write(&sentinel, b"synthetic stable sentinel").unwrap();
+        let profile =
+            ProfileContext::preflight(&fixture.join("preview"), std::slice::from_ref(&stable))
+                .unwrap();
+        let backup = profile.backups_dir().join("Signal/20261020");
+        std::fs::create_dir_all(&backup).unwrap();
+        std::fs::write(backup.join("memory.db"), b"synthetic listing fixture").unwrap();
+
+        for agent_name in [Some("Signal"), None] {
+            let entries =
+                scan_backup_dirs_with_profile(profile.root(), agent_name, Some(&profile)).unwrap();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(Path::new(&entries[0].path), backup);
+            assert!(entries[0].has_memory_db);
+        }
+        assert_eq!(
+            std::fs::read(&sentinel).unwrap(),
+            b"synthetic stable sentinel"
+        );
+        assert_eq!(std::fs::read_dir(&stable_backup).unwrap().count(), 1);
+        std::fs::remove_dir_all(fixture).unwrap();
+    }
+
+    #[test]
+    fn preview_backup_selection_rejects_outside_paths_and_conflicting_roots() {
+        let fixture =
+            std::env::temp_dir().join(format!("preview-backups-{}", uuid::Uuid::new_v4()));
+        let profile = ProfileContext::preflight(&fixture.join("preview"), &[]).unwrap();
+        let outside = fixture.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let sentinel = outside.join("memory.db");
+        std::fs::write(&sentinel, b"must never open as a database").unwrap();
+        let internal_non_backup = profile.identities_dir().join("not-a-backup");
+        assert!(find_memory_db_with_profile(&outside, Some(&profile)).is_err());
+        assert!(find_memory_db_with_profile(&internal_non_backup, Some(&profile)).is_err());
+        assert!(scan_backup_dirs_with_profile(&outside, None, Some(&profile)).is_err());
+        std::fs::create_dir_all(profile.backups_dir()).unwrap();
+        assert!(scan_backup_dirs_with_profile(
+            profile.root(),
+            Some("../identities"),
+            Some(&profile)
+        )
+        .is_err());
+        assert_eq!(
+            std::fs::read(&sentinel).unwrap(),
+            b"must never open as a database"
+        );
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 1);
+        std::fs::remove_dir_all(fixture).unwrap();
+    }
+
+    #[test]
+    fn preview_backup_selection_keeps_supported_nested_database_layout() {
+        let fixture =
+            std::env::temp_dir().join(format!("preview-backups-{}", uuid::Uuid::new_v4()));
+        let profile = ProfileContext::preflight(&fixture, &[]).unwrap();
+        let backup = profile.backups_dir().join("Signal/20261020");
+        let database = backup.join("entity/abigail_memory.db");
+        std::fs::create_dir_all(database.parent().unwrap()).unwrap();
+        std::fs::write(&database, b"synthetic path fixture").unwrap();
+        assert_eq!(
+            find_memory_db_with_profile(&backup, Some(&profile)).unwrap(),
+            Some(database)
+        );
+        std::fs::remove_dir_all(fixture).unwrap();
+    }
 
     #[test]
     fn test_preview_backup_with_data() {

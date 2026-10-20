@@ -4,6 +4,7 @@ import LoaderScreen from "./components/LoaderScreen";
 import ChatPanel from "./components/ChatPanel";
 import { entityHealth, getSessionStatus, getStatus } from "./lib/daemonClient";
 import { resolveEntityUrl } from "./lib/connection";
+import { isNativeConnection, nativeRuntimeConnection, ownershipHeaders } from "./lib/nativeConnection";
 import { showAppWindow } from "./lib/window";
 import { defaultProfile, isEntityProfile, type EntityProfile } from "./presence/profile";
 
@@ -33,6 +34,7 @@ function hiveProfileUrl(entityId: string, session: unknown, override?: string): 
 export default function App() {
   const [phase, setPhase] = useState<Phase>("splash");
   const [readiness, setReadiness] = useState<Readiness>("pending");
+  const [connectionError, setConnectionError] = useState<string>();
   const [baseUrl, setBaseUrl] = useState<string>("");
   const [runtimeEntityId, setRuntimeEntityId] = useState<string>();
   const [identityError, setIdentityError] = useState(false);
@@ -65,20 +67,30 @@ export default function App() {
           throw new Error("Entity status did not include an identity.");
         }
         if (disposed || controller.signal.aborted) return;
-        // The native shell currently supplies an address, not an independent
-        // Entity ID. Pin this initial identity so chat/history cannot later
-        // restore a different Entity underneath its visual profile.
+        // Pin the confirmed Entity ID as well as the native process connection
+        // so chat/history cannot restore another Entity under this appearance.
         identityConfirmed = true;
         setRuntimeEntityId(status.entity_id);
         if ("name" in status && typeof status.name === "string") {
           setProfile(defaultProfile(status.name));
         }
-        const override = new URLSearchParams(window.location.search).get("hiveUrl") || import.meta.env.VITE_HIVE_DAEMON_URL;
-        // An explicit address is sufficient; optional session discovery must not
-        // consume the profile deadline when no lease lookup is needed.
-        const session = override ? null : await getSessionStatus(controller.signal).catch(() => null);
-        const response = await fetch(hiveProfileUrl(status.entity_id, session, override), {
-          headers: { Accept: "application/json" }, signal: controller.signal,
+        let profileUrl: string;
+        let headers: HeadersInit = { Accept: "application/json" };
+        if (isNativeConnection()) {
+          const connection = await nativeRuntimeConnection(baseUrl, undefined, controller.signal);
+          if (!connection.hive_url) throw new Error("Native Runtime did not verify its Hive.");
+          profileUrl = `${connection.hive_url}/v1/entities/${encodeURIComponent(status.entity_id)}/presence`;
+          headers = ownershipHeaders(connection.hive_process_identity, headers);
+        } else {
+          const override = new URLSearchParams(window.location.search).get("hiveUrl") || import.meta.env.VITE_HIVE_DAEMON_URL;
+          // Optional session discovery must not consume the profile deadline
+          // when the browser fixture already supplies an explicit address.
+          const session = override ? null : await getSessionStatus(controller.signal).catch(() => null);
+          profileUrl = hiveProfileUrl(status.entity_id, session, override);
+        }
+        if (controller.signal.aborted) return;
+        const response = await fetch(profileUrl, {
+          headers, signal: controller.signal, redirect: isNativeConnection() ? "error" : undefined,
         });
         const envelope: unknown = await response.json();
         if (!response.ok || !envelope || typeof envelope !== "object" || !("ok" in envelope) || envelope.ok !== true || !("data" in envelope) || !isEntityProfile(envelope.data)) {
@@ -95,11 +107,18 @@ export default function App() {
       }
     })();
     return () => { disposed = true; clearTimeout(timeout); controller.abort(); };
-  }, [readiness, identityAttempt]);
+  }, [readiness, identityAttempt, baseUrl]);
 
   const checkReadiness = useCallback(async () => {
     setReadiness("pending");
-    setBaseUrl(await resolveEntityUrl());
+    setConnectionError(undefined);
+    try {
+      setBaseUrl(await resolveEntityUrl());
+    } catch (error) {
+      setConnectionError(error instanceof Error ? error.message : String(error));
+      setReadiness("failed");
+      return;
+    }
     const deadline = Date.now() + READY_CEILING_MS;
     while (Date.now() < deadline) {
       if (await entityHealth()) {
@@ -136,7 +155,7 @@ export default function App() {
     return (
       <LoaderScreen
         error
-        message="Your Entity isn't responding yet."
+        message={connectionError ?? "Your Entity isn't responding yet."}
         onRetry={() => {
           setPhase("loading");
           void checkReadiness();

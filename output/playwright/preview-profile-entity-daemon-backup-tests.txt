@@ -1,0 +1,6 @@
+
+running 2 tests
+test backup_ops::tests::preview_backup_ops_accepts_only_profile_backup_database_location ... ok
+test backup_ops::tests::preview_backup_ops_rejects_external_source_before_preview_or_import ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 46 filtered out; finished in 0.10s

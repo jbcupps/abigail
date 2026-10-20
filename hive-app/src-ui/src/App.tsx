@@ -5,6 +5,7 @@ import PresenceHome from "./components/PresenceHome";
 import ProviderWizard from "./components/ProviderWizard";
 import { hiveHealth, getStatus, type HiveStatus } from "./lib/daemonClient";
 import { showAppWindow } from "./lib/window";
+import { isNativeConnection, nativeHiveConnection } from "../../../entity-runtime-app/src-ui/src/lib/nativeConnection";
 
 type Phase = "splash" | "loading" | "ready" | "error";
 type Readiness = "pending" | "ok" | "failed";
@@ -15,6 +16,7 @@ export default function App() {
   const preview = new URLSearchParams(window.location.search).get("presencePreview") === "1";
   const [phase, setPhase] = useState<Phase>(preview ? "ready" : "splash");
   const [readiness, setReadiness] = useState<Readiness>("pending");
+  const [connectionError, setConnectionError] = useState<string>();
   const [status, setStatus] = useState<HiveStatus | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const mounted = useRef(true);
@@ -30,6 +32,18 @@ export default function App() {
 
   const checkReadiness = useCallback(async () => {
     setReadiness("pending");
+    setConnectionError(undefined);
+    if (isNativeConnection()) {
+      try {
+        await nativeHiveConnection();
+      } catch (error) {
+        if (mounted.current) {
+          setConnectionError(error instanceof Error ? error.message : String(error));
+          setReadiness("failed");
+        }
+        return;
+      }
+    }
     const deadline = Date.now() + READY_CEILING_MS;
     while (mounted.current && Date.now() < deadline) {
       if (await hiveHealth()) {
@@ -84,7 +98,7 @@ export default function App() {
     return (
       <LoaderScreen
         error
-        message="The Hive isn't responding yet."
+        message={connectionError ?? "The Hive isn't responding yet."}
         onRetry={() => {
           setPhase("loading");
           void checkReadiness();

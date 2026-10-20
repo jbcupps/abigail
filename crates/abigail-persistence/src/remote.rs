@@ -3,6 +3,7 @@
 //! own database in that store.
 
 use crate::{EntityScope, PersistenceError, PersistenceHandle, QueryBinding};
+use abigail_core::profile::{ProcessIdentity, ProfileContext};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::OnceLock;
@@ -54,6 +55,8 @@ pub(crate) struct HiveTransport {
     pub base_url: String,
     pub entity_id: String,
     pub lease_id: String,
+    client: reqwest::Client,
+    identity: Option<ProcessIdentity>,
 }
 
 static HIVE_TRANSPORT: OnceLock<HiveTransport> = OnceLock::new();
@@ -69,6 +72,28 @@ pub fn configure_hive_transport(
     })
 }
 
+/// Configure an Entity's persistence boundary using the already verified,
+/// exact live Hive identity. Preview never adopts an unpinned endpoint.
+pub fn configure_hive_transport_with_identity(
+    base_url: &str,
+    entity_id: &str,
+    lease_id: &str,
+    identity: &ProcessIdentity,
+) -> crate::client::Result<()> {
+    let profile = abigail_core::profile::current()
+        .map_err(|error| PersistenceError::Remote(error.to_string()))?
+        .ok_or_else(|| {
+            PersistenceError::Remote(
+                "Pinned Hive persistence requires a validated preview profile".into(),
+            )
+        })?;
+    let transport =
+        HiveTransport::new_with_profile(base_url, entity_id, lease_id, &profile, identity)?;
+    HIVE_TRANSPORT.set(transport).map_err(|_| {
+        PersistenceError::Remote("Hive persistence is already configured for this process".into())
+    })
+}
+
 pub(crate) fn configured_transport() -> Option<HiveTransport> {
     HIVE_TRANSPORT.get().cloned()
 }
@@ -78,6 +103,41 @@ impl HiveTransport {
         base_url: &str,
         entity_id: &str,
         lease_id: &str,
+    ) -> crate::client::Result<Self> {
+        if abigail_core::profile::current()
+            .map_err(|error| PersistenceError::Remote(error.to_string()))?
+            .is_some()
+        {
+            return Err(PersistenceError::Remote(
+                "Preview Hive persistence requires an explicit process identity".into(),
+            ));
+        }
+        Self::build(base_url, entity_id, lease_id, None)
+    }
+
+    fn new_with_profile(
+        base_url: &str,
+        entity_id: &str,
+        lease_id: &str,
+        profile: &ProfileContext,
+        identity: &ProcessIdentity,
+    ) -> crate::client::Result<Self> {
+        profile
+            .validate_identity(identity)
+            .map_err(|error| PersistenceError::Remote(error.to_string()))?;
+        if identity.instance_id != identity.hive_instance_id {
+            return Err(PersistenceError::Remote(
+                "Persistence must be pinned to the Hive process instance".into(),
+            ));
+        }
+        Self::build(base_url, entity_id, lease_id, Some(identity.clone()))
+    }
+
+    fn build(
+        base_url: &str,
+        entity_id: &str,
+        lease_id: &str,
+        identity: Option<ProcessIdentity>,
     ) -> crate::client::Result<Self> {
         let url =
             reqwest::Url::parse(base_url).map_err(|e| PersistenceError::Remote(e.to_string()))?;
@@ -93,16 +153,37 @@ impl HiveTransport {
                 "Hive persistence requires a local HTTP endpoint".into(),
             ));
         }
+        if identity.is_some() {
+            let port = url.port_or_known_default().filter(|port| *port != 0);
+            if port.is_none_or(|port| {
+                (43141..=43150).contains(&port) || base_url != format!("http://127.0.0.1:{port}")
+            }) {
+                return Err(PersistenceError::Remote(
+                    "Preview Hive persistence requires a canonical loopback endpoint".into(),
+                ));
+            }
+        }
         uuid::Uuid::parse_str(entity_id).map_err(|e| PersistenceError::Remote(e.to_string()))?;
         if lease_id.is_empty() {
             return Err(PersistenceError::Remote(
                 "Hive persistence requires a runtime lease".into(),
             ));
         }
+        let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30));
+        if identity.is_some() {
+            builder = builder
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none());
+        }
+        let client = builder
+            .build()
+            .map_err(|error| PersistenceError::Remote(error.to_string()))?;
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             entity_id: entity_id.to_string(),
             lease_id: lease_id.to_string(),
+            client,
+            identity,
         })
     }
 
@@ -116,15 +197,27 @@ impl HiveTransport {
         }
     }
 
-    pub(crate) async fn call(&self, operation: RemoteOperation) -> crate::client::Result<Value> {
-        let response = reqwest::Client::new()
+    fn request(&self, operation: &RemoteOperation) -> reqwest::RequestBuilder {
+        let request = self
+            .client
             .post(format!(
                 "{}/v1/entities/{}/persistence",
                 self.base_url, self.entity_id
             ))
             .bearer_auth(&self.lease_id)
-            .timeout(std::time::Duration::from_secs(30))
-            .json(&operation)
+            .json(operation);
+        match &self.identity {
+            // Ownership IDs do not replace the independent runtime lease.
+            Some(identity) => request
+                .header("x-abigail-profile-id", &identity.profile_id)
+                .header("x-abigail-process-instance-id", &identity.instance_id),
+            None => request,
+        }
+    }
+
+    pub(crate) async fn call(&self, operation: RemoteOperation) -> crate::client::Result<Value> {
+        let response = self
+            .request(&operation)
             .send()
             .await
             .map_err(|e| PersistenceError::Remote(e.to_string()))?
@@ -283,6 +376,143 @@ fn validate_sql(sql: &str) -> crate::client::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct PreviewFixture {
+        root: std::path::PathBuf,
+        profile: ProfileContext,
+    }
+
+    impl PreviewFixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "abigail-preview-transport-{}",
+                uuid::Uuid::new_v4()
+            ));
+            let profile = ProfileContext::preflight(&root, &[]).unwrap();
+            Self { root, profile }
+        }
+
+        fn hive_identity(&self) -> ProcessIdentity {
+            let instance = uuid::Uuid::new_v4().to_string();
+            self.profile.process_identity(&instance, &instance).unwrap()
+        }
+    }
+
+    impl Drop for PreviewFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn preview_transport_builds_a_pinned_request_without_opening_a_socket() {
+        let fixture = PreviewFixture::new();
+        let identity = fixture.hive_identity();
+        let entity = uuid::Uuid::new_v4().to_string();
+        let transport = HiveTransport::new_with_profile(
+            "http://127.0.0.1:51111",
+            &entity,
+            "synthetic-lease",
+            &fixture.profile,
+            &identity,
+        )
+        .unwrap();
+        let request = transport
+            .request(&RemoteOperation::Select {
+                table: "conversation_turn".into(),
+                id: "synthetic-turn".into(),
+            })
+            .build()
+            .unwrap();
+        assert_eq!(
+            request.url().as_str(),
+            format!("http://127.0.0.1:51111/v1/entities/{entity}/persistence")
+        );
+        assert_eq!(
+            request.headers()["x-abigail-profile-id"],
+            identity.profile_id
+        );
+        assert_eq!(
+            request.headers()["x-abigail-process-instance-id"],
+            identity.instance_id
+        );
+        assert_eq!(
+            request.headers()[reqwest::header::AUTHORIZATION],
+            "Bearer synthetic-lease"
+        );
+        assert!(transport
+            .validate_scope(&EntityScope::Entity(entity))
+            .is_ok());
+        assert!(transport.validate_scope(&EntityScope::Hive).is_err());
+    }
+
+    #[test]
+    fn preview_transport_rejects_other_profile_root_channel_and_entity_instance() {
+        let fixture = PreviewFixture::new();
+        let expected = fixture.hive_identity();
+        let entity = uuid::Uuid::new_v4().to_string();
+        let mut differences = vec![expected.clone(); 5];
+        differences[0].channel = "stable".into();
+        differences[1].profile_id = uuid::Uuid::new_v4().to_string();
+        differences[2].canonical_data_root = fixture.root.join("other");
+        differences[3].instance_id = uuid::Uuid::new_v4().to_string();
+        differences[4].hive_instance_id = "invalid-instance".into();
+        for actual in differences {
+            assert!(HiveTransport::new_with_profile(
+                "http://127.0.0.1:51111",
+                &entity,
+                "synthetic-lease",
+                &fixture.profile,
+                &actual,
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn preview_transport_requires_exact_endpoint_and_preserves_stable_url_compatibility() {
+        let fixture = PreviewFixture::new();
+        let identity = fixture.hive_identity();
+        let entity = uuid::Uuid::new_v4().to_string();
+        for url in [
+            "http://127.0.0.1:43141",
+            "http://127.0.0.1:43150",
+            "http://localhost:51111",
+            "http://127.0.0.1:51111/",
+            "http://127.0.0.1:51111?other=profile",
+            "http://127.0.0.1:0",
+            "http://127.0.0.1",
+            "http://127.0.0.1:051111",
+        ] {
+            assert!(
+                HiveTransport::new_with_profile(
+                    url,
+                    &entity,
+                    "synthetic-lease",
+                    &fixture.profile,
+                    &identity,
+                )
+                .is_err(),
+                "{url}"
+            );
+        }
+        let stable =
+            HiveTransport::build("http://localhost:43141/", &entity, "synthetic-lease", None)
+                .unwrap();
+        assert_eq!(stable.base_url, "http://localhost:43141");
+        let request = stable
+            .request(&RemoteOperation::Select {
+                table: "conversation_turn".into(),
+                id: "synthetic-turn".into(),
+            })
+            .build()
+            .unwrap();
+        assert!(!request.headers().contains_key("x-abigail-profile-id"));
+        assert!(!request
+            .headers()
+            .contains_key("x-abigail-process-instance-id"));
+    }
+
     #[test]
     fn remote_transport_rejects_external_hive_and_cross_entity_scope() {
         let id = uuid::Uuid::new_v4().to_string();

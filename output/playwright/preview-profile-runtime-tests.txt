@@ -1,0 +1,120 @@
+   Compiling tracing v0.1.44
+   Compiling rustls v0.23.37
+   Compiling h2 v0.4.13
+   Compiling hyper v1.8.1
+   Compiling hyper-util v0.1.20
+   Compiling tower v0.5.3
+   Compiling tokio-rustls v0.26.4
+   Compiling tower-http v0.6.8
+   Compiling hyper-rustls v0.27.7
+   Compiling compio-log v0.1.0
+   Compiling compio-driver v0.10.0
+   Compiling compio-runtime v0.10.1
+   Compiling tungstenite v0.28.0
+   Compiling axum v0.8.8
+   Compiling compio-net v0.10.0
+   Compiling hyper-timeout v0.5.2
+   Compiling rustls-platform-verifier v0.7.0
+   Compiling futures-rustls v0.26.0
+   Compiling keyring v3.6.3
+   Compiling quinn-proto v0.11.16
+   Compiling compio-tls v0.8.0
+   Compiling tonic v0.14.5
+   Compiling reqwest v0.12.28
+   Compiling geo v0.32.0
+   Compiling rstest_macros v0.26.1
+   Compiling markup5ever v0.39.0
+   Compiling cookie_store v0.22.1
+   Compiling tonic-prost v0.14.5
+   Compiling compio-fs v0.10.0
+   Compiling rustls-platform-verifier v0.6.2
+   Compiling reqwest v0.13.4
+   Compiling surrealdb-protocol v0.8.3
+   Compiling compio v0.17.0
+   Compiling html5ever v0.39.0
+   Compiling compio-quic v0.6.0
+   Compiling rstest v0.26.1
+   Compiling compio-ws v0.2.0
+   Compiling geo v0.31.0
+   Compiling zopfli v0.8.3
+   Compiling surrealkv v0.21.2
+   Compiling iggy_common v0.8.0
+   Compiling surrealmx v0.18.0
+   Compiling ammonia v4.1.4
+   Compiling revision v0.17.0
+   Compiling sqlx-core v0.8.6
+   Compiling surrealdb-types v3.0.5
+   Compiling jsonwebtoken v10.3.0
+   Compiling abigail-core v0.0.1 (<repository>\crates\abigail-core)
+warning: function `write_encrypted_sentinel` is never used
+  --> crates\abigail-core\src\vault\mod.rs:80:15
+   |
+80 | pub(crate) fn write_encrypted_sentinel(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `abigail-core` (lib) generated 1 warning
+   Compiling ext-sort v0.1.5
+   Compiling ureq-proto v0.6.0
+   Compiling quinn-udp v0.5.14
+   Compiling object_store v0.13.1
+   Compiling reqwest-middleware v0.4.2
+   Compiling surrealdb-core v3.0.5
+   Compiling ureq v3.3.0
+   Compiling zip v8.2.0
+   Compiling sqlx-sqlite v0.8.6
+   Compiling reqwest-retry v0.8.0
+   Compiling iggy_binary_protocol v0.8.0
+   Compiling quinn v0.11.9
+   Compiling tokio-tungstenite v0.28.0
+   Compiling surrealdb v3.0.5
+   Compiling iggy v0.8.0
+   Compiling tungstenite v0.30.0
+   Compiling sqlx v0.8.6
+   Compiling playwright-rs v0.15.0
+   Compiling tokio-tungstenite v0.30.0
+   Compiling abigail-persistence v0.0.1 (<repository>\crates\abigail-persistence)
+   Compiling abigail-streaming v0.0.1 (<repository>\crates\abigail-streaming)
+   Compiling notify v8.2.0
+   Compiling abigail-queue v0.0.1 (<repository>\crates\abigail-queue)
+   Compiling abigail-auth v0.0.1 (<repository>\crates\abigail-auth)
+   Compiling abigail-skills v0.0.1 (<repository>\crates\abigail-skills)
+   Compiling av-scenechange v0.14.1
+   Compiling av1-grain v0.2.5
+   Compiling chromiumoxide_types v0.8.0
+   Compiling rav1e v0.8.1
+   Compiling chromiumoxide_pdl v0.8.0
+   Compiling ravif v0.13.0
+   Compiling chromiumoxide_cdp v0.8.0
+   Compiling async-tungstenite v0.32.1
+   Compiling image v0.25.10
+   Compiling chromiumoxide v0.8.0
+   Compiling abigail-capabilities v0.0.1 (<repository>\crates\abigail-capabilities)
+   Compiling arboard v3.6.1
+   Compiling skill-clipboard v0.0.1 (<repository>\skills\skill-clipboard)
+   Compiling skill-system-monitor v0.0.1 (<repository>\skills\skill-system-monitor)
+   Compiling skill-notification v0.0.1 (<repository>\skills\skill-notification)
+   Compiling skill-browser v0.0.1 (<repository>\skills\skill-browser)
+   Compiling skill-web-search v0.0.1 (<repository>\skills\skill-web-search)
+   Compiling skill-image v0.0.1 (<repository>\skills\skill-image)
+   Compiling skill-calendar v0.0.1 (<repository>\skills\skill-calendar)
+   Compiling skill-perplexity-search v0.0.1 (<repository>\skills\skill-perplexity-search)
+   Compiling skill-knowledge-base v0.0.1 (<repository>\skills\skill-knowledge-base)
+   Compiling skill-http v0.0.1 (<repository>\skills\skill-http)
+   Compiling skill-document v0.0.1 (<repository>\skills\skill-document)
+   Compiling skill-shell v0.0.1 (<repository>\skills\skill-shell)
+   Compiling skill-git v0.0.1 (<repository>\skills\skill-git)
+   Compiling skill-code-analysis v0.0.1 (<repository>\skills\skill-code-analysis)
+   Compiling skill-database v0.0.1 (<repository>\skills\skill-database)
+   Compiling skill-filesystem v0.0.1 (<repository>\skills\skill-filesystem)
+   Compiling abigail-runtime v0.0.1 (<repository>\crates\abigail-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14m 29s
+     Running unittests src\lib.rs (target\debug\deps\abigail_runtime-c3708b00b5066844.exe)
+
+running 3 tests
+test tests::preview_tool_roots_exclude_identity_os_and_sibling_entity_directories ... ok
+test tests::preview_tool_roots_reject_wrong_entity_directory_and_invalid_id ... ok
+test tests::stable_tool_roots_keep_existing_resolution ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.04s

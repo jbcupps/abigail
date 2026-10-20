@@ -277,6 +277,7 @@ mod tests {
         ));
 
         EntityDaemonState {
+            process_identity: None,
             entity_id: "pipeline-entity".to_string(),
             config: AppConfig::default_paths(),
             hive_url: "http://127.0.0.1:3141".to_string(),

@@ -9,6 +9,7 @@ import {
   normalizeChatGatewayError,
   normalizeChatGatewayResponse,
 } from "./chatGateway";
+import { verifiedRuntimeFetch } from "../lib/nativeConnection";
 
 interface ApiEnvelope<T> {
   ok: boolean;
@@ -126,7 +127,7 @@ export class EntityHttpChatGateway implements ChatGateway {
     this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
     this.reconnectBackoffMs = options.reconnectBackoffMs ?? DEFAULT_RECONNECT_BACKOFF_MS;
-    this.fetchFn = options.fetchFn ?? fetch;
+    this.fetchFn = verifiedRuntimeFetch(options.fetchFn ?? fetch);
     this.allowNonStreamingFallback = options.allowNonStreamingFallback ?? true;
   }
 

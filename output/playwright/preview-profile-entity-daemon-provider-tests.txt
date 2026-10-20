@@ -1,0 +1,6 @@
+
+running 2 tests
+test router_build::preview_provider_tests::preview_cloud_requires_explicit_key_and_preserves_explicit_local_url ... ok
+test router_build::preview_provider_tests::preview_provider_selection_never_reuses_system_cli_auth ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 46 filtered out; finished in 0.00s

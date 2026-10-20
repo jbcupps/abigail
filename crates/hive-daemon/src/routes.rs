@@ -10,7 +10,7 @@ use hive_core::{
     ApiEnvelope, BestModelResponse, CliDetectResponse, CliProviderDetection, CreateEntityRequest,
     CreateEntityResponse, CreateForgeApprovalJobRequest, EntityCreationResponse,
     EntityCreationState, EntityInfo, EntityOpenResponse, ExecutionReceiptsResponse,
-    ForgeApprovalJobsResponse, HelperInfo, HiveDefaultResponse, HiveStatus, LocalProviderRequest,
+    ForgeApprovalJobsResponse, HiveDefaultResponse, HiveStatus, LocalProviderRequest,
     LocalProviderResponse, OutboxSyncRequest, OutboxSyncResponse, ProviderConfig,
     ProviderModelInfo, ProviderModelsRequest, ProviderModelsResponse, ProviderProfileResponse,
     RuntimeHeartbeatRequest, RuntimeHeartbeatResponse, RuntimeRegistrationRequest,
@@ -49,6 +49,47 @@ pub async fn health() -> &'static str {
     "ok"
 }
 
+#[derive(serde::Serialize)]
+pub struct ShutdownResponse {
+    shutdown: bool,
+    owned_entities_reaped: bool,
+}
+
+/// Acknowledge preview shutdown only after every owned child has been reaped.
+pub async fn shutdown(
+    State(state): State<HiveDaemonState>,
+) -> (StatusCode, Json<ApiEnvelope<ShutdownResponse>>) {
+    if state.process_identity.is_none() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiEnvelope::error(
+                "Preview ownership is required for this shutdown endpoint",
+            )),
+        );
+    }
+    match state.supervisor.shutdown().await {
+        Ok(()) => {
+            if let Ok(mut helper) = state.helper.lock() {
+                *helper = None;
+            }
+            state.shutdown.notify_one();
+            (
+                StatusCode::OK,
+                Json(ApiEnvelope::success(ShutdownResponse {
+                    shutdown: true,
+                    owned_entities_reaped: true,
+                })),
+            )
+        }
+        Err(error) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ApiEnvelope::error(format!(
+                "Owned Entity cleanup is unconfirmed: {error:#}"
+            ))),
+        ),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // GET /v1/status
 // ---------------------------------------------------------------------------
@@ -82,8 +123,12 @@ pub async fn get_status(State(state): State<HiveDaemonState>) -> Json<ApiEnvelop
                 .and_then(|config| state.hive.resolve_config(&config).ok())
                 .is_some_and(|config| config.ego_provider.is_some());
             let any_provider_configured = local_configured || inference_configured;
-            let helper_local_url = state.helper_url.lock().ok().and_then(|g| g.clone());
-            let helper_running = helper_local_url.is_some();
+            let helper = state
+                .helper
+                .lock()
+                .ok()
+                .and_then(|value| value.clone())
+                .unwrap_or_default();
             let ready_state = if any_provider_configured {
                 "ready"
             } else {
@@ -91,16 +136,14 @@ pub async fn get_status(State(state): State<HiveDaemonState>) -> Json<ApiEnvelop
             };
 
             let status = HiveStatus {
+                process_identity: state.process_identity.clone(),
                 master_key_loaded: true,
                 entity_count: entities.len(),
                 entities,
                 ready_state: ready_state.to_string(),
                 any_provider_configured,
                 setup_complete: any_provider_configured,
-                helper: Some(HelperInfo {
-                    running: helper_running,
-                    local_url: helper_local_url,
-                }),
+                helper: Some(helper),
             };
             Json(ApiEnvelope::success(status))
         }
@@ -363,8 +406,13 @@ pub async fn get_best_model(
 /// Detect CLI provider tools (claude, gemini, codex, grok) installed on PATH,
 /// including whether they are signed in.
 pub async fn detect_cli(
-    State(_state): State<HiveDaemonState>,
+    State(state): State<HiveDaemonState>,
 ) -> Json<ApiEnvelope<CliDetectResponse>> {
+    if state.process_identity.is_some() {
+        return Json(ApiEnvelope::error(
+            "Installed CLI accounts are unavailable in this preview profile. Connect a profile-specific API provider or explicit local server.",
+        ));
+    }
     let providers = abigail_hive::detect_cli_providers_full()
         .into_iter()
         .map(|d| CliProviderDetection {
@@ -459,6 +507,13 @@ pub async fn set_hive_default(
     State(state): State<HiveDaemonState>,
     Json(body): Json<SetHiveDefaultRequest>,
 ) -> Json<ApiEnvelope<HiveDefaultResponse>> {
+    if let Err(error) = validate_preview_provider(
+        state.process_identity.is_some(),
+        body.provider.as_deref(),
+        None,
+    ) {
+        return Json(ApiEnvelope::error(error));
+    }
     // Resolve which provider/model to store: explicit, or best available.
     let (provider, model) = match body.provider.clone() {
         Some(p) => (Some(p.trim().to_lowercase()), body.model.clone()),
@@ -647,10 +702,7 @@ pub async fn open_entity(
     Path(entity_id): Path<String>,
 ) -> Json<ApiEnvelope<EntityOpenResponse>> {
     match state.supervisor.ensure_entity_running(&entity_id).await {
-        Ok(local_url) => Json(ApiEnvelope::success(EntityOpenResponse {
-            entity_id,
-            local_url,
-        })),
+        Ok(opened) => Json(ApiEnvelope::success(opened)),
         Err(e) => Json(ApiEnvelope::error(format!("{:#}", e))),
     }
 }
@@ -664,6 +716,7 @@ pub async fn open_entity(
 pub async fn close_entity(
     State(state): State<HiveDaemonState>,
     Path(entity_id): Path<String>,
+    request: Option<Json<CloseEntityRequest>>,
 ) -> Json<ApiEnvelope<String>> {
     match state.identity_manager.hive_agent_id() {
         Ok(hive_id) if hive_id == entity_id => {
@@ -674,17 +727,35 @@ pub async fn close_entity(
         Ok(_) => {}
         Err(error) => return Json(ApiEnvelope::error(error)),
     }
-    state.supervisor.stop_entity(&entity_id);
-    match state.runtime_control.lock() {
-        Ok(mut control) => {
-            control.revoke_entity_sessions(&entity_id);
-        }
-        Err(error) => return Json(ApiEnvelope::error(error.to_string())),
+    if let Err(error) = state
+        .supervisor
+        .stop_entity(
+            &entity_id,
+            request
+                .as_ref()
+                .and_then(|request| request.expected_entity_instance_id.as_deref()),
+            || {
+                state
+                    .runtime_control
+                    .lock()
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?
+                    .revoke_entity_sessions(&entity_id);
+                Ok(())
+            },
+        )
+        .await
+    {
+        return Json(ApiEnvelope::error(error.to_string()));
     }
     Json(ApiEnvelope::success(format!(
         "Entity {} stopped",
         entity_id
     )))
+}
+
+#[derive(serde::Deserialize)]
+pub struct CloseEntityRequest {
+    expected_entity_instance_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -862,9 +933,16 @@ pub async fn get_secret(
 
 /// Discover available models from a provider using its API key.
 pub async fn discover_models(
-    State(_state): State<HiveDaemonState>,
+    State(state): State<HiveDaemonState>,
     Json(body): Json<ProviderModelsRequest>,
 ) -> Json<ApiEnvelope<ProviderModelsResponse>> {
+    if let Err(error) = validate_preview_provider(
+        state.process_identity.is_some(),
+        Some(&body.provider),
+        Some(&body.api_key),
+    ) {
+        return Json(ApiEnvelope::error(error));
+    }
     if let Err(error) =
         abigail_capabilities::cognitive::validation::validate_api_key(&body.provider, &body.api_key)
             .await
@@ -895,6 +973,20 @@ pub async fn discover_models(
         }
         Err(e) => Json(ApiEnvelope::error(e)),
     }
+}
+
+fn validate_preview_provider(
+    preview: bool,
+    provider: Option<&str>,
+    api_key: Option<&str>,
+) -> Result<(), &'static str> {
+    if preview
+        && (provider.is_some_and(|value| value.trim().to_ascii_lowercase().ends_with("-cli"))
+            || api_key.is_some_and(|value| value.trim().eq_ignore_ascii_case("system")))
+    {
+        return Err("Installed CLI accounts are unavailable in this preview profile. Connect a profile-specific API provider or explicit local server.");
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1118,6 +1210,19 @@ mod tests {
     use abigail_identity::IdentityManager;
     use std::sync::{Arc, Mutex, OnceLock};
 
+    #[test]
+    fn preview_provider_connection_blocks_ambient_cli_accounts_before_probe() {
+        for provider in ["claude-cli", "codex-cli", "grok-cli", " GROK-CLI "] {
+            assert!(validate_preview_provider(true, Some(provider), None).is_err());
+            assert!(validate_preview_provider(false, Some(provider), None).is_ok());
+        }
+        assert!(validate_preview_provider(true, Some("openai"), Some("system")).is_err());
+        assert!(
+            validate_preview_provider(true, Some("openai"), Some("synthetic-explicit-key")).is_ok()
+        );
+        assert!(validate_preview_provider(true, None, None).is_ok());
+    }
+
     fn test_vault_root() -> &'static std::path::Path {
         static ROOT: OnceLock<std::path::PathBuf> = OnceLock::new();
         ROOT.get_or_init(|| {
@@ -1236,12 +1341,14 @@ mod tests {
 
         (
             HiveDaemonState {
+                process_identity: None,
+                shutdown: Arc::new(tokio::sync::Notify::new()),
                 identity_manager,
                 hive,
                 hive_secrets,
                 hive_url: "http://127.0.0.1:3141".to_string(),
                 runtime_control: Arc::new(Mutex::new(RuntimeControlPlane::default())),
-                helper_url: Arc::new(Mutex::new(None)),
+                helper: Arc::new(Mutex::new(None)),
                 supervisor: crate::supervisor::HiveSupervisor::new(
                     "http://127.0.0.1:3141".to_string(),
                     data_root.clone(),
@@ -1464,7 +1571,7 @@ mod tests {
         assert!(response.0.ok);
         assert_eq!(response.0.result, serde_json::json!([]));
 
-        let response = close_entity(State(state.clone()), Path(alpha_id.clone())).await;
+        let response = close_entity(State(state.clone()), Path(alpha_id.clone()), None).await;
         assert!(response.0.ok, "explicit family close succeeds");
         let (status, response) = crate::persistence::request(
             State(state.clone()),
@@ -1612,7 +1719,7 @@ mod tests {
             Some("Abigail Hive".into()),
             Some(state.hive_url.clone()),
         );
-        let response = close_entity(State(state.clone()), Path(hive_id)).await;
+        let response = close_entity(State(state.clone()), Path(hive_id), None).await;
         assert!(
             !response.0.ok,
             "family close route cannot close the Hive helper"

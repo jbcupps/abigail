@@ -1,0 +1,21 @@
+   Compiling syn v2.0.117
+   Compiling regex-syntax v0.8.10
+   Compiling regex-automata v0.4.14
+   Compiling windows-sys v0.59.0
+   Compiling tracing-attributes v0.1.31
+   Compiling tracing v0.1.44
+   Compiling nu-ansi-term v0.50.3
+   Compiling matchers v0.2.0
+   Compiling smallvec v1.15.1
+   Compiling tracing-subscriber v0.3.22
+   Compiling windows-sys v0.61.2
+   Compiling abigail-diag v0.0.1 (<repository>\crates\abigail-diag)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 19.11s
+     Running unittests src\lib.rs (target\debug\deps\abigail_diag-4be193e190808c3f.exe)
+
+running 3 tests
+test tests::explicit_log_directory_is_immutable_without_global_environment_changes ... ok
+test tests::fatal_record_uses_only_the_selected_synthetic_directory ... ok
+test tests::relative_log_directory_is_rejected_without_latching_a_fallback ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s

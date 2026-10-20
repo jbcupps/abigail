@@ -1,0 +1,15 @@
+
+running 11 tests
+test tests::a_reused_entity_port_cannot_repin_an_existing_window ... ok
+test tests::entity_cleanup_requires_a_successful_envelope ... ok
+test tests::preview_binary_overrides_must_match_the_packaged_path ... ok
+test tests::preview_descriptor_is_bound_to_profile_root_channel_and_hive_instance ... ok
+test tests::preview_origin_refuses_normal_ports_remote_hosts_and_redirect_paths ... ok
+test tests::resolver_falls_back_to_first_candidate_for_clear_spawn_errors ... ok
+test tests::resolver_prefers_valid_env_override ... ok
+test tests::resolver_uses_nested_resources_dir_for_installer_layout ... ok
+test tests::resolver_uses_resource_dir_when_sibling_is_absent ... ok
+test tests::startup_failure_requires_explicit_drain_and_exit_before_releasing_ownership ... ok
+test tests::status_requires_exact_expected_live_instance_and_entity ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s

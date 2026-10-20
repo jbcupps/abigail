@@ -1,0 +1,151 @@
+   Compiling windows-sys v0.60.2
+   Compiling socket2 v0.6.3
+   Compiling zeroize_derive v1.4.3
+   Compiling zeroize v1.8.2
+   Compiling tokio v1.53.1
+   Compiling aws-lc-rs v1.16.0
+   Compiling rustls-pki-types v1.14.0
+   Compiling rustls v0.23.37
+   Compiling rustls-webpki v0.103.13
+   Compiling tokio-util v0.7.18
+   Compiling h2 v0.4.13
+   Compiling hyper v1.8.1
+   Compiling hyper-util v0.1.20
+   Compiling tower v0.5.3
+   Compiling webpki-roots v1.0.6
+   Compiling compio-buf v0.7.2
+   Compiling rust_decimal v1.40.0
+   Compiling compio-log v0.1.0
+   Compiling compio-driver v0.10.0
+   Compiling compio-io v0.8.4
+   Compiling tokio-rustls v0.26.4
+   Compiling tokio-stream v0.1.18
+   Compiling compio-runtime v0.10.1
+   Compiling ahash v0.8.12
+   Compiling twox-hash v2.1.2
+   Compiling rand_chacha v0.3.1
+   Compiling tower-http v0.6.8
+   Compiling rand v0.8.5
+   Compiling hyper-rustls v0.27.7
+   Compiling darling_core v0.21.3
+   Compiling darling_core v0.23.0
+   Compiling anstyle-wincon v3.0.11
+   Compiling proc-macro2-diagnostics v0.10.1
+   Compiling axum v0.8.8
+   Compiling darling_macro v0.23.0
+   Compiling darling_macro v0.21.3
+   Compiling compio-net v0.10.0
+   Compiling webpki-roots v0.26.11
+   Compiling hyper-timeout v0.5.2
+   Compiling rustls-platform-verifier v0.7.0
+   Compiling futures-rustls v0.26.0
+   Compiling anstyle-query v1.1.5
+   Compiling serde_spanned v0.6.9
+   Compiling toml_datetime v0.6.11
+   Compiling quinn-proto v0.11.16
+   Compiling anstream v1.0.0
+   Compiling toml_edit v0.22.27
+   Compiling tungstenite v0.28.0
+   Compiling compio-tls v0.8.0
+   Compiling tonic v0.14.5
+   Compiling darling v0.21.3
+   Compiling darling v0.23.0
+   Compiling pear_codegen v0.2.9
+   Compiling prettyplease v0.2.37
+   Compiling terminal_size v0.4.3
+   Compiling geo v0.32.0
+   Compiling pear v0.2.9
+   Compiling derive_more-impl v2.1.1
+   Compiling rstest_macros v0.26.1
+   Compiling clap_builder v4.6.0
+   Compiling crossterm v0.29.0
+   Compiling bon-macros v3.9.0
+   Compiling serde_with_macros v3.17.0
+   Compiling tonic-prost v0.14.5
+   Compiling compio-fs v0.10.0
+   Compiling toml v0.8.23
+   Compiling strum_macros v0.27.2
+   Compiling clap_derive v4.6.1
+   Compiling yasna v0.5.2
+   Compiling compio-macros v0.1.2
+   Compiling keyring v3.6.3
+   Compiling comfy-table v7.2.2
+   Compiling byte-unit v5.2.0
+   Compiling tempfile v3.26.0
+   Compiling rstest v0.26.1
+   Compiling curve25519-dalek v4.1.3
+   Compiling surrealdb-protocol v0.8.3
+   Compiling compio v0.17.0
+   Compiling rcgen v0.14.7
+   Compiling clap v4.6.1
+   Compiling strum v0.27.2
+   Compiling figment v0.10.19
+   Compiling serde_with v3.17.0
+   Compiling bon v3.9.0
+   Compiling compio-quic v0.6.0
+   Compiling derive_more v2.1.1
+   Compiling compio-ws v0.2.0
+   Compiling reqwest v0.12.28
+   Compiling lz4_flex v0.12.0
+   Compiling quick_cache v0.6.18
+   Compiling async-scoped v0.9.0
+   Compiling iggy_common v0.8.0
+   Compiling surrealkv v0.21.2
+   Compiling storekey v0.11.0
+   Compiling revision v0.17.0
+   Compiling async-dropper-derive v0.3.1
+   Compiling sqlx-core v0.8.6
+   Compiling ndarray-stats v0.7.0
+   Compiling headers v0.4.1
+   Compiling object_store v0.13.1
+   Compiling surrealdb-types v3.0.5
+   Compiling bcrypt v0.18.0
+   Compiling async-dropper-simple v0.2.6
+   Compiling reqwest-middleware v0.4.2
+   Compiling sysinfo v0.37.2
+   Compiling jsonwebtoken v10.3.0
+   Compiling quinn-udp v0.5.14
+   Compiling ext-sort v0.1.5
+   Compiling dirs v6.0.0
+   Compiling affinitypool v0.4.0
+   Compiling retry-policies v0.5.1
+   Compiling rustls-platform-verifier v0.6.2
+   Compiling surrealdb-core v3.0.5
+   Compiling reqwest v0.13.4
+   Compiling sqlx-sqlite v0.8.6
+   Compiling reqwest-retry v0.8.0
+   Compiling iggy_binary_protocol v0.8.0
+   Compiling ed25519-dalek v2.2.0
+   Compiling quinn v0.11.9
+   Compiling async-dropper v0.3.1
+   Compiling tokio-tungstenite v0.28.0
+   Compiling trait-variant v0.1.2
+   Compiling surrealdb v3.0.5
+   Compiling iggy v0.8.0
+   Compiling abigail-core v0.0.1 (<repository>\crates\abigail-core)
+warning: function `write_encrypted_sentinel` is never used
+  --> crates\abigail-core\src\vault\mod.rs:80:15
+   |
+80 | pub(crate) fn write_encrypted_sentinel(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `abigail-core` (lib) generated 1 warning
+   Compiling sqlx v0.8.6
+   Compiling abigail-persistence v0.0.1 (<repository>\crates\abigail-persistence)
+   Compiling abigail-streaming v0.0.1 (<repository>\crates\abigail-streaming)
+   Compiling x25519-dalek v2.0.1
+   Compiling abigail-memory v0.0.1 (<repository>\crates\abigail-memory)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11m 59s
+     Running unittests src\lib.rs (target\debug\deps\abigail_memory-82b154902e274fe0.exe)
+
+running 6 tests
+test archive::tests::preview_archive_destinations_are_entity_scoped_without_stable_output ... ok
+test archive::tests::preview_archive_rejects_outside_key_and_invalid_entity_without_writes ... ok
+test backup_import::tests::preview_backup_scan_uses_only_profile_backups_and_preserves_sibling_fixture ... ok
+test backup_import::tests::preview_backup_selection_keeps_supported_nested_database_layout ... ok
+test backup_import::tests::preview_backup_selection_rejects_outside_paths_and_conflicting_roots ... ok
+test backup_import::tests::test_preview_backup_with_data ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 29 filtered out; finished in 0.54s

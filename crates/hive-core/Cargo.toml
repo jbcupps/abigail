@@ -4,5 +4,6 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+abigail-core = { path = "../abigail-core" }
 serde.workspace = true
 serde_json.workspace = true

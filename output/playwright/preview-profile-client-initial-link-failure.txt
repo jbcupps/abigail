@@ -1,0 +1,28 @@
+   Compiling futures-util v0.3.32
+   Compiling tower v0.5.3
+   Compiling hyper-util v0.1.20
+   Compiling tower-http v0.6.8
+   Compiling hyper-rustls v0.27.7
+   Compiling reqwest v0.13.4
+   Compiling abigail-core v0.0.1 (<repository>\crates\abigail-core)
+warning: function `write_encrypted_sentinel` is never used
+  --> crates\abigail-core\src\vault\mod.rs:80:15
+   |
+80 | pub(crate) fn write_encrypted_sentinel(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `abigail-core` (lib) generated 1 warning
+   Compiling hive-core v0.0.1 (<repository>\crates\hive-core)
+   Compiling entity-core v0.0.1 (<repository>\crates\entity-core)
+   Compiling daemon-client v0.0.1 (<repository>\crates\daemon-client)
+error: linking with `link.exe` failed: exit code: 1140
+  |
+[Sanitization note: compiler-emitted linker argument list omitted; diagnostic and result retained.]
+  = note: some arguments are omitted. use `--verbose` to show all linker arguments
+  = note:    Creating library <repository>\target\debug\deps\daemon_client-485c24f9d5115714.lib and object <repository>\target\debug\deps\daemon_client-485c24f9d5115714.exp
+          LINK : fatal error LNK1140: limit exceeded for program database; link with /PDB:NONE
+
+
+error: could not compile `daemon-client` (lib test) due to 1 previous error

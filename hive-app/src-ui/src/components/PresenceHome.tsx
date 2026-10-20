@@ -6,6 +6,7 @@ import { loadPresence, openPresence, preparePresence, previewEntities, requirePr
 import type { EntityInfo, HiveStatus } from "../lib/daemonClient";
 import FirstSignal from "./FirstSignal";
 import { readCreationDraft } from "../lib/creationDraft";
+import { isNativeConnection } from "../../../../entity-runtime-app/src-ui/src/lib/nativeConnection";
 
 interface Props { preview: boolean; status: HiveStatus | null; onRefresh: () => void; onProviders: () => void }
 export default function PresenceHome({ preview, status, onRefresh, onProviders }: Props) {
@@ -107,12 +108,35 @@ export default function PresenceHome({ preview, status, onRefresh, onProviders }
     setCreating(false); setEditing(undefined);
     void open(value.id, "open", value.profile, value.hiveUrl);
   };
+  const openHelper = async () => {
+    if (!helperEntityId || !helperUrl || (isNativeConnection() && busy)) return;
+    returnHome();
+    if (!isNativeConnection()) {
+      setActive({ id: "hive-helper", profile: defaultProfile("Abigail Hive"), url: helperUrl, helper: true, expectedEntityId: helperEntityId });
+      return;
+    }
+    const generation = openGeneration.current;
+    const controller = new AbortController();
+    pendingOpen.current = controller;
+    setBusy("hive-helper"); setError("");
+    try {
+      const url = await openPresence(helperEntityId, controller.signal);
+      if (generation === openGeneration.current && !controller.signal.aborted) {
+        setActive({ id: "hive-helper", profile: defaultProfile("Abigail Hive"), url, helper: true, expectedEntityId: helperEntityId });
+      }
+    } catch (error) {
+      if (generation === openGeneration.current && !controller.signal.aborted) setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (generation === openGeneration.current) setBusy(undefined);
+    }
+  };
+  const activeRuntimeUrl = active?.helper && !isNativeConnection() ? helperUrl : active?.url;
   return <div className="first-signal-shell">
     {synthetic && <div className="signal-preview-banner" role="status"><strong>SYNTHETIC TRANSPORT</strong><span>This Hive uses an in-memory HTTP fixture. No model or provider is connected to this fixture. Replies are scripted test data.</span></div>}
-    <header className="signal-nav"><a href={preview ? "?presencePreview=1" : "?"} onClick={event => { event.preventDefault(); if (!saving) returnHome(); }} aria-disabled={saving} className="signal-wordmark" aria-label="Abigail Hive home"><span aria-hidden="true">✳</span> ABIGAIL <small>HIVE</small></a><nav aria-label="Main navigation"><button disabled={saving} className="signal-nav-active" onClick={returnHome}>Your Entities</button>{!preview && <button disabled={saving} onClick={onProviders}>Model connections</button>}{helperUrl && <button disabled={saving || !helperEntityId} onClick={() => { if (!helperEntityId) return; returnHome(); setActive({ id: "hive-helper", profile: defaultProfile("Abigail Hive"), url: helperUrl, helper: true, expectedEntityId: helperEntityId }); }}>Ask Abigail</button>}</nav><span className="signal-nav-status"><i />{preview ? "DESIGN PREVIEW" : synthetic ? "SYNTHETIC TRANSPORT" : "HIVE CONNECTED"}</span></header>
+    <header className="signal-nav"><a href={preview ? "?presencePreview=1" : "?"} onClick={event => { event.preventDefault(); if (!saving) returnHome(); }} aria-disabled={saving} className="signal-wordmark" aria-label="Abigail Hive home"><span aria-hidden="true">✳</span> ABIGAIL <small>HIVE</small></a><nav aria-label="Main navigation"><button disabled={saving} className="signal-nav-active" onClick={returnHome}>Your Entities</button>{!preview && <button disabled={saving} onClick={onProviders}>Model connections</button>}{helperUrl && <button disabled={saving || (isNativeConnection() && !!busy) || !helperEntityId} onClick={() => void openHelper()}>Ask Abigail</button>}</nav><span className="signal-nav-status"><i />{preview ? "DESIGN PREVIEW" : synthetic ? "SYNTHETIC TRANSPORT" : "HIVE CONNECTED"}</span></header>
     {preview && <div className="signal-preview-banner">LOCAL DESIGN PREVIEW <span>Identity drafts stay in this browser. No model, microphone, or provider is connected.</span><a href="?" aria-disabled={saving} onClick={event => { if (saving) event.preventDefault(); }}>Return to live Hive</a></div>}
     {helperUrl && !helperEntityId && !active?.helper && <section className="signal-scope" role="status"><p>Abigail Hive's identity is unavailable. Refresh Hive before opening its conversation.</p><button className="signal-secondary" disabled={saving} onClick={onRefresh}>Refresh Hive</button></section>}
-    {creating ? <FirstSignal preview={preview} existing={editing} onBusyChange={setSaving} onClose={() => { setCreating(false); setEditing(undefined); setRevision(value => value + 1); onRefresh(); }} onPersisted={persisted} onSaved={saved} /> : active ? active.helper && !helperUrl ? <main className="signal-home"><section className="signal-scope" role="status"><h1>Abigail Hive is unavailable.</h1><p>{needsProvider ? "Connect a model in Hive to continue this conversation." : "The helper is unavailable. Your saved conversation will restore when it is available again."} No messages will be sent automatically.</p>{needsProvider && <button className="signal-secondary" onClick={onProviders}>Connect a model</button>}<button className="signal-link" onClick={returnHome}>Back to Your Entities</button></section></main> : <RuntimeChat key={active.helper ? `${active.id}:${helperUrl}` : active.id} baseUrl={active.helper ? helperUrl! : active.url} expectedEntityId={active.helper ? active.expectedEntityId : active.id} profile={active.profile} profileNotice={active.notice} demo={preview} onBack={returnHome} /> : <main className="signal-home">
+    {creating ? <FirstSignal preview={preview} existing={editing} onBusyChange={setSaving} onClose={() => { setCreating(false); setEditing(undefined); setRevision(value => value + 1); onRefresh(); }} onPersisted={persisted} onSaved={saved} /> : active ? active.helper && !helperUrl ? <main className="signal-home"><section className="signal-scope" role="status"><h1>Abigail Hive is unavailable.</h1><p>{needsProvider ? "Connect a model in Hive to continue this conversation." : "The helper is unavailable. Your saved conversation will restore when it is available again."} No messages will be sent automatically.</p>{needsProvider && <button className="signal-secondary" onClick={onProviders}>Connect a model</button>}<button className="signal-link" onClick={returnHome}>Back to Your Entities</button></section></main> : <RuntimeChat key={active.helper ? `${active.id}:${activeRuntimeUrl}` : active.id} baseUrl={activeRuntimeUrl!} expectedEntityId={active.helper ? active.expectedEntityId : active.id} profile={active.profile} profileNotice={active.notice} demo={preview} onBack={returnHome} /> : <main className="signal-home">
       <div className="signal-home-heading"><div><p className="signal-eyebrow">YOUR PERSONAL CONSTELLATION</p><h1>A space for<br /><em>good company.</em></h1><p>Distinct identities. Familiar presences.<br />A little more possibility in every conversation.</p></div><div className="signal-home-orbit"><Presence identity="aether" compact label="Decorative procedural portrait" /></div></div>
       {needsProvider && <section className="signal-scope" role="status"><p>Connect a model before opening a conversation. Visual identities can be created and edited now. Cloud models process messages with the provider you choose.</p><button className="signal-secondary" onClick={onProviders}>Connect a model</button></section>}
       <section className="signal-entities"><div className="signal-section-title"><h2>Your Entities <span>{entities.length}</span></h2><button className="signal-link" onClick={() => { setRevision(value => value + 1); onRefresh(); }}>Refresh ↻</button></div>

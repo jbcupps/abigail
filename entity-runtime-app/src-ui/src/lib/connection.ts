@@ -1,4 +1,5 @@
 import { detectRuntimeMode } from "../runtimeMode";
+import { nativeRuntimeConnection } from "./nativeConnection";
 
 // Resolve the Entity Runtime daemon base URL. In a packaged (native) build the
 // Rust shell knows the real URL from the ABIGAIL_ENTITY_URL env var (set per
@@ -9,16 +10,6 @@ const DEFAULT_ENTITY_URL = "http://127.0.0.1:43142";
 
 let cached: string | null = null;
 
-async function fromTauri(): Promise<string | null> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const info = await invoke<{ runtime_url: string }>("get_runtime_connection_info");
-    return info?.runtime_url ?? null;
-  } catch {
-    return null;
-  }
-}
-
 function fromQueryOrEnv(): string | null {
   const param = new URLSearchParams(window.location.search).get("entityUrl");
   if (param) return param;
@@ -27,12 +18,9 @@ function fromQueryOrEnv(): string | null {
 }
 
 export async function resolveEntityUrl(): Promise<string> {
+  if (detectRuntimeMode() === "native") return (await nativeRuntimeConnection()).runtime_url;
   if (cached) return cached;
-  let url: string | null = null;
-  if (detectRuntimeMode() === "native") {
-    url = await fromTauri();
-  }
-  if (!url) url = fromQueryOrEnv();
+  let url = fromQueryOrEnv();
   if (!url) url = DEFAULT_ENTITY_URL;
   cached = url.replace(/\/+$/, "");
   return cached;

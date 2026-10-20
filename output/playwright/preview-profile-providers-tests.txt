@@ -1,0 +1,65 @@
+   Compiling tokio v1.53.1
+   Compiling futures-io v0.3.32
+   Compiling futures-util v0.3.32
+   Compiling serde v1.0.228
+   Compiling aws-lc-rs v1.16.0
+   Compiling icu_normalizer v2.1.1
+   Compiling tracing v0.1.44
+   Compiling idna_adapter v1.2.1
+   Compiling tokio-util v0.7.18
+   Compiling idna v1.1.0
+   Compiling h2 v0.4.13
+   Compiling serde_json v1.0.150
+   Compiling rustls-webpki v0.103.13
+   Compiling hyper v1.8.1
+   Compiling rustls v0.23.37
+   Compiling tower v0.5.3
+   Compiling hyper-util v0.1.20
+   Compiling url v2.5.8
+   Compiling tower-http v0.6.8
+   Compiling rand_chacha v0.9.0
+   Compiling publicsuffix v2.3.0
+   Compiling rand v0.9.2
+   Compiling tokio-rustls v0.26.4
+   Compiling chromiumoxide_types v0.8.0
+   Compiling sha1 v0.10.6
+   Compiling either v1.15.0
+   Compiling tungstenite v0.28.0
+   Compiling chromiumoxide_pdl v0.8.0
+   Compiling serde_urlencoded v0.7.1
+   Compiling curve25519-dalek v4.1.3
+   Compiling hyper-rustls v0.27.7
+   Compiling cookie_store v0.22.1
+   Compiling rustls-platform-verifier v0.6.2
+   Compiling futures-executor v0.3.32
+   Compiling reqwest v0.13.4
+   Compiling futures v0.3.32
+   Compiling ed25519-dalek v2.2.0
+   Compiling chrono v0.4.44
+   Compiling reqwest v0.12.28
+   Compiling chromiumoxide_cdp v0.8.0
+   Compiling async-tungstenite v0.32.1
+   Compiling chromiumoxide v0.8.0
+   Compiling abigail-core v0.0.1 (<repository>\crates\abigail-core)
+warning: function `write_encrypted_sentinel` is never used
+  --> crates\abigail-core\src\vault\mod.rs:80:15
+   |
+80 | pub(crate) fn write_encrypted_sentinel(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `abigail-core` (lib) generated 1 warning
+   Compiling abigail-capabilities v0.0.1 (<repository>\crates\abigail-capabilities)
+   Compiling abigail-hive v0.0.1 (<repository>\crates\abigail-hive)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 39s
+     Running unittests src\lib.rs (target\debug\deps\abigail_hive-20089f71cc9c1da0.exe)
+
+running 5 tests
+test hive::tests::preview_provider_discovery_does_not_invoke_external_probe ... ok
+test hive::tests::preview_provider_profile_never_reads_ambient_environment_or_cli_auth ... ok
+test hive::tests::preview_provider_selection_rejects_cli_preference_and_legacy_cli ... ok
+test provider_registry::tests::preview_provider_registry_never_invents_local_url ... ok
+test provider_registry::tests::preview_provider_registry_requires_explicit_key_and_disallows_cli ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 38 filtered out; finished in 0.01s

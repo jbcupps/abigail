@@ -1,0 +1,6 @@
+
+running 2 tests
+test routes::creation_http_tests::preview_shutdown_acknowledges_only_after_owned_supervisor_is_closed ... ok
+test routes::creation_http_tests::preview_shutdown_refuses_a_stable_owner_without_stopping_it ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 48 filtered out; finished in 0.00s

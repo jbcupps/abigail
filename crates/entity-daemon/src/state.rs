@@ -67,6 +67,7 @@ impl RouterHandle {
 /// Shared state for all entity-daemon route handlers.
 #[derive(Clone)]
 pub struct EntityDaemonState {
+    pub process_identity: Option<abigail_core::profile::ProcessIdentity>,
     pub entity_id: String,
     pub config: AppConfig,
     #[allow(dead_code)]

@@ -23,12 +23,102 @@ use tokio_util::sync::CancellationToken;
 const BUS_STREAM: &str = abigail_streaming::BUS_STREAM;
 const BUS_TOPIC: &str = abigail_streaming::Topic::JobEvents.as_str();
 
+#[cfg(test)]
+mod preview_binding_tests {
+    use super::*;
+    use abigail_core::profile::ProcessIdentity;
+
+    fn identity() -> ProcessIdentity {
+        ProcessIdentity {
+            channel: "beta".into(),
+            profile_id: "4fa59494-7704-4fae-bfbf-1e7a325a7664".into(),
+            canonical_data_root: "/synthetic/preview".into(),
+            instance_id: "57fbb3e7-e715-4c9a-a04f-31036f1c7f6c".into(),
+            hive_instance_id: "253b0b3d-31f6-41c2-afd2-cae7b5316376".into(),
+        }
+    }
+
+    #[test]
+    fn preview_requests_require_exact_profile_and_live_entity_instance() {
+        let identity = identity();
+        let mut headers = HeaderMap::new();
+        for path in ["/v1/chat", "/v1/chat/cancel", "/v1/chat/history"] {
+            assert!(!preview_request_allowed(Some(&identity), path, &headers));
+        }
+        headers.insert("x-abigail-profile-id", identity.profile_id.parse().unwrap());
+        assert!(!preview_request_allowed(
+            Some(&identity),
+            "/v1/chat/cancel",
+            &headers
+        ));
+        headers.insert(
+            "x-abigail-process-instance-id",
+            identity.instance_id.parse().unwrap(),
+        );
+        assert!(preview_request_allowed(
+            Some(&identity),
+            "/v1/chat/cancel",
+            &headers
+        ));
+        headers.insert(
+            "x-abigail-process-instance-id",
+            identity.hive_instance_id.parse().unwrap(),
+        );
+        assert!(!preview_request_allowed(
+            Some(&identity),
+            "/v1/chat/cancel",
+            &headers
+        ));
+        headers.insert(
+            "x-abigail-process-instance-id",
+            identity.instance_id.parse().unwrap(),
+        );
+        headers.insert(
+            "x-abigail-profile-id",
+            uuid::Uuid::new_v4().to_string().parse().unwrap(),
+        );
+        assert!(!preview_request_allowed(
+            Some(&identity),
+            "/v1/chat/cancel",
+            &headers
+        ));
+    }
+
+    #[test]
+    fn identity_discovery_is_available_and_stable_requests_are_unchanged() {
+        let identity = identity();
+        for path in ["/health", "/v1/status"] {
+            assert!(preview_request_allowed(
+                Some(&identity),
+                path,
+                &HeaderMap::new()
+            ));
+        }
+        assert!(!preview_request_allowed(
+            Some(&identity),
+            "/v1/status/extra",
+            &HeaderMap::new()
+        ));
+        assert!(preview_request_allowed(None, "/v1/chat", &HeaderMap::new()));
+        for header in ["x-abigail-profile-id", "x-abigail-process-instance-id"] {
+            let mut headers = HeaderMap::new();
+            headers.insert(header, identity.instance_id.parse().unwrap());
+            for path in ["/v1/chat", "/v1/status"] {
+                assert!(!preview_request_allowed(None, path, &headers));
+            }
+        }
+    }
+}
+
 /// Settings saved in the Hive apply to the very next turn, including the
 /// helper that was started before first-run model setup. Keep the last router
 /// if the control plane is temporarily unreachable.
 async fn refresh_provider_for_turn(state: &EntityDaemonState) {
     let refresh = async {
-        let client = crate::hive_client::HiveClient::new(&state.hive_url);
+        let client = crate::hive_client::HiveClient::for_runtime(
+            &state.hive_url,
+            state.process_identity.as_ref(),
+        )?;
         let config = client.get_provider_config(&state.entity_id).await?;
         let snapshot = serde_json::to_value(&config)?;
         if !state.router.matches_provider_config(&snapshot) {
@@ -139,6 +229,46 @@ pub async fn health() -> &'static str {
     "ok"
 }
 
+/// Discovery is readable before binding. All other preview requests must name
+/// this exact live process; a port reused by another instance cannot accept them.
+pub(crate) fn preview_request_allowed(
+    identity: Option<&abigail_core::profile::ProcessIdentity>,
+    path: &str,
+    headers: &HeaderMap,
+) -> bool {
+    let Some(identity) = identity else {
+        return !headers.contains_key("x-abigail-profile-id")
+            && !headers.contains_key("x-abigail-process-instance-id");
+    };
+    matches!(path, "/health" | "/v1/status")
+        || (headers
+            .get("x-abigail-profile-id")
+            .and_then(|value| value.to_str().ok())
+            == Some(identity.profile_id.as_str())
+            && headers
+                .get("x-abigail-process-instance-id")
+                .and_then(|value| value.to_str().ok())
+                == Some(identity.instance_id.as_str()))
+}
+
+pub(crate) async fn require_preview_identity(
+    State(identity): State<Option<abigail_core::profile::ProcessIdentity>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if !preview_request_allowed(identity.as_ref(), request.uri().path(), request.headers()) {
+        return (
+            StatusCode::CONFLICT,
+            Json(ApiEnvelope::<()>::error(
+                "Preview process identity mismatch",
+            )),
+        )
+            .into_response();
+    }
+    next.run(request).await
+}
+
 // ---------------------------------------------------------------------------
 // GET /v1/status
 // ---------------------------------------------------------------------------
@@ -153,6 +283,7 @@ pub async fn get_status(State(state): State<EntityDaemonState>) -> Json<ApiEnvel
         .unwrap_or(0);
 
     Json(ApiEnvelope::success(EntityStatus {
+        process_identity: state.process_identity.clone(),
         entity_id: state.entity_id.clone(),
         name: state.config.agent_name.clone(),
         birth_complete: state.config.birth_complete,
@@ -1083,6 +1214,7 @@ mod tests {
         ));
 
         EntityDaemonState {
+            process_identity: None,
             entity_id: "test-entity".to_string(),
             config: AppConfig::default_paths(),
             hive_url: "http://127.0.0.1:3141".to_string(),

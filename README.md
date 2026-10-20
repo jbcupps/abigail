@@ -41,6 +41,7 @@ Local storage belongs to you. Cloud providers and installed CLIs use their own a
 ## Current Dev Note
 
 - **First Signal development integration:** guided creation, reviewed Markdown briefs, and an original procedural presence are being integrated with the current saved-conversation runtime. Creation uses an exact durable request key for recovery, rather than inferring success from a matching name. See [the integration scope and validation](documents/FIRST_SIGNAL_INTEGRATION.md). Appearance remains metadata, and procedural animation is not generated video or evidence of reasoning. This development branch is not a released installer.
+- **Preview profile development:** the application source now separates preview data, credentials, WebView storage, and daemon ownership from stable defaults. [The profile contract](documents/PREVIEW_PROFILE_CONTRACT.md) records the launcher requirements and open acceptance work. Complete-profile cold restore and signed-installer validation remain pending; this is not an accepted preview installer.
 - **Bus and skills:** [the source map](documents/BUS_AND_SKILL_SOURCE_MAP.md) distinguishes the active in-process bus, Hive-owned SurrealDB persistence, implemented runtime stages, and gaps in evaluated skill installation/version rollback.
 
 - Abigail is still in a dev-first phase. A clean working dev instance matters more than cross-version compatibility right now.

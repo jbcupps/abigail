@@ -8,12 +8,14 @@ use crate::secure_fs;
 use crate::vault::crypto;
 use crate::vault::unlock::HybridUnlockProvider;
 use crate::vault::unlock::UnlockProvider;
+use crate::vault::unlock::{credential_scope_label, validate_credential_path};
 use std::path::Path;
 
 const STORAGE_SCOPE: &str = "encrypted-storage:general";
 
 /// Write data to a file, encrypting it with AES-256-GCM.
 pub fn write_encrypted(path: &Path, data: &[u8]) -> Result<()> {
+    validate_credential_path(path)?;
     let unlock = HybridUnlockProvider::new();
     let root_kek = unlock.root_kek()?;
     write_encrypted_with_kek(path, data, &root_kek)
@@ -21,6 +23,7 @@ pub fn write_encrypted(path: &Path, data: &[u8]) -> Result<()> {
 
 /// Read and decrypt a file encrypted by [`write_encrypted`].
 pub fn read_encrypted(path: &Path) -> Result<Vec<u8>> {
+    validate_credential_path(path)?;
     let unlock = HybridUnlockProvider::new();
     let root_kek = unlock.root_kek()?;
     read_encrypted_with_kek(path, &root_kek)
@@ -31,7 +34,8 @@ fn write_encrypted_with_kek(
     data: &[u8],
     root_kek: &[u8; crate::vault::VAULT_KEK_LEN],
 ) -> Result<()> {
-    let dek = crypto::derive_scope_key(root_kek, STORAGE_SCOPE);
+    validate_credential_path(path)?;
+    let dek = crypto::derive_scope_key(root_kek, &credential_scope_label(STORAGE_SCOPE)?);
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -45,7 +49,8 @@ fn read_encrypted_with_kek(
     path: &Path,
     root_kek: &[u8; crate::vault::VAULT_KEK_LEN],
 ) -> Result<Vec<u8>> {
-    let dek = crypto::derive_scope_key(root_kek, STORAGE_SCOPE);
+    validate_credential_path(path)?;
+    let dek = crypto::derive_scope_key(root_kek, &credential_scope_label(STORAGE_SCOPE)?);
     let envelope = std::fs::read(path)?;
     crypto::open(&dek, &envelope)
 }

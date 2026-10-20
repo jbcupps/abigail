@@ -1,3 +1,5 @@
+import { verifiedRuntimeFetch } from "../../../../entity-runtime-app/src-ui/src/lib/nativeConnection";
+
 export interface ConversationMessage {
   role: "user" | "assistant";
   content: string;
@@ -11,7 +13,7 @@ export interface ConversationSnapshot {
 }
 
 async function read<T>(baseUrl: string, path: string, signal: AbortSignal): Promise<T> {
-  const response = await fetch(`${baseUrl.replace(/\/+$/, "")}${path}`, {
+  const response = await verifiedRuntimeFetch()(`${baseUrl.replace(/\/+$/, "")}${path}`, {
     headers: { Accept: "application/json" },
     signal,
   });

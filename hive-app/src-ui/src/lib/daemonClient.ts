@@ -1,4 +1,5 @@
 import { resolveHiveUrl } from "./connection";
+import { hiveRequestHeaders, isNativeConnection } from "../../../../entity-runtime-app/src-ui/src/lib/nativeConnection";
 
 // Thin typed wrapper over the Hive daemon HTTP API. Every JSON route returns the
 // universal `{ ok, data?, error? }` envelope; `/health` returns plain text.
@@ -24,7 +25,9 @@ export interface CreateEntityResult {
 
 async function hiveFetch(path: string, init?: RequestInit): Promise<Response> {
   const base = await resolveHiveUrl();
-  return fetch(`${base}${path}`, { ...init, signal: init?.signal ?? AbortSignal.timeout(30_000) });
+  const signal = init?.signal ?? AbortSignal.timeout(30_000);
+  const headers = await hiveRequestHeaders(base, init?.headers, signal);
+  return fetch(`${base}${path}`, { ...init, headers, signal, redirect: isNativeConnection() ? "error" : init?.redirect });
 }
 
 async function unwrap<T>(res: Response, path: string): Promise<T> {

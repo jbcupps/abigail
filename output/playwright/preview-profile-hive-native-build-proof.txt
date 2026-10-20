@@ -1,0 +1,43 @@
+Extracted actual Cargo records from target/preview-profile-hive-native-build.jsonl. Dependency records omitted; selected executable artifact and final build status retained. Machine paths sanitized.
+
+{
+  "reason": "compiler-artifact",
+  "package_id": "path+file:///<repository>/hive-app#abigail-hive-app@0.0.1",
+  "manifest_path": "<repository>\\hive-app\\Cargo.toml",
+  "target": {
+    "kind": [
+      "staticlib",
+      "cdylib",
+      "rlib"
+    ],
+    "crate_types": [
+      "staticlib",
+      "cdylib",
+      "rlib"
+    ],
+    "name": "abigail_hive_desktop",
+    "src_path": "<repository>\\hive-app\\src\\lib.rs",
+    "edition": "2021",
+    "doc": true,
+    "doctest": true,
+    "test": true
+  },
+  "profile": {
+    "opt_level": "0",
+    "debuginfo": 2,
+    "debug_assertions": true,
+    "overflow_checks": true,
+    "test": true
+  },
+  "features": [],
+  "filenames": [
+    "<repository>\\target\\debug\\deps\\abigail_hive_desktop-d7a75bbd10a25ff2.exe"
+  ],
+  "executable": "<repository>\\target\\debug\\deps\\abigail_hive_desktop-d7a75bbd10a25ff2.exe",
+  "fresh": false
+}
+
+{
+  "reason": "build-finished",
+  "success": true
+}

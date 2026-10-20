@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+abigail-core = { path = "../abigail-core" }
 hive-core = { path = "../hive-core" }
 entity-core = { path = "../entity-core" }
 reqwest.workspace = true

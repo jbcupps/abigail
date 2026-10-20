@@ -8,11 +8,13 @@ mod doctor;
 mod persistence;
 mod presence;
 mod presence_profile;
+mod profile_runtime;
 mod routes;
 mod runtime_registry;
 mod state;
 mod supervisor;
 
+use abigail_core::profile::{ProcessIdentity, ProfileContext};
 use abigail_core::{AppConfig, SecretsVault};
 use abigail_hive::Hive;
 use abigail_identity::IdentityManager;
@@ -27,8 +29,12 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 #[command(name = "hive-daemon", about = "Abigail Hive control plane daemon")]
 struct Cli {
     /// Port to listen on
-    #[arg(long, default_value = "43141")]
-    port: u16,
+    #[arg(long)]
+    port: Option<u16>,
+
+    /// Explicit application profile. Preview must agree with the launcher context.
+    #[arg(long)]
+    profile: Option<String>,
 
     /// Data directory (defaults to platform-specific app data dir)
     #[arg(long)]
@@ -43,28 +49,125 @@ struct Cli {
 
 #[tokio::main]
 async fn main() {
-    // Durable file logging + panic hook FIRST, before any fallible work. The GUI
-    // shell spawns us with no console (invalid inherited stdout/stderr), so any
-    // earlier stdout write could kill us silently. See `abigail_diag`.
-    abigail_diag::init("hive-daemon");
-
     let cli = Cli::parse();
+    // Refusal must precede logs, vault access, store initialization and doctor.
+    let prepared = (|| -> anyhow::Result<_> {
+        let preview_requested = abigail_core::profile::compiled_preview()
+            || cli.profile.as_deref() == Some("preview")
+            || std::env::var("ABIGAIL_PROFILE").ok().as_deref() == Some("preview");
+        if preview_requested {
+            anyhow::ensure!(
+                profile_runtime::preview_port_allowed(cli.port.unwrap_or(0)),
+                "Preview Hive cannot bind a normal daemon port"
+            );
+            profile_runtime::validate_launch_arguments(
+                cli.profile.as_deref(),
+                cli.data_dir.as_deref().map(std::path::Path::new),
+            )?;
+            anyhow::ensure!(
+                std::env::var_os("ABIGAIL_HIVE_URL").is_none(),
+                "Preview Hive launch cannot inherit an existing Hive endpoint"
+            );
+            anyhow::ensure!(
+                std::env::var_os("ABIGAIL_CI_MODE").is_none()
+                    && std::env::var_os("ABIGAIL_DAEMON_INTEGRATION").is_none(),
+                "Preview Hive cannot inherit ephemeral test-mode flags"
+            );
+            for key in [
+                "ABIGAIL_PROFILE_ID",
+                "ABIGAIL_PROCESS_INSTANCE_ID",
+                "ABIGAIL_HIVE_INSTANCE_ID",
+            ] {
+                let value = std::env::var(key)
+                    .map_err(|_| anyhow::anyhow!("Preview Hive requires {key}"))?;
+                abigail_core::profile::validate_uuid(&value)?;
+            }
+            anyhow::ensure!(
+                std::env::var("ABIGAIL_PROCESS_INSTANCE_ID")?
+                    == std::env::var("ABIGAIL_HIVE_INSTANCE_ID")?,
+                "Preview Hive process and Hive instance identifiers must match"
+            );
+            supervisor::entity_daemon_binary_for_profile(true)?;
+        }
+        let profile = abigail_core::profile::initialize_process(
+            cli.profile.as_deref(),
+            cli.data_dir.as_deref().map(std::path::Path::new),
+        )?;
+        let identity = profile
+            .as_deref()
+            .map(|profile| {
+                profile_runtime::launch_identity(
+                    profile,
+                    std::env::var("ABIGAIL_PROFILE_ID").ok().as_deref(),
+                    std::env::var("ABIGAIL_PROCESS_INSTANCE_ID").ok().as_deref(),
+                    std::env::var("ABIGAIL_HIVE_INSTANCE_ID").ok().as_deref(),
+                )
+            })
+            .transpose()?;
+        Ok((profile, identity))
+    })();
+    let (profile, identity) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            use std::io::Write as _;
+            let _ = writeln!(std::io::stderr(), "Hive startup refused: {error:#}");
+            std::process::exit(1);
+        }
+    };
+    let _profile_owner = match profile
+        .as_deref()
+        .map(profile_runtime::ProfileOwner::acquire)
+        .transpose()
+    {
+        Ok(owner) => owner,
+        Err(error) => {
+            use std::io::Write as _;
+            let _ = writeln!(std::io::stderr(), "Hive ownership refused: {error:#}");
+            std::process::exit(1);
+        }
+    };
+    if let Some(profile) = profile.as_deref() {
+        if let Err(error) = abigail_diag::init_with_log_dir("hive-daemon", &profile.logs_dir()) {
+            use std::io::Write as _;
+            let _ = writeln!(
+                std::io::stderr(),
+                "Hive logging initialization failed: {error}"
+            );
+            std::process::exit(1);
+        }
+    } else {
+        abigail_diag::init("hive-daemon");
+    }
+    let port = cli
+        .port
+        .unwrap_or(if profile.is_some() { 0 } else { 43141 });
     if cli.doctor {
-        std::process::exit(doctor::run(cli.data_dir.as_deref(), cli.port));
+        let root = profile
+            .as_ref()
+            .map(|context| context.root().to_string_lossy().to_string());
+        std::process::exit(doctor::run(
+            root.as_deref().or(cli.data_dir.as_deref()),
+            port,
+        ));
     }
 
-    if let Err(e) = run().await {
+    if let Err(e) = run(cli, profile, identity, port).await {
         tracing::error!("hive-daemon exited with error: {e:#}");
         abigail_diag::record_fatal("hive-daemon", &format!("{e:#}"));
         std::process::exit(1);
     }
 }
 
-async fn run() -> anyhow::Result<()> {
-    let cli = Cli::parse();
-
+async fn run(
+    cli: Cli,
+    profile: Option<Arc<ProfileContext>>,
+    process_identity: Option<ProcessIdentity>,
+    port: u16,
+) -> anyhow::Result<()> {
     // Resolve data directory
-    let data_root = if let Some(dir) = &cli.data_dir {
+    let data_root = if let Some(profile) = profile.as_deref() {
+        profile.root().to_path_buf()
+    } else if let Some(dir) = &cli.data_dir {
         std::path::PathBuf::from(dir)
     } else {
         AppConfig::default_paths().data_dir
@@ -103,23 +206,44 @@ async fn run() -> anyhow::Result<()> {
 
     let hive = Arc::new(Hive::new(entity_secrets.clone(), hive_secrets.clone()));
 
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", cli.port)).await?;
+    let mut attempts = 0;
+    let listener = loop {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
+        if profile.is_none() || profile_runtime::preview_port_allowed(listener.local_addr()?.port())
+        {
+            break listener;
+        }
+        drop(listener);
+        attempts += 1;
+        anyhow::ensure!(
+            attempts < 16,
+            "Could not allocate a separate preview Hive port"
+        );
+    };
     let local_addr = listener.local_addr()?;
     let hive_url = format!("http://{}", local_addr);
 
     // Capture the immortal Hive helper's id before `identity_manager` moves into
     // the daemon state.
     let hive_helper_id = identity_manager.hive_agent_id();
-    let helper_url: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    let supervisor = supervisor::HiveSupervisor::new(hive_url.clone(), data_root.clone());
+    let helper = Arc::new(Mutex::new(None));
+    let shutdown = Arc::new(tokio::sync::Notify::new());
+    let supervisor = supervisor::HiveSupervisor::with_profile(
+        hive_url.clone(),
+        data_root.clone(),
+        profile.clone(),
+        process_identity.clone(),
+    );
 
     let state = HiveDaemonState {
         identity_manager,
         hive,
         hive_secrets,
         hive_url: hive_url.clone(),
+        process_identity: process_identity.clone(),
+        shutdown: shutdown.clone(),
         runtime_control: Arc::new(Mutex::new(runtime_registry::RuntimeControlPlane::default())),
-        helper_url: helper_url.clone(),
+        helper: helper.clone(),
         supervisor: supervisor.clone(),
     };
 
@@ -127,9 +251,7 @@ async fn run() -> anyhow::Result<()> {
     // identity, run as its own entity-daemon. The control plane keeps serving
     // /health immediately while the helper warms up.
     match hive_helper_id {
-        Ok(id) => {
-            supervisor::supervise_hive_helper(id, hive_url.clone(), data_root.clone(), helper_url)
-        }
+        Ok(id) => supervisor::supervise_hive_helper(supervisor, id, helper),
         Err(e) => tracing::warn!("Hive helper not started: {}", e),
     }
 
@@ -153,9 +275,13 @@ async fn run() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(routes::health))
         .route("/v1/status", get(routes::get_status))
+        .route("/v1/shutdown", post(routes::shutdown))
         .route("/v1/entities", get(routes::list_entities))
         .route("/v1/entities", post(routes::create_entity))
-        .route("/v1/entity-creations/:creation_key", get(routes::get_entity_creation))
+        .route(
+            "/v1/entity-creations/:creation_key",
+            get(routes::get_entity_creation),
+        )
         .route("/v1/entities/:id", get(routes::get_entity))
         .merge(presence::router(state.identity_manager.clone()))
         .route("/v1/entities/:id/open", post(routes::open_entity))
@@ -210,6 +336,10 @@ async fn run() -> anyhow::Result<()> {
             "/v1/entities/:id/execution/receipts",
             get(routes::get_execution_receipts),
         )
+        .layer(axum::middleware::from_fn_with_state(
+            process_identity,
+            profile_runtime::require_identity,
+        ))
         .layer(cors)
         .with_state(state);
 
@@ -222,7 +352,9 @@ async fn run() -> anyhow::Result<()> {
         use std::io::Write as _;
         let _ = writeln!(std::io::stdout(), "Hive daemon listening on {}", hive_url);
     }
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move { shutdown.notified().await })
+        .await?;
 
     Ok(())
 }

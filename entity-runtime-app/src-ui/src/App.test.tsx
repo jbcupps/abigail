@@ -10,8 +10,10 @@ const mocks = vi.hoisted(() => ({
   profileResponse: vi.fn(),
   resolveEntityUrl: vi.fn(),
   showAppWindow: vi.fn(),
+  invoke: vi.fn(),
 }));
 
+vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("./lib/connection", () => ({
   resolveEntityUrl: mocks.resolveEntityUrl,
 }));
@@ -37,6 +39,7 @@ describe("Abigail Entity Runtime app", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    delete window.isTauri;
     window.history.replaceState({}, "", "/");
     vi.stubGlobal("fetch", mocks.fetch);
     mocks.resolveEntityUrl.mockResolvedValue("http://127.0.0.1:43142");
@@ -53,7 +56,44 @@ describe("Abigail Entity Runtime app", () => {
     });
   });
 
-  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+  afterEach(() => { delete window.isTauri; vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+  it("shows native connection refusal without opening a fallback conversation", async () => {
+    window.isTauri = true;
+    mocks.resolveEntityUrl.mockRejectedValue(new Error("The pinned runtime instance is no longer available. Reopen the Entity."));
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /skip/i }));
+    expect(await screen.findByText(/pinned runtime instance is no longer available/)).toBeInTheDocument();
+    expect(mocks.entityHealth).not.toHaveBeenCalled();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox", { name: "YOUR MESSAGE" })).not.toBeInTheDocument();
+  });
+
+  it("uses verified native Hive ownership for appearance despite browser address overrides", async () => {
+    window.isTauri = true;
+    window.history.replaceState({}, "", "/?hiveUrl=http://127.0.0.1:49999");
+    vi.stubEnv("VITE_HIVE_DAEMON_URL", "http://127.0.0.1:48888");
+    const owner = {
+      channel: "beta", canonical_data_root: "C:\\synthetic-preview",
+      profile_id: "11111111-1111-4111-8111-111111111111",
+      instance_id: "22222222-2222-4222-8222-222222222222",
+      hive_instance_id: "33333333-3333-4333-8333-333333333333",
+    };
+    mocks.invoke.mockResolvedValue({
+      runtime_url: "http://127.0.0.1:43142", hive_url: "http://127.0.0.1:43161",
+      process_identity: owner, hive_process_identity: { ...owner, instance_id: owner.hive_instance_id },
+    });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /skip/i }));
+    await screen.findByText("Explore ideas together.");
+    const [url, init] = mocks.fetch.mock.calls.find(([target]) => String(target).endsWith("/presence"))!;
+    expect(url).toBe("http://127.0.0.1:43161/v1/entities/entity-123/presence");
+    expect(new Headers(init.headers).get("x-abigail-profile-id")).toBe(owner.profile_id);
+    expect(new Headers(init.headers).get("x-abigail-process-instance-id")).toBe(owner.hive_instance_id);
+    expect(init.redirect).toBe("error");
+    expect(mocks.getSessionStatus).not.toHaveBeenCalled();
+    expect(mocks.fetch.mock.calls.some(([target]) => /49999|48888/.test(String(target)))).toBe(false);
+  });
 
   it("opens from splash into the chat runtime", async () => {
     render(<App />);

@@ -11,8 +11,17 @@ use abigail_capabilities::cognitive::{
 use abigail_core::{AppConfig, CliPermissionMode, RoutingMode, SecretsVault};
 use std::sync::{Arc, Mutex};
 
+/// Failed preflight is closed just like preview. Only the stable profile may
+/// reuse ambient environment credentials or external CLI account state.
+pub(crate) fn ambient_providers_allowed() -> bool {
+    matches!(abigail_core::profile::current(), Ok(None))
+}
+
 /// Check whether a binary is reachable on the system PATH.
 pub fn is_binary_on_path(name: &str) -> bool {
+    if !ambient_providers_allowed() {
+        return false;
+    }
     #[cfg(windows)]
     let check = {
         use std::os::windows::process::CommandExt;
@@ -36,7 +45,18 @@ pub fn is_binary_on_path(name: &str) -> bool {
 
 /// Detect all CLI tools with full verification (official + auth status).
 pub fn detect_cli_providers_full() -> Vec<CliDetectionResult> {
-    detect_all_cli_providers()
+    detect_cli_with_policy(ambient_providers_allowed(), detect_all_cli_providers)
+}
+
+fn detect_cli_with_policy(
+    allow_ambient: bool,
+    discover: impl FnOnce() -> Vec<CliDetectionResult>,
+) -> Vec<CliDetectionResult> {
+    if allow_ambient {
+        discover()
+    } else {
+        Vec::new()
+    }
 }
 
 /// Fully resolved configuration ready for provider construction.
@@ -130,12 +150,25 @@ impl Hive {
         config: &AppConfig,
         vault: &SecretsVault,
     ) -> Option<ProviderSelection> {
+        Self::determine_ego_with_sources(config, ambient_providers_allowed(), |name| {
+            vault.get_secret(name).map(str::to_string)
+        })
+    }
+
+    fn determine_ego_with_sources(
+        config: &AppConfig,
+        allow_ambient: bool,
+        stored_key: impl Fn(&str) -> Option<String>,
+    ) -> Option<ProviderSelection> {
         // 1. Explicit preference from Mentor menu (Forge)
         if let Some(pref) = &config.active_provider_preference {
             if Self::is_cli_provider(pref) {
+                if !allow_ambient {
+                    return None;
+                }
                 return Some(
-                    vault
-                        .get_secret(pref)
+                    stored_key(pref)
+                        .as_deref()
                         .map(str::trim)
                         .filter(|key| !key.is_empty())
                         .map(|key| ProviderSelection {
@@ -149,8 +182,8 @@ impl Hive {
                 );
             }
 
-            if let Some(selection) = vault
-                .get_secret(pref)
+            if let Some(selection) = stored_key(pref)
+                .as_deref()
                 .map(str::trim)
                 .filter(|key| !key.is_empty())
                 .map(|key| ProviderSelection {
@@ -175,8 +208,11 @@ impl Hive {
             "grok-cli",
         ];
         for name in &provider_names {
-            if let Some(selection) = vault
-                .get_secret(name)
+            if !allow_ambient && Self::is_cli_provider(name) {
+                continue;
+            }
+            if let Some(selection) = stored_key(name)
+                .as_deref()
                 .map(str::trim)
                 .filter(|key| !key.is_empty())
                 .map(|key| ProviderSelection {
@@ -191,6 +227,9 @@ impl Hive {
         // 3. Trinity config (legacy/manual paths)
         if let Some(trinity) = &config.trinity {
             if let Some(p) = &trinity.ego_provider {
+                if !allow_ambient && Self::is_cli_provider(p) {
+                    return None;
+                }
                 if let Some(k) = &trinity.ego_api_key {
                     if !k.is_empty() {
                         return Some(ProviderSelection {
@@ -243,7 +282,7 @@ impl Hive {
         let mut best: Option<BestModel> = None;
 
         // Authenticated CLI tools on PATH.
-        for det in detect_all_cli_providers() {
+        for det in detect_cli_providers_full() {
             if det.on_path && det.is_authenticated {
                 if let Some(tier) = cli_provider_tier(&det.provider_name) {
                     consider(
@@ -293,24 +332,50 @@ impl Hive {
     /// resolved through the entity vault, then the hive vault, then
     /// environment variables. CLI providers fall back to system auth.
     pub fn resolve_provider_profile(&self, name: &str) -> Option<ProviderSelection> {
+        Self::resolve_profile_with_sources(
+            name,
+            ambient_providers_allowed(),
+            |name| {
+                for vault in [&self.secrets, &self.hive_secrets] {
+                    if let Ok(guard) = vault.lock() {
+                        if let Some(key) = guard
+                            .get_secret(name)
+                            .map(str::trim)
+                            .filter(|key| !key.is_empty())
+                        {
+                            return Some(key.to_string());
+                        }
+                    }
+                }
+                None
+            },
+            |name| std::env::var(name).ok(),
+        )
+    }
+
+    fn resolve_profile_with_sources(
+        name: &str,
+        allow_ambient: bool,
+        stored_key: impl Fn(&str) -> Option<String>,
+        environment: impl Fn(&str) -> Option<String>,
+    ) -> Option<ProviderSelection> {
         let name = name.trim().to_lowercase();
-        if name.is_empty() {
+        if name.is_empty() || (!allow_ambient && Self::is_cli_provider(&name)) {
             return None;
         }
 
-        for vault in [&self.secrets, &self.hive_secrets] {
-            if let Ok(guard) = vault.lock() {
-                if let Some(key) = guard
-                    .get_secret(&name)
-                    .map(str::trim)
-                    .filter(|key| !key.is_empty())
-                {
-                    return Some(ProviderSelection {
-                        provider: name.clone(),
-                        auth: ProviderAuth::ApiKey(key.to_string()),
-                    });
-                }
-            }
+        if let Some(key) = stored_key(&name)
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+        {
+            return Some(ProviderSelection {
+                provider: name,
+                auth: ProviderAuth::ApiKey(key.to_string()),
+            });
+        }
+        if !allow_ambient {
+            return None;
         }
 
         let env_var = match name.as_str() {
@@ -322,7 +387,7 @@ impl Hive {
             _ => None,
         };
         if let Some(var) = env_var {
-            if let Ok(key) = std::env::var(var) {
+            if let Some(key) = environment(var) {
                 let key = key.trim().to_string();
                 if !key.is_empty() {
                     return Some(ProviderSelection {
@@ -346,6 +411,7 @@ impl Hive {
     ///
     /// Acquires locks on `secrets` then `hive_secrets` (in documented order).
     pub fn resolve_config(&self, config: &AppConfig) -> Result<HiveConfig, String> {
+        abigail_core::profile::current().map_err(|error| error.to_string())?;
         // An explicit local choice must never silently select an installed CLI
         // or a previously saved cloud key.
         if config.active_provider_preference.as_deref() == Some("local") {
@@ -437,6 +503,82 @@ impl Hive {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_provider_profile_never_reads_ambient_environment_or_cli_auth() {
+        let never_env = |_name: &str| -> Option<String> { panic!("ambient environment queried") };
+        for name in ["openai", "anthropic", "google", "xai", "perplexity"] {
+            assert!(Hive::resolve_profile_with_sources(name, false, |_| None, never_env).is_none());
+            let explicit = Hive::resolve_profile_with_sources(
+                name,
+                false,
+                |_| Some("synthetic-preview-key".into()),
+                never_env,
+            )
+            .unwrap();
+            assert_eq!(explicit.api_key().as_deref(), Some("synthetic-preview-key"));
+        }
+        for name in Hive::CLI_PROVIDERS {
+            assert!(Hive::resolve_profile_with_sources(
+                name,
+                false,
+                |_| panic!("CLI credentials must not be requested in preview"),
+                never_env,
+            )
+            .is_none());
+        }
+        let stable = Hive::resolve_profile_with_sources(
+            "openai",
+            true,
+            |_| None,
+            |_| Some("synthetic-ambient-key".into()),
+        )
+        .unwrap();
+        assert_eq!(stable.api_key().as_deref(), Some("synthetic-ambient-key"));
+        let stable_cli =
+            Hive::resolve_profile_with_sources("codex-cli", true, |_| None, never_env).unwrap();
+        assert_eq!(stable_cli.auth, ProviderAuth::System);
+    }
+
+    #[test]
+    fn preview_provider_discovery_does_not_invoke_external_probe() {
+        assert!(detect_cli_with_policy(false, || panic!("CLI probe invoked")).is_empty());
+        let invoked = std::cell::Cell::new(false);
+        assert!(detect_cli_with_policy(true, || {
+            invoked.set(true);
+            Vec::new()
+        })
+        .is_empty());
+        assert!(invoked.get());
+    }
+
+    #[test]
+    fn preview_provider_selection_rejects_cli_preference_and_legacy_cli() {
+        let mut config = AppConfig::default_paths();
+        config.active_provider_preference = Some("codex-cli".into());
+        assert!(
+            Hive::determine_ego_with_sources(&config, false, |_| Some("synthetic".into()))
+                .is_none()
+        );
+        config.active_provider_preference = None;
+        config.trinity = Some(abigail_core::TrinityConfig {
+            id_url: None,
+            ego_provider: Some("claude-cli".into()),
+            ego_api_key: Some("synthetic".into()),
+        });
+        assert!(Hive::determine_ego_with_sources(&config, false, |_| None).is_none());
+        config.trinity = None;
+        let selection = Hive::determine_ego_with_sources(&config, false, |name| {
+            matches!(name, "anthropic" | "codex-cli").then(|| "synthetic-preview-key".into())
+        })
+        .unwrap();
+        assert_eq!(selection.provider_name(), "anthropic");
+        assert!(Hive::determine_ego_with_sources(&config, false, |name| {
+            (name == "codex-cli").then(|| "synthetic".into())
+        })
+        .is_none());
+    }
+
     fn temp_vault() -> Arc<Mutex<SecretsVault>> {
         let dir = std::env::temp_dir().join(format!(
             "hive_test_{}",

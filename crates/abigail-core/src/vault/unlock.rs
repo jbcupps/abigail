@@ -1,9 +1,9 @@
 //! Hybrid unlock providers for obtaining the root Key Encryption Key (KEK).
 //!
-//! Priority order:
-//! 1. **OS credential store** (Windows Credential Manager / macOS Keychain / Linux Secret Service)
-//! 2. **Passphrase** via `ABIGAIL_VAULT_PASSPHRASE` env var or explicit input
-//! 3. **DPAPI** (Windows-only legacy path, read-only for migration)
+//! Priority order: the current profile's session cache, OS credential store,
+//! then its Windows DPAPI fallback file. Stable mode also retains the existing
+//! raw-key and passphrase environment fallbacks. Preview mode never reads those
+//! environment secrets or the stable credential entry.
 //!
 //! On first run, the provider generates a random 32-byte KEK and stores it in
 //! the OS credential store. Subsequent runs retrieve it.
@@ -13,6 +13,7 @@ use crate::secure_fs;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const KEK_LEN: usize = super::VAULT_KEK_LEN;
 const KEYRING_SERVICE: &str = "com.abigail.vault";
@@ -90,7 +91,7 @@ pub fn configure_process_vault_data_dir(data_root: &Path) {
     std::env::set_var(PROCESS_VAULT_DATA_DIR_ENV, data_root);
 }
 
-pub fn process_vault_data_dir() -> PathBuf {
+fn stable_vault_data_dir() -> PathBuf {
     if let Some(path) = std::env::var_os(PROCESS_VAULT_DATA_DIR_ENV) {
         if !path.is_empty() {
             return PathBuf::from(path);
@@ -99,99 +100,260 @@ pub fn process_vault_data_dir() -> PathBuf {
     crate::AppConfig::default_paths().data_dir
 }
 
+pub fn process_vault_data_dir() -> Result<PathBuf> {
+    Ok(CredentialContext::current()?.data_root)
+}
+
+/// Resolved before cache lookup or any credential access. A preview never
+/// consults the ordinary data-root override or ordinary keyring entry.
+pub(crate) struct CredentialContext {
+    pub(crate) data_root: PathBuf,
+    namespace: Option<String>,
+    profile: Option<Arc<crate::profile::ProfileContext>>,
+}
+
+impl CredentialContext {
+    pub(crate) fn current() -> Result<Self> {
+        match current_profile()? {
+            Some(profile) => Self::for_profile(profile),
+            None => Ok(Self::stable(stable_vault_data_dir())),
+        }
+    }
+
+    fn stable(data_root: PathBuf) -> Self {
+        Self {
+            data_root,
+            namespace: None,
+            profile: None,
+        }
+    }
+
+    fn for_profile(profile: Arc<crate::profile::ProfileContext>) -> Result<Self> {
+        profile
+            .validate_path(profile.root())
+            .map_err(profile_error)?;
+        Ok(Self {
+            data_root: profile.root().to_path_buf(),
+            namespace: Some(profile.credential_namespace()),
+            profile: Some(profile),
+        })
+    }
+
+    pub(crate) fn cache_key(&self) -> (PathBuf, Option<String>) {
+        (self.data_root.clone(), self.namespace.clone())
+    }
+
+    fn keyring_service(&self) -> String {
+        self.namespace.as_ref().map_or_else(
+            || KEYRING_SERVICE.to_string(),
+            |ns| format!("{KEYRING_SERVICE}.{ns}"),
+        )
+    }
+
+    fn keyring_account(&self) -> String {
+        self.namespace.as_ref().map_or_else(
+            || KEYRING_ACCOUNT.to_string(),
+            |ns| format!("{KEYRING_ACCOUNT}.{ns}"),
+        )
+    }
+
+    pub(crate) fn scope_label(&self, label: &str) -> String {
+        self.namespace
+            .as_ref()
+            .map_or_else(|| label.to_string(), |ns| format!("{ns}:{label}"))
+    }
+
+    fn validate_path(&self, path: &Path) -> Result<()> {
+        if let Some(profile) = &self.profile {
+            profile.validate_path(path).map_err(profile_error)?;
+        }
+        Ok(())
+    }
+
+    fn allows_ambient_credentials(&self) -> bool {
+        self.namespace.is_none()
+    }
+
+    fn fallback_path(&self) -> PathBuf {
+        let name = self.namespace.as_ref().map_or_else(
+            || "vault.kek.dpapi".to_string(),
+            |ns| format!("vault.{ns}.kek.dpapi"),
+        );
+        self.data_root.join(name)
+    }
+}
+
+pub(crate) fn validate_credential_path(path: &Path) -> Result<()> {
+    if let Some(profile) = current_profile()? {
+        profile.validate_path(path).map_err(profile_error)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn credential_scope_label(label: &str) -> Result<String> {
+    Ok(match current_profile()? {
+        Some(profile) => format!("{}:{label}", profile.credential_namespace()),
+        None => label.to_string(),
+    })
+}
+
+pub(crate) fn require_legacy_credentials_allowed() -> Result<()> {
+    require_legacy_credentials_for(current_profile()?.as_deref())
+}
+
+fn require_legacy_credentials_for(profile: Option<&crate::profile::ProfileContext>) -> Result<()> {
+    if profile.is_some() {
+        return Err(CoreError::Vault(
+            "Preview profiles do not import legacy credentials. Configure credentials within this preview profile.".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn current_profile() -> Result<Option<Arc<crate::profile::ProfileContext>>> {
+    crate::profile::current().map_err(profile_error)
+}
+
+fn profile_error(error: impl std::fmt::Display) -> CoreError {
+    CoreError::Vault(format!("Credential profile validation failed: {error}"))
+}
+
+// The orchestration is shared with fake-only tests. Only this backend can call
+// the OS credential store, DPAPI or ambient environment.
+trait RootKeyBackend {
+    fn load_keyring(&self, context: &CredentialContext) -> Result<Option<[u8; KEK_LEN]>>;
+    fn store_keyring(&self, context: &CredentialContext, kek: &[u8; KEK_LEN]) -> Result<()>;
+    fn load_fallback(&self, context: &CredentialContext) -> Result<Option<[u8; KEK_LEN]>>;
+    fn store_fallback(&self, context: &CredentialContext, kek: &[u8; KEK_LEN]) -> Result<bool>;
+    fn environment(&self, name: &str) -> Option<String>;
+}
+
+struct SystemRootKeyBackend;
+
+impl RootKeyBackend for SystemRootKeyBackend {
+    fn load_keyring(&self, context: &CredentialContext) -> Result<Option<[u8; KEK_LEN]>> {
+        os_keyring_load_optional(context)
+    }
+    fn store_keyring(&self, context: &CredentialContext, kek: &[u8; KEK_LEN]) -> Result<()> {
+        os_keyring_store_verified(context, kek)
+    }
+    fn load_fallback(&self, context: &CredentialContext) -> Result<Option<[u8; KEK_LEN]>> {
+        load_context_fallback(context)
+    }
+    fn store_fallback(&self, context: &CredentialContext, kek: &[u8; KEK_LEN]) -> Result<bool> {
+        persist_context_fallback(context, kek)
+    }
+    fn environment(&self, name: &str) -> Option<String> {
+        std::env::var(name).ok()
+    }
+}
+
 impl UnlockProvider for HybridUnlockProvider {
     fn root_kek(&self) -> Result<[u8; KEK_LEN]> {
-        if let Some(kek) = super::cached_session_root_kek() {
-            return Ok(kek);
-        }
+        root_kek_with_backend(&CredentialContext::current()?, &SystemRootKeyBackend)
+    }
+}
 
-        let data_root = process_vault_data_dir();
-        std::fs::create_dir_all(&data_root)?;
-        let sentinel_path = super::sentinel_path(&data_root);
-        let has_sentinel = sentinel_path.exists();
+fn root_kek_with_backend(
+    context: &CredentialContext,
+    backend: &dyn RootKeyBackend,
+) -> Result<[u8; KEK_LEN]> {
+    context.validate_path(&context.data_root)?;
+    context.validate_path(&super::sentinel_path(&context.data_root))?;
+    context.validate_path(&context.fallback_path())?;
+    let cache_key = context.cache_key();
+    if let Some(kek) = super::cached_session_root_kek(&cache_key) {
+        return Ok(kek);
+    }
 
-        // paper Sections 22-27 runtime verification:
-        // stable KEK + sentinel check must succeed before runtime unlock is accepted.
-        if let Some(kek) = os_keyring_load_optional()? {
-            let sentinel_value = verify_or_create_sentinel(&data_root, &kek)?;
-            if let Err(error) = persist_windows_kek_fallback(&data_root, &kek) {
-                tracing::warn!(
-                    "Stable KEK loaded from OS keyring but fallback persistence failed: {}",
-                    error
-                );
-            }
-            super::cache_session_root_kek(kek, sentinel_value);
-            return Ok(kek);
-        }
+    let data_root = &context.data_root;
+    std::fs::create_dir_all(&data_root)?;
+    let sentinel_path = super::sentinel_path(&data_root);
+    let has_sentinel = sentinel_path.exists();
 
-        if let Some(kek) = load_windows_kek_fallback_optional(&data_root)? {
+    // paper Sections 22-27 runtime verification:
+    // stable KEK + sentinel check must succeed before runtime unlock is accepted.
+    if let Some(kek) = backend.load_keyring(context)? {
+        let sentinel_value = verify_context_sentinel(context, &kek)?;
+        if let Err(error) = backend.store_fallback(context, &kek) {
             tracing::warn!(
-                "Stable KEK recovered from DPAPI fallback file because OS keyring lookup failed"
+                "Stable KEK loaded from OS keyring but fallback persistence failed: {}",
+                error
             );
-            if let Err(error) = os_keyring_store_verified(&kek) {
-                tracing::warn!("Failed to repair OS keyring from fallback KEK: {}", error);
-            }
-            let sentinel_value = verify_or_create_sentinel(&data_root, &kek)?;
-            super::cache_session_root_kek(kek, sentinel_value);
-            return Ok(kek);
         }
+        super::cache_session_root_kek(cache_key, kek, sentinel_value);
+        return Ok(kek);
+    }
 
-        if let Ok(raw_secret) = std::env::var(RAW_KEK_ENV) {
+    if let Some(kek) = backend.load_fallback(context)? {
+        tracing::warn!(
+            "Stable KEK recovered from DPAPI fallback file because OS keyring lookup failed"
+        );
+        if let Err(error) = backend.store_keyring(context, &kek) {
+            tracing::warn!("Failed to repair OS keyring from fallback KEK: {}", error);
+        }
+        let sentinel_value = verify_context_sentinel(context, &kek)?;
+        super::cache_session_root_kek(cache_key, kek, sentinel_value);
+        return Ok(kek);
+    }
+
+    if context.allows_ambient_credentials() {
+        if let Some(raw_secret) = backend.environment(RAW_KEK_ENV) {
             if !raw_secret.trim().is_empty() {
                 let kek = decode_raw_kek(&raw_secret)?;
-                let sentinel_value = verify_or_create_sentinel(&data_root, &kek)?;
-                super::cache_session_root_kek(kek, sentinel_value);
+                let sentinel_value = verify_context_sentinel(context, &kek)?;
+                super::cache_session_root_kek(cache_key, kek, sentinel_value);
                 return Ok(kek);
             }
         }
 
-        if let Ok(passphrase) = std::env::var(PASSPHRASE_ENV) {
+        if let Some(passphrase) = backend.environment(PASSPHRASE_ENV) {
             if !passphrase.trim().is_empty() {
                 let kek = derive_passphrase_kek(&data_root, &passphrase, has_sentinel)?;
-                let sentinel_value = verify_or_create_sentinel(&data_root, &kek)?;
-                super::cache_session_root_kek(kek, sentinel_value);
+                let sentinel_value = verify_context_sentinel(context, &kek)?;
+                super::cache_session_root_kek(cache_key, kek, sentinel_value);
                 return Ok(kek);
             }
         }
-
-        if has_sentinel {
-            return Err(CoreError::Vault(
-                "Recovery Mode: vault sentinel exists but stable KEK could not be loaded. \
-                 Refusing to auto-create a new key to avoid wrong-key AES-GCM corruption."
-                    .to_string(),
-            ));
-        }
-
-        // First boot only (no sentinel exists): create stable KEK once.
-        tracing::info!("No stable vault KEK found; bootstrapping initial root key");
-        let kek = generate_random_kek();
-        let keyring_persisted = match os_keyring_store_verified(&kek) {
-            Ok(()) => true,
-            Err(error) => {
-                tracing::warn!("Stable KEK could not be verified in OS keyring: {}", error);
-                false
-            }
-        };
-        let fallback_persisted = match persist_windows_kek_fallback(&data_root, &kek) {
-            Ok(persisted) => persisted,
-            Err(error) => {
-                tracing::warn!(
-                    "Stable KEK could not be persisted to DPAPI fallback file: {}",
-                    error
-                );
-                false
-            }
-        };
-        if !keyring_persisted && !fallback_persisted {
-            return Err(CoreError::Vault(format!(
-                "Recovery Mode: failed to persist stable KEK '{}': OS keyring verification failed and no secure fallback could be written.",
-                KEYRING_ACCOUNT
-            )));
-        }
-        let sentinel_value = super::write_encrypted_sentinel(&data_root, &kek)?;
-        super::cache_session_root_kek(kek, sentinel_value);
-        Ok(kek)
     }
+
+    if has_sentinel {
+        return Err(CoreError::Vault(
+            "Recovery Mode: vault sentinel exists but stable KEK could not be loaded. \
+                 Refusing to auto-create a new key to avoid wrong-key AES-GCM corruption."
+                .to_string(),
+        ));
+    }
+
+    // First boot only (no sentinel exists): create stable KEK once.
+    tracing::info!("No stable vault KEK found; bootstrapping initial root key");
+    let kek = generate_random_kek();
+    let keyring_persisted = match backend.store_keyring(context, &kek) {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!("Stable KEK could not be verified in OS keyring: {}", error);
+            false
+        }
+    };
+    let fallback_persisted = match backend.store_fallback(context, &kek) {
+        Ok(persisted) => persisted,
+        Err(error) => {
+            tracing::warn!(
+                "Stable KEK could not be persisted to DPAPI fallback file: {}",
+                error
+            );
+            false
+        }
+    };
+    if !keyring_persisted && !fallback_persisted {
+        return Err(CoreError::Vault(format!(
+                "Recovery Mode: failed to persist stable KEK '{}': OS keyring verification failed and no secure fallback could be written.",
+                context.keyring_account()
+            )));
+    }
+    let sentinel_value = verify_context_sentinel(context, &kek)?;
+    super::cache_session_root_kek(cache_key, kek, sentinel_value);
+    Ok(kek)
 }
 
 /// Provider that always derives the KEK from a fixed passphrase.
@@ -343,8 +505,8 @@ fn decode_raw_kek(raw_secret: &str) -> Result<[u8; KEK_LEN]> {
 // OS credential store helpers
 // ---------------------------------------------------------------------------
 
-fn os_keyring_load() -> Result<[u8; KEK_LEN]> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
+fn os_keyring_load(context: &CredentialContext) -> Result<[u8; KEK_LEN]> {
+    let entry = keyring::Entry::new(&context.keyring_service(), &context.keyring_account())
         .map_err(|e| CoreError::Keyring(format!("keyring entry creation failed: {}", e)))?;
     let password = entry
         .get_password()
@@ -358,8 +520,8 @@ fn os_keyring_load() -> Result<[u8; KEK_LEN]> {
     Ok(kek)
 }
 
-fn os_keyring_load_optional() -> Result<Option<[u8; KEK_LEN]>> {
-    match os_keyring_load() {
+fn os_keyring_load_optional(context: &CredentialContext) -> Result<Option<[u8; KEK_LEN]>> {
+    match os_keyring_load(context) {
         Ok(kek) => Ok(Some(kek)),
         Err(e) => {
             let msg = e.to_string().to_ascii_lowercase();
@@ -377,10 +539,10 @@ fn os_keyring_load_optional() -> Result<Option<[u8; KEK_LEN]>> {
     }
 }
 
-fn os_keyring_store(kek: &[u8; KEK_LEN]) -> Result<()> {
+fn os_keyring_store(context: &CredentialContext, kek: &[u8; KEK_LEN]) -> Result<()> {
     use base64::Engine as _;
     let encoded = base64::engine::general_purpose::STANDARD.encode(kek);
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
+    let entry = keyring::Entry::new(&context.keyring_service(), &context.keyring_account())
         .map_err(|e| CoreError::Keyring(format!("keyring entry creation failed: {}", e)))?;
     entry
         .set_password(&encoded)
@@ -388,15 +550,68 @@ fn os_keyring_store(kek: &[u8; KEK_LEN]) -> Result<()> {
     Ok(())
 }
 
-fn os_keyring_store_verified(kek: &[u8; KEK_LEN]) -> Result<()> {
-    os_keyring_store(kek)?;
-    let reloaded = os_keyring_load()?;
+fn os_keyring_store_verified(context: &CredentialContext, kek: &[u8; KEK_LEN]) -> Result<()> {
+    os_keyring_store(context, kek)?;
+    let reloaded = os_keyring_load(context)?;
     if &reloaded != kek {
         return Err(CoreError::Keyring(
             "keyring verification failed: stored KEK did not round-trip".to_string(),
         ));
     }
     Ok(())
+}
+
+#[cfg(windows)]
+#[derive(Serialize, Deserialize)]
+struct ProfileFallbackKey {
+    namespace: String,
+    key: [u8; KEK_LEN],
+}
+
+#[cfg(windows)]
+fn encode_profile_fallback(namespace: &str, kek: &[u8; KEK_LEN]) -> Result<Vec<u8>> {
+    Ok(serde_json::to_vec(&ProfileFallbackKey {
+        namespace: namespace.to_string(),
+        key: *kek,
+    })?)
+}
+
+#[cfg(windows)]
+fn decode_profile_fallback(namespace: &str, plaintext: &[u8]) -> Result<[u8; KEK_LEN]> {
+    let payload: ProfileFallbackKey = serde_json::from_slice(plaintext)?;
+    if payload.namespace != namespace {
+        return Err(CoreError::Vault(
+            "Preview fallback key belongs to another profile".into(),
+        ));
+    }
+    Ok(payload.key)
+}
+
+fn persist_context_fallback(context: &CredentialContext, kek: &[u8; KEK_LEN]) -> Result<bool> {
+    context.validate_path(&context.fallback_path())?;
+    #[cfg(windows)]
+    if let Some(namespace) = &context.namespace {
+        let payload = encode_profile_fallback(namespace, kek)?;
+        let encrypted = crate::dpapi::dpapi_encrypt(&payload)?;
+        secure_fs::write_bytes_atomic(&context.fallback_path(), &encrypted)?;
+        return Ok(true);
+    }
+    persist_windows_kek_fallback(&context.data_root, kek)
+}
+
+fn load_context_fallback(context: &CredentialContext) -> Result<Option<[u8; KEK_LEN]>> {
+    context.validate_path(&context.fallback_path())?;
+    #[cfg(windows)]
+    if let Some(namespace) = &context.namespace {
+        let path = context.fallback_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let encrypted = std::fs::read(path)?;
+        let plaintext = crate::dpapi::dpapi_decrypt(&encrypted)?;
+        return Ok(Some(decode_profile_fallback(namespace, &plaintext)?));
+    }
+    load_windows_kek_fallback_optional(&context.data_root)
 }
 
 #[cfg(windows)]
@@ -435,19 +650,23 @@ fn load_windows_kek_fallback_optional(_data_root: &Path) -> Result<Option<[u8; K
     Ok(None)
 }
 
-fn verify_or_create_sentinel(data_root: &Path, kek: &[u8; KEK_LEN]) -> Result<String> {
+fn verify_context_sentinel(context: &CredentialContext, kek: &[u8; KEK_LEN]) -> Result<String> {
+    let data_root = &context.data_root;
     let sentinel_path = super::sentinel_path(data_root);
+    context.validate_path(&sentinel_path)?;
+    let scope = context.scope_label(super::SENTINEL_SCOPE);
     if sentinel_path.exists() {
-        super::decrypt_sentinel(data_root, kek).map_err(|e| {
-            CoreError::Vault(format!(
-                "Recovery Mode: failed to decrypt {} with stable KEK '{}': {}",
-                sentinel_path.display(),
-                KEYRING_ACCOUNT,
-                e
-            ))
-        })
+        super::decrypt_sentinel_bytes_with_scope(&std::fs::read(&sentinel_path)?, kek, &scope)
+            .map_err(|e| {
+                CoreError::Vault(format!(
+                    "Recovery Mode: failed to decrypt {} with stable KEK '{}': {}",
+                    sentinel_path.display(),
+                    context.keyring_account(),
+                    e
+                ))
+            })
     } else {
-        super::write_encrypted_sentinel(data_root, kek)
+        super::write_encrypted_sentinel_with_scope(data_root, kek, &scope)
     }
 }
 
@@ -456,6 +675,250 @@ use base64::Engine as _;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct FakeRootKeyBackend {
+        keys: Mutex<HashMap<(String, String), [u8; KEK_LEN]>>,
+        fallbacks: Mutex<HashMap<PathBuf, [u8; KEK_LEN]>>,
+        calls: Mutex<Vec<String>>,
+        refuse_persistence: bool,
+    }
+
+    impl RootKeyBackend for FakeRootKeyBackend {
+        fn load_keyring(&self, context: &CredentialContext) -> Result<Option<[u8; KEK_LEN]>> {
+            let identity = (context.keyring_service(), context.keyring_account());
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("load:{}", identity.1));
+            Ok(self.keys.lock().unwrap().get(&identity).copied())
+        }
+        fn store_keyring(&self, context: &CredentialContext, kek: &[u8; KEK_LEN]) -> Result<()> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("store:{}", context.keyring_account()));
+            if self.refuse_persistence {
+                return Err(CoreError::Vault("synthetic store unavailable".into()));
+            }
+            self.keys
+                .lock()
+                .unwrap()
+                .insert((context.keyring_service(), context.keyring_account()), *kek);
+            Ok(())
+        }
+        fn load_fallback(&self, context: &CredentialContext) -> Result<Option<[u8; KEK_LEN]>> {
+            Ok(self
+                .fallbacks
+                .lock()
+                .unwrap()
+                .get(&context.fallback_path())
+                .copied())
+        }
+        fn store_fallback(&self, context: &CredentialContext, kek: &[u8; KEK_LEN]) -> Result<bool> {
+            if self.refuse_persistence {
+                return Ok(false);
+            }
+            self.fallbacks
+                .lock()
+                .unwrap()
+                .insert(context.fallback_path(), *kek);
+            Ok(true)
+        }
+        fn environment(&self, _name: &str) -> Option<String> {
+            panic!("preview must never request an ambient unlock secret")
+        }
+    }
+
+    struct SyntheticRoot(PathBuf);
+    impl SyntheticRoot {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "abigail_preview_credentials_{}_{}",
+                std::process::id(),
+                rand::random::<u64>(),
+            ));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+        fn preview(&self, name: &str) -> CredentialContext {
+            let profile =
+                crate::profile::ProfileContext::preflight(&self.0.join(name), &[]).unwrap();
+            CredentialContext::for_profile(Arc::new(profile)).unwrap()
+        }
+    }
+    impl Drop for SyntheticRoot {
+        fn drop(&mut self) {
+            // Only the uniquely created synthetic fixture directory is removed.
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn preview_credentials_isolate_cache_keyring_fallback_and_reopen() {
+        let temp = SyntheticRoot::new();
+        let ongoing = temp.preview("ongoing");
+        let disposable = temp.preview("disposable");
+        let backend = FakeRootKeyBackend::default();
+        let stable = CredentialContext::stable(ongoing.data_root.clone());
+        backend.keys.lock().unwrap().insert(
+            (KEYRING_SERVICE.into(), KEYRING_ACCOUNT.into()),
+            [7; KEK_LEN],
+        );
+        backend
+            .fallbacks
+            .lock()
+            .unwrap()
+            .insert(stable.fallback_path(), [7; KEK_LEN]);
+        super::super::cache_session_root_kek(stable.cache_key(), [7; KEK_LEN], "synthetic".into());
+
+        let ongoing_key = root_kek_with_backend(&ongoing, &backend).unwrap();
+        let disposable_key = root_kek_with_backend(&disposable, &backend).unwrap();
+        assert_ne!(ongoing_key, [7; KEK_LEN]);
+        assert_ne!(disposable_key, ongoing_key);
+        assert_ne!(ongoing.keyring_service(), KEYRING_SERVICE);
+        assert_ne!(ongoing.keyring_account(), KEYRING_ACCOUNT);
+        assert_ne!(ongoing.keyring_account(), disposable.keyring_account());
+        assert_ne!(ongoing.fallback_path(), stable.fallback_path());
+        assert!(ongoing.fallback_path().starts_with(&ongoing.data_root));
+        assert!(backend
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|call| !call.ends_with(KEYRING_ACCOUNT)));
+        assert_eq!(
+            backend
+                .keys
+                .lock()
+                .unwrap()
+                .get(&(KEYRING_SERVICE.into(), KEYRING_ACCOUNT.into())),
+            Some(&[7; KEK_LEN])
+        );
+        assert_eq!(
+            backend
+                .fallbacks
+                .lock()
+                .unwrap()
+                .get(&stable.fallback_path()),
+            Some(&[7; KEK_LEN])
+        );
+
+        // Remove only this session's cache entry to exercise keyring retrieval.
+        super::super::SESSION_KEYS
+            .get()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .remove(&ongoing.cache_key());
+        let reopened = CredentialContext::for_profile(Arc::new(
+            crate::profile::ProfileContext::preflight(&ongoing.data_root, &[]).unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(
+            root_kek_with_backend(&reopened, &backend).unwrap(),
+            ongoing_key
+        );
+
+        // Root remains part of the cache identity even if a profile marker was copied.
+        let mut moved = CredentialContext::stable(temp.0.join("other-root"));
+        moved.namespace = ongoing.namespace.clone();
+        assert!(super::super::cached_session_root_kek(&moved.cache_key()).is_none());
+    }
+
+    #[test]
+    fn preview_credentials_fallback_repairs_only_preview_entry() {
+        let temp = SyntheticRoot::new();
+        let context = temp.preview("ongoing");
+        let backend = FakeRootKeyBackend::default();
+        backend
+            .fallbacks
+            .lock()
+            .unwrap()
+            .insert(context.fallback_path(), [9; KEK_LEN]);
+        assert_eq!(
+            root_kek_with_backend(&context, &backend).unwrap(),
+            [9; KEK_LEN]
+        );
+        let keys = backend.keys.lock().unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(
+            keys.get(&(context.keyring_service(), context.keyring_account())),
+            Some(&[9; KEK_LEN])
+        );
+        assert!(!keys.contains_key(&(KEYRING_SERVICE.into(), KEYRING_ACCOUNT.into())));
+    }
+
+    #[test]
+    fn preview_credentials_refuse_missing_key_and_failed_persistence() {
+        let temp = SyntheticRoot::new();
+        let existing = temp.preview("existing");
+        verify_context_sentinel(&existing, &[3; KEK_LEN]).unwrap();
+        let sentinel = std::fs::read(super::super::sentinel_path(&existing.data_root)).unwrap();
+        let backend = FakeRootKeyBackend::default();
+        assert!(root_kek_with_backend(&existing, &backend).is_err());
+        assert!(backend.keys.lock().unwrap().is_empty());
+        assert_eq!(
+            std::fs::read(super::super::sentinel_path(&existing.data_root)).unwrap(),
+            sentinel
+        );
+
+        let fresh = temp.preview("fresh");
+        let unavailable = FakeRootKeyBackend {
+            refuse_persistence: true,
+            ..Default::default()
+        };
+        assert!(root_kek_with_backend(&fresh, &unavailable).is_err());
+        assert!(!super::super::sentinel_path(&fresh.data_root).exists());
+        assert!(super::super::cached_session_root_kek(&fresh.cache_key()).is_none());
+    }
+
+    #[test]
+    fn preview_credentials_reject_legacy_and_cross_profile_ciphertext() {
+        let temp = SyntheticRoot::new();
+        let context = temp.preview("ongoing");
+        let other = temp.preview("disposable");
+        assert!(require_legacy_credentials_for(context.profile.as_deref()).is_err());
+        assert!(require_legacy_credentials_for(None).is_ok());
+        assert!(context.validate_path(&temp.0.join("outside")).is_err());
+        let stable = CredentialContext::stable(temp.0.join("stable"));
+        for label in [
+            super::super::SENTINEL_SCOPE,
+            "secrets:secrets",
+            "keyring:identity",
+            "keyring:master",
+            "keyring:encrypt",
+            "encrypted-storage:general",
+            "hive",
+        ] {
+            assert_eq!(stable.scope_label(label), label);
+            let key =
+                super::super::crypto::derive_scope_key(&[11; KEK_LEN], &context.scope_label(label));
+            let envelope = super::super::crypto::seal(&key, b"synthetic value").unwrap();
+            for incompatible in [&stable, &other] {
+                let wrong = super::super::crypto::derive_scope_key(
+                    &[11; KEK_LEN],
+                    &incompatible.scope_label(label),
+                );
+                assert!(super::super::crypto::open(&wrong, &envelope).is_err());
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn preview_credentials_fallback_payload_rejects_ordinary_and_other_profile_keys() {
+        // Test the plaintext codec only; DPAPI and the OS keyring are never called.
+        let payload = encode_profile_fallback("synthetic-preview-a", &[13; KEK_LEN]).unwrap();
+        assert_eq!(
+            decode_profile_fallback("synthetic-preview-a", &payload).unwrap(),
+            [13; KEK_LEN]
+        );
+        assert!(decode_profile_fallback("synthetic-preview-b", &payload).is_err());
+        assert!(decode_profile_fallback("synthetic-preview-a", &[13; KEK_LEN]).is_err());
+    }
 
     #[cfg(not(windows))]
     #[test]

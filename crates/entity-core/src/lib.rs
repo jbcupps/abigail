@@ -300,6 +300,9 @@ impl ExecutionTrace {
 /// Entity runtime status snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityStatus {
+    /// Preview process ownership; absent for stable compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_identity: Option<abigail_core::profile::ProcessIdentity>,
     pub entity_id: String,
     pub name: Option<String>,
     pub birth_complete: bool,

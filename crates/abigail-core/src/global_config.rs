@@ -75,14 +75,27 @@ impl GlobalConfig {
 
     /// Load GlobalConfig from disk.
     pub fn load(data_root: &Path) -> anyhow::Result<Self> {
+        let profile = crate::profile::current()?;
+        if let Some(profile) = &profile {
+            profile.validate_path(data_root)?;
+            profile.validate_path(&data_root.join("global_settings.json"))?;
+        }
         let content = crate::path_guard::load_string_from_root(data_root, "global_settings.json")?;
         let mut config: Self = serde_json::from_str(&content)?;
+        if let Some(profile) = &profile {
+            profile.validate_global_config(&config)?;
+        }
         config.normalize_agent_directories()?;
         Ok(config)
     }
 
     /// Save GlobalConfig to disk.
     pub fn save(&self, data_root: &Path) -> anyhow::Result<()> {
+        if let Some(profile) = crate::profile::current()? {
+            profile.validate_path(data_root)?;
+            profile.validate_path(&data_root.join("global_settings.json"))?;
+            profile.validate_global_config(self)?;
+        }
         let mut normalized = self.clone();
         normalized.normalize_agent_directories()?;
         let content = serde_json::to_string_pretty(&normalized)?;

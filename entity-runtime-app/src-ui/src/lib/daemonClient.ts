@@ -1,4 +1,5 @@
 import { resolveEntityUrl } from "./connection";
+import { verifiedRuntimeFetch } from "./nativeConnection";
 
 // Thin wrapper over the Entity Runtime daemon HTTP API. Chat itself goes through
 // EntityHttpChatGateway (added in Phase 1); this client covers health/status.
@@ -10,7 +11,7 @@ export interface ApiEnvelope<T> {
 
 async function entityFetch(path: string, init?: RequestInit): Promise<Response> {
   const base = await resolveEntityUrl();
-  return fetch(`${base}${path}`, init);
+  return verifiedRuntimeFetch()(`${base}${path}`, init);
 }
 
 export async function entityHealth(): Promise<boolean> {

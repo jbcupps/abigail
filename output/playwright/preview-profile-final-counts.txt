@@ -1,0 +1,117 @@
+[
+  {
+    "Log": "target/preview-profile-core-final-tests.log",
+    "Passed": 14,
+    "Ignored": 1
+  },
+  {
+    "Log": "target/preview-profile-config-final-tests.log",
+    "Passed": 37,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-credential-final-tests.log",
+    "Passed": 5,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-identity-final-tests.log",
+    "Passed": 14,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-creation-final-tests.log",
+    "Passed": 22,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-diag-tests.log",
+    "Passed": 3,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-memory-tests.log",
+    "Passed": 6,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-runtime-tests.log",
+    "Passed": 3,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-providers-tests.log",
+    "Passed": 5,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-client-tests.log",
+    "Passed": 2,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-persistence-tests.log",
+    "Passed": 3,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-hive-daemon-profile_runtime__tests-tests.log",
+    "Passed": 5,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-hive-daemon-supervisor__preview_identity_tests-tests.log",
+    "Passed": 9,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-hive-daemon-preview_provider_connection-tests.log",
+    "Passed": 1,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-hive-daemon-creation_http_tests__preview_shutdown-tests.log",
+    "Passed": 2,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-hive-daemon-supervisor__tests__-tests.log",
+    "Passed": 9,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-entity-daemon-preview_startup_tests-tests.log",
+    "Passed": 5,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-entity-daemon-preview_client_tests-tests.log",
+    "Passed": 3,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-entity-daemon-preview_provider_tests-tests.log",
+    "Passed": 2,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-entity-daemon-preview_binding_tests-tests.log",
+    "Passed": 2,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-entity-daemon-backup_ops__tests__preview_-tests.log",
+    "Passed": 2,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-hive-native-tests__-tests.log",
+    "Passed": 11,
+    "Ignored": 0
+  },
+  {
+    "Log": "target/preview-profile-runtime-native-tests__-tests.log",
+    "Passed": 2,
+    "Ignored": 0
+  }
+]

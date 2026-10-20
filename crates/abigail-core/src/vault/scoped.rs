@@ -8,7 +8,7 @@
 //! Payload: JSON-serialised `HashMap<String, String>`.
 
 use super::crypto;
-use super::unlock::UnlockProvider;
+use super::unlock::{credential_scope_label, validate_credential_path, UnlockProvider};
 use crate::error::{CoreError, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -59,9 +59,10 @@ impl ScopedVault {
         scope: VaultScope,
         unlock: Arc<dyn UnlockProvider>,
     ) -> Result<Self> {
+        validate_credential_path(&file_path)?;
         let secrets = if file_path.exists() {
             let root_kek = unlock.root_kek()?;
-            let dek = crypto::derive_scope_key(&root_kek, &scope.label());
+            let dek = crypto::derive_scope_key(&root_kek, &credential_scope_label(&scope.label())?);
             let envelope = std::fs::read(&file_path)?;
             let plaintext = crypto::open(&dek, &envelope)?;
             serde_json::from_slice(&plaintext)
@@ -80,8 +81,10 @@ impl ScopedVault {
 
     /// Persist the current in-memory secrets to the encrypted file.
     pub fn save(&self) -> Result<()> {
+        validate_credential_path(&self.file_path)?;
         let root_kek = self.unlock.root_kek()?;
-        let dek = crypto::derive_scope_key(&root_kek, &self.scope.label());
+        let dek =
+            crypto::derive_scope_key(&root_kek, &credential_scope_label(&self.scope.label())?);
         let plaintext = serde_json::to_vec(&self.secrets)?;
         let envelope = crypto::seal(&dek, &plaintext)?;
 
@@ -93,6 +96,7 @@ impl ScopedVault {
     }
 
     pub fn get_secret(&self, key: &str) -> Option<&str> {
+        validate_credential_path(&self.file_path).ok()?;
         self.secrets.get(key).map(|s| s.as_str())
     }
 
@@ -123,6 +127,7 @@ impl ScopedVault {
 
     /// Delete the backing file and clear in-memory secrets.
     pub fn reset(&mut self) -> Result<()> {
+        validate_credential_path(&self.file_path)?;
         self.secrets.clear();
         if self.file_path.exists() {
             std::fs::remove_file(&self.file_path)?;

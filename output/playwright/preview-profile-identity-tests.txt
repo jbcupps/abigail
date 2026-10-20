@@ -1,0 +1,36 @@
+   Compiling abigail-core v0.0.1 (<repository>\crates\abigail-core)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `<repository>\target\debug\incremental\abigail_core-0wgip5633uc0c\s-hne0fk17po-0zv9tof-working`
+
+warning: function `write_encrypted_sentinel` is never used
+  --> crates\abigail-core\src\vault\mod.rs:80:15
+   |
+80 | pub(crate) fn write_encrypted_sentinel(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `abigail-core` (lib) generated 2 warnings
+   Compiling abigail-identity v0.0.1 (<repository>\crates\abigail-identity)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `<repository>\target\debug\incremental\abigail_identity-3d50hr7g770k7\s-hne0fm5vif-1n4aq1g-working`
+
+warning: `abigail-identity` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.14s
+     Running unittests src\lib.rs (target\debug\deps\abigail_identity-37987ebe8adc8077.exe)
+
+running 14 tests
+test preview_profile_tests::preview_active_config_cannot_select_another_entity_before_migration ... ok
+test preview_profile_tests::preview_backup_selection_cannot_target_an_outside_fixture ... ok
+test preview_profile_tests::preview_bootstrap_allows_fresh_or_existing_keyed_identity_state ... ok
+test preview_profile_tests::preview_decryption_failure_never_recovers_or_bootstraps_identity_state ... ok
+test preview_profile_tests::preview_disposable_backups_restore_inside_root_without_touching_ongoing_files ... ok
+test preview_profile_tests::preview_documents_are_registered_uuid_scoped_and_stable_after_rename ... ok
+test preview_profile_tests::preview_identity_paths_and_documents_survive_manager_reopen ... ok
+test preview_profile_tests::preview_legacy_identity_refusal_preserves_all_source_and_registry_bytes ... ok
+test preview_profile_tests::preview_missing_master_key_preserves_existing_registry_and_identity_tree ... ok
+test preview_profile_tests::preview_outside_backup_config_is_refused_without_consuming_the_backup ... ok
+test preview_profile_tests::preview_outside_config_paths_are_rejected_before_migration_or_archive ... ok
+test preview_profile_tests::preview_rejects_a_different_shared_store_even_inside_the_profile ... ok
+test preview_profile_tests::preview_restore_rebinds_declared_missing_public_key_for_unborn_entity ... ok
+test preview_profile_tests::stable_identity_decryption_recovery_still_retries_after_recovery ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 33 filtered out; finished in 1.46s

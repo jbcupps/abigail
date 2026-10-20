@@ -1,0 +1,32 @@
+[
+  {
+    "Filter": "preview_startup_tests",
+    "Matched": 5,
+    "Log": "target/preview-profile-entity-daemon-preview_startup_tests-tests.log",
+    "ExitCode": 0
+  },
+  {
+    "Filter": "preview_client_tests",
+    "Matched": 3,
+    "Log": "target/preview-profile-entity-daemon-preview_client_tests-tests.log",
+    "ExitCode": 0
+  },
+  {
+    "Filter": "preview_provider_tests",
+    "Matched": 2,
+    "Log": "target/preview-profile-entity-daemon-preview_provider_tests-tests.log",
+    "ExitCode": 0
+  },
+  {
+    "Filter": "preview_binding_tests",
+    "Matched": 2,
+    "Log": "target/preview-profile-entity-daemon-preview_binding_tests-tests.log",
+    "ExitCode": 0
+  },
+  {
+    "Filter": "backup_ops::tests::preview_",
+    "Matched": 2,
+    "Log": "target/preview-profile-entity-daemon-backup_ops__tests__preview_-tests.log",
+    "ExitCode": 0
+  }
+]

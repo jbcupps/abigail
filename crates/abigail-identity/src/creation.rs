@@ -100,6 +100,7 @@ impl IdentityManager {
         };
         Ok(Self {
             data_root,
+            profile: None,
             global_config: std::sync::RwLock::new(global_config),
             master_key: ed25519_dalek::SigningKey::from_bytes(&[9; 32]),
         })

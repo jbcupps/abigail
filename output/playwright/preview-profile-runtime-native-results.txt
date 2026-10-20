@@ -1,0 +1,6 @@
+{
+  "Filter": "tests::",
+  "Matched": 2,
+  "Log": "target/preview-profile-runtime-native-tests__-tests.log",
+  "ExitCode": 0
+}

@@ -1,0 +1,13 @@
+
+running 9 tests
+test supervisor::preview_identity_tests::cancelled_shutdown_retains_cleanup_and_allows_only_a_confirmed_retry ... ok
+test supervisor::preview_identity_tests::close_keeps_session_revocation_inside_the_entity_lifecycle_lock ... ok
+test supervisor::preview_identity_tests::lifecycle_serializes_the_same_entity_without_blocking_another_entity ... ok
+test supervisor::preview_identity_tests::packaged_entity_binary_rejects_other_directories_and_names ... ok
+test supervisor::preview_identity_tests::readiness_requires_profile_root_channel_and_both_live_instances ... ok
+test supervisor::preview_identity_tests::shutdown_blocks_new_opens_before_an_existing_operation_drains ... ok
+test supervisor::preview_identity_tests::shutdown_preserves_cleanup_failure_and_never_reopens ... ok
+test supervisor::preview_identity_tests::shutdown_waits_for_cancelled_launch_and_owned_cleanup_completion ... ok
+test supervisor::preview_identity_tests::stale_close_cannot_select_a_replacement_instance ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 41 filtered out; finished in 0.01s

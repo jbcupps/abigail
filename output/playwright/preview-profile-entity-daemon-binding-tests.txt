@@ -1,0 +1,6 @@
+
+running 2 tests
+test routes::preview_binding_tests::identity_discovery_is_available_and_stable_requests_are_unchanged ... ok
+test routes::preview_binding_tests::preview_requests_require_exact_profile_and_live_entity_instance ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 46 filtered out; finished in 0.00s

@@ -10,7 +10,7 @@ use abigail_core::{
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 mod creation;
@@ -90,16 +90,87 @@ pub struct AgentContext {
 /// - Load existing agents (verify signature, return context)
 pub struct IdentityManager {
     data_root: PathBuf,
+    profile: Option<Arc<abigail_core::profile::ProfileContext>>,
     global_config: RwLock<GlobalConfig>,
     master_key: SigningKey,
 }
 
 impl IdentityManager {
+    /// A missing key in an established preview is a recovery condition, not
+    /// permission to generate a replacement that cannot verify its Entities.
+    /// Run before credential unlock and repeat before any bootstrap writes.
+    fn validate_preview_bootstrap(data_root: &Path, preview: bool) -> Result<(), String> {
+        if !preview {
+            return Ok(());
+        }
+        if data_root
+            .join("master.key")
+            .try_exists()
+            .map_err(|e| e.to_string())?
+        {
+            return Ok(());
+        }
+        let has_registry = GlobalConfig::config_path(data_root)
+            .try_exists()
+            .map_err(|e| e.to_string())?;
+        let identities = data_root.join("identities");
+        let has_identities = if identities.try_exists().map_err(|e| e.to_string())? {
+            std::fs::read_dir(&identities)
+                .map_err(|e| e.to_string())?
+                .next()
+                .transpose()
+                .map_err(|e| e.to_string())?
+                .is_some()
+        } else {
+            false
+        };
+        if has_registry || has_identities {
+            return Err(
+                "Preview identity recovery is required: master.key is missing from an existing identity profile. Refusing to generate a replacement key."
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+
     fn should_auto_reset_identity_state(error: &str) -> bool {
         let error = error.to_ascii_lowercase();
         error.contains("aes-gcm decryption failed")
             || error.contains("wrong key or tampered data")
             || error.contains("decryption failed")
+    }
+
+    /// Keep recovery dispatch injectable so preview refusal can be checked
+    /// without unlocking a real vault or bootstrapping an identity.
+    fn load_with_recovery<T>(
+        preview: bool,
+        mut load: impl FnMut() -> Result<T, String>,
+        recover: impl FnOnce() -> Result<(), String>,
+    ) -> anyhow::Result<T> {
+        match load() {
+            Ok(value) => Ok(value),
+            Err(error) if !preview && Self::should_auto_reset_identity_state(&error) => {
+                tracing::warn!(
+                    error = %error,
+                    "AES-GCM decryption failed while loading identity state; archiving identity material and bootstrapping fresh state"
+                );
+                recover().map_err(anyhow::Error::msg)?;
+                load().map_err(|retry_error| {
+                    tracing::error!("Fatal identity error after auto-recovery: {}", retry_error);
+                    anyhow::anyhow!(retry_error)
+                })
+            }
+            Err(error) => {
+                tracing::error!("Fatal identity error: {}", error);
+                if preview && Self::should_auto_reset_identity_state(&error) {
+                    return Err(anyhow::anyhow!(
+                        "Preview identity recovery requires an explicit restore; automatic reset is disabled: {}",
+                        error
+                    ));
+                }
+                Err(anyhow::anyhow!(error))
+            }
+        }
     }
 
     fn recover_identity_state(data_root: &Path) -> Result<(), String> {
@@ -183,8 +254,91 @@ impl IdentityManager {
 
     fn resolve_agent_dir(&self, directory: &Path) -> Result<PathBuf, String> {
         let relative = self.normalize_agent_directory(directory)?;
-        abigail_core::path_guard::resolve_within_root(&self.data_root, &relative, "agent directory")
-            .map_err(|e| e.to_string())
+        let path = abigail_core::path_guard::resolve_within_root(
+            &self.data_root,
+            &relative,
+            "agent directory",
+        )
+        .map_err(|e| e.to_string())?;
+        self.validate_profile_path(&path)?;
+        Ok(path)
+    }
+
+    fn validate_profile_path(&self, path: &Path) -> Result<(), String> {
+        if let Some(profile) = &self.profile {
+            profile.validate_path(path).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    fn validate_profile_config(&self, config: &AppConfig, path: &Path) -> Result<(), String> {
+        if let Some(profile) = &self.profile {
+            profile
+                .validate_config_at_path(config, path)
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    fn read_compatible_config(&self, path: &Path) -> Result<AppConfig, String> {
+        self.validate_profile_path(path)?;
+        abigail_core::path_guard::ensure_expected_filename(path, "config.json")
+            .map_err(|e| e.to_string())?;
+        let parent = path.parent().ok_or("Config path has no parent directory")?;
+        let content = abigail_core::path_guard::load_string_from_root(parent, "config.json")
+            .map_err(|e| e.to_string())?;
+        let config = AppConfig::from_json_compatible(&content).map_err(|e| e.to_string())?;
+        self.validate_profile_config(&config, path)?;
+        Ok(config)
+    }
+
+    fn load_config(&self, path: &Path) -> Result<AppConfig, String> {
+        if self.profile.is_none() {
+            return AppConfig::load(path).map_err(|e| e.to_string());
+        }
+        // Validate the value that will be used before migration can write it back.
+        let mut config = self.read_compatible_config(path)?;
+        if config.migrate() {
+            config.save(path).map_err(|e| e.to_string())?;
+        }
+        Ok(config)
+    }
+
+    fn backups_dir(&self) -> Result<PathBuf, String> {
+        let path = self.profile.as_ref().map_or_else(
+            || self.data_root.join("backups"),
+            |profile| profile.backups_dir(),
+        );
+        self.validate_profile_path(&path)?;
+        Ok(path)
+    }
+
+    fn backup_path(&self, directory_name: &str) -> Result<PathBuf, String> {
+        if self.profile.is_some() {
+            let relative = Path::new(directory_name);
+            abigail_core::path_guard::ensure_relative_no_traversal(relative, "backup directory")
+                .map_err(|e| e.to_string())?;
+            if relative.components().count() != 1 || directory_name == "." {
+                return Err("Backup directory must be a single directory name.".to_string());
+            }
+        }
+        let path = self.backups_dir()?.join(directory_name);
+        self.validate_profile_path(&path)?;
+        Ok(path)
+    }
+
+    fn validate_profile_tree(&self, path: &Path) -> Result<(), String> {
+        if self.profile.is_none() {
+            return Ok(());
+        }
+        self.validate_profile_path(path)?;
+        if path.is_dir() {
+            for entry in std::fs::read_dir(path).map_err(|e| e.to_string())? {
+                let entry = entry.map_err(|e| e.to_string())?;
+                self.validate_profile_tree(&entry.path())?;
+            }
+        }
+        Ok(())
     }
 
     fn registry_directory_for(&self, agent_id: &str) -> PathBuf {
@@ -192,12 +346,30 @@ impl IdentityManager {
     }
 
     fn shared_memory_db_path(&self) -> PathBuf {
-        HiveEntity::memory_db_path(&self.data_root)
+        self.profile.as_ref().map_or_else(
+            || HiveEntity::memory_db_path(&self.data_root),
+            |profile| profile.shared_memory_path(),
+        )
     }
 
     /// Create a new IdentityManager, loading GlobalConfig and master key from disk.
     /// If master key doesn't exist, generates one (first-run bootstrap).
     pub fn new(data_root: PathBuf) -> anyhow::Result<Self> {
+        let profile = abigail_core::profile::current()?;
+        let data_root = if let Some(profile) = &profile {
+            profile.validate_path(&data_root)?;
+            if !abigail_core::profile::same_path(
+                &abigail_core::profile::canonical_without_links(&data_root)?,
+                profile.root(),
+            ) {
+                anyhow::bail!("Identity data root does not match the validated preview profile.");
+            }
+            profile.root().to_path_buf()
+        } else {
+            data_root
+        };
+        Self::validate_preview_bootstrap(&data_root, profile.is_some())
+            .map_err(anyhow::Error::msg)?;
         // paper Sections 22-27 runtime verification:
         // the KEK must already be session-verified before identity bootstrap.
         let unlock = abigail_core::HybridUnlockProvider::new();
@@ -206,28 +378,24 @@ impl IdentityManager {
             .root_kek()
             .map_err(|e| anyhow::anyhow!(format!("Recovery Mode: {}", e)))?;
 
-        match Self::try_load_from_vault(data_root.clone()) {
-            Ok(manager) => Ok(manager),
-            Err(error) if Self::should_auto_reset_identity_state(&error) => {
+        Self::load_with_recovery(
+            profile.is_some(),
+            || Self::try_load_from_vault(data_root.clone(), profile.clone()),
+            || {
                 tracing::warn!(
                     data_root = %data_root.display(),
-                    error = %error,
-                    "AES-GCM decryption failed while loading identity state; archiving identity material and bootstrapping fresh state"
+                    "Recovering stable identity state"
                 );
-                Self::recover_identity_state(&data_root).map_err(anyhow::Error::msg)?;
-                Self::try_load_from_vault(data_root).map_err(|retry_error| {
-                    tracing::error!("Fatal identity error after auto-recovery: {}", retry_error);
-                    anyhow::anyhow!(retry_error)
-                })
-            }
-            Err(error) => {
-                tracing::error!("Fatal identity error: {}", error);
-                Err(anyhow::anyhow!(error))
-            }
-        }
+                Self::recover_identity_state(&data_root)
+            },
+        )
     }
 
-    fn try_load_from_vault(data_root: PathBuf) -> Result<Self, String> {
+    fn try_load_from_vault(
+        data_root: PathBuf,
+        profile: Option<Arc<abigail_core::profile::ProfileContext>>,
+    ) -> Result<Self, String> {
+        Self::validate_preview_bootstrap(&data_root, profile.is_some())?;
         // Ensure directories exist
         std::fs::create_dir_all(&data_root).map_err(|e| e.to_string())?;
         let identities_dir = data_root.join("identities");
@@ -261,6 +429,7 @@ impl IdentityManager {
 
         Ok(Self {
             data_root,
+            profile,
             global_config: RwLock::new(global_config),
             master_key,
         })
@@ -278,7 +447,10 @@ impl IdentityManager {
 
     /// Get the identities directory path.
     pub fn identities_dir(&self) -> PathBuf {
-        self.data_root.join("identities")
+        self.profile.as_ref().map_or_else(
+            || self.data_root.join("identities"),
+            |profile| profile.identities_dir(),
+        )
     }
 
     pub fn hive_agent_id(&self) -> Result<String, String> {
@@ -300,8 +472,9 @@ impl IdentityManager {
 
             let config_path = agent_dir.join("config.json");
             let (birth_complete, birth_date) = if config_path.exists() {
-                match AppConfig::load(&config_path) {
+                match self.load_config(&config_path) {
                     Ok(config) => (config.birth_complete, config.birth_timestamp.clone()),
+                    Err(error) if self.profile.is_some() => return Err(error),
                     Err(_) => (false, None),
                 }
             } else {
@@ -393,7 +566,7 @@ impl IdentityManager {
             return Err(format!("Agent {} config not found", agent_id));
         }
 
-        let config = AppConfig::load(&config_path).map_err(|e| e.to_string())?;
+        let config = self.load_config(&config_path)?;
         // Both verification and Documents setup acquire the registry again.
         // Never recursively hold a read guard: a waiting creator needs the
         // write lock, and writer-prioritizing RwLocks then block the next read.
@@ -449,11 +622,11 @@ impl IdentityManager {
     /// Initialize a reserved directory, preserving an existing valid config on replay.
     fn initialize_agent_files(&self, uuid: &str, name: &str, theme: &str) -> Result<(), String> {
         let agent_dir = self.identities_dir().join(uuid);
+        self.validate_profile_path(&agent_dir)?;
         let config_path = agent_dir.join("config.json");
         if config_path.try_exists().map_err(|e| e.to_string())? {
             // Validate compatibility without AppConfig::load's migration/write side effect.
-            let content = std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-            let existing = AppConfig::from_json_compatible(&content).map_err(|e| e.to_string())?;
+            let existing = self.read_compatible_config(&config_path)?;
             if existing.is_hive
                 || existing.data_dir != agent_dir
                 || existing.agent_name.as_deref() != Some(name)
@@ -683,6 +856,7 @@ impl IdentityManager {
     /// Normal installs use the user's `Documents/Abigail/{agent_name}`.
     /// Custom data roots keep that tree under their own `Documents`; an
     /// explicit `ABIGAIL_DOCUMENTS_DIR` overrides the Documents base.
+    /// Validated preview profiles use UUID directories and never consult that override.
     pub fn create_documents_folder(&self, agent_id: &str) -> Result<PathBuf, String> {
         let agent_name = {
             let gc = self.global_config.read().map_err(|e| e.to_string())?;
@@ -691,6 +865,15 @@ impl IdentityManager {
                 .ok_or_else(|| format!("Agent {} not registered", agent_id))?;
             entry.name.clone()
         };
+
+        if let Some(profile) = &self.profile {
+            let documents = profile
+                .entity_documents(agent_id)
+                .map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(&documents)
+                .map_err(|e| format!("Failed to create preview Documents folder: {}", e))?;
+            return Ok(documents);
+        }
 
         // Sanitize the name for use as a directory (replace problematic chars)
         let safe_name: String = agent_name
@@ -842,8 +1025,14 @@ impl IdentityManager {
         if !legacy_config_path.exists() {
             return Ok(None); // No legacy identity
         }
+        if self.profile.is_some() {
+            return Err(
+                "Preview profiles require explicit identity import; automatic legacy migration is unavailable."
+                    .into(),
+            );
+        }
 
-        let legacy_config = AppConfig::load(&legacy_config_path).map_err(|e| e.to_string())?;
+        let legacy_config = self.load_config(&legacy_config_path)?;
 
         // Only migrate if birth was complete
         if !legacy_config.birth_complete {
@@ -888,6 +1077,8 @@ impl IdentityManager {
         for file in &files_to_copy {
             let src = self.data_root.join(file);
             let dst = agent_dir.join(file);
+            self.validate_profile_path(&src)?;
+            self.validate_profile_path(&dst)?;
             if src.exists() {
                 std::fs::copy(&src, &dst)
                     .map_err(|e| format!("Failed to copy legacy file {}: {}", file, e))?;
@@ -898,6 +1089,7 @@ impl IdentityManager {
         let legacy_docs = self.data_root.join("docs");
         let agent_docs = agent_dir.join("docs");
         if legacy_docs.exists() && !agent_docs.exists() {
+            self.validate_profile_tree(&legacy_docs)?;
             copy_dir_recursive(&legacy_docs, &agent_docs)
                 .map_err(|e| format!("Failed to copy legacy docs: {}", e))?;
         }
@@ -905,7 +1097,7 @@ impl IdentityManager {
         // Update agent config paths
         let agent_config_path = agent_dir.join("config.json");
         if agent_config_path.exists() {
-            let mut config = AppConfig::load(&agent_config_path).map_err(|e| e.to_string())?;
+            let mut config = self.load_config(&agent_config_path)?;
             config.data_dir = agent_dir.clone();
             config.models_dir = agent_dir.join("models");
             config.docs_dir = agent_dir.join("docs");
@@ -983,6 +1175,7 @@ impl IdentityManager {
     /// Archive an agent by moving its directory to Hive backups and
     /// removing it from the active registry.
     pub fn archive_agent(&self, agent_id: &str) -> Result<String, String> {
+        let backups_dir = self.backups_dir()?;
         let (agent_name, agent_dir) = {
             let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
             let entry = gc
@@ -994,6 +1187,10 @@ impl IdentityManager {
             }
 
             let dir = self.resolve_agent_dir(&entry.directory)?;
+            if self.profile.is_some() {
+                self.read_compatible_config(&dir.join("config.json"))?;
+                self.validate_profile_tree(&dir)?;
+            }
 
             gc.remove_agent(agent_id);
             gc.save(&self.data_root).map_err(|e| e.to_string())?;
@@ -1007,15 +1204,18 @@ impl IdentityManager {
             ));
         }
 
-        let backups_dir = self.data_root.join("backups");
         std::fs::create_dir_all(&backups_dir)
             .map_err(|e| format!("Failed to create backups directory: {}", e))?;
 
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
         let safe_name =
             agent_name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
-        let backup_name = format!("{}_{}", timestamp, safe_name);
-        let backup_path = backups_dir.join(backup_name);
+        let backup_name = if self.profile.is_some() {
+            format!("{}_{}_{}", timestamp, safe_name, agent_id)
+        } else {
+            format!("{}_{}", timestamp, safe_name)
+        };
+        let backup_path = self.backup_path(&backup_name)?;
 
         std::fs::rename(&agent_dir, &backup_path)
             .map_err(|e| format!("Failed to archive agent directory: {}", e))?;
@@ -1057,15 +1257,23 @@ impl IdentityManager {
             ));
         }
 
-        let backups_dir = self.data_root.join("backups");
+        if self.profile.is_some() {
+            self.read_compatible_config(&agent_dir.join("config.json"))?;
+            self.validate_profile_tree(&agent_dir)?;
+        }
+        let backups_dir = self.backups_dir()?;
         std::fs::create_dir_all(&backups_dir)
             .map_err(|e| format!("Failed to create backups directory: {}", e))?;
 
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
         let safe_name =
             agent_name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
-        let backup_name = format!("{}_{}_backup", timestamp, safe_name);
-        let backup_path = backups_dir.join(&backup_name);
+        let backup_name = if self.profile.is_some() {
+            format!("{}_{}_{}_backup", timestamp, safe_name, Uuid::new_v4())
+        } else {
+            format!("{}_{}_backup", timestamp, safe_name)
+        };
+        let backup_path = self.backup_path(&backup_name)?;
 
         copy_dir_recursive(&agent_dir, &backup_path)
             .map_err(|e| format!("Failed to copy agent directory: {}", e))?;
@@ -1089,7 +1297,7 @@ impl IdentityManager {
 
     /// List all backups in `{data_root}/backups/`.
     pub fn list_backups(&self) -> Result<Vec<BackupInfo>, String> {
-        let backups_dir = self.data_root.join("backups");
+        let backups_dir = self.backups_dir()?;
         if !backups_dir.exists() {
             return Ok(Vec::new());
         }
@@ -1104,6 +1312,7 @@ impl IdentityManager {
                 Err(_) => continue,
             };
             let path = entry.path();
+            self.validate_profile_path(&path)?;
             if !path.is_dir() {
                 continue;
             }
@@ -1111,6 +1320,7 @@ impl IdentityManager {
 
             // Try reading backup_metadata.json first
             let metadata_path = path.join("backup_metadata.json");
+            self.validate_profile_path(&metadata_path)?;
             let (agent_name, backup_type, created_at) = if metadata_path.exists() {
                 match std::fs::read_to_string(&metadata_path) {
                     Ok(json) => match serde_json::from_str::<BackupMetadata>(&json) {
@@ -1126,8 +1336,9 @@ impl IdentityManager {
             // Read config.json for birth status
             let config_path = path.join("config.json");
             let (birth_complete, birth_date) = if config_path.exists() {
-                match AppConfig::load(&config_path) {
+                match self.load_config(&config_path) {
                     Ok(config) => (config.birth_complete, config.birth_timestamp.clone()),
+                    Err(error) if self.profile.is_some() => return Err(error),
                     Err(_) => (false, None),
                 }
             } else {
@@ -1163,22 +1374,19 @@ impl IdentityManager {
     /// Creates a new UUID, moves the backup into identities/, updates paths,
     /// re-signs with the current master key, and registers in GlobalConfig.
     pub fn restore_backup(&self, backup_dir_name: &str) -> Result<String, String> {
-        let backups_dir = self.data_root.join("backups");
-        let backup_path = backups_dir.join(backup_dir_name);
+        let backup_path = self.backup_path(backup_dir_name)?;
 
         if !backup_path.exists() {
             return Err(format!("Backup not found: {}", backup_dir_name));
         }
+        self.validate_profile_tree(&backup_path)?;
 
         // Refuse unsupported or invalid configs before moving or changing the backup.
         // Keep the validated value so loading cannot silently fall back after the move.
         let config_path = backup_path.join("config.json");
         let backup_config = if config_path.try_exists().map_err(|e| e.to_string())? {
-            let content =
-                abigail_core::path_guard::load_string_from_root(&backup_path, "config.json")
-                    .map_err(|e| format!("Failed to read backup config: {}", e))?;
             Some(
-                AppConfig::from_json_compatible(&content)
+                self.read_compatible_config(&config_path)
                     .map_err(|e| format!("Cannot restore backup config: {}", e))?,
             )
         } else {
@@ -1209,7 +1417,9 @@ impl IdentityManager {
             config.models_dir = agent_dir.join("models");
             config.docs_dir = agent_dir.join("docs");
             config.db_path = self.shared_memory_db_path();
-            if agent_dir.join("external_pubkey.bin").exists() {
+            if agent_dir.join("external_pubkey.bin").exists()
+                || (self.profile.is_some() && config.external_pubkey_path.is_some())
+            {
                 config.external_pubkey_path = Some(agent_dir.join("external_pubkey.bin"));
             }
             // Preserve existing post-move behavior; transactional restore is separate work.
@@ -1261,8 +1471,7 @@ impl IdentityManager {
 
     /// Delete a backup directory.
     pub fn delete_backup(&self, backup_dir_name: &str) -> Result<(), String> {
-        let backups_dir = self.data_root.join("backups");
-        let backup_path = backups_dir.join(backup_dir_name);
+        let backup_path = self.backup_path(backup_dir_name)?;
 
         if !backup_path.exists() {
             return Err(format!("Backup not found: {}", backup_dir_name));
@@ -1347,6 +1556,499 @@ fn parse_backup_dir_name(dir_name: &str) -> (String, String, String) {
 }
 
 #[cfg(test)]
+mod preview_profile_tests {
+    use super::*;
+
+    fn snapshot(root: &Path) -> std::collections::BTreeMap<PathBuf, Option<Vec<u8>>> {
+        let mut result = std::collections::BTreeMap::new();
+        let mut pending = vec![root.to_path_buf()];
+        while let Some(dir) = pending.pop() {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                let relative = path.strip_prefix(root).unwrap().to_path_buf();
+                if path.is_dir() {
+                    result.insert(relative, None);
+                    pending.push(path);
+                } else {
+                    result.insert(relative, Some(std::fs::read(path).unwrap()));
+                }
+            }
+        }
+        result
+    }
+
+    struct Fixture {
+        container: PathBuf,
+        manager: IdentityManager,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let container =
+                std::env::temp_dir().join(format!("abigail_preview_identity_{}", Uuid::new_v4()));
+            std::fs::create_dir_all(&container).unwrap();
+            let profile = Arc::new(
+                abigail_core::profile::ProfileContext::preflight(&container.join("profile"), &[])
+                    .unwrap(),
+            );
+            let root = profile.root().to_path_buf();
+            let manager = IdentityManager {
+                global_config: RwLock::new(GlobalConfig::new(&root)),
+                data_root: root,
+                profile: Some(profile),
+                master_key: SigningKey::from_bytes(&[9; 32]),
+            };
+            Self { container, manager }
+        }
+
+        fn reopen(&self) -> IdentityManager {
+            let profile = Arc::new(
+                abigail_core::profile::ProfileContext::preflight(self.manager.data_root(), &[])
+                    .unwrap(),
+            );
+            IdentityManager {
+                data_root: profile.root().to_path_buf(),
+                profile: Some(profile),
+                global_config: RwLock::new(GlobalConfig::load(self.manager.data_root()).unwrap()),
+                master_key: SigningKey::from_bytes(&[9; 32]),
+            }
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let temporary_root = std::env::temp_dir();
+            assert!(self.container.is_absolute());
+            assert!(self.container.starts_with(&temporary_root));
+            assert_ne!(self.container, temporary_root);
+            let _ = std::fs::remove_dir_all(&self.container);
+        }
+    }
+
+    #[test]
+    fn preview_documents_are_registered_uuid_scoped_and_stable_after_rename() {
+        let fixture = Fixture::new();
+        let manager = &fixture.manager;
+        let (ongoing, _) = manager.create_agent("Same display name").unwrap();
+        let (disposable, _) = manager.create_agent("Same display name").unwrap();
+        let ongoing_docs = manager.create_documents_folder(&ongoing).unwrap();
+        let disposable_docs = manager.create_documents_folder(&disposable).unwrap();
+        assert_eq!(
+            ongoing_docs,
+            manager.data_root().join("Documents").join(&ongoing)
+        );
+        assert_eq!(
+            disposable_docs,
+            manager.data_root().join("Documents").join(&disposable)
+        );
+        assert_ne!(ongoing_docs, disposable_docs);
+        std::fs::write(ongoing_docs.join("ongoing.txt"), b"retained").unwrap();
+        manager
+            .update_agent_name(&ongoing, "Renamed Entity")
+            .unwrap();
+        assert_eq!(
+            manager.create_documents_folder(&ongoing).unwrap(),
+            ongoing_docs
+        );
+        assert!(manager
+            .create_documents_folder(&Uuid::new_v4().to_string())
+            .is_err());
+        assert!(!manager.data_root().join("Documents/Abigail").exists());
+        manager.delete_agent(&disposable).unwrap();
+        assert_eq!(
+            std::fs::read(ongoing_docs.join("ongoing.txt")).unwrap(),
+            b"retained"
+        );
+    }
+
+    #[test]
+    fn preview_identity_paths_and_documents_survive_manager_reopen() {
+        let fixture = Fixture::new();
+        let (id, directory) = fixture.manager.create_agent("Continuing preview").unwrap();
+        let before = std::fs::read(directory.join("config.json")).unwrap();
+        let documents = fixture.manager.create_documents_folder(&id).unwrap();
+        let profile_id = fixture.manager.profile.as_ref().unwrap().profile_id();
+        let reopened = fixture.reopen();
+        let config = reopened.load_agent(&id).unwrap();
+        assert_eq!(reopened.profile.as_ref().unwrap().profile_id(), profile_id);
+        assert_eq!(config.data_dir, directory);
+        assert_eq!(config.docs_dir, directory.join("docs"));
+        assert_eq!(config.models_dir, directory.join("models"));
+        assert_eq!(config.db_path, reopened.data_root().join("memory.db"));
+        assert_eq!(reopened.agent_dir(&id).unwrap(), directory);
+        assert_eq!(reopened.create_documents_folder(&id).unwrap(), documents);
+        assert_eq!(
+            std::fs::read(directory.join("config.json")).unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn preview_outside_config_paths_are_rejected_before_migration_or_archive() {
+        let fixture = Fixture::new();
+        let manager = &fixture.manager;
+        let (id, directory) = manager.create_agent("Continuing preview").unwrap();
+        let config_path = directory.join("config.json");
+        let original = std::fs::read(&config_path).unwrap();
+        let registry_path = GlobalConfig::config_path(manager.data_root());
+        let registry = std::fs::read(&registry_path).unwrap();
+        let outside = fixture.container.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("sentinel"), b"outside unchanged").unwrap();
+
+        for field in [
+            "data_dir",
+            "models_dir",
+            "docs_dir",
+            "db_path",
+            "external_pubkey_path",
+        ] {
+            let mut value: serde_json::Value = serde_json::from_slice(&original).unwrap();
+            value["schema_version"] = serde_json::json!(26);
+            value[field] = serde_json::json!(outside.join(field));
+            let invalid = serde_json::to_vec_pretty(&value).unwrap();
+            std::fs::write(&config_path, &invalid).unwrap();
+
+            assert!(manager.load_agent(&id).is_err(), "{field}");
+            assert!(manager.list_agents().is_err(), "{field}");
+            assert!(manager.backup_agent(&id).is_err(), "{field}");
+            assert!(manager.archive_agent(&id).is_err(), "{field}");
+            assert_eq!(std::fs::read(&config_path).unwrap(), invalid, "{field}");
+            assert_eq!(std::fs::read(&registry_path).unwrap(), registry, "{field}");
+            assert!(!manager.data_root().join("backups").exists());
+            assert_eq!(
+                std::fs::read(outside.join("sentinel")).unwrap(),
+                b"outside unchanged"
+            );
+        }
+    }
+
+    #[test]
+    fn preview_rejects_a_different_shared_store_even_inside_the_profile() {
+        let fixture = Fixture::new();
+        let (id, directory) = fixture.manager.create_agent("Shared store").unwrap();
+        let config_path = directory.join("config.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
+        value["db_path"] = serde_json::json!(fixture.manager.data_root().join("other-memory.db"));
+        let invalid = serde_json::to_vec(&value).unwrap();
+        std::fs::write(&config_path, &invalid).unwrap();
+        assert!(fixture.manager.load_agent(&id).is_err());
+        assert_eq!(std::fs::read(&config_path).unwrap(), invalid);
+        assert!(!fixture.manager.data_root().join("other-memory.db").exists());
+    }
+
+    #[test]
+    fn preview_active_config_cannot_select_another_entity_before_migration() {
+        let fixture = Fixture::new();
+        let manager = &fixture.manager;
+        let (ongoing, ongoing_dir) = manager.create_agent("Same name").unwrap();
+        let (disposable, disposable_dir) = manager.create_agent("Same name").unwrap();
+        let ongoing_path = ongoing_dir.join("config.json");
+        let disposable_path = disposable_dir.join("config.json");
+        let ongoing_bytes = std::fs::read(&ongoing_path).unwrap();
+        let registry_path = GlobalConfig::config_path(manager.data_root());
+        let registry_bytes = std::fs::read(&registry_path).unwrap();
+
+        // All declared paths are individually valid inside this profile, but
+        // belong to the other Entity. An old schema must not migrate first.
+        let mut redirected: serde_json::Value = serde_json::from_slice(&ongoing_bytes).unwrap();
+        redirected["schema_version"] = serde_json::json!(abigail_core::CONFIG_SCHEMA_VERSION - 1);
+        let redirected_bytes = serde_json::to_vec_pretty(&redirected).unwrap();
+        std::fs::write(&disposable_path, &redirected_bytes).unwrap();
+
+        assert!(manager.load_agent(&disposable).is_err());
+        assert!(manager.list_agents().is_err());
+        assert!(manager.backup_agent(&disposable).is_err());
+        assert!(manager.archive_agent(&disposable).is_err());
+        assert_eq!(std::fs::read(&disposable_path).unwrap(), redirected_bytes);
+        assert_eq!(std::fs::read(&ongoing_path).unwrap(), ongoing_bytes);
+        assert_eq!(std::fs::read(&registry_path).unwrap(), registry_bytes);
+        assert!(!manager.data_root().join("backups").exists());
+        assert_eq!(manager.load_agent(&ongoing).unwrap().data_dir, ongoing_dir);
+    }
+
+    #[test]
+    fn preview_legacy_identity_refusal_preserves_all_source_and_registry_bytes() {
+        let fixture = Fixture::new();
+        let manager = &fixture.manager;
+        let (_, directory) = manager.create_agent("Continuing Entity").unwrap();
+        let root = manager.data_root();
+        let mut legacy: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(directory.join("config.json")).unwrap()).unwrap();
+        legacy["schema_version"] = serde_json::json!(abigail_core::CONFIG_SCHEMA_VERSION - 1);
+        legacy["birth_complete"] = serde_json::json!(true);
+        legacy["data_dir"] = serde_json::json!(root);
+        legacy["docs_dir"] = serde_json::json!(root.join("docs"));
+        legacy["models_dir"] = serde_json::json!(root.join("models"));
+        std::fs::write(
+            root.join("config.json"),
+            serde_json::to_vec_pretty(&legacy).unwrap(),
+        )
+        .unwrap();
+        std::fs::create_dir(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/soul.md"), b"synthetic legacy document").unwrap();
+        std::fs::write(
+            root.join("secrets.bin"),
+            b"synthetic bytes: never decrypted",
+        )
+        .unwrap();
+        std::fs::write(root.join("master.key"), b"synthetic bytes: never loaded").unwrap();
+        let before = snapshot(root);
+
+        assert!(manager
+            .migrate_legacy_identity()
+            .unwrap_err()
+            .contains("explicit identity import"));
+        assert_eq!(snapshot(root), before);
+    }
+
+    #[test]
+    fn preview_decryption_failure_never_recovers_or_bootstraps_identity_state() {
+        let fixture = Fixture::new();
+        let manager = &fixture.manager;
+        let (_, ongoing) = manager.create_agent("Continuing Entity").unwrap();
+        manager.create_agent("Disposable Entity").unwrap();
+        std::fs::write(ongoing.join("presence.json"), b"maintained presentation").unwrap();
+        std::fs::write(
+            manager.data_root().join("master.key"),
+            b"synthetic incompatible encrypted master key",
+        )
+        .unwrap();
+        let before = snapshot(manager.data_root());
+        let loads = std::cell::Cell::new(0);
+
+        let error = IdentityManager::load_with_recovery::<()>(
+            manager.profile.is_some(),
+            || {
+                loads.set(loads.get() + 1);
+                Err("AES-GCM decryption failed: wrong key or tampered data".into())
+            },
+            || {
+                panic!("Preview must not invoke identity recovery");
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("automatic reset is disabled"));
+        assert_eq!(loads.get(), 1, "No bootstrap/retry after a rejected load");
+        assert_eq!(snapshot(manager.data_root()), before);
+        assert!(!manager.data_root().join("backups").exists());
+    }
+
+    #[test]
+    fn preview_missing_master_key_preserves_existing_registry_and_identity_tree() {
+        for material in ["registry", "identities", "both"] {
+            let fixture = Fixture::new();
+            let root = fixture.manager.data_root();
+            if material != "identities" {
+                GlobalConfig::new(root).save(root).unwrap();
+            }
+            if material != "registry" {
+                let identity = root.join("identities").join(Uuid::new_v4().to_string());
+                std::fs::create_dir_all(identity.join("docs")).unwrap();
+                std::fs::write(identity.join("presence.json"), b"maintained presentation").unwrap();
+                std::fs::write(
+                    identity.join("docs/soul.md"),
+                    b"maintained identity document",
+                )
+                .unwrap();
+            }
+            let before = snapshot(root);
+
+            let error = IdentityManager::validate_preview_bootstrap(root, true).unwrap_err();
+            assert!(
+                error.contains("master.key is missing"),
+                "{material}: {error}"
+            );
+            assert_eq!(snapshot(root), before, "{material}");
+            assert!(!root.join("vault.sentinel").exists());
+            assert!(!root.join("master.key").exists());
+            // Stable mode keeps its existing missing-key bootstrap behavior.
+            assert!(IdentityManager::validate_preview_bootstrap(root, false).is_ok());
+            assert_eq!(snapshot(root), before, "stable check: {material}");
+        }
+    }
+
+    #[test]
+    fn preview_bootstrap_allows_fresh_or_existing_keyed_identity_state() {
+        let fixture = Fixture::new();
+        let root = fixture.manager.data_root();
+        let before = snapshot(root);
+        assert!(IdentityManager::validate_preview_bootstrap(root, true).is_ok());
+        assert_eq!(snapshot(root), before);
+
+        std::fs::create_dir(root.join("identities")).unwrap();
+        let empty_identity_state = snapshot(root);
+        assert!(IdentityManager::validate_preview_bootstrap(root, true).is_ok());
+        assert_eq!(snapshot(root), empty_identity_state);
+
+        GlobalConfig::new(root).save(root).unwrap();
+        std::fs::write(
+            root.join("master.key"),
+            b"synthetic existing key: never unlocked",
+        )
+        .unwrap();
+        let keyed_state = snapshot(root);
+        assert!(IdentityManager::validate_preview_bootstrap(root, true).is_ok());
+        assert_eq!(snapshot(root), keyed_state);
+        assert!(!root.join("vault.sentinel").exists());
+    }
+
+    #[test]
+    fn stable_identity_decryption_recovery_still_retries_after_recovery() {
+        let calls = std::cell::RefCell::new(Vec::new());
+        let value = IdentityManager::load_with_recovery(
+            false,
+            || {
+                let retry = calls.borrow().contains(&"recover");
+                calls.borrow_mut().push("load");
+                if retry {
+                    Ok("synthetic recovered identity")
+                } else {
+                    Err("AES-GCM decryption failed".into())
+                }
+            },
+            || {
+                calls.borrow_mut().push("recover");
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(value, "synthetic recovered identity");
+        assert_eq!(*calls.borrow(), ["load", "recover", "load"]);
+    }
+
+    #[test]
+    fn preview_restore_rebinds_declared_missing_public_key_for_unborn_entity() {
+        let fixture = Fixture::new();
+        let manager = &fixture.manager;
+        let (id, directory) = manager.create_agent("Unborn Entity").unwrap();
+        let mut config = manager.load_agent(&id).unwrap();
+        assert!(!config.birth_complete);
+        config.external_pubkey_path = Some(directory.join("external_pubkey.bin"));
+        config.save(&directory.join("config.json")).unwrap();
+        assert!(!directory.join("external_pubkey.bin").exists());
+        let original_bytes = std::fs::read(directory.join("config.json")).unwrap();
+        let backup = PathBuf::from(manager.backup_agent(&id).unwrap());
+
+        let restored_id = manager
+            .restore_backup(backup.file_name().unwrap().to_str().unwrap())
+            .unwrap();
+        let restored = manager.load_agent(&restored_id).unwrap();
+        assert!(!restored.birth_complete);
+        assert_eq!(
+            restored.external_pubkey_path,
+            Some(restored.data_dir.join("external_pubkey.bin")),
+        );
+        assert_ne!(restored.data_dir, directory);
+        assert!(!restored.external_pubkey_path.unwrap().exists());
+        assert_eq!(
+            std::fs::read(directory.join("config.json")).unwrap(),
+            original_bytes
+        );
+    }
+
+    #[test]
+    fn preview_disposable_backups_restore_inside_root_without_touching_ongoing_files() {
+        let fixture = Fixture::new();
+        let manager = &fixture.manager;
+        let (ongoing, ongoing_dir) = manager.create_agent("Same name").unwrap();
+        let (disposable, disposable_dir) = manager.create_agent("Same name").unwrap();
+        std::fs::write(ongoing_dir.join("presence.json"), b"ongoing presentation").unwrap();
+        std::fs::write(
+            disposable_dir.join("presence.json"),
+            b"disposable presentation",
+        )
+        .unwrap();
+        let ongoing_config = std::fs::read(ongoing_dir.join("config.json")).unwrap();
+        let first = PathBuf::from(manager.backup_agent(&ongoing).unwrap());
+        let second = PathBuf::from(manager.backup_agent(&disposable).unwrap());
+        let third = PathBuf::from(manager.backup_agent(&disposable).unwrap());
+        assert_ne!(first, second);
+        assert_ne!(second, third);
+        let backups = manager.list_backups().unwrap();
+        assert_eq!(backups.len(), 3);
+        assert!(backups
+            .iter()
+            .all(|backup| Path::new(&backup.directory_path)
+                .starts_with(manager.data_root().join("backups"))));
+
+        let restored = manager
+            .restore_backup(second.file_name().unwrap().to_str().unwrap())
+            .unwrap();
+        assert_ne!(restored, disposable);
+        let restored_config = manager.load_agent(&restored).unwrap();
+        assert_eq!(
+            restored_config.data_dir,
+            manager.data_root().join("identities").join(&restored)
+        );
+        assert_eq!(
+            restored_config.db_path,
+            manager.data_root().join("memory.db")
+        );
+        assert_eq!(
+            std::fs::read(restored_config.data_dir.join("presence.json")).unwrap(),
+            b"disposable presentation"
+        );
+        manager
+            .delete_backup(third.file_name().unwrap().to_str().unwrap())
+            .unwrap();
+        manager.delete_agent(&disposable).unwrap();
+        let reopened = fixture.reopen();
+        assert_eq!(reopened.load_agent(&ongoing).unwrap().data_dir, ongoing_dir);
+        assert_eq!(
+            std::fs::read(ongoing_dir.join("config.json")).unwrap(),
+            ongoing_config
+        );
+        assert_eq!(
+            std::fs::read(ongoing_dir.join("presence.json")).unwrap(),
+            b"ongoing presentation"
+        );
+    }
+
+    #[test]
+    fn preview_outside_backup_config_is_refused_without_consuming_the_backup() {
+        let fixture = Fixture::new();
+        let manager = &fixture.manager;
+        let (id, _) = manager.create_agent("Import fixture").unwrap();
+        let backup = PathBuf::from(manager.backup_agent(&id).unwrap());
+        let config_path = backup.join("config.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
+        value["docs_dir"] = serde_json::json!(fixture.container.join("outside-documents"));
+        let invalid = serde_json::to_vec_pretty(&value).unwrap();
+        std::fs::write(&config_path, &invalid).unwrap();
+        let registry_path = GlobalConfig::config_path(manager.data_root());
+        let registry = std::fs::read(&registry_path).unwrap();
+        assert!(manager.list_backups().is_err());
+        assert!(manager
+            .restore_backup(backup.file_name().unwrap().to_str().unwrap())
+            .is_err());
+        assert_eq!(std::fs::read(&config_path).unwrap(), invalid);
+        assert_eq!(std::fs::read(&registry_path).unwrap(), registry);
+        assert!(!fixture.container.join("outside-documents").exists());
+    }
+
+    #[test]
+    fn preview_backup_selection_cannot_target_an_outside_fixture() {
+        let fixture = Fixture::new();
+        let outside = fixture.container.join("outside-backup");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("sentinel"), b"untouched").unwrap();
+        let outside_name = outside.to_str().unwrap();
+        assert!(fixture.manager.restore_backup(outside_name).is_err());
+        assert!(fixture.manager.delete_backup(outside_name).is_err());
+        assert!(fixture.manager.restore_backup(".").is_err());
+        assert_eq!(
+            std::fs::read(outside.join("sentinel")).unwrap(),
+            b"untouched"
+        );
+        assert!(fixture.manager.list_backups().unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1376,6 +2078,7 @@ mod tests {
         std::fs::create_dir_all(&tmp).unwrap();
         IdentityManager {
             data_root: tmp.clone(),
+            profile: None,
             global_config: RwLock::new(GlobalConfig::new(&tmp)),
             master_key: SigningKey::from_bytes(&[9u8; 32]),
         }
@@ -1467,6 +2170,7 @@ mod tests {
 
         let reopened = IdentityManager {
             data_root: manager.data_root.clone(),
+            profile: manager.profile.clone(),
             global_config: RwLock::new(GlobalConfig::load(manager.data_root()).unwrap()),
             master_key: manager.master_key.clone(),
         };
@@ -1591,6 +2295,7 @@ mod tests {
 
         let manager = IdentityManager {
             data_root: tmp.clone(),
+            profile: None,
             global_config: RwLock::new(GlobalConfig::new(&tmp)),
             master_key: SigningKey::from_bytes(&[9u8; 32]),
         };
@@ -1655,6 +2360,7 @@ mod tests {
         IdentityManager::ensure_hive_entity(&tmp, &mut global).unwrap();
         let manager = IdentityManager {
             data_root: tmp.clone(),
+            profile: None,
             global_config: RwLock::new(global.clone()),
             master_key: SigningKey::from_bytes(&[9u8; 32]),
         };
@@ -1689,6 +2395,7 @@ mod tests {
 
         let manager = IdentityManager {
             data_root: tmp.clone(),
+            profile: None,
             global_config: RwLock::new(global),
             master_key: SigningKey::from_bytes(&[9u8; 32]),
         };

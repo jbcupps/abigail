@@ -1,0 +1,24 @@
+   Compiling surrealdb-core v3.0.5
+   Compiling surrealdb v3.0.5
+   Compiling abigail-core v0.0.1 (<repository>\crates\abigail-core)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `<repository>\target\debug\incremental\abigail_core-0999j34t28otl\s-hne0n71n0r-1sm7f2r-working`
+
+warning: function `write_encrypted_sentinel` is never used
+  --> crates\abigail-core\src\vault\mod.rs:80:15
+   |
+80 | pub(crate) fn write_encrypted_sentinel(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `abigail-core` (lib) generated 2 warnings
+   Compiling abigail-persistence v0.0.1 (<repository>\crates\abigail-persistence)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7m 56s
+     Running unittests src\lib.rs (target\debug\deps\abigail_persistence-cfe80dfe49139eb3.exe)
+
+running 3 tests
+test remote::tests::preview_transport_builds_a_pinned_request_without_opening_a_socket ... ok
+test remote::tests::preview_transport_rejects_other_profile_root_channel_and_entity_instance ... ok
+test remote::tests::preview_transport_requires_exact_endpoint_and_preserves_stable_url_compatibility ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.03s

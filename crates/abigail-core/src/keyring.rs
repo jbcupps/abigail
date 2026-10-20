@@ -2,7 +2,10 @@ use crate::document::DocumentTier;
 use crate::error::{CoreError, Result};
 use crate::secure_fs;
 use crate::vault::crypto;
-use crate::vault::unlock::{HybridUnlockProvider, UnlockProvider};
+use crate::vault::unlock::{
+    credential_scope_label, require_legacy_credentials_allowed, validate_credential_path,
+    HybridUnlockProvider, UnlockProvider,
+};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier as DalekVerifier, VerifyingKey};
 use rand::rngs::OsRng;
@@ -31,6 +34,7 @@ pub struct Keyring {
 
 impl Keyring {
     pub fn generate(storage_path: PathBuf) -> Result<Self> {
+        validate_credential_path(&storage_path.join("keys.vault"))?;
         let mentor_keypair = SigningKey::generate(&mut OsRng);
         Ok(Self {
             mentor_keypair,
@@ -41,6 +45,7 @@ impl Keyring {
 
     pub fn load(storage_path: PathBuf) -> Result<Self> {
         let keys_file = storage_path.join("keys.vault");
+        validate_credential_path(&keys_file)?;
         let unlock: Arc<dyn UnlockProvider> = Arc::new(HybridUnlockProvider::new());
 
         if keys_file.exists() {
@@ -49,6 +54,7 @@ impl Keyring {
 
         // Fallback: try legacy DPAPI keys.bin
         let legacy_file = storage_path.join("keys.bin");
+        validate_credential_path(&legacy_file)?;
         if legacy_file.exists() {
             return Self::load_legacy(&legacy_file, storage_path, unlock);
         }
@@ -64,8 +70,9 @@ impl Keyring {
         storage_path: PathBuf,
         unlock: Arc<dyn UnlockProvider>,
     ) -> Result<Self> {
+        validate_credential_path(keys_file)?;
         let root_kek = unlock.root_kek()?;
-        let dek = crypto::derive_scope_key(&root_kek, KEYRING_SCOPE);
+        let dek = crypto::derive_scope_key(&root_kek, &credential_scope_label(KEYRING_SCOPE)?);
         let envelope = std::fs::read(keys_file)?;
         let decrypted = crypto::open(&dek, &envelope)?;
 
@@ -89,6 +96,8 @@ impl Keyring {
         storage_path: PathBuf,
         unlock: Arc<dyn UnlockProvider>,
     ) -> Result<Self> {
+        validate_credential_path(legacy_file)?;
+        require_legacy_credentials_allowed()?;
         use crate::dpapi::dpapi_decrypt;
         let encrypted = std::fs::read(legacy_file)?;
         let decrypted = dpapi_decrypt(&encrypted)?;
@@ -123,12 +132,13 @@ impl Keyring {
     }
 
     pub fn save(&self) -> Result<()> {
+        validate_credential_path(&self.storage_path.join("keys.vault"))?;
         let stored = StoredKeysV2 {
             mentor_secret: self.mentor_keypair.to_bytes().to_vec(),
         };
         let serialized = serde_json::to_vec(&stored)?;
         let root_kek = self.unlock.root_kek()?;
-        let dek = crypto::derive_scope_key(&root_kek, KEYRING_SCOPE);
+        let dek = crypto::derive_scope_key(&root_kek, &credential_scope_label(KEYRING_SCOPE)?);
         let envelope = crypto::seal(&dek, &serialized)?;
 
         let keys_file = self.storage_path.join("keys.vault");
@@ -150,14 +160,14 @@ impl Keyring {
     pub fn encrypt_bytes(data: &[u8]) -> Result<Vec<u8>> {
         let unlock = HybridUnlockProvider::new();
         let root_kek = unlock.root_kek()?;
-        let dek = crypto::derive_scope_key(&root_kek, "keyring:encrypt");
+        let dek = crypto::derive_scope_key(&root_kek, &credential_scope_label("keyring:encrypt")?);
         crypto::seal(&dek, data)
     }
 
     pub fn decrypt_bytes(data: &[u8]) -> Result<Vec<u8>> {
         let unlock = HybridUnlockProvider::new();
         let root_kek = unlock.root_kek()?;
-        let dek = crypto::derive_scope_key(&root_kek, "keyring:encrypt");
+        let dek = crypto::derive_scope_key(&root_kek, &credential_scope_label("keyring:encrypt")?);
         crypto::open(&dek, data)
     }
 }
@@ -176,6 +186,7 @@ pub struct MasterKeyResult {
 }
 
 pub fn generate_master_key(data_dir: &Path) -> Result<MasterKeyResult> {
+    validate_credential_path(&data_dir.join("master.key"))?;
     let signing_key = SigningKey::generate(&mut OsRng);
     std::fs::create_dir_all(data_dir)?;
 
@@ -187,7 +198,7 @@ pub fn generate_master_key(data_dir: &Path) -> Result<MasterKeyResult> {
 
     let unlock = HybridUnlockProvider::new();
     let root_kek = unlock.root_kek()?;
-    let dek = crypto::derive_scope_key(&root_kek, "keyring:master");
+    let dek = crypto::derive_scope_key(&root_kek, &credential_scope_label("keyring:master")?);
     let envelope = crypto::seal(&dek, &serialized)?;
     secure_fs::write_bytes_atomic(&master_key_path, &envelope)?;
     Ok(MasterKeyResult {
@@ -197,6 +208,7 @@ pub fn generate_master_key(data_dir: &Path) -> Result<MasterKeyResult> {
 }
 
 pub fn load_master_key(path: &Path) -> Result<SigningKey> {
+    validate_credential_path(path)?;
     let data = std::fs::read(path)?;
 
     if crypto::is_vault_envelope(&data) {
@@ -204,7 +216,7 @@ pub fn load_master_key(path: &Path) -> Result<SigningKey> {
         // silently falling through to DPAPI (which would crash on non-DPAPI data).
         let unlock = HybridUnlockProvider::new();
         let root_kek = unlock.root_kek()?;
-        let dek = crypto::derive_scope_key(&root_kek, "keyring:master");
+        let dek = crypto::derive_scope_key(&root_kek, &credential_scope_label("keyring:master")?);
         let decrypted = crypto::open(&dek, &data)?;
         let stored: MasterKeyStored =
             serde_json::from_slice(&decrypted).map_err(|e| CoreError::Keyring(e.to_string()))?;
@@ -217,6 +229,7 @@ pub fn load_master_key(path: &Path) -> Result<SigningKey> {
     }
 
     // Legacy DPAPI format (file does NOT start with vault envelope version byte)
+    require_legacy_credentials_allowed()?;
     let decrypted = crate::dpapi::dpapi_decrypt(&data)?;
     let stored: MasterKeyStored =
         serde_json::from_slice(&decrypted).map_err(|e| CoreError::Keyring(e.to_string()))?;

@@ -1,0 +1,9 @@
+
+running 5 tests
+test profile_runtime::tests::ownership_uses_live_os_lock_and_preserves_stale_file_contents ... ok
+test profile_runtime::tests::preview_ports_exclude_the_normal_daemon_range ... ok
+test profile_runtime::tests::preview_requests_require_exact_profile_and_live_instance ... ok
+test profile_runtime::tests::preview_requires_explicit_cli_profile_and_absolute_root ... ok
+test profile_runtime::tests::stable_requests_keep_existing_contract ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 45 filtered out; finished in 0.00s

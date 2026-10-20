@@ -1,4 +1,5 @@
 import { resolveHiveUrl } from "./connection";
+import { hiveRequestHeaders, isNativeConnection } from "../../../../entity-runtime-app/src-ui/src/lib/nativeConnection";
 
 const CREATION_TIMEOUT_MS = 30_000;
 const CANDIDATE_TIMEOUT_MS = 5_000;
@@ -98,8 +99,9 @@ async function readEnvelope(response: Response): Promise<unknown> {
 }
 
 async function readEntities(hiveUrl: string, signal: AbortSignal): Promise<(CreationCandidate & { is_hive: boolean })[]> {
+  const headers = await hiveRequestHeaders(hiveUrl, { Accept: "application/json" }, signal);
   checkActive(signal);
-  const response = await fetch(`${hiveUrl}/v1/entities`, { headers: { Accept: "application/json" }, signal });
+  const response = await fetch(`${hiveUrl}/v1/entities`, { headers, signal, redirect: isNativeConnection() ? "error" : undefined });
   const data = await readEnvelope(response);
   if (!Array.isArray(data) || data.some(item => !item || !validId(item.id) || typeof item.name !== "string" || typeof item.is_hive !== "boolean")) {
     throw new Error("Hive returned an invalid Entity list. Creation could not be checked.");
@@ -118,9 +120,11 @@ async function lookup(attempt: CreationAttempt, signal: AbortSignal): Promise<Cr
   if (!isCanonicalUuid(attempt.creationKey) || attempt.attemptId !== attempt.creationKey || !validName(attempt.name)) {
     throw new Error("This older creation has no replay-safe key. Review it without repeating creation.");
   }
+  const base = pinnedHiveUrl(attempt.hiveUrl);
+  const headers = await hiveRequestHeaders(base, { Accept: "application/json" }, signal);
   checkActive(signal);
-  const response = await fetch(`${pinnedHiveUrl(attempt.hiveUrl)}/v1/entity-creations/${attempt.creationKey}`, {
-    headers: { Accept: "application/json" }, signal,
+  const response = await fetch(`${base}/v1/entity-creations/${attempt.creationKey}`, {
+    headers, signal, redirect: isNativeConnection() ? "error" : undefined,
   });
   if (response.status === 404 || response.status === 405) throw new Error("This Hive does not support exact creation recovery yet. Update Hive before creating an Entity; no unkeyed request will be sent.");
   const raw = await readEnvelope(response);
@@ -175,11 +179,13 @@ export async function createPresenceEntity(name: string, preview: boolean, optio
       }
       // Persist the attempt before sending. If that fails or causes cancellation,
       // POST is never invoked and the caller can safely report "not sent".
+      const headers = await hiveRequestHeaders(hiveUrl, { "Content-Type": "application/json", Accept: "application/json" }, signal);
+      checkActive(signal);
       await options.onDispatched?.(attempt);
       checkActive(signal);
       dispatched = true;
       const response = await fetch(`${hiveUrl}/v1/entities`, {
-        method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+        method: "POST", headers, redirect: isNativeConnection() ? "error" : undefined,
         body: JSON.stringify({ name: attempt.name, creation_key: attempt.creationKey }), signal,
       });
       // Deliberately inspect late responses after timeout/cancellation. A valid ID

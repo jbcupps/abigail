@@ -11,6 +11,7 @@ pub mod keyring;
 pub mod local_llm_url;
 pub mod ops;
 pub mod path_guard;
+pub mod profile;
 pub mod sao_bridge;
 pub mod secrets;
 pub mod secure_fs;

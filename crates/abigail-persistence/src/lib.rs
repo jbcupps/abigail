@@ -11,7 +11,10 @@ pub use client::{EntityScope, PersistenceError, PersistenceHandle, QueryBinding}
 pub use config::{ci_mode_enabled, TEST_MODE};
 pub use encryption::ScopedCipher;
 pub use migration::{migrate_legacy_layout, MigrationReport, RecoverySnapshot};
-pub use remote::{configure_hive_transport, RemoteOperation, RemoteResponse};
+pub use remote::{
+    configure_hive_transport, configure_hive_transport_with_identity, RemoteOperation,
+    RemoteResponse,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ReflectionScore {

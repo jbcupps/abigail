@@ -9,6 +9,7 @@ use aes_gcm::{
 use hkdf::Hkdf;
 use rand::{rngs::OsRng, RngCore};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use x25519_dalek::{EphemeralSecret, PublicKey as X25519Public, StaticSecret};
 
 use crate::store::MemoryStore;
@@ -70,6 +71,7 @@ struct ArchiveHeaderV2 {
 pub struct ArchiveExporter {
     pub_key_path: PathBuf,
     archive_dir: PathBuf,
+    profile: Option<Arc<abigail_core::profile::ProfileContext>>,
 }
 
 impl ArchiveExporter {
@@ -77,6 +79,7 @@ impl ArchiveExporter {
         Self {
             pub_key_path,
             archive_dir,
+            profile: None,
         }
     }
 
@@ -89,11 +92,44 @@ impl ArchiveExporter {
         Some(Self {
             pub_key_path,
             archive_dir,
+            profile: None,
         })
+    }
+
+    /// Select a preview destination from its validated process context.
+    /// Stable callers retain the existing Documents archive location.
+    pub fn with_profile(
+        pub_key_path: PathBuf,
+        agent_name: Option<&str>,
+        entity_id: &str,
+        profile: Option<Arc<abigail_core::profile::ProfileContext>>,
+    ) -> anyhow::Result<Option<Self>> {
+        let Some(profile) = profile else {
+            return Ok(Self::with_defaults(pub_key_path, agent_name));
+        };
+        let archive_dir = profile.entity_archives(entity_id)?;
+        let expected_key = profile
+            .identities_dir()
+            .join(entity_id)
+            .join("external_pubkey.bin");
+        if !abigail_core::profile::same_path(&pub_key_path, &expected_key) {
+            anyhow::bail!("Archive public key does not match the preview Entity.");
+        }
+        profile.validate_path(&pub_key_path)?;
+        profile.validate_path(&archive_dir)?;
+        Ok(Some(Self {
+            pub_key_path,
+            archive_dir,
+            profile: Some(profile),
+        }))
     }
 
     /// Export all conversation turns + memories as an encrypted `.abigail` archive.
     pub fn export(&self, store: &MemoryStore) -> anyhow::Result<PathBuf> {
+        if let Some(profile) = &self.profile {
+            profile.validate_path(&self.pub_key_path)?;
+            profile.validate_path(&self.archive_dir)?;
+        }
         let pub_bytes = std::fs::read(&self.pub_key_path)?;
         if pub_bytes.len() != 32 {
             anyhow::bail!("Invalid public key file (expected 32 bytes)");
@@ -168,7 +204,10 @@ impl ArchiveExporter {
             .map_err(|e| anyhow::anyhow!("AES-GCM encrypt failed: {}", e))?;
         out.extend_from_slice(&ciphertext);
 
-        let _ = std::fs::create_dir_all(&self.archive_dir);
+        if let Some(profile) = &self.profile {
+            profile.validate_path(&self.archive_dir)?;
+        }
+        std::fs::create_dir_all(&self.archive_dir)?;
         let ts = chrono::Utc::now().format("%Y%m%d_%H%M%S");
         let filename = format!("abigail_{}.abigail", ts);
         let path = self.archive_dir.join(&filename);
@@ -338,6 +377,79 @@ fn decrypt_archive_v2(data: &[u8], x_secret: &StaticSecret) -> anyhow::Result<Ve
 mod tests {
     use super::*;
     use crate::store::{ConversationTurn, Memory, MemoryStore};
+
+    #[test]
+    fn preview_archive_destinations_are_entity_scoped_without_stable_output() {
+        let fixture =
+            std::env::temp_dir().join(format!("preview-archive-{}", uuid::Uuid::new_v4()));
+        let stable = fixture.join("stable-sentinel");
+        std::fs::create_dir_all(&stable).unwrap();
+        let sentinel = stable.join("keep.txt");
+        std::fs::write(&sentinel, b"synthetic stable sentinel").unwrap();
+        let profile = Arc::new(
+            abigail_core::profile::ProfileContext::preflight(
+                &fixture.join("preview"),
+                std::slice::from_ref(&stable),
+            )
+            .unwrap(),
+        );
+        let store = MemoryStore::open_in_memory().unwrap();
+        let signing = ed25519_dalek::SigningKey::from_bytes(&[31; 32]);
+        for id in [
+            "11111111-1111-4111-8111-111111111111",
+            "22222222-2222-4222-8222-222222222222",
+        ] {
+            let key = profile
+                .identities_dir()
+                .join(id)
+                .join("external_pubkey.bin");
+            std::fs::create_dir_all(key.parent().unwrap()).unwrap();
+            std::fs::write(&key, signing.verifying_key().to_bytes()).unwrap();
+            let exporter =
+                ArchiveExporter::with_profile(key, Some("Same name"), id, Some(profile.clone()))
+                    .unwrap()
+                    .unwrap();
+            let archive = exporter.export(&store).unwrap();
+            assert_eq!(
+                archive.parent().unwrap(),
+                profile.entity_archives(id).unwrap()
+            );
+        }
+        assert_eq!(
+            std::fs::read(&sentinel).unwrap(),
+            b"synthetic stable sentinel"
+        );
+        assert_eq!(std::fs::read_dir(&stable).unwrap().count(), 1);
+        std::fs::remove_dir_all(fixture).unwrap();
+    }
+
+    #[test]
+    fn preview_archive_rejects_outside_key_and_invalid_entity_without_writes() {
+        let fixture =
+            std::env::temp_dir().join(format!("preview-archive-{}", uuid::Uuid::new_v4()));
+        let profile =
+            Arc::new(abigail_core::profile::ProfileContext::preflight(&fixture, &[]).unwrap());
+        let id = "11111111-1111-4111-8111-111111111111";
+        assert!(ArchiveExporter::with_profile(
+            fixture.with_extension("outside-key"),
+            None,
+            id,
+            Some(profile.clone()),
+        )
+        .is_err());
+        assert!(ArchiveExporter::with_profile(
+            profile
+                .identities_dir()
+                .join(id)
+                .join("external_pubkey.bin"),
+            None,
+            "../escape",
+            Some(profile.clone()),
+        )
+        .is_err());
+        assert!(!profile.root().join("archives").exists());
+        std::fs::remove_dir_all(fixture).unwrap();
+    }
 
     #[test]
     fn test_ed25519_to_x25519_roundtrip() {

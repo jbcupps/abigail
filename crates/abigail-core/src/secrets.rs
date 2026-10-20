@@ -13,7 +13,10 @@
 use crate::error::{CoreError, Result};
 use crate::secure_fs;
 use crate::vault::crypto;
-use crate::vault::unlock::{HybridUnlockProvider, PassphraseUnlockProvider, UnlockProvider};
+use crate::vault::unlock::{
+    credential_scope_label, require_legacy_credentials_allowed, validate_credential_path,
+    HybridUnlockProvider, PassphraseUnlockProvider, UnlockProvider,
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -58,6 +61,7 @@ impl SecretsVault {
     pub fn load_custom(data_dir: PathBuf, filename: &str) -> Result<Self> {
         let vault_filename = force_vault_extension(filename);
         let file_path = data_dir.join(&vault_filename);
+        validate_credential_path(&file_path)?;
         let unlock: Arc<dyn UnlockProvider> = Arc::new(HybridUnlockProvider::new());
 
         if !file_path.exists()
@@ -73,7 +77,7 @@ impl SecretsVault {
         let secrets = if file_path.exists() {
             let root_kek = unlock.root_kek()?;
             let scope = scope_from_filename(&vault_filename);
-            let dek = crypto::derive_scope_key(&root_kek, &scope);
+            let dek = crypto::derive_scope_key(&root_kek, &credential_scope_label(&scope)?);
             let envelope = std::fs::read(&file_path)?;
             let plaintext = crypto::open(&dek, &envelope)?;
             serde_json::from_slice(&plaintext)
@@ -105,11 +109,12 @@ impl SecretsVault {
     ) -> Result<Self> {
         let vault_filename = force_vault_extension(filename);
         let file_path = data_dir.join(&vault_filename);
+        validate_credential_path(&file_path)?;
         let scope = scope_from_filename(&vault_filename);
 
         let secrets = if file_path.exists() {
             let root_kek = unlock.root_kek()?;
-            let dek = crypto::derive_scope_key(&root_kek, &scope);
+            let dek = crypto::derive_scope_key(&root_kek, &credential_scope_label(&scope)?);
             let envelope = std::fs::read(&file_path)?;
             let plaintext = crypto::open(&dek, &envelope)?;
             serde_json::from_slice(&plaintext)
@@ -128,8 +133,9 @@ impl SecretsVault {
 
     /// Persist secrets to the encrypted vault file.
     pub fn save(&self) -> Result<()> {
+        validate_credential_path(&self.file_path)?;
         let root_kek = self.unlock.root_kek()?;
-        let dek = crypto::derive_scope_key(&root_kek, &self.scope_label);
+        let dek = crypto::derive_scope_key(&root_kek, &credential_scope_label(&self.scope_label)?);
         let plaintext = serde_json::to_vec(&self.secrets)?;
         let envelope = crypto::seal(&dek, &plaintext)?;
 
@@ -142,6 +148,7 @@ impl SecretsVault {
 
     /// Get a secret by provider name.
     pub fn get_secret(&self, provider: &str) -> Option<&str> {
+        validate_credential_path(&self.file_path).ok()?;
         self.secrets.get(provider).map(|s| s.as_str())
     }
 
@@ -186,15 +193,18 @@ fn migrate_legacy_file_with_provider(
 ) -> Result<bool> {
     let vault_filename = force_vault_extension(filename);
     let file_path = data_dir.join(&vault_filename);
+    validate_credential_path(&file_path)?;
     if file_path.exists() {
         return Ok(false);
     }
 
     let legacy_bin = data_dir.join(filename.replace(".vault", ".bin"));
+    validate_credential_path(&legacy_bin)?;
     if !legacy_bin.exists() {
         return Ok(false);
     }
 
+    require_legacy_credentials_allowed()?;
     let encrypted = std::fs::read(&legacy_bin)?;
     let decrypted = crate::dpapi::dpapi_decrypt(&encrypted)?;
     let secrets: HashMap<String, String> = serde_json::from_slice(&decrypted).map_err(|e| {

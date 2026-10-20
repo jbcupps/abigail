@@ -522,13 +522,21 @@ pub struct EmailConfig {
 
 impl AppConfig {
     pub fn default_paths() -> Self {
+        if let Some(profile) = crate::profile::current().expect("Profile preflight is required") {
+            return Self::defaults_at(profile.root());
+        }
         let base = directories::ProjectDirs::from("com", "abigail", "Abigail")
             .map(|d| d.data_local_dir().to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."));
+        Self::defaults_at(&base)
+    }
 
+    /// Construct config defaults at an explicit root without reading process
+    /// state. Used by validated profile contexts and synthetic fixtures.
+    pub fn defaults_at(base: &Path) -> Self {
         Self {
             schema_version: CONFIG_SCHEMA_VERSION,
-            data_dir: base.clone(),
+            data_dir: base.to_path_buf(),
             models_dir: base.join("models"),
             docs_dir: base.join("docs"),
             db_path: base.join("memory.db"),
@@ -587,6 +595,9 @@ impl AppConfig {
     /// This path is derived from the application's default data directory,
     /// and intentionally does not rely on potentially untrusted input.
     pub fn trusted_config_path(_data_dir: &Path) -> PathBuf {
+        if let Some(profile) = crate::profile::current().expect("Profile preflight is required") {
+            return profile.root().join("config.json");
+        }
         // Use the same base directory as `default_paths` to ensure this
         // always resolves to an application-controlled location.
         let base = directories::ProjectDirs::from("com", "abigail", "Abigail")
@@ -629,8 +640,16 @@ impl AppConfig {
     }
 
     pub fn load_from_data_dir(data_dir: &Path) -> anyhow::Result<Self> {
+        let profile = crate::profile::current()?;
+        if let Some(profile) = &profile {
+            profile.validate_path(data_dir)?;
+            profile.validate_path(&data_dir.join("config.json"))?;
+        }
         let content = crate::path_guard::load_string_from_root(data_dir, "config.json")?;
         let mut config = Self::from_json_compatible(&content)?;
+        if let Some(profile) = &profile {
+            profile.validate_config_at_path(&config, &data_dir.join("config.json"))?;
+        }
 
         // Auto-migrate if needed
         if config.migrate() {
@@ -665,6 +684,11 @@ impl AppConfig {
     }
 
     pub fn save_to_data_dir(&self, data_dir: &Path) -> anyhow::Result<()> {
+        if let Some(profile) = crate::profile::current()? {
+            profile.validate_path(data_dir)?;
+            profile.validate_path(&data_dir.join("config.json"))?;
+            profile.validate_config_at_path(self, &data_dir.join("config.json"))?;
+        }
         Self::check_schema_version(self.schema_version)?;
         // A stale in-memory config must not replace a file written by a newer
         // Abigail version, including after a caller falls back from a load error.

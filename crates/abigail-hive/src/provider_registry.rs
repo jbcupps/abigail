@@ -56,6 +56,35 @@ pub struct IdProviderResult {
 /// Stateless registry that knows how to construct every provider variant.
 pub struct ProviderRegistry;
 
+// None means profile preflight failed: no provider may be constructed. false
+// means a validated preview, which may use only explicitly supplied API keys
+// and local URLs. CLI account adapters are not isolated for preview yet.
+fn provider_access() -> Option<bool> {
+    abigail_core::profile::current()
+        .ok()
+        .map(|profile| profile.is_none())
+}
+
+fn selection_allowed(selection: Option<&ProviderSelection>, access: Option<bool>) -> bool {
+    match access {
+        None => false,
+        Some(true) => true,
+        Some(false) => selection.is_some_and(|selection| {
+            !matches!(
+                selection.provider_name(),
+                "claude-cli" | "gemini-cli" | "codex-cli" | "grok-cli"
+            ) && selection
+                .api_key()
+                .is_some_and(|key| !key.trim().is_empty())
+        }),
+    }
+}
+
+fn explicit_local_url(url: Option<String>, access: Option<bool>) -> Option<String> {
+    access?;
+    url.filter(|url| !url.trim().is_empty())
+}
+
 impl ProviderRegistry {
     /// Build an Ego (cloud) LLM provider from a provider name, API key, and optional model.
     ///
@@ -84,6 +113,12 @@ impl ProviderRegistry {
         ego_model: Option<String>,
         cli_permission_mode: CliPermissionMode,
     ) -> EgoProviderResult {
+        if !selection_allowed(selection, provider_access()) {
+            return EgoProviderResult {
+                provider: None,
+                kind: None,
+            };
+        }
         let provider_name = selection.map(|selection| selection.provider_name());
         let api_key = selection.and_then(|selection| selection.api_key());
         let is_cli = matches!(
@@ -253,7 +288,7 @@ impl ProviderRegistry {
 
     /// Build an Id (local) provider from an optional LLM base URL.
     pub fn build_id(local_llm_base_url: Option<String>) -> IdProviderResult {
-        if let Some(url) = local_llm_base_url.filter(|u| !u.trim().is_empty()) {
+        if let Some(url) = explicit_local_url(local_llm_base_url, provider_access()) {
             if let Ok(p) = LocalHttpProvider::with_url(url) {
                 let p = Arc::new(p);
                 return IdProviderResult {
@@ -270,7 +305,7 @@ impl ProviderRegistry {
 
     /// Build an Id (local) provider with auto-detected model name.
     pub async fn build_id_auto_detect(local_llm_base_url: Option<String>) -> IdProviderResult {
-        if let Some(url) = local_llm_base_url.filter(|u| !u.trim().is_empty()) {
+        if let Some(url) = explicit_local_url(local_llm_base_url, provider_access()) {
             if let Ok(p) = LocalHttpProvider::with_url_auto_model(url).await {
                 let p = Arc::new(p);
                 return IdProviderResult {
@@ -287,6 +322,10 @@ impl ProviderRegistry {
 
     /// Build a Superego safety provider from a provider name and key.
     pub fn build_superego(provider: &str, key: &str) -> Arc<dyn LlmProvider> {
+        let access = provider_access();
+        if access.is_none() || (access == Some(false) && key.trim().is_empty()) {
+            return Arc::new(CandleProvider::new());
+        }
         let fallback = || match OpenAiProvider::new(Some(key.to_string())) {
             Ok(p) => Arc::new(p) as Arc<dyn LlmProvider>,
             Err(e) => {
@@ -313,6 +352,49 @@ impl ProviderRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_provider_registry_requires_explicit_key_and_disallows_cli() {
+        use crate::hive::ProviderAuth;
+        for name in ["claude-cli", "gemini-cli", "codex-cli", "grok-cli"] {
+            for auth in [
+                ProviderAuth::System,
+                ProviderAuth::ApiKey("synthetic".into()),
+            ] {
+                let selection = ProviderSelection {
+                    provider: name.into(),
+                    auth,
+                };
+                assert!(!selection_allowed(Some(&selection), Some(false)));
+                assert!(selection_allowed(Some(&selection), Some(true)));
+                assert!(!selection_allowed(Some(&selection), None));
+            }
+        }
+        let explicit = ProviderSelection {
+            provider: "openai".into(),
+            auth: ProviderAuth::ApiKey("synthetic".into()),
+        };
+        assert!(selection_allowed(Some(&explicit), Some(false)));
+        for auth in [ProviderAuth::System, ProviderAuth::ApiKey("  ".into())] {
+            let missing = ProviderSelection {
+                provider: "openai".into(),
+                auth,
+            };
+            assert!(!selection_allowed(Some(&missing), Some(false)));
+        }
+        assert!(!selection_allowed(None, Some(false)));
+    }
+
+    #[test]
+    fn preview_provider_registry_never_invents_local_url() {
+        for access in [None, Some(false), Some(true)] {
+            assert!(explicit_local_url(None, access).is_none());
+            assert!(explicit_local_url(Some(" ".into()), access).is_none());
+        }
+        let url = Some("http://127.0.0.1:1".to_string());
+        assert!(explicit_local_url(url.clone(), None).is_none());
+        assert_eq!(explicit_local_url(url.clone(), Some(false)), url);
+    }
 
     #[test]
     fn build_ego_openai() {

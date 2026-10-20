@@ -27,6 +27,15 @@ impl HiveDaemonClient {
         &self.base_url
     }
 
+    /// Attach an independently verified preview process identity to every call.
+    pub fn with_process_identity(
+        mut self,
+        identity: &abigail_core::profile::ProcessIdentity,
+    ) -> anyhow::Result<Self> {
+        self.client = crate::preview_client(&self.base_url, identity)?;
+        Ok(self)
+    }
+
     pub async fn health(&self) -> anyhow::Result<bool> {
         let resp = self
             .client

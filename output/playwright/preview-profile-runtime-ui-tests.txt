@@ -1,0 +1,12 @@
+
+> abigail-entity-runtime-ui@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.8 <repository>/entity-runtime-app/src-ui
+
+
+ Test Files  7 passed (7)
+      Tests  92 passed (92)
+   Start at  09:19:42
+   Duration  5.22s (transform 1.57s, setup 4.28s, import 3.12s, tests 3.15s, environment 18.21s)

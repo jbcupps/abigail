@@ -23,6 +23,8 @@ impl Fixture {
         let entity_secrets = Arc::new(Mutex::new(SecretsVault::new(self.0.join("entity-secrets"))));
         let hive_secrets = Arc::new(Mutex::new(SecretsVault::new(self.0.join("hive-secrets"))));
         HiveDaemonState {
+            process_identity: None,
+            shutdown: Arc::new(tokio::sync::Notify::new()),
             identity_manager,
             hive: Arc::new(Hive::new(entity_secrets, hive_secrets.clone())),
             hive_secrets,
@@ -30,7 +32,7 @@ impl Fixture {
             runtime_control: Arc::new(Mutex::new(
                 crate::runtime_registry::RuntimeControlPlane::default(),
             )),
-            helper_url: Arc::new(Mutex::new(None)),
+            helper: Arc::new(Mutex::new(None)),
             supervisor: crate::supervisor::HiveSupervisor::new(
                 "http://127.0.0.1:43141".to_string(),
                 self.0.clone(),
@@ -50,6 +52,42 @@ fn request(name: &str, key: &str) -> Json<CreateEntityRequest> {
         name: name.to_string(),
         creation_key: Some(key.to_string()),
     })
+}
+
+#[tokio::test]
+async fn preview_shutdown_refuses_a_stable_owner_without_stopping_it() {
+    let fixture = Fixture::new();
+    let state = fixture.state();
+    let supervisor = state.supervisor.clone();
+    let (status, Json(response)) = shutdown(State(state)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(!response.ok);
+    assert!(!supervisor.is_shutdown());
+}
+
+#[tokio::test]
+async fn preview_shutdown_acknowledges_only_after_owned_supervisor_is_closed() {
+    let fixture = Fixture::new();
+    let mut state = fixture.state();
+    state.process_identity = Some(abigail_core::profile::ProcessIdentity {
+        channel: "beta".into(),
+        profile_id: uuid::Uuid::new_v4().to_string(),
+        canonical_data_root: fixture.0.clone(),
+        instance_id: uuid::Uuid::new_v4().to_string(),
+        hive_instance_id: uuid::Uuid::new_v4().to_string(),
+    });
+    let supervisor = state.supervisor.clone();
+    let (status, Json(response)) = shutdown(State(state)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(supervisor.is_shutdown());
+    assert_eq!(
+        serde_json::to_value(response).unwrap(),
+        serde_json::json!({ "ok": true, "data": { "shutdown": true, "owned_entities_reaped": true } })
+    );
+    assert!(supervisor
+        .ensure_entity_running(&uuid::Uuid::new_v4().to_string())
+        .await
+        .is_err());
 }
 
 #[tokio::test]

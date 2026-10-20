@@ -1,5 +1,6 @@
 import { isEntityProfile, type EntityProfile } from "../../../../entity-runtime-app/src-ui/src/presence/profile";
 import { resolveHiveUrl } from "./connection";
+import { hiveRequestHeaders, isNativeConnection, nativeOpenEntity } from "../../../../entity-runtime-app/src-ui/src/lib/nativeConnection";
 import type { EntityInfo } from "./daemonClient";
 export { createPresenceEntity, listCreationCandidates, CreationError, type CreationAttempt, type CreationCandidate, type CreationOptions } from "./presenceCreation";
 
@@ -30,9 +31,10 @@ async function request(path: string, init?: RequestInit, signal?: AbortSignal, t
   try {
     const operation = (async () => {
       const base = hiveUrl ?? await resolveHiveUrl();
+      const headers = isNativeConnection() ? await hiveRequestHeaders(base, init?.headers, controller.signal) : init?.headers;
       if (controller.signal.aborted) throw controller.signal.reason;
       onResolved?.(base);
-      const response = await fetch(`${base}${path}`, { ...init, signal: controller.signal });
+      const response = await fetch(`${base}${path}`, { ...init, headers, signal: controller.signal, redirect: isNativeConnection() ? "error" : init?.redirect });
       const value: unknown = await response.json();
       const envelope = value && typeof value === "object" ? value as Record<string, unknown> : null;
       if (!response.ok || envelope?.ok !== true || envelope.data === undefined) {
@@ -88,6 +90,7 @@ export async function savePresence(id: string, profile: EntityProfile, preview: 
   }
 }
 export async function openPresence(id: string, signal?: AbortSignal, hiveUrl?: string): Promise<string> {
+  if (isNativeConnection()) return nativeOpenEntity(id, hiveUrl, signal);
   const data = await request(`/v1/entities/${encodeURIComponent(id)}/open`, { method: "POST" }, signal, OPEN_TIMEOUT_MS, hiveUrl);
   const address = data && typeof data === "object" ? (data as Record<string, unknown>).local_url : undefined;
   if (typeof address !== "string" || !address.trim() || address !== address.trim()) throw new Error("Hive did not return a usable Entity address.");

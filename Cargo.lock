@@ -170,8 +170,10 @@ dependencies = [
 name = "abigail-entity-runtime-app"
 version = "0.0.1"
 dependencies = [
+ "abigail-core",
  "daemon-client",
  "entity-core",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "tauri",
@@ -201,6 +203,7 @@ dependencies = [
 name = "abigail-hive-app"
 version = "0.0.1"
 dependencies = [
+ "abigail-core",
  "daemon-client",
  "hive-core",
  "reqwest 0.13.4",
@@ -2886,6 +2889,7 @@ dependencies = [
 name = "daemon-client"
 version = "0.0.1"
 dependencies = [
+ "abigail-core",
  "anyhow",
  "entity-core",
  "futures-util",
@@ -3644,6 +3648,7 @@ dependencies = [
 name = "entity-core"
 version = "0.0.1"
 dependencies = [
+ "abigail-core",
  "chrono",
  "hive-core",
  "serde",
@@ -5062,6 +5067,7 @@ dependencies = [
 name = "hive-core"
 version = "0.0.1"
 dependencies = [
+ "abigail-core",
  "serde",
  "serde_json",
 ]

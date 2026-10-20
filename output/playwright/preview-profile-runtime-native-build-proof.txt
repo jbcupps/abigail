@@ -1,0 +1,43 @@
+Extracted actual Cargo records from target/preview-profile-runtime-native-build.jsonl. Dependency records omitted; selected executable artifact and final build status retained. Machine paths sanitized.
+
+{
+  "reason": "compiler-artifact",
+  "package_id": "path+file:///<repository>/entity-runtime-app#abigail-entity-runtime-app@0.0.1",
+  "manifest_path": "<repository>\\entity-runtime-app\\Cargo.toml",
+  "target": {
+    "kind": [
+      "staticlib",
+      "cdylib",
+      "rlib"
+    ],
+    "crate_types": [
+      "staticlib",
+      "cdylib",
+      "rlib"
+    ],
+    "name": "abigail_entity_runtime_desktop",
+    "src_path": "<repository>\\entity-runtime-app\\src\\lib.rs",
+    "edition": "2021",
+    "doc": true,
+    "doctest": true,
+    "test": true
+  },
+  "profile": {
+    "opt_level": "0",
+    "debuginfo": 2,
+    "debug_assertions": true,
+    "overflow_checks": true,
+    "test": true
+  },
+  "features": [],
+  "filenames": [
+    "<repository>\\target\\debug\\deps\\abigail_entity_runtime_desktop-af0ce5d78f838e7d.exe"
+  ],
+  "executable": "<repository>\\target\\debug\\deps\\abigail_entity_runtime_desktop-af0ce5d78f838e7d.exe",
+  "fresh": false
+}
+
+{
+  "reason": "build-finished",
+  "success": true
+}
