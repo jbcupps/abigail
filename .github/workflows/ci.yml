@@ -107,8 +107,35 @@ jobs:
         env:
           ABIGAIL_DAEMON_INTEGRATION: "1"
 
-      - name: Run stability gates
-        run: node scripts/check_stability.mjs
+      # Keep these commands in the same order as check_stability.mjs. Separate
+      # steps expose the failing check in job metadata without downloading logs.
+      - name: Stability - check Entity daemon
+        run: cargo check -p entity-daemon
+
+      - name: Stability - check Hive and Runtime apps
+        run: cargo check -p abigail-hive-app -p abigail-entity-runtime-app
+
+      - name: Stability - compile soul-forge and skills tests
+        run: cargo test -p soul-forge -p abigail-skills --no-run
+
+      - name: Stability - check existing crypto claims
+        run: node scripts/check_crypto_claims.mjs
+
+      - name: Stability - build Hive frontend
+        working-directory: hive-app/src-ui
+        run: cmd.exe /d /s /c npm.cmd run build
+
+      - name: Stability - test Hive frontend
+        working-directory: hive-app/src-ui
+        run: cmd.exe /d /s /c npm.cmd test
+
+      - name: Stability - build Runtime frontend
+        working-directory: entity-runtime-app/src-ui
+        run: cmd.exe /d /s /c npm.cmd run build
+
+      - name: Stability - test Runtime frontend
+        working-directory: entity-runtime-app/src-ui
+        run: cmd.exe /d /s /c npm.cmd test
 
   # -- Lint ----------------------------------------------------------------
   # Checks formatting, clippy, and split desktop app compilation.
