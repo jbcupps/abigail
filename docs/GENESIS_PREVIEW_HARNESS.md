@@ -76,5 +76,41 @@ behavior or all exact-installer acceptance stages. New product source tests,
 hosted source CI, candidate-origin proof and native installed acceptance are
 distinct evidence. Native capture remains unavailable on this agent.
 
-Exact frozen harness identity, workflow digests and local test outcomes are
-recorded by the companion evidence commit after the execution commit exists.
+## Frozen execution and local validation
+
+Harness commit: `0bb0f4fd0cd181250cc62ed472699c5ea21c79a2`, retained on
+`dev/genesis-preview-harness`. The companion `dev/genesis-preview-evidence`
+branch contains this document, the two reviewed bindings and byte-exact workflow
+fixtures. Dispatch the execution branch, not the later evidence branch.
+
+| Git blob at frozen harness | SHA-256 |
+| --- | --- |
+| `.github/workflows/ci.yml` | `4114e030cab0eda10995884e746a0bffeed73eba373eeb34cbf02345aa171022` |
+| `.github/workflows/preview-candidate.yml` | `d9ccd63dc36ded79b34cced601c9eb2a12b2f9df0249c8cc89b69ff349ee0886` |
+
+Local results on AILap:
+
+- Candidate workflow policy/parser/scope: 50 passed. Pure runner: 111 passed;
+  its synthetic `D:` fixture needs a process-local PowerShell PSDrive on this
+  C-only machine. This mapping is not persistent and creates no OS drive.
+- Owned-job helpers: 66 passed, including C# declaration compilation without
+  invoking native process APIs. Synthetic lifecycle: 38 passed.
+- Preview/provenance evidence: 155 passed, one existing Windows-junction test
+  skipped by the filesystem sandbox. Both historical and new source bindings
+  reject altered branch/event/product/harness/workflow/attempt/gate evidence.
+  The new candidate workflow record cannot manufacture artifact acceptance.
+- Exact text comparison to immutable a182 CI confirmed only the listed pins,
+  labels and three manual skips changed. All six actual Bash guards passed 54
+  mocked cases (no real Git/product calls). Git Bash needed the normal approved
+  sandbox escalation to initialize its MSYS object namespace.
+- Node syntax, PowerShell parser checks, default plan-only runner and Git diff
+  whitespace checks passed. No product changes require a new product build.
+
+**Unverified local check:** `node --test scripts/tests/test_preview_source_ci.mjs`
+stops before its cases because both available Python runtimes lack PyYAML
+(`ModuleNotFoundError: yaml`). No package was installed. The exact-baseline and
+54 guard checks above do not substitute for this parsed policy suite. Rerun with
+`PREVIEW_CI_TEST_PYTHON` pointing to an approved Python+PyYAML environment and
+Git Bash before declaring all harness tests green. Its historical workflow
+digest is preserved; the three newer required steps are asserted separately,
+with mutation tests for omission and manual-dispatch suppression.

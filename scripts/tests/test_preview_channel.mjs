@@ -195,10 +195,13 @@ function candidateOriginFixture() {
   return { ...f, binding, origin, originPin };
 }
 
-function sourceCiFixture() {
-  const f = candidateOriginFixture();
-  const bindingId = "preview-source-ci-c79e214";
+function sourceCiFixture(bindingId = "preview-source-ci-c79e214") {
   const sourceBinding = REVIEWED_WORKFLOW_BINDINGS[bindingId];
+  // Never relabel the historical candidate's actual artifact/provenance bytes.
+  // The newer product uses wholly synthetic release/compatibility observations.
+  const f = bindingId === "preview-source-ci-c79e214"
+    ? candidateOriginFixture()
+    : fixture({ source: sourceBinding.productSourceCommit });
   editReport(f.descriptor, "publicVerification", (report) => {
     Object.assign(report.sourceCi, {
       sourceBinding: bindingId, sourceCommit: sourceBinding.productSourceCommit,
@@ -213,12 +216,15 @@ function sourceCiFixture() {
   f.responses.set(sourceRunUrl, json(run));
   const sourceWorkflowUrl = `https://raw.githubusercontent.com/${REPOSITORY}/${sourceBinding.harnessRevision}/${sourceBinding.workflowPath}`;
   f.responses.set(sourceWorkflowUrl,
-    fs.readFileSync(new URL("./fixtures/preview-bindings/source-ci-c79e214.yml", import.meta.url), "utf8"));
+    fs.readFileSync(new URL(bindingId === "preview-source-ci-c79e214"
+      ? "./fixtures/preview-bindings/source-ci-c79e214.yml"
+      : "./fixtures/preview-bindings/source-ci-genesis.yml", import.meta.url), "utf8"));
   return { ...f, sourceBinding, sourceRunUrl, sourceWorkflowUrl };
 }
 
+for (const sourceBindingId of ["preview-source-ci-c79e214", "genesis-source-ci-a18249a"]) {
 for (const [name, mutate, localError, onlineError] of [
-  ["approved c79 execution", () => {}, null, null],
+  ["exact reviewed execution record", () => {}, null, null],
   ["self-asserted arbitrary harness and matching caller input", (ci, run) => {
     ci.harnessRevision = SOURCE;
     run.head_sha = SOURCE;
@@ -240,8 +246,8 @@ for (const [name, mutate, localError, onlineError] of [
     run.head_branch = "beta"; // Even matching legacy source/branch cannot turn dispatch into push.
   }, null, /Unbound source CI must be a beta push/],
 ]) {
-  test(`source CI acceptance distinguishes ${name}`, async () => {
-    const f = sourceCiFixture();
+  test(`${sourceBindingId}: source CI acceptance distinguishes ${name}`, async () => {
+    const f = sourceCiFixture(sourceBindingId);
     const run = JSON.parse(f.responses.get(f.sourceRunUrl));
     editReport(f.descriptor, "publicVerification", (report) => {
       mutate(report.sourceCi, run);
@@ -266,8 +272,8 @@ for (const [name, mutate, localError, onlineError] of [
   });
 }
 
-test("reviewed source CI retains the existing required gate and advisory failure policy", async () => {
-  const f = sourceCiFixture();
+test(`${sourceBindingId}: reviewed source CI retains the existing required gate and advisory failure policy`, async () => {
+  const f = sourceCiFixture(sourceBindingId);
   const run = JSON.parse(f.responses.get(f.sourceRunUrl));
   run.conclusion = "failure"; // Synthetic advisory audit failure; gate remains successful.
   f.responses.set(f.sourceRunUrl, json(run));
@@ -284,8 +290,8 @@ for (const [name, mutate] of [
   ["PR event substituted", (ci) => { ci.event = "pull_request"; }],
   ["push event substituted", (ci) => { ci.event = "push"; }],
 ]) {
-  test(`reviewed source CI rejects ${name}`, async () => {
-    const f = sourceCiFixture();
+  test(`${sourceBindingId}: reviewed source CI rejects ${name}`, async () => {
+    const f = sourceCiFixture(sourceBindingId);
     editReport(f.descriptor, "publicVerification", (report) => mutate(report.sourceCi));
     await assert.rejects(validatePreviewDescriptor(f.descriptor));
   });
@@ -309,8 +315,8 @@ for (const [name, mutate] of [
       json({ total_count: 1, jobs: [{ name: "gate", status: "completed", conclusion: "skipped" }] }));
   }],
 ]) {
-  test(`online reviewed source CI rejects ${name}`, async () => {
-    const f = sourceCiFixture();
+  test(`${sourceBindingId}: online reviewed source CI rejects ${name}`, async () => {
+    const f = sourceCiFixture(sourceBindingId);
     const run = JSON.parse(f.responses.get(f.sourceRunUrl));
     mutate(f, run);
     f.responses.set(f.sourceRunUrl, json(run));
@@ -318,8 +324,8 @@ for (const [name, mutate] of [
   });
 }
 
-test("reviewed source CI cannot replace candidate origin or full compatibility acceptance", async () => {
-  const f = sourceCiFixture();
+test(`${sourceBindingId}: reviewed source CI cannot replace candidate origin or full compatibility acceptance`, async () => {
+  const f = sourceCiFixture(sourceBindingId);
   const ci = JSON.parse(f.descriptor.evidence.publicVerification.content).sourceCi;
   for (const purpose of ["candidate-origin", "compatibility"]) {
     assert.throws(() => reviewedExecutionBinding(ci, f.sourceBinding.productSourceCommit, purpose), /no matching reviewed/);
@@ -328,6 +334,49 @@ test("reviewed source CI cannot replace candidate origin or full compatibility a
     report.execution = { ...ci, environment: "disposable-windows", commands: ["Synthetic source regression only"] };
   });
   await assert.rejects(validatePreviewDescriptor(f.descriptor), /no matching reviewed/);
+});
+}
+
+test("Genesis source CI cannot reuse the historical product binding", async () => {
+  const f = sourceCiFixture("genesis-source-ci-a18249a");
+  editReport(f.descriptor, "publicVerification", report => {
+    report.sourceCi.sourceBinding = "preview-source-ci-c79e214";
+  });
+  await assert.rejects(validatePreviewDescriptor(f.descriptor), /no matching reviewed execution binding/);
+});
+
+for (const [bindingId, filename] of [
+  ["genesis-source-ci-a18249a", "source-ci-genesis.yml"],
+  ["genesis-candidate-a18249a", "preview-candidate-genesis.yml"],
+]) {
+  test(`${bindingId}: exact Git workflow bytes bind the reviewed product and harness`, () => {
+    const binding = REVIEWED_WORKFLOW_BINDINGS[bindingId];
+    const bytes = fs.readFileSync(new URL(`./fixtures/preview-bindings/${filename}`, import.meta.url));
+    assert.equal(hash(bytes), binding.workflowSha256);
+    assert.ok(bytes.toString("utf8").includes(binding.productSourceCommit));
+    assert.equal(binding.harnessRevision, "0bb0f4fd0cd181250cc62ed472699c5ea21c79a2");
+    assert.equal(binding.branch, "dev/genesis-preview-harness");
+    assert.equal(binding.event, "workflow_dispatch");
+  });
+}
+
+test("Genesis candidate workflow binding alone cannot invent run or artifact acceptance", async () => {
+  const bindingId = "genesis-candidate-a18249a";
+  const binding = REVIEWED_WORKFLOW_BINDINGS[bindingId];
+  assert.equal(Object.hasOwn(REVIEWED_CANDIDATE_ORIGINS, bindingId), false);
+  const f = sourceCiFixture("genesis-source-ci-a18249a");
+  const origin = {
+    ...candidateOriginFixture().origin, sourceBinding: bindingId,
+    sourceCommit: binding.productSourceCommit, harnessRevision: binding.harnessRevision,
+    workflowPath: binding.workflowPath, branch: binding.branch, event: binding.event,
+  };
+  assert.equal(reviewedExecutionBinding(origin, binding.productSourceCommit, "candidate-origin"), binding);
+  for (const purpose of ["source-ci", "compatibility"]) {
+    assert.throws(() => reviewedExecutionBinding(origin, binding.productSourceCommit, purpose), /no matching reviewed/);
+  }
+  editReport(f.descriptor, "publicVerification", report => { report.candidateOrigin = origin; });
+  await assert.rejects(validatePreviewDescriptor(f.descriptor), /Candidate origin run or artifact differs/);
+  await assert.rejects(verifyPublicPreviewEvidence(f.descriptor, f.fetcher), /Candidate origin run or artifact differs/);
 });
 
 test("reviewed candidate-origin proof binds separate product/harness without replacing compatibility", async () => {

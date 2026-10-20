@@ -3,6 +3,32 @@
 // A candidate-origin record establishes where bytes came from; it does not
 // establish full compatibility or permit use as a source-CI/acceptance gate.
 export const REVIEWED_WORKFLOW_BINDINGS = Object.freeze({
+  "genesis-source-ci-a18249a": Object.freeze({
+    purpose: "source-ci",
+    productSourceCommit: "a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d",
+    harnessRevision: "0bb0f4fd0cd181250cc62ed472699c5ea21c79a2",
+    workflowPath: ".github/workflows/ci.yml",
+    workflowSha256: "4114e030cab0eda10995884e746a0bffeed73eba373eeb34cbf02345aa171022",
+    event: "workflow_dispatch",
+    branch: "dev/genesis-preview-harness",
+    productCheckoutPath: ".",
+    // Reviewed source relationship only; no hosted run or execution permission.
+    // Six guards bind the actual checkout and caller revision consistently.
+    // Acceptance additionally verifies the actual run and immutable workflow.
+  }),
+  "genesis-candidate-a18249a": Object.freeze({
+    purpose: "candidate-origin",
+    productSourceCommit: "a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d",
+    harnessRevision: "0bb0f4fd0cd181250cc62ed472699c5ea21c79a2",
+    workflowPath: ".github/workflows/preview-candidate.yml",
+    workflowSha256: "d9ccd63dc36ded79b34cced601c9eb2a12b2f9df0249c8cc89b69ff349ee0886",
+    event: "workflow_dispatch",
+    branch: "dev/genesis-preview-harness",
+    productCheckoutPath: "product",
+    // Literal immutable product checkout; separate harness checkout.
+    // Deliberately no REVIEWED_CANDIDATE_ORIGINS entry until real run/artifact
+    // bytes exist and are reviewed. This binding alone cannot accept bytes.
+  }),
   "preview-source-ci-c79e214": Object.freeze({
     purpose: "source-ci",
     productSourceCommit: "f7c7848d25726480b253ec1ca637c3ffa5ea3c77",
