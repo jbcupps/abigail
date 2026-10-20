@@ -1,0 +1,103 @@
+{
+  "source_head": "3875299954976fc37785a48e924fd89d86d51113",
+  "merge_head": "4558fe68d9812998eb53a94ba157970af552f923",
+  "build_profile": "preview",
+  "target_dir": "<build-cache>\\preview",
+  "build_command": "cargo build --locked --offline --release -p abigail-profile --message-format=json",
+  "build_exit": 0,
+  "build_duration_seconds": 1.1704607,
+  "artifact": "<build-cache>\\preview\\release\\abigail-profile.exe",
+  "artifact_sha256": "50899E552D33CF64F9C22681F9CC245F93A14155771EFF5A34A9178914005AEF",
+  "artifact_size": 2959360,
+  "artifact_signature": "NotSigned",
+  "fixture_dir": "<repository>\\.cache\\rc-101542bd",
+  "missing_bundle_absent": true,
+  "destination_absent": true,
+  "results": [
+    {
+      "name": "help",
+      "arguments": [
+        "--help"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "duration_seconds": 0.28949,
+      "passed": true
+    },
+    {
+      "name": "snapshot-help",
+      "arguments": [
+        "snapshot",
+        "--help"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "duration_seconds": 0.0246649,
+      "passed": true
+    },
+    {
+      "name": "verify-help",
+      "arguments": [
+        "verify",
+        "--help"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "duration_seconds": 0.024142,
+      "passed": true
+    },
+    {
+      "name": "restore-help",
+      "arguments": [
+        "restore",
+        "--help"
+      ],
+      "expected_exit": 0,
+      "exit_code": 0,
+      "duration_seconds": 0.0298749,
+      "passed": true
+    },
+    {
+      "name": "snapshot-missing-args",
+      "arguments": [
+        "snapshot"
+      ],
+      "expected_exit": 2,
+      "exit_code": 2,
+      "duration_seconds": 0.0246786,
+      "passed": true
+    },
+    {
+      "name": "verify-missing-bundle",
+      "arguments": [
+        "verify",
+        "--snapshot",
+        "<repository>\\.cache\\rc-101542bd\\missing-bundle"
+      ],
+      "expected_exit": 1,
+      "exit_code": 1,
+      "duration_seconds": 0.0254055,
+      "passed": true
+    },
+    {
+      "name": "restore-missing-bundle",
+      "arguments": [
+        "restore",
+        "--snapshot",
+        "<repository>\\.cache\\rc-101542bd\\missing-bundle",
+        "--destination",
+        "<repository>\\.cache\\rc-101542bd\\unused-destination"
+      ],
+      "expected_exit": 1,
+      "exit_code": 1,
+      "duration_seconds": 0.0315266,
+      "passed": true
+    }
+  ],
+  "passed": 7,
+  "child_environment": "Cleared; OS loader variables and dedicated workspace temporary directory only",
+  "limitations": [
+    "No successful restore; missing bundle fails before SystemRestoreCredentialProbe",
+    "No real credentials or DPAPI"
+  ]
+}

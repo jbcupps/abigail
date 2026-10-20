@@ -48,6 +48,9 @@ function Get-AbigailPreviewRuntimeInterface {
     "nativeFallback": "reject"
   },
   "lifecycle": {
+    "profileUseLease": "shared-until-process-exit",
+    "coldOperationLease": "exclusive-profile-use-and-hive-owner",
+    "coldStagingStartup": "reject-including-ancestors",
     "entityClose": "POST /v1/entities/:id/close",
     "entityCloseInstanceField": "expected_entity_instance_id",
     "responseValidation": "api-envelope",

@@ -1,0 +1,29 @@
+{
+  "command": "cargo test --locked --offline --release -j1 -p abigail-core --lib config::tests:: -- --test-threads=1 --nocapture",
+  "repository": "<repository>",
+  "cargoTarget": "<build-cache>\\stable-config-tests",
+  "buildProfileEnvironment": "ABIGAIL_BUILD_PROFILE and named runtime preview variables absent; verified in a child process before Cargo",
+  "testScope": "32 config::tests plus 5 global_config::tests; synthetic/temp fixtures only",
+  "fixturePath": "<repository>\\target\\sct-1408a0c8",
+  "startedUtc": "2026-10-20T15:30:09.7937361Z",
+  "completedUtc": "2026-10-20T15:30:50.1488964Z",
+  "cargoExitCode": 0,
+  "result": "ok",
+  "passed": 37,
+  "failed": 0,
+  "ignored": 0,
+  "testExecutable": "<build-cache>\\stable-config-tests\\release\\deps\\abigail_core-1b0230f8c394423b.exe",
+  "testExecutableSha256": "6BE564FEDF998766662A0E29D3FC06F7ADDA84106FD63AF7AF5614994C39AD5D",
+  "sourceHashes": {
+    "Cargo.toml": "C5F1BE1C1FE2ACAF168247619132A4553E74FC8409CE5116210D5A555CEE9631",
+    "Cargo.lock": "C9C6F182A4FBE454C5874B2F19E1D42BE453A3DAB3593E05F36F457EE2F8265A",
+    "crates/abigail-core/src/config.rs": "BAAFF97F77D1EC1997798F03674E9666C36996B5DC4B4FB203081D2F89A4F376",
+    "crates/abigail-core/Cargo.toml": "DE5D4A60ED0908B395A372BB57FA9F841E29723F429957DC13068BB812F5DCA9",
+    "crates/abigail-core/src/profile_snapshot/state.rs": "695E4BAE603B5A4434AD26B4086155D43730C52A0CCAD4678B4ED13B9D0F361D",
+    "crates/abigail-core/src/global_config.rs": "0028A0D1257CACA97AD8B205598BF7222920C6986F4DCDCDA2740CE6CC381169",
+    "crates/abigail-core/src/profile.rs": "393F907CF869F3882587E8C73EBFD633F7888B71FB6D6E55A4FC04C11D402D12"
+  },
+  "realCredentialsAccessed": false,
+  "guiDaemonOrInstallerExecuted": false,
+  "log": "<repository>\\output\\preview-combined\\recovery-config-default.txt"
+}

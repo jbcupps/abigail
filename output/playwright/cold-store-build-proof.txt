@@ -1,0 +1,38 @@
+[
+  {
+    "reason": "compiler-artifact",
+    "package_id": "path+file:///<repository>/crates/abigail-persistence#0.0.1",
+    "manifest_path": "<repository>\\crates\\abigail-persistence\\Cargo.toml",
+    "target": {
+      "kind": [
+        "test"
+      ],
+      "crate_types": [
+        "bin"
+      ],
+      "name": "cold_profile_restore",
+      "src_path": "<repository>\\crates\\abigail-persistence\\tests\\cold_profile_restore.rs",
+      "edition": "2021",
+      "doc": false,
+      "doctest": false,
+      "test": true
+    },
+    "profile": {
+      "opt_level": "0",
+      "debuginfo": 2,
+      "debug_assertions": true,
+      "overflow_checks": true,
+      "test": true
+    },
+    "features": [],
+    "filenames": [
+      "<repository>\\target\\debug\\deps\\cold_profile_restore-4e4827ad6b847ada.exe"
+    ],
+    "executable": "<repository>\\target\\debug\\deps\\cold_profile_restore-4e4827ad6b847ada.exe",
+    "fresh": false
+  },
+  {
+    "reason": "build-finished",
+    "success": true
+  }
+]

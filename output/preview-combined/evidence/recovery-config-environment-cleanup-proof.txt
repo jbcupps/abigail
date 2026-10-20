@@ -1,0 +1,18 @@
+{
+  "variables": [
+    "ABIGAIL_BUILD_PROFILE",
+    "ABIGAIL_PROFILE"
+  ],
+  "beforeRemovalMethod": "[Environment]::SetEnvironmentVariable(name,$null,Process)",
+  "childPresenceAfterNullAssignment": [
+    true,
+    true
+  ],
+  "removalMethod": "Remove-Item -LiteralPath Env:NAME",
+  "childPresenceAfterRemoval": [
+    false,
+    false
+  ],
+  "probe": "Actual Node child process Object.hasOwn(process.env,name); only the two named non-secret variables inspected",
+  "source": "compiled_preview compares build value with preview; current refuses a present ABIGAIL_PROFILE value other than stable"
+}

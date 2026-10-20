@@ -1,0 +1,117 @@
+CLI smoke evidence: actual results from target/cold-cli-results.json followed by the seven captured command outputs. Paths are sanitized. Nonzero exits are the expected parser/missing-snapshot refusals, not successful restore operations.
+
+[
+  {
+    "Log": "target/cold-cli-help.log",
+    "Name": "help",
+    "Exit": 0,
+    "Expected": 0
+  },
+  {
+    "Log": "target/cold-cli-snapshot-help.log",
+    "Name": "snapshot-help",
+    "Exit": 0,
+    "Expected": 0
+  },
+  {
+    "Log": "target/cold-cli-verify-help.log",
+    "Name": "verify-help",
+    "Exit": 0,
+    "Expected": 0
+  },
+  {
+    "Log": "target/cold-cli-restore-help.log",
+    "Name": "restore-help",
+    "Exit": 0,
+    "Expected": 0
+  },
+  {
+    "Log": "target/cold-cli-snapshot-missing-arguments.log",
+    "Name": "snapshot-missing-arguments",
+    "Exit": 2,
+    "Expected": 2
+  },
+  {
+    "Log": "target/cold-cli-verify-missing-snapshot.log",
+    "Name": "verify-missing-snapshot",
+    "Exit": 1,
+    "Expected": 1
+  },
+  {
+    "Log": "target/cold-cli-restore-missing-snapshot.log",
+    "Name": "restore-missing-snapshot",
+    "Exit": 1,
+    "Expected": 1
+  }
+]
+
+Case: help | observed exit: 0 | expected exit: 0 | source: target/cold-cli-help.log
+
+Cold preview-profile recovery on this Windows device
+
+Usage: abigail-profile.exe <COMMAND>
+
+Commands:
+  snapshot  Copy a stopped preview to a new snapshot directory. No credential access
+  verify    Check manifest, every file/hash and identity/config consistency. No credential access
+  restore   Recover into a new root using existing same-user/device credentials. Does not bootstrap credentials, overwrite a root, or launch an application
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+
+
+Case: snapshot-help | observed exit: 0 | expected exit: 0 | source: target/cold-cli-snapshot-help.log
+
+Copy a stopped preview to a new snapshot directory. No credential access
+
+Usage: abigail-profile.exe snapshot --source <SOURCE> --output <OUTPUT>
+
+Options:
+      --source <SOURCE>
+      --output <OUTPUT>
+  -h, --help             Print help
+
+
+Case: verify-help | observed exit: 0 | expected exit: 0 | source: target/cold-cli-verify-help.log
+
+Check manifest, every file/hash and identity/config consistency. No credential access
+
+Usage: abigail-profile.exe verify --snapshot <SNAPSHOT>
+
+Options:
+      --snapshot <SNAPSHOT>
+  -h, --help                 Print help
+
+
+Case: restore-help | observed exit: 0 | expected exit: 0 | source: target/cold-cli-restore-help.log
+
+Recover into a new root using existing same-user/device credentials. Does not bootstrap credentials, overwrite a root, or launch an application
+
+Usage: abigail-profile.exe restore --snapshot <SNAPSHOT> --destination <DESTINATION>
+
+Options:
+      --snapshot <SNAPSHOT>
+      --destination <DESTINATION>
+  -h, --help                       Print help
+
+
+Case: snapshot-missing-arguments | observed exit: 2 | expected exit: 2 | source: target/cold-cli-snapshot-missing-arguments.log
+
+error: the following required arguments were not provided:
+  --source <SOURCE>
+  --output <OUTPUT>
+
+Usage: abigail-profile.exe snapshot --source <SOURCE> --output <OUTPUT>
+
+For more information, try '--help'.
+
+
+Case: verify-missing-snapshot | observed exit: 1 | expected exit: 1 | source: target/cold-cli-verify-missing-snapshot.log
+
+Error: Snapshot bundle must be a directory
+
+
+Case: restore-missing-snapshot | observed exit: 1 | expected exit: 1 | source: target/cold-cli-restore-missing-snapshot.log
+
+Error: Snapshot bundle must be a directory

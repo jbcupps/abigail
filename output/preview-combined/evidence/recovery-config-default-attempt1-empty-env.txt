@@ -1,0 +1,305 @@
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling syn v2.0.117
+   Compiling cfg-if v1.0.4
+   Compiling typenum v1.20.1
+   Compiling synstructure v0.13.2
+   Compiling getrandom v0.3.4
+   Compiling zerofrom-derive v0.1.6
+   Compiling hybrid-array v0.4.13
+   Compiling windows_x86_64_msvc v0.53.1
+   Compiling getrandom v0.4.2
+   Compiling zerofrom v0.1.6
+   Compiling jobserver v0.1.34
+   Compiling yoke-derive v0.8.1
+   Compiling shlex v1.3.0
+   Compiling rand_core v0.10.1
+   Compiling find-msvc-tools v0.1.9
+   Compiling stable_deref_trait v1.2.1
+   Compiling yoke v0.8.1
+   Compiling cc v1.2.56
+   Compiling bytes v1.11.1
+   Compiling pin-project-lite v0.2.17
+   Compiling windows-link v0.2.1
+   Compiling subtle v2.6.1
+   Compiling windows-targets v0.53.5
+   Compiling crypto-common v0.2.2
+   Compiling cmake v0.1.57
+   Compiling zerovec-derive v0.11.2
+   Compiling futures-core v0.3.32
+   Compiling fs_extra v1.3.0
+   Compiling dunce v1.0.5
+   Compiling aws-lc-sys v0.37.1
+   Compiling zerovec v0.11.5
+   Compiling windows-sys v0.60.2
+   Compiling windows-sys v0.61.2
+   Compiling displaydoc v0.2.5
+   Compiling syn v3.0.3
+   Compiling version_check v0.9.5
+   Compiling zeroize v1.8.2
+   Compiling generic-array v0.14.7
+   Compiling tokio-macros v2.7.2
+   Compiling mio v1.2.2
+   Compiling socket2 v0.6.3
+   Compiling windows_x86_64_msvc v0.52.6
+   Compiling once_cell v1.21.3
+   Compiling itoa v1.0.17
+   Compiling tokio v1.53.1
+   Compiling aws-lc-rs v1.16.0
+   Compiling cmov v0.5.4
+   Compiling ctutils v0.4.2
+   Compiling http v1.4.0
+   Compiling tinystr v0.8.2
+   Compiling block-buffer v0.12.1
+   Compiling writeable v0.6.2
+   Compiling slab v0.4.12
+   Compiling smallvec v1.15.1
+   Compiling litemap v0.8.1
+   Compiling icu_locale_core v2.1.1
+   Compiling windows-targets v0.52.6
+   Compiling zerotrie v0.2.3
+   Compiling potential_utf v0.1.4
+   Compiling icu_properties_data v2.1.2
+   Compiling icu_normalizer_data v2.1.1
+   Compiling icu_collections v2.1.1
+   Compiling icu_provider v2.1.1
+   Compiling http-body v1.0.1
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling tracing-core v0.1.36
+   Compiling rustls-pki-types v1.14.0
+   Compiling getrandom v0.2.17
+   Compiling tracing-attributes v0.1.31
+   Compiling futures-sink v0.3.32
+   Compiling untrusted v0.9.0
+   Compiling futures-task v0.3.32
+   Compiling serde_core v1.0.228
+   Compiling equivalent v1.0.2
+   Compiling windows-link v0.1.3
+   Compiling hashbrown v0.16.1
+   Compiling rustls v0.23.37
+   Compiling httparse v1.10.1
+   Compiling indexmap v2.13.0
+   Compiling futures-util v0.3.32
+   Compiling rustls-webpki v0.103.13
+   Compiling tokio-util v0.7.18
+   Compiling tracing v0.1.44
+   Compiling rand_core v0.6.4
+   Compiling digest v0.10.7
+   Compiling inout v0.2.2
+   Compiling semver v1.0.27
+   Compiling libc v0.2.189
+   Compiling memchr v2.8.0
+   Compiling percent-encoding v2.3.2
+   Compiling atomic-waker v1.1.2
+   Compiling cpufeatures v0.3.0
+   Compiling try-lock v0.2.5
+   Compiling tower-service v0.3.3
+   Compiling zerocopy v0.8.40
+   Compiling fnv v1.0.7
+   Compiling h2 v0.4.13
+   Compiling want v0.3.1
+   Compiling rustc_version v0.4.1
+   Compiling icu_normalizer v2.1.1
+   Compiling icu_properties v2.1.2
+   Compiling windows-strings v0.4.2
+   Compiling windows-result v0.3.4
+   Compiling windows-sys v0.59.0
+   Compiling futures-channel v0.3.32
+   Compiling cpufeatures v0.2.17
+   Compiling cpubits v0.1.1
+   Compiling autocfg v1.5.0
+   Compiling zmij v1.0.21
+   Compiling const-oid v0.10.2
+   Compiling pin-utils v0.1.0
+   Compiling serde v1.0.228
+   Compiling hyper v1.8.1
+   Compiling digest v0.11.3
+   Compiling num-traits v0.2.19
+   Compiling windows-registry v0.5.3
+   Compiling idna_adapter v1.2.1
+   Compiling curve25519-dalek v4.1.3
+   Compiling cipher v0.5.2
+   Compiling universal-hash v0.6.1
+   Compiling sync_wrapper v1.0.2
+   Compiling serde_derive v1.0.228
+   Compiling tower-layer v0.3.3
+   Compiling base64 v0.22.1
+   Compiling utf8_iter v1.0.4
+   Compiling log v0.4.29
+   Compiling ipnet v2.12.0
+   Compiling serde_json v1.0.150
+   Compiling hyper-util v0.1.20
+   Compiling idna v1.1.0
+   Compiling tower v0.5.3
+   Compiling polyval v0.7.1
+   Compiling ppv-lite86 v0.2.21
+   Compiling tokio-rustls v0.26.4
+   Compiling form_urlencoded v1.2.2
+   Compiling aho-corasick v1.1.4
+   Compiling curve25519-dalek-derive v0.1.1
+   Compiling regex-syntax v0.8.10
+   Compiling thiserror v1.0.69
+   Compiling base64ct v1.8.3
+   Compiling signature v2.2.0
+   Compiling option-ext v0.2.0
+   Compiling iri-string v0.7.10
+   Compiling bitflags v2.11.0
+   Compiling anyhow v1.0.103
+   Compiling tower-http v0.6.8
+   Compiling dirs-sys v0.5.0
+   Compiling ed25519 v2.2.3
+   Compiling password-hash v0.5.0
+   Compiling regex-automata v0.4.14
+   Compiling url v2.5.8
+   Compiling hyper-rustls v0.27.7
+   Compiling rand_chacha v0.3.1
+   Compiling ghash v0.6.0
+   Compiling rustls-platform-verifier v0.6.2
+   Compiling ctr v0.10.1
+   Compiling aes v0.9.1
+   Compiling hmac v0.13.0
+   Compiling sha2 v0.10.9
+   Compiling aead v0.6.1
+   Compiling blake2 v0.10.6
+   Compiling http-body-util v0.1.3
+   Compiling windows-core v0.52.0
+   Compiling encoding_rs v0.8.35
+   Compiling thiserror-impl v1.0.69
+   Compiling mime v0.3.17
+   Compiling reqwest v0.13.4
+   Compiling windows v0.52.0
+   Compiling argon2 v0.5.3
+   Compiling aes-gcm v0.11.0
+   Compiling ed25519-dalek v2.2.0
+   Compiling hkdf v0.13.0
+   Compiling rand v0.8.5
+   Compiling chrono v0.4.44
+   Compiling regex v1.12.3
+   Compiling directories v6.0.0
+   Compiling keyring v3.6.3
+   Compiling sha2 v0.11.0
+   Compiling abigail-core v0.0.1 (<repository>\crates\abigail-core)
+    Finished `release` profile [optimized] target(s) in 7m 25s
+     Running unittests src\lib.rs (<build-cache>\stable-config-tests\release\deps\abigail_core-1b0230f8c394423b.exe)
+
+running 37 tests
+
+thread 'config::tests::schema_guard_keeps_current_and_legacy_load_save_behavior' (22732) panicked at crates\abigail-core\src\config.rs:1198:69:
+called `Result::unwrap()` on an `Err` value: Preview profile preflight has not completed
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test config::tests::schema_guard_keeps_current_and_legacy_load_save_behavior ... FAILED
+test config::tests::schema_guard_preserves_files_with_invalid_or_overflowing_versions ... ok
+test config::tests::schema_guard_refuses_future_in_memory_save_without_creating_a_target ... ok
+
+thread 'config::tests::schema_guard_refuses_stale_save_over_a_newer_file' (39652) panicked at crates\abigail-core\src\config.rs:1116:44:
+called `Result::unwrap()` on an `Err` value: Preview profile preflight has not completed
+test config::tests::schema_guard_refuses_stale_save_over_a_newer_file ... FAILED
+
+thread 'config::tests::schema_guard_rejects_future_load_before_deserializing_changed_fields' (41992) panicked at crates\abigail-core\src\config.rs:1106:13:
+assertion failed: error.contains("newer than this Abigail version supports")
+test config::tests::schema_guard_rejects_future_load_before_deserializing_changed_fields ... FAILED
+test config::tests::test_autonomy_profile_serde_roundtrip ... ok
+
+thread 'config::tests::test_birth_stage_helpers' (21152) panicked at crates\abigail-core\src\config.rs:525:58:
+Profile preflight is required: Preview profile preflight has not completed
+test config::tests::test_birth_stage_helpers ... FAILED
+test config::tests::test_check_interrupted_birth_completed ... ok
+test config::tests::test_check_interrupted_birth_not_interrupted ... ok
+test config::tests::test_check_interrupted_birth_was_interrupted ... ok
+test config::tests::test_default_autonomy_profile_is_desktop_operator ... ok
+test config::tests::test_default_routing_mode_is_ego_primary ... ok
+test config::tests::test_ego_primary_routing_mode_serde ... ok
+
+thread 'config::tests::test_last_provider_change_at_serde_roundtrip' (38952) panicked at crates\abigail-core\src\config.rs:525:58:
+Profile preflight is required: Preview profile preflight has not completed
+test config::tests::test_last_provider_change_at_serde_roundtrip ... FAILED
+test config::tests::test_legacy_council_deserializes_to_ego_primary ... ok
+
+thread 'config::tests::test_legacy_email_fields_are_not_serialized_on_save' (2936) panicked at crates\abigail-core\src\config.rs:1414:52:
+called `Result::unwrap()` on an `Err` value: Preview profile preflight has not completed
+test config::tests::test_legacy_email_fields_are_not_serialized_on_save ... FAILED
+test config::tests::test_legacy_id_primary_deserializes_to_ego_primary ... ok
+test config::tests::test_legacy_tier_based_deserializes_to_ego_primary ... ok
+
+thread 'config::tests::test_load_legacy_config_without_schema_version' (37008) panicked at crates\abigail-core\src\config.rs:1263:52:
+called `Result::unwrap()` on an `Err` value: Preview profile preflight has not completed
+test config::tests::test_load_legacy_config_without_schema_version ... FAILED
+test config::tests::test_mcp_trust_policy_allows_allowlisted_subdomain ... ok
+test config::tests::test_mcp_trust_policy_allows_any_host_when_allowlist_disabled_and_empty ... ok
+test config::tests::test_mcp_trust_policy_denies_non_allowlisted_host_when_strict ... ok
+
+thread 'config::tests::test_migrate_from_pre_v1' (40420) panicked at crates\abigail-core\src\config.rs:525:58:
+Profile preflight is required: Preview profile preflight has not completed
+test config::tests::test_migrate_from_pre_v1 ... FAILED
+
+thread 'config::tests::test_migrate_v11_to_v12' (36516) panicked at crates\abigail-core\src\config.rs:525:58:
+Profile preflight is required: Preview profile preflight has not completed
+test config::tests::test_migrate_v11_to_v12 ... FAILED
+
+thread 'config::tests::test_migrate_v18_to_v19' (32544) panicked at crates\abigail-core\src\config.rs:525:58:
+Profile preflight is required: Preview profile preflight has not completed
+test config::tests::test_migrate_v18_to_v19 ... FAILED
+
+thread 'config::tests::test_migrate_v19_to_v20' (31612) panicked at crates\abigail-core\src\config.rs:525:58:
+Profile preflight is required: Preview profile preflight has not completed
+test config::tests::test_migrate_v19_to_v20 ... FAILED
+
+thread 'config::tests::test_migrate_v24_to_v25_sets_autonomy_profile' (37908) panicked at crates\abigail-core\src\config.rs:525:58:
+Profile preflight is required: Preview profile preflight has not completed
+test config::tests::test_migrate_v24_to_v25_sets_autonomy_profile ... FAILED
+
+thread 'config::tests::test_migrate_v4_to_v8' (5680) panicked at crates\abigail-core\src\config.rs:525:58:
+Profile preflight is required: Preview profile preflight has not completed
+test config::tests::test_migrate_v4_to_v8 ... FAILED
+
+thread 'config::tests::test_migrate_v7_to_v8_with_legacy_email' (16576) panicked at crates\abigail-core\src\config.rs:525:58:
+Profile preflight is required: Preview profile preflight has not completed
+test config::tests::test_migrate_v7_to_v8_with_legacy_email ... FAILED
+
+thread 'config::tests::test_migrate_v8_preserves_routing_mode' (37184) panicked at crates\abigail-core\src\config.rs:525:58:
+Profile preflight is required: Preview profile preflight has not completed
+test config::tests::test_migrate_v8_preserves_routing_mode ... FAILED
+
+thread 'config::tests::test_no_migration_needed' (15740) panicked at crates\abigail-core\src\config.rs:525:58:
+Profile preflight is required: Preview profile preflight has not completed
+test config::tests::test_no_migration_needed ... FAILED
+
+thread 'config::tests::test_preloaded_skills_version_default' (37668) panicked at crates\abigail-core\src\config.rs:525:58:
+Profile preflight is required: Preview profile preflight has not completed
+test config::tests::test_preloaded_skills_version_default ... FAILED
+test global_config::tests::test_find_and_remove_agent ... ok
+
+thread 'global_config::tests::test_global_config_roundtrip' (35920) panicked at crates\abigail-core\src\global_config.rs:180:27:
+called `Result::unwrap()` on an `Err` value: Preview profile preflight has not completed
+test global_config::tests::test_global_config_roundtrip ... FAILED
+test global_config::tests::test_normalize_agent_directory_rejects_absolute_paths ... ok
+test global_config::tests::test_normalize_agent_directory_rejects_traversal ... ok
+test global_config::tests::test_register_duplicate_fails ... ok
+
+failures:
+
+failures:
+    config::tests::schema_guard_keeps_current_and_legacy_load_save_behavior
+    config::tests::schema_guard_refuses_stale_save_over_a_newer_file
+    config::tests::schema_guard_rejects_future_load_before_deserializing_changed_fields
+    config::tests::test_birth_stage_helpers
+    config::tests::test_last_provider_change_at_serde_roundtrip
+    config::tests::test_legacy_email_fields_are_not_serialized_on_save
+    config::tests::test_load_legacy_config_without_schema_version
+    config::tests::test_migrate_from_pre_v1
+    config::tests::test_migrate_v11_to_v12
+    config::tests::test_migrate_v18_to_v19
+    config::tests::test_migrate_v19_to_v20
+    config::tests::test_migrate_v24_to_v25_sets_autonomy_profile
+    config::tests::test_migrate_v4_to_v8
+    config::tests::test_migrate_v7_to_v8_with_legacy_email
+    config::tests::test_migrate_v8_preserves_routing_mode
+    config::tests::test_no_migration_needed
+    config::tests::test_preloaded_skills_version_default
+    global_config::tests::test_global_config_roundtrip
+
+test result: FAILED. 19 passed; 18 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.22s
+
+error: test failed, to rerun pass `-p abigail-core --lib`

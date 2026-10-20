@@ -1,0 +1,125 @@
+{
+  "started_at": "2026-10-20T11:15:16-04:00",
+  "updated_at": "2026-10-20T11:27:56.5724324-04:00",
+  "source_head": "3875299954976fc37785a48e924fd89d86d51113",
+  "merge_head": "4558fe68d9812998eb53a94ba157970af552f923",
+  "build_profile": "preview",
+  "target_dir": "<build-cache>\\preview",
+  "fixture_dir": "<repository>\\.cache\\rt-7e0b8346",
+  "commands": [
+    {
+      "name": "snapshot",
+      "command": "cargo test --locked --offline --release -p abigail-core --lib profile_snapshot:: -- --test-threads=1 --nocapture",
+      "exit_code": 0,
+      "duration_seconds": 24.9331526,
+      "passed": 29,
+      "failed": 0,
+      "ignored": 0,
+      "log": "<repository>\\output\\preview-combined\\recovery-snapshot-longpath-final.txt",
+      "fixture_dir": "<repository>\\output\\preview-combined\\recovery-fixtures-7a0051817d504a72b1cd00ad62803cb6"
+    },
+    {
+      "name": "lease",
+      "command": "cargo test --locked --offline --release -p abigail-core --lib profile_lease::tests:: -- --test-threads=1 --nocapture",
+      "exit_code": 0,
+      "duration_seconds": 1.3585629,
+      "passed": 9,
+      "failed": 0,
+      "ignored": 1,
+      "log": "<repository>\\output\\preview-combined\\recovery-lease.txt",
+      "fixture_dir": "<repository>\\.cache\\rt-947151c1"
+    },
+    {
+      "name": "credentials",
+      "command": "cargo test --locked --offline --release -p abigail-core --lib cold_restore_credentials_ -- --test-threads=1 --nocapture",
+      "exit_code": 0,
+      "duration_seconds": 1.3708769,
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "log": "<repository>\\output\\preview-combined\\recovery-credentials.txt",
+      "fixture_dir": "<repository>\\.cache\\rt-947151c1"
+    },
+    {
+      "name": "profile",
+      "command": "cargo test --locked --offline --release -p abigail-core --lib profile::tests:: -- --test-threads=1 --nocapture",
+      "exit_code": 0,
+      "duration_seconds": 1.4086568,
+      "passed": 14,
+      "failed": 0,
+      "ignored": 1,
+      "log": "<repository>\\output\\preview-combined\\recovery-profile.txt",
+      "fixture_dir": "<repository>\\.cache\\rt-947151c1"
+    },
+    {
+      "name": "config",
+      "command": "cargo test --locked --offline --release -p abigail-core --lib config::tests:: -- --test-threads=1 --nocapture",
+      "exit_code": 101,
+      "duration_seconds": 1.2166577,
+      "passed": 19,
+      "failed": 18,
+      "ignored": 0,
+      "log": "<repository>\\output\\preview-combined\\recovery-config.txt",
+      "fixture_dir": "<repository>\\.cache\\rt-947151c1"
+    },
+    {
+      "name": "preview-credentials",
+      "command": "cargo test --locked --offline --release -p abigail-core --lib preview_credentials_ -- --test-threads=1 --nocapture",
+      "exit_code": 0,
+      "duration_seconds": 1.3610066,
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0,
+      "log": "<repository>\\output\\preview-combined\\recovery-preview-credentials.txt",
+      "fixture_dir": "<repository>\\.cache\\rt-7e0b8346"
+    },
+    {
+      "name": "store",
+      "command": "cargo test --locked --offline --release -p abigail-persistence --test cold_profile_restore -- --test-threads=1 --nocapture",
+      "exit_code": 0,
+      "duration_seconds": 574.935685,
+      "passed": 3,
+      "failed": 0,
+      "ignored": 1,
+      "log": "<repository>\\output\\preview-combined\\recovery-store.txt",
+      "fixture_dir": "<repository>\\.cache\\rt-7e0b8346"
+    },
+    {
+      "name": "binding",
+      "command": "cargo test --locked --offline --release -p entity-daemon --bin entity-daemon preview_binding_tests -- --test-threads=1 --nocapture",
+      "exit_code": 0,
+      "duration_seconds": 118.9631351,
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0,
+      "log": "<repository>\\output\\preview-combined\\recovery-binding.txt",
+      "fixture_dir": "<repository>\\.cache\\rt-7e0b8346"
+    }
+  ],
+  "passed_total": 71.0,
+  "ignored_total": 3.0,
+  "limitations": [
+    "Synthetic fixtures and fake credentials only",
+    "No successful CLI restore or system credential probe",
+    "No installed lifecycle acceptance"
+  ],
+  "failed_attempts": [
+    {
+      "name": "config",
+      "command": "cargo test --locked --offline --release -p abigail-core --lib config::tests:: -- --test-threads=1 --nocapture",
+      "exit_code": 101,
+      "duration_seconds": 1.2166577,
+      "passed": 19,
+      "failed": 18,
+      "ignored": 0,
+      "log": "<repository>\\output\\preview-combined\\recovery-config.txt",
+      "fixture_dir": "<repository>\\.cache\\rt-947151c1"
+    }
+  ],
+  "passed_scope": "Successful intended preview selections only; legacy config37 requires separate default compilation and its failed preview attempt is preserved.",
+  "final_source_manifest": "<repository>\\output\\preview-combined\\recovery-final-source-files.json",
+  "final_fixture_correction_proof": "<repository>\\output\\preview-combined\\recovery-snapshot-longpath-final-proof.json",
+  "changed_test_files": [
+    "crates/abigail-core/src/profile_snapshot/state.rs"
+  ]
+}

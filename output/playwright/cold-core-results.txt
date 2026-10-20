@@ -1,0 +1,38 @@
+[
+  {
+    "Filter": "profile_snapshot::",
+    "Name": "snapshot",
+    "Exit": 0,
+    "Summary": "test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 154 filtered out; finished in 33.98s"
+  },
+  {
+    "Filter": "profile_lease::tests::",
+    "Name": "lease",
+    "Exit": 0,
+    "Summary": "test result: ok. 9 passed; 0 failed; 1 ignored; 0 measured; 173 filtered out; finished in 0.37s"
+  },
+  {
+    "Filter": "cold_restore_credentials_",
+    "Name": "credentials",
+    "Exit": 0,
+    "Summary": "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 176 filtered out; finished in 0.31s"
+  },
+  {
+    "Filter": "profile::tests::",
+    "Name": "profile-regression",
+    "Exit": 0,
+    "Summary": "test result: ok. 14 passed; 0 failed; 1 ignored; 0 measured; 168 filtered out; finished in 0.42s"
+  },
+  {
+    "Filter": "config::tests::",
+    "Name": "config-regression",
+    "Exit": 0,
+    "Summary": "test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.21s"
+  },
+  {
+    "Filter": "preview_credentials_",
+    "Name": "credential-regression",
+    "Exit": 0,
+    "Summary": "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 178 filtered out; finished in 0.14s"
+  }
+]

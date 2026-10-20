@@ -1,0 +1,50 @@
+   Compiling abigail-core v0.0.1 (<repository>\crates\abigail-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 32.25s
+     Running unittests src\lib.rs (target\debug\deps\abigail_core-04e025eb0f36f985.exe)
+
+running 26 tests
+test profile_snapshot::state::tests::snapshot_state_accepts_absent_source_and_retains_identity_and_receipts ... ok
+test profile_snapshot::state::tests::snapshot_state_accepts_complete_tombstone_and_reserved_partial_config ... ok
+test profile_snapshot::state::tests::snapshot_state_lexical_paths_reject_traversal_prefix_collision_and_devices ... ok
+test profile_snapshot::state::tests::snapshot_state_rebase_preserves_unknown_json_and_exact_receipts ... ok
+test profile_snapshot::state::tests::snapshot_state_rejects_duplicate_json_keys ... ok
+test profile_snapshot::state::tests::snapshot_state_rejects_duplicate_registry_ids_and_mismatched_directory ... ok
+test profile_snapshot::state::tests::snapshot_state_rejects_entity_path_redirection_before_rebase_writes ... ok
+test profile_snapshot::state::tests::snapshot_state_rejects_malformed_conflicting_or_reserved_active_receipts ... ok
+test profile_snapshot::state::tests::snapshot_state_rejects_missing_identity_material_and_file_shaped_store ... ok
+test profile_snapshot::state::tests::snapshot_state_rejects_missing_registered_config ... ok
+test profile_snapshot::state::tests::snapshot_state_rejects_newer_and_malformed_schemas_and_marker ... ok
+test profile_snapshot::state::tests::snapshot_state_rejects_wrong_profile_and_newer_global_camel_schema ... ok
+test profile_snapshot::tests::cold_snapshot_io_existing_destinations_are_never_overwritten ... ok
+test profile_snapshot::tests::cold_snapshot_io_existing_writer_handle_prevents_snapshot_publication ... ok
+test profile_snapshot::tests::cold_snapshot_io_forbidden_destination_preserves_source_and_bundle ... ok
+
+thread 'profile_snapshot::tests::cold_snapshot_io_preserves_uuid_receipts_documents_webview_and_rebases_only_paths' (44432) panicked at crates\abigail-core\src\profile_snapshot\tests.rs:279:5:
+assertion `left == right` failed
+  left: String("\\\\?\\<repository>\\target\\cold-profile-tmp\\cold-snapshot-io-31758aa3-d228-48ab-926e-207eb74c0c06\\restored\\identities\\f7b23765-3c8a-498e-acaf-defffdcd91fc")
+ right: String("<repository>\\target\\cold-profile-tmp\\cold-snapshot-io-31758aa3-d228-48ab-926e-207eb74c0c06\\restored\\identities\\f7b23765-3c8a-498e-acaf-defffdcd91fc")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test profile_snapshot::tests::cold_snapshot_io_preserves_uuid_receipts_documents_webview_and_rebases_only_paths ... FAILED
+test profile_snapshot::tests::cold_snapshot_io_publication_race_preserves_the_new_destination ... ok
+test profile_snapshot::tests::cold_snapshot_io_refuses_live_profile_lease_then_succeeds_after_release ... ok
+test profile_snapshot::tests::cold_snapshot_io_refuses_overlapping_source_bundle_or_restore_roots ... ok
+test profile_snapshot::tests::cold_snapshot_io_rejects_changed_extra_missing_files_and_extra_bundle_content ... ok
+test profile_snapshot::tests::cold_snapshot_io_rejects_declared_root_or_identity_summary_mismatch ... ok
+test profile_snapshot::tests::cold_snapshot_io_rejects_malformed_newer_duplicate_or_unknown_manifest_fields ... ok
+test profile_snapshot::tests::cold_snapshot_io_rejects_traversal_absolute_and_case_colliding_inventory_paths ... ok
+
+thread 'profile_snapshot::tests::cold_snapshot_io_restore_does_not_require_original_root_to_exist' (39156) panicked at crates\abigail-core\src\profile_snapshot\tests.rs:155:51:
+called `Result::unwrap()` on an `Err` value: Access is denied. (0x80070005)
+test profile_snapshot::tests::cold_snapshot_io_restore_does_not_require_original_root_to_exist ... FAILED
+test profile_snapshot::tests::cold_snapshot_io_stale_partial_is_not_a_completed_bundle_or_active_profile ... ok
+test profile_snapshot::tests::cold_snapshot_io_wrong_or_missing_credentials_leave_no_destination_and_preserve_bundle ... ok
+
+failures:
+
+failures:
+    profile_snapshot::tests::cold_snapshot_io_preserves_uuid_receipts_documents_webview_and_rebases_only_paths
+    profile_snapshot::tests::cold_snapshot_io_restore_does_not_require_original_root_to_exist
+
+test result: FAILED. 24 passed; 2 failed; 0 ignored; 0 measured; 154 filtered out; finished in 35.93s
+
+error: test failed, to rerun pass `-p abigail-core --lib`

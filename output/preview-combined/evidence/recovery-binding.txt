@@ -1,0 +1,63 @@
+   Compiling abigail-core v0.0.1 (<repository>\crates\abigail-core)
+warning: function `write_encrypted_sentinel` is never used
+  --> crates\abigail-core\src\vault\mod.rs:80:15
+   |
+80 | pub(crate) fn write_encrypted_sentinel(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling abigail-persistence v0.0.1 (<repository>\crates\abigail-persistence)
+   Compiling abigail-auth v0.0.1 (<repository>\crates\abigail-auth)
+   Compiling abigail-capabilities v0.0.1 (<repository>\crates\abigail-capabilities)
+   Compiling hive-core v0.0.1 (<repository>\crates\hive-core)
+   Compiling abigail-superego v0.0.1 (<repository>\crates\abigail-superego)
+   Compiling abigail-identity v0.0.1 (<repository>\crates\abigail-identity)
+   Compiling entity-core v0.0.1 (<repository>\crates\entity-core)
+warning: `abigail-core` (lib) generated 1 warning
+   Compiling abigail-hive v0.0.1 (<repository>\crates\abigail-hive)
+   Compiling abigail-queue v0.0.1 (<repository>\crates\abigail-queue)
+   Compiling abigail-memory v0.0.1 (<repository>\crates\abigail-memory)
+   Compiling abigail-skills v0.0.1 (<repository>\crates\abigail-skills)
+   Compiling abigail-router v0.0.1 (<repository>\crates\abigail-router)
+   Compiling skill-http v0.0.1 (<repository>\skills\skill-http)
+   Compiling skill-shell v0.0.1 (<repository>\skills\skill-shell)
+   Compiling skill-image v0.0.1 (<repository>\skills\skill-image)
+   Compiling skill-knowledge-base v0.0.1 (<repository>\skills\skill-knowledge-base)
+   Compiling skill-code-analysis v0.0.1 (<repository>\skills\skill-code-analysis)
+   Compiling skill-calendar v0.0.1 (<repository>\skills\skill-calendar)
+   Compiling skill-system-monitor v0.0.1 (<repository>\skills\skill-system-monitor)
+   Compiling skill-perplexity-search v0.0.1 (<repository>\skills\skill-perplexity-search)
+   Compiling skill-document v0.0.1 (<repository>\skills\skill-document)
+   Compiling skill-database v0.0.1 (<repository>\skills\skill-database)
+   Compiling skill-notification v0.0.1 (<repository>\skills\skill-notification)
+   Compiling skill-clipboard v0.0.1 (<repository>\skills\skill-clipboard)
+   Compiling skill-browser v0.0.1 (<repository>\skills\skill-browser)
+   Compiling skill-web-search v0.0.1 (<repository>\skills\skill-web-search)
+   Compiling skill-git v0.0.1 (<repository>\skills\skill-git)
+   Compiling skill-filesystem v0.0.1 (<repository>\skills\skill-filesystem)
+   Compiling soul-forge v0.0.1 (<repository>\crates\soul-forge)
+   Compiling entity-chat v0.0.1 (<repository>\crates\entity-chat)
+   Compiling abigail-runtime v0.0.1 (<repository>\crates\abigail-runtime)
+   Compiling entity-daemon v0.0.1 (<repository>\crates\entity-daemon)
+warning: associated function `new` is never used
+  --> crates\entity-daemon\src\backup_ops.rs:16:12
+   |
+15 | impl LocalBackupOps {
+   | ------------------- associated function in this implementation
+16 |     pub fn new(memory: Arc<MemoryStore>, data_root: PathBuf, agent_name: Option<String>) -> Self {
+   |            ^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `entity-daemon` (bin "entity-daemon" test) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 1m 58s
+     Running unittests src\main.rs (<build-cache>\preview\release\deps\entity_daemon-4951d0e41fae33a9.exe)
+
+running 4 tests
+test routes::preview_binding_tests::handshake_paths_do_not_exempt_other_http_methods ... ok
+test routes::preview_binding_tests::identity_discovery_is_available_and_stable_requests_are_unchanged ... ok
+test routes::preview_binding_tests::preview_options_preflight_does_not_require_process_headers ... ok
+test routes::preview_binding_tests::preview_requests_require_exact_profile_and_live_entity_instance ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 46 filtered out; finished in 0.00s

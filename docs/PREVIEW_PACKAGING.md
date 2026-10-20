@@ -41,7 +41,8 @@ for inspecting and testing the generated candidate installer.
 ## Implemented profile and runtime interface
 
 The selected `dev/preview-combined-0.0.76` integrates app
-`ca6a7527da8787be6b5315e13e4fc228287ce15d` and packaging
+`ca6a7527da8787be6b5315e13e4fc228287ce15d`, its published cold-recovery descendant
+`4558fe68d9812998eb53a94ba157970af552f923`, and packaging
 `de65e7e47fa35c7b742421274db5e1fac4720f8d` (including scaffold
 `6b246d3ab07322a899106d1198bfafba3a7b2309`).
 See [the source alignment](../documents/PREVIEW_RELEASE_ALIGNMENT.md).
@@ -63,7 +64,7 @@ Both [Hive](../hive-app/tauri.preview.conf.json) and
 | `packagedExecutableEnvironment` | Canonical packaged paths are required; blank, relative or conflicting inherited executable/internal-bin overrides fail. |
 | `processIdentity` | Verify every `channel`, `profile_id`, `canonical_data_root`, `instance_id`, `hive_instance_id` field and the selected Entity. Hive instance is fresh and equals its daemon instance. Each Entity daemon instance is fresh/distinct; the Runtime GUI expects that daemon's instance. |
 | `http` | Pin `x-abigail-profile-id` and `x-abigail-process-instance-id`. Only GET `/health`, GET `/v1/status` and OPTIONS are exempt. These non-secret routing guards are not authentication or binary provenance. No redirects or native browser/query/environment/default-port fallback. |
-| `lifecycle` | Entity close pins `expected_entity_instance_id` and validates its API envelope. Hive replacement requires acknowledged drain/reaping and owned-child exit. No stale-PID killing; a stale creation endpoint rejects while preserving the exact key. |
+| `lifecycle` | Entity close pins `expected_entity_instance_id` and validates its API envelope. Hive replacement requires acknowledged drain/reaping and owned-child exit. No stale-PID killing; a stale creation endpoint rejects while preserving the exact key. All four preview processes hold a shared profile-use lease until exit; cold operations require exclusive profile-use and Hive-owner leases; startup rejects cold-staging paths including ancestors. |
 | `dynamicValueSources` | Absolute roots, persistent profile UUIDs, fresh process UUIDs, endpoints and one-use runtime-bootstrap capabilities come from validated launch/runtime state, never static release metadata. |
 
 The default root is `<KnownFolder LocalAppData>/AbigailPreview/profiles/ongoing`,
@@ -95,6 +96,17 @@ plugin JSON does not implement isolation automatically, and embedded strings
 prove inclusion only. The combined integration also narrows Entity handshake
 exemptions to the documented GET methods and OPTIONS, with synthetic regression
 tests; actual installed lifecycle and race acceptance remain open.
+
+The lifecycle descriptors `profileUseLease: "shared-until-process-exit"`,
+`coldOperationLease: "exclusive-profile-use-and-hive-owner"` and
+`coldStagingStartup: "reject-including-ancestors"` describe the included recovery
+source's ownership rules. Cooperative leases do not find unknown profile clones,
+exclude every older or foreign writer, or permanently prevent two restored roots
+from opening later. See [the cold-recovery contract](../documents/PREVIEW_COLD_RECOVERY.md).
+The offline `abigail-profile` utility is a separate workspace executable, not a
+fifth installer payload in this candidate. The four-binary staging and signing
+contract is unchanged. Real Windows credential, GUI reopening and exact installed
+recovery acceptance remain open.
 
 ## Nonpublishing build knobs
 

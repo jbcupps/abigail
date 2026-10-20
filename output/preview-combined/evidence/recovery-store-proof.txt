@@ -1,0 +1,130 @@
+{
+  "source_log": "output/preview-combined/recovery-store.txt",
+  "events": [
+    {
+      "phase": "seed",
+      "pid": 42444
+    },
+    {
+      "phase": "snapshot",
+      "pid": 22752
+    },
+    {
+      "phase": "restore",
+      "pid": 42376
+    },
+    {
+      "phase": "reopen",
+      "pid": 12180,
+      "verified_conversation_turns": 4,
+      "verified_creation_receipts": 3,
+      "verified_entity_ids": [
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222"
+      ],
+      "verified_entity_signatures": 2,
+      "verified_store_scopes": 3
+    },
+    {
+      "phase": "seed",
+      "pid": 4728
+    },
+    {
+      "phase": "snapshot",
+      "pid": 33860
+    },
+    {
+      "phase": "interrupted-restore",
+      "pid": 42956,
+      "staging_root": "\\\\?\\<repository>\\.cache\\rt-7e0b8346\\abigail-cold-store-fixture-2d8beb6e-90e9-4225-aa1a-3f3446eccf23\\.abigail-cold-e87f73f6-d0e2-417b-a859-aea37368e629.partial"
+    },
+    {
+      "phase": "restore",
+      "pid": 40320
+    },
+    {
+      "phase": "reopen",
+      "pid": 21040,
+      "verified_conversation_turns": 4,
+      "verified_creation_receipts": 3,
+      "verified_entity_ids": [
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222"
+      ],
+      "verified_entity_signatures": 2,
+      "verified_store_scopes": 3
+    },
+    {
+      "phase": "seed",
+      "pid": 44232
+    },
+    {
+      "phase": "snapshot",
+      "pid": 42320
+    },
+    {
+      "phase": "missing-credential",
+      "pid": 4892
+    },
+    {
+      "phase": "wrong-credential",
+      "pid": 37924
+    },
+    {
+      "phase": "restore",
+      "pid": 34360
+    },
+    {
+      "phase": "reopen",
+      "pid": 35912,
+      "verified_conversation_turns": 4,
+      "verified_creation_receipts": 3,
+      "verified_entity_ids": [
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222"
+      ],
+      "verified_entity_signatures": 2,
+      "verified_store_scopes": 3
+    }
+  ],
+  "reopen_events": [
+    {
+      "phase": "reopen",
+      "pid": 12180,
+      "verified_conversation_turns": 4,
+      "verified_creation_receipts": 3,
+      "verified_entity_ids": [
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222"
+      ],
+      "verified_entity_signatures": 2,
+      "verified_store_scopes": 3
+    },
+    {
+      "phase": "reopen",
+      "pid": 21040,
+      "verified_conversation_turns": 4,
+      "verified_creation_receipts": 3,
+      "verified_entity_ids": [
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222"
+      ],
+      "verified_entity_signatures": 2,
+      "verified_store_scopes": 3
+    },
+    {
+      "phase": "reopen",
+      "pid": 35912,
+      "verified_conversation_turns": 4,
+      "verified_creation_receipts": 3,
+      "verified_entity_ids": [
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222"
+      ],
+      "verified_entity_signatures": 2,
+      "verified_store_scopes": 3
+    }
+  ],
+  "test_result": "3 passed; 0 failed; 1 ignored; 8.55 seconds",
+  "credentials": "Synthetic fake provider only; no system credential probe or DPAPI"
+}

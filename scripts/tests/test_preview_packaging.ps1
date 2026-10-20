@@ -141,6 +141,9 @@ try {
             $interface.lifecycle.hiveReplacement -ceq 'acknowledged-drain-and-owned-child-exit' -and
             $interface.lifecycle.stalePidTermination -ceq 'forbidden' -and
             $interface.lifecycle.staleCreationEndpoint -ceq 'reject-preserve-exact-key') 'Close, cleanup or exact-key recovery contract changed.'
+        Assert-Test ($interface.lifecycle.profileUseLease -ceq 'shared-until-process-exit' -and
+            $interface.lifecycle.coldOperationLease -ceq 'exclusive-profile-use-and-hive-owner' -and
+            $interface.lifecycle.coldStagingStartup -ceq 'reject-including-ancestors') 'Cold profile ownership or staging refusal contract changed.'
         foreach ($withdrawnField in @('profileId', 'daemonArguments', 'roots')) {
             Assert-Test (-not $launch.Contains($withdrawnField)) "The withdrawn $withdrawnField contract is still present."
         }
@@ -250,6 +253,12 @@ try {
         @{ name = 'routing guard claimed authentication'; change = { param($c) $c.runtimeInterface.http.purpose = 'authentication' } },
         @{ name = 'follow redirects'; change = { param($c) $c.runtimeInterface.http.redirects = 'follow' } },
         @{ name = 'native fallback'; change = { param($c) $c.runtimeInterface.http.nativeFallback = 'stable-default' } },
+        @{ name = 'missing process-use lease'; change = { param($c) $c.runtimeInterface.lifecycle.Remove('profileUseLease') } },
+        @{ name = 'process-use lease ends before process exit'; change = { param($c) $c.runtimeInterface.lifecycle.profileUseLease = 'shared-until-window-close' } },
+        @{ name = 'missing cold-operation lease'; change = { param($c) $c.runtimeInterface.lifecycle.Remove('coldOperationLease') } },
+        @{ name = 'cold operation without process-use exclusion'; change = { param($c) $c.runtimeInterface.lifecycle.coldOperationLease = 'exclusive-hive-owner-only' } },
+        @{ name = 'missing cold-staging refusal'; change = { param($c) $c.runtimeInterface.lifecycle.Remove('coldStagingStartup') } },
+        @{ name = 'cold-staging refusal omits ancestors'; change = { param($c) $c.runtimeInterface.lifecycle.coldStagingStartup = 'reject-leaf-only' } },
         @{ name = 'PID termination'; change = { param($c) $c.runtimeInterface.lifecycle.stalePidTermination = 'allowed' } },
         @{ name = 'unacknowledged Hive replacement'; change = { param($c) $c.runtimeInterface.lifecycle.hiveReplacement = 'kill-on-timeout' } },
         @{ name = 'rebind stale creation endpoint'; change = { param($c) $c.runtimeInterface.lifecycle.staleCreationEndpoint = 'automatic-rebind' } },

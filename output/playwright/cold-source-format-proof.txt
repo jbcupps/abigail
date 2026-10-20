@@ -1,0 +1,17 @@
+{
+  "files": [
+    "crates/abigail-core/src/lib.rs",
+    "crates/abigail-core/src/keyring.rs",
+    "crates/abigail-core/src/profile.rs",
+    "crates/abigail-core/src/profile_lease.rs",
+    "crates/abigail-core/src/profile_snapshot.rs",
+    "crates/abigail-core/src/profile_snapshot/state.rs",
+    "crates/abigail-core/src/profile_snapshot/tests.rs",
+    "crates/abigail-core/src/vault/unlock.rs",
+    "crates/abigail-persistence/tests/cold_profile_restore.rs",
+    "crates/abigail-profile/src/main.rs"
+  ],
+  "exit_code": 0,
+  "check": "rustfmt --edition 2021 --check --config skip_children=true",
+  "date_utc": "2026-10-20T14:58:03.5564229Z"
+}

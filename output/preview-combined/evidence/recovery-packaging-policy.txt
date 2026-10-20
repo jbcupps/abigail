@@ -1,0 +1,77 @@
+PASS omitted channel preserves stable identities and leaves configs unchanged
+PASS preview has distinct shell, launcher, window and NSIS identities
+PASS both shells carry the accepted compiled profile and persistent marker contract
+PASS stamps are deterministic and stable contains no preview hashes
+PASS hive-app whitespace-only overlay change changes its stamp
+PASS entity-runtime-app whitespace-only overlay change changes its stamp
+PASS reject changed Hive product
+PASS reject changed Hive identifier
+PASS reject changed Hive main binary
+PASS reject changed Runtime product
+PASS reject changed Runtime identifier
+PASS reject changed Hive window title
+PASS reject changed Runtime window title
+PASS reject changed NSIS install mode
+PASS reject changed NSIS menu folder
+PASS reject changed NSIS hook
+PASS reject one-sided launch contract mutation in hive-app
+PASS reject one-sided launch contract mutation in entity-runtime-app
+PASS reject matching mutations in both overlays: schema
+PASS reject matching mutations in both overlays: marker
+PASS reject matching mutations in both overlays: channel
+PASS reject matching mutations in both overlays: release channel
+PASS reject matching mutations in both overlays: compiled environment name
+PASS reject matching mutations in both overlays: compiled environment value
+PASS reject matching mutations in both overlays: known folder
+PASS reject matching mutations in both overlays: profile under stable install
+PASS reject matching mutations in both overlays: profile under preview install
+PASS reject matching mutations in both overlays: marker filename
+PASS reject matching mutations in both overlays: marker schema
+PASS reject matching mutations in both overlays: marker kind
+PASS reject matching mutations in both overlays: marker channel
+PASS reject matching mutations in both overlays: persistent ID field
+PASS reject matching mutations in both overlays: obsolete pending runtime interface
+PASS reject matching mutations in both overlays: claimed installer readiness
+PASS reject matching mutations in both overlays: executable metadata recipe
+PASS reject matching mutations in both overlays: default over conflicting environment
+PASS reject matching mutations in both overlays: inherited Hive adoption
+PASS reject matching mutations in both overlays: child creates marker
+PASS reject matching mutations in both overlays: withdrawn CLI switch
+PASS reject matching mutations in both overlays: runtime-generated CLI replaced by frozen recipe
+PASS reject matching mutations in both overlays: missing process identity field
+PASS reject matching mutations in both overlays: fresh GUI instance instead of selected daemon
+PASS reject matching mutations in both overlays: missing HTTP process pin
+PASS reject matching mutations in both overlays: method-free handshake exemptions
+PASS reject matching mutations in both overlays: routing guard claimed authentication
+PASS reject matching mutations in both overlays: follow redirects
+PASS reject matching mutations in both overlays: native fallback
+PASS reject matching mutations in both overlays: missing process-use lease
+PASS reject matching mutations in both overlays: process-use lease ends before process exit
+PASS reject matching mutations in both overlays: missing cold-operation lease
+PASS reject matching mutations in both overlays: cold operation without process-use exclusion
+PASS reject matching mutations in both overlays: missing cold-staging refusal
+PASS reject matching mutations in both overlays: cold-staging refusal omits ancestors
+PASS reject matching mutations in both overlays: PID termination
+PASS reject matching mutations in both overlays: unacknowledged Hive replacement
+PASS reject matching mutations in both overlays: rebind stale creation endpoint
+PASS reject matching mutations in both overlays: static nested profile UUID
+PASS reject matching mutations in both overlays: static nested endpoint
+PASS reject matching mutations in both overlays: static absolute profile root
+PASS reject matching mutations in both overlays: static process identity
+PASS reject matching mutations in both overlays: unknown nested contract field
+PASS reject matching mutations in both overlays: missing runtime interface member
+PASS reject matching mutations in both overlays: scalar instead of header array
+PASS reject matching mutations in both overlays: null runtime interface
+PASS reject matching mutations in both overlays: string instead of schema number
+PASS reject matching mutations in both overlays: wrongly cased contract key
+PASS reject matching mutations in both overlays: unknown top-level endpoint
+PASS reject matching mutations in both overlays: withdrawn fixed profile ID
+PASS reject matching mutations in both overlays: withdrawn daemon arguments
+PASS reject matching mutations in both overlays: withdrawn child-root layout
+PASS reject changed stable base identity for hive-app in stable
+PASS reject changed stable base identity for hive-app in preview
+PASS reject changed stable base identity for entity-runtime-app in stable
+PASS reject changed stable base identity for entity-runtime-app in preview
+PASS reject unsupported channel
+PASS reject a tag in the numeric packaging version field
+Preview packaging policy tests: 76 passed. Runtime compatibility remains untested.

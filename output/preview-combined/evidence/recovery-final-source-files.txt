@@ -1,0 +1,291 @@
+{
+  "captured_at": "2026-10-20T15:31:46.7897507+00:00",
+  "head": "3875299954976fc37785a48e924fd89d86d51113",
+  "merge_head": "4558fe68d9812998eb53a94ba157970af552f923",
+  "files": [
+    {
+      "path": "Cargo.toml",
+      "sha256": "C5F1BE1C1FE2ACAF168247619132A4553E74FC8409CE5116210D5A555CEE9631"
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "C9C6F182A4FBE454C5874B2F19E1D42BE453A3DAB3593E05F36F457EE2F8265A"
+    },
+    {
+      "path": "crates/abigail-core/Cargo.toml",
+      "sha256": "DE5D4A60ED0908B395A372BB57FA9F841E29723F429957DC13068BB812F5DCA9"
+    },
+    {
+      "path": "crates/abigail-core/src/capability_envelope.rs",
+      "sha256": "2FEFD00E04FD066743966FA2B5D3A5F9A67542E80C01DDA376989A0703FB52A5"
+    },
+    {
+      "path": "crates/abigail-core/src/config.rs",
+      "sha256": "BAAFF97F77D1EC1997798F03674E9666C36996B5DC4B4FB203081D2F89A4F376"
+    },
+    {
+      "path": "crates/abigail-core/src/constitutional.rs",
+      "sha256": "F1130FF414713DEFF95567BBBFE45FD8926ED971FC276202BCC079984097024B"
+    },
+    {
+      "path": "crates/abigail-core/src/document.rs",
+      "sha256": "3CA9FFBE6E412310BF0E66D0BA296636741E09DB74EE8AFAD1ACED985AE43EB8"
+    },
+    {
+      "path": "crates/abigail-core/src/dpapi.rs",
+      "sha256": "232B6FEE39F317B054CB2897B9F9569E095C6064EC645A6E41E697A19FD684A9"
+    },
+    {
+      "path": "crates/abigail-core/src/encrypted_storage.rs",
+      "sha256": "EC767C7DE288474FD30BDDB415907F18EFF1DA44CBF582D1AB615E54A1EC79E5"
+    },
+    {
+      "path": "crates/abigail-core/src/error.rs",
+      "sha256": "6C48A0758782412FB8198D46F55DFE05671FED9A2121427E90267E991E28B9A8"
+    },
+    {
+      "path": "crates/abigail-core/src/global_config.rs",
+      "sha256": "0028A0D1257CACA97AD8B205598BF7222920C6986F4DCDCDA2740CE6CC381169"
+    },
+    {
+      "path": "crates/abigail-core/src/key_detection.rs",
+      "sha256": "0885D499C4D828957C676B88EE90BF3B8333D43670C1885F0DDDE9EA6A2C90C1"
+    },
+    {
+      "path": "crates/abigail-core/src/keyring.rs",
+      "sha256": "10E6EE3237FBBB41491FC4702D4B5355B53387AA37A1762A1A50631990485899"
+    },
+    {
+      "path": "crates/abigail-core/src/lib.rs",
+      "sha256": "AEC00B27F4549E6F408725607153A3FD1D12795F49A2408D239D9F48A37F9905"
+    },
+    {
+      "path": "crates/abigail-core/src/local_llm_url.rs",
+      "sha256": "201E13C22BD7265863375B8B21552E69CD27BA056A0A86C06556DA361BAF0F83"
+    },
+    {
+      "path": "crates/abigail-core/src/ops.rs",
+      "sha256": "410ECFF7770DE3D5AD9F7003E9F28CCE3C13BD8CA237DC144070FE1F16DE2FC1"
+    },
+    {
+      "path": "crates/abigail-core/src/path_guard.rs",
+      "sha256": "59553825C3C2284EC535217CBBB851C9BA239F4DFF87B0424E83729821F1A2E0"
+    },
+    {
+      "path": "crates/abigail-core/src/profile.rs",
+      "sha256": "393F907CF869F3882587E8C73EBFD633F7888B71FB6D6E55A4FC04C11D402D12"
+    },
+    {
+      "path": "crates/abigail-core/src/profile_lease.rs",
+      "sha256": "C62D584F4F12917E5CC2C148731C03A211843EC880517FBD65447289BDDBEC00"
+    },
+    {
+      "path": "crates/abigail-core/src/profile_snapshot.rs",
+      "sha256": "11B51E9335BF5F779D874E3E4CFCF61C580499D604F6FA966E626B4A24FC6D7A"
+    },
+    {
+      "path": "crates/abigail-core/src/profile_snapshot/state.rs",
+      "sha256": "695E4BAE603B5A4434AD26B4086155D43730C52A0CCAD4678B4ED13B9D0F361D"
+    },
+    {
+      "path": "crates/abigail-core/src/profile_snapshot/tests.rs",
+      "sha256": "EF10A421F740C4AEAC832B8FFE871F99B28F06EB20F9D19EADEAD804B58F3A31"
+    },
+    {
+      "path": "crates/abigail-core/src/sao_bridge.rs",
+      "sha256": "576065E4CC7F7597B40CC151F3E378E38821A8816912CB525F4F757044AAD150"
+    },
+    {
+      "path": "crates/abigail-core/src/secrets.rs",
+      "sha256": "35F31615E540759D5CB382D791DB592D9555189D5263F85F032E2CE91275EA71"
+    },
+    {
+      "path": "crates/abigail-core/src/secure_fs.rs",
+      "sha256": "4647C82C61B613D954ECA93E547AA035CAB64A0339B7B1CD625D172253B572E8"
+    },
+    {
+      "path": "crates/abigail-core/src/structured_failure.rs",
+      "sha256": "6053F75947658215CBEE89FBF4C4E5DD8A0A2FBE137D2D5D652D054AE5C588B5"
+    },
+    {
+      "path": "crates/abigail-core/src/system_prompt.rs",
+      "sha256": "70B856F94320B8BA4EA747B247B3029D0734394ABA5160063274E3D455FF90C9"
+    },
+    {
+      "path": "crates/abigail-core/src/templates.rs",
+      "sha256": "57999A8AE4F67D48A853669202CCCD4EEFBE7A88117AC7850A9941CB30FFF6BF"
+    },
+    {
+      "path": "crates/abigail-core/src/vault/crypto.rs",
+      "sha256": "6A6B522A82297D42F253D10A4915931308CC2F5B3C5B10C41CBE9507C84C79E2"
+    },
+    {
+      "path": "crates/abigail-core/src/vault/external.rs",
+      "sha256": "D5A27E48D193F29412BB438AB5B9C26E26C41E8330E9A3353E174AA9B95B475A"
+    },
+    {
+      "path": "crates/abigail-core/src/vault/mod.rs",
+      "sha256": "11A00F2550CC1B9B2FA18E7316E44F3C9F6A43A1D506373476052ABA1B8A6C3D"
+    },
+    {
+      "path": "crates/abigail-core/src/vault/scoped.rs",
+      "sha256": "3FA4F1C038819A0B88CAA2EE56684145CACE2072B95C18FB033C64FEA857062C"
+    },
+    {
+      "path": "crates/abigail-core/src/vault/unlock.rs",
+      "sha256": "41E2540763F3747EBF746F5E7CA387D95480CE5213E8CC16BD241E113A849F8F"
+    },
+    {
+      "path": "crates/abigail-core/src/verifier.rs",
+      "sha256": "1E40D1B8422C210B65DAB7DD514363FBCE75B3D5BA65C4DA532FC48EC15382B7"
+    },
+    {
+      "path": "crates/abigail-core/tests/vault_stability.rs",
+      "sha256": "6DB993CE7E5B756E5AF895AB98282F7020EA6FC97539743FF62975BB35AFBC6C"
+    },
+    {
+      "path": "crates/abigail-persistence/Cargo.toml",
+      "sha256": "E668B533A4CD3344D5DB3D22173A8546DCEF88673DD52C98406F33AE6CAB53E6"
+    },
+    {
+      "path": "crates/abigail-persistence/src/client.rs",
+      "sha256": "12C42FC92E08831BA733931BF5979805C74C12638E586640382E496A25385A51"
+    },
+    {
+      "path": "crates/abigail-persistence/src/config.rs",
+      "sha256": "6742B8510F8533B0C49C5093D04860217D9EA6A7EBBE07E426C6CC1CE4C10A92"
+    },
+    {
+      "path": "crates/abigail-persistence/src/encryption.rs",
+      "sha256": "E4FB9E9A2F015B8F20A58FF8E5C17FD587EBC49EB780B6E29D5F59A715B98FF6"
+    },
+    {
+      "path": "crates/abigail-persistence/src/lib.rs",
+      "sha256": "C98409C71F4B21CB662FF8C32C77751977CE247D790312FC86CF9EC054D63C9D"
+    },
+    {
+      "path": "crates/abigail-persistence/src/migration.rs",
+      "sha256": "88904A8734C18E26976056C26B83E9B416A93540DBB238E3AB23E22034632593"
+    },
+    {
+      "path": "crates/abigail-persistence/src/remote.rs",
+      "sha256": "EB4BB620D304E9FF613FF92BF4D8E6F5BAD2107B334BD7B7711BFEAA6AB7A355"
+    },
+    {
+      "path": "crates/abigail-persistence/src/schema.rs",
+      "sha256": "E529D01E5CF5B13DFFD4E3869E5C1F2A0795434CB857997C6302DF43D4A3BC16"
+    },
+    {
+      "path": "crates/abigail-persistence/tests/cold_profile_restore.rs",
+      "sha256": "22D9BAD0F5029A8E4C63B170FC29D1AAE6A92697176735394DBD2E0344B86FD6"
+    },
+    {
+      "path": "crates/abigail-profile/Cargo.toml",
+      "sha256": "462408961229D13A84EECE2D688535F4EDA68B6DCF3ADB2BC601341F5547E122"
+    },
+    {
+      "path": "crates/abigail-profile/src/main.rs",
+      "sha256": "3C5F81B58BE360E147673D5F8C086B1D1ECE16B7D13484FF75EF066CAEFF4405"
+    },
+    {
+      "path": "crates/entity-daemon/Cargo.toml",
+      "sha256": "744CD788F0DD862362D764D8CF853E4949FFB461D8D8492039042D1951B2C860"
+    },
+    {
+      "path": "crates/entity-daemon/src/backup_ops.rs",
+      "sha256": "60726ACCCE3C35A219B5CE2DDFC9E3BDE67F9DA5C5D193CB7F7F1D2F8767F7D4"
+    },
+    {
+      "path": "crates/entity-daemon/src/capability_matcher.rs",
+      "sha256": "816EEA80AA4408D271EA9D92FF7B942193DF195F7FFD017F16125CEF4FAC7A87"
+    },
+    {
+      "path": "crates/entity-daemon/src/execution_ledger.rs",
+      "sha256": "413C5FC7606ADCFAA319CEE1B119F37F1CDD1691081537AEC86D7F467CE5843C"
+    },
+    {
+      "path": "crates/entity-daemon/src/hive_client.rs",
+      "sha256": "224AD8D79F3AAA8F64E138958AB4D4083FD44C5F3EE111CCC10A55476BDFD33F"
+    },
+    {
+      "path": "crates/entity-daemon/src/job_scheduler.rs",
+      "sha256": "30565058F9B34051272FF524F555B779865BE158074057306506C0082F87098C"
+    },
+    {
+      "path": "crates/entity-daemon/src/main.rs",
+      "sha256": "C4726756EEC126FC8980FCB47C903AE5B800420AED79E88E219667BF71E51924"
+    },
+    {
+      "path": "crates/entity-daemon/src/memory_consumer.rs",
+      "sha256": "1C763D13BE8F1A42AD008175AAD50432CDF21B18F8597F81DF5FDA7E53778A8B"
+    },
+    {
+      "path": "crates/entity-daemon/src/outbox.rs",
+      "sha256": "E7D8218217D37C6278E47F98186942D227619AD803B1997680DA73AF6807B938"
+    },
+    {
+      "path": "crates/entity-daemon/src/pipeline/ego_stage.rs",
+      "sha256": "DBCB1C753460C8A0E8ACCA7D65E35887F7D8E1C950F87D01156B67D1E1E72AF8"
+    },
+    {
+      "path": "crates/entity-daemon/src/pipeline/governance.rs",
+      "sha256": "A1C000652B2F64F9834D8F6A6F6778C3BBE2B6233D58A9AB92D891B4AA96C9E4"
+    },
+    {
+      "path": "crates/entity-daemon/src/pipeline/id_stage.rs",
+      "sha256": "71291D90F2F787DEF5984078560E78892E16D1961D2F8E44E693BEB4FAA1F784"
+    },
+    {
+      "path": "crates/entity-daemon/src/pipeline/journal.rs",
+      "sha256": "EEB08A04BF8D84CCF674EEBF9A9B069A26FA8EE714B435AD69EAB03AB6F6468D"
+    },
+    {
+      "path": "crates/entity-daemon/src/pipeline/mod.rs",
+      "sha256": "4A1FE515ABAE167D78B0D228DD15B732DDD0CD5D79AB53E698B8E51965A5FE9B"
+    },
+    {
+      "path": "crates/entity-daemon/src/pipeline/stream_gate.rs",
+      "sha256": "7DA58C5764AE5878A8598A62A83F92AF4979AC51665B39BB085D38A7E869EBFF"
+    },
+    {
+      "path": "crates/entity-daemon/src/pipeline/superego_stage.rs",
+      "sha256": "3475556F584554998CD75BD18D8561C11BB1FB54343952A27376A661F7B8A167"
+    },
+    {
+      "path": "crates/entity-daemon/src/queue_ops.rs",
+      "sha256": "9A6978467730D84D6A0B3633BD7C927B1474B336C6B35973C7B647911D1735F9"
+    },
+    {
+      "path": "crates/entity-daemon/src/router_build.rs",
+      "sha256": "90F4C8361E59ECE21EC5CE652798B89C65F0CDCF687394DB7039AC42A1588019"
+    },
+    {
+      "path": "crates/entity-daemon/src/routes.rs",
+      "sha256": "BF66191F3037D144CFF460379813A247140996B91C06E4CA53286D63CFD62544"
+    },
+    {
+      "path": "crates/entity-daemon/src/state.rs",
+      "sha256": "8493D73A898E1639F2D000DE4A703030ED96284A30F8728604885CA52F3413AC"
+    },
+    {
+      "path": "crates/entity-daemon/src/subagent_runner.rs",
+      "sha256": "BF0A5E90FA05C5BEBEF9CC0B2167DB13316B2D25FC6B5A8EB5680205DF84611F"
+    },
+    {
+      "path": "crates/entity-daemon/tests/chat_integration.rs",
+      "sha256": "B091DBFF0DDF7EC89918A2B2673F1A38DBA2B505D724E683FBFD4B974767F7B0"
+    },
+    {
+      "path": "crates/entity-daemon/tests/daemon_e2e.rs",
+      "sha256": "750F76D7966623AEC40D5E4DEBB10BB69CBCF4B70B65424464AA9EADE5594647"
+    },
+    {
+      "path": "crates/entity-daemon/tests/integration.rs",
+      "sha256": "E94BD63E322F0D964F18D18D95C47E4C16A8AB8B824F609F37B5B6450BF57CB9"
+    },
+    {
+      "path": "crates/entity-daemon/tests/integration_skills.rs",
+      "sha256": "F03BA2FADB723AECB1D47E93DE97C996218814733C8CDF9CDD042C874ACD0CC5"
+    }
+  ]
+}

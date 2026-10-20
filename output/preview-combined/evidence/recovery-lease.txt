@@ -1,0 +1,16 @@
+    Finished `release` profile [optimized] target(s) in 1.03s
+     Running unittests src\lib.rs (<build-cache>\preview\release\deps\abigail_core-1b0230f8c394423b.exe)
+
+running 10 tests
+test profile_lease::tests::cold_operation_refuses_fresh_process_startup ... ok
+test profile_lease::tests::cold_ownership_inspection_allows_damaged_configs_without_modifying_them ... ok
+test profile_lease::tests::cold_ownership_inspection_requires_expected_existing_compatible_marker ... ok
+test profile_lease::tests::existing_inspection_never_initializes_an_absent_marker ... ok
+test profile_lease::tests::initialized_process_keeps_lease_after_local_context_is_dropped ... ok
+test profile_lease::tests::interrupted_staging_is_inspectable_but_fresh_process_startup_refuses_it ... ok
+test profile_lease::tests::legacy_hive_lock_blocks_cold_operation_without_leaking_participation_lock ... ok
+test profile_lease::tests::process_lease_child_fixture ... ignored, Only synthetic lease parent tests may invoke this child fixture
+test profile_lease::tests::shared_users_exclude_cold_operations_until_every_user_exits ... ok
+test profile_lease::tests::stale_lock_contents_are_preserved_and_never_treated_as_ownership ... ok
+
+test result: ok. 9 passed; 0 failed; 1 ignored; 0 measured; 173 filtered out; finished in 0.22s

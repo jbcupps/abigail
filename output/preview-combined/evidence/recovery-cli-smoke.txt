@@ -1,0 +1,79 @@
+Cargo artifact: <build-cache>\preview\release\abigail-profile.exe
+
+CASE help
+ARGS --help
+EXIT 0
+Cold preview-profile recovery on this Windows device
+
+Usage: abigail-profile.exe <COMMAND>
+
+Commands:
+  snapshot  Copy a stopped preview to a new snapshot directory. No credential access
+  verify    Check manifest, every file/hash and identity/config consistency. No credential access
+  restore   Recover into a new root using existing same-user/device credentials. Does not bootstrap credentials, overwrite a root, or launch an application
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+
+
+CASE snapshot-help
+ARGS snapshot --help
+EXIT 0
+Copy a stopped preview to a new snapshot directory. No credential access
+
+Usage: abigail-profile.exe snapshot --source <SOURCE> --output <OUTPUT>
+
+Options:
+      --source <SOURCE>
+      --output <OUTPUT>
+  -h, --help             Print help
+
+
+CASE verify-help
+ARGS verify --help
+EXIT 0
+Check manifest, every file/hash and identity/config consistency. No credential access
+
+Usage: abigail-profile.exe verify --snapshot <SNAPSHOT>
+
+Options:
+      --snapshot <SNAPSHOT>
+  -h, --help                 Print help
+
+
+CASE restore-help
+ARGS restore --help
+EXIT 0
+Recover into a new root using existing same-user/device credentials. Does not bootstrap credentials, overwrite a root, or launch an application
+
+Usage: abigail-profile.exe restore --snapshot <SNAPSHOT> --destination <DESTINATION>
+
+Options:
+      --snapshot <SNAPSHOT>
+      --destination <DESTINATION>
+  -h, --help                       Print help
+
+
+CASE snapshot-missing-args
+ARGS snapshot
+EXIT 2
+error: the following required arguments were not provided:
+  --source <SOURCE>
+  --output <OUTPUT>
+
+Usage: abigail-profile.exe snapshot --source <SOURCE> --output <OUTPUT>
+
+For more information, try '--help'.
+
+
+CASE verify-missing-bundle
+ARGS verify --snapshot <repository>\.cache\rc-101542bd\missing-bundle
+EXIT 1
+Error: Snapshot bundle must be a directory
+
+
+CASE restore-missing-bundle
+ARGS restore --snapshot <repository>\.cache\rc-101542bd\missing-bundle --destination <repository>\.cache\rc-101542bd\unused-destination
+EXIT 1
+Error: Snapshot bundle must be a directory

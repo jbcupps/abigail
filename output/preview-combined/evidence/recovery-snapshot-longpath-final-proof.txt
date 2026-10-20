@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "exit_code": 0,
+  "duration_seconds": 24.9331526,
+  "fixture_dir": "<repository>\\output\\preview-combined\\recovery-fixtures-7a0051817d504a72b1cd00ad62803cb6",
+  "build_profile": "preview",
+  "target_dir": "<build-cache>\\preview",
+  "command": "cargo test --locked --offline --release -p abigail-core --lib profile_snapshot:: -- --test-threads=1 --nocapture",
+  "test_count": 29,
+  "log": "<repository>\\output\\preview-combined\\recovery-snapshot-longpath-final.txt",
+  "source_file_sha256": "695E4BAE603B5A4434AD26B4086155D43730C52A0CCAD4678B4ED13B9D0F361D",
+  "correction": "Test-only canonicalization of owned fixture container before deriving child paths"
+}

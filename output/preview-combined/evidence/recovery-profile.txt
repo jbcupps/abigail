@@ -1,0 +1,21 @@
+    Finished `release` profile [optimized] target(s) in 1.04s
+     Running unittests src\lib.rs (<build-cache>\preview\release\deps\abigail_core-1b0230f8c394423b.exe)
+
+running 15 tests
+test profile::tests::active_entity_config_cannot_select_another_entitys_paths ... ok
+test profile::tests::compiled_preview_never_silently_becomes_stable ... ok
+test profile::tests::config_and_registry_cannot_redirect_outside_profile ... ok
+test profile::tests::entity_paths_are_uuid_scoped_and_reject_traversal ... ok
+test profile::tests::marker_publication_cannot_replace_an_existing_owner ... ok
+test profile::tests::newer_config_refuses_whole_profile_preflight_without_migration ... ok
+test profile::tests::ownership_rejects_other_channel_profile_root_and_stale_instance ... ok
+test profile::tests::profile_marker_reopens_without_changing_identity_or_bytes ... ok
+test profile::tests::rejects_newer_or_wrong_marker_and_preserves_bytes ... ok
+test profile::tests::rejects_overlap_relative_roots_and_unmarked_populated_roots_without_writes ... ok
+test profile::tests::startup_does_not_interpret_webview_skill_or_archived_configs_as_active ... ok
+test profile::tests::startup_entry_refuses_inherited_profile_mismatch_without_writes ... ok
+test profile::tests::startup_entry_refuses_newer_active_config_without_writes ... ok
+test profile::tests::startup_entry_refuses_outside_documents_override_without_writes ... ok
+test profile::tests::startup_refusal_child_fixture ... ignored, Only the synthetic startup parent tests may invoke this child fixture
+
+test result: ok. 14 passed; 0 failed; 1 ignored; 0 measured; 168 filtered out; finished in 0.26s

@@ -1,0 +1,39 @@
+[
+  {
+    "reason": "compiler-artifact",
+    "package_id": "path+file:///<repository>/crates/abigail-profile#0.0.1",
+    "manifest_path": "<repository>\\crates\\abigail-profile\\Cargo.toml",
+    "target": {
+      "kind": [
+        "bin"
+      ],
+      "crate_types": [
+        "bin"
+      ],
+      "name": "abigail-profile",
+      "src_path": "<repository>\\crates\\abigail-profile\\src\\main.rs",
+      "edition": "2021",
+      "doc": true,
+      "doctest": false,
+      "test": true
+    },
+    "profile": {
+      "opt_level": "0",
+      "debuginfo": 2,
+      "debug_assertions": true,
+      "overflow_checks": true,
+      "test": false
+    },
+    "features": [],
+    "filenames": [
+      "<repository>\\target\\debug\\abigail-profile.exe",
+      "<repository>\\target\\debug\\abigail_profile.pdb"
+    ],
+    "executable": "<repository>\\target\\debug\\abigail-profile.exe",
+    "fresh": false
+  },
+  {
+    "reason": "build-finished",
+    "success": true
+  }
+]
