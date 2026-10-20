@@ -555,7 +555,7 @@ jobs:
           node scripts/release_provenance.mjs create @policyArgs
           if ($LASTEXITCODE -ne 0) { throw 'Release provenance creation failed.' }
 
-      - name: Upload verified release assets
+      - name: Upload verified release assets (Upload updater artifacts when enabled)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
         with:
           name: abigail-release-assets-windows
