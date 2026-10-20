@@ -13,6 +13,12 @@ continues to use `entity_daemon_binary_for_profile`, `HiveSupervisor::with_profi
 and `spawn_entity_with_profile`. No runtime branch, ownership check, credential
 operation, shutdown behavior or supported feature configuration changes.
 
+Workspace Clippy then exposed the same unused-constructor issue in
+`entity-daemon::backup_ops::LocalBackupOps::new`. There are no production or test
+callers anywhere in the repository, and this is also a binary-only crate without
+package features. The unused constructor is removed; the existing production and
+test callers of `new_with_profile` and its validation remain unchanged.
+
 The existing supervisor tests exercise those test helpers. Final validation must
 run the full Hive and Runtime frontend suites/builds, scoped Genesis and creation
 handler regressions, supervisor regressions, native-shell compile, formatting and

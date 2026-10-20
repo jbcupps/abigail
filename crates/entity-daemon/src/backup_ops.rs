@@ -13,15 +13,6 @@ pub struct LocalBackupOps {
 }
 
 impl LocalBackupOps {
-    pub fn new(memory: Arc<MemoryStore>, data_root: PathBuf, agent_name: Option<String>) -> Self {
-        Self {
-            memory,
-            data_root,
-            agent_name,
-            profile: None,
-        }
-    }
-
     pub fn new_with_profile(
         memory: Arc<MemoryStore>,
         data_root: PathBuf,
