@@ -16,7 +16,7 @@ on:
         required: false
         type: string
       windows_signing:
-        description: 'Use repository policy, unsigned stabilization, or SSL.com cloud signing.'
+        description: 'Use repository policy or SSL.com cloud signing. Unsigned requires publish_release=false.'
         required: false
         default: repository
         type: choice
@@ -72,6 +72,14 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+
+      - name: Require signing for release publication before building
+        if: github.event_name != 'workflow_dispatch' || inputs.publish_release
+        shell: pwsh
+        run: |
+          if ($env:ABIGAIL_LOCAL_SIGNING -ne 'true' -and $env:ABIGAIL_CLOUD_SIGNING -ne 'true') {
+            throw 'Stable and beta publication require Windows signing. Enable a supported signing lane, or use publish_release=false for an unsigned candidate.'
+          }
 
       - name: Validate cloud signing credentials before building
         if: env.ABIGAIL_CLOUD_SIGNING == 'true'
@@ -576,14 +584,18 @@ jobs:
       WINDOWS_SIGNED: ${{ needs.build.outputs.windows_signed }}
       WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
     steps:
-      - name: Require Windows signing for stable publication
+      - name: Require Windows signing for stable and beta publication
         shell: bash
         env:
           RELEASE_CHANNEL: ${{ needs.build.outputs.channel }}
           WINDOWS_SIGNED: ${{ needs.build.outputs.windows_signed }}
         run: |
-          if [[ "$RELEASE_CHANNEL" == "stable" && "$WINDOWS_SIGNED" != "true" ]]; then
-            echo "::error::Stable releases require verified Windows Authenticode signatures. Enable a supported signing lane, or use publish_release=false for an unsigned candidate."
+          if [[ "$RELEASE_CHANNEL" != "stable" && "$RELEASE_CHANNEL" != "beta" ]]; then
+            echo "::error::Only stable and beta channels may be published."
+            exit 1
+          fi
+          if [[ "$WINDOWS_SIGNED" != "true" ]]; then
+            echo "::error::Stable and beta releases require verified Windows Authenticode signatures. Enable a supported signing lane, or use publish_release=false for an unsigned candidate."
             exit 1
           fi
 

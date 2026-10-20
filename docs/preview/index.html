@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Abigail — Preview downloads</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 44rem; margin: 2.5rem auto; padding: 0 1.25rem; line-height: 1.6; color: #172033; }
+    h1 { font-size: 1.8rem; line-height: 1.2; }
+    h2 { font-size: 1.15rem; margin-top: 1.75rem; }
+    a { color: #1748a2; }
+    a:focus-visible { outline: 3px solid #d48c00; outline-offset: 4px; }
+    .notice { padding: 1rem; background: #f3f5f8; border-left: 4px solid #73839a; }
+    .download { display: inline-block; padding: .75rem 1rem; margin: .5rem 0; color: white; background: #1748a2; border-radius: .4rem; font-weight: 600; }
+    dt { font-weight: 600; margin-top: .7rem; }
+    dd { margin-left: 0; }
+    code { overflow-wrap: anywhere; font-size: .9rem; }
+    li { margin: .4rem 0; }
+    footer { margin-top: 2rem; border-top: 1px solid #dce1e8; padding-top: 1rem; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <p><a href="../">Abigail downloads</a></p>
+  <h1>Preview downloads</h1>
+  <p>Preview builds are for testing upcoming changes. Updates are manual and opt-in: this page never downloads an installer or updates your app automatically.</p>
+  <p id="preview-status" class="notice" role="status" aria-live="polite">Checking whether a verified preview is available…</p>
+  <noscript><p>No preview download is offered without validating its release information. You can still use the stable release below.</p></noscript>
+  <section id="preview-ready" hidden aria-labelledby="preview-title">
+    <h2 id="preview-title"></h2>
+    <dl>
+      <dt>Source commit</dt><dd><code id="preview-source"></code></dd>
+      <dt>Installer SHA-256</dt><dd><code id="preview-sha256"></code></dd>
+      <dt>Installer size</dt><dd id="preview-size"></dd>
+      <dt>Signing certificate thumbprint</dt><dd><code id="preview-certificate"></code></dd>
+    </dl>
+    <p><a id="preview-download" class="download">Download this Windows preview</a></p>
+    <p><a id="preview-notes">Read this preview’s release notes</a></p>
+    <h2>Before installing</h2>
+    <ol id="preview-checklist"></ol>
+    <h2>Known gaps</h2>
+    <ul id="preview-gaps"></ul>
+    <h2>Verification evidence</h2>
+    <p>These checks cover the scenarios recorded in the reports. Windows may still show a reputation prompt for a newly released installer.</p>
+    <ul id="preview-evidence"></ul>
+  </section>
+  <footer>
+    <p>Prefer the stable version? <a href="https://github.com/jbcupps/abigail/releases/latest">View the stable release</a>.</p>
+    <p>This preview route is promoted deliberately after verification. Older tagged releases and their files are preserved.</p>
+  </footer>
+  <script type="module" src="./preview.mjs"></script>
+</body>
+</html>

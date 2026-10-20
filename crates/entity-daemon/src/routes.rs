@@ -4,7 +4,7 @@ use crate::state::EntityDaemonState;
 use abigail_capabilities::cognitive::StreamEvent;
 use abigail_queue::{JobPriority, JobRecord, JobSpec, RequiredCapability};
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::Json;
 use entity_core::{
@@ -43,11 +43,17 @@ mod preview_binding_tests {
         let identity = identity();
         let mut headers = HeaderMap::new();
         for path in ["/v1/chat", "/v1/chat/cancel", "/v1/chat/history"] {
-            assert!(!preview_request_allowed(Some(&identity), path, &headers));
+            assert!(!preview_request_allowed(
+                Some(&identity),
+                &Method::POST,
+                path,
+                &headers
+            ));
         }
         headers.insert("x-abigail-profile-id", identity.profile_id.parse().unwrap());
         assert!(!preview_request_allowed(
             Some(&identity),
+            &Method::POST,
             "/v1/chat/cancel",
             &headers
         ));
@@ -57,6 +63,7 @@ mod preview_binding_tests {
         );
         assert!(preview_request_allowed(
             Some(&identity),
+            &Method::POST,
             "/v1/chat/cancel",
             &headers
         ));
@@ -66,6 +73,7 @@ mod preview_binding_tests {
         );
         assert!(!preview_request_allowed(
             Some(&identity),
+            &Method::POST,
             "/v1/chat/cancel",
             &headers
         ));
@@ -79,6 +87,7 @@ mod preview_binding_tests {
         );
         assert!(!preview_request_allowed(
             Some(&identity),
+            &Method::POST,
             "/v1/chat/cancel",
             &headers
         ));
@@ -90,22 +99,88 @@ mod preview_binding_tests {
         for path in ["/health", "/v1/status"] {
             assert!(preview_request_allowed(
                 Some(&identity),
+                &Method::GET,
                 path,
                 &HeaderMap::new()
             ));
         }
         assert!(!preview_request_allowed(
             Some(&identity),
+            &Method::GET,
             "/v1/status/extra",
             &HeaderMap::new()
         ));
-        assert!(preview_request_allowed(None, "/v1/chat", &HeaderMap::new()));
+        assert!(preview_request_allowed(
+            None,
+            &Method::POST,
+            "/v1/chat",
+            &HeaderMap::new()
+        ));
         for header in ["x-abigail-profile-id", "x-abigail-process-instance-id"] {
             let mut headers = HeaderMap::new();
             headers.insert(header, identity.instance_id.parse().unwrap());
-            for path in ["/v1/chat", "/v1/status"] {
-                assert!(!preview_request_allowed(None, path, &headers));
+            for method in [Method::GET, Method::POST, Method::OPTIONS] {
+                for path in ["/health", "/v1/chat", "/v1/status"] {
+                    assert!(!preview_request_allowed(None, &method, path, &headers));
+                }
             }
+        }
+    }
+
+    #[test]
+    fn handshake_paths_do_not_exempt_other_http_methods() {
+        let identity = identity();
+        let mut stale = HeaderMap::new();
+        stale.insert("x-abigail-profile-id", identity.profile_id.parse().unwrap());
+        stale.insert(
+            "x-abigail-process-instance-id",
+            identity.hive_instance_id.parse().unwrap(),
+        );
+        let mut pinned = stale.clone();
+        pinned.insert(
+            "x-abigail-process-instance-id",
+            identity.instance_id.parse().unwrap(),
+        );
+        for method in [
+            Method::HEAD,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+        ] {
+            for path in ["/health", "/v1/status"] {
+                assert!(!preview_request_allowed(
+                    Some(&identity),
+                    &method,
+                    path,
+                    &HeaderMap::new()
+                ));
+                assert!(!preview_request_allowed(
+                    Some(&identity),
+                    &method,
+                    path,
+                    &stale
+                ));
+                assert!(preview_request_allowed(
+                    Some(&identity),
+                    &method,
+                    path,
+                    &pinned
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn preview_options_preflight_does_not_require_process_headers() {
+        let identity = identity();
+        for path in ["/health", "/v1/status", "/v1/chat", "/v1/status/extra"] {
+            assert!(preview_request_allowed(
+                Some(&identity),
+                &Method::OPTIONS,
+                path,
+                &HeaderMap::new()
+            ));
         }
     }
 }
@@ -229,10 +304,12 @@ pub async fn health() -> &'static str {
     "ok"
 }
 
-/// Discovery is readable before binding. All other preview requests must name
-/// this exact live process; a port reused by another instance cannot accept them.
+/// GET discovery and OPTIONS preflight are readable before binding. All other
+/// preview requests must name this exact live process; a port reused by another
+/// instance cannot accept them.
 pub(crate) fn preview_request_allowed(
     identity: Option<&abigail_core::profile::ProcessIdentity>,
+    method: &Method,
     path: &str,
     headers: &HeaderMap,
 ) -> bool {
@@ -240,7 +317,8 @@ pub(crate) fn preview_request_allowed(
         return !headers.contains_key("x-abigail-profile-id")
             && !headers.contains_key("x-abigail-process-instance-id");
     };
-    matches!(path, "/health" | "/v1/status")
+    method == Method::OPTIONS
+        || (method == Method::GET && matches!(path, "/health" | "/v1/status"))
         || (headers
             .get("x-abigail-profile-id")
             .and_then(|value| value.to_str().ok())
@@ -257,7 +335,12 @@ pub(crate) async fn require_preview_identity(
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
-    if !preview_request_allowed(identity.as_ref(), request.uri().path(), request.headers()) {
+    if !preview_request_allowed(
+        identity.as_ref(),
+        request.method(),
+        request.uri().path(),
+        request.headers(),
+    ) {
         return (
             StatusCode::CONFLICT,
             Json(ApiEnvelope::<()>::error(

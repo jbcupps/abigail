@@ -1,8 +1,19 @@
 # Application and preview-release alignment
 
-2026-10-20. Compared application development commit `d883fe001c31b1999d76a7bf5a7defd3818e2744` with release scaffolding `6b246d3ab07322a899106d1198bfafba3a7b2309`, specifically its `docs/PREVIEW_CHANNEL.md` and the release owner's application handoff. The branches remain separate. This document records coordination and component evidence, not installed-preview acceptance.
+2026-10-20. The selected isolated combined development branch is `dev/preview-combined-0.0.76`. It integrates these published sources:
 
-The parent subsequently confirmed the separate packaging slice committed and pushed at `de65e7e47fa35c7b742421274db5e1fac4720f8d`. The [packaging alignment handoff](../output/playwright/preview-packaging-readonly-handoff.md) distinguishes that owner-reported status from the earlier read-only inspection and lists the coordinated runtime-metadata changes still required. The application slice's [final component evidence](../output/playwright/preview-profile-isolation-validation.md) does not transfer acceptance to a combined build or installer.
+| Input | Exact source |
+| --- | --- |
+| Application, `dev/first-signal-integration-0.0.76` | `ca6a7527da8787be6b5315e13e4fc228287ce15d` |
+| Packaging, `dev/preview-packaging-0.0.76` | `de65e7e47fa35c7b742421274db5e1fac4720f8d` |
+| Release scaffold included by packaging | `6b246d3ab07322a899106d1198bfafba3a7b2309` |
+| Shared stable-main base | `17b636b9e5f10b812deb287ad2c6637188991ec2` |
+
+Remote heads were checked before integration; no combined remote branch existed. The prior worktrees remain untouched. The [earlier packaging handoff](../output/playwright/preview-packaging-readonly-handoff.md) is historical coordination evidence. The combined source aligns both preview overlays' descriptive `runtimeInterface`, validator, tests and [packaging documentation](../docs/PREVIEW_PACKAGING.md) with the implemented application contract below. Overlay, contract, source and executable hashes must be prepared again after alignment.
+
+The application's [167 selected Rust and 373 frontend passes](../output/playwright/preview-profile-isolation-validation.md) and prior packaging checks are separate component evidence. They do not establish combined lifecycle or installed-preview acceptance. This dev integration does not sign, execute an installer, publish a release, advance the unavailable preview selector, access real credentials or profiles, grant new access, or change main/beta. Stable 0.0.76 remains available.
+
+See [combined development validation](../docs/PREVIEW_COMBINED_VALIDATION.md) for this candidate's fresh checks and native build/preparation evidence.
 
 ## Agreement and additions
 
@@ -27,6 +38,7 @@ The parent accepted this implementation target on 2026-10-20 after assigning the
 | Compiled application profile | Build-time `ABIGAIL_BUILD_PROFILE=preview` embedded in all four binaries; a compiled preview must not become stable when runtime variables are absent |
 | Required launcher mode/root | `ABIGAIL_PROFILE=preview` and an absolute persistent `ABIGAIL_DATA_DIR=R`; the compiled-preview Hive launcher fills only absent values with preview/default root. Explicit blank/conflicting values fail. Child daemons require explicit matching context. |
 | Child daemon arguments | `--profile preview --data-dir R`; these must agree with the inherited validated context |
+| Daemon ports | Hive receives `--port <chosen-port>` outside stable's reserved `43141..43150`; Entity receives `--port 0`. Endpoints are selected and verified at launch. |
 | Entity daemon selection | Explicit `--entity-id <uuid>` and `--hive-url <verified-url>`; the Hive URL must match `ABIGAIL_HIVE_URL` |
 | Runtime GUI selection | `ABIGAIL_ENTITY_ID`, `ABIGAIL_ENTITY_URL` and `ABIGAIL_HIVE_URL`, plus the same validated profile and instance context |
 | Profile marker | `R/profile.json`: `schema_version: 1`, `kind: "preview"`, `channel: "beta"`, persistent non-secret `profile_id` UUID |
@@ -41,33 +53,33 @@ The version-independent default ongoing root is `<KnownFolder LocalAppData>/Abig
 
 Fresh-creation fixture roots are separate unique directories beneath the test workspace, such as `<workspace>/target/preview-fixtures/<run-id>/creation`. Continuing-profile upgrade/reopen tests use a distinct `<run-id>/ongoing` fixture retained across candidate updates. Within-profile disposable-Entity tests remain useful, but reset/cleanup targets must never be the continuing root. Synthetic harnesses must require their explicit fixture root, not use the persistent launcher location.
 
-The marker's schema is independent of Entity config schema 27. Persist the profile UUID across versions. Initial marker creation is allowed only in a new empty validated root; a populated unmarked root requires an explicit import decision.
+The marker's schema is independent of Entity config schema 27. Persist the canonical non-nil profile UUID across versions. Initial marker creation is allowed only in a new empty validated root; children cannot initialize a missing marker. A populated unmarked root requires an explicit import decision.
 
-After marker verification, the app supplies `ABIGAIL_PROFILE_ID=<uuid>` to its children. For a new Hive launch it generates `ABIGAIL_HIVE_INSTANCE_ID=<fresh-uuid>` and sets `ABIGAIL_PROCESS_INSTANCE_ID` to the same UUID. Each Entity child receives the expected Hive instance and its own fresh process instance, with the explicitly selected Hive URL. Status/descriptor `process_identity` contains `channel`, `profile_id`, `canonical_data_root`, `instance_id`, and `hive_instance_id`. Profile/root/instance values must be verified before adopting an existing process or sending close/recovery requests. These non-secret identifiers identify ownership; they are not provider credentials. Never trust inherited `ABIGAIL_HIVE_URL` or executable overrides as ownership proof. Reject a conflicting inherited value rather than silently rebinding.
+After marker verification, the app supplies `ABIGAIL_PROFILE_ID=<uuid>` to its children. For a new Hive launch it generates `ABIGAIL_HIVE_INSTANCE_ID=<fresh-uuid>` and sets `ABIGAIL_PROCESS_INSTANCE_ID` to the same UUID. Each Entity child receives the expected Hive instance and its own fresh distinct process instance, with the explicitly selected Hive URL. Status/descriptor `process_identity` contains `channel`, `profile_id`, `canonical_data_root`, `instance_id`, and `hive_instance_id`; preview channel is `beta`. Verify every field and the selected Entity before adoption or use. These non-secret identifiers identify ownership; they are not provider credentials. Never trust inherited `ABIGAIL_HIVE_URL` or executable overrides as ownership proof. Reject blank, relative or conflicting inherited `ABIGAIL_ENTITY_DAEMON_PATH`, `ABIGAIL_ENTITY_RUNTIME_APP_PATH` and `ABIGAIL_INTERNAL_BIN_DIR`; use explicit canonical packaged child paths.
 
 Verified preview HTTP clients pin `x-abigail-profile-id` and `x-abigail-process-instance-id`; preview daemons require these except for GET `/health`, GET `/v1/status`, and OPTIONS. Current stable middleware rejects preview ownership headers. These are routing guards against accidental cross-profile use, not authentication credentials or binary provenance. Preview endpoints use verified loopback URLs outside stable's reserved ports `43141..43150`. The initial Hive launcher refuses inherited `ABIGAIL_HIVE_URL`; child processes receive their verified endpoint explicitly.
 
-Native connection resolution fails closed when handshake/IPC verification fails, with no browser/query/environment/default-port fallback. A stored creation-journal endpoint that no longer matches the pinned preview daemon is rejected explicitly; the exact creation key is preserved. Automatic same-profile endpoint rebinding is not implemented.
+Native connection resolution fails closed when handshake/IPC verification fails, with no browser/query/environment/default-port fallback and no followed redirects. A stored creation-journal endpoint that no longer matches the pinned preview daemon is rejected explicitly; the exact creation key is preserved. Automatic same-profile endpoint rebinding is not implemented.
 
-The preview cleanup protocol is verified `POST /v1/shutdown`, acknowledging `shutdown: true` and `owned_entities_reaped: true`, followed by exit of the owned Hive child. An uncertain drain must not trigger force-kill/replacement. Close requests identify the exact Entity process instance. These source guards still require actual candidate lifecycle acceptance.
+Entity close uses `POST /v1/entities/:id/close` with `{"expected_entity_instance_id":"<exact Entity daemon process UUID>"}` and validates the API envelope. The preview cleanup protocol is verified `POST /v1/shutdown`, acknowledging `{ok:true,data:{shutdown:true,owned_entities_reaped:true}}`, followed by exit of the owned Hive child. An uncertain drain must not trigger force-kill/replacement; never kill a stale descriptor PID. These source guards still require actual candidate lifecycle acceptance.
 
-The assigned packaging worker owns Tauri packaging configs/overlays, `scripts/stage_split_installer_resources.ps1`, `scripts/build_signed_installer.ps1`, and release tests. This app worktree will not edit those files. Application engineering owns Rust config/profile/path/process code and app continuity tests. Coordinate the two Tauri compilation configurations: current staging uses one shared `TAURI_CONFIG` during a multi-package build, so a shared override cannot safely assign different Hive/Runtime identifiers. Preview overlays should preserve stable defaults.
+The packaging source builds daemons without a Tauri overlay, then Hive and Runtime separately using their own `TAURI_CONFIG` overlays. All four binaries must embed `ABIGAIL_BUILD_PROFILE=preview`. Stable base configurations and default build behavior remain preserved. The overlay metadata describes this interface; application code does not execute arbitrary plugin JSON as a launch recipe. Dynamic roots, profile/process UUIDs, selected Entity IDs, ports and URLs must never become static release metadata. Fixed `profileId`, alternative `roots` and a static `daemonArguments` recipe remain prohibited.
 
-The parent selects the integration source. Current app and release branches are main-based; selected beta Genesis/static-runtime/installer-lock behavior still needs deliberate reconciliation with main signing/provenance safeguards. No merge or source selection is implied by this comparison.
+The parent selected these two main-based published inputs for dev integration. Beta `ea92effd31f554f74bb5e109deaa42876ec4f06f` Genesis/static-runtime/installer-lock behavior remains separate for explicit later comparison with main signing/provenance safeguards. No blind beta merge, main/beta push or release promotion is part of this task.
 
 ## Implementation sequence and remaining work
 
 1. **Config refusal — implemented:** validate the serialized version before deserializing/migrating, guard saves against a newer on-disk target, and stop active callers from substituting defaults or consuming a backup after refusal. Schema 27 remains current; earlier component results are linked below.
 2. **Startup/profile context — implemented in source:** validate compiled mode, root, marker schema, active configs and registry before startup consumers initialize. Use one immutable context for the paths in [PREVIEW_PROFILE_CONTRACT.md](PREVIEW_PROFILE_CONTRACT.md). Stable defaults remain unchanged.
 3. **Credential and connection dependencies — implemented in source:** scope credential selection/cache/encryption labels, with fake-adapter test seams. Bind channel/profile/root/live instance through daemon discovery, child launch, saved creation recovery and close/restart. Reject native fallback on failure. Component tests do not validate real OS credentials or installed lifecycle.
-4. **Full cold snapshot/restore — next slice, unimplemented:** quiesce owners; inventory all persistent files and required credential availability; restore into a new fixture; rebase approved paths, invalidate descriptors, and verify the same UUID, history and settings. Existing per-Entity restore generates a new UUID and does not satisfy this requirement.
-5. **Exact candidate acceptance — open:** coordinate distinct compiled/installer identities and run the ten stages against the final signed installer bytes. Preserve the accepted artifact; component tests cannot transfer acceptance to a rebuilt installer.
+4. **Full cold snapshot/restore - separate application slice:** not implemented by this integration. Quiesce owners; inventory all persistent files and required credential availability; restore into a new fixture; rebase approved paths, invalidate descriptors, and verify the same UUID, history and settings. Existing per-Entity restore generates a new UUID and does not satisfy this requirement.
+5. **Exact candidate acceptance - open:** the combined source supplies distinct compiled/installer identities; actual lifecycle and Windows install/upgrade/uninstall/restore acceptance remain pending. Run the ten stages against the final signed installer bytes in a separately authorized acceptance task. Preserve the accepted artifact; component tests cannot transfer acceptance to a rebuilt installer.
 
 ## Release-stage evidence mapping
 
 | Exact stage ID | Application contribution / remaining evidence |
 | --- | --- |
-| `separate-installer-identity` | Assigned identities above; packaging is owned separately. Inspect the final compiled/generated installer identity and provenance. |
+| `separate-installer-identity` | Combined source supplies the assigned identities above. Inspect the final compiled/generated installer identity and provenance. |
 | `stable-preview-coexistence` | Requires isolated synthetic Windows install/upgrade/uninstall in both launch orders; no personal-profile run. |
 | `profile-path-isolation` | Shared context/preflight, scoped paths and synthetic rejection/sentinel tests are implemented. Exact installed candidate evidence remains open. |
 | `daemon-ownership-isolation` | Profile/root/live-instance handshakes, pinned transport and owned-child lifecycle guards are implemented. Actual candidate lifecycle/port-race acceptance remains open. |

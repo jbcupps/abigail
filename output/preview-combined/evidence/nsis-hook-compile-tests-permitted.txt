@@ -1,0 +1,33 @@
+PASS stable equality
+PASS stable child
+PASS stable ancestor
+PASS case insensitive equality
+PASS separate preview sibling
+PASS similar prefix sibling
+PASS profile equality
+PASS profile child
+PASS profile ancestor
+PASS profile similar sibling
+PASS different native volume
+PASS registered custom install ancestor
+PASS both vendor hooks call their own guarded function
+PASS both hooks enforce the compile-time preview identity
+PASS default stable installation and preview profile are protected
+PASS stable registry query covers 0x80000001 / 0x0101
+PASS stable registry query covers 0x80000001 / 0x0201
+PASS stable registry query covers 0x80000002 / 0x0101
+PASS stable registry query covers 0x80000002 / 0x0201
+PASS both uninstall and remembered stable locations are queried
+PASS unreadable, missing-value and empty registrations fail closed
+PASS all existing path ancestors reject reparse points with immediate native error capture
+PASS only absent leaves are permitted; access errors are rejected
+PASS native volume identity, normalization and handle cleanup are required
+PASS unsupported volumes and truncated native paths fail closed
+PASS hooks contain no deletion, execution, process kills or registry mutation
+PASS vendor placement and filesystem race limits remain explicit
+PASS exact preview identity compiles
+PASS stable product cannot use preview hooks
+PASS stable identifier cannot use preview hooks
+PASS stable executable cannot use preview hooks
+PASS machine installation cannot use preview hooks
+32 preview NSIS checks passed. Compiled fixtures were never executed; hosted coexistence acceptance remains required.

@@ -1,0 +1,57 @@
+warning: function `write_encrypted_sentinel` is never used
+  --> crates\abigail-core\src\vault\mod.rs:80:15
+   |
+80 | pub(crate) fn write_encrypted_sentinel(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `abigail-core` (lib) generated 1 warning
+   Compiling daemon-test-harness v0.0.1 (<repository>\crates\daemon-test-harness)
+warning: associated function `new` is never used
+  --> crates\entity-daemon\src\backup_ops.rs:16:12
+   |
+15 | impl LocalBackupOps {
+   | ------------------- associated function in this implementation
+16 |     pub fn new(memory: Arc<MemoryStore>, data_root: PathBuf, agent_name: Option<String>) -> Self {
+   |            ^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `entity-daemon` (bin "entity-daemon") generated 1 warning
+   Compiling entity-daemon v0.0.1 (<repository>\crates\entity-daemon)
+warning: `entity-daemon` (bin "entity-daemon" test) generated 1 warning (1 duplicate)
+    Finished `release` profile [optimized] target(s) in 22.19s
+     Running unittests src\main.rs (<preview-target>\release\deps\entity_daemon-4951d0e41fae33a9.exe)
+
+running 4 tests
+test routes::preview_binding_tests::handshake_paths_do_not_exempt_other_http_methods ... ok
+test routes::preview_binding_tests::preview_options_preflight_does_not_require_process_headers ... ok
+test routes::preview_binding_tests::identity_discovery_is_available_and_stable_requests_are_unchanged ... ok
+test routes::preview_binding_tests::preview_requests_require_exact_profile_and_live_entity_instance ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 46 filtered out; finished in 0.00s
+
+     Running tests\chat_integration.rs (<preview-target>\release\deps\chat_integration-bfc55a6ae93710e6.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\daemon_e2e.rs (<preview-target>\release\deps\daemon_e2e-4027808bdee42ef2.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests\integration.rs (<preview-target>\release\deps\integration-3044a315298c40e2.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests\integration_skills.rs (<preview-target>\release\deps\integration_skills-8c58bc1e111458f8.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s

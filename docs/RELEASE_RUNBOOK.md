@@ -13,8 +13,9 @@ workspace tests, formatting, Clippy, and installer validation.
 ## Branch Channels
 
 - `beta` is the permanent iteration and UAT branch. Merge implementation PRs there first.
-- Every push to `beta` runs the one-step Windows installer workflow and publishes a GitHub prerelease tagged `vX.Y.Z-beta.N`.
+- Every push to `beta` requests the one-step Windows installer workflow; successful signing and release gates permit a GitHub prerelease tagged `vX.Y.Z-beta.N`.
 - `main` is the promoted stable branch. Stable releases use clean `vX.Y.Z` tags and are not prereleases.
+- The fixed [preview page](https://jbcupps.github.io/abigail/preview/) selects one explicitly verified beta build. A new prerelease never advances that pointer automatically. See the [preview contract and promotion procedure](PREVIEW_CHANNEL.md) for profile isolation, continuing-Entity acceptance, complete backups, and manual opt-in updates.
 
 ## Full Installer Release
 
@@ -64,14 +65,14 @@ gh run watch --repo jbcupps/abigail
 Verify the release:
 
 ```bash
-gh release view v0.0.75 --json tagName,url,publishedAt,assets
+gh release view v0.0.76 --json tagName,url,publishedAt,assets
 ```
 
 The workflow builds and tags the triggering commit. Both desktop shells embed their production frontend assets and the requested installer version. It refuses an existing tag that identifies another commit. Every publishing event validates the release ref; pushed tags must match `vX.Y.Z` or `vX.Y.Z-beta.N` exactly.
 
-Before publishing an unsigned installer, the workflow installs it in a fresh test directory, checks all four payload hashes and Windows daemon loader checks, then runs the synthetic daemon contract against those installed binaries. The contract uses isolated data, Documents, and app profiles, exercises live streaming and durable history across restarts, and does not require a model account or API key. It is a contract check; it does not claim real-model inference. The installed verifier refuses to replace an existing Abigail installation outside the repository's test directory. Validation evidence is uploaded as `abigail-installer-validation-windows-latest`.
+Before uploading an unsigned candidate artifact, the workflow installs it in a fresh test directory, checks all four payload hashes and Windows daemon loader checks, then runs the synthetic daemon contract against those installed binaries. The contract uses synthetic roots, exercises live streaming and durable history across restarts, and does not require a model account or API key. It does not prove all Windows KnownFolder paths are isolated, GUI/installer coexistence, migration/restore, or real-model inference. The installed verifier refuses to replace an existing Abigail installation outside the repository's test directory. Validation evidence is uploaded as `abigail-installer-validation-windows-latest`.
 
-Publication also requires the `gate` job from the `CI` workflow to pass for the exact release commit on `beta` or `main`. The wait is bounded to one hour. Advisory audit or CodeQL results do not override a successful gate. `beta` builds are prereleases; promoted `main` and clean `vX.Y.Z` tag builds are stable releases. Stable publication requires a successfully verified Windows signing lane before creating a tag or release. Unsigned candidate builds (`publish_release=false`) and beta stabilization remain available; updater signing remains opt-in.
+Publication also requires the `gate` job from the `CI` workflow to pass for the exact release commit on `beta` or `main`. The wait is bounded to one hour. Advisory audit or CodeQL results do not override a successful gate. `beta` builds are prereleases; promoted `main` and clean `vX.Y.Z` tag builds are stable releases. Stable and beta publication require a successfully verified Windows signing lane before creating a tag or release. Unsigned candidate builds (`publish_release=false`) and artifact-only stabilization remain available; updater signing remains opt-in. Selection for the preview page additionally requires the compatibility evidence in `PREVIEW_CHANNEL.md`.
 
 Before upload, the workflow stages the canonical public filenames once and verifies their final Windows signatures, expected publisher certificate, timestamps, and SHA-256 hashes. The single `abigail-release-assets-windows` artifact contains those exact bytes, `windows-signature-evidence.json`, and `release-provenance.json`. The publish job verifies them again on Windows, rejects an existing release, and uploads without renaming or rebuilding files. Stable releases explicitly become latest; beta releases do not.
 
@@ -96,7 +97,7 @@ For existing SSL.com certificates, local signed builds, runner setup, and signat
 verification, follow [Windows SSL.com signing](WINDOWS_SSL_COM_SIGNING.md).
 The [Codex desktop handoff](CODEX_SSL_COM_HANDOFF.md) covers the account/provider steps.
 
-The repeatable stabilization path keeps signing and updater artifacts opt-in. Public stable releases require Windows signing; the publication gate rejects an unsigned stable build.
+The repeatable artifact-only stabilization path keeps signing and updater artifacts opt-in. Public stable and beta releases require Windows signing; the publication gate rejects unsigned builds.
 
 - `ABIGAIL_REQUIRE_WINDOWS_SIGNING=true` enables Windows signing checks and signing config.
 - `ABIGAIL_WINDOWS_SIGNING_MODE=store` expects a certificate available on the Windows runner.
@@ -105,7 +106,7 @@ The repeatable stabilization path keeps signing and updater artifacts opt-in. Pu
 
 Current expected repeat-build posture:
 
-- Leave `ABIGAIL_REQUIRE_WINDOWS_SIGNING` unset for unsigned stabilization only. Stable publication requires the supported SSL.com cloud or local signing lane; see the [cloud signing guide](windows-cloud-signing.md) for `windows_signing=esigner` and repository policy.
+- Leave `ABIGAIL_REQUIRE_WINDOWS_SIGNING` unset for unsigned candidates/stabilization only. Stable and beta publication require the supported SSL.com cloud or local signing lane; see the [cloud signing guide](windows-cloud-signing.md) for `windows_signing=esigner` and repository policy.
 - Leave `ABIGAIL_REQUIRE_UPDATER_SIGNING` unset until the updater signing lane is intentionally restored.
 - Keep Apple/macOS out of the build matrix until the Apple Developer account agreement/signing problem is fixed.
 - Keep Linux out of the full installer matrix until the one-step Linux package is intentionally added.

@@ -1,0 +1,146 @@
+{
+  "productName": "Abigail Preview",
+  "identifier": "com.abigail.preview",
+  "mainBinaryName": "Abigail Preview",
+  "app": {
+    "windows": [
+      {
+        "title": "Abigail Preview Hive",
+        "width": 1280,
+        "height": 860,
+        "resizable": true,
+        "visible": false
+      }
+    ]
+  },
+  "bundle": {
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "startMenuFolder": "Abigail Preview",
+        "installerHooks": "../scripts/nsis-preview-hooks.nsh"
+      }
+    }
+  },
+  "plugins": {
+    "abigail-launch": {
+      "schemaVersion": 1,
+      "contract": "abigail-channel-profile-v1",
+      "channel": "preview",
+      "releaseChannel": "beta",
+      "compiledProfile": {
+        "environment": "ABIGAIL_BUILD_PROFILE",
+        "value": "preview"
+      },
+      "profileRoot": {
+        "windowsKnownFolder": "LocalAppData",
+        "relativePath": "AbigailPreview/profiles/ongoing"
+      },
+      "profileMarker": {
+        "fileName": "profile.json",
+        "schemaVersion": 1,
+        "kind": "preview",
+        "channel": "beta",
+        "persistentIdField": "profile_id"
+      },
+      "runtimeInterface": {
+        "status": "implemented",
+        "metadataRole": "descriptive-only",
+        "launcher": {
+          "defaultEnvironmentWhenAbsent": [
+            "ABIGAIL_PROFILE",
+            "ABIGAIL_DATA_DIR"
+          ],
+          "blankOrConflictingEnvironment": "reject",
+          "inheritedHiveUrl": "reject",
+          "markerInitialization": "new-empty-root-only",
+          "childMarkerInitialization": "forbidden"
+        },
+        "daemonCli": {
+          "commonOptions": [
+            "--profile",
+            "--data-dir"
+          ],
+          "hiveOptions": [
+            "--port"
+          ],
+          "entityOptions": [
+            "--entity-id",
+            "--hive-url",
+            "--port"
+          ],
+          "contextAgreement": "required",
+          "hivePort": "ephemeral-outside-43141-43150",
+          "entityPort": "os-assigned"
+        },
+        "childEnvironment": {
+          "profile": "ABIGAIL_PROFILE",
+          "dataRoot": "ABIGAIL_DATA_DIR",
+          "profileId": "ABIGAIL_PROFILE_ID",
+          "hiveInstanceId": "ABIGAIL_HIVE_INSTANCE_ID",
+          "processInstanceId": "ABIGAIL_PROCESS_INSTANCE_ID",
+          "documentsOverride": "ABIGAIL_DOCUMENTS_DIR"
+        },
+        "runtimeSelectionEnvironment": [
+          "ABIGAIL_ENTITY_ID",
+          "ABIGAIL_ENTITY_URL",
+          "ABIGAIL_HIVE_URL"
+        ],
+        "packagedExecutableEnvironment": [
+          "ABIGAIL_ENTITY_DAEMON_PATH",
+          "ABIGAIL_ENTITY_RUNTIME_APP_PATH",
+          "ABIGAIL_INTERNAL_BIN_DIR"
+        ],
+        "processIdentity": {
+          "fields": [
+            "channel",
+            "profile_id",
+            "canonical_data_root",
+            "instance_id",
+            "hive_instance_id"
+          ],
+          "verification": "all-fields-and-selected-entity",
+          "hiveInstance": "fresh-equals-hive-daemon-instance",
+          "entityInstance": "fresh-per-entity-daemon",
+          "runtimeGuiExpectedInstance": "selected-entity-daemon-instance"
+        },
+        "http": {
+          "pinnedHeaders": [
+            "x-abigail-profile-id",
+            "x-abigail-process-instance-id"
+          ],
+          "unpinnedRequests": [
+            "GET /health",
+            "GET /v1/status",
+            "OPTIONS"
+          ],
+          "purpose": "routing-guards-not-authentication",
+          "endpoint": "verified-loopback-outside-stable-ports",
+          "redirects": "reject",
+          "nativeFallback": "reject"
+        },
+        "lifecycle": {
+          "entityClose": "POST /v1/entities/:id/close",
+          "entityCloseInstanceField": "expected_entity_instance_id",
+          "responseValidation": "api-envelope",
+          "hiveShutdown": "POST /v1/shutdown",
+          "hiveShutdownAcknowledgement": [
+            "shutdown",
+            "owned_entities_reaped"
+          ],
+          "hiveReplacement": "acknowledged-drain-and-owned-child-exit",
+          "stalePidTermination": "forbidden",
+          "staleCreationEndpoint": "reject-preserve-exact-key"
+        },
+        "dynamicValueSources": {
+          "dataRoot": "validated-launch-context",
+          "profileId": "persistent-profile-marker",
+          "processInstances": "fresh-launch-uuids",
+          "endpoints": "verified-live-daemons",
+          "runtimeBootstrap": "one-use-generated-capability"
+        },
+        "candidateAcceptance": "pending"
+      }
+    }
+  }
+}

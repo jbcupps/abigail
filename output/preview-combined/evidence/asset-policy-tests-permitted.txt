@@ -1,0 +1,34 @@
+Prepared beta assets without rebuilding or publishing: <temp>\abigail-preview-stage-tests-d572aaa71a9a4427b7e602a4b1bd5a09\happy-output
+PASS same signed beta-tag candidate retains every nonmetadata byte and source file
+PASS existing output is never overwritten
+PASS output cannot equal candidate
+PASS output cannot be inside candidate
+PASS missing output parent
+Release provenance failed: Manifest sourceCommit does not match the requested release policy.
+PASS wrong exact source
+Release provenance failed: Manifest tag does not match the requested release policy.
+PASS wrong beta tag
+Release provenance failed: Manifest expectedThumbprint does not match the requested release policy.
+PASS wrong publisher pin
+Release provenance failed: Manifest windowsSigned does not match the requested release policy.
+PASS unsigned candidate
+Release provenance failed: Manifest channel does not match the requested release policy.
+PASS already beta is not a candidate
+PASS stable tag input cannot convert
+Release provenance failed: Manifest tag does not match the requested release policy.
+PASS stable candidate cannot relabel as beta
+Release provenance failed: Staged asset differs from provenance: Abigail-windows-x64-setup.exe
+PASS tampered installer
+Release provenance failed: Staged files do not match the manifest asset set (missing or extra files).
+PASS unapproved extra source file
+Release provenance failed: Staged files do not match the manifest asset set (missing or extra files).
+PASS missing source evidence
+PASS source subdirectory
+PASS native-failure
+Release provenance failed: Unexpected signing certificate: Abigail-windows-x64-setup.exe
+PASS bad-evidence
+PASS mutate-copy
+PASS extra-output
+PASS linked source
+PASS linked output parent
+Preview preparation: 22 checks passed; 0 skipped. Native verification was mocked; no real signing or acceptance is established.

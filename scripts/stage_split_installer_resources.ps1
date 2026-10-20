@@ -9,7 +9,11 @@
 #>
 param(
     [ValidateSet("debug", "release")]
-    [string]$Configuration = "release"
+    [string]$Configuration = "release",
+    [ValidateSet("stable", "preview")]
+    [string]$Channel = "stable",
+    [ValidatePattern('^\d+\.\d+\.\d+$')]
+    [string]$Version
 )
 
 Set-StrictMode -Version Latest
@@ -17,6 +21,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $resourceDir = Join-Path $repoRoot "hive-app\resources"
+. (Join-Path $PSScriptRoot 'packaging_profile.ps1')
 
 function Invoke-Checked {
     param(
@@ -53,9 +58,7 @@ function Build-Frontend {
     Invoke-Checked -FilePath "npm" -Arguments @("run", "build") -WorkingDirectory $uiDir
 }
 
-Build-Frontend -AppDir (Join-Path $repoRoot "hive-app") -Label "Abigail Hive"
-Build-Frontend -AppDir (Join-Path $repoRoot "entity-runtime-app") -Label "Abigail Entity Runtime"
-
+# Preserve the stable combined-build invocation and its ambient override merge.
 $cargoArgs = @(
     "build",
     "--locked",
@@ -69,62 +72,104 @@ if ($Configuration -eq "release") {
     $cargoArgs += "--release"
 }
 
-Write-Host "Building internal Abigail runtime binaries..."
 $hiveConfig = Get-Content -LiteralPath (Join-Path $repoRoot 'hive-app/tauri.conf.json') -Raw | ConvertFrom-Json
-$hiveVersion = $hiveConfig.version
+$hiveVersion = if ([string]::IsNullOrWhiteSpace($Version)) { $hiveConfig.version } else { $Version }
+$profile = Get-AbigailPackagingProfile -RepositoryRoot $repoRoot -Channel $Channel -Version $hiveVersion
 $previousTauriConfig = $env:TAURI_CONFIG
+$previousTargetDir = $env:CARGO_TARGET_DIR
+$previousBuildProfile = $env:ABIGAIL_BUILD_PROFILE
 try {
-    # Embed the installer version in both shells, including the Runtime built
-    # directly with Cargo rather than with the Hive-only Tauri CLI build.
-    $override = if ([string]::IsNullOrWhiteSpace($previousTauriConfig)) {
-        [pscustomobject]@{}
-    } else { $previousTauriConfig | ConvertFrom-Json }
-    $override | Add-Member -NotePropertyName version -NotePropertyValue $hiveVersion -Force
-    $env:TAURI_CONFIG = $override | ConvertTo-Json -Depth 20 -Compress
-    Invoke-Checked -FilePath "cargo" -Arguments $cargoArgs -WorkingDirectory $repoRoot
+    if ($Channel -eq 'preview') {
+        # Both daemons and both shells must compile the same profile selection.
+        $env:ABIGAIL_BUILD_PROFILE = 'preview'
+    } elseif (-not [string]::IsNullOrEmpty($previousBuildProfile)) {
+        throw 'Stable staging requires ABIGAIL_BUILD_PROFILE to be unset.'
+    }
+    if ($Channel -eq 'preview' -and [string]::IsNullOrWhiteSpace($previousTargetDir)) {
+        $env:CARGO_TARGET_DIR = Join-Path $repoRoot 'target/preview'
+    }
+    Build-Frontend -AppDir (Join-Path $repoRoot "hive-app") -Label "Abigail Hive"
+    Build-Frontend -AppDir (Join-Path $repoRoot "entity-runtime-app") -Label "Abigail Entity Runtime"
+
+    Write-Host "Building internal Abigail runtime binaries..."
+    if ($Channel -eq 'preview') {
+        # A global Hive overlay would give Runtime the Hive identifier. Build
+        # daemons without Tauri overrides, then compile each shell separately.
+        $releaseArgs = if ($Configuration -eq 'release') { @('--release') } else { @() }
+        $env:TAURI_CONFIG = $null
+        Invoke-Checked -FilePath "cargo" -Arguments (@('build', '--locked', '-p', 'hive-daemon', '-p', 'entity-daemon') + $releaseArgs) -WorkingDirectory $repoRoot
+        $env:TAURI_CONFIG = $profile.hiveOverlay | ConvertTo-Json -Depth 20 -Compress
+        Invoke-Checked -FilePath "cargo" -Arguments (@('build', '--locked', '-p', 'abigail-hive-app', '--features', 'tauri/custom-protocol') + $releaseArgs) -WorkingDirectory $repoRoot
+        $env:TAURI_CONFIG = $profile.runtimeOverlay | ConvertTo-Json -Depth 20 -Compress
+        Invoke-Checked -FilePath "cargo" -Arguments (@('build', '--locked', '-p', 'abigail-entity-runtime-app', '--features', 'tauri/custom-protocol') + $releaseArgs) -WorkingDirectory $repoRoot
+    } else {
+        # Embed the installer version in both stable shells while retaining any
+        # caller-provided stable configuration fields exactly as before.
+        $override = if ([string]::IsNullOrWhiteSpace($previousTauriConfig)) {
+            [pscustomobject]@{}
+        } else { $previousTauriConfig | ConvertFrom-Json }
+        $override | Add-Member -NotePropertyName version -NotePropertyValue $hiveVersion -Force
+        $env:TAURI_CONFIG = $override | ConvertTo-Json -Depth 20 -Compress
+        Invoke-Checked -FilePath "cargo" -Arguments $cargoArgs -WorkingDirectory $repoRoot
+    }
+    $env:TAURI_CONFIG = $previousTauriConfig
+
+    $targetRoot = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $repoRoot "target" }
+    if ($Channel -eq 'preview' -and -not [IO.Path]::IsPathFullyQualified($targetRoot)) {
+        $targetRoot = Join-Path $repoRoot $targetRoot
+    }
+    $binaryDir = Join-Path $targetRoot $Configuration
+    foreach ($app in @('hive-app', 'entity-runtime-app')) {
+        $frontendDir = Join-Path $repoRoot "$app/src-ui/dist"
+        $index = Get-Content -LiteralPath (Join-Path $frontendDir 'index.html') -Raw
+        $entries = @([regex]::Matches($index, 'src="\./([^"<>]+\.js)"') | ForEach-Object { $_.Groups[1].Value })
+        if ($entries.Count -eq 0) { throw "$app has no packaged JavaScript entry in index.html." }
+        $shellPath = Join-Path $binaryDir "abigail-$app.exe"
+        $shellVersion = (Get-Item -LiteralPath $shellPath).VersionInfo.ProductVersion
+        if ($shellVersion -ne $hiveVersion) { throw "$shellPath embeds version $shellVersion, expected $hiveVersion." }
+        # Compressed asset contents still retain their map keys. A dev-server build
+        # has no keys for the current production frontend and must never be staged.
+        $embeddedAssets = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($shellPath))
+        foreach ($entry in $entries) {
+            if (-not (Test-Path -LiteralPath (Join-Path $frontendDir $entry)) -or -not $embeddedAssets.Contains($entry)) {
+                throw "$shellPath does not embed current frontend entry $entry. Rebuild with --features tauri/custom-protocol."
+            }
+        }
+        if ($Channel -eq 'preview') {
+            $identifier = if ($app -eq 'hive-app') { $profile.hiveIdentifier } else { $profile.runtimeIdentifier }
+            # These compiled strings are necessary markers, not proof that the
+            # app consumes the profile contract. Runtime acceptance is separate.
+            if (-not $embeddedAssets.Contains($identifier) -or
+                -not $embeddedAssets.Contains($profile.launchContract.contract)) {
+                throw "$shellPath does not embed the preview identifier and launch contract marker."
+            }
+        }
+        $embeddedAssets = $null
+    }
+    $requiredBinaries = @(
+        "abigail-entity-runtime-app.exe",
+        "hive-daemon.exe",
+        "entity-daemon.exe"
+    )
+
+    New-Item -ItemType Directory -Force -Path $resourceDir | Out-Null
+    foreach ($binary in $requiredBinaries) {
+        $source = Join-Path $binaryDir $binary
+        if (-not (Test-Path $source)) {
+            throw "Missing required installer resource: $source"
+        }
+        Copy-Item -Path $source -Destination (Join-Path $resourceDir $binary) -Force
+    }
+
+    Write-Host "Staged Abigail installer resources:"
+    Get-ChildItem $resourceDir -File |
+        Where-Object { $_.Name -ne ".gitkeep" } |
+        Select-Object Name, Length |
+        Format-Table -AutoSize |
+        Out-String |
+        Write-Host
 } finally {
     $env:TAURI_CONFIG = $previousTauriConfig
+    $env:CARGO_TARGET_DIR = $previousTargetDir
+    $env:ABIGAIL_BUILD_PROFILE = $previousBuildProfile
 }
-
-$targetRoot = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $repoRoot "target" }
-$binaryDir = Join-Path $targetRoot $Configuration
-foreach ($app in @('hive-app', 'entity-runtime-app')) {
-    $frontendDir = Join-Path $repoRoot "$app/src-ui/dist"
-    $index = Get-Content -LiteralPath (Join-Path $frontendDir 'index.html') -Raw
-    $entries = @([regex]::Matches($index, 'src="\./([^"<>]+\.js)"') | ForEach-Object { $_.Groups[1].Value })
-    if ($entries.Count -eq 0) { throw "$app has no packaged JavaScript entry in index.html." }
-    $shellPath = Join-Path $binaryDir "abigail-$app.exe"
-    $shellVersion = (Get-Item -LiteralPath $shellPath).VersionInfo.ProductVersion
-    if ($shellVersion -ne $hiveVersion) { throw "$shellPath embeds version $shellVersion, expected $hiveVersion." }
-    # Compressed asset contents still retain their map keys. A dev-server build
-    # has no keys for the current production frontend and must never be staged.
-    $embeddedAssets = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($shellPath))
-    foreach ($entry in $entries) {
-        if (-not (Test-Path -LiteralPath (Join-Path $frontendDir $entry)) -or -not $embeddedAssets.Contains($entry)) {
-            throw "$shellPath does not embed current frontend entry $entry. Rebuild with --features tauri/custom-protocol."
-        }
-    }
-    $embeddedAssets = $null
-}
-$requiredBinaries = @(
-    "abigail-entity-runtime-app.exe",
-    "hive-daemon.exe",
-    "entity-daemon.exe"
-)
-
-New-Item -ItemType Directory -Force -Path $resourceDir | Out-Null
-foreach ($binary in $requiredBinaries) {
-    $source = Join-Path $binaryDir $binary
-    if (-not (Test-Path $source)) {
-        throw "Missing required installer resource: $source"
-    }
-    Copy-Item -Path $source -Destination (Join-Path $resourceDir $binary) -Force
-}
-
-Write-Host "Staged Abigail installer resources:"
-Get-ChildItem $resourceDir -File |
-    Where-Object { $_.Name -ne ".gitkeep" } |
-    Select-Object Name, Length |
-    Format-Table -AutoSize |
-    Out-String |
-    Write-Host

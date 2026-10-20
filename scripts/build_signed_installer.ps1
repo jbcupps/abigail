@@ -6,12 +6,15 @@ Prepare, check, and sign Abigail's current one-app Windows NSIS installer.
 Prepare builds both embedded desktop shells and the two daemons without a
 password or TOTP secret. Check validates the frozen source/configuration/bytes
 and signing tools without signing. Sign uses automated SSL.com credentials,
-verifies the actual installed payload, and runs the isolated synthetic contract.
+verifies the actual installed stable payload, and runs its isolated synthetic
+contract. Preview produces only a candidate; its separate compatibility gate
+must verify those exact installer bytes before publication.
 No phase publishes a release. The existing unsigned installer lane is unchanged.
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][ValidateSet('Prepare', 'Check', 'Sign')][string]$Phase,
+    [ValidateSet('stable', 'preview')][string]$Channel = 'stable',
     [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.0.75',
     [string]$TargetDir = $env:CARGO_TARGET_DIR,
     [string]$WorkDir,
@@ -23,11 +26,33 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $appRoot = Join-Path $repoRoot 'hive-app'
 $hiveConfigPath = Join-Path $appRoot 'tauri.conf.json'
 $resourceRoot = Join-Path $appRoot 'resources'
+. (Join-Path $PSScriptRoot 'packaging_profile.ps1')
 
 function Resolve-BuildPath([string]$Value, [string]$Fallback) {
     if ([string]::IsNullOrWhiteSpace($Value)) { $Value = $Fallback }
     if (-not [IO.Path]::IsPathFullyQualified($Value)) { $Value = Join-Path $repoRoot $Value }
     [IO.Path]::GetFullPath($Value)
+}
+function Resolve-PackagingBuildPaths {
+    param([string]$RequestedTargetDir, [string]$RequestedWorkDir)
+    $target = Resolve-BuildPath $RequestedTargetDir 'target'
+    # Treat an explicit target as a cache root, never a shared stable output.
+    if ($Channel -eq 'preview') { $target = Join-Path $target 'preview' }
+    [pscustomobject]@{
+        target = $target
+        work = Resolve-BuildPath $RequestedWorkDir (Join-Path $target "signed-release/$Version")
+    }
+}
+function Assert-PreparationChannel {
+    # An explicit shared WorkDir must not overwrite the other channel's
+    # preparation or leave its latest-success pointer beside a new candidate.
+    if (Test-Path -LiteralPath $statePath -PathType Leaf) {
+        $previous = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+        $previousChannel = if ($previous.PSObject.Properties['packaging']) { $previous.packaging.channel } else { 'stable' }
+        if ($previousChannel -cne $Channel) {
+            throw 'WorkDir already belongs to another packaging channel. Choose a separate work directory.'
+        }
+    }
 }
 function Write-BuildJson($Value, [string]$Path) {
     [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
@@ -187,6 +212,37 @@ function Assert-EmbeddedShell([string]$Path, $Frontend, [string]$ExpectedVersion
     foreach ($entry in $Frontend.javascript_entries) {
         if (-not $contents.Contains($entry)) { throw "$Path does not embed current frontend entry $entry." }
     }
+    if ($Channel -eq 'preview') {
+        $identifier = if ($Frontend.app -eq 'hive-app') { $packaging.hiveIdentifier } else { $packaging.runtimeIdentifier }
+        if (-not $contents.Contains($identifier) -or -not $contents.Contains($packaging.launchContract.contract)) {
+            throw "$Path does not embed the requested preview identity and launch metadata."
+        }
+    }
+}
+function Get-SignedBundleConfiguration {
+    # A bundle overlay cannot repair a shell compiled with the wrong identity.
+    # Prepare independently checks both compiled contexts before using this.
+    $config = if ($Channel -eq 'preview') {
+        $packaging.hiveOverlay | ConvertTo-Json -Depth 20 | ConvertFrom-Json -AsHashtable
+    } else { @{ version = $Version; mainBinaryName = 'Abigail' } }
+    $config.build = @{ beforeBuildCommand = ''; beforeBundleCommand = '' }
+    if (-not $config.Contains('bundle')) { $config.bundle = @{} }
+    $config.bundle.active = $true
+    $config.bundle.targets = @('nsis')
+    $config.bundle.createUpdaterArtifacts = $false
+    $config.bundle.resources = $resources
+    if (-not $config.bundle.Contains('windows')) { $config.bundle.windows = @{} }
+    $config.bundle.windows.signCommand = $null
+    $config.bundle.windows.certificateThumbprint = $null
+    $config.bundle.windows.timestampUrl = $null
+    $config.bundle.windows.tsp = $false
+    if (-not $config.bundle.windows.Contains('nsis')) { $config.bundle.windows.nsis = @{} }
+    $config.bundle.windows.nsis.compression = $Compression
+    $hookName = if ($Channel -eq 'preview') { 'nsis-preview-hooks.nsh' } else { 'nsis-mvp-hooks.nsh' }
+    $config.bundle.windows.nsis.installerHooks = (Join-Path $repoRoot "scripts/$hookName").Replace('\', '/')
+    if (-not $config.Contains('plugins')) { $config.plugins = @{} }
+    $config.plugins.updater = $null
+    $config
 }
 function Assert-PreparedState($State) {
     $currentSource = Get-SourceState
@@ -196,15 +252,30 @@ function Assert-PreparedState($State) {
     if ($State.version -ne $Version -or $State.compression -ne $Compression) {
         throw 'Requested version or compression changed. Run Prepare again.'
     }
+    if (-not $State.PSObject.Properties['packaging'] -or
+        ($State.packaging | ConvertTo-Json -Depth 8 -Compress) -cne ($packagingStamp | ConvertTo-Json -Depth 8 -Compress)) {
+        throw 'Packaging channel, identities, overlays or launch contract changed. Run Prepare again.'
+    }
     if ($State.configSha256 -ne (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash) {
         throw 'Prepared configuration changed. Run Prepare again.'
     }
     $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-    if ($config.version -ne $Version -or $config.mainBinaryName -ne 'Abigail' -or
+    if ($config.version -ne $Version -or $config.mainBinaryName -ne $packaging.mainBinaryName -or
         $config.bundle.createUpdaterArtifacts -ne $false -or $config.bundle.targets.Count -ne 1 -or
         $config.bundle.targets[0] -ne 'nsis' -or
         ($config.bundle.resources -join '|') -ne ($resources -join '|')) {
         throw 'Prepared configuration is not the current one-app NSIS release.'
+    }
+    if ($Channel -eq 'preview') {
+        $expectedConfig = Get-SignedBundleConfiguration
+        if ($config.productName -cne $packaging.productName -or $config.identifier -cne $packaging.hiveIdentifier -or
+            $config.bundle.windows.nsis.installMode -cne 'currentUser' -or
+            $config.bundle.windows.nsis.startMenuFolder -cne $packaging.productName -or
+            $config.bundle.windows.nsis.installerHooks -cne $expectedConfig.bundle.windows.nsis.installerHooks -or
+            ($config.plugins.'abigail-launch' | ConvertTo-Json -Depth 20 -Compress) -cne
+                ($packaging.launchContract | ConvertTo-Json -Depth 20 -Compress)) {
+            throw 'Prepared preview identity, install guards or launch contract changed.'
+        }
     }
     if (@($State.binaries).Count -ne 4) { throw 'Exactly four prepared executables are required.' }
     for ($index = 0; $index -lt 4; $index++) {
@@ -223,8 +294,11 @@ function Assert-PreparedState($State) {
 }
 
 if ($env:OS -ne 'Windows_NT') { throw 'Cloud installer signing requires Windows.' }
-$targetRoot = Resolve-BuildPath $TargetDir 'target'
-$work = Resolve-BuildPath $WorkDir (Join-Path $targetRoot "signed-release/$Version")
+$packaging = Get-AbigailPackagingProfile -RepositoryRoot $repoRoot -Channel $Channel -Version $Version
+$packagingStamp = Get-AbigailPackagingStamp -Profile $packaging
+$buildPaths = Resolve-PackagingBuildPaths -RequestedTargetDir $TargetDir -RequestedWorkDir $WorkDir
+$targetRoot = $buildPaths.target
+$work = $buildPaths.work
 $binaryRoot = Join-Path $targetRoot 'release'
 $preparedRoot = Join-Path $work 'prepared'
 $statePath = Join-Path $work 'build-state.json'
@@ -232,8 +306,8 @@ $configPath = Join-Path $work 'bundle-config.json'
 $resources = @('resources/abigail-entity-runtime-app.exe', 'resources/hive-daemon.exe', 'resources/entity-daemon.exe')
 $binaryInputs = @([pscustomobject]@{
     source_path = Join-Path $binaryRoot 'abigail-hive-app.exe'
-    prepared_path = Join-Path $preparedRoot 'Abigail.exe'
-    relative_path = 'Abigail.exe'
+    prepared_path = Join-Path $preparedRoot $packaging.launcherFileName
+    relative_path = $packaging.launcherFileName
 })
 foreach ($resource in $resources) {
     $binaryInputs += [pscustomobject]@{
@@ -245,6 +319,7 @@ foreach ($resource in $resources) {
 $previousTargetDir = $env:CARGO_TARGET_DIR
 $previousTauriConfig = $env:TAURI_CONFIG
 $previousSignedMainPath = $env:ABIGAIL_SIGNED_MAIN_PATH
+$previousSignedMainName = $env:ABIGAIL_SIGNED_MAIN_NAME
 $previousProcessPath = $env:PATH
 $previousSignToolPath = $env:TAURI_WINDOWS_SIGNTOOL_PATH
 $previousSigningEnvironment = @{}
@@ -258,6 +333,7 @@ try {
         foreach ($name in @('ESIGNER_PASSWORD', 'ESIGNER_TOTP_SECRET')) {
             if ([Environment]::GetEnvironmentVariable($name)) { throw 'Prepare must run without signing passwords or TOTP secrets.' }
         }
+        Assert-PreparationChannel
         foreach ($command in @('git', 'cargo', 'node', 'npm.cmd')) {
             if (-not (Get-Command $command -ErrorAction SilentlyContinue)) { throw "$command is required on PATH." }
         }
@@ -265,8 +341,16 @@ try {
         Invoke-Checked $tauriCli @('--version') $repoRoot
         $source = Get-SourceState
         New-Item -ItemType Directory -Force -Path $preparedRoot | Out-Null
-        $originalConfig = [IO.File]::ReadAllBytes($hiveConfigPath)
-        try {
+        if ($Channel -eq 'preview') {
+            # Preview identity must be compiled into each shell independently.
+            # The shared stable config files remain byte-for-byte unchanged.
+            $env:TAURI_CONFIG = $null
+            try {
+                & (Join-Path $PSScriptRoot 'stage_split_installer_resources.ps1') -Configuration release -Channel preview -Version $Version
+            } finally { $env:TAURI_CONFIG = $previousTauriConfig }
+        } else {
+          $originalConfig = [IO.File]::ReadAllBytes($hiveConfigPath)
+          try {
             # Stage reads Hive's version to compile both Tauri contexts. Apply
             # it before any frontend/native build, then restore exact bytes.
             $hiveConfig = [Text.Encoding]::UTF8.GetString($originalConfig) | ConvertFrom-Json -AsHashtable
@@ -278,9 +362,10 @@ try {
             Write-BuildJson $hiveConfig $hiveConfigPath
             $env:TAURI_CONFIG = $null
             & (Join-Path $PSScriptRoot 'stage_split_installer_resources.ps1') -Configuration release
-        } finally {
+          } finally {
             [IO.File]::WriteAllBytes($hiveConfigPath, $originalConfig)
             $env:TAURI_CONFIG = $previousTauriConfig
+          }
         }
         $frontends = @(foreach ($app in @('hive-app', 'entity-runtime-app')) { Read-FrontendAssets $app })
         Assert-EmbeddedShell $binaryInputs[0].source_path $frontends[0] $Version
@@ -295,22 +380,12 @@ try {
                 sha256 = (Get-FileHash -LiteralPath $binaryInput.prepared_path -Algorithm SHA256).Hash
             }
         })
-        $config = @{
-            version = $Version; mainBinaryName = 'Abigail'
-            build = @{ beforeBuildCommand = ''; beforeBundleCommand = '' }
-            bundle = @{
-                active = $true; targets = @('nsis'); createUpdaterArtifacts = $false; resources = $resources
-                windows = @{
-                    signCommand = $null; certificateThumbprint = $null; timestampUrl = $null; tsp = $false
-                    nsis = @{ compression = $Compression; installerHooks = (Join-Path $PSScriptRoot 'nsis-mvp-hooks.nsh').Replace('\', '/') }
-                }
-            }
-            plugins = @{ updater = $null }
-        }
+        $config = Get-SignedBundleConfiguration
         Write-BuildJson $config $configPath
         if ((Get-SourceState).sha256 -ne $source.sha256) { throw 'Source changed during preparation. Run Prepare again.' }
         $state = [ordered]@{
             sourceCommit = $source.commit; source = $source; version = $Version; compression = $Compression
+            packaging = $packagingStamp
             preparedUtc = [DateTime]::UtcNow.ToString('o'); binaries = $records; frontends = $frontends
             configSha256 = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
         }
@@ -347,7 +422,7 @@ try {
     $validationDir = Join-Path $output 'validation'
     $backupRoot = Join-Path $work "backups/$runId"
     New-Item -ItemType Directory -Force -Path $output, $validationDir, $backupRoot | Out-Null
-    $mainPath = Join-Path $binaryRoot 'Abigail.exe'
+    $mainPath = Join-Path $binaryRoot $packaging.launcherFileName
     $destinations = @($mainPath) + @($binaryInputs | Select-Object -Skip 1 | ForEach-Object { $_.source_path })
     for ($index = 0; $index -lt 4; $index++) {
         $path = $destinations[$index]
@@ -362,7 +437,8 @@ try {
         & (Join-Path $PSScriptRoot 'sign_windows_artifact.ps1') -Path $path
         $records += Assert-AbigailSignature -Path $path -Thumbprint $thumbprint
     }
-    $env:ABIGAIL_SIGNED_MAIN_PATH = Join-Path $output 'Abigail.exe'
+    $env:ABIGAIL_SIGNED_MAIN_NAME = $packaging.launcherFileName
+    $env:ABIGAIL_SIGNED_MAIN_PATH = Join-Path $output $packaging.launcherFileName
     $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json -AsHashtable
     $config.bundle.windows.signCommand = @{
         cmd = (Get-Command pwsh).Source
@@ -385,7 +461,7 @@ try {
     Copy-Item -LiteralPath $installers[0].FullName -Destination $installerPath
     $installerRecord = Assert-AbigailSignature -Path $installerPath -Thumbprint $thumbprint
     $records += $installerRecord
-    $payload = @([ordered]@{ name = 'Abigail'; relative_path = 'Abigail.exe'; sha256 = $mainRecord.sha256 })
+    $payload = @([ordered]@{ name = $packaging.productName; relative_path = $packaging.launcherFileName; sha256 = $mainRecord.sha256 })
     for ($index = 1; $index -lt 4; $index++) {
         $payload += [ordered]@{
             name = [IO.Path]::GetFileName($binaryInputs[$index].source_path)
@@ -397,10 +473,35 @@ try {
     Write-BuildJson ([ordered]@{
         version = $Version; configuration = 'release'; signed = $true; source_commit = $state.sourceCommit
         source_state_sha256 = $state.source.sha256; created_at_utc = [DateTime]::UtcNow.ToString('o')
+        packaging = $packagingStamp
         installer_path = $installerPath; installer_sha256 = $installerRecord.sha256
         payload = $payload; frontends = $state.frontends
     }) $manifestPath
     Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $validationDir 'mvp-build.json')
+    if ($Channel -eq 'preview') {
+        # Do not run the stable installer/harness against a preview or let its
+        # twelve fresh-profile stages stand in for coexistence acceptance.
+        # This branch never installs or launches the candidate on this host.
+        $report = [ordered]@{
+            sourceCommit = $state.sourceCommit; sourceStateSha256 = $state.source.sha256; version = $Version
+            packaging = $packagingStamp
+            verifiedUtc = [DateTime]::UtcNow.ToString('o'); expectedThumbprint = $thumbprint; artifacts = $records
+            installedContract = [ordered]@{
+                passed = $false; status = 'preview compatibility pending'; stages = 0; realModelValidation = $false
+            }
+            publicationEligible = $false
+        }
+        Write-BuildJson $report (Join-Path $output 'signature-report.json')
+        Write-BuildJson $report (Join-Path $output 'windows-signatures.json')
+        Copy-Item -LiteralPath $statePath -Destination (Join-Path $output 'prepared-build-state.json')
+        Write-BuildJson ([ordered]@{
+            source_commit = $state.sourceCommit; version = $Version; channel = $Channel; artifact_dir = $output
+            publication_eligible = $false; compatibility_status = 'pending'
+        }) (Join-Path $work 'latest-candidate.json')
+        if ($env:GITHUB_OUTPUT) { "artifact_dir=$output" | Add-Content -LiteralPath $env:GITHUB_OUTPUT }
+        Write-Host "Signed preview candidate only; installation and compatibility acceptance remain pending: $output"
+        return
+    }
     $installDir = Join-Path $repoRoot "target/manual-test/signed-installed-$runId"
     & (Join-Path $PSScriptRoot 'verify-mvp-windows.ps1') -InstallerPath $installerPath -ManifestPath $manifestPath -InstallDir $installDir
     Copy-Item -LiteralPath "$installDir-verification/installed-payload.json" -Destination (Join-Path $validationDir 'installed-payload.json')
@@ -480,6 +581,7 @@ try {
         $env:CARGO_TARGET_DIR = $previousTargetDir
         $env:TAURI_CONFIG = $previousTauriConfig
         $env:ABIGAIL_SIGNED_MAIN_PATH = $previousSignedMainPath
+        $env:ABIGAIL_SIGNED_MAIN_NAME = $previousSignedMainName
         $env:PATH = $previousProcessPath
         $env:TAURI_WINDOWS_SIGNTOOL_PATH = $previousSignToolPath
         foreach ($name in $previousSigningEnvironment.Keys) {

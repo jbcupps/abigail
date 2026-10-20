@@ -22,6 +22,10 @@ $testSource = $actualSource
 function Get-SourceState { $testSource }
 $Version = '0.0.75'
 $Compression = 'zlib'
+$Channel = 'stable'
+. (Join-Path $repoRoot 'scripts/packaging_profile.ps1')
+$packaging = Get-AbigailPackagingProfile -RepositoryRoot $repoRoot -Version $Version -Channel $Channel
+$packagingStamp = Get-AbigailPackagingStamp -Profile $packaging
 $resources = @('resources/abigail-entity-runtime-app.exe', 'resources/hive-daemon.exe', 'resources/entity-daemon.exe')
 $testRoot = Join-Path $repoRoot ('target/manual-test/signed-builder-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Path $testRoot | Out-Null
@@ -40,6 +44,7 @@ $binaryInputs = @(foreach ($index in 0..3) {
 })
 $state = [pscustomobject]@{
     sourceCommit = $testSource.commit; source = $testSource; version = $Version; compression = $Compression
+    packaging = $packagingStamp
     configSha256 = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
     binaries = @($binaryInputs | ForEach-Object {
         [pscustomobject]@{
@@ -60,6 +65,15 @@ function Assert-Rejected([string]$Name, [scriptblock]$Action, [string]$Message) 
 }
 Assert-PreparedState $state
 Write-Host 'PASS unchanged prepared inputs'
+$mutated = Copy-TestState
+$mutated.PSObject.Properties.Remove('packaging')
+Assert-Rejected 'legacy preparation without channel binding' { Assert-PreparedState $mutated } 'Packaging channel'
+$mutated = Copy-TestState
+$mutated.packaging.channel = 'preview'
+Assert-Rejected 'different packaging channel' { Assert-PreparedState $mutated } 'Packaging channel'
+$mutated = Copy-TestState
+$mutated.packaging.runtimeIdentifier = 'com.abigail.preview.entity-runtime'
+Assert-Rejected 'different compiled Runtime identity' { Assert-PreparedState $mutated } 'Packaging channel'
 $mutated = Copy-TestState
 $mutated.sourceCommit = '0' * 40
 Assert-Rejected 'different source commit' { Assert-PreparedState $mutated } 'Source changed'
@@ -110,6 +124,85 @@ foreach ($variant in @('updater', 'other-target', 'other-launcher', 'missing-res
 }
 Assert-PreparedState $state
 Write-Host 'PASS restored prepared inputs'
+$stablePaths = Resolve-PackagingBuildPaths
+if ($stablePaths.target -ne (Join-Path $repoRoot 'target')) { throw 'Stable target default changed.' }
+$Channel = 'preview'
+$packaging = Get-AbigailPackagingProfile -RepositoryRoot $repoRoot -Version $Version -Channel $Channel
+$packagingStamp = Get-AbigailPackagingStamp -Profile $packaging
+Assert-Rejected 'stable preparation reused as preview' { Assert-PreparedState $state } 'Packaging channel'
+$previewPaths = Resolve-PackagingBuildPaths
+$explicitPaths = Resolve-PackagingBuildPaths -RequestedTargetDir 'target/synthetic-cache'
+if ($previewPaths.target -ne (Join-Path $repoRoot 'target/preview') -or
+    $explicitPaths.target -ne (Join-Path $repoRoot 'target/synthetic-cache/preview') -or
+    $previewPaths.work -ne (Join-Path $previewPaths.target "signed-release/$Version")) {
+    throw 'Preview build outputs are not namespaced independently.'
+}
+Write-Host 'PASS stable and explicit/default preview target paths'
+$previewConfig = Get-SignedBundleConfiguration
+Write-BuildJson $previewConfig $configPath
+$previewState = Copy-TestState
+$previewState.packaging = $packagingStamp
+$previewState.configSha256 = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
+Assert-PreparedState $previewState
+Write-Host 'PASS unchanged preview preparation and merged bundle configuration'
+foreach ($variant in @('product', 'identifier', 'install-mode', 'shortcut', 'hook', 'root')) {
+    $invalid = $previewConfig | ConvertTo-Json -Depth 20 | ConvertFrom-Json -AsHashtable
+    switch ($variant) {
+        'product' { $invalid.productName = 'Abigail' }
+        'identifier' { $invalid.identifier = 'com.abigail' }
+        'install-mode' { $invalid.bundle.windows.nsis.installMode = 'both' }
+        'shortcut' { $invalid.bundle.windows.nsis.startMenuFolder = 'Abigail' }
+        'hook' { $invalid.bundle.windows.nsis.installerHooks = 'nsis-mvp-hooks.nsh' }
+        'root' { $invalid.plugins.'abigail-launch'.profileRoot.relativePath = 'Abigail' }
+    }
+    Write-BuildJson $invalid $configPath
+    $mutated = $previewState | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+    $mutated.configSha256 = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
+    Assert-Rejected "unsafe preview $variant" { Assert-PreparedState $mutated } 'preview identity'
+}
+Write-BuildJson $previewConfig $configPath
+$mutated = $previewState | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+$mutated.packaging.hiveOverlaySha256 = '0' * 64
+Assert-Rejected 'changed preview overlay bytes' { Assert-PreparedState $mutated } 'Packaging channel'
+$mutated = $previewState | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+$mutated.packaging.launchContractSha256 = '0' * 64
+Assert-Rejected 'changed launch contract' { Assert-PreparedState $mutated } 'Packaging channel'
+Assert-PreparedState $previewState
+$Channel = 'stable'
+$packaging = Get-AbigailPackagingProfile -RepositoryRoot $repoRoot -Version $Version -Channel $Channel
+$packagingStamp = Get-AbigailPackagingStamp -Profile $packaging
+Assert-Rejected 'preview preparation reused as stable' { Assert-PreparedState $previewState } 'Packaging channel'
+# The preview candidate return must precede any installer or legacy harness
+# invocation. This is a static guard, not a claim of compatibility acceptance.
+$builderSource = [IO.File]::ReadAllText($builder)
+$candidateStart = $builderSource.IndexOf("if (`$Channel -eq 'preview') {", $builderSource.IndexOf("`$manifestPath ="))
+$installStart = $builderSource.IndexOf("& (Join-Path `$PSScriptRoot 'verify-mvp-windows.ps1')", $candidateStart)
+$candidateSection = $builderSource.Substring($candidateStart, $installStart - $candidateStart)
+if ($candidateSection -notmatch '(?m)^\s+return\s*$' -or
+    $candidateSection -notmatch 'publicationEligible = \$false' -or
+    $candidateSection -notmatch 'latest-candidate.json' -or
+    $candidateSection -match 'latest-success.json') {
+    throw 'Preview candidate must not execute stable acceptance or claim publication readiness.'
+}
+Write-Host 'PASS preview candidate stops before installer execution and success marker'
+$statePath = Join-Path $testRoot 'build-state.json'
+Assert-PreparationChannel
+Write-BuildJson $state $statePath
+Assert-PreparationChannel
+$Channel = 'preview'
+Assert-Rejected 'preview Prepare overwrites stable work directory' { Assert-PreparationChannel } 'WorkDir already belongs'
+Write-BuildJson $previewState $statePath
+Assert-PreparationChannel
+$Channel = 'stable'
+Assert-Rejected 'stable Prepare overwrites preview work directory' { Assert-PreparationChannel } 'WorkDir already belongs'
+$legacyState = Copy-TestState
+$legacyState.PSObject.Properties.Remove('packaging')
+Write-BuildJson $legacyState $statePath
+Assert-PreparationChannel
+$Channel = 'preview'
+Assert-Rejected 'preview Prepare overwrites legacy stable work directory' { Assert-PreparationChannel } 'WorkDir already belongs'
+$Channel = 'stable'
+Write-Host 'PASS new/same-channel preparation and legacy stable reprepare'
 # Exercise the real phase entrypoint with synthetic secrets. It must stop before
 # discovering tools or touching build files, and must not print secret values.
 $blockedWork = Join-Path $testRoot 'blocked-secret-prepare'

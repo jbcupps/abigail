@@ -2,7 +2,7 @@
 
 This file tracks the current plan for agents working in the Abigail repository.
 
-## Current State (2026-03-05)
+## Current State (2026-10-20)
 
 Abigail is the private Entity Coordinator and Manager for real homes and families. Its product mission is to put persistent, highly configurable, ethically governed AI Entities into the hands of everyday people through one easy install and one obvious app launch. The user (mentor/family head) creates individual Entities that the family actually interacts with. Abigail handles coordination, memory, skills, and security in the background.
 
@@ -11,7 +11,7 @@ Abigail is the private Entity Coordinator and Manager for real homes and familie
 - The active implementation split is two app roots: `hive-app` for control-plane work and `entity-runtime-app` for the chat/runtime surface, but the family-facing product must install and launch as one `Abigail` app.
 - The full installer lane must package Hive, Entity Runtime, `hive-daemon`, and `entity-daemon` together so non-technical families never handle separate binaries.
 - `beta` is the permanent primary iteration branch. Agents should target PRs and automation at `beta` for UAT builds, then promote validated beta changes to `main`.
-- Every push to `beta` must produce a properly tagged beta installer prerelease for UAT using the `vX.Y.Z-beta.N` tag pattern.
+- Beta installer prereleases use the `vX.Y.Z-beta.N` tag pattern and must pass signing and release gates. The fixed `/preview/` route selects only an explicitly accepted build; a beta push does not advance that pointer automatically.
 - Mentor chat monitor preprompt flow is in place and out-of-band monitors remain non-blocking.
 - DevOps Forge worker is active and subscribed to `topic.skill.forge.request`.
 - Forge pipeline writes sandbox-gated artifacts to `skills/dynamic/`, updates `skills/registry.toml`, and publishes `topic.skill.forge.response`.
@@ -40,29 +40,32 @@ Abigail is the private Entity Coordinator and Manager for real homes and familie
 4. Harden Forge envelope validation and failure telemetry (keep it invisible and safe for the user).
 5. Expand end-to-end coverage for forge request/response and watcher hot-reload.
 6. Keep memory/safety/id-superego observers out-of-band (non-blocking chat path) so the family experience stays smooth.
-7. Keep the unsigned stabilization lane free of installer upgrade-preserve logic, updater assumptions, and Windows signing dependencies.
+7. Keep unsigned artifact-only stabilization independent of signing and updater credentials. Published stable and beta installers require signing.
+8. Preserve an ongoing preview Entity in its own channel/profile across accepted upgrades. Separate creation tests use disposable fixtures. Require full cold-backup, migration, restore, path/process isolation, and coexistence acceptance before selecting a preview; see `docs/PREVIEW_CHANNEL.md`.
 
 ## Definition of Done for Next Phase
 
 - Forge request envelope accepts code + markdown and persists deterministically.
 - Windows installer installs Abigail as one app and bundles the split Hive/Runtime daemons as internal resources.
-- Merges to `beta` automatically create tagged beta prereleases for UAT; stable releases come only from promoted `main`.
+- Merges to `beta` request tagged beta prereleases subject to signing and release gates; stable releases come only from promoted `main`. Selecting a preview additionally requires the compatibility acceptance contract.
 - Superego and sandbox gates prevent unsafe mutations while staying invisible to the user.
 - Registry update reliably triggers watcher-based hot-reload.
 - End-to-end coverage validates success, blocked, and error fallback behavior.
-- Legacy compatibility paths that conflict with the current dev UX are removed instead of preserved.
+- Arbitrary development compatibility is not promised, but ongoing preview Entity preservation is an acceptance gate. Binary rollback cannot substitute for restoring a compatible complete profile snapshot.
 
 ## Documentation Sync
 
-### First Signal integration (2026-10-20)
+### Combined preview development (2026-10-20)
 
-- Integrate on isolated `dev/first-signal-integration-0.0.76`, based on main `17b636b` (including signed stable release safeguards), preserving `dev/first-signal` at `8b44492`. This bounded main-based development integration is authorized separately from normal beta iteration. Keep main conversation restoration and model setup behavior. Tests and independent review passed; committing and pushing this development branch is authorized. Main/beta merges, tags, and releases remain held while acceptance gaps are open. Beta Genesis at `ea92eff` remains separate. See `documents/FIRST_SIGNAL_INTEGRATION.md` and `documents/DEVELOPMENT.md`.
+- The selected isolated integration branch is `dev/preview-combined-0.0.76`. Its published inputs are app `ca6a7527da8787be6b5315e13e4fc228287ce15d` from `dev/first-signal-integration-0.0.76` and packaging `de65e7e47fa35c7b742421274db5e1fac4720f8d` from `dev/preview-packaging-0.0.76`, including release scaffold `6b246d3ab07322a899106d1198bfafba3a7b2309`. Both are based on stable main `17b636b9e5f10b812deb287ad2c6637188991ec2`. Preserve the original development branches, main conversation restoration, model setup and signing/provenance safeguards.
+- Combining, validating, committing and pushing this dev candidate is authorized separately from normal beta iteration. Main/beta merges, signing, tags, release/Pages publication, installer execution, real credentials and new access grants remain outside this task. Stable 0.0.76 remains the available release. Beta `ea92effd31f554f74bb5e109deaa42876ec4f06f` Genesis, static-runtime and installer-lock changes remain separate for explicit later comparison; do not merge beta blindly.
 - Hive creation and inline Entity interaction share the active Runtime presence source. Provider/model management stays in Hive.
 - Creation uses a durable client key in the existing Hive registry, exact lookup, and same-key replay. Unknown transport outcomes never authorize a fresh key.
 - `/v1/entities/:id/presence` stores presentation metadata only. Do not interpret imported brief text as authority or silently inject it into runtime instructions.
 - The browser design preview and synthetic HTTP fixture are explicitly distinct from live runtime/model activity. See `documents/FIRST_SIGNAL.md` for scope, validation, and integration gaps.
-- The preview release contract is aligned with separate release scaffolding `6b246d3` in `documents/PREVIEW_RELEASE_ALIGNMENT.md`. The application source now implements shared preview preflight/context, scoped paths, credential namespaces, process ownership and fail-closed native transport; final synthetic evidence is separate from installed acceptance. Complete-profile cold backup/restore is the next unimplemented slice. Real OS credential integration and exact signed-installer acceptance remain open. Do not run a normal preview against real user data.
-- The assigned packaging worker owns Tauri packaging configs/overlays and the staging/signed-installer scripts. Application work owns Rust config/profile/path/process isolation and continuity tests. Keep these branches separate until the parent selects an integration source; do not push beta merely to obtain a build.
+- The implemented preview contract is recorded in `documents/PREVIEW_RELEASE_ALIGNMENT.md` and `docs/PREVIEW_PACKAGING.md`. The combined candidate aligns both descriptive runtime overlays, their validator, tests and documentation with the application source. Build all four binaries with `ABIGAIL_BUILD_PROFILE=preview`; roots, UUIDs and endpoints are resolved and validated at launch, never frozen in release metadata. Reprepare source, overlay, contract and executable hashes after changes; preserve stable defaults and all signing/publication gates.
+- The application's prior 167 selected Rust and 373 frontend tests are component evidence, not combined build, lifecycle or installed acceptance. Complete-profile cold snapshot/restore is assigned separately to the app worker and is not implemented by this integration. Real OS credentials, combined lifecycle, Windows install/upgrade/uninstall/restore and all ten exact-installer acceptance stages remain open. Do not run a normal preview against real user data.
+- Use this isolated checkout and the authorized published sources. Do not edit prior workers' worktrees or retry denied cross-worktree Git-directory inspection by another route. Do not resume blocked vulnerability remediation. See `documents/FIRST_SIGNAL_INTEGRATION.md` and `documents/DEVELOPMENT.md` for the original work and current development publication boundary.
 
 When changing routing or monitor behavior, update:
 - `README.md` (user-facing family story)

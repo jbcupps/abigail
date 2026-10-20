@@ -1,0 +1,24 @@
+PASS default stable launcher
+PASS explicit stable launcher
+PASS explicit preview launcher
+PASS stable default does not capture preview
+PASS preview selection does not capture stable
+PASS no capture destination
+PASS preview selection does not capture abigail-entity-runtime-app.exe
+PASS preview selection does not capture hive-daemon.exe
+PASS preview selection does not capture entity-daemon.exe
+PASS preview selection does not capture setup.exe
+PASS preview selection does not capture uninstaller.exe
+PASS preview selection does not capture nst123.tmp
+PASS invalid configured name [Other.exe]
+PASS invalid configured name [../Abigail.exe]
+PASS invalid configured name [Abigail Preview]
+PASS invalid configured name [ ]
+PASS invalid configured name [abigail.exe]
+PASS preview cannot be captured as stable
+PASS stable cannot be captured as preview
+PASS destination casing must match selected name
+PASS relative destination rejected
+PASS build executable cannot be overwritten
+PASS stable capture still works after preview cases
+PASS: 23 synthetic signed-launcher capture cases; no signing or executable execution.
