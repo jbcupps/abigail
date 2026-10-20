@@ -306,6 +306,54 @@ mod tests {
         std::fs::read(directory.join("config.json")).unwrap()
     }
 
+    fn seed_ongoing_files(directory: &Path) {
+        let mut config = AppConfig::load(&directory.join("config.json")).unwrap();
+        config.primary_color = Some("#c7a86c".to_string());
+        config.save(&directory.join("config.json")).unwrap();
+        std::fs::create_dir_all(directory.join("docs/notes")).unwrap();
+        std::fs::write(
+            directory.join("docs/notes/continuity.md"),
+            b"Retain this synthetic ongoing Entity note across updates.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            directory.join("presence.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "name": "Ongoing",
+                "purpose": "Retain this synthetic presentation brief.",
+                "temperament": "curious",
+                "boundaries": "Ask before changing saved work.",
+                "identity": "lumen"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn snapshot_files(directory: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+        fn visit(
+            root: &Path,
+            directory: &Path,
+            files: &mut std::collections::BTreeMap<PathBuf, Vec<u8>>,
+        ) {
+            for entry in std::fs::read_dir(directory).unwrap() {
+                let entry = entry.unwrap();
+                let path = entry.path();
+                if entry.file_type().unwrap().is_dir() {
+                    visit(root, &path, files);
+                } else {
+                    files.insert(
+                        path.strip_prefix(root).unwrap().to_path_buf(),
+                        std::fs::read(path).unwrap(),
+                    );
+                }
+            }
+        }
+        let mut files = std::collections::BTreeMap::new();
+        visit(directory, directory, &mut files);
+        files
+    }
+
     #[test]
     fn absent_lookup_does_not_write_or_allocate() {
         let root = TestRoot::new();
@@ -631,5 +679,168 @@ mod tests {
         let gc = GlobalConfig::load(&root.0).unwrap();
         assert_eq!(gc.agents.len(), 2);
         assert!(gc.creation_attempts.is_empty());
+    }
+
+    #[test]
+    fn populated_legacy_registry_preserves_entities_and_settings_when_adding_creation_ledger() {
+        let root = TestRoot::new();
+        let manager = root.manager();
+        let (ongoing_id, ongoing_dir) = manager.create_agent("Ongoing").unwrap();
+        let (other_id, _) = manager.create_agent("Other existing Entity").unwrap();
+        seed_ongoing_files(&ongoing_dir);
+        let ongoing_files = snapshot_files(&ongoing_dir);
+        let mut old = serde_json::to_value(GlobalConfig::load(&root.0).unwrap()).unwrap();
+        old.as_object_mut().unwrap().remove("creation_attempts");
+        old["default_theme"] = serde_json::json!("phosphor");
+        let existing_entries = old["agents"].clone();
+        let legacy_bytes = serde_json::to_vec_pretty(&old).unwrap();
+        std::fs::write(GlobalConfig::config_path(&root.0), &legacy_bytes).unwrap();
+        drop(manager);
+
+        let upgraded = root.manager();
+        {
+            let gc = upgraded.global_config.read().unwrap();
+            assert!(gc.creation_attempts.is_empty());
+            assert_eq!(serde_json::to_value(&gc.agents).unwrap(), existing_entries);
+            assert_eq!(gc.default_theme, "phosphor");
+        }
+        // Opening a populated legacy registry must not rewrite it.
+        assert_eq!(
+            std::fs::read(GlobalConfig::config_path(&root.0)).unwrap(),
+            legacy_bytes
+        );
+        let key = Uuid::new_v4().to_string();
+        let (disposable_id, _) = upgraded
+            .create_agent_idempotent("Disposable", &key)
+            .unwrap();
+        assert_ne!(disposable_id, ongoing_id);
+        assert_ne!(disposable_id, other_id);
+        drop(upgraded);
+
+        let reopened = root.manager();
+        let gc = reopened.global_config.read().unwrap();
+        let mut after = serde_json::to_value(&*gc).unwrap();
+        assert_eq!(gc.agents.len(), 3);
+        assert_eq!(
+            after["agents"].as_array().unwrap()[..2],
+            existing_entries.as_array().unwrap()[..]
+        );
+        // The first ordinary mutation adds only its Entity and creation ledger.
+        after["agents"] = existing_entries;
+        after.as_object_mut().unwrap().remove("creation_attempts");
+        assert_eq!(after, old);
+        assert_eq!(snapshot_files(&ongoing_dir), ongoing_files);
+    }
+
+    #[test]
+    fn disposable_same_name_lifecycle_preserves_ongoing_uuid_and_saved_files() {
+        let root = TestRoot::new();
+        let ongoing_key = Uuid::new_v4().to_string();
+        let disposable_key = Uuid::new_v4().to_string();
+        let manager = root.manager();
+        let ongoing = manager
+            .create_agent_idempotent("Ongoing", &ongoing_key)
+            .unwrap();
+        seed_ongoing_files(&ongoing.1);
+        let ongoing_files = snapshot_files(&ongoing.1);
+        let disposable = manager
+            .create_agent_idempotent("Ongoing", &disposable_key)
+            .unwrap();
+        assert_ne!(ongoing.0, disposable.0);
+        assert_ne!(ongoing.1, disposable.1);
+        drop(manager);
+
+        let reopened = root.manager();
+        assert_eq!(
+            reopened
+                .create_agent_idempotent("Ongoing", &disposable_key)
+                .unwrap(),
+            disposable
+        );
+        reopened.delete_agent(&disposable.0).unwrap();
+        assert!(!disposable.1.exists());
+        assert_eq!(snapshot_files(&ongoing.1), ongoing_files);
+        drop(reopened);
+
+        let reopened = root.manager();
+        assert_eq!(
+            reopened.entity_creation_status(&disposable_key).unwrap(),
+            AgentCreationStatus::Unavailable {
+                name: "Ongoing".to_string(),
+                id: disposable.0.clone(),
+            }
+        );
+        assert!(matches!(
+            reopened.create_agent_idempotent("Ongoing", &disposable_key),
+            Err(AgentCreationError::Unavailable(_))
+        ));
+        assert_eq!(
+            reopened
+                .create_agent_idempotent("Ongoing", &ongoing_key)
+                .unwrap(),
+            ongoing
+        );
+        let next = reopened
+            .create_agent_idempotent("Ongoing", &Uuid::new_v4().to_string())
+            .unwrap();
+        assert_ne!(next.0, ongoing.0);
+        assert_ne!(next.0, disposable.0);
+        reopened.delete_agent(&next.0).unwrap();
+        drop(reopened);
+
+        let final_manager = root.manager();
+        let agents = final_manager.list_agents().unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].id, ongoing.0);
+        assert_eq!(agents[0].name, "Ongoing");
+        assert_eq!(snapshot_files(&ongoing.1), ongoing_files);
+    }
+
+    #[test]
+    fn failed_disposable_creation_resumes_reserved_uuid_without_touching_ongoing_entity() {
+        let root = TestRoot::new();
+        let manager = root.manager();
+        let (ongoing_id, ongoing_dir) = manager.create_agent("Ongoing").unwrap();
+        seed_ongoing_files(&ongoing_dir);
+        let ongoing_files = snapshot_files(&ongoing_dir);
+        let key = Uuid::new_v4().to_string();
+        let reserved = reserve(&manager, &key);
+        let disposable_dir = manager.identities_dir().join(&reserved.entity_id);
+        // A file where the new Entity directory belongs simulates an ordinary
+        // initialization failure after the durable reservation was written.
+        std::fs::write(&disposable_dir, b"synthetic temporary obstruction").unwrap();
+        assert!(matches!(
+            manager.create_agent_idempotent("Signal", &key),
+            Err(AgentCreationError::Storage(_))
+        ));
+        assert_eq!(snapshot_files(&ongoing_dir), ongoing_files);
+        drop(manager);
+
+        let reopened = root.manager();
+        assert_eq!(reopened.list_agents().unwrap()[0].id, ongoing_id);
+        assert_eq!(
+            reopened.entity_creation_status(&key).unwrap(),
+            AgentCreationStatus::Reserved {
+                name: "Signal".to_string(),
+            }
+        );
+        std::fs::remove_file(&disposable_dir).unwrap();
+        let recovered = reopened.create_agent_idempotent("Signal", &key).unwrap();
+        assert_eq!(recovered.0, reserved.entity_id);
+        assert_eq!(recovered.1, disposable_dir);
+        assert_ne!(recovered.0, ongoing_id);
+        reopened.delete_agent(&recovered.0).unwrap();
+        drop(reopened);
+
+        let final_manager = root.manager();
+        let agents = final_manager.list_agents().unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].id, ongoing_id);
+        assert_eq!(snapshot_files(&ongoing_dir), ongoing_files);
+        assert!(!disposable_dir.exists());
+        assert!(matches!(
+            final_manager.create_agent_idempotent("Signal", &key),
+            Err(AgentCreationError::Unavailable(_))
+        ));
     }
 }

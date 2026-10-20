@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ChatPanel from "./ChatPanel";
+import { defaultProfile } from "../presence/profile";
 
 const json = (data: unknown) => new Response(JSON.stringify({ ok: true, data }), { headers: { "Content-Type": "application/json" } });
 const sse = (body: string) => new Response(body, { headers: { "Content-Type": "text/event-stream" } });
@@ -22,7 +23,7 @@ describe("Durable Entity conversations", () => {
       history.push({ role: "user", content: request.message }, { role: "assistant", content: "Three in the afternoon." });
       return sse('event: token\ndata: Three in the afternoon.\n\nevent: done\ndata: {"reply":"Three in the afternoon."}\n\n');
     }));
-    const first = render(<ChatPanel baseUrl={base} />);
+    const first = render(<ChatPanel baseUrl={base} expectedEntityId="ada" />);
     expect(await screen.findByText("Friday at 3 PM.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Ada" })).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "YOUR MESSAGE" }), { target: { value: "What time?" } });
@@ -31,9 +32,56 @@ describe("Durable Entity conversations", () => {
     expect(await screen.findByText("Three in the afternoon.")).toBeInTheDocument();
     expect(calls).toBe(1);
     first.unmount();
-    render(<ChatPanel baseUrl="http://127.0.0.1:50001" />);
+    render(<ChatPanel baseUrl="http://127.0.0.1:50001" expectedEntityId="ada" />);
     expect(await screen.findByText("Three in the afternoon.")).toBeInTheDocument();
     expect(screen.getByText("Remember our appointment")).toBeInTheDocument();
+  });
+
+  it("never exposes another Entity's history or sends when a selected runtime URL answers with a different ID", async () => {
+    let entityId = "other";
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      requests.push(url);
+      if (url.includes("/v1/status")) return json({ entity_id: entityId, name: entityId === "ada" ? "Ada" : "Other Entity" });
+      if (url.includes("/history")) return json({
+        session_id: `persisted-${entityId}`,
+        messages: [{ role: "assistant", content: entityId === "ada" ? "Ada's fixture history" : "Other Entity's fixture history" }],
+      });
+      throw new Error("No message should be sent");
+    }));
+    render(<ChatPanel baseUrl={base} expectedEntityId="ada" profile={defaultProfile("Ada")} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/different Entity/i);
+    expect(screen.queryByText("Other Entity's fixture history")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "YOUR MESSAGE" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    fireEvent.submit(screen.getByRole("textbox").closest("form")!);
+    expect(requests.some(url => url.includes("/chat/stream"))).toBe(false);
+
+    // Explicit retry may restore the selected identity after the endpoint is corrected.
+    entityId = "ada";
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Ada's fixture history")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "YOUR MESSAGE" })).toBeEnabled();
+    expect(screen.queryByText("Other Entity's fixture history")).not.toBeInTheDocument();
+  });
+
+  it("clears the old transcript and draft when a replacement port does not belong to the selected Entity", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const original = url.startsWith(base);
+      if (url.includes("/v1/status")) return json({ entity_id: original ? "ada" : "other", name: original ? "Ada" : "Other" });
+      return json({ session_id: original ? "ada-session" : "other-session", messages: [
+        { role: "assistant", content: original ? "Ada fixture conversation" : "Other fixture conversation" },
+      ] });
+    }));
+    const view = render(<ChatPanel baseUrl={base} expectedEntityId="ada" />);
+    await screen.findByText("Ada fixture conversation");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Unsent fixture draft" } });
+    view.rerender(<ChatPanel baseUrl="http://127.0.0.1:50001" expectedEntityId="ada" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/different Entity/i);
+    expect(screen.queryByText("Ada fixture conversation")).not.toBeInTheDocument();
+    expect(screen.queryByText("Other fixture conversation")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toHaveValue("");
+    expect(screen.getByRole("textbox")).toBeDisabled();
   });
 
   it("blocks new messages when history fails, and restores them on Retry", async () => {

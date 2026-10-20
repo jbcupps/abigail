@@ -4,6 +4,8 @@ Date: 2026-10-20. Branch: `dev/first-signal-integration-0.0.76`.
 Base: `17b636b9e5f10b812deb287ad2c6637188991ec2`.
 Validation was recorded before the authorized development commit/push. No release or full daemon startup occurred.
 
+Later maintained/disposable Entity checks and the selected-Entity identity fix are recorded in [preview continuity validation](preview-continuity-validation.md). Its UI/backend counts replace the corresponding earlier counts below. The proposed persistent preview boundary remains unimplemented; see [the application/packaging contract](../../documents/PREVIEW_PROFILE_CONTRACT.md).
+
 ## Completed
 
 - Hive UI: 264 tests passed. Runtime UI: 68 tests passed.

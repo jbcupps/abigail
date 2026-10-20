@@ -7,6 +7,8 @@ import type { EntityProfile } from "../presence/profile";
 
 interface ChatPanelProps {
   baseUrl: string;
+  /** The selected Entity's stable ID; runtime addresses can change or be reused. */
+  expectedEntityId?: string;
   greeting?: string;
   showHeader?: boolean;
   profile?: EntityProfile;
@@ -42,7 +44,7 @@ function cancelStream(stream: ChatGatewayStream) {
   void stream.dispose().catch(() => undefined);
 }
 
-export default function ChatPanel({ baseUrl, greeting, showHeader = true, profile, profileNotice, onBack, demo = false }: ChatPanelProps) {
+export default function ChatPanel({ baseUrl, expectedEntityId, greeting, showHeader = true, profile, profileNotice, onBack, demo = false }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [runtimeName, setRuntimeName] = useState("Your Entity");
   const [loading, setLoading] = useState(!demo);
@@ -106,6 +108,11 @@ export default function ChatPanel({ baseUrl, greeting, showHeader = true, profil
       timer = setTimeout(() => controller.abort(new DOMException("Conversation restore timed out.", "TimeoutError")), 15_000);
       void Promise.race([loadConversation(baseUrl, controller.signal), interrupted]).then(snapshot => {
         if (connection.disposed || controller.signal.aborted) return;
+        if (expectedEntityId !== undefined && snapshot.entity_id !== expectedEntityId) {
+          setLoadError("This runtime belongs to a different Entity. Return to Hive and reopen the selected Entity, or retry after its connection is corrected. No message was sent.");
+          setActivity("error");
+          return;
+        }
         setRuntimeName(snapshot.name || "Your Entity");
         sessionIdRef.current = snapshot.session_id;
         connection.ready = true;
@@ -131,7 +138,7 @@ export default function ChatPanel({ baseUrl, greeting, showHeader = true, profil
       if (!turn) return;
       if (turn.stream) cancelStream(turn.stream);
     };
-  }, [baseUrl, demo, gateway, loadAttempt]);
+  }, [baseUrl, expectedEntityId, demo, gateway, loadAttempt]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });

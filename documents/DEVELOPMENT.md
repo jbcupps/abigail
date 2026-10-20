@@ -42,6 +42,8 @@ See [First Signal](FIRST_SIGNAL.md) for the browser preview, synthetic transport
 
 The current integration branch starts at main `17b636b`, with First Signal applied as a reviewed patch. Integration tests and independent review passed; development commit/push is authorized. Use the explicit destination below only from that integration worktree. The remaining mobile and full-daemon acceptance gaps are recorded in `FIRST_SIGNAL_INTEGRATION.md`. No release workflow, tag, or main/beta merge is part of this bounded task.
 
+The maintained/disposable Entity follow-up is documented in [PREVIEW_DATA_COMPATIBILITY.md](PREVIEW_DATA_COMPATIBILITY.md). A persistent preview needs the application and packaging boundary proposed in [PREVIEW_PROFILE_CONTRACT.md](PREVIEW_PROFILE_CONTRACT.md); the current data-root environment overrides do not provide that isolation. Do not treat this development branch as accepted for an ongoing production profile or signed preview update.
+
 ```sh
 git -C "<worktrees>/first-signal-integration" push -u origin HEAD:refs/heads/dev/first-signal-integration-0.0.76
 ```

@@ -628,7 +628,9 @@ mod tests {
         let path = root.join("memory.db");
 
         let test_bin = std::env::current_exe().unwrap();
-        for action in ["write", "read"] {
+        // Each phase is a new process, so none can observe an earlier phase's
+        // in-process engine cache. These are synthetic scopes in a fresh store.
+        for action in ["write", "read", "delete-disposable", "read-after-delete"] {
             let status = std::process::Command::new(&test_bin)
                 .env("ABIGAIL_PERSISTENCE_REOPEN_CHILD", action)
                 .env("ABIGAIL_PERSISTENCE_REOPEN_PATH", &path)
@@ -659,37 +661,69 @@ mod tests {
             created_at: String,
         }
 
-        match action.to_string_lossy().as_ref() {
+        let ongoing_scope = EntityScope::Entity("ongoing-synthetic".to_string());
+        let disposable_scope = EntityScope::Entity("disposable-synthetic".to_string());
+        let turn = |content: &str| TurnDoc {
+            id: "turn-1".to_string(),
+            session_id: "session-1".to_string(),
+            role: "user".to_string(),
+            content: content.to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let ongoing_turn = turn("synthetic ongoing conversation");
+        let disposable_turn = turn("synthetic disposable conversation");
+        let action = action.to_string_lossy();
+
+        match action.as_ref() {
             "write" => {
-                let handle =
-                    PersistenceHandle::open(&path, EntityScope::Entity("entity-a".to_string()))
-                        .unwrap();
-                handle
-                    .create(
-                        "conversation_turn",
-                        "turn-1",
-                        &TurnDoc {
-                            id: "turn-1".to_string(),
-                            session_id: "session-1".to_string(),
-                            role: "user".to_string(),
-                            content: "hello durable store".to_string(),
-                            created_at: "2026-01-01T00:00:00Z".to_string(),
-                        },
-                    )
+                // Deliberately identical record/session IDs must remain distinct
+                // across Entity databases inside the same Hive-owned store.
+                let ongoing = PersistenceHandle::open(&path, ongoing_scope).unwrap();
+                let disposable = PersistenceHandle::open(&path, disposable_scope).unwrap();
+                // Production Hive has no conversation table. Define an empty
+                // synthetic one so its isolation query must succeed and return
+                // no Entity records, rather than failing on a missing table.
+                let hive = PersistenceHandle::open(&path, EntityScope::Hive).unwrap();
+                hive.execute("DEFINE TABLE conversation_turn SCHEMALESS;", &[])
+                    .unwrap();
+                ongoing
+                    .create("conversation_turn", "turn-1", &ongoing_turn)
+                    .unwrap();
+                disposable
+                    .create("conversation_turn", "turn-1", &disposable_turn)
                     .unwrap();
             }
-            "read" => {
-                let reopened =
-                    PersistenceHandle::open(&path, EntityScope::Entity("entity-a".to_string()))
+            "read" | "read-after-delete" => {
+                for (scope, expected) in [
+                    (ongoing_scope, Some(ongoing_turn)),
+                    (
+                        disposable_scope,
+                        (action == "read").then_some(disposable_turn),
+                    ),
+                    (EntityScope::Hive, None),
+                ] {
+                    let reopened = PersistenceHandle::open(&path, scope.clone()).unwrap();
+                    let turns = reopened
+                        .query_vec::<TurnDoc>(
+                            "SELECT * FROM conversation_turn WHERE session_id = $session_id",
+                            &[QueryBinding::new("session_id", "session-1").unwrap()],
+                        )
                         .unwrap();
-                let turns = reopened
-                    .query_vec::<TurnDoc>(
-                        "SELECT * FROM conversation_turn WHERE session_id = $session_id",
-                        &[QueryBinding::new("session_id", "session-1").unwrap()],
-                    )
+                    assert_eq!(
+                        turns,
+                        expected.into_iter().collect::<Vec<_>>(),
+                        "unexpected conversation in {} after {action}",
+                        scope.label()
+                    );
+                }
+            }
+            "delete-disposable" => {
+                // This checks scoped record deletion, not IdentityManager's
+                // separate registry/directory deletion behavior.
+                let disposable = PersistenceHandle::open(&path, disposable_scope).unwrap();
+                disposable
+                    .delete_record("conversation_turn", "turn-1")
                     .unwrap();
-                assert_eq!(turns.len(), 1);
-                assert_eq!(turns[0].content, "hello durable store");
             }
             other => panic!("unknown child action {other}"),
         }

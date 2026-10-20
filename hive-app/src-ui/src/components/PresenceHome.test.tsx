@@ -20,12 +20,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../lib/presenceApi", () => mocks);
 vi.mock("../../../../entity-runtime-app/src-ui/src/components/ChatPanel", () => ({
-  default: ({ profile, baseUrl, profileNotice, onBack }: { profile: EntityProfile; baseUrl: string; profileNotice?: string; onBack: () => void }) => {
+  default: ({ profile, baseUrl, expectedEntityId, profileNotice, onBack }: { profile: EntityProfile; baseUrl: string; expectedEntityId?: string; profileNotice?: string; onBack: () => void }) => {
     useEffect(() => {
       mocks.chatMounted(baseUrl);
       return () => { mocks.chatDisposed(baseUrl); };
     }, [baseUrl]);
-    return <section aria-label="Opened conversation"><h1>{profile.name} conversation</h1><p>{baseUrl}</p>{profileNotice && <p>{profileNotice}</p>}<button onClick={onBack}>Return from conversation</button></section>;
+    return <section aria-label="Opened conversation" data-expected-entity-id={expectedEntityId}><h1>{profile.name} conversation</h1><p>{baseUrl}</p>{profileNotice && <p>{profileNotice}</p>}<button onClick={onBack}>Return from conversation</button></section>;
   },
 }));
 
@@ -37,8 +37,11 @@ function deferred<T>() {
 }
 
 const status: HiveStatus = {
-  entity_count: 1,
-  entities: [{ id: "ada", name: "Ada", birth_complete: true, is_hive: false, immortal: false }],
+  entity_count: 2,
+  entities: [
+    { id: "ada", name: "Ada", birth_complete: true, is_hive: false, immortal: false },
+    { id: "hive-entity", name: "Abigail Hive", birth_complete: true, is_hive: true, immortal: true },
+  ],
   ready_state: "ready",
   any_provider_configured: true,
   setup_complete: true,
@@ -79,6 +82,47 @@ describe("Presence Home pending operations", () => {
     window.history.replaceState({}, "", originalUrl);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("passes the selected stable Entity ID to chat even when its displayed profile has been renamed", async () => {
+    mocks.loadPresence.mockResolvedValue(defaultProfile("Renamed visual identity"));
+    render(<PresenceHome preview={false} status={status} onRefresh={vi.fn()} onProviders={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Open conversation/ }));
+    expect(await screen.findByRole("region", { name: "Opened conversation" })).toHaveAttribute("data-expected-entity-id", "ada");
+    expect(await screen.findByRole("heading", { name: "Renamed visual identity conversation" })).toBeInTheDocument();
+  });
+
+  it("pins the helper's authoritative Hive Entity ID across port changes", async () => {
+    const helperStatus = status;
+    const view = render(<PresenceHome preview={false} status={helperStatus} onRefresh={vi.fn()} onProviders={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Abigail" }));
+    expect(screen.getByRole("region", { name: "Opened conversation" })).toHaveAttribute("data-expected-entity-id", "hive-entity");
+    view.rerender(<PresenceHome preview={false} status={{ ...helperStatus, helper: { running: true, local_url: "http://127.0.0.1:50002" } }} onRefresh={vi.fn()} onProviders={vi.fn()} />);
+    expect(screen.getByRole("region", { name: "Opened conversation" })).toHaveAttribute("data-expected-entity-id", "hive-entity");
+    expect(screen.getByText("http://127.0.0.1:50002")).toBeInTheDocument();
+    view.rerender(<PresenceHome preview={false} status={{ ...status, entities: status.entities.filter(entity => !entity.is_hive) }} onRefresh={vi.fn()} onProviders={vi.fn()} />);
+    expect(screen.getByRole("region", { name: "Opened conversation" })).toHaveAttribute("data-expected-entity-id", "hive-entity");
+    expect(screen.queryByText(/Abigail Hive's identity is unavailable/)).not.toBeInTheDocument();
+  });
+
+  it.each(["missing", "empty", "whitespace"])("does not open a helper with a URL but a %s authoritative Entity ID", kind => {
+    const entities = kind === "missing" ? status.entities.filter(entity => !entity.is_hive)
+      : status.entities.map(entity => entity.is_hive ? { ...entity, id: kind === "empty" ? "" : "   " } : entity);
+    const onRefresh = vi.fn();
+    const view = render(<PresenceHome preview={false} status={{ ...status, entities }} onRefresh={onRefresh} onProviders={vi.fn()} />);
+    const ask = screen.getByRole("button", { name: "Ask Abigail" });
+    expect(ask).toBeDisabled();
+    expect(screen.getByText(/Abigail Hive's identity is unavailable/)).toBeInTheDocument();
+    fireEvent.click(ask);
+    expect(mocks.chatMounted).not.toHaveBeenCalled();
+    expect(screen.queryByRole("region", { name: "Opened conversation" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh Hive" }));
+    expect(onRefresh).toHaveBeenCalledOnce();
+    view.rerender(<PresenceHome preview={false} status={status} onRefresh={onRefresh} onProviders={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Ask Abigail" })).toBeEnabled();
+    expect(mocks.chatMounted).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Ask Abigail" }));
+    expect(screen.getByRole("region", { name: "Opened conversation" })).toHaveAttribute("data-expected-entity-id", "hive-entity");
   });
 
   it("keeps navigation blocked throughout both entity creation and profile saving", async () => {

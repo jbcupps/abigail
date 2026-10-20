@@ -1,0 +1,43 @@
+Synthetic scoped-store continuity validation
+Command: cargo test --locked --offline -p abigail-persistence client::tests -- --test-threads=1
+No daemons, providers, IdentityManager, or actual user data used.
+Previous run failed because its synthetic empty Hive table was not defined. This run includes that test-only setup correction; assertions remain strict.
+   Compiling abigail-persistence v0.0.1 (<repository>\crates\abigail-persistence)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\abigail_persistence-2kk17k28v854e\s-hndxtiymy4-1u5au65-working`
+
+warning: `abigail-persistence` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.56s
+     Running unittests src\lib.rs (target\debug\deps\abigail_persistence-cfe80dfe49139eb3.exe)
+
+running 3 tests
+test client::tests::conversation_turn_reopen_child ... ok
+test client::tests::conversation_turn_survives_uncached_reopen ...
+running 1 test
+test client::tests::conversation_turn_reopen_child ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.14s
+
+
+running 1 test
+test client::tests::conversation_turn_reopen_child ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.06s
+
+
+running 1 test
+test client::tests::conversation_turn_reopen_child ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.05s
+
+
+running 1 test
+test client::tests::conversation_turn_reopen_child ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.06s
+
+ok
+test client::tests::file_backed_handles_can_share_one_embedded_store_across_scopes ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.55s
+
+Exit code: 0

@@ -1,0 +1,54 @@
+Provenance: captured from the original completed log read before the corrected run.
+The corrected run finished before a separate file copy could be made. The actual
+test-result output below is retained from that read; preceding dependency compile
+lines are omitted. This is an excerpt, not a byte-for-byte copy of the original log.
+
+Synthetic scoped-store continuity validation
+Command: cargo test --locked --offline -p abigail-persistence client::tests -- --test-threads=1
+No daemons, providers, IdentityManager, or actual user data used.
+   Compiling abigail-persistence v0.0.1 (<repository>\crates\abigail-persistence)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7m 44s
+     Running unittests src\lib.rs (target\debug\deps\abigail_persistence-cfe80dfe49139eb3.exe)
+
+running 3 tests
+test client::tests::conversation_turn_reopen_child ... ok
+test client::tests::conversation_turn_survives_uncached_reopen ...
+running 1 test
+test client::tests::conversation_turn_reopen_child ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.14s
+
+
+running 1 test
+
+thread 'client::tests::conversation_turn_reopen_child' (42864) panicked at crates\abigail-persistence\src\client.rs:705:26:
+called `Result::unwrap()` on an `Err` value: Query(Error { code: -32000, message: "The table 'conversation_turn' does not exist", details: NotFound(Some(Table { name: "conversation_turn" })), cause: None })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test client::tests::conversation_turn_reopen_child ... FAILED
+
+failures:
+
+failures:
+    client::tests::conversation_turn_reopen_child
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.08s
+
+FAILED
+test client::tests::file_backed_handles_can_share_one_embedded_store_across_scopes ... ok
+
+failures:
+
+---- client::tests::conversation_turn_survives_uncached_reopen stdout ----
+
+thread 'client::tests::conversation_turn_survives_uncached_reopen' (45012) panicked at crates\abigail-persistence\src\client.rs:642:13:
+child read failed: exit code: 101
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    client::tests::conversation_turn_survives_uncached_reopen
+
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.43s
+
+error: test failed, to rerun pass `-p abigail-persistence --lib`
+Exit code: 101

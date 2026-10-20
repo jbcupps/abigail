@@ -34,6 +34,9 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>("splash");
   const [readiness, setReadiness] = useState<Readiness>("pending");
   const [baseUrl, setBaseUrl] = useState<string>("");
+  const [runtimeEntityId, setRuntimeEntityId] = useState<string>();
+  const [identityError, setIdentityError] = useState(false);
+  const [identityAttempt, setIdentityAttempt] = useState(0);
   const [profile, setProfile] = useState<EntityProfile>();
   const [profileNotice, setProfileNotice] = useState<string | null>(null);
 
@@ -41,7 +44,17 @@ export default function App() {
     if (readiness !== "ok") return;
     const controller = new AbortController();
     let disposed = false;
-    const timeout = setTimeout(() => controller.abort(), PROFILE_TIMEOUT_MS);
+    let identityConfirmed = false;
+    const timeout = setTimeout(() => {
+      controller.abort();
+      if (!disposed) {
+        if (!identityConfirmed) setIdentityError(true);
+        else setProfileNotice("Visual profile unavailable. Using the default appearance.");
+      }
+    }, PROFILE_TIMEOUT_MS);
+    setRuntimeEntityId(undefined);
+    setIdentityError(false);
+    setProfile(undefined);
     setProfileNotice(null);
     // Appearance belongs to Hive storage. Fetch it separately so a missing
     // profile never prevents the Entity's working text connection from opening.
@@ -51,7 +64,13 @@ export default function App() {
         if (!status || typeof status !== "object" || !("entity_id" in status) || typeof status.entity_id !== "string" || !status.entity_id) {
           throw new Error("Entity status did not include an identity.");
         }
-        if (!disposed && "name" in status && typeof status.name === "string") {
+        if (disposed || controller.signal.aborted) return;
+        // The native shell currently supplies an address, not an independent
+        // Entity ID. Pin this initial identity so chat/history cannot later
+        // restore a different Entity underneath its visual profile.
+        identityConfirmed = true;
+        setRuntimeEntityId(status.entity_id);
+        if ("name" in status && typeof status.name === "string") {
           setProfile(defaultProfile(status.name));
         }
         const override = new URLSearchParams(window.location.search).get("hiveUrl") || import.meta.env.VITE_HIVE_DAEMON_URL;
@@ -65,15 +84,18 @@ export default function App() {
         if (!response.ok || !envelope || typeof envelope !== "object" || !("ok" in envelope) || envelope.ok !== true || !("data" in envelope) || !isEntityProfile(envelope.data)) {
           throw new Error("Hive could not provide a valid visual profile.");
         }
-        if (!disposed) setProfile(envelope.data);
+        if (!disposed && !controller.signal.aborted) setProfile(envelope.data);
       } catch {
-        if (!disposed) setProfileNotice("Visual profile unavailable. Using the default appearance.");
+        if (!disposed) {
+          if (!identityConfirmed) setIdentityError(true);
+          else setProfileNotice("Visual profile unavailable. Using the default appearance.");
+        }
       } finally {
         clearTimeout(timeout);
       }
     })();
     return () => { disposed = true; clearTimeout(timeout); controller.abort(); };
-  }, [readiness]);
+  }, [readiness, identityAttempt]);
 
   const checkReadiness = useCallback(async () => {
     setReadiness("pending");
@@ -122,10 +144,17 @@ export default function App() {
       />
     );
   }
+  if (!runtimeEntityId) {
+    return <LoaderScreen
+      error={identityError}
+      message={identityError ? "Your Entity's identity could not be confirmed. No conversation has been opened." : "Confirming your Entity."}
+      onRetry={identityError ? () => setIdentityAttempt(value => value + 1) : undefined}
+    />;
+  }
 
   return (
     <div className="h-screen">
-      <ChatPanel baseUrl={baseUrl} profile={profile} profileNotice={profileNotice} />
+      <ChatPanel baseUrl={baseUrl} expectedEntityId={runtimeEntityId} profile={profile} profileNotice={profileNotice} />
     </div>
   );
 }
