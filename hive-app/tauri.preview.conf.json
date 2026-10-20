@@ -1,0 +1,51 @@
+{
+  "productName": "Abigail Preview",
+  "identifier": "com.abigail.preview",
+  "mainBinaryName": "Abigail Preview",
+  "app": {
+    "windows": [
+      {
+        "title": "Abigail Preview Hive",
+        "width": 1280,
+        "height": 860,
+        "resizable": true,
+        "visible": false
+      }
+    ]
+  },
+  "bundle": {
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "startMenuFolder": "Abigail Preview",
+        "installerHooks": "../scripts/nsis-preview-hooks.nsh"
+      }
+    }
+  },
+  "plugins": {
+    "abigail-launch": {
+      "schemaVersion": 1,
+      "contract": "abigail-channel-profile-v1",
+      "channel": "preview",
+      "releaseChannel": "beta",
+      "compiledProfile": {
+        "environment": "ABIGAIL_BUILD_PROFILE",
+        "value": "preview"
+      },
+      "profileRoot": {
+        "windowsKnownFolder": "LocalAppData",
+        "relativePath": "AbigailPreview/profiles/ongoing"
+      },
+      "profileMarker": {
+        "fileName": "profile.json",
+        "schemaVersion": 1,
+        "kind": "preview",
+        "channel": "beta",
+        "persistentIdField": "profile_id"
+      },
+      "runtimeInterface": {
+        "status": "pending-app-owner"
+      }
+    }
+  }
+}

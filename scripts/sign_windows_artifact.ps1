@@ -24,9 +24,12 @@ foreach ($variable in @('WINDOWS_CERTIFICATE_THUMBPRINT', 'ESIGNER_USERNAME', 'E
 if ($env:ESIGNER_TOTP_SECRET.Trim() -match '^\d{6}$') { throw 'ESIGNER_TOTP_SECRET must be the existing signing seed, not a changing six-digit code.' }
 $thumbprint = ConvertTo-AbigailThumbprint $env:WINDOWS_CERTIFICATE_THUMBPRINT
 function Save-SignedMain {
-    if ($name -eq 'Abigail.exe' -and $env:ABIGAIL_SIGNED_MAIN_PATH) {
+    $expectedName = if ($env:ABIGAIL_SIGNED_MAIN_NAME) { $env:ABIGAIL_SIGNED_MAIN_NAME } else { 'Abigail.exe' }
+    if ($expectedName -cnotin @('Abigail.exe', 'Abigail Preview.exe')) { throw 'Signed launcher capture name must be Abigail.exe or Abigail Preview.exe.' }
+    if ($name -eq $expectedName -and $env:ABIGAIL_SIGNED_MAIN_PATH) {
         if (-not [IO.Path]::IsPathFullyQualified($env:ABIGAIL_SIGNED_MAIN_PATH)) { throw 'Signed launcher capture requires an absolute path.' }
         $capture = [IO.Path]::GetFullPath($env:ABIGAIL_SIGNED_MAIN_PATH)
+        if ([IO.Path]::GetFileName($capture) -cne $expectedName) { throw 'Signed launcher capture basename must match the expected launcher name.' }
         if ([string]::Equals($capture, $resolved, [StringComparison]::OrdinalIgnoreCase)) { throw 'Signed launcher capture must be separate from the build executable.' }
         Copy-Item -LiteralPath $resolved -Destination $capture -Force
     }

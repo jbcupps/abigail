@@ -1,0 +1,41 @@
+{
+  "productName": "Abigail Preview Entity Runtime",
+  "identifier": "com.abigail.preview.entity-runtime",
+  "app": {
+    "windows": [
+      {
+        "title": "Abigail Preview Entity Runtime",
+        "width": 1180,
+        "height": 860,
+        "resizable": true,
+        "visible": false
+      }
+    ]
+  },
+  "plugins": {
+    "abigail-launch": {
+      "schemaVersion": 1,
+      "contract": "abigail-channel-profile-v1",
+      "channel": "preview",
+      "releaseChannel": "beta",
+      "compiledProfile": {
+        "environment": "ABIGAIL_BUILD_PROFILE",
+        "value": "preview"
+      },
+      "profileRoot": {
+        "windowsKnownFolder": "LocalAppData",
+        "relativePath": "AbigailPreview/profiles/ongoing"
+      },
+      "profileMarker": {
+        "fileName": "profile.json",
+        "schemaVersion": 1,
+        "kind": "preview",
+        "channel": "beta",
+        "persistentIdField": "profile_id"
+      },
+      "runtimeInterface": {
+        "status": "pending-app-owner"
+      }
+    }
+  }
+}

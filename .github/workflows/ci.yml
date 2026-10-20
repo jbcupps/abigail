@@ -62,6 +62,14 @@ jobs:
       - name: Verify preview selection failure paths
         run: node --test scripts/tests/test_preview_channel.mjs
 
+      - name: Verify preview packaging with synthetic inputs
+        shell: pwsh
+        run: |
+          ./scripts/tests/test_preview_packaging.ps1
+          ./scripts/tests/test_preview_staging.ps1
+          ./scripts/tests/test_preview_nsis_hooks.ps1
+          ./scripts/tests/test_preview_signed_capture.ps1
+
       - name: Verify final release signatures without signing credentials
         shell: pwsh
         run: ./scripts/tests/test_release_artifacts.ps1

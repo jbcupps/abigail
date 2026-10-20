@@ -21,6 +21,10 @@ stable `/releases/latest/download/` route for preview.
 
 ## Application and packaging contract
 
+The separate preview overlays, selected product/compiled identities and proposed
+launcher interface are documented in [Preview Windows packaging](PREVIEW_PACKAGING.md).
+Packaging metadata alone does not implement application isolation.
+
 Stable and preview must coexist without either replacing, discovering, writing
 to, or stopping the other's installation/profile/processes.
 
