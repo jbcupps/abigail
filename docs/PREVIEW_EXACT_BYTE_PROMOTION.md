@@ -114,6 +114,13 @@ Normal PR CI run `39479148145` started. Registration merge and the separate
 manual exact-product source-CI run remain pending; this PR run tests the normal
 PR merge source and must not be reported as product f7 source CI.
 
+The separately reviewed [source CI execution scope](PREVIEW_SOURCE_CI_SCOPE.md)
+records the actual native DPAPI and disposable local key fixtures, the Linux
+runner Secret Service lookup, and cleanup/cache boundaries. The latest
+dispatch condition excludes additional credential creation; this full manual
+run therefore requires specific approval. No tests are skipped to avoid that
+condition, and no SSL.com signing or provider credentials are needed.
+
 There is no reviewed full-compatibility binding yet. All ten existing
 acceptance stages and the actual ongoing Entity/history/settings/seed/snapshot
 observations remain mandatory. The new binding support supplies no missing
