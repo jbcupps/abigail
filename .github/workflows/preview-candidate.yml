@@ -1,12 +1,12 @@
-# This new manual workflow requires separate default-branch registration before
-# its first dispatch. A dev push does not authorize or start acceptance/signing.
+# Already registered on the default branch. A dev push does not authorize or
+# start acceptance/signing; reviewed execution bindings remain separate authority.
 name: Abigail Preview Candidate
 
 on:
   workflow_dispatch:
     inputs:
       reviewed_harness_commit:
-        description: 'Exact reviewed dev harness commit (40 lowercase hex; must match this dispatch)'
+        description: 'Caller revision consistency (40 lowercase hex); reviewed binding governs evidence'
         required: true
         type: string
       approve_fixture_dpapi:
@@ -37,9 +37,9 @@ jobs:
       run:
         shell: pwsh
     env:
-      PRODUCT_SOURCE: f7c7848d25726480b253ec1ca637c3ffa5ea3c77
+      PRODUCT_SOURCE: a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d
     steps:
-      - name: Require reviewed hosted scope and explicit approvals
+      - name: Require hosted scope, caller revision and explicit approvals
         id: scope
         env:
           REVIEWED_HARNESS_COMMIT: ${{ inputs.reviewed_harness_commit }}
@@ -55,7 +55,7 @@ jobs:
           if ($env:APPROVE_FIXTURE_DPAPI -cne 'true') { throw 'Disposable preview and stable identity/DPAPI approval is required.' }
           if ($env:APPROVE_SIGNING_QUOTA -cne 'true') { throw 'Existing SSL.com quota/cost approval is required.' }
           if ($env:GITHUB_RUN_ATTEMPT -cne '1') { throw 'A new reviewed dispatch is required instead of repeating signing through rerun.' }
-          if ($env:PRODUCT_SOURCE -cne 'f7c7848d25726480b253ec1ca637c3ffa5ea3c77') { throw 'Product source pin changed.' }
+          if ($env:PRODUCT_SOURCE -cne 'a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d') { throw 'Product source pin changed.' }
 
       - name: Checkout reviewed acceptance harness
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -68,7 +68,7 @@ jobs:
       - name: Checkout fixed product source separately
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: f7c7848d25726480b253ec1ca637c3ffa5ea3c77
+          ref: a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d
           path: product
           fetch-depth: 1
           persist-credentials: false

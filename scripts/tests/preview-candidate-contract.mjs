@@ -2,7 +2,7 @@
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
-export const PRODUCT_SOURCE = 'f7c7848d25726480b253ec1ca637c3ffa5ea3c77';
+export const PRODUCT_SOURCE = 'a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d';
 export const STABLE_SOURCE = 'e3ad51181da1ea11bded24ca0c39e2dcfe5fa944';
 export const LIMITATIONS = Object.freeze([
   'Daemon acceptance only: no Hive/Runtime GUI, WebView, default KnownFolder bootstrap or real provider acceptance.',

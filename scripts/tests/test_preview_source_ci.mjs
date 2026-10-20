@@ -28,9 +28,9 @@ const bash = process.env.PREVIEW_CI_TEST_BASH ||
   (process.platform === "win32"
     ? join(process.env.ProgramFiles || "C:\\Program Files", "Git", "bin", "bash.exe")
     : "bash");
-const product = "f7c7848d25726480b253ec1ca637c3ffa5ea3c77";
+const product = "a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d";
 const checkoutJobs = ["stability", "lint", "test", "frontend", "audit", "codeql"];
-const guardName = "Verify exact checked-out source and reviewed manual scope";
+const guardName = "Verify exact checked-out source and caller revision consistency";
 const sourceExpression =
   "${{ github.event_name == 'workflow_dispatch' && '" + product + "' || github.sha }}";
 
@@ -45,7 +45,7 @@ function canonical(value) {
 function assertPolicy(candidate) {
   assert.deepEqual(candidate.on.workflow_dispatch.inputs, {
     reviewed_harness_commit: {
-      description: "Reviewed dev workflow commit; manual CI checks fixed preview product f7c7848 without signing",
+      description: "Caller revision consistency; fixed product a18249a; reviewed binding governs evidence",
       required: "true",
       type: "string",
     },
@@ -71,10 +71,22 @@ function assertPolicy(candidate) {
     delete original.jobs[name].steps[0].with;
     original.jobs[name].steps.splice(1, 1);
   }
+  // Beta added these regressions after the historical baseline below. They
+  // must run for the new fixed product too; no manual-dispatch skips remain.
+  for (const step of [
+    { name: "Verify Windows runtime dependency gates", run: "node --test scripts/tests/test_windows_runtime.mjs" },
+    { name: "Install NSIS for native installer regression", run: "choco install nsis --version=3.11 --yes --no-progress" },
+    { name: "Verify installer and uninstaller reject locked payloads", shell: "pwsh", run: "./scripts/tests/test_mvp_installer_locks.ps1" },
+  ]) {
+    const matches = original.jobs.stability.steps.filter(item => item.name === step.name);
+    assert.deepEqual(matches, [step]);
+    original.jobs.stability.steps = original.jobs.stability.steps.filter(item => item.name !== step.name);
+  }
   // Entire preexisting parsed workflow at 02d5048ff01a296c376da103ae8b6087265f0bc9.
   // This checks default triggers, all old commands/exclusions, permissions,
   // concurrency, required gates, and advisory audit/CodeQL without reproducing
-  // a weaker second copy. Updating this digest requires reviewing the CI delta.
+  // a weaker second copy. The three exact additions above are checked separately.
+  // Updating this digest requires reviewing the CI delta.
   const digest = createHash("sha256")
     .update(JSON.stringify(canonical(original)))
     .digest("hex");
@@ -134,6 +146,18 @@ for (const name of checkoutJobs) {
     [steps[1], steps[2]] = [steps[2], steps[1]];
   };
 }
+for (const name of [
+  "Verify Windows runtime dependency gates",
+  "Install NSIS for native installer regression",
+  "Verify installer and uninstaller reject locked payloads",
+]) {
+  mutations[`${name} omitted`] = candidate => {
+    candidate.jobs.stability.steps = candidate.jobs.stability.steps.filter(step => step.name !== name);
+  };
+  mutations[`${name} skips manual source CI`] = candidate => {
+    candidate.jobs.stability.steps.find(step => step.name === name).if = "github.event_name != 'workflow_dispatch'";
+  };
+}
 for (const [label, mutate] of Object.entries(mutations)) {
   test(`policy rejects ${label}`, () => {
     const candidate = structuredClone(workflow);
@@ -177,10 +201,10 @@ for (const name of checkoutJobs) {
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, new RegExp(`Verified product source: ${product}; workflow revision: ${harness}`));
   });
-  test(`${name}: actual guard accepts the separately reviewed c79 revision`, () => {
-    const reviewed = "c79e21442143829f4611e48d9ec193089b759c67";
+  test(`${name}: actual guard checks consistency for another caller revision`, () => {
+    const reviewed = "e".repeat(40);
     const result = executeGuard(guard, {
-      GITHUB_REF: "refs/heads/dev/preview-source-ci-0.0.76",
+      GITHUB_REF: "refs/heads/dev/another-caller",
       REVIEWED_HARNESS_COMMIT: reviewed,
       GITHUB_SHA: reviewed,
     });
@@ -188,6 +212,10 @@ for (const name of checkoutJobs) {
     assert.match(result.stdout, new RegExp(`Verified product source: ${product}; workflow revision: ${reviewed}`));
   });
   const invalid = {
+    "superseded product pin": {
+      ABIGAIL_SOURCE_COMMIT: "f7c7848d25726480b253ec1ca637c3ffa5ea3c77",
+      MOCK_CHECKOUT_SHA: "f7c7848d25726480b253ec1ca637c3ffa5ea3c77",
+    },
     "wrong checkout": { MOCK_CHECKOUT_SHA: "b".repeat(40) },
     "different repository": { GITHUB_REPOSITORY: "other/abigail" },
     "main dispatch": { GITHUB_REF: "refs/heads/main" },

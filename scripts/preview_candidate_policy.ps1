@@ -78,7 +78,7 @@ function Assert-CandidatePayloadPolicy {
 function Assert-CandidateMetadata {
     param($Manifest, $Signatures, $Prepared, $Baseline, [string]$ProductCommit, [string]$Thumbprint)
     Assert-CandidateCondition ($ProductCommit -ceq $Baseline.productSourceCommit -and
-        $ProductCommit -ceq 'f7c7848d25726480b253ec1ca637c3ffa5ea3c77') 'Product source must be the reviewed immutable candidate.'
+        $ProductCommit -ceq 'a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d') 'Product source must be the reviewed immutable candidate.'
     Assert-CandidateCondition ($Thumbprint -ceq $Baseline.certificateThumbprint) 'Certificate must match the reviewed public baseline.'
     Assert-CandidateCondition ($Manifest.signed -is [bool] -and $Manifest.signed -and
         $Manifest.configuration -ceq 'release' -and $Manifest.version -ceq $Baseline.version) 'Candidate must be a signed release build at the pinned version.'
@@ -149,7 +149,7 @@ function ConvertTo-CandidatePublicLifecycle {
         Assert-CandidateCondition $Report.processes_quiesced 'Lifecycle phase has not confirmed owned process shutdown.'
     }
     Assert-CandidateCondition (-not $Report.passed -or $Report.processes_quiesced) 'A passed lifecycle phase cannot leave owned processes unconfirmed.'
-    Assert-CandidateCondition ($Report.product_source -ceq 'f7c7848d25726480b253ec1ca637c3ffa5ea3c77' -and
+    Assert-CandidateCondition ($Report.product_source -ceq 'a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d' -and
         $Report.stable_source -ceq 'e3ad51181da1ea11bded24ca0c39e2dcfe5fa944') 'Lifecycle source pins changed.'
     $phaseAssertions = @{
         seed = @('stable-first-start', 'preview-second-start', 'stable-synthetic-family',

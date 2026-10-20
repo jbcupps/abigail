@@ -7,7 +7,7 @@ No product, installer, DPAPI, registry or process operation occurs in plan mode.
 [CmdletBinding()]
 param(
     [string]$CandidateArtifactDir,
-    [string]$ProductSourceCommit = 'f7c7848d25726480b253ec1ca637c3ffa5ea3c77',
+    [string]$ProductSourceCommit = 'a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d',
     [string]$HarnessSourceCommit,
     [string]$RecoveryCliPath,
     [string]$RecoveryCliSha256,

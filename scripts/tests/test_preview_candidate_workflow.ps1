@@ -7,8 +7,10 @@ $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $workflow = [IO.File]::ReadAllText((Join-Path $root '.github/workflows/preview-candidate.yml')).Replace("`r`n", "`n")
 $passed = 0
+$product = 'a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d'
 
 function Assert-Policy([string]$Text) {
+    if (-not $Text.Contains("      PRODUCT_SOURCE: $product`n")) { throw 'Exact product environment pin required.' }
     if ($Text -notmatch '(?m)^on:\n  workflow_dispatch:\n' -or $Text -match '(?m)^  (push|pull_request|pull_request_target|workflow_call|schedule|repository_dispatch|workflow_run):') {
         throw 'Only workflow_dispatch is allowed.'
     }
@@ -33,7 +35,7 @@ function Assert-Policy([string]$Text) {
     $actions = @([regex]::Matches($Text, '(?m)^        uses: ([^\s#]+)') | ForEach-Object { $_.Groups[1].Value })
     if ($actions.Count -ne 5 -or @($actions | Where-Object { $_ -cnotin $allowedActions }).Count) { throw 'Only reviewed pinned actions may run.' }
     $steps = @([regex]::Matches($Text, '(?ms)^      - name: ([^\n]+)\n(.*?)(?=^      - name:|\z)'))
-    if ($steps[0].Groups[1].Value -cne 'Require reviewed hosted scope and explicit approvals') { throw 'Approval gate must run first.' }
+    if ($steps[0].Groups[1].Value -cne 'Require hosted scope, caller revision and explicit approvals') { throw 'Approval gate must run first.' }
     $sign = @($steps | Where-Object { $_.Value -match '(?m)^        id: sign$' })
     if ($sign.Count -ne 1) { throw 'Exactly one signing step is required.' }
     $preflight = @($steps | Where-Object { $_.Groups[1].Value -ceq 'Check harness policy and syntax without credentials' })
@@ -60,7 +62,7 @@ function Assert-Policy([string]$Text) {
     $expectedSecrets = @('ESIGNER_USERNAME', 'ESIGNER_PASSWORD', 'ESIGNER_CREDENTIAL_ID', 'ESIGNER_TOTP_SECRET', 'WINDOWS_CERTIFICATE_THUMBPRINT')
     if ($secretNames.Count -ne 5 -or @(Compare-Object $expectedSecrets $secretNames).Count -or
         $Text.Replace($sign[0].Value, '') -match '\$\{\{\s*secrets\.') { throw 'Existing signing secrets belong only to the signing step.' }
-    if ($Text -notmatch '(?m)^          ref: f7c7848d25726480b253ec1ca637c3ffa5ea3c77\n          path: product$' -or
+    if ($Text -notmatch '(?m)^          ref: a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d\n          path: product$' -or
         $Text -notmatch '(?m)^          ref: \$\{\{ github.sha \}\}\n          path: harness$' -or
         @([regex]::Matches($Text, '(?m)^          persist-credentials: false$')).Count -ne 2) { throw 'Product and harness checkouts must remain separate and immutable.' }
     $phases = @([regex]::Matches($Text, 'build_signed_installer\.ps1 -Phase (Prepare|Check|Sign) -Channel preview -Version 0\.0\.76 -TargetDir') | ForEach-Object { $_.Groups[1].Value })
@@ -94,13 +96,21 @@ function Test-PolicyMutation([string]$Label, [string]$Mutated) {
 
 Assert-Policy $workflow
 $passed++
+$baseline = Get-Content -LiteralPath (Join-Path $root 'scripts/preview-candidate-baseline.json') -Raw | ConvertFrom-Json
+if ($baseline.productSourceCommit -cne $product) { throw 'Baseline product pin differs from workflow.' }
+$runner = [IO.File]::ReadAllText((Join-Path $root 'scripts/run-preview-candidate.ps1'))
+if (-not $runner.Contains("[string]`$ProductSourceCommit = '$product'")) { throw 'Runner default product pin differs from workflow.' }
+$contract = [IO.File]::ReadAllText((Join-Path $root 'scripts/tests/preview-candidate-contract.mjs'))
+if (-not $contract.Contains("export const PRODUCT_SOURCE = '$product';")) { throw 'Lifecycle contract product pin differs from workflow.' }
+$passed += 3
 Test-PolicyMutation 'automatic push' ($workflow.Replace("  workflow_dispatch:`n", "  push:`n  workflow_dispatch:`n"))
 Test-PolicyMutation 'write permission' ($workflow.Replace('contents: read', 'contents: write'))
 Test-PolicyMutation 'job permission override' ($workflow.Replace("  candidate:`n", "  candidate:`n    permissions:`n      contents: write`n"))
 Test-PolicyMutation 'self hosted runner' ($workflow.Replace('runs-on: windows-latest', 'runs-on: self-hosted'))
 Test-PolicyMutation 'approval defaults true' ($workflow.Replace('default: false', 'default: true'))
-Test-PolicyMutation 'secrets in global environment' ($workflow.Replace('PRODUCT_SOURCE: f7', 'ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}' + "`n      PRODUCT_SOURCE: f7"))
-Test-PolicyMutation 'mutable checkout pin' ($workflow.Replace('ref: f7c7848d25726480b253ec1ca637c3ffa5ea3c77', 'ref: main'))
+Test-PolicyMutation 'secrets in global environment' ($workflow.Replace('PRODUCT_SOURCE: a182', 'ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}' + "`n      PRODUCT_SOURCE: a182"))
+Test-PolicyMutation 'superseded product environment' ($workflow.Replace("PRODUCT_SOURCE: $product", 'PRODUCT_SOURCE: f7c7848d25726480b253ec1ca637c3ffa5ea3c77'))
+Test-PolicyMutation 'mutable checkout pin' ($workflow.Replace('ref: a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d', 'ref: main'))
 Test-PolicyMutation 'checkout persists credentials' ($workflow.Replace('persist-credentials: false', 'persist-credentials: true'))
 Test-PolicyMutation 'unreviewed action tag' ($workflow.Replace('actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5', 'actions/checkout@v4'))
 Test-PolicyMutation 'stable default Sign' ($workflow.Replace('-Phase Sign -Channel preview', '-Phase Sign'))
@@ -135,7 +145,7 @@ $fixture = [ordered]@{
     RUNNER_ENVIRONMENT = 'github-hosted'; RUNNER_OS = 'Windows'; GITHUB_REF = 'refs/heads/dev/preview-combined-0.0.76'
     REVIEWED_HARNESS_COMMIT = ('a' * 40); GITHUB_SHA = ('a' * 40)
     APPROVE_FIXTURE_DPAPI = 'true'; APPROVE_SIGNING_QUOTA = 'true'; GITHUB_RUN_ATTEMPT = '1'
-    PRODUCT_SOURCE = 'f7c7848d25726480b253ec1ca637c3ffa5ea3c77'
+    PRODUCT_SOURCE = 'a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d'
 }
 $previous = @{}
 foreach ($name in $fixture.Keys) { $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
@@ -149,7 +159,8 @@ try {
         @('GITHUB_REF', 'refs/heads/main'), @('GITHUB_REF', 'refs/tags/v0.0.76'),
         @('REVIEWED_HARNESS_COMMIT', ('b' * 40)), @('REVIEWED_HARNESS_COMMIT', ''), @('REVIEWED_HARNESS_COMMIT', ('A' * 40)),
         @('APPROVE_FIXTURE_DPAPI', 'false'), @('APPROVE_FIXTURE_DPAPI', ''), @('APPROVE_SIGNING_QUOTA', 'false'),
-        @('GITHUB_RUN_ATTEMPT', '2'), @('PRODUCT_SOURCE', ('a' * 40))
+        @('GITHUB_RUN_ATTEMPT', '2'), @('PRODUCT_SOURCE', ('a' * 40)),
+        @('PRODUCT_SOURCE', 'f7c7848d25726480b253ec1ca637c3ffa5ea3c77')
     )
     foreach ($case in $rejections) {
         [Environment]::SetEnvironmentVariable($case[0], $case[1], 'Process')

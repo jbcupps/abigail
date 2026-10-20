@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       reviewed_harness_commit:
-        description: 'Reviewed dev workflow commit; manual CI checks fixed preview product f7c7848 without signing'
+        description: 'Caller revision consistency; fixed product a18249a; reviewed binding governs evidence'
         required: true
         type: string
   push:
@@ -27,7 +27,7 @@ env:
   ABIGAIL_CI_MODE: "1"
   # Manual acceptance CI tests immutable product source, independently of this
   # reviewed workflow revision. Push/PR/schedule retain their original checkout.
-  ABIGAIL_SOURCE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && 'f7c7848d25726480b253ec1ca637c3ffa5ea3c77' || github.sha }}
+  ABIGAIL_SOURCE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && 'a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d' || github.sha }}
   REVIEWED_HARNESS_COMMIT: ${{ inputs.reviewed_harness_commit }}
 
 concurrency:
@@ -46,7 +46,7 @@ jobs:
           ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
           persist-credentials: false
 
-      - name: Verify exact checked-out source and reviewed manual scope
+      - name: Verify exact checked-out source and caller revision consistency
         shell: bash
         run: |
           set -euo pipefail
@@ -56,7 +56,7 @@ jobs:
             [[ "$GITHUB_REF" == refs/heads/dev/* ]]
             [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
             [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
-            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d" ]]
           fi
           printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
 
@@ -81,7 +81,6 @@ jobs:
           cd ../../entity-runtime-app/src-ui && npm ci
 
       - name: Verify Windows runtime dependency gates
-        if: github.event_name != 'workflow_dispatch'
         run: node --test scripts/tests/test_windows_runtime.mjs
 
       - name: Verify unsigned stabilization lane
@@ -125,11 +124,9 @@ jobs:
         shell: pwsh
         run: ./scripts/tests/test_stable_recovery.ps1
       - name: Install NSIS for native installer regression
-        if: github.event_name != 'workflow_dispatch'
         run: choco install nsis --version=3.11 --yes --no-progress
 
       - name: Verify installer and uninstaller reject locked payloads
-        if: github.event_name != 'workflow_dispatch'
         shell: pwsh
         run: ./scripts/tests/test_mvp_installer_locks.ps1
 
@@ -210,7 +207,7 @@ jobs:
           ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
           persist-credentials: false
 
-      - name: Verify exact checked-out source and reviewed manual scope
+      - name: Verify exact checked-out source and caller revision consistency
         shell: bash
         run: |
           set -euo pipefail
@@ -220,7 +217,7 @@ jobs:
             [[ "$GITHUB_REF" == refs/heads/dev/* ]]
             [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
             [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
-            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d" ]]
           fi
           printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
 
@@ -277,7 +274,7 @@ jobs:
           ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
           persist-credentials: false
 
-      - name: Verify exact checked-out source and reviewed manual scope
+      - name: Verify exact checked-out source and caller revision consistency
         shell: bash
         run: |
           set -euo pipefail
@@ -287,7 +284,7 @@ jobs:
             [[ "$GITHUB_REF" == refs/heads/dev/* ]]
             [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
             [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
-            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d" ]]
           fi
           printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
 
@@ -330,7 +327,7 @@ jobs:
           ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
           persist-credentials: false
 
-      - name: Verify exact checked-out source and reviewed manual scope
+      - name: Verify exact checked-out source and caller revision consistency
         shell: bash
         run: |
           set -euo pipefail
@@ -340,7 +337,7 @@ jobs:
             [[ "$GITHUB_REF" == refs/heads/dev/* ]]
             [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
             [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
-            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d" ]]
           fi
           printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
 
@@ -381,7 +378,7 @@ jobs:
           ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
           persist-credentials: false
 
-      - name: Verify exact checked-out source and reviewed manual scope
+      - name: Verify exact checked-out source and caller revision consistency
         shell: bash
         run: |
           set -euo pipefail
@@ -391,7 +388,7 @@ jobs:
             [[ "$GITHUB_REF" == refs/heads/dev/* ]]
             [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
             [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
-            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d" ]]
           fi
           printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
 
@@ -434,7 +431,7 @@ jobs:
           ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
           persist-credentials: false
 
-      - name: Verify exact checked-out source and reviewed manual scope
+      - name: Verify exact checked-out source and caller revision consistency
         shell: bash
         run: |
           set -euo pipefail
@@ -444,7 +441,7 @@ jobs:
             [[ "$GITHUB_REF" == refs/heads/dev/* ]]
             [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
             [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
-            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d" ]]
           fi
           printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
 
