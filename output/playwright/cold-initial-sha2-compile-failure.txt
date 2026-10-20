@@ -1,0 +1,195 @@
+    Checking cfg-if v1.0.4
+    Checking typenum v1.20.1
+    Checking windows_x86_64_msvc v0.53.1
+    Checking windows-targets v0.53.5
+    Checking windows-sys v0.60.2
+   Compiling getrandom v0.3.4
+    Checking hybrid-array v0.4.13
+    Checking zerofrom v0.1.6
+   Compiling jobserver v0.1.34
+    Checking rand_core v0.10.1
+    Checking stable_deref_trait v1.2.1
+   Compiling cc v1.2.56
+    Checking yoke v0.8.1
+    Checking getrandom v0.4.2
+    Checking pin-project-lite v0.2.17
+    Checking bytes v1.11.1
+    Checking subtle v2.6.1
+    Checking windows-link v0.2.1
+    Checking crypto-common v0.2.2
+   Compiling cmake v0.1.57
+    Checking futures-core v0.3.32
+   Compiling aws-lc-sys v0.37.1
+    Checking zerovec v0.11.5
+    Checking windows-sys v0.61.2
+    Checking zeroize v1.8.2
+    Checking mio v1.2.2
+    Checking socket2 v0.6.3
+    Checking once_cell v1.21.3
+    Checking itoa v1.0.17
+    Checking tokio v1.53.1
+    Checking cmov v0.5.4
+   Compiling aws-lc-rs v1.16.0
+    Checking ctutils v0.4.2
+    Checking generic-array v0.14.7
+    Checking windows_x86_64_msvc v0.52.6
+    Checking http v1.4.0
+    Checking tinystr v0.8.2
+    Checking block-buffer v0.12.1
+    Checking writeable v0.6.2
+    Checking slab v0.4.12
+    Checking litemap v0.8.1
+    Checking smallvec v1.15.1
+    Checking icu_locale_core v2.1.1
+    Checking windows-targets v0.52.6
+    Checking zerotrie v0.2.3
+    Checking potential_utf v0.1.4
+    Checking icu_collections v2.1.1
+    Checking icu_provider v2.1.1
+    Checking http-body v1.0.1
+    Checking block-buffer v0.10.4
+    Checking crypto-common v0.1.7
+    Checking tracing-core v0.1.36
+    Checking rustls-pki-types v1.14.0
+    Checking getrandom v0.2.17
+    Checking futures-sink v0.3.32
+    Checking untrusted v0.9.0
+    Checking equivalent v1.0.2
+    Checking hashbrown v0.16.1
+    Checking futures-task v0.3.32
+    Checking windows-link v0.1.3
+   Compiling rustls v0.23.37
+    Checking futures-util v0.3.32
+    Checking indexmap v2.13.0
+    Checking rustls-webpki v0.103.13
+    Checking tokio-util v0.7.18
+    Checking tracing v0.1.44
+    Checking rand_core v0.6.4
+    Checking digest v0.10.7
+    Checking icu_properties_data v2.1.2
+    Checking icu_normalizer_data v2.1.1
+    Checking inout v0.2.2
+    Checking fnv v1.0.7
+    Checking percent-encoding v2.3.2
+    Checking tower-service v0.3.3
+    Checking cpufeatures v0.3.0
+    Checking memchr v2.8.0
+    Checking atomic-waker v1.1.2
+    Checking try-lock v0.2.5
+    Checking want v0.3.1
+    Checking h2 v0.4.13
+    Checking icu_normalizer v2.1.1
+    Checking icu_properties v2.1.2
+    Checking serde_core v1.0.228
+    Checking httparse v1.10.1
+    Checking windows-result v0.3.4
+    Checking windows-strings v0.4.2
+    Checking windows-sys v0.59.0
+    Checking futures-channel v0.3.32
+    Checking pin-utils v0.1.0
+    Checking cpubits v0.1.1
+    Checking const-oid v0.10.2
+    Checking cpufeatures v0.2.17
+    Checking digest v0.11.3
+    Checking hyper v1.8.1
+    Checking windows-registry v0.5.3
+    Checking idna_adapter v1.2.1
+    Checking libc v0.2.189
+    Checking zerocopy v0.8.40
+    Checking cipher v0.5.2
+    Checking universal-hash v0.6.1
+    Checking sync_wrapper v1.0.2
+    Checking log v0.4.29
+    Checking utf8parse v0.2.2
+    Checking anstyle v1.0.13
+    Checking tower-layer v0.3.3
+    Checking once_cell_polyfill v1.70.2
+    Checking base64 v0.22.1
+    Checking ipnet v2.12.0
+    Checking utf8_iter v1.0.4
+    Checking idna v1.1.0
+    Checking hyper-util v0.1.20
+    Checking anstyle-wincon v3.0.11
+    Checking tower v0.5.3
+    Checking anstyle-parse v1.0.0
+    Checking serde v1.0.228
+    Checking polyval v0.7.1
+    Checking ppv-lite86 v0.2.21
+    Checking zmij v1.0.21
+    Checking tokio-rustls v0.26.4
+    Checking aho-corasick v1.1.4
+    Checking form_urlencoded v1.2.2
+    Checking anstyle-query v1.1.5
+    Checking base64ct v1.8.3
+    Checking iri-string v0.7.10
+    Checking option-ext v0.2.0
+    Checking bitflags v2.11.0
+    Checking signature v2.2.0
+    Checking regex-syntax v0.8.10
+    Checking is_terminal_polyfill v1.70.2
+    Checking colorchoice v1.0.4
+    Checking anstream v1.0.0
+    Checking regex-automata v0.4.14
+    Checking ed25519 v2.2.3
+    Checking tower-http v0.6.8
+    Checking dirs-sys v0.5.0
+    Checking password-hash v0.5.0
+    Checking curve25519-dalek v4.1.3
+    Checking url v2.5.8
+    Checking hyper-rustls v0.27.7
+    Checking serde_json v1.0.150
+    Checking num-traits v0.2.19
+    Checking rand_chacha v0.3.1
+    Checking ghash v0.6.0
+    Checking rustls-platform-verifier v0.6.2
+    Checking aes v0.9.1
+    Checking ctr v0.10.1
+    Checking hmac v0.13.0
+    Checking sha2 v0.10.9
+    Checking aead v0.6.1
+    Checking blake2 v0.10.6
+    Checking http-body-util v0.1.3
+    Checking windows-core v0.52.0
+    Checking encoding_rs v0.8.35
+    Checking strsim v0.11.1
+    Checking mime v0.3.17
+    Checking clap_lex v1.0.0
+    Checking clap_builder v4.6.0
+    Checking reqwest v0.13.4
+    Checking thiserror v1.0.69
+    Checking windows v0.52.0
+    Checking argon2 v0.5.3
+    Checking aes-gcm v0.11.0
+    Checking ed25519-dalek v2.2.0
+    Checking hkdf v0.13.0
+    Checking rand v0.8.5
+    Checking chrono v0.4.44
+    Checking anyhow v1.0.103
+    Checking directories v6.0.0
+    Checking regex v1.12.3
+    Checking keyring v3.6.3
+    Checking sha2 v0.11.0
+    Checking abigail-core v0.0.1 (<repository>\crates\abigail-core)
+error[E0277]: the trait bound `Array<u8, UInt<UInt<UInt<UInt<..., ...>, ...>, ...>, ...>>: LowerHex` is not satisfied
+   --> crates\abigail-core\src\profile_snapshot.rs:374:33
+    |
+374 |     Ok((length, format!("{:x}", digest.finalize())))
+    |                          ----   ^^^^^^^^^^^^^^^^^ the trait `LowerHex` is not implemented for `Array<u8, UInt<UInt<UInt<UInt<UInt<..., ...>, ...>, ...>, ...>, ...>>`
+    |                          |
+    |                          required by this formatting parameter
+    |
+    = help: the following other types implement trait `LowerHex`:
+              &T
+              &mut T
+              Saturating<T>
+              Signature
+              Wrapping<T>
+              bytes::bytes::Bytes
+              bytes::bytes_mut::BytesMut
+              compiler_builtins::math::libm_math::support::big::i256
+            and 26 others
+    = note: the full name for the type has been written to '<repository>\target\debug\deps\abigail_core-913960796bc035c3.long-type-2136436278605119436.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `abigail-core` (lib) due to 1 previous error

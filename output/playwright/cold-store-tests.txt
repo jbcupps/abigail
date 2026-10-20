@@ -1,0 +1,23 @@
+
+running 4 tests
+test cold_profile_child_fixture ... ignored, Invoked only by parent tests with an isolated synthetic phase
+test cold_profile_full_store_and_identity_survive_fresh_process_restore ... Cold-profile fresh-process evidence: {"phase":"seed","pid":30284}
+Cold-profile fresh-process evidence: {"phase":"snapshot","pid":40500}
+Cold-profile fresh-process evidence: {"phase":"restore","pid":14088}
+Cold-profile fresh-process evidence: {"phase":"reopen","pid":13148,"verified_conversation_turns":4,"verified_creation_receipts":3,"verified_entity_ids":["11111111-1111-4111-8111-111111111111","22222222-2222-4222-8222-222222222222"],"verified_entity_signatures":2,"verified_store_scopes":3}
+ok
+test cold_profile_interrupted_restore_never_publishes_and_can_retry ... Cold-profile fresh-process evidence: {"phase":"seed","pid":42408}
+Cold-profile fresh-process evidence: {"phase":"snapshot","pid":4580}
+Cold-profile fresh-process evidence: {"phase":"interrupted-restore","pid":36052,"staging_root":"\\\\?\\<repository>\\target\\cold-profile-tmp\\abigail-cold-store-fixture-03d88218-0126-40b1-a196-e4152dafc658\\.abigail-cold-9a91d8a7-8818-4c1e-9b71-0bf7f7e2cb95.partial"}
+Cold-profile fresh-process evidence: {"phase":"restore","pid":42044}
+Cold-profile fresh-process evidence: {"phase":"reopen","pid":42676,"verified_conversation_turns":4,"verified_creation_receipts":3,"verified_entity_ids":["11111111-1111-4111-8111-111111111111","22222222-2222-4222-8222-222222222222"],"verified_entity_signatures":2,"verified_store_scopes":3}
+ok
+test cold_profile_missing_or_wrong_credentials_preserve_bundle_and_destination ... Cold-profile fresh-process evidence: {"phase":"seed","pid":17628}
+Cold-profile fresh-process evidence: {"phase":"snapshot","pid":24884}
+Cold-profile fresh-process evidence: {"phase":"missing-credential","pid":40036}
+Cold-profile fresh-process evidence: {"phase":"wrong-credential","pid":18356}
+Cold-profile fresh-process evidence: {"phase":"restore","pid":38320}
+Cold-profile fresh-process evidence: {"phase":"reopen","pid":41352,"verified_conversation_turns":4,"verified_creation_receipts":3,"verified_entity_ids":["11111111-1111-4111-8111-111111111111","22222222-2222-4222-8222-222222222222"],"verified_entity_signatures":2,"verified_store_scopes":3}
+ok
+
+test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 12.62s

@@ -1,0 +1,2 @@
+   Compiling abigail-core v0.0.1 (<repository>\crates\abigail-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.10s

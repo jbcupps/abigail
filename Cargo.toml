@@ -4,6 +4,7 @@ members = [
     "crates/abigail-diag",
     "crates/abigail-persistence",
     "crates/abigail-core",
+    "crates/abigail-profile",
     "crates/abigail-memory",
     "crates/abigail-capabilities",
     "crates/abigail-router",

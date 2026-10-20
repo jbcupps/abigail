@@ -16,3 +16,6 @@ tracing.workspace = true
 uuid.workspace = true
 reqwest.workspace = true
 sqlx = { version = "0.8.1", default-features = false, features = ["sqlite", "runtime-tokio-rustls", "chrono", "uuid"] }
+
+[dev-dependencies]
+ed25519-dalek.workspace = true

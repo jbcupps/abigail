@@ -1,10 +1,10 @@
 # Persistent preview profile boundary
 
-Application implementation status, 2026-10-20. The accepted profile contract is implemented in the current development source. [Final component validation](../output/playwright/preview-profile-isolation-validation.md) records 167 selected Rust tests, 373 frontend tests, both frontend builds, and independent review. These results are separate from installed acceptance. No normal preview startup, real profile migration, OS credential operation, or signed-installer acceptance is claimed by this document.
+Application implementation status, 2026-10-20. The accepted profile contract is implemented in the current development source. The [previous isolation slice's component validation](../output/playwright/preview-profile-isolation-validation.md) records 167 selected Rust tests, 373 frontend tests, both frontend builds, and independent review. Those historical results do not validate subsequent cold-recovery changes. Final [cold-recovery validation](../output/playwright/cold-profile-validation.md) passed 104 distinct Rust tests—101 core and three actual SurrealKV fresh-process recovery tests—and seven separately counted CLI smoke checks, with three ignored child fixtures. Independent review found no unresolved blocking findings; source publication remains pending. Neither record establishes installed acceptance. No normal preview startup, real profile migration, OS credential operation, or signed-installer acceptance is claimed by this document.
 
 The goal is one persistent preview profile containing an ongoing Entity and separate disposable Entities. Updating the preview application must preserve that profile. Stable defaults and existing stable data remain unchanged. A preview profile belongs to a selected beta release, not a third release channel.
 
-The [release alignment](PREVIEW_RELEASE_ALIGNMENT.md) records the exact launcher contract, packaging ownership, and ten required installer acceptance stages. Complete-profile cold backup/restore is the next application slice and remains unimplemented.
+The [release alignment](PREVIEW_RELEASE_ALIGNMENT.md) records the exact launcher contract, packaging ownership, and ten required installer acceptance stages. The bounded [Windows cold-profile recovery slice](PREVIEW_COLD_RECOVERY.md) is now implemented in source; final component and installed acceptance remain separate.
 
 ## Implemented application boundary
 
@@ -24,6 +24,7 @@ The marker at `R/profile.json` contains `schema_version: 1`, `kind: "preview"`, 
 | Vault, master-key and encrypted-storage callers | Use a profile-specific credential namespace and root-bound cache. Fake backend seams allow tests without calling the OS keyring or DPAPI. |
 | Hive/provider setup | Reject ambient API-key and installed-CLI account reuse in preview. Explicitly configured preview credentials or local URLs remain the setup path. |
 | Native apps, daemon clients and supervisor | Verify channel, profile UUID, canonical root and live process instances before adoption/use. Pin HTTP ownership headers and fail closed when native verification fails. |
+| `profile_lease`, `profile_snapshot` and `abigail-profile` | Hold process-use leases in all four preview processes. Cold snapshot/restore requires exclusive cold/Hive ownership, inventories the whole retained root, verifies hashes, preserves UUIDs and requires existing credentials before publishing a fresh recovery root. Synthetic component validation is complete. |
 
 ## Paths
 
@@ -59,6 +60,8 @@ No cryptographic key is derived from the public profile UUID alone. A whole-root
 
 The launcher passes explicit packaged executable paths and profile/root/instance context. Preview endpoints use verified loopback URLs outside stable's reserved ports `43141..43150`. Hive holds an OS file lock for the selected profile before opening the store. The supervisor uses owned child handles; a stale descriptor PID never authorizes termination.
 
+All four current preview processes also retain a shared process-use lease until exit. Cold operations require exclusive participation and Hive owner locks; restore locks the recorded original root if it still exists with the matching marker. This does not detect unknown clones, guarantee exclusion of arbitrary older/foreign writers, or prevent separate roots being reopened later. See the [cold ownership limits](PREVIEW_COLD_RECOVERY.md#cold-ownership-and-publication).
+
 Status and descriptor `process_identity` values contain `channel`, `profile_id`, `canonical_data_root`, `instance_id`, and `hive_instance_id`. Callers compare them with the intended live owner. Verified clients pin `x-abigail-profile-id` and `x-abigail-process-instance-id`. Preview middleware requires these except for GET health/status and OPTIONS; current stable middleware rejects preview ownership headers. These non-secret fields guard accidental routing and stale ownership. They are not local-client authentication or executable provenance.
 
 Native transport resolves and revalidates IPC metadata before HTTP/SSE use. A failed native handshake never falls back to a browser query, environment URL, or stable default port. The Runtime also requires the selected Entity ID. Startup/cleanup failure is visible in the UI with connection actions unavailable.
@@ -67,11 +70,11 @@ Preview shutdown requires acknowledgement that owned Entity children were draine
 
 Creation lookup, replay and profile save use the same verified transport. If a retained creation-journal URL differs from the pinned endpoint, recovery fails explicitly and preserves the exact creation key. Automatic same-profile endpoint rebinding is not implemented. Never replace an uncertain attempt with a fresh key or silently retarget it.
 
-## Remaining acceptance and next slice
+## Cold recovery and remaining acceptance
 
-- The [recorded component results](../output/playwright/preview-profile-isolation-validation.md) cover preflight rejection, sentinel preservation, UUID path scopes, fake credential calls and ownership checks. They do not substitute for the exact installed candidate.
-- Implement complete-profile cold backup/restore: stop all owners, inventory persistent files and required credentials, snapshot the shared store with the rest of the root, and restore into a designated isolated recovery root.
-- Rebase approved absolute paths during that explicit restore, invalidate copied runtime descriptors, and verify the same profile UUID, registered Entities, exact committed transcript, presentation and credential/decryption availability before mutations. Existing per-Entity restore creates a new UUID and does not satisfy this requirement.
+- The [previous isolation results](../output/playwright/preview-profile-isolation-validation.md) cover preflight rejection, sentinel preservation, UUID path scopes, fake credential calls and ownership checks. They do not substitute for final cold-recovery validation or the exact installed candidate.
+- The new [cold recovery CLI](PREVIEW_COLD_RECOVERY.md) snapshots the complete `memory.db`, registry/receipts, identity, Documents and WebView data; excludes `runtime`, `tmp`, `logs` and `backups`; and publishes only a validated fresh destination. It rebases only declared paths and probes the existing sentinel/master-key credentials without bootstrap. Hashes provide integrity comparison, not authentication or bundle encryption.
+- Final core and actual SurrealKV fresh-process selections passed 104 distinct Rust tests plus seven CLI smoke checks; source publication remains pending in the [cold validation record](../output/playwright/cold-profile-validation.md). The synthetic store/fake-credential harness does not establish GUI reopening or real provider/OS credential acceptance. Existing per-Entity restore still creates a new UUID and is unchanged.
 - Exercise OS credential integration using a reviewed isolated test plan, without the operator's existing credentials. See [STARTUP_TEST_ISOLATION_PLAN.md](STARTUP_TEST_ISOLATION_PLAN.md).
 - Verify all ten [release stages](PREVIEW_RELEASE_ALIGNMENT.md#release-stage-evidence-mapping) against the final signed installer bytes. Fresh creation uses a separate fixture from the continuing-profile upgrade fixture. Keep old/new owners from opening one store concurrently.
 

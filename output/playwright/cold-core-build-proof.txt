@@ -1,0 +1,40 @@
+Extracted actual Cargo records from target/cold-core-build.jsonl. Dependency records omitted; selected abigail_core test executable artifact and final build status retained. Machine paths sanitized. This is the final rerun after the formatting-only correction.
+
+{
+  "reason": "compiler-artifact",
+  "package_id": "path+file:///<repository>/crates/abigail-core#0.0.1",
+  "manifest_path": "<repository>\\crates\\abigail-core\\Cargo.toml",
+  "target": {
+    "kind": [
+      "lib"
+    ],
+    "crate_types": [
+      "lib"
+    ],
+    "name": "abigail_core",
+    "src_path": "<repository>\\crates\\abigail-core\\src\\lib.rs",
+    "edition": "2021",
+    "doc": true,
+    "doctest": true,
+    "test": true
+  },
+  "profile": {
+    "opt_level": "0",
+    "debuginfo": 2,
+    "debug_assertions": true,
+    "overflow_checks": true,
+    "test": true
+  },
+  "features": [],
+  "filenames": [
+    "<repository>\\target\\debug\\deps\\abigail_core-04e025eb0f36f985.exe",
+    "<repository>\\target\\debug\\deps\\abigail_core-04e025eb0f36f985.pdb"
+  ],
+  "executable": "<repository>\\target\\debug\\deps\\abigail_core-04e025eb0f36f985.exe",
+  "fresh": false
+}
+
+{
+  "reason": "build-finished",
+  "success": true
+}

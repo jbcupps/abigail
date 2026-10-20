@@ -1,0 +1,5 @@
+   Compiling surrealdb-core v3.0.5
+   Compiling surrealdb v3.0.5
+   Compiling abigail-core v0.0.1 (<repository>\crates\abigail-core)
+   Compiling abigail-persistence v0.0.1 (<repository>\crates\abigail-persistence)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11m 13s

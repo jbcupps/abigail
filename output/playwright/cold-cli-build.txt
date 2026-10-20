@@ -1,0 +1,15 @@
+   Compiling tokio v1.53.1
+   Compiling tokio-util v0.7.18
+   Compiling h2 v0.4.13
+   Compiling hyper v1.8.1
+   Compiling hyper-util v0.1.20
+   Compiling tower v0.5.3
+   Compiling tokio-rustls v0.26.4
+   Compiling tower-http v0.6.8
+   Compiling hyper-rustls v0.27.7
+   Compiling clap_builder v4.6.0
+   Compiling reqwest v0.13.4
+   Compiling abigail-core v0.0.1 (<repository>\crates\abigail-core)
+   Compiling clap v4.6.1
+   Compiling abigail-profile v0.0.1 (<repository>\crates\abigail-profile)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 54.55s

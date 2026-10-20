@@ -216,21 +216,35 @@ pub fn load_master_key(path: &Path) -> Result<SigningKey> {
         // silently falling through to DPAPI (which would crash on non-DPAPI data).
         let unlock = HybridUnlockProvider::new();
         let root_kek = unlock.root_kek()?;
-        let dek = crypto::derive_scope_key(&root_kek, &credential_scope_label("keyring:master")?);
-        let decrypted = crypto::open(&dek, &data)?;
-        let stored: MasterKeyStored =
-            serde_json::from_slice(&decrypted).map_err(|e| CoreError::Keyring(e.to_string()))?;
-        let key_bytes: [u8; 32] = stored
-            .secret
-            .as_slice()
-            .try_into()
-            .map_err(|_| CoreError::Crypto("Invalid master key length".into()))?;
-        return Ok(SigningKey::from_bytes(&key_bytes));
+        return decode_master_key_envelope(
+            &data,
+            &root_kek,
+            &credential_scope_label("keyring:master")?,
+        );
     }
 
     // Legacy DPAPI format (file does NOT start with vault envelope version byte)
     require_legacy_credentials_allowed()?;
     let decrypted = crate::dpapi::dpapi_decrypt(&data)?;
+    let stored: MasterKeyStored =
+        serde_json::from_slice(&decrypted).map_err(|e| CoreError::Keyring(e.to_string()))?;
+    let key_bytes: [u8; 32] = stored
+        .secret
+        .as_slice()
+        .try_into()
+        .map_err(|_| CoreError::Crypto("Invalid master key length".into()))?;
+    Ok(SigningKey::from_bytes(&key_bytes))
+}
+
+/// Pure envelope decoder shared with cold-restore verification. It never
+/// resolves a global profile, unlocks credentials or writes identity material.
+pub(crate) fn decode_master_key_envelope(
+    data: &[u8],
+    root_kek: &[u8; 32],
+    scope: &str,
+) -> Result<SigningKey> {
+    let dek = crypto::derive_scope_key(root_kek, scope);
+    let decrypted = crypto::open(&dek, data)?;
     let stored: MasterKeyStored =
         serde_json::from_slice(&decrypted).map_err(|e| CoreError::Keyring(e.to_string()))?;
     let key_bytes: [u8; 32] = stored

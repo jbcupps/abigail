@@ -87,6 +87,172 @@ impl Default for HybridUnlockProvider {
     }
 }
 
+/// Non-secret evidence that the existing preview sentinel and master key can
+/// both be decrypted. This does not verify provider accounts, every encrypted
+/// file, or the availability of any external credential omitted from a backup.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RestoreCredentialVerification {
+    pub profile_id: String,
+    pub credential_namespace: String,
+    pub master_public_key: [u8; 32],
+}
+
+/// Cold-restore credential check. Callers retain the stopped-profile guard
+/// while probing so files cannot change between hash and credential checks.
+/// Implementations return public evidence, never the root encryption key.
+pub trait RestoreCredentialProbe: Send + Sync {
+    fn verify_profile(
+        &self,
+        profile: Arc<crate::profile::ProfileContext>,
+    ) -> Result<RestoreCredentialVerification>;
+}
+
+/// Read existing preview credentials from the profile's OS entry or its
+/// copied same-device fallback. No generation, repair, cache access or write
+/// occurs. A missing credential is a recovery error, never a bootstrap request.
+#[derive(Default)]
+pub struct SystemRestoreCredentialProbe;
+
+impl RestoreCredentialProbe for SystemRestoreCredentialProbe {
+    fn verify_profile(
+        &self,
+        profile: Arc<crate::profile::ProfileContext>,
+    ) -> Result<RestoreCredentialVerification> {
+        verify_restore_credentials_with_backend(profile, &SystemRootKeyBackend)
+    }
+}
+
+/// Explicit provider seam for synthetic recovery fixtures. The supplied
+/// provider must itself be read-only (for example a fixed fake provider or
+/// `PassphraseUnlockProvider`); do not supply `HybridUnlockProvider`, whose
+/// normal startup contract allows bootstrap and repair. This probe adds no
+/// writes or cache behavior and never selects an ambient provider.
+pub struct ProvidedRestoreCredentialProbe {
+    unlock: Arc<dyn UnlockProvider>,
+}
+
+impl ProvidedRestoreCredentialProbe {
+    pub fn new(unlock: Arc<dyn UnlockProvider>) -> Self {
+        Self { unlock }
+    }
+}
+
+impl RestoreCredentialProbe for ProvidedRestoreCredentialProbe {
+    fn verify_profile(
+        &self,
+        profile: Arc<crate::profile::ProfileContext>,
+    ) -> Result<RestoreCredentialVerification> {
+        let context = CredentialContext::for_profile(profile)?;
+        let material = RestoreCredentialMaterial::read(&context)?;
+        let kek = self.unlock.root_kek().map_err(|error| {
+            CoreError::Vault(format!(
+                "Cold restore credential unavailable from the supplied provider: {error}"
+            ))
+        })?;
+        material.verify(&context, &kek)
+    }
+}
+
+struct RestoreCredentialMaterial {
+    sentinel: Vec<u8>,
+    master: Vec<u8>,
+}
+
+impl RestoreCredentialMaterial {
+    fn read(context: &CredentialContext) -> Result<Self> {
+        let profile = context
+            .profile
+            .as_ref()
+            .ok_or_else(|| CoreError::Vault("Cold restore requires a preview profile".into()))?;
+        let marker_path = context.data_root.join("profile.json");
+        context.validate_path(&marker_path)?;
+        let marker: crate::profile::ProfileMarker =
+            serde_json::from_slice(&std::fs::read(&marker_path)?)?;
+        if marker.schema_version != crate::profile::PROFILE_SCHEMA_VERSION
+            || marker.kind != "preview"
+            || marker.channel != profile.channel()
+            || marker.profile_id != profile.profile_id()
+        {
+            return Err(CoreError::Vault(
+                "Cold restore profile marker changed or is incompatible; no credentials were read"
+                    .into(),
+            ));
+        }
+        let read = |name: &str| -> Result<Vec<u8>> {
+            let path = context.data_root.join(name);
+            context.validate_path(&path)?;
+            let bytes = std::fs::read(&path).map_err(|error| {
+                CoreError::Vault(format!(
+                    "Cold restore requires existing {name}; no replacement will be generated: {error}"
+                ))
+            })?;
+            if bytes.len() < 29 || !super::crypto::is_vault_envelope(&bytes) {
+                return Err(CoreError::Vault(format!(
+                    "Cold restore {name} has an unsupported or malformed encrypted envelope"
+                )));
+            }
+            Ok(bytes)
+        };
+        Ok(Self {
+            sentinel: read(super::SENTINEL_FILE_NAME)?,
+            master: read("master.key")?,
+        })
+    }
+
+    fn verify(
+        &self,
+        context: &CredentialContext,
+        kek: &[u8; KEK_LEN],
+    ) -> Result<RestoreCredentialVerification> {
+        super::decrypt_sentinel_bytes_with_scope(
+            &self.sentinel,
+            kek,
+            &context.scope_label(super::SENTINEL_SCOPE),
+        )
+        .map_err(|error| {
+            CoreError::Vault(format!(
+                "Cold restore cannot decrypt vault.sentinel with the existing profile credential: {error}"
+            ))
+        })?;
+        let master = crate::keyring::decode_master_key_envelope(
+            &self.master,
+            kek,
+            &context.scope_label("keyring:master"),
+        )
+        .map_err(|error| {
+            CoreError::Vault(format!(
+                "Cold restore cannot decrypt or decode master.key with the existing profile credential: {error}"
+            ))
+        })?;
+        let profile = context.profile.as_ref().expect("validated preview context");
+        Ok(RestoreCredentialVerification {
+            profile_id: profile.profile_id().to_string(),
+            credential_namespace: profile.credential_namespace(),
+            master_public_key: master.verifying_key().to_bytes(),
+        })
+    }
+}
+
+fn verify_restore_credentials_with_backend(
+    profile: Arc<crate::profile::ProfileContext>,
+    backend: &dyn RootKeyBackend,
+) -> Result<RestoreCredentialVerification> {
+    let context = CredentialContext::for_profile(profile)?;
+    // Validate all selected files before asking the backend for a credential.
+    let material = RestoreCredentialMaterial::read(&context)?;
+    context.validate_path(&context.fallback_path())?;
+    let kek = if let Some(kek) = backend.load_keyring(&context)? {
+        kek
+    } else if let Some(kek) = backend.load_fallback(&context)? {
+        kek
+    } else {
+        return Err(CoreError::Vault(
+            "Cold restore credential unavailable. This snapshot does not contain the OS keyring entry; same-device restoration requires the original user's existing preview credential or a decryptable profile DPAPI fallback. No new key was generated.".into(),
+        ));
+    };
+    material.verify(&context, &kek)
+}
+
 pub fn configure_process_vault_data_dir(data_root: &Path) {
     std::env::set_var(PROCESS_VAULT_DATA_DIR_ENV, data_root);
 }
@@ -754,6 +920,258 @@ mod tests {
             // Only the uniquely created synthetic fixture directory is removed.
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[derive(Default)]
+    struct RestoreFakeBackend {
+        keyring: Option<[u8; KEK_LEN]>,
+        fallback: Option<[u8; KEK_LEN]>,
+        calls: Mutex<Vec<&'static str>>,
+    }
+
+    impl RootKeyBackend for RestoreFakeBackend {
+        fn load_keyring(&self, context: &CredentialContext) -> Result<Option<[u8; KEK_LEN]>> {
+            assert!(context.namespace.as_ref().unwrap().starts_with("preview."));
+            self.calls.lock().unwrap().push("keyring");
+            Ok(self.keyring)
+        }
+        fn load_fallback(&self, context: &CredentialContext) -> Result<Option<[u8; KEK_LEN]>> {
+            assert!(context.fallback_path().starts_with(&context.data_root));
+            self.calls.lock().unwrap().push("fallback");
+            Ok(self.fallback)
+        }
+        fn store_keyring(&self, _: &CredentialContext, _: &[u8; KEK_LEN]) -> Result<()> {
+            panic!("a restore probe must not create or repair an OS credential")
+        }
+        fn store_fallback(&self, _: &CredentialContext, _: &[u8; KEK_LEN]) -> Result<bool> {
+            panic!("a restore probe must not create or replace a fallback")
+        }
+        fn environment(&self, _: &str) -> Option<String> {
+            panic!("a restore probe must not read ambient credentials")
+        }
+    }
+
+    fn restore_material(context: &CredentialContext, kek: &[u8; KEK_LEN]) -> [u8; 32] {
+        super::super::write_encrypted_sentinel_with_scope(
+            &context.data_root,
+            kek,
+            &context.scope_label(super::super::SENTINEL_SCOPE),
+        )
+        .unwrap();
+        let master = ed25519_dalek::SigningKey::from_bytes(&[19; 32]);
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "secret": master.to_bytes().to_vec(),
+        }))
+        .unwrap();
+        let dek =
+            super::super::crypto::derive_scope_key(kek, &context.scope_label("keyring:master"));
+        std::fs::write(
+            context.data_root.join("master.key"),
+            super::super::crypto::seal(&dek, &payload).unwrap(),
+        )
+        .unwrap();
+        master.verifying_key().to_bytes()
+    }
+
+    fn restore_file_bytes(context: &CredentialContext) -> Vec<(String, Vec<u8>)> {
+        let mut files: Vec<_> = std::fs::read_dir(&context.data_root)
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                (
+                    entry.file_name().to_string_lossy().to_string(),
+                    std::fs::read(entry.path()).unwrap(),
+                )
+            })
+            .collect();
+        files.sort_by(|a, b| a.0.cmp(&b.0));
+        files
+    }
+
+    #[test]
+    fn cold_restore_credentials_use_existing_key_without_reading_or_mutating_cache() {
+        let temp = SyntheticRoot::new();
+        let context = temp.preview("existing");
+        let public_key = restore_material(&context, &[21; KEK_LEN]);
+        let before = restore_file_bytes(&context);
+        // A stale cached key must neither satisfy nor poison this disk probe.
+        super::super::cache_session_root_kek(
+            context.cache_key(),
+            [99; KEK_LEN],
+            "synthetic cache marker".into(),
+        );
+        let backend = RestoreFakeBackend {
+            keyring: Some([21; KEK_LEN]),
+            ..Default::default()
+        };
+        let verified =
+            verify_restore_credentials_with_backend(context.profile.clone().unwrap(), &backend)
+                .unwrap();
+        assert_eq!(verified.master_public_key, public_key);
+        assert_eq!(
+            verified.credential_namespace,
+            context.namespace.clone().unwrap()
+        );
+        assert_eq!(
+            super::super::cached_session_root_kek(&context.cache_key()),
+            Some([99; KEK_LEN])
+        );
+        assert_eq!(*backend.calls.lock().unwrap(), vec!["keyring"]);
+        assert_eq!(restore_file_bytes(&context), before);
+    }
+
+    #[test]
+    fn cold_restore_credentials_accept_existing_fallback_without_repairing_keyring() {
+        let temp = SyntheticRoot::new();
+        let context = temp.preview("existing");
+        restore_material(&context, &[22; KEK_LEN]);
+        let before = restore_file_bytes(&context);
+        let backend = RestoreFakeBackend {
+            fallback: Some([22; KEK_LEN]),
+            ..Default::default()
+        };
+        verify_restore_credentials_with_backend(context.profile.clone().unwrap(), &backend)
+            .unwrap();
+        assert_eq!(*backend.calls.lock().unwrap(), vec!["keyring", "fallback"]);
+        assert!(super::super::cached_session_root_kek(&context.cache_key()).is_none());
+        assert_eq!(restore_file_bytes(&context), before);
+    }
+
+    #[test]
+    fn cold_restore_credentials_missing_key_never_bootstraps_or_uses_cached_key() {
+        let temp = SyntheticRoot::new();
+        let context = temp.preview("existing");
+        restore_material(&context, &[23; KEK_LEN]);
+        let before = restore_file_bytes(&context);
+        super::super::cache_session_root_kek(
+            context.cache_key(),
+            [23; KEK_LEN],
+            "synthetic cached credential".into(),
+        );
+        let backend = RestoreFakeBackend::default();
+        let error =
+            verify_restore_credentials_with_backend(context.profile.clone().unwrap(), &backend)
+                .unwrap_err()
+                .to_string();
+        assert!(error.contains("snapshot does not contain the OS keyring entry"));
+        assert_eq!(*backend.calls.lock().unwrap(), vec!["keyring", "fallback"]);
+        assert_eq!(restore_file_bytes(&context), before);
+    }
+
+    #[test]
+    fn cold_restore_credentials_reject_missing_or_invalid_files_before_backend_access() {
+        for name in ["vault.sentinel", "master.key"] {
+            for missing in [true, false] {
+                let temp = SyntheticRoot::new();
+                let context = temp.preview("existing");
+                restore_material(&context, &[24; KEK_LEN]);
+                let target = context.data_root.join(name);
+                if missing {
+                    std::fs::remove_file(target).unwrap();
+                } else {
+                    std::fs::write(target, [2; 48]).unwrap();
+                }
+                let before = restore_file_bytes(&context);
+                let backend = RestoreFakeBackend::default();
+                let error = verify_restore_credentials_with_backend(
+                    context.profile.clone().unwrap(),
+                    &backend,
+                )
+                .unwrap_err()
+                .to_string();
+                assert!(error.contains(name));
+                assert!(backend.calls.lock().unwrap().is_empty());
+                assert_eq!(restore_file_bytes(&context), before);
+            }
+        }
+    }
+
+    #[test]
+    fn cold_restore_credentials_reject_wrong_key_and_damaged_master_without_writes() {
+        let temp = SyntheticRoot::new();
+        let context = temp.preview("existing");
+        restore_material(&context, &[25; KEK_LEN]);
+        let backend = RestoreFakeBackend {
+            keyring: Some([26; KEK_LEN]),
+            ..Default::default()
+        };
+        let before = restore_file_bytes(&context);
+        let error =
+            verify_restore_credentials_with_backend(context.profile.clone().unwrap(), &backend)
+                .unwrap_err()
+                .to_string();
+        assert!(error.contains("vault.sentinel"));
+        assert_eq!(restore_file_bytes(&context), before);
+
+        // Keep a valid sentinel but replace master with a validly encrypted
+        // payload that is not a signing key. A sentinel-only check would pass.
+        let dek = super::super::crypto::derive_scope_key(
+            &[25; KEK_LEN],
+            &context.scope_label("keyring:master"),
+        );
+        std::fs::write(
+            context.data_root.join("master.key"),
+            super::super::crypto::seal(&dek, br#"{"secret":[1,2]}"#).unwrap(),
+        )
+        .unwrap();
+        let backend = RestoreFakeBackend {
+            keyring: Some([25; KEK_LEN]),
+            ..Default::default()
+        };
+        let before = restore_file_bytes(&context);
+        let error =
+            verify_restore_credentials_with_backend(context.profile.clone().unwrap(), &backend)
+                .unwrap_err()
+                .to_string();
+        assert!(error.contains("master.key"));
+        assert_eq!(restore_file_bytes(&context), before);
+    }
+
+    #[test]
+    fn cold_restore_credentials_reject_changed_marker_before_backend_access() {
+        let temp = SyntheticRoot::new();
+        let context = temp.preview("existing");
+        restore_material(&context, &[27; KEK_LEN]);
+        let marker_path = context.data_root.join("profile.json");
+        let mut marker: crate::profile::ProfileMarker =
+            serde_json::from_slice(&std::fs::read(&marker_path).unwrap()).unwrap();
+        marker.profile_id = crate::profile::new_instance_id();
+        std::fs::write(&marker_path, serde_json::to_vec(&marker).unwrap()).unwrap();
+        let before = restore_file_bytes(&context);
+        let backend = RestoreFakeBackend::default();
+        assert!(verify_restore_credentials_with_backend(
+            context.profile.clone().unwrap(),
+            &backend
+        )
+        .is_err());
+        assert!(backend.calls.lock().unwrap().is_empty());
+        assert_eq!(restore_file_bytes(&context), before);
+    }
+
+    #[test]
+    fn cold_restore_credentials_injected_provider_reopens_same_uuid_at_fresh_root() {
+        let temp = SyntheticRoot::new();
+        let source = temp.preview("source");
+        let provider = Arc::new(PassphraseUnlockProvider::new("synthetic-cold-restore"));
+        let expected = restore_material(&source, &provider.root_kek().unwrap());
+        let destination = temp.0.join("destination");
+        std::fs::create_dir(&destination).unwrap();
+        for (name, bytes) in restore_file_bytes(&source) {
+            std::fs::write(destination.join(name), bytes).unwrap();
+        }
+        let restored =
+            Arc::new(crate::profile::ProfileContext::preflight(&destination, &[]).unwrap());
+        let restored_context = CredentialContext::for_profile(restored.clone()).unwrap();
+        let before = restore_file_bytes(&restored_context);
+        let probe = ProvidedRestoreCredentialProbe::new(provider);
+        let result = probe.verify_profile(restored.clone()).unwrap();
+        assert_eq!(
+            result.profile_id,
+            source.profile.as_ref().unwrap().profile_id()
+        );
+        assert_eq!(result.master_public_key, expected);
+        assert_eq!(restore_file_bytes(&restored_context), before);
+        assert!(super::super::cached_session_root_kek(&restored_context.cache_key()).is_none());
     }
 
     #[test]

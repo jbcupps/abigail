@@ -11,10 +11,12 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub const PROFILE_SCHEMA_VERSION: u32 = 1;
 static CURRENT: OnceLock<Arc<ProfileContext>> = OnceLock::new();
+static PROCESS_LEASE: OnceLock<crate::profile_lease::ProfileUseLease> = OnceLock::new();
+static INITIALIZATION: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -87,6 +89,23 @@ pub fn default_preview_root() -> Result<PathBuf> {
         .join("ongoing"))
 }
 
+/// Interrupted cold operations leave reserved staging directories for explicit
+/// inspection only. Normal startup must never consume or initialize their data.
+/// Check ancestors too: snapshot payloads live beneath a staging directory.
+pub fn reject_cold_staging_root(root: &Path) -> Result<()> {
+    for component in root.components() {
+        if let Component::Normal(name) = component {
+            let name = name.to_string_lossy().to_ascii_lowercase();
+            if name.starts_with(".abigail-cold-") && name.ends_with(".partial") {
+                bail!(
+                    "Cold snapshot/restore staging cannot be opened as an active preview profile"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Resolve mode independently of I/O, making missing/conflicting launcher
 /// arguments testable without changing the environment of parallel tests.
 pub fn resolve_preview_request(
@@ -152,6 +171,11 @@ pub fn initialize_process(
         }
         return Ok(None);
     };
+    // Serialize publishing the process context and its lifetime lease. A lease
+    // must never be installed for one root while CURRENT names another root.
+    let _initialization = INITIALIZATION
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Preview profile initialization was interrupted"))?;
     // Validate inherited non-secret context before creating even a new marker.
     let expected_id = match std::env::var("ABIGAIL_PROFILE_ID") {
         Ok(value) => Some(value),
@@ -162,6 +186,7 @@ pub fn initialize_process(
         validate_uuid(id)?;
     }
     let canonical = canonical_without_links(&root)?;
+    reject_cold_staging_root(&canonical)?;
     if let Some(docs) = std::env::var_os("ABIGAIL_DOCUMENTS_DIR") {
         if !same_path(
             &canonical_without_links(Path::new(&docs))?,
@@ -178,6 +203,20 @@ pub fn initialize_process(
         return Ok(Some(existing.clone()));
     }
     context.create_marker_if_missing()?;
+    let lease = crate::profile_lease::ProfileUseLease::acquire(&context)?;
+    // Inspection precedes the lease so rejected schemas/paths remain a
+    // non-writing refusal. Repeat it under the lease before any consumer starts.
+    let verified = ProfileContext::inspect(
+        context.root(),
+        &production_roots(),
+        Some(context.profile_id()),
+    )?;
+    if context.marker != verified.marker || !same_path(context.root(), verified.root()) {
+        bail!("Preview profile changed during initialization");
+    }
+    PROCESS_LEASE
+        .set(lease)
+        .map_err(|_| anyhow::anyhow!("The process profile lease was initialized concurrently"))?;
     let context = Arc::new(context);
     CURRENT
         .set(context.clone())
@@ -206,7 +245,46 @@ impl ProfileContext {
         Ok(context)
     }
 
+    /// Inspect an existing profile without initialization, migration, credential
+    /// access or a process lease. Offline tools take a cold lease separately.
+    pub fn inspect_existing(root: &Path, forbidden_roots: &[PathBuf]) -> Result<Self> {
+        let context = Self::inspect(root, forbidden_roots, None)?;
+        let marker: ProfileMarker = serde_json::from_str(
+            &fs::read_to_string(context.root.join("profile.json"))
+                .context("Cold profile operation requires an existing profile.json marker")?,
+        )
+        .context("Invalid existing preview profile marker")?;
+        if marker != context.marker {
+            bail!("Preview profile marker changed during inspection");
+        }
+        Ok(context)
+    }
+
+    /// Validate only an existing root and its expected compatible marker before
+    /// acquiring cold ownership. Damaged active configs are deliberately not
+    /// read: recovery must be able to exclude a broken original profile.
+    /// This does not establish that the profile's data is valid or stopped.
+    pub fn inspect_for_cold_ownership(
+        root: &Path,
+        forbidden_roots: &[PathBuf],
+        expected_profile_id: &str,
+    ) -> Result<Self> {
+        validate_uuid(expected_profile_id)?;
+        Self::inspect_marker(root, forbidden_roots, Some(expected_profile_id))
+            .context("Cannot identify the existing preview profile for cold ownership")
+    }
+
     fn inspect(
+        root: &Path,
+        forbidden_roots: &[PathBuf],
+        expected_id: Option<&str>,
+    ) -> Result<Self> {
+        let context = Self::inspect_marker(root, forbidden_roots, expected_id)?;
+        context.validate_existing_files()?;
+        Ok(context)
+    }
+
+    fn inspect_marker(
         root: &Path,
         forbidden_roots: &[PathBuf],
         expected_id: Option<&str>,
@@ -257,9 +335,7 @@ impl ProfileContext {
         if expected_id.is_some_and(|id| id != marker.profile_id) {
             bail!("Inherited profile identity does not match the selected root");
         }
-        let context = Self { root, marker };
-        context.validate_existing_files()?;
-        Ok(context)
+        Ok(Self { root, marker })
     }
 
     fn create_marker_if_missing(&self) -> Result<()> {
@@ -502,7 +578,8 @@ impl ProfileContext {
     }
 }
 
-fn production_roots() -> Vec<PathBuf> {
+/// Lexically derived forbidden roots; this does not inspect their contents.
+pub fn production_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Some(dirs) = directories::ProjectDirs::from("com", "abigail", "Abigail") {
         roots.push(dirs.data_local_dir().to_path_buf());
