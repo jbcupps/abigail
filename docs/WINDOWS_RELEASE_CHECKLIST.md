@@ -53,6 +53,14 @@ For a reported warning, request the exact downloaded filename, SHA-256, release 
 - **Wrong bytes, publisher, tag, or channel:** stop promotion and announcements. The release owner must explicitly approve any quarantine, latest-channel correction, or removal. Ship a corrected build under a new unused version after the normal gate and signing checks; do not rewrite the old version's provenance.
 - **Missing signing credentials or service entitlement:** resolve through the existing account owner and provider. Approval is required for new enrollment, purchases, key provisioning, and account changes. Unsigned candidates remain available for diagnostics.
 
+### Pinned v0.0.76 publication recovery
+
+`recover-stable-0.0.76.yml` is a one-time exception to rebuilding after a prepublication failure. Original release run `39380331517` completed its build, signing, installed acceptance, and asset verification successfully. Publication stopped when its expected missing-release response retained a native exit code of 1. No tag or release creation step ran.
+
+The recovery accepts no inputs. It pins the original stable source `e3ad51181da1ea11bded24ca0c39e2dcfe5fa944`, artifact `12246127943`, archive digest, independently verified provenance hash, and successful main-push CI gate `39376395634`. It checks original build/acceptance step results, verifies the exact four files and publisher again, and publishes without rebuilding, signing, or editing provenance. It refuses an existing release or a latest stable release other than `v0.0.75`. The recovery workflow revision is recorded separately and is never substituted for the product source.
+
+Run this workflow only from reviewed `main`. Completion still requires its public-download verifier to succeed and `published-verification/result.json` inside the `stable-0.0.76-recovery-verification` artifact to report `verified: true`. Retain both the original failed publication run and the new recovery evidence; the old workflow is not relabeled successful.
+
 ## Local process tests
 
 Run on Windows with Node.js, PowerShell 7, and the Windows SDK SignTool available:
@@ -63,6 +71,7 @@ node --test scripts/tests/test_release_provenance.mjs
 pwsh ./scripts/tests/test_release_artifacts.ps1
 pwsh ./scripts/tests/test_stage_release_assets.ps1
 pwsh ./scripts/tests/test_published_release.ps1
+pwsh ./scripts/tests/test_stable_recovery.ps1
 ```
 
 The tests exercise missing/tampered assets, identity and channel mismatches, wrong publisher, missing timestamps, ambiguous staging, and substituted public downloads. Native signature tests copy an already signed Node executable and never sign or execute the test copy. Published-download tests mock network metadata and transfers while retaining the real hash and native signature checks. Junction tests need filesystem permissions supported by the Windows CI runner. These tests do not prove signing-service availability or substitute for a hosted candidate and approved release run.

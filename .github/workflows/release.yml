@@ -621,6 +621,8 @@ jobs:
           $result = (& gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" 2>&1 | Out-String)
           if ($LASTEXITCODE -eq 0) { throw 'This release already exists. Verify it or choose a new version; never overwrite released assets.' }
           if ($result -notmatch 'HTTP 404') { throw 'Unable to confirm that the release version is unused.' }
+          # The expected 404 is handled; Actions otherwise exits with gh's code.
+          $LASTEXITCODE = 0
 
       - name: Require successful CI gate for this commit
         shell: bash
