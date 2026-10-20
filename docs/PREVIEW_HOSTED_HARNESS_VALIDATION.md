@@ -121,3 +121,48 @@ PowerShell parser checks, including removal, unlocked-install, ignored-failure
 and late-install mutations for the new bootstrap. No audit remediation was
 performed. Native builds, signing and installed lifecycle acceptance remain
 pending a subsequent reviewed dispatch.
+
+## Successful signed hosted candidate
+
+The repaired harness `dfebfb8b589bbf3f8275eff5547e1e7c8d7b91c4` completed
+[`39468905473`](https://github.com/jbcupps/abigail/actions/runs/39468905473),
+attempt 1, successfully on October 20, 2026. The job took 26m56s. Product
+`f7c7848d25726480b253ec1ca637c3ffa5ea3c77` and stable fixture
+`e3ad51181da1ea11bded24ca0c39e2dcfe5fa944` remain unchanged.
+
+The fresh hosted four-binary build, separate recovery CLI, frozen preparation,
+SSL.com signing, fixture acceptance and public artifact upload all passed.
+The report records 20 completed execution steps and 16 passing lifecycle
+assertions across seed, verify and return-to-stable phases:
+
+- Signed stable and preview payloads, uninstallers, registrations and shortcuts.
+- Both daemon launch orders, synthetic creation/chat and preview routing guards.
+- Same-candidate reinstall preserving preview state and stable coexistence state.
+- Cold snapshot, verify, fresh-destination restore and installed-daemon reopening.
+- Preview uninstall followed by stable reopening, stable uninstall, owned process
+  quiescence, and removal of the disposable fixture and its registrations.
+
+Artifact `abigail-preview-candidate-39468905473-1` has GitHub artifact ID
+`12287683353`, archive digest
+`8bf9865341e78cb2582ee1d3b261e75e46ad8e452c2bb74d211bd0923b72f6dc`
+and expires November 3, 2026. Its public provenance records:
+
+| File | SHA-256 |
+| --- | --- |
+| `Abigail-windows-x64-setup.exe` | `a59580764b7cf072cf7c6eeccf040f5c934c5b0c5c164cfe5338e2ccfe5199d1` |
+| `Abigail Preview.exe` | `1933d48cea9a1c20aaa670fbc618a87704f9a1054caa4b631eda4f76c5408162` |
+| `preview-candidate-acceptance.json` | `705f86995444db15e1da77aa1827b8a6c6c565c80136d3aa8ec996b6a150a032` |
+| `prepared-build-state.json` | `5f415ccc3fe8e22202ac6990cc9bc3cb675eafb8f568359c21216424589b8b0a` |
+
+After downloading the allowlisted artifact, all seven provenance-listed files
+matched their sizes and SHA-256 values. Native Authenticode verification of both
+downloaded executable files returned `Valid` with expected certificate
+`69BE78FD201A59A29C46F5D37097E0C6DDA04A41`. Neither executable was run locally.
+No credential-bearing signing log was extracted.
+
+This is selected synthetic installed acceptance, not full release acceptance.
+`publicationEligible`, `fullAcceptance` and `realModelValidation` remain false.
+Visual GUI/WebView reopening, normal KnownFolder bootstrap, real provider
+integration, stable-active installer behavior, prior accepted-preview migration,
+newer-schema refusal and native-keyring/cross-user/device recovery remain open.
+No release or preview pointer was published or changed by this run.
