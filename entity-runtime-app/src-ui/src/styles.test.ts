@@ -44,4 +44,27 @@ describe("Embedded application stylesheet", () => {
     expect(declaration("h1", "font-size")).toBe("inherit");
     expect(declaration("h1", "font-weight")).toBe("inherit");
   });
+
+  it("embeds the shared presence layout and animation without a stylesheet request", () => {
+    expect(declaration(".presence-art", "isolation")).toBe("isolate");
+    expect(declaration(".presence-runtime", "grid-template-columns")).toMatch(/minmax\(300px,\s*43%\)/);
+    expect(declaration(".presence-body", "animation")).toContain("presence-breathe");
+    const imports: string[] = [];
+    stylesheet.walkAtRules("import", (rule) => { imports.push(rule.params); });
+    expect(imports).toEqual([]);
+  });
+
+  it("embeds the presence reduced-motion override", () => {
+    let reducesPresenceMotion = false;
+    stylesheet.walkAtRules("media", (media) => {
+      if (!/prefers-reduced-motion:\s*reduce/.test(media.params)) return;
+      media.walkRules((rule) => {
+        if (!rule.selectors.includes(".presence-art *")) return;
+        rule.walkDecls("animation", (item) => {
+          reducesPresenceMotion = item.value === "none" && item.important === true;
+        });
+      });
+    });
+    expect(reducesPresenceMotion).toBe(true);
+  });
 });

@@ -1,0 +1,12 @@
+
+> abigail-hive-ui@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.8 <repository>/hive-app/src-ui
+
+
+ Test Files  11 passed (11)
+      Tests  283 passed (283)
+   Start at  11:02:31
+   Duration  5.54s (transform 4.00s, setup 2.64s, import 6.68s, tests 7.92s, environment 18.50s)

@@ -22,9 +22,13 @@ preservation/acceptance rules.
 Both overlays now describe the implemented runtime interface, with explicit
 `candidateAcceptance: "pending"`. The validator checks the complete closed
 launch schema, types and nested fields. Static roots, UUIDs, endpoints and
-executable recipes are rejected. The one application correction restricts
+executable recipes are rejected. The routing correction restricts
 Entity handshake exemptions to GET `/health`, GET `/v1/status` and OPTIONS,
 matching Hive and the documented contract. Stable header rejection is unchanged.
+The frontend correction embeds the unchanged shared Presence stylesheet through
+each shell's existing inline stylesheet pipeline. Production preparation exposed
+the original side-effect CSS import as incompatible with the packaged WebView;
+the packaging guard remains unchanged.
 
 The stable base Tauri configurations are identical to the application input.
 The staging, signed-builder, signing callback, release workflow and unavailable
@@ -39,9 +43,10 @@ remain historical; they are not relabeled as combined acceptance.
 
 | Check | Result |
 | --- | --- |
-| Hive UI, `npm test` | [281 tests in 11 files passed](../output/preview-combined/evidence/hive-frontend-tests-permitted.txt) |
-| Runtime UI, `npm test` | [92 tests in 7 files passed](../output/preview-combined/evidence/runtime-frontend-tests.txt) |
-| Both UI production builds, `npm run build` | TypeScript and Vite passed: [Hive](../output/preview-combined/evidence/hive-frontend-build.txt), [Runtime](../output/preview-combined/evidence/runtime-frontend-build.txt) |
+| Hive UI, `npm test` | [283 tests in 11 files passed](../output/preview-combined/evidence/css-fix-hive-tests.txt) |
+| Runtime UI, `npm test` | [94 tests in 7 files passed](../output/preview-combined/evidence/css-fix-runtime-tests.txt) |
+| Both UI production builds, `npm run build` | TypeScript and Vite passed: [Hive](../output/preview-combined/evidence/css-fix-hive-build.txt), [Runtime](../output/preview-combined/evidence/css-fix-runtime-build.txt) |
+| `test_preview_frontend_assets.ps1` | [6 actual generated-artifact checks passed](../output/preview-combined/evidence/css-fix-frontend-assets.txt), exercising the unchanged preparation guard, no emitted CSS files, and embedded Presence styles |
 | `test_preview_packaging.ps1` | [70 policy cases passed](../output/preview-combined/evidence/review-policy.txt) |
 | `test_preview_staging.ps1` | [21 mocked staging checks passed](../output/preview-combined/evidence/review-staging.txt) |
 | `test_signed_installer_state.ps1` | [38 prepared-state assertions passed](../output/preview-combined/evidence/review-prepared-state.txt) |
@@ -53,12 +58,13 @@ remain historical; they are not relabeled as combined acceptance.
 | Changed Rust formatting and Git whitespace | Passed |
 | Independent runtime and combined-diff reviews | Completed; no outstanding scoped findings |
 | Entity `preview_binding_tests`, compiled preview/release | [4 tests passed](../output/preview-combined/evidence/entity-preview-binding-tests.txt); other integration cases were filtered out |
-| All four release preview binaries and staging | [Built and staged successfully](../output/preview-combined/evidence/preview-staging-build.txt) with `ABIGAIL_BUILD_PROFILE=preview` |
-| Final unsigned Prepare source/overlay/contract/binary hashes | Post-commit receipt is recorded separately in local `build-state.json` and the task handoff; it cannot be embedded in its own source snapshot |
+| All four release preview binaries and staging before the CSS correction | [Built and staged successfully](../output/preview-combined/evidence/preview-staging-build.txt) with `ABIGAIL_BUILD_PROFILE=preview`; final preparation rebuilds these after the correction |
+| Final unsigned Prepare source/overlay/contract/binary hashes | The post-commit result and receipt are recorded separately in local `build-state.json` and the task handoff; they cannot be embedded in their own source snapshot |
 
-The first Hive frontend attempt failed before test collection because sandbox
-filesystem restrictions prevented Vite's temporary-config rename. The permitted
-retry passed all 281 tests. Initial release/asset-policy runs skipped junction
+Initial frontend attempts failed before test collection because sandbox
+filesystem restrictions prevented Vite's temporary-config rename. Permitted
+retries passed; the final 377-test run includes four new inline Presence style
+regressions and supersedes the earlier 373-test run. Initial release/asset-policy runs skipped junction
 fixtures under the restricted filesystem; permitted retries ran all cases.
 NSIS was found in the existing Tauri tool cache; after an initial restricted
 process-launch failure, its permitted fixture compilation passed. No generated
@@ -92,8 +98,18 @@ version, embedded current frontend entries, preview identifiers and contract
 markers before copying the three internal resources.
 The initial daemon build completed in 13m36s; staging compiled Hive in 2m47s
 and Runtime in 54.69s. The filtered Entity test harness compiled in 22.19s.
-Existing unused-helper warnings were emitted; no build failure occurred.
+Existing unused-helper warnings were emitted; native compilation succeeded.
 No compiler optimization setting or persistent Rust flag was changed.
+
+The first post-merge Prepare, against
+`1643b5a5f6b875ebfc1b7b8562b568cc34c1c000`, stopped at
+`Read-FrontendAssets`: both frontends emitted an external Presence stylesheet.
+No frozen build-state was produced. This was an executed validation failure,
+not an approval denial. Moving the shared stylesheet into both existing inline
+CSS pipelines fixes that incompatibility without changing its contents or
+weakening the guard. The final artifact test also verifies layout, animation and
+reduced-motion markers in both generated JavaScript entries. This correction
+requires new native shell builds and new preparation hashes.
 
 Final `build_signed_installer.ps1 -Phase Prepare -Channel preview -Version
 0.0.76 -TargetDir <isolated-cache>` runs after the source commit. It freezes that

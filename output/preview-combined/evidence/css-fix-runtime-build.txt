@@ -1,0 +1,15 @@
+
+> abigail-entity-runtime-ui@0.1.0 build
+> tsc && vite build
+
+vite v8.0.16 building client environment for production...
+
+transforming...Γ£ô 40 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.33 kB Γöé gzip:  0.24 kB
+dist/assets/core-CYtF6UP-.js      1.07 kB Γöé gzip:  0.53 kB
+dist/assets/window-ChqIDTcg.js   14.17 kB Γöé gzip:  3.47 kB
+dist/assets/index-BNwn0jpu.js   263.05 kB Γöé gzip: 80.88 kB
+
+Γ£ô built in 875ms

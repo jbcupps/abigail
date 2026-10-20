@@ -1,4 +1,5 @@
 @import "tailwindcss" source("../");
+@import "../../../entity-runtime-app/src-ui/src/presence/presence.css";
 @config "../tailwind.config.js";
 
 /* ═══════════════════════════════════════════════════════════════════

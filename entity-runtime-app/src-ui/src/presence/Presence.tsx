@@ -1,6 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { VisualIdentity } from "./profile";
-import "./presence.css";
 
 export type PresenceState = "idle" | "listening" | "thinking" | "speaking" | "interrupted" | "error";
 export interface PresenceMedia {

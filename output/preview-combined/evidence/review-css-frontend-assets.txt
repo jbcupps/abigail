@@ -1,0 +1,9 @@
+{"app":"hive-app","javascript_entries":["assets/index-D48pfX96.js"]}
+PASS hive-app packaging frontend guard
+PASS hive-app has no emitted external CSS
+PASS hive-app entry embeds presence layout, animation and reduced-motion CSS
+{"app":"entity-runtime-app","javascript_entries":["assets/index-BNwn0jpu.js"]}
+PASS entity-runtime-app packaging frontend guard
+PASS entity-runtime-app has no emitted external CSS
+PASS entity-runtime-app entry embeds presence layout, animation and reduced-motion CSS
+6 frontend artifact checks passed.
