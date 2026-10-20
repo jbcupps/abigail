@@ -7,6 +7,12 @@
 name: CI
 
 on:
+  workflow_dispatch:
+    inputs:
+      reviewed_harness_commit:
+        description: 'Reviewed dev workflow commit; manual CI checks fixed preview product f7c7848 without signing'
+        required: true
+        type: string
   push:
     branches: [main, beta]
   pull_request:
@@ -19,6 +25,10 @@ permissions:
 
 env:
   ABIGAIL_CI_MODE: "1"
+  # Manual acceptance CI tests immutable product source, independently of this
+  # reviewed workflow revision. Push/PR/schedule retain their original checkout.
+  ABIGAIL_SOURCE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && 'f7c7848d25726480b253ec1ca637c3ffa5ea3c77' || github.sha }}
+  REVIEWED_HARNESS_COMMIT: ${{ inputs.reviewed_harness_commit }}
 
 concurrency:
   # Preserve the same-commit push gate required by installer publication.
@@ -32,6 +42,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - name: Verify exact checked-out source and reviewed manual scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ABIGAIL_SOURCE_COMMIT"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "$GITHUB_REPOSITORY" == "jbcupps/abigail" ]]
+            [[ "$GITHUB_REF" == refs/heads/dev/* ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+          fi
+          printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
@@ -167,6 +194,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - name: Verify exact checked-out source and reviewed manual scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ABIGAIL_SOURCE_COMMIT"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "$GITHUB_REPOSITORY" == "jbcupps/abigail" ]]
+            [[ "$GITHUB_REF" == refs/heads/dev/* ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+          fi
+          printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
@@ -217,6 +261,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - name: Verify exact checked-out source and reviewed manual scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ABIGAIL_SOURCE_COMMIT"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "$GITHUB_REPOSITORY" == "jbcupps/abigail" ]]
+            [[ "$GITHUB_REF" == refs/heads/dev/* ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+          fi
+          printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
 
       - name: Install Linux dependencies (Tauri 2 / Debian)
         if: matrix.platform == 'ubuntu-22.04'
@@ -253,6 +314,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - name: Verify exact checked-out source and reviewed manual scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ABIGAIL_SOURCE_COMMIT"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "$GITHUB_REPOSITORY" == "jbcupps/abigail" ]]
+            [[ "$GITHUB_REF" == refs/heads/dev/* ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+          fi
+          printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
 
       - name: Setup Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -287,6 +365,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - name: Verify exact checked-out source and reviewed manual scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ABIGAIL_SOURCE_COMMIT"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "$GITHUB_REPOSITORY" == "jbcupps/abigail" ]]
+            [[ "$GITHUB_REF" == refs/heads/dev/* ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+          fi
+          printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
@@ -323,6 +418,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.ABIGAIL_SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - name: Verify exact checked-out source and reviewed manual scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ABIGAIL_SOURCE_COMMIT"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "$GITHUB_REPOSITORY" == "jbcupps/abigail" ]]
+            [[ "$GITHUB_REF" == refs/heads/dev/* ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+            [[ "$REVIEWED_HARNESS_COMMIT" == "$GITHUB_SHA" ]]
+            [[ "$ABIGAIL_SOURCE_COMMIT" == "f7c7848d25726480b253ec1ca637c3ffa5ea3c77" ]]
+          fi
+          printf 'Verified product source: %s; workflow revision: %s\n' "$ABIGAIL_SOURCE_COMMIT" "$GITHUB_SHA"
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
