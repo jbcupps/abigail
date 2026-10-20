@@ -1,0 +1,36 @@
+Captured command output; machine paths redacted, terminal control sequences removed, trailing whitespace trimmed.
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\abigail_core-0wgip5633uc0c\s-hndy6r2lql-11bl0s3-working`
+
+warning: `abigail-core` (lib) generated 1 warning
+   Compiling abigail-identity v0.0.1 (<repository>\crates\abigail-identity)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\abigail_identity-3d50hr7g770k7\s-hndy84pyej-15vlmkq-working`
+
+warning: `abigail-identity` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.55s
+     Running unittests src\lib.rs (target\debug\deps\abigail_identity-37987ebe8adc8077.exe)
+
+running 22 tests
+test creation::tests::invalid_key_or_name_never_reserves ... ok
+test creation::tests::absent_lookup_does_not_write_or_allocate ... ok
+test creation::tests::invalid_partial_config_stays_untouched_and_keeps_reservation ... ok
+test creation::tests::reservation_write_failure_does_not_publish_or_initialize ... ok
+test creation::tests::mismatched_partial_config_is_never_adopted_or_overwritten ... ok
+test creation::tests::old_registry_and_unkeyed_creation_remain_compatible ... ok
+test creation::tests::conflicting_name_is_rejected_before_and_after_completion ... ok
+test creation::tests::deleted_completion_is_terminal_after_restart ... ok
+test creation::tests::file_initialization_failure_keeps_the_reserved_id_for_restart_retry ... ok
+test creation::tests::missing_completed_config_is_not_recreated ... ok
+test creation::tests::initialized_reservation_replays_without_overwriting ... ok
+test creation::tests::reservation_before_files_survives_restart ... ok
+test creation::tests::completed_replay_survives_restart_and_does_not_overwrite_config ... ok
+test creation::tests::concurrent_replay_allocates_exactly_one_entity ... ok
+test creation::tests::final_registry_write_failure_leaves_only_a_reservation_for_replay ... ok
+test creation::tests::reserved_future_config_refusal_preserves_files_and_creation_receipt ... ok
+test creation::tests::failed_disposable_creation_resumes_reserved_uuid_without_touching_ongoing_entity ... ok
+test creation::tests::reserved_legacy_config_replay_validates_without_migrating_its_bytes ... ok
+test creation::tests::populated_legacy_registry_preserves_entities_and_settings_when_adding_creation_ledger ... ok
+test creation::tests::disposable_same_name_lifecycle_preserves_ongoing_uuid_and_saved_files ... ok
+test creation::tests::restore_supported_unsigned_backup_rebases_paths_and_preserves_saved_data ... ok
+test creation::tests::restore_backup_config_refusal_preserves_source_directory_and_registry ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.26s

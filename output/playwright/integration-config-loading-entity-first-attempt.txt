@@ -1,0 +1,94 @@
+Entity config refusal: isolated helper tests
+Command: cargo test --locked --offline -j 1 -p entity-daemon --bin entity-daemon config_loading_tests -- --test-threads=1
+Only config_loading_tests was selected. Linking failed before tests executed; no daemon startup, providers, credentials, or actual user data used.
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_system_monitor-05dvg8f14xs1p\s-hndy58c5mn-13e765x-working`
+
+warning: `skill-system-monitor` (lib) generated 1 warning
+   Compiling skill-notification v0.0.1 (<repository>\skills\skill-notification)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_notification-005qfrnawov5j\s-hndy59bu92-0bnjej5-working`
+
+warning: `skill-notification` (lib) generated 1 warning
+   Compiling skill-image v0.0.1 (<repository>\skills\skill-image)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_image-0tlvi8yel4fbo\s-hndy5aikjl-01qbhaf-working`
+
+warning: `skill-image` (lib) generated 1 warning
+   Compiling skill-web-search v0.0.1 (<repository>\skills\skill-web-search)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_web_search-0oreakvevaib4\s-hndy5fk71v-14jtcze-working`
+
+warning: `skill-web-search` (lib) generated 1 warning
+   Compiling skill-browser v0.0.1 (<repository>\skills\skill-browser)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_browser-2eznp7pp4aa95\s-hndy5gito8-1toox25-working`
+
+warning: `skill-browser` (lib) generated 1 warning
+   Compiling skill-http v0.0.1 (<repository>\skills\skill-http)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_http-1ysntsrfvur2a\s-hndy5kdurp-1c0coud-working`
+
+warning: `skill-http` (lib) generated 1 warning
+   Compiling skill-perplexity-search v0.0.1 (<repository>\skills\skill-perplexity-search)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_perplexity_search-0znd8wn8xl3od\s-hndy5ljtmw-155al55-working`
+
+warning: `skill-perplexity-search` (lib) generated 1 warning
+   Compiling skill-document v0.0.1 (<repository>\skills\skill-document)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_document-0vbza2circ263\s-hndy5msl6n-01d177o-working`
+
+warning: `skill-document` (lib) generated 1 warning
+   Compiling skill-shell v0.0.1 (<repository>\skills\skill-shell)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_shell-2oa1uc4o73xl5\s-hndy5ns1ne-1vqp5m3-working`
+
+warning: `skill-shell` (lib) generated 1 warning
+   Compiling skill-git v0.0.1 (<repository>\skills\skill-git)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_git-0mks4wpif1ijf\s-hndy5ord3l-1k0y6wm-working`
+
+warning: `skill-git` (lib) generated 1 warning
+   Compiling skill-calendar v0.0.1 (<repository>\skills\skill-calendar)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_calendar-0i18e140tfxcv\s-hndy5ppqaq-1lksjru-working`
+
+warning: `skill-calendar` (lib) generated 1 warning
+   Compiling skill-database v0.0.1 (<repository>\skills\skill-database)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_database-0smajchfkttoc\s-hndy5ru4di-1g4yd81-working`
+
+warning: `skill-database` (lib) generated 1 warning
+   Compiling skill-filesystem v0.0.1 (<repository>\skills\skill-filesystem)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_filesystem-1fp2463amxfut\s-hndy5str66-01ube1d-working`
+
+warning: `skill-filesystem` (lib) generated 1 warning
+   Compiling skill-code-analysis v0.0.1 (<repository>\skills\skill-code-analysis)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_code_analysis-2x0szvnxgtu7v\s-hndy5tzh6k-0rhgz2i-working`
+
+warning: `skill-code-analysis` (lib) generated 1 warning
+   Compiling skill-knowledge-base v0.0.1 (<repository>\skills\skill-knowledge-base)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_knowledge_base-1d8m6usntp4kl\s-hndy5v515o-0zp2sxx-working`
+
+warning: `skill-knowledge-base` (lib) generated 1 warning
+   Compiling abigail-runtime v0.0.1 (<repository>\crates\abigail-runtime)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\abigail_runtime-0k9n8neywiu71\s-hndy5x8k8n-17015n4-working`
+
+warning: `abigail-runtime` (lib) generated 1 warning
+   Compiling entity-chat v0.0.1 (<repository>\crates\entity-chat)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\entity_chat-29ofjdk1inop6\s-hndy5ygbgh-0t88onw-working`
+
+warning: `entity-chat` (lib) generated 1 warning
+   Compiling soul-forge v0.0.1 (<repository>\crates\soul-forge)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\soul_forge-2czl9zct2bz1x\s-hndy60us4c-16kun2u-working`
+
+warning: `soul-forge` (lib) generated 1 warning
+   Compiling abigail-superego v0.0.1 (<repository>\crates\abigail-superego)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\abigail_superego-190qwupemadko\s-hndy629vsf-153bidq-working`
+
+warning: `abigail-superego` (lib) generated 1 warning
+   Compiling daemon-test-harness v0.0.1 (<repository>\crates\daemon-test-harness)
+   Compiling abigail-identity v0.0.1 (<repository>\crates\abigail-identity)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\abigail_identity-3otn0mq2efxej\s-hndy64abuf-0znge1f-working`
+
+warning: `abigail-identity` (lib) generated 1 warning
+   Compiling entity-daemon v0.0.1 (<repository>\crates\entity-daemon)
+error: linking with `link.exe` failed: exit code: 1140
+  |
+  = note: [full linker command omitted from portable log; it contains local toolchain/cache paths]
+  = note: some arguments are omitted. use `--verbose` to show all linker arguments
+  = note:    Creating library <repository>\target\debug\deps\entity_daemon-18645d314c627556.lib and object <repository>\target\debug\deps\entity_daemon-18645d314c627556.exp
+          LINK : fatal error LNK1140: limit exceeded for program database; link with /PDB:NONE
+
+
+error: could not compile `entity-daemon` (bin "entity-daemon" test) due to 1 previous error
+Exit code: 101

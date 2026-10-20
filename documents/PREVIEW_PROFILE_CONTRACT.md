@@ -4,6 +4,8 @@ Source review and packaging contract proposal, 2026-10-20. **This contract is no
 
 The goal is one persistent preview profile containing an ongoing Entity and separate disposable Entities. Updating the preview application must preserve that profile. Normal production behavior and existing production data must remain unchanged.
 
+The [release alignment](PREVIEW_RELEASE_ALIGNMENT.md) maps this proposal to release scaffolding `6b246d3`, its ten exact acceptance stage IDs, proposed packaging identifiers, and the smallest application implementation sequence. A preview profile belongs to a selected beta release, not a third release channel.
+
 ## Current paths that prevent an isolation claim
 
 | Source | Current behavior |
@@ -43,9 +45,11 @@ The goal is one persistent preview profile containing an ongoing Entity and sepa
    | Hive and Runtime WebView data | Separate role directories beneath `<preview-root>/webview` |
 
    For preview, either derive `ABIGAIL_DOCUMENTS_DIR` internally or accept only the exact agreed preview Documents root. Never honor an outside override or fall back to OS Documents. Validate persisted path-valued settings before using them; copying an old config must not redirect the new profile to production files.
-5. Propagate the same profile/root explicitly to Hive, its helper, each Entity process, and both native UIs; reject conflicting arguments or inherited values. Descriptor and status/connection handshakes verify the profile UUID and expected root ownership before endpoint adoption. A copied UUID alone cannot distinguish an active original from a restored root. Do not accept an arbitrary healthy production daemon, including through URL overrides. Propagate startup failure to the UI and disable native fallback to normal default ports or browser overrides. One immutable profile per process is the minimum cache/ownership model.
+5. Propagate the same profile/root explicitly to Hive, its helper, each Entity process, and both native UIs; reject conflicting arguments or inherited values. Descriptor and status/connection handshakes verify channel, profile UUID, expected root ownership, and live process-instance identity before endpoint adoption. A copied UUID alone cannot distinguish an active original from a restored root. Do not accept an arbitrary healthy production daemon, including through URL overrides. Propagate startup failure to the UI and disable native fallback to normal default ports or browser overrides. One immutable profile per process is the minimum cache/ownership model.
 
    Verify retained creation-journal endpoints before lookup, replay, or profile save too. Preserve the exact creation key; never replay it against a different profile. A changed port can be rebound only after verifying that the new endpoint owns the same intended profile/root.
+
+   Scope close/restart to the verified instance and owned child handles. Never kill a stale descriptor PID. Pass packaged executable paths explicitly and reject inherited overrides that select a different channel's executables.
 6. Preview uses a distinct OS keyring account bound to its profile UUID. Production retains its existing account. Preview must not read, repair, fall back to, or migrate the production entry implicitly. Root-relative DPAPI fallback and every master-key/encrypted-storage helper must receive the same context. This requires coordinated dependency plumbing; changing only the first constructor is insufficient.
 7. Provider reuse is explicit. Do not silently inherit production provider settings, ambient API keys, or CLI accounts. A user may separately choose to connect an existing provider account, with the same visible verification and data-flow explanation used by normal model setup.
 8. Packaging supplies separate preview identity/shortcut/update routing and preserves this root and WebView data. Those release/channel changes belong to the release-engineering owner. Application code must enforce the boundary even when an environment variable or launcher argument is missing.
@@ -59,10 +63,12 @@ For a fresh preview profile, UUID-based Documents avoid the inherited same-name 
 ## Required synthetic acceptance and migration evidence
 
 - Pure path/context tests reject missing/relative roots, root overlap, mismatched markers, outside Documents/config paths, and a wrong-profile daemon. Invalid configuration must perform no fallback filesystem or credential operation.
+- Startup preflight rejects unsupported profile/config schemas before writes. Config loader/save tests are component evidence; the exact installer must also preserve all fixture bytes during the `newer-schema-refusal` stage.
 - Use fake credential-provider/keyring adapters to prove namespace selection and absence of calls to the production account. Run no actual credential operation until the concrete plan is reviewed.
 - Create a synthetic maintained Entity plus a disposable Entity. Exercise create, profile save, native tool root selection, archive destination, backup enumeration, reopen, and runtime restart. Sentinel files representing production data must remain byte-identical and absent from allowed roots/discovery results.
 - Stop all owners before a consistent whole-root snapshot. Inventory external artifacts and credential dependencies too: current Documents/archive output, WebView state, and OS credential entries are not all inside the root. Even after the proposed path changes, a root copy alone does not establish availability of the required encryption key.
 - Restore into an explicitly designated isolated recovery root. Rebase persisted absolute config paths through a reviewed import step or reject them; never follow paths back to the source profile. Invalidate copied PID/URL runtime descriptors. Keep the original profile stopped during recovery validation, then verify expected root ownership, profile identity, credential/decryption availability, registered UUIDs, exact committed transcript and presentation before allowing mutations. A file copy alone is not restore verification.
 - Verify the actual signed candidate update preserves the same profile UUID/root and maintained Entity while its binary revisions change. Disposable Entity maintenance must not alter the maintained Entity. Do not run old/new application owners concurrently against one store.
+- Run fresh-install creation acceptance in a separate disposable profile from the continuing-profile upgrade fixture. Keep the within-profile Entity isolation tests as an additional check.
 
 These tests separate application profile isolation from real-provider inference, installed OS credential integration, and installer/channel acceptance. The latter remain separately scoped activities. The current First Signal source/tests do not yet satisfy this complete preview contract.

@@ -36,6 +36,8 @@ Abigail grew from the vision in "Toward a Decentralized Trust Framework for Veri
 
 `dev/first-signal-integration-0.0.76` integrates First Signal onto signed-stable main `17b636b` under the current product task. Preserve release safeguards, current conversation history, provider checks, and the original development branches. Creation recovery uses the exact persisted key; presentation metadata remains separate from birth/model instructions. Integration validation and independent review passed; the development commit/push is authorized. Main/beta merges and release remain held while acceptance gaps are open. The existing bus and incomplete skill lifecycle are mapped in `documents/BUS_AND_SKILL_SOURCE_MAP.md`; this task does not implement skill promotion or access Iris's library.
 
+The preview follow-up aligns with release scaffolding `6b246d3`; see `documents/PREVIEW_RELEASE_ALIGNMENT.md` for assigned packaging ownership, proposed launcher/profile parameters and the exact acceptance stages. Config-level schema refusal does not make the current application profile-isolated or accepted for a signed preview. Keep real profiles and credentials untouched while completing synthetic application checks.
+
 **How You Should Work**
 
 The First Signal presence slice uses Hive-owned `presence.json` presentation metadata and the existing Entity text gateway. Appearance, imported briefs, and demonstration animation never grant permissions or indicate model reasoning. Keep actual request, input, and playback signals separate. See `documents/FIRST_SIGNAL.md` before extending its media or persona adapters.

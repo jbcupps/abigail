@@ -1,0 +1,16 @@
+Captured command output; machine paths redacted, terminal control sequences removed, trailing whitespace trimmed.
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\abigail_core-0wgip5633uc0c\s-hndy6r2lql-11bl0s3-working`
+
+warning: `abigail-core` (lib) generated 1 warning
+   Compiling abigail-identity v0.0.1 (<repository>\crates\abigail-identity)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\abigail_identity-3d50hr7g770k7\s-hndyd8xdxx-0867dln-working`
+
+warning: `abigail-identity` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.82s
+     Running unittests src\lib.rs (target\debug\deps\abigail_identity-37987ebe8adc8077.exe)
+
+running 2 tests
+test creation::tests::restore_supported_unsigned_backup_rebases_paths_and_preserves_saved_data ... ok
+test creation::tests::restore_backup_config_refusal_preserves_source_directory_and_registry ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 0.13s

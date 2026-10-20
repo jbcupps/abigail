@@ -451,9 +451,9 @@ impl IdentityManager {
         let agent_dir = self.identities_dir().join(uuid);
         let config_path = agent_dir.join("config.json");
         if config_path.try_exists().map_err(|e| e.to_string())? {
-            // Reading directly avoids AppConfig::load's migration/write side effect.
+            // Validate compatibility without AppConfig::load's migration/write side effect.
             let content = std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-            let existing: AppConfig = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+            let existing = AppConfig::from_json_compatible(&content).map_err(|e| e.to_string())?;
             if existing.is_hive
                 || existing.data_dir != agent_dir
                 || existing.agent_name.as_deref() != Some(name)
@@ -1170,18 +1170,24 @@ impl IdentityManager {
             return Err(format!("Backup not found: {}", backup_dir_name));
         }
 
-        // Read config to get agent name
+        // Refuse unsupported or invalid configs before moving or changing the backup.
+        // Keep the validated value so loading cannot silently fall back after the move.
         let config_path = backup_path.join("config.json");
-        let agent_name = if config_path.exists() {
-            match AppConfig::load(&config_path) {
-                Ok(config) => config
-                    .agent_name
-                    .unwrap_or_else(|| "Restored Entity".to_string()),
-                Err(_) => "Restored Entity".to_string(),
-            }
+        let backup_config = if config_path.try_exists().map_err(|e| e.to_string())? {
+            let content =
+                abigail_core::path_guard::load_string_from_root(&backup_path, "config.json")
+                    .map_err(|e| format!("Failed to read backup config: {}", e))?;
+            Some(
+                AppConfig::from_json_compatible(&content)
+                    .map_err(|e| format!("Cannot restore backup config: {}", e))?,
+            )
         } else {
-            "Restored Entity".to_string()
+            None
         };
+        let agent_name = backup_config
+            .as_ref()
+            .and_then(|config| config.agent_name.clone())
+            .unwrap_or_else(|| "Restored Entity".to_string());
 
         // Generate new UUID to avoid conflicts
         let new_uuid = Uuid::new_v4().to_string();
@@ -1195,24 +1201,19 @@ impl IdentityManager {
                 .map_err(|e| format!("Backup copied but failed to remove original: {}", e))?;
         }
 
-        // Update config.json paths
+        // Migrate supported configs in memory and update the restored paths.
         let new_config_path = agent_dir.join("config.json");
-        if new_config_path.exists() {
-            match AppConfig::load(&new_config_path) {
-                Ok(mut config) => {
-                    config.data_dir = agent_dir.clone();
-                    config.models_dir = agent_dir.join("models");
-                    config.docs_dir = agent_dir.join("docs");
-                    config.db_path = self.shared_memory_db_path();
-                    if agent_dir.join("external_pubkey.bin").exists() {
-                        config.external_pubkey_path = Some(agent_dir.join("external_pubkey.bin"));
-                    }
-                    let _ = config.save(&new_config_path);
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to update restored config: {}", e);
-                }
+        if let Some(mut config) = backup_config {
+            config.migrate();
+            config.data_dir = agent_dir.clone();
+            config.models_dir = agent_dir.join("models");
+            config.docs_dir = agent_dir.join("docs");
+            config.db_path = self.shared_memory_db_path();
+            if agent_dir.join("external_pubkey.bin").exists() {
+                config.external_pubkey_path = Some(agent_dir.join("external_pubkey.bin"));
             }
+            // Preserve existing post-move behavior; transactional restore is separate work.
+            let _ = config.save(&new_config_path);
         }
 
         // Re-sign agent public key with current Hive master key

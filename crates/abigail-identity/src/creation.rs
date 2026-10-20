@@ -460,6 +460,213 @@ mod tests {
     }
 
     #[test]
+    fn reserved_future_config_refusal_preserves_files_and_creation_receipt() {
+        let root = TestRoot::new();
+        let manager = root.manager();
+        let key = Uuid::new_v4().to_string();
+        let record = reserve(&manager, &key);
+        manager
+            .initialize_agent_files(&record.entity_id, "Signal", "phosphor")
+            .unwrap();
+        let directory = manager.identities_dir().join(&record.entity_id);
+        let mut config: serde_json::Value =
+            serde_json::from_slice(&config_bytes(&directory)).unwrap();
+        config["schema_version"] = serde_json::json!(abigail_core::CONFIG_SCHEMA_VERSION + 1);
+        config["future_fixture_field"] = serde_json::json!({"must_remain": "unchanged"});
+        std::fs::write(
+            directory.join("config.json"),
+            serde_json::to_vec_pretty(&config).unwrap(),
+        )
+        .unwrap();
+        let before_files = snapshot_files(&root.0);
+        let before_registry =
+            serde_json::to_value(&*manager.global_config.read().unwrap()).unwrap();
+
+        for manager in [&manager, &root.manager()] {
+            assert!(matches!(
+                manager.create_agent_idempotent("Signal", &key),
+                Err(AgentCreationError::Storage(_))
+            ));
+            assert_eq!(
+                manager.entity_creation_status(&key).unwrap(),
+                AgentCreationStatus::Reserved {
+                    name: "Signal".to_string()
+                }
+            );
+            assert_eq!(
+                serde_json::to_value(&*manager.global_config.read().unwrap()).unwrap(),
+                before_registry
+            );
+            assert_eq!(snapshot_files(&root.0), before_files);
+        }
+    }
+
+    #[test]
+    fn reserved_legacy_config_replay_validates_without_migrating_its_bytes() {
+        let root = TestRoot::new();
+        let manager = root.manager();
+        let key = Uuid::new_v4().to_string();
+        let record = reserve(&manager, &key);
+        manager
+            .initialize_agent_files(&record.entity_id, "Signal", "phosphor")
+            .unwrap();
+        let directory = manager.identities_dir().join(&record.entity_id);
+        let mut config: serde_json::Value =
+            serde_json::from_slice(&config_bytes(&directory)).unwrap();
+        config["schema_version"] = serde_json::json!(0);
+        let legacy_bytes = serde_json::to_vec_pretty(&config).unwrap();
+        std::fs::write(directory.join("config.json"), &legacy_bytes).unwrap();
+
+        let (id, _) = manager.create_agent_idempotent("Signal", &key).unwrap();
+        assert_eq!(id, record.entity_id);
+        assert_eq!(config_bytes(&directory), legacy_bytes);
+        assert_eq!(
+            GlobalConfig::load(&root.0).unwrap().creation_attempts[&key].state,
+            AgentCreationState::Complete
+        );
+    }
+
+    #[test]
+    fn restore_backup_config_refusal_preserves_source_directory_and_registry() {
+        for invalid in ["future", "invalid version", "malformed json"] {
+            let root = TestRoot::new();
+            let manager = root.manager();
+            let ongoing_key = Uuid::new_v4().to_string();
+            manager
+                .create_agent_idempotent("Ongoing fixture", &ongoing_key)
+                .unwrap();
+            let archived_id = Uuid::new_v4().to_string();
+            manager
+                .initialize_agent_files(&archived_id, "Archived fixture", "phosphor")
+                .unwrap();
+            let backup = root.0.join("backups/unsupported-fixture");
+            std::fs::create_dir_all(backup.parent().unwrap()).unwrap();
+            std::fs::rename(manager.identities_dir().join(&archived_id), &backup).unwrap();
+            let mut config: serde_json::Value =
+                serde_json::from_slice(&config_bytes(&backup)).unwrap();
+            config["schema_version"] = match invalid {
+                "future" => serde_json::json!(abigail_core::CONFIG_SCHEMA_VERSION + 1),
+                _ => serde_json::json!("invalid"),
+            };
+            let invalid_bytes = if invalid == "malformed json" {
+                b"{\"schema_version\":".to_vec()
+            } else {
+                serde_json::to_vec_pretty(&config).unwrap()
+            };
+            std::fs::write(backup.join("config.json"), invalid_bytes).unwrap();
+            std::fs::write(
+                backup.join("backup_metadata.json"),
+                b"{\"fixture\":\"retain original backup\"}",
+            )
+            .unwrap();
+            std::fs::write(
+                backup.join("docs/synthetic-note.md"),
+                b"Keep this fixture note.",
+            )
+            .unwrap();
+            let before_files = snapshot_files(&root.0);
+            let before_registry =
+                serde_json::to_value(&*manager.global_config.read().unwrap()).unwrap();
+            let before_identity_dirs: std::collections::BTreeSet<_> =
+                std::fs::read_dir(manager.identities_dir())
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path())
+                    .collect();
+
+            assert!(
+                manager.restore_backup("unsupported-fixture").is_err(),
+                "restore must refuse {invalid}"
+            );
+            assert!(backup.is_dir(), "backup source must remain for {invalid}");
+            assert_eq!(snapshot_files(&root.0), before_files, "{invalid}");
+            assert_eq!(
+                serde_json::to_value(&*manager.global_config.read().unwrap()).unwrap(),
+                before_registry,
+                "{invalid}"
+            );
+            let after_identity_dirs: std::collections::BTreeSet<_> =
+                std::fs::read_dir(manager.identities_dir())
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path())
+                    .collect();
+            assert_eq!(after_identity_dirs, before_identity_dirs, "{invalid}");
+        }
+    }
+
+    #[test]
+    fn restore_supported_unsigned_backup_rebases_paths_and_preserves_saved_data() {
+        for schema_version in [0, abigail_core::CONFIG_SCHEMA_VERSION] {
+            let root = TestRoot::new();
+            let manager = root.manager();
+            let ongoing_key = Uuid::new_v4().to_string();
+            let (ongoing_id, ongoing_dir) = manager
+                .create_agent_idempotent("Ongoing fixture", &ongoing_key)
+                .unwrap();
+            let ongoing_files = snapshot_files(&ongoing_dir);
+            let before_registry = GlobalConfig::load(&root.0).unwrap();
+            let archived_id = Uuid::new_v4().to_string();
+            manager
+                .initialize_agent_files(&archived_id, "Archived fixture", "phosphor")
+                .unwrap();
+            let backup = root.0.join("backups/supported-fixture");
+            std::fs::create_dir_all(backup.parent().unwrap()).unwrap();
+            std::fs::rename(manager.identities_dir().join(&archived_id), &backup).unwrap();
+            assert!(!backup.join("external_pubkey.bin").exists());
+            let mut config: serde_json::Value =
+                serde_json::from_slice(&config_bytes(&backup)).unwrap();
+            config["schema_version"] = serde_json::json!(schema_version);
+            std::fs::write(
+                backup.join("config.json"),
+                serde_json::to_vec_pretty(&config).unwrap(),
+            )
+            .unwrap();
+            std::fs::write(
+                backup.join("backup_metadata.json"),
+                b"{\"fixture\":\"supported unsigned backup\"}",
+            )
+            .unwrap();
+            let note = b"Synthetic archived note survives restore.";
+            std::fs::write(backup.join("docs/synthetic-note.md"), note).unwrap();
+
+            let restored_id = manager.restore_backup("supported-fixture").unwrap();
+            assert_ne!(restored_id, archived_id);
+            assert_ne!(restored_id, ongoing_id);
+            assert!(!backup.exists());
+            let restored_dir = manager.identities_dir().join(&restored_id);
+            let restored = AppConfig::from_json_compatible(
+                std::str::from_utf8(&config_bytes(&restored_dir)).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(restored.schema_version, abigail_core::CONFIG_SCHEMA_VERSION);
+            assert_eq!(restored.agent_name.as_deref(), Some("Archived fixture"));
+            assert_eq!(restored.data_dir, restored_dir);
+            assert_eq!(restored.models_dir, restored_dir.join("models"));
+            assert_eq!(restored.docs_dir, restored_dir.join("docs"));
+            assert_eq!(restored.db_path, manager.shared_memory_db_path());
+            assert_eq!(
+                std::fs::read(restored_dir.join("docs/synthetic-note.md")).unwrap(),
+                note
+            );
+            assert!(!restored_dir.join("backup_metadata.json").exists());
+            assert!(!restored_dir.join("signature.sig").exists());
+            assert_eq!(snapshot_files(&ongoing_dir), ongoing_files);
+            let after_registry = GlobalConfig::load(&root.0).unwrap();
+            assert_eq!(after_registry.agents.len(), 2);
+            assert_eq!(
+                serde_json::to_value(&after_registry.creation_attempts).unwrap(),
+                serde_json::to_value(&before_registry.creation_attempts).unwrap()
+            );
+            let restored_entry = after_registry.find_agent(&restored_id).unwrap();
+            assert_eq!(restored_entry.name, "Archived fixture");
+            assert!(!restored_entry.is_hive);
+            assert_eq!(
+                restored_entry.directory,
+                manager.registry_directory_for(&restored_id)
+            );
+        }
+    }
+
+    #[test]
     fn conflicting_name_is_rejected_before_and_after_completion() {
         let root = TestRoot::new();
         let key = Uuid::new_v4().to_string();

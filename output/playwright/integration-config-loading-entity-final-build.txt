@@ -1,0 +1,66 @@
+Entity config helper test-harness final build
+Command: cargo rustc --locked --offline -j 1 -p entity-daemon --bin entity-daemon --profile test --message-format json -- -C link-arg=/PDB:NONE
+Retry after workspace build-space recovery. Earlier LNK1140 and disk-space failure logs preserved separately.
+Only final target receives the PDB override. This command builds but does not run an executable.
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_system_monitor-05dvg8f14xs1p\s-hndy58c5mn-13e765x-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_notification-005qfrnawov5j\s-hndy59bu92-0bnjej5-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_image-0tlvi8yel4fbo\s-hndy5aikjl-01qbhaf-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_web_search-0oreakvevaib4\s-hndy5fk71v-14jtcze-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_browser-2eznp7pp4aa95\s-hndy5gito8-1toox25-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_perplexity_search-0znd8wn8xl3od\s-hndy5ljtmw-155al55-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_knowledge_base-1d8m6usntp4kl\s-hndy5v515o-0zp2sxx-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_calendar-0i18e140tfxcv\s-hndy5ppqaq-1lksjru-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_code_analysis-2x0szvnxgtu7v\s-hndy5tzh6k-0rhgz2i-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_document-0vbza2circ263\s-hndy5msl6n-01d177o-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_shell-2oa1uc4o73xl5\s-hndy5ns1ne-1vqp5m3-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_http-1ysntsrfvur2a\s-hndy5kdurp-1c0coud-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_database-0smajchfkttoc\s-hndy5ru4di-1g4yd81-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_filesystem-1fp2463amxfut\s-hndy5str66-01ube1d-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\skill_git-0mks4wpif1ijf\s-hndy5ord3l-1k0y6wm-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\abigail_runtime-0k9n8neywiu71\s-hndy5x8k8n-17015n4-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\entity_chat-29ofjdk1inop6\s-hndy5ygbgh-0t88onw-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\soul_forge-2czl9zct2bz1x\s-hndy60us4c-16kun2u-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\abigail_superego-190qwupemadko\s-hndy629vsf-153bidq-working`
+
+
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\abigail_identity-3otn0mq2efxej\s-hndye918ty-0xgc0ro-working`
+
+
+{"reason":"compiler-artifact","target_name":"entity-daemon","target_kind":["bin"],"test_profile":true,"executable":"<repository>\\target\\debug\\deps\\entity_daemon-156852a1e32cb3f2.exe"}
+Build exit code: 0

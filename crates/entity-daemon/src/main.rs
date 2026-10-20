@@ -29,6 +29,7 @@ use abigail_runtime::{
 };
 use abigail_skills::{Skill, SkillExecutionPolicy, SkillExecutor, SkillRegistry};
 use abigail_streaming::{MemoryBroker, StreamBroker};
+use anyhow::Context;
 use axum::routing::{get, post};
 use axum::Router;
 use capability_matcher::CapabilityMatcher;
@@ -79,6 +80,117 @@ async fn main() {
         tracing::error!("entity-daemon exited with error: {e:#}");
         abigail_diag::record_fatal(&component, &format!("{e:#}"));
         std::process::exit(1);
+    }
+}
+
+fn load_entity_config(entity_dir: &std::path::Path) -> anyhow::Result<AppConfig> {
+    let config_path = entity_dir.join("config.json");
+    match std::fs::symlink_metadata(&config_path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(AppConfig::default_paths())
+        }
+        Err(error) => Err(error).with_context(|| {
+            format!(
+                "Could not inspect Entity config at {}",
+                config_path.display()
+            )
+        }),
+        Ok(_) => AppConfig::load(&config_path)
+            .with_context(|| format!("Could not load Entity config at {}", config_path.display())),
+    }
+}
+
+#[cfg(test)]
+mod config_loading_tests {
+    use super::load_entity_config;
+    use abigail_core::{AppConfig, CONFIG_SCHEMA_VERSION};
+    use std::path::PathBuf;
+
+    struct ConfigDirectory(PathBuf);
+
+    impl ConfigDirectory {
+        fn new() -> Self {
+            let root = std::env::temp_dir()
+                .join(format!("abigail-entity-config-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+            Self(root)
+        }
+
+        fn config_path(&self) -> PathBuf {
+            self.0.join("config.json")
+        }
+
+        fn compatible_config(&self) -> AppConfig {
+            let mut config = AppConfig::default_paths();
+            config.data_dir = self.0.clone();
+            config.docs_dir = self.0.join("docs");
+            config.models_dir = self.0.join("models");
+            config.db_path = self.0.join("memory.db");
+            config.agent_name = Some("Synthetic ongoing Entity".into());
+            config
+        }
+    }
+
+    impl Drop for ConfigDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn missing_config_uses_defaults_without_creating_a_file() {
+        let directory = ConfigDirectory::new();
+        let loaded = load_entity_config(&directory.0).unwrap();
+        assert_eq!(loaded.data_dir, AppConfig::default_paths().data_dir);
+        assert_eq!(loaded.schema_version, CONFIG_SCHEMA_VERSION);
+        assert!(loaded.agent_name.is_none());
+        assert!(!directory.config_path().exists());
+        assert_eq!(std::fs::read_dir(&directory.0).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn compatible_config_preserves_values_and_bytes() {
+        let directory = ConfigDirectory::new();
+        let expected = directory.compatible_config();
+        let bytes = serde_json::to_vec_pretty(&expected).unwrap();
+        std::fs::write(directory.config_path(), &bytes).unwrap();
+        let loaded = load_entity_config(&directory.0).unwrap();
+        assert_eq!(loaded.agent_name, expected.agent_name);
+        assert_eq!(loaded.data_dir, expected.data_dir);
+        assert_eq!(loaded.db_path, expected.db_path);
+        assert_eq!(std::fs::read(directory.config_path()).unwrap(), bytes);
+    }
+
+    #[test]
+    fn future_config_is_refused_and_preserved_byte_for_byte() {
+        let directory = ConfigDirectory::new();
+        let mut value = serde_json::to_value(directory.compatible_config()).unwrap();
+        value["schema_version"] = (CONFIG_SCHEMA_VERSION + 1).into();
+        value["future_field"] = "synthetic data this version cannot interpret".into();
+        let bytes = serde_json::to_vec_pretty(&value).unwrap();
+        std::fs::write(directory.config_path(), &bytes).unwrap();
+        let error = load_entity_config(&directory.0).unwrap_err();
+        assert!(format!("{error:#}").contains("schema"));
+        assert_eq!(std::fs::read(directory.config_path()).unwrap(), bytes);
+    }
+
+    #[test]
+    fn malformed_existing_config_is_refused_and_preserved_byte_for_byte() {
+        let directory = ConfigDirectory::new();
+        let bytes = b"{ invalid synthetic config";
+        std::fs::write(directory.config_path(), bytes).unwrap();
+        assert!(load_entity_config(&directory.0).is_err());
+        assert_eq!(std::fs::read(directory.config_path()).unwrap(), bytes);
+    }
+
+    #[test]
+    fn existing_unreadable_config_path_is_not_treated_as_missing() {
+        let directory = ConfigDirectory::new();
+        std::fs::create_dir(directory.config_path()).unwrap();
+        let marker = directory.config_path().join("synthetic-marker.txt");
+        std::fs::write(&marker, b"preserve this directory").unwrap();
+        assert!(load_entity_config(&directory.0).is_err());
+        assert_eq!(std::fs::read(marker).unwrap(), b"preserve this directory");
     }
 }
 
@@ -184,19 +296,7 @@ async fn run() -> anyhow::Result<()> {
     let shared_registry_path = shared_skills_base.join("registry.toml");
 
     // Load entity config when present so policy fields are enforced in runtime.
-    let config_path = entity_dir.join("config.json");
-    let mut config = if config_path.exists() {
-        AppConfig::load(&config_path).unwrap_or_else(|e| {
-            tracing::warn!(
-                "Failed to load entity config at {}: {}. Falling back to defaults.",
-                config_path.display(),
-                e
-            );
-            AppConfig::default_paths()
-        })
-    } else {
-        AppConfig::default_paths()
-    };
+    let mut config = load_entity_config(&entity_dir)?;
     config.agent_name = Some(entity_info.name.clone());
     config.birth_complete = entity_info.birth_complete;
     config.is_hive = entity_info.is_hive;

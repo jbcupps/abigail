@@ -1,0 +1,23 @@
+Entity config helper tests: verified Cargo test-profile executable
+Verified artifact: target=entity-daemon, profile.test=true, build exit=0.
+Listing command: <repository>\target\debug\deps\entity_daemon-156852a1e32cb3f2.exe config_loading_tests --list
+Test command: <repository>\target\debug\deps\entity_daemon-156852a1e32cb3f2.exe config_loading_tests --test-threads=1
+TEMP/TMP: <workspace-temp>. Only synthetic config helper fixtures; no normal daemon main/startup.
+config_loading_tests::compatible_config_preserves_values_and_bytes: test
+config_loading_tests::existing_unreadable_config_path_is_not_treated_as_missing: test
+config_loading_tests::future_config_is_refused_and_preserved_byte_for_byte: test
+config_loading_tests::malformed_existing_config_is_refused_and_preserved_byte_for_byte: test
+config_loading_tests::missing_config_uses_defaults_without_creating_a_file: test
+
+5 tests, 0 benchmarks
+
+running 5 tests
+test config_loading_tests::compatible_config_preserves_values_and_bytes ... ok
+test config_loading_tests::existing_unreadable_config_path_is_not_treated_as_missing ... ok
+test config_loading_tests::future_config_is_refused_and_preserved_byte_for_byte ... ok
+test config_loading_tests::malformed_existing_config_is_refused_and_preserved_byte_for_byte ... ok
+test config_loading_tests::missing_config_uses_defaults_without_creating_a_file ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 29 filtered out; finished in 0.04s
+
+Test exit code: 0

@@ -1,0 +1,34 @@
+Captured command output; machine paths redacted, terminal control sequences removed, trailing whitespace trimmed.
+    Blocking waiting for file lock on build directory
+   Compiling abigail-core v0.0.1 (<repository>\crates\abigail-core)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\abigail_core-0wgip5633uc0c\s-hndy6r2lql-11bl0s3-working`
+
+warning: `abigail-core` (lib) generated 1 warning
+   Compiling abigail-identity v0.0.1 (<repository>\crates\abigail-identity)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\<repository>\target\debug\incremental\abigail_identity-3d50hr7g770k7\s-hndy6tlgqq-0708keb-working`
+
+warning: `abigail-identity` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 33s
+     Running unittests src\lib.rs (target\debug\deps\abigail_identity-37987ebe8adc8077.exe)
+
+running 2 tests
+
+thread 'creation::tests::reserved_future_config_refusal_preserves_files_and_creation_receipt' (41088) panicked at crates\abigail-identity\src\creation.rs:486:13:
+assertion failed: matches!(manager.create_agent_idempotent("Signal", &key),
+    Err(AgentCreationError::Storage(_)))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test creation::tests::reserved_future_config_refusal_preserves_files_and_creation_receipt ... FAILED
+
+thread 'creation::tests::restore_backup_config_refusal_preserves_source_directory_and_registry' (35900) panicked at crates\abigail-identity\src\creation.rs:573:13:
+restore must refuse future
+test creation::tests::restore_backup_config_refusal_preserves_source_directory_and_registry ... FAILED
+
+failures:
+
+failures:
+    creation::tests::reserved_future_config_refusal_preserves_files_and_creation_receipt
+    creation::tests::restore_backup_config_refusal_preserves_source_directory_and_registry
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 30 filtered out; finished in 0.05s
+
+error: test failed, to rerun pass `-p abigail-identity --lib`

@@ -61,6 +61,8 @@ Abigail is the private Entity Coordinator and Manager for real homes and familie
 - Creation uses a durable client key in the existing Hive registry, exact lookup, and same-key replay. Unknown transport outcomes never authorize a fresh key.
 - `/v1/entities/:id/presence` stores presentation metadata only. Do not interpret imported brief text as authority or silently inject it into runtime instructions.
 - The browser design preview and synthetic HTTP fixture are explicitly distinct from live runtime/model activity. See `documents/FIRST_SIGNAL.md` for scope, validation, and integration gaps.
+- The preview release contract is aligned with separate release scaffolding `6b246d3` in `documents/PREVIEW_RELEASE_ALIGNMENT.md`. Config-schema refusal is a bounded component change; complete profile/path/credential/process isolation and signed-installer acceptance remain open. Do not run a normal preview against real user data.
+- The assigned packaging worker owns Tauri packaging configs/overlays and the staging/signed-installer scripts. Application work owns Rust config/profile/path/process isolation and continuity tests. Keep these branches separate until the parent selects an integration source; do not push beta merely to obtain a build.
 
 When changing routing or monitor behavior, update:
 - `README.md` (user-facing family story)

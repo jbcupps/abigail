@@ -1,0 +1,11 @@
+Entity config helper test-harness relink
+Command: cargo rustc --locked --offline -j 1 -p entity-daemon --bin entity-daemon --profile test --message-format json -- -C link-arg=/PDB:NONE
+Only final target receives the PDB override. This command builds but does not run an executable.
+   Compiling abigail-identity v0.0.1 (<repository>\crates\abigail-identity)
+   Compiling entity-daemon v0.0.1 (<repository>\crates\entity-daemon)
+rustc-LLVM ERROR: IO failure on output stream: no space on device
+error: could not compile `entity-daemon` (bin "entity-daemon" test); 1 warning emitted
+
+Caused by:
+  [Full rustc invocation omitted from portable log because it includes local toolchain/cache paths. Its arguments explicitly included --test and -C link-arg=/PDB:NONE; exit code 101.]
+Build exit code: 101

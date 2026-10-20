@@ -44,6 +44,8 @@ The current integration branch starts at main `17b636b`, with First Signal appli
 
 The maintained/disposable Entity follow-up is documented in [PREVIEW_DATA_COMPATIBILITY.md](PREVIEW_DATA_COMPATIBILITY.md). A persistent preview needs the application and packaging boundary proposed in [PREVIEW_PROFILE_CONTRACT.md](PREVIEW_PROFILE_CONTRACT.md); the current data-root environment overrides do not provide that isolation. Do not treat this development branch as accepted for an ongoing production profile or signed preview update.
 
+Release scaffolding remains separately on `dev/preview-release-channel-0.0.76` at `6b246d3`. [PREVIEW_RELEASE_ALIGNMENT.md](PREVIEW_RELEASE_ALIGNMENT.md) records compatible requirements, proposed packaging parameters, bounded config-schema refusal work, and remaining activation/acceptance steps. Do not infer an integration source or merge from that comparison.
+
 ```sh
 git -C "<worktrees>/first-signal-integration" push -u origin HEAD:refs/heads/dev/first-signal-integration-0.0.76
 ```

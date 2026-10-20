@@ -630,7 +630,7 @@ impl AppConfig {
 
     pub fn load_from_data_dir(data_dir: &Path) -> anyhow::Result<Self> {
         let content = crate::path_guard::load_string_from_root(data_dir, "config.json")?;
-        let mut config: Self = serde_json::from_str(&content)?;
+        let mut config = Self::from_json_compatible(&content)?;
 
         // Auto-migrate if needed
         if config.migrate() {
@@ -645,6 +645,14 @@ impl AppConfig {
         Ok(config)
     }
 
+    /// Parse supported config JSON without migrating it or writing to disk.
+    /// Inspect the schema first so unknown fields from a newer version cannot
+    /// be silently dropped by deserializing this version's AppConfig.
+    pub fn from_json_compatible(content: &str) -> anyhow::Result<Self> {
+        Self::check_document_schema(content)?;
+        Ok(serde_json::from_str(content)?)
+    }
+
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         crate::path_guard::ensure_expected_filename(path, "config.json")?;
         let data_dir = path.parent().ok_or_else(|| {
@@ -657,9 +665,48 @@ impl AppConfig {
     }
 
     pub fn save_to_data_dir(&self, data_dir: &Path) -> anyhow::Result<()> {
+        Self::check_schema_version(self.schema_version)?;
+        // A stale in-memory config must not replace a file written by a newer
+        // Abigail version, including after a caller falls back from a load error.
+        match crate::path_guard::load_string_from_root(data_dir, "config.json") {
+            Ok(existing) => Self::check_document_schema(&existing)?,
+            Err(error)
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) => {}
+            Err(error) => return Err(error),
+        }
         let content = serde_json::to_string_pretty(self)?;
         crate::path_guard::write_string_to_root(data_dir, "config.json", &content)?;
         Ok(())
+    }
+
+    fn check_schema_version(version: u32) -> anyhow::Result<()> {
+        if version > CONFIG_SCHEMA_VERSION {
+            anyhow::bail!(
+                "Config schema version {} is newer than this Abigail version supports ({}). Use a compatible newer Abigail version; the config was not changed.",
+                version,
+                CONFIG_SCHEMA_VERSION
+            );
+        }
+        Ok(())
+    }
+
+    fn check_document_schema(content: &str) -> anyhow::Result<()> {
+        #[derive(Deserialize)]
+        struct SchemaHeader {
+            #[serde(default = "default_schema_version")]
+            schema_version: u32,
+        }
+
+        // Keep AppConfig's object shape: a derived one-field header alone can
+        // also deserialize a JSON array. Invalid/overflow/duplicate versions
+        // must fail rather than being narrowed, defaulted, or overwritten.
+        if !content.trim_start().starts_with('{') {
+            anyhow::bail!("Config must be a JSON object; the config was not changed.");
+        }
+        let header: SchemaHeader = serde_json::from_str(content)?;
+        Self::check_schema_version(header.schema_version)
     }
 
     /// Migrate config from older schema versions to the current version.
@@ -992,6 +1039,161 @@ mod tests {
             iggy_connection: None,
             theme_id: None,
             autonomy_profile: AutonomyProfile::default(),
+        }
+    }
+
+    struct SchemaTestRoot(PathBuf);
+
+    impl SchemaTestRoot {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "abigail-config-schema-{}-{}",
+                std::process::id(),
+                rand::random::<u64>()
+            ));
+            fs::create_dir_all(&root).unwrap();
+            Self(root)
+        }
+    }
+
+    impl Drop for SchemaTestRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn schema_guard_rejects_future_load_before_deserializing_changed_fields() {
+        let root = SchemaTestRoot::new();
+        let config = test_config(&root.0);
+        let mut future = serde_json::to_value(&config).unwrap();
+        future["schema_version"] = serde_json::json!(CONFIG_SCHEMA_VERSION + 1);
+        future["routing_mode"] = serde_json::json!("future_mode");
+        future["future_only_field"] = serde_json::json!({"keep": ["all", "bytes"]});
+        let bytes = format!("{}\n", serde_json::to_string_pretty(&future).unwrap()).into_bytes();
+        fs::write(config.config_path(), &bytes).unwrap();
+
+        for result in [
+            AppConfig::from_json_compatible(std::str::from_utf8(&bytes).unwrap()),
+            AppConfig::load(&config.config_path()),
+            AppConfig::load_from_data_dir(&config.data_dir),
+        ] {
+            let error = result.unwrap_err().to_string();
+            assert!(error.contains("newer than this Abigail version supports"));
+            assert!(error.contains(&(CONFIG_SCHEMA_VERSION + 1).to_string()));
+            assert_eq!(fs::read(config.config_path()).unwrap(), bytes);
+        }
+    }
+
+    #[test]
+    fn schema_guard_refuses_stale_save_over_a_newer_file() {
+        let root = SchemaTestRoot::new();
+        let config = test_config(&root.0);
+        config.save(&config.config_path()).unwrap();
+        let mut stale = AppConfig::load(&config.config_path()).unwrap();
+        stale.agent_name = Some("A stale edit".into());
+        let mut future = serde_json::to_value(&config).unwrap();
+        future["schema_version"] = serde_json::json!(CONFIG_SCHEMA_VERSION + 1);
+        future["future_only_field"] = serde_json::json!({"preserve": true});
+        let bytes = serde_json::to_vec_pretty(&future).unwrap();
+        fs::write(config.config_path(), &bytes).unwrap();
+
+        assert!(stale.save(&config.config_path()).is_err());
+        assert_eq!(fs::read(config.config_path()).unwrap(), bytes);
+        assert!(stale.save_to_data_dir(&config.data_dir).is_err());
+        assert_eq!(fs::read(config.config_path()).unwrap(), bytes);
+    }
+
+    #[test]
+    fn schema_guard_refuses_future_in_memory_save_without_creating_a_target() {
+        let root = SchemaTestRoot::new();
+        let mut config = test_config(&root.0);
+        config.schema_version = CONFIG_SCHEMA_VERSION + 1;
+        let absent = root.0.join("must-not-be-created");
+        assert!(config.save_to_data_dir(&absent).is_err());
+        assert!(!absent.exists());
+        assert!(config.save(&absent.join("config.json")).is_err());
+        assert!(!absent.exists());
+    }
+
+    #[test]
+    fn schema_guard_preserves_files_with_invalid_or_overflowing_versions() {
+        let root = SchemaTestRoot::new();
+        let config = test_config(&root.0);
+        for version in [
+            "4294967296",
+            "18446744073709551616",
+            "1e1000",
+            "-1",
+            "27.5",
+            "null",
+            "true",
+            "\"28\"",
+        ] {
+            let bytes = format!(
+                "{{ \"schema_version\": {version}, \"unknown_payload\": {{\"keep\": true}} }}\n"
+            )
+            .into_bytes();
+            fs::write(config.config_path(), &bytes).unwrap();
+            assert!(AppConfig::load(&config.config_path()).is_err(), "{version}");
+            assert_eq!(fs::read(config.config_path()).unwrap(), bytes);
+            assert!(config.save(&config.config_path()).is_err(), "{version}");
+            assert_eq!(fs::read(config.config_path()).unwrap(), bytes);
+        }
+        for bytes in [
+            format!(
+                "{{\"schema_version\":{},\"schema_version\":{CONFIG_SCHEMA_VERSION}}}",
+                CONFIG_SCHEMA_VERSION + 1
+            ),
+            format!("[{CONFIG_SCHEMA_VERSION}]"),
+            "{\"schema_version\":".into(),
+        ] {
+            fs::write(config.config_path(), bytes.as_bytes()).unwrap();
+            assert!(AppConfig::load(&config.config_path()).is_err());
+            assert!(config.save(&config.config_path()).is_err());
+            assert_eq!(fs::read_to_string(config.config_path()).unwrap(), bytes);
+        }
+    }
+
+    #[test]
+    fn schema_guard_keeps_current_and_legacy_load_save_behavior() {
+        let root = SchemaTestRoot::new();
+        for version in [Some(CONFIG_SCHEMA_VERSION), Some(0), None] {
+            let config = test_config(&root.0);
+            let mut document = serde_json::to_value(&config).unwrap();
+            document["agent_name"] = serde_json::json!("Existing synthetic Entity");
+            document["primary_color"] = serde_json::json!("#c7a86c");
+            match version {
+                Some(version) => document["schema_version"] = serde_json::json!(version),
+                None => {
+                    document.as_object_mut().unwrap().remove("schema_version");
+                }
+            }
+            let bytes = serde_json::to_vec_pretty(&document).unwrap();
+            fs::write(config.config_path(), &bytes).unwrap();
+            let mut loaded = AppConfig::load(&config.config_path()).unwrap();
+            assert_eq!(loaded.schema_version, CONFIG_SCHEMA_VERSION);
+            assert_eq!(
+                loaded.agent_name.as_deref(),
+                Some("Existing synthetic Entity")
+            );
+            assert_eq!(loaded.primary_color.as_deref(), Some("#c7a86c"));
+            if version != Some(0) {
+                assert_eq!(fs::read(config.config_path()).unwrap(), bytes);
+            } else {
+                let migrated: serde_json::Value =
+                    serde_json::from_slice(&fs::read(config.config_path()).unwrap()).unwrap();
+                assert_eq!(migrated["schema_version"], CONFIG_SCHEMA_VERSION);
+            }
+            loaded.primary_color = Some("#112233".into());
+            loaded.save(&config.config_path()).unwrap();
+            assert_eq!(
+                AppConfig::load(&config.config_path())
+                    .unwrap()
+                    .primary_color
+                    .as_deref(),
+                Some("#112233")
+            );
         }
     }
 
