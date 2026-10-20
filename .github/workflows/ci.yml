@@ -87,8 +87,18 @@ jobs:
       - name: Build daemon binaries for integration tests
         run: cargo build -p hive-daemon -p entity-daemon
 
-      - name: Run Hive daemon contract tests
-        run: cargo test -p hive-daemon --test integration --test startup
+      - name: Verify startup preserves an unchanged shared vault
+        run: cargo test --locked -p entity-daemon --test integration startup_preserves_an_unchanged_skill_vault_without_delete_sharing -- --exact
+        env:
+          ABIGAIL_DAEMON_INTEGRATION: "1"
+
+      - name: Run Hive daemon HTTP contract tests
+        run: cargo test --locked -p hive-daemon --test integration
+        env:
+          ABIGAIL_DAEMON_INTEGRATION: "1"
+
+      - name: Run Hive cold-start regression
+        run: cargo test --locked -p hive-daemon --test startup
         env:
           ABIGAIL_DAEMON_INTEGRATION: "1"
 
