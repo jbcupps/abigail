@@ -194,7 +194,7 @@ assert(
   installedVerification >= 0 && installedVerification < installerUpload &&
     release.includes("./scripts/verify-mvp-windows.ps1") &&
     release.includes("./scripts/tests/run-mvp-acceptance.ps1 -BinaryDir $installDir"),
-  "Unsigned releases must verify and exercise the actual installed payload before uploading the installer."
+  "Unsigned candidates must verify and exercise the actual installed payload before uploading the installer."
 );
 assert(
   release.includes("../scripts/nsis-mvp-hooks.nsh"),
@@ -202,14 +202,20 @@ assert(
 );
 const ciGate = release.indexOf("- name: Require successful CI gate for this commit");
 const releasePublication = release.indexOf("- name: Create GitHub Release");
-const stableSigningGate = release.indexOf("- name: Require Windows signing for stable publication");
+const publicationSigningGate = release.indexOf("- name: Require Windows signing for stable and beta publication");
+const beforeBuildSigningGate = release.indexOf("- name: Require signing for release publication before building");
 const releaseTagCreation = release.indexOf("- name: Create git tag if needed");
 assert(
-  stableSigningGate > release.indexOf("\n  publish:") &&
-    stableSigningGate < releaseTagCreation && releaseTagCreation < releasePublication &&
+  beforeBuildSigningGate > release.indexOf("\n  build:") &&
+    beforeBuildSigningGate < release.indexOf("- name: Install NSIS") &&
+    /- name: Require signing for release publication before building\r?\n\s+if: github.event_name != 'workflow_dispatch' \|\| inputs.publish_release/.test(release) &&
+    release.includes("if ($env:ABIGAIL_LOCAL_SIGNING -ne 'true' -and $env:ABIGAIL_CLOUD_SIGNING -ne 'true')") &&
+    publicationSigningGate > release.indexOf("\n  publish:") &&
+    publicationSigningGate < releaseTagCreation && releaseTagCreation < releasePublication &&
     release.includes('WINDOWS_SIGNED: ${{ needs.build.outputs.windows_signed }}') &&
-    release.includes('[[ "$RELEASE_CHANNEL" == "stable" && "$WINDOWS_SIGNED" != "true" ]]'),
-  "Stable publication must reject unsigned builds before creating tags or releases; unsigned candidates and beta stabilization remain available."
+    release.includes('[[ "$RELEASE_CHANNEL" != "stable" && "$RELEASE_CHANNEL" != "beta" ]]') &&
+    release.includes('[[ "$WINDOWS_SIGNED" != "true" ]]'),
+  "Stable and beta publication must reject unsigned builds before building and before tag/release creation; unsigned manual candidates and diagnostics remain available."
 );
 const finalStaging = release.indexOf('- name: Stage and verify exact release assets');
 const publishReverification = release.indexOf('- name: Reverify exact bytes before publication');

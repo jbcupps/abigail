@@ -10,6 +10,7 @@
 //                   --source-commit SHA
 // create writes DIR/release-provenance.json. verify does not modify files.
 // The latest-release JSON must contain null when GitHub has no latest stable release.
+// Stable and beta require signing; unsigned builds must use the candidate channel.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -44,7 +45,7 @@ function validatePolicy({ sourceCommit, tag, channel, windowsSigned, expectedThu
   requireCondition(typeof windowsSigned === "boolean", "windowsSigned must be a Boolean, not a truthy string.");
   const validTag = channel === "stable" ? STABLE_TAG.test(tag) : channel === "beta" ? BETA_TAG.test(tag) : STABLE_TAG.test(tag) || BETA_TAG.test(tag);
   requireCondition(typeof tag === "string" && validTag, "Release tag does not match its channel.");
-  requireCondition(channel !== "stable" || windowsSigned, "Stable releases require signed Windows installers.");
+  requireCondition(channel === "candidate" || windowsSigned, "Stable and beta releases require signed Windows installers; unsigned builds must use the candidate channel.");
   return { sourceCommit: sourceCommit.toLowerCase(), tag, channel, windowsSigned, expectedThumbprint: normalizedThumbprint(expectedThumbprint, windowsSigned) };
 }
 

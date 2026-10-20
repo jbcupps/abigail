@@ -40,10 +40,11 @@ Local storage belongs to you. Cloud providers and installed CLIs use their own a
 
 ## Current Dev Note
 
-- Abigail is still in a dev-first phase. A clean working dev instance matters more than cross-version compatibility right now.
-- Legacy migration and upgrade preservation are not current product promises. Remove or replace stale compatibility paths when they get in the way of the active Hive-first design.
+- Stable downloads remain on `main`. The [preview download page](https://jbcupps.github.io/abigail/preview/) selects an explicitly accepted, signed `beta` prerelease; it stays unavailable until that build passes the [preview acceptance gates](docs/PREVIEW_CHANNEL.md).
+- Preview updates are manual and opt-in. A continuing preview Entity must survive accepted upgrades in its own isolated profile. Disposable creation tests use separate fixtures. Preserve a complete cold backup before migration; installing an older binary does not undo data migration.
+- Arbitrary development builds are not a compatibility promise. Do not remove preservation or isolation required by the preview acceptance contract.
 - The implementation uses two desktop app roots: `Abigail Hive` for control-plane/admin work and `Abigail Entity Runtime` for chat/runtime work. The family-facing installer must still expose one `Abigail` app icon and start the internal pieces automatically.
-- `beta` is the permanent UAT branch. Iterative work lands there first and produces tagged beta installer prereleases; `main` receives only promoted stable changes.
+- `beta` is the permanent integration and UAT branch. Feature work stays in separate dev branches/worktrees, then selected changes reach `beta`; `main` receives promoted stable changes. A new beta prerelease does not automatically replace the selected preview.
 - Default local builds and installer validation are intentionally unsigned and updater-free during stabilization. Final OV signing happens later on the dedicated release-signing system.
 - Automated SSL.com cloud releases use the [Windows cloud signing guide](docs/windows-cloud-signing.md); local certificate-store signing uses the [Windows signing guide](docs/WINDOWS_SSL_COM_SIGNING.md).
 - Repeatable release automation is documented in [`docs/RELEASE_RUNBOOK.md`](docs/RELEASE_RUNBOOK.md). The active full installer release lane currently builds the Windows one-step installer; Apple/macOS builds are temporarily removed from the matrix.

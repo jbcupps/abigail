@@ -63,9 +63,9 @@ test("synthetic provenance: records all final files, optional MSI, updater and s
   assert.equal(validatePublishedRelease(published(manifest)).verifiedAssets, 7);
 });
 
-test("unsigned beta and unsigned candidate are explicit; neither may claim signing", (t) => {
-  for (const channel of ["beta", "candidate"]) {
-    const f = fixture(t, { channel, tag: "v0.0.76-beta.132", windowsSigned: false, expectedThumbprint: null });
+test("unsigned candidates may plan stable or beta tags but may not claim signing", (t) => {
+  for (const tag of ["v0.0.76", "v0.0.76-beta.132"]) {
+    const f = fixture(t, { channel: "candidate", tag, windowsSigned: false, expectedThumbprint: null });
     const manifest = f.create();
     assert.equal(manifest.windowsSigned, false);
     verifyProvenance({ assetsDir: f.assetsDir, manifest, ...f.policy });
@@ -81,9 +81,35 @@ test("candidate may use a planned stable tag but cannot be published", (t) => {
   assert.throws(() => validatePublishedRelease(published(manifest)), /Candidate artifacts cannot be published/);
 });
 
-test("stable signing cannot be disabled and Boolean strings are rejected", (t) => {
+test("stable and beta signing cannot be disabled at creation, verification or publication", (t) => {
+  for (const [channel, tag] of [["stable", "v0.0.76"], ["beta", "v0.0.76-beta.132"]]) {
+    const f = fixture(t, { channel, tag });
+    const signedManifest = f.create();
+    const unsignedPolicy = { ...f.policy, windowsSigned: false, expectedThumbprint: null };
+    const unsignedManifest = { ...signedManifest, windowsSigned: false, expectedThumbprint: null };
+    assert.throws(() => createProvenance({ assetsDir: f.assetsDir, ...unsignedPolicy }), /Stable and beta releases require signed/);
+    assert.throws(() => verifyProvenance({ assetsDir: f.assetsDir, manifest: signedManifest, ...unsignedPolicy }), /Stable and beta releases require signed/);
+    assert.throws(() => verifyProvenance({ assetsDir: f.assetsDir, manifest: unsignedManifest, ...f.policy }), /Stable and beta releases require signed/);
+    assert.throws(() => validatePublishedRelease(published(unsignedManifest)), /Stable and beta releases require signed/);
+  }
+});
+
+test("signed beta provenance verifies and publishes only as a prerelease", (t) => {
+  const f = fixture(t, { channel: "beta", tag: "v0.0.76-beta.132" });
+  const manifest = f.create();
+  assert.equal(manifest.windowsSigned, true);
+  assert.equal(manifest.expectedThumbprint, THUMBPRINT);
+  assert.equal(verifyProvenance({ assetsDir: f.assetsDir, manifest, ...f.policy }), manifest);
+  const data = published(manifest);
+  assert.equal(validatePublishedRelease(data).channel, "beta");
+  assert.throws(() => validatePublishedRelease({ ...data, release: { ...data.release, prerelease: false } }), /prerelease state/);
+  f.report.artifacts[0].certificateThumbprint = "D".repeat(40);
+  f.writeReport();
+  assert.throws(f.create, /Unexpected signing certificate/);
+});
+
+test("Boolean strings and missing signing identities are rejected", (t) => {
   const f = fixture(t);
-  assert.throws(() => createProvenance({ assetsDir: f.assetsDir, ...f.policy, windowsSigned: false, expectedThumbprint: null }), /Stable releases require signed/);
   assert.throws(() => createProvenance({ assetsDir: f.assetsDir, ...f.policy, windowsSigned: "true" }), /must be a Boolean/);
   assert.throws(() => createProvenance({ assetsDir: f.assetsDir, ...f.policy, expectedThumbprint: "" }), /exact 40-hex/);
 });

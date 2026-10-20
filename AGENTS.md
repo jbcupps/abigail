@@ -2,7 +2,7 @@
 
 This file tracks the current plan for agents working in the Abigail repository.
 
-## Current State (2026-03-05)
+## Current State (2026-10-20)
 
 Abigail is the private Entity Coordinator and Manager for real homes and families. Its product mission is to put persistent, highly configurable, ethically governed AI Entities into the hands of everyday people through one easy install and one obvious app launch. The user (mentor/family head) creates individual Entities that the family actually interacts with. Abigail handles coordination, memory, skills, and security in the background.
 
@@ -11,7 +11,7 @@ Abigail is the private Entity Coordinator and Manager for real homes and familie
 - The active implementation split is two app roots: `hive-app` for control-plane work and `entity-runtime-app` for the chat/runtime surface, but the family-facing product must install and launch as one `Abigail` app.
 - The full installer lane must package Hive, Entity Runtime, `hive-daemon`, and `entity-daemon` together so non-technical families never handle separate binaries.
 - `beta` is the permanent primary iteration branch. Agents should target PRs and automation at `beta` for UAT builds, then promote validated beta changes to `main`.
-- Every push to `beta` must produce a properly tagged beta installer prerelease for UAT using the `vX.Y.Z-beta.N` tag pattern.
+- Beta installer prereleases use the `vX.Y.Z-beta.N` tag pattern and must pass signing and release gates. The fixed `/preview/` route selects only an explicitly accepted build; a beta push does not advance that pointer automatically.
 - Mentor chat monitor preprompt flow is in place and out-of-band monitors remain non-blocking.
 - DevOps Forge worker is active and subscribed to `topic.skill.forge.request`.
 - Forge pipeline writes sandbox-gated artifacts to `skills/dynamic/`, updates `skills/registry.toml`, and publishes `topic.skill.forge.response`.
@@ -40,17 +40,18 @@ Abigail is the private Entity Coordinator and Manager for real homes and familie
 4. Harden Forge envelope validation and failure telemetry (keep it invisible and safe for the user).
 5. Expand end-to-end coverage for forge request/response and watcher hot-reload.
 6. Keep memory/safety/id-superego observers out-of-band (non-blocking chat path) so the family experience stays smooth.
-7. Keep the unsigned stabilization lane free of installer upgrade-preserve logic, updater assumptions, and Windows signing dependencies.
+7. Keep unsigned artifact-only stabilization independent of signing and updater credentials. Published stable and beta installers require signing.
+8. Preserve an ongoing preview Entity in its own channel/profile across accepted upgrades. Separate creation tests use disposable fixtures. Require full cold-backup, migration, restore, path/process isolation, and coexistence acceptance before selecting a preview; see `docs/PREVIEW_CHANNEL.md`.
 
 ## Definition of Done for Next Phase
 
 - Forge request envelope accepts code + markdown and persists deterministically.
 - Windows installer installs Abigail as one app and bundles the split Hive/Runtime daemons as internal resources.
-- Merges to `beta` automatically create tagged beta prereleases for UAT; stable releases come only from promoted `main`.
+- Merges to `beta` request tagged beta prereleases subject to signing and release gates; stable releases come only from promoted `main`. Selecting a preview additionally requires the compatibility acceptance contract.
 - Superego and sandbox gates prevent unsafe mutations while staying invisible to the user.
 - Registry update reliably triggers watcher-based hot-reload.
 - End-to-end coverage validates success, blocked, and error fallback behavior.
-- Legacy compatibility paths that conflict with the current dev UX are removed instead of preserved.
+- Arbitrary development compatibility is not promised, but ongoing preview Entity preservation is an acceptance gate. Binary rollback cannot substitute for restoring a compatible complete profile snapshot.
 
 ## Documentation Sync
 
