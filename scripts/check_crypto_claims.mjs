@@ -47,7 +47,8 @@ const claims = [
         path: "crates/abigail-identity/src/lib.rs",
         markers: [
           "if !verify_agent_signature(&master_pubkey, &agent_pubkey, &sig_bytes) {",
-          "if config.birth_complete && !config.is_hive {\n            self.verify_agent(agent_id)?;",
+          "if config.birth_complete && !config.is_hive {",
+          "self.verify_agent(agent_id)?;",
         ],
       },
       {
