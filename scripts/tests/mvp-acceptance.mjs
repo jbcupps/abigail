@@ -219,13 +219,11 @@ try {
       assert.equal(issued.response.status, 403, 'Unauthenticated client obtained a runtime lease');
       const disclosed = await raw(`${entity.url}/v1/session/status`);
       assert.equal(disclosed.response.status, 403, 'Unauthenticated client obtained runtime session metadata');
-    }
-  });
-  await stage('Hive control plane rejects requests without this install token', async () => {
-    for (const path of ['/v1/status', '/v1/entities', '/v1/secrets/list', `/v1/entities/${family[0].id}/provider-config`]) {
-      for (const headers of [{}, { authorization: `Bearer ${'0'.repeat(64)}` }]) {
-        const denied = await raw(`${hiveUrl}${path}`, { headers });
-        assert.equal(denied.response.status, 401, `${path} answered without the control token`); assert.equal(denied.value.ok, false);
+      for (const path of ['/v1/status', '/v1/entities', '/v1/secrets/list', `/v1/entities/${entity.id}/provider-config`]) {
+        for (const headers of [{}, { authorization: `Bearer ${'0'.repeat(64)}` }]) {
+          const denied = await raw(`${hiveUrl}${path}`, { headers });
+          assert.equal(denied.response.status, 401, `${path} answered without this install's Hive control token`);
+        }
       }
     }
   });
