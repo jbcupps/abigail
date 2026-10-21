@@ -1,4 +1,4 @@
-import { resolveHiveUrl } from "./connection";
+import { resolveHiveConnection, resolveHiveUrl } from "./connection";
 
 // Thin typed wrapper over the Hive daemon HTTP API. Every JSON route returns the
 // universal `{ ok, data?, error? }` envelope; `/health` returns plain text.
@@ -22,9 +22,13 @@ export interface CreateEntityResult {
   directory: string;
 }
 
+// Every route except `/health` needs the Hive control token.
 async function hiveFetch(path: string, init?: RequestInit): Promise<Response> {
-  const base = await resolveHiveUrl();
-  return fetch(`${base}${path}`, { ...init, signal: init?.signal ?? AbortSignal.timeout(30_000) });
+  const signal = init?.signal ?? AbortSignal.timeout(30_000);
+  if (path === "/health") return fetch(`${await resolveHiveUrl()}${path}`, { ...init, signal });
+  const { base, token } = await resolveHiveConnection();
+  const headers = { ...(init?.headers as Record<string, string> | undefined), Authorization: `Bearer ${token}` };
+  return fetch(`${base}${path}`, { ...init, headers, signal });
 }
 
 async function unwrap<T>(res: Response, path: string): Promise<T> {

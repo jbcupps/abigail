@@ -1,17 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { genesisRequest, resolveGenesisConnection } from "./genesisClient";
-import { resolveGenesisToken, resolveHiveUrl } from "./connection";
-vi.mock("./connection", () => ({ resolveHiveUrl: vi.fn(), resolveGenesisToken: vi.fn() }));
+import { genesisRequest } from "./genesisClient";
+import { resolveHiveConnection } from "./connection";
+vi.mock("./connection", () => ({ resolveHiveConnection: vi.fn() }));
 
-beforeEach(() => { vi.mocked(resolveHiveUrl).mockResolvedValue("http://127.0.0.1:43141"); vi.mocked(resolveGenesisToken).mockResolvedValue("private-capability"); });
+beforeEach(() => { vi.mocked(resolveHiveConnection).mockResolvedValue({ base: "http://127.0.0.1:43141", token: "private-capability" }); });
 afterEach(() => { vi.resetAllMocks(); vi.unstubAllGlobals(); });
 
 describe("private Genesis requests", () => {
-  it.each(["https://evil.example", "http://localhost.evil.example", "http://user:password@127.0.0.1", "http://127.0.0.1?token=x", "http://127.0.0.1/forward", "http://127.0.0.1#fragment"])("rejects unsafe connection %s before obtaining a capability", async (url) => {
-    vi.mocked(resolveHiveUrl).mockResolvedValue(url);
-    await expect(resolveGenesisConnection()).rejects.toThrow("local Hive connection");
-    expect(resolveGenesisToken).not.toHaveBeenCalled();
-  });
   it("puts the capability in the authorization header, never the URL", async () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, data: [] }) });
     vi.stubGlobal("fetch", fetcher);

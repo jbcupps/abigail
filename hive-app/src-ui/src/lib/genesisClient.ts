@@ -1,4 +1,4 @@
-import { resolveGenesisToken, resolveHiveUrl } from "./connection";
+import { resolveHiveConnection } from "./connection";
 
 export type GenesisMode = "guided" | "voice" | "markdown" | "hybrid" | "quick" | "deep";
 export type GenesisState = "draft" | "discovering" | "review" | "portrait_pending" | "portrait_approved" | "manifesting" | "ready" | "failed" | "cancelled";
@@ -47,7 +47,7 @@ export const GENESIS_MODES: { value: GenesisMode; label: string; detail: string 
 ];
 
 export async function genesisRequest<T>(path: string, body?: unknown, method = body === undefined ? "GET" : "POST"): Promise<T> {
-  const { base, token } = await resolveGenesisConnection();
+  const { base, token } = await resolveHiveConnection();
   const response = await fetch(`${base}/v1/genesis${path}`, {
     method,
     headers: { Accept: "application/json", Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
@@ -57,18 +57,6 @@ export async function genesisRequest<T>(path: string, body?: unknown, method = b
   const envelope = await response.json() as { ok: boolean; data?: T; error?: string };
   if (!response.ok || !envelope.ok || envelope.data === undefined) throw new Error(envelope.error || `Genesis request failed (${response.status}).`);
   return envelope.data;
-}
-
-export async function resolveGenesisConnection(): Promise<{ base: string; token: string }> {
-  const base = await resolveHiveUrl();
-  const url = new URL(base);
-  if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
-      || url.username || url.password || url.search || url.hash || (url.pathname !== "/" && url.pathname !== "")) {
-    throw new Error("Genesis requires a local Hive connection. Use the Abigail app or a local development Hive.");
-  }
-  const token = await resolveGenesisToken();
-  if (!token) throw new Error("Genesis requires an authenticated Hive connection. Reopen Abigail or configure the development Genesis token.");
-  return { base: url.origin, token };
 }
 
 export const listGenesisSessions = () => genesisRequest<GenesisSession[]>("/sessions");
