@@ -4,11 +4,14 @@
 set -euo pipefail
 
 echo "Cleaning frontend coverage outputs..."
-rm -rf tauri-app/src-ui/coverage/
+for app in hive-app entity-runtime-app legacy/tauri-app; do
+  rm -rf "$app/src-ui/coverage/"
+done
 
 echo "Cleaning frontend build artifacts..."
-rm -rf tauri-app/src-ui/dist/
-rm -rf tauri-app/src-ui/node_modules/.vite
+for app in hive-app entity-runtime-app legacy/tauri-app; do
+  rm -rf "$app/src-ui/dist/" "$app/src-ui/node_modules/.vite"
+done
 
 echo "Cleaning lcov/coverage data..."
 find . -name "*.lcov" -delete 2>/dev/null || true

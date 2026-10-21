@@ -44,7 +44,8 @@ services:
         set -e
         cargo fmt --all -- --check || true
         cargo build --all
-        cd tauri-app/src-ui && npm ci && npm run build && cd ../..
+        (cd hive-app/src-ui && npm ci && npm run build)
+        (cd entity-runtime-app/src-ui && npm ci && npm run build)
         cargo test --all --no-fail-fast 2>&1 | head -200
         echo "Build and test completed."
 

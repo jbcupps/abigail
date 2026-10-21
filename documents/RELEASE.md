@@ -36,7 +36,7 @@ Updater key format for Tauri 2:
 
 ## Build-time release preparation
 
-- `scripts/prepare_tauri_bundle_config.mjs` injects the updater verification public key and signing fields into `tauri-app/tauri.conf.json`.
+- `scripts/prepare_tauri_bundle_config.mjs` injects the updater verification public key and signing fields into `hive-app/tauri.conf.json` by default.
 - For SSL.com timestamps, `scripts/prepare_tauri_bundle_config.mjs` enables Tauri's RFC 3161 (`tsp`) mode automatically when the timestamp host is `ssl.com`, or explicitly when `ABIGAIL_WINDOWS_TIMESTAMP_TSP=true`.
 - `scripts/validate_tauri_signing_key.sh` normalizes and validates the updater signing secret key before bundling.
 - `scripts/generate_tauri_latest_manifest.mjs` produces `latest.json` from the signed updater artifacts that are actually attached to the release.

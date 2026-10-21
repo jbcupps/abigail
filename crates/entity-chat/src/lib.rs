@@ -1,8 +1,9 @@
-//! Shared chat pipeline for entity-daemon and Tauri app.
+//! Shared chat pipeline for entity-daemon and abigail-cli.
 //!
-//! This crate owns the single chat engine used by both the CLI (entity-daemon)
-//! and the GUI (Tauri desktop app). Changes here automatically affect both
-//! consumers, so testing `cargo test -p entity-chat` validates the shared engine.
+//! This crate owns the single chat engine used by every Entity runtime
+//! (entity-daemon) and the troubleshooting CLI. Changes here automatically
+//! affect both consumers, so testing `cargo test -p entity-chat` validates the
+//! shared engine.
 
 pub mod job_tools;
 

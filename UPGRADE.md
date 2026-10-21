@@ -4,12 +4,11 @@ This document covers how Abigail handles updates and data preservation across ve
 
 ## Auto-update
 
-Abigail checks for updates on launch with the Tauri updater plugin.
+The current Abigail app (Hive plus Entity Runtime) does not ship an in-app updater. Upgrade by running a newer installer; see [Manual upgrade](#manual-upgrade). The installer removes app files only and never deletes family data.
 
-- `Install & Restart` downloads the signed updater artifact, verifies it against the embedded updater public key, installs it, and relaunches Abigail.
-- `Later` dismisses the banner for the current session.
+The updater described below belonged to the retired single-agent app (now `legacy/tauri-app`) and is kept for reference only.
 
-### Platform support
+### Platform support (retired app)
 
 | Platform | Auto-update | Mechanism |
 | --- | --- | --- |
@@ -26,7 +25,7 @@ Abigail checks for updates on launch with the Tauri updater plugin.
 
 ## Data preserved during upgrades
 
-All user data is preserved during both auto-update and manual installer upgrades.
+All user data is preserved across installer upgrades.
 
 ### Core files
 
@@ -51,11 +50,11 @@ Legacy SQLite files may still appear during upgrade only:
 
 On first launch after the migration, Abigail imports supported legacy SQLite data into the Hive-owned Surreal store and archives the legacy files with a `.legacy-imported` suffix after a successful import.
 
-### Hive multi-agent files
+### Hive and Entity files
 
 - `global_settings.json`
-- `identities/`
-- per-agent configs, databases, docs, signatures, and recovery metadata
+- `identities/<UUID>/` per Entity: config, signed constitutional docs, signatures, birth certificate, and the encrypted signing-key vault
+- each Entity's records live in its own `entity_<UUID>` database inside `memory.db`
 
 ### Data directory locations
 
@@ -76,15 +75,12 @@ On first launch after the migration, Abigail imports supported legacy SQLite dat
 
 ## Manual upgrade
 
-If auto-update is unavailable:
-
 1. Download the latest installer from [GitHub Releases](https://github.com/jbcupps/abigail/releases).
-2. Run the installer.
-3. Choose to preserve existing data when prompted.
+2. Run the installer. Existing family data stays in place.
 
 ## Downgrade
 
-Downgrading is not supported by the updater.
+Downgrading is not supported.
 
 1. Download the older release manually.
 2. Install it separately.

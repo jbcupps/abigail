@@ -1,6 +1,6 @@
 # Code Formatting and Conventions Style Guide
 
-This guide covers UI-facing code conventions across `hive-app`, `entity-runtime-app`, and `tauri-app`.
+This guide covers UI-facing code conventions across `hive-app` and `entity-runtime-app`.
 
 ## Stack
 
@@ -24,7 +24,7 @@ TypeScript/React:
 Rust:
 
 - `cargo fmt --all`.
-- `cargo clippy --workspace --exclude abigail-app -- -D warnings` for CI-style checks.
+- `cargo clippy --workspace -- -D warnings` for CI-style checks.
 
 CSS:
 
@@ -183,8 +183,8 @@ Current validation commands:
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --exclude abigail-app -- -D warnings
-cargo test --workspace --exclude abigail-app
+cargo clippy --workspace -- -D warnings
+cargo test --workspace
 npm test
 npm run build
 ```

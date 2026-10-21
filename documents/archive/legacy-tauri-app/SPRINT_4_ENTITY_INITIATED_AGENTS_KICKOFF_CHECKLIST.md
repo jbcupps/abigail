@@ -1,7 +1,7 @@
 # Sprint 4 Kickoff Checklist - Entity-Initiated Agents
 
 **Date:** 2026-03-01  
-**Roadmap Source:** `documents/GUI_ENTITY_STABILITY_ROADMAP.md` (Sprint 4 section)  
+**Roadmap Source:** `documents/archive/legacy-tauri-app/GUI_ENTITY_STABILITY_ROADMAP.md` (Sprint 4 section)  
 **Objective:** Replace stubbed agentic flows with real runtime execution, persistence, recovery, and GUI lifecycle bridging so entities can initiate agents without a GUI-originated trigger.
 
 ## Sprint 4 Scope (Locked)
@@ -20,7 +20,7 @@
   - `npm test` passes in `tauri-app/src-ui`.
   - `cargo check -p abigail-app` passes.
 - Sprint 3 report accepted:
-  - `documents/tests/SPRINT_3_INTERNAL_MESSAGE_BOUNDARY_REPORT.md`
+  - `documents/archive/legacy-tauri-app/SPRINT_3_INTERNAL_MESSAGE_BOUNDARY_REPORT.md`
 - No open P0 regression in default Birth -> Chat flow.
 
 ## Implementation Checklist
@@ -84,9 +84,9 @@
   - subagent registration
   - entity-initiated entrypoint
   - orchestration UI/backend wiring
-- Validation command outputs recorded in `documents/tests/VALIDATION_AND_GATE_REPORT.md`.
+- Validation command outputs recorded in `documents/archive/legacy-tauri-app/VALIDATION_AND_GATE_REPORT.md`.
 - Sprint 4 closure report added as:
-  - `documents/tests/SPRINT_4_ENTITY_INITIATED_AGENTS_REPORT.md`
+  - `documents/archive/legacy-tauri-app/SPRINT_4_ENTITY_INITIATED_AGENTS_REPORT.md`
 
 ## Risks and Controls
 
@@ -112,7 +112,7 @@
 ## Sprint 4 Initiation Prompt (Copy/Paste)
 
 ```text
-Execute Sprint 4: Entity-Initiated Agents exactly per documents/tests/SPRINT_4_ENTITY_INITIATED_AGENTS_KICKOFF_CHECKLIST.md and roadmap S4-01..S4-06.
+Execute Sprint 4: Entity-Initiated Agents exactly per documents/archive/legacy-tauri-app/SPRINT_4_ENTITY_INITIATED_AGENTS_KICKOFF_CHECKLIST.md and roadmap S4-01..S4-06.
 
 Constraints:
 - Validate behavior from code first; do not rely on docs assumptions.
@@ -135,7 +135,7 @@ Validation gates (must run and report):
 
 Deliverables:
 - Code changes for S4-01..S4-06
-- Updated validation evidence in documents/tests/VALIDATION_AND_GATE_REPORT.md
-- New closure report documents/tests/SPRINT_4_ENTITY_INITIATED_AGENTS_REPORT.md with pass/fail status, residual risks, and follow-up actions.
+- Updated validation evidence in documents/archive/legacy-tauri-app/VALIDATION_AND_GATE_REPORT.md
+- New closure report documents/archive/legacy-tauri-app/SPRINT_4_ENTITY_INITIATED_AGENTS_REPORT.md with pass/fail status, residual risks, and follow-up actions.
 ```
 

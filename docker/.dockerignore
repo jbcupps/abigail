@@ -6,7 +6,7 @@
 *.md
 !documents/*.md
 target
-tauri-app/src-ui/node_modules
+**/node_modules
 .cargo-docker
 *.log
 .env

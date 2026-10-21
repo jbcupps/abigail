@@ -1,7 +1,7 @@
 {
   "name": "abigail-desktop",
   "version": "0.0.1",
-  "description": "Abigail - Desktop AI Agent with constitutional integrity and ethical alignment",
+  "description": "Abigail - local-first framework for creating and hosting persistent, ethically governed AI Entities",
   "bin": {
     "abigail": "bin/run.js"
   },

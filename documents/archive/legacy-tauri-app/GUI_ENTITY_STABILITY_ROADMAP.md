@@ -7,7 +7,7 @@
 
 ## Inputs
 
-- `documents/GUI_ENTITY_CODE_REVIEW_REPORT.md`
+- `documents/archive/legacy-tauri-app/GUI_ENTITY_CODE_REVIEW_REPORT.md`
 - `documents/Feature_Gap_Analysis.md`
 
 ---
@@ -65,7 +65,7 @@ Keep browser harness command mocks aligned with native command registry.
 - Experimental/unwired paths are not exposed by default.
 
 **Sprint 1 Status (2026-03-01):** Completed.  
-Execution report: `documents/tests/SPRINT_1_GUI_ENTITY_STABILITY_REPORT.md`
+Execution report: `documents/archive/legacy-tauri-app/SPRINT_1_GUI_ENTITY_STABILITY_REPORT.md`
 
 ---
 
@@ -91,7 +91,7 @@ Verify parity of provider/model/tier/execution-trace/session semantics across ad
 - Both adapters pass parity tests for functional and telemetry output.
 
 **Sprint 2 Status (2026-03-01):** Completed.  
-Execution report: `documents/tests/SPRINT_2_CHAT_GATEWAY_REPORT.md`
+Execution report: `documents/archive/legacy-tauri-app/SPRINT_2_CHAT_GATEWAY_REPORT.md`
 
 ---
 

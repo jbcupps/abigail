@@ -18,13 +18,13 @@ Validate integrated runtime behavior across daemons, skills, routing, and deskto
 1. `cargo test -p entity-daemon --test integration_skills`
 2. `cargo test -p entity-daemon --test chat_integration`
 3. `cargo test -p entity-chat --test e2e_parity`
-4. `cd tauri-app/src-ui && npm run check:command-contract`
-5. `node scripts/check_stability.mjs`
+4. `node scripts/check_stability.mjs`
 
 ## Env-Gated Live Commands (Optional but Required for Full Release Readiness)
 
 1. `cargo test -p abigail-skills --test browser_persistent_auth -- --nocapture`
-2. `.\scripts\tests\live_tauri_skill_secrets_e2e.ps1`
+2. Daemon integration suites with `ABIGAIL_DAEMON_INTEGRATION=1`
+3. `scripts/tests/run-mvp-acceptance.ps1` (concurrent Entities, streaming, scoped persistence, restart durability)
 
 ## Priority Test Cases
 
@@ -49,9 +49,11 @@ Validate integrated runtime behavior across daemons, skills, routing, and deskto
 - Evidence: `abigail-skills/tests/browser_persistent_auth.rs`
 
 ### E2E-LIVE-002
-- Title: Desktop runtime probe validates instruction bootstrap and removed-capability checks
+- Title: Hive and Entity Runtime pass MVP acceptance (concurrent Entities, streaming, restart durability)
 - Priority: P0
-- Evidence: `scripts/tests/live_tauri_skill_secrets_e2e.ps1`
+- Evidence: `scripts/tests/run-mvp-acceptance.ps1`; installed results in `docs/MVP_WINDOWS.md`
+
+The retired app's desktop probe (`legacy/tauri-app/scripts/tests/live_tauri_skill_secrets_e2e.ps1`) is no longer part of this program.
 
 ## Exit Criteria
 

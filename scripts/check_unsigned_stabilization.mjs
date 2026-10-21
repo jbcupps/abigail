@@ -12,17 +12,22 @@ function assert(condition, message) {
   }
 }
 
-const tauriConfig = readJson("tauri-app/tauri.conf.json");
+const hiveConfig = readJson("hive-app/tauri.conf.json");
 assert(
-  tauriConfig.bundle?.createUpdaterArtifacts === false,
+  hiveConfig.bundle?.createUpdaterArtifacts !== true,
   "Unsigned stabilization lane must keep createUpdaterArtifacts disabled by default."
 );
 assert(
-  !tauriConfig.plugins?.updater,
-  "Unsigned stabilization lane must not ship updater config in tauri.conf.json."
+  !hiveConfig.plugins?.updater,
+  "Unsigned stabilization lane must not ship updater config in hive-app/tauri.conf.json."
 );
 
-const nsisHooks = fs.readFileSync("tauri-app/nsis-hooks.nsh", "utf8");
+const hiveHooksPath = hiveConfig.bundle?.windows?.nsis?.installerHooks ?? "";
+assert(
+  hiveHooksPath === "../scripts/nsis-mvp-hooks.nsh",
+  "Hive's default NSIS hooks must be the family-data-preserving MVP hooks."
+);
+const nsisHooks = fs.readFileSync("scripts/nsis-mvp-hooks.nsh", "utf8");
 for (const forbidden of [
   "BackupUserData",
   "RestoreUserData",
@@ -138,14 +143,21 @@ assert(
 );
 for (const forbidden of [
   "cd tauri-app",
+  "cd legacy",
   "tauri-app/src-ui",
   "tauri-app/tauri.conf.json",
+  "legacy/tauri-app",
 ]) {
   assert(
     !release.includes(forbidden),
     `Full installer release must not build the legacy tauri-app path (${forbidden}).`
   );
 }
+const workspaceManifest = fs.readFileSync("Cargo.toml", "utf8");
+assert(
+  !workspaceManifest.includes('"tauri-app"') && workspaceManifest.includes('exclude = ["legacy"]'),
+  "The retired single-agent app must stay outside the framework workspace."
+);
 for (const required of [
   "hive-app/tauri.conf.json",
   "stage_split_installer_resources.ps1",

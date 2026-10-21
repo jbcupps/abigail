@@ -1,7 +1,7 @@
 # Sprint 2 Kickoff Checklist - Chat Gateway Abstraction
 
 **Date:** 2026-03-01  
-**Roadmap Source:** `documents/GUI_ENTITY_STABILITY_ROADMAP.md` (Sprint 2 section)  
+**Roadmap Source:** `documents/archive/legacy-tauri-app/GUI_ENTITY_STABILITY_ROADMAP.md` (Sprint 2 section)  
 **Objective:** Decouple GUI chat from direct Tauri command/event wiring by introducing a transport-agnostic gateway and validating parity across adapters.
 
 ## Sprint 2 Scope (Locked)
@@ -19,7 +19,7 @@
   - `npm test` passes in `tauri-app/src-ui`.
   - `cargo check -p abigail-app` passes.
 - No open P0 defects in default Birth -> Connectivity -> Chat flow.
-- `documents/tests/SPRINT_1_GUI_ENTITY_STABILITY_REPORT.md` accepted as baseline.
+- `documents/archive/legacy-tauri-app/SPRINT_1_GUI_ENTITY_STABILITY_REPORT.md` accepted as baseline.
 
 ## Implementation Checklist
 
@@ -87,9 +87,9 @@
   - entity adapter
   - `ChatInterface` migration
   - parity tests
-- Test run outputs recorded in `documents/tests/VALIDATION_AND_GATE_REPORT.md`.
+- Test run outputs recorded in `documents/archive/legacy-tauri-app/VALIDATION_AND_GATE_REPORT.md`.
 - Sprint 2 closure report added as:
-  - `documents/tests/SPRINT_2_CHAT_GATEWAY_REPORT.md`
+  - `documents/archive/legacy-tauri-app/SPRINT_2_CHAT_GATEWAY_REPORT.md`
 
 ## Risks and Controls
 
@@ -111,7 +111,7 @@
 ## Sprint 2 Initiation Prompt (Copy/Paste)
 
 ```text
-Execute Sprint 2: Chat Gateway Abstraction exactly per documents/tests/SPRINT_2_CHAT_GATEWAY_KICKOFF_CHECKLIST.md and roadmap S2-01..S2-05.
+Execute Sprint 2: Chat Gateway Abstraction exactly per documents/archive/legacy-tauri-app/SPRINT_2_CHAT_GATEWAY_KICKOFF_CHECKLIST.md and roadmap S2-01..S2-05.
 
 Constraints:
 - Do not trust documentation blindly; verify behavior from code paths before editing.
@@ -133,7 +133,7 @@ Validation gates (must run and report):
 
 Deliverables:
 - Code changes for S2-01..S2-05
-- Updated validation evidence in documents/tests/VALIDATION_AND_GATE_REPORT.md
-- New closure report documents/tests/SPRINT_2_CHAT_GATEWAY_REPORT.md with pass/fail status and residual risks.
+- Updated validation evidence in documents/archive/legacy-tauri-app/VALIDATION_AND_GATE_REPORT.md
+- New closure report documents/archive/legacy-tauri-app/SPRINT_2_CHAT_GATEWAY_REPORT.md with pass/fail status and residual risks.
 ```
 

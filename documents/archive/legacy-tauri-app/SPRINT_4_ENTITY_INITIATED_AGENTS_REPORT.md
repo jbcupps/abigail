@@ -1,7 +1,7 @@
 # Sprint 4 Entity-Initiated Agents Report
 
 Date: 2026-03-01  
-Scope: `S4-01..S4-06` from `documents/GUI_ENTITY_STABILITY_ROADMAP.md` and `documents/tests/SPRINT_4_ENTITY_INITIATED_AGENTS_KICKOFF_CHECKLIST.md`.
+Scope: `S4-01..S4-06` from `documents/archive/legacy-tauri-app/GUI_ENTITY_STABILITY_ROADMAP.md` and `documents/archive/legacy-tauri-app/SPRINT_4_ENTITY_INITIATED_AGENTS_KICKOFF_CHECKLIST.md`.
 
 ## Scope Decision Notes (Code-First)
 

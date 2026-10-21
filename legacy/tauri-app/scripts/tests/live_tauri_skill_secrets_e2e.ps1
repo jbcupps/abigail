@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Live Tauri E2E — validates the desktop runtime skill/secrets/instruction
+    LEGACY live Tauri E2E for the retired single-agent app — validates its desktop runtime skill/secrets/instruction
     pipeline by building the real executable and running the probe mode.
 
 .DESCRIPTION
@@ -18,7 +18,7 @@
 
 .EXAMPLE
     # Deterministic-only (no external deps):
-    .\scripts\tests\live_tauri_skill_secrets_e2e.ps1
+    .\legacy\tauri-app\scripts\tests\live_tauri_skill_secrets_e2e.ps1
 #>
 
 [CmdletBinding()]
@@ -27,7 +27,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+$LegacyAppDir = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+$RepoRoot = (Resolve-Path (Join-Path $LegacyAppDir '../..')).Path
 
 Write-Host "`n=== Abigail Live Tauri E2E ===" -ForegroundColor Cyan
 Write-Host "Repo:  $RepoRoot"
@@ -35,10 +36,10 @@ Write-Host "Time:  $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`n"
 
 # ── Build ───────────────────────────────────────────────────────────
 if (-not $SkipBuild) {
-    Write-Host "[BUILD] cargo build -p abigail-app --release ..." -ForegroundColor Yellow
+    Write-Host "[BUILD] cargo build --release --manifest-path legacy/tauri-app/Cargo.toml ..." -ForegroundColor Yellow
     Push-Location $RepoRoot
     try {
-        cargo build -p abigail-app --release 2>&1
+        cargo build --release --manifest-path (Join-Path $LegacyAppDir 'Cargo.toml') 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[BUILD] FAILED (exit $LASTEXITCODE)" -ForegroundColor Red
             exit 2
@@ -52,13 +53,13 @@ if (-not $SkipBuild) {
 }
 
 # ── Locate binary ──────────────────────────────────────────────────
-$binary = Join-Path $RepoRoot 'target\release\abigail-app.exe'
+$binary = Join-Path $LegacyAppDir 'target\release\abigail-app.exe'
 if (-not (Test-Path $binary)) {
     # Tauri names the binary after productName in tauri.conf.json
-    $binary = Join-Path $RepoRoot 'target\release\Abigail.exe'
+    $binary = Join-Path $LegacyAppDir 'target\release\Abigail.exe'
 }
 if (-not (Test-Path $binary)) {
-    Write-Host "[ERROR] Release binary not found at target\release\" -ForegroundColor Red
+    Write-Host "[ERROR] Release binary not found at legacy\tauri-app\target\release\" -ForegroundColor Red
     exit 2
 }
 Write-Host "[PROBE] Binary: $binary"

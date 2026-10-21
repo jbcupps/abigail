@@ -22,8 +22,8 @@ output/
 /dist/
 
 # Node / frontend
-tauri-app/src-ui/node_modules/
-tauri-app/src-ui/dist/
+legacy/tauri-app/src-ui/node_modules/
+legacy/tauri-app/src-ui/dist/
 hive-app/src-ui/node_modules/
 hive-app/src-ui/dist/
 entity-runtime-app/src-ui/node_modules/
@@ -34,11 +34,11 @@ hive-app/resources/*
 # Splash video — large binary asset; the splash falls back to a branded card if
 # absent. Re-add via Git LFS / a build-time fetch rather than committing it.
 **/src-ui/public/video/*.mp4
-tauri-app/abigail-keygen*
-tauri-app/ollama*
+legacy/tauri-app/abigail-keygen*
+legacy/tauri-app/ollama*
 
 # Test coverage outputs
-tauri-app/src-ui/coverage/
+**/src-ui/coverage/
 *.lcov
 lcov.info
 
@@ -46,7 +46,7 @@ lcov.info
 *.log
 
 # Tauri generated files
-tauri-app/gen/
+legacy/tauri-app/gen/
 hive-app/gen/
 entity-runtime-app/gen/
 

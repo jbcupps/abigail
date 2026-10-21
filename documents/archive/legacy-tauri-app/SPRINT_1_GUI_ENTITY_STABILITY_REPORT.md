@@ -1,7 +1,7 @@
 # Sprint 1 GUI/Entity Stability Report
 
 **Date:** 2026-03-01  
-**Scope:** Sprint 1 from `documents/GUI_ENTITY_STABILITY_ROADMAP.md`
+**Scope:** Sprint 1 from `documents/archive/legacy-tauri-app/GUI_ENTITY_STABILITY_ROADMAP.md`
 
 ## Gap-Closure Checklist (S1-01..S1-05)
 

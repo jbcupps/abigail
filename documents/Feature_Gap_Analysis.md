@@ -17,10 +17,12 @@ This report identifies **37 feature gaps** across 12 categories, estimates effor
 This document remains the long-horizon parity analysis.  
 The active near-term execution plan for stability and architecture cutover is:
 
-- `documents/GUI_ENTITY_STABILITY_ROADMAP.md`
-- `documents/GUI_ENTITY_CODE_REVIEW_REPORT.md`
+- `documents/archive/legacy-tauri-app/GUI_ENTITY_STABILITY_ROADMAP.md` (archived)
+- `documents/archive/legacy-tauri-app/GUI_ENTITY_CODE_REVIEW_REPORT.md` (archived)
 
 That roadmap prioritizes command-surface reliability, GUI/Entity chat decoupling, and entity-initiated agent lifecycle stability before broader parity expansion.
+
+> **Framework Notice (2026-10):** The single desktop Tauri application described in this summary has been retired to `legacy/tauri-app/`. Abigail is now a framework: Hive creates, births, signs, and supervises persistent Entities, and each Entity runs in its own Entity Runtime. See `README.md` and `docs/architecture.md`.
 
 > **Historical Reference Notice (2026-03-01):** Most detailed "current state" snapshots in this document were captured on 2026-02-06 and are preserved for parity context. For implementation truth, prefer `README.md`, `CLAUDE.md`, and the GUI/Entity stability roadmap.
 
@@ -261,14 +263,11 @@ That roadmap prioritizes command-surface reliability, GUI/Entity chat decoupling
 
 **OpenClaw's capability:** Route different channels to isolated agent instances via workspaces. Each workspace has its own memory directory, skills configuration, and system prompt. Enables running multiple specialized agents from a single installation.
 
-**Abigail's current state:** Single agent with Id/Ego routing. The `agent.rs` module in `abigail-capabilities` has cooperation stubs. No workspace isolation.
+**Abigail's current state (updated 2026-10):** Abigail is now a multi-Entity framework. Hive (`hive-app` / `hive-daemon`) keeps a registry of named Entities and creates, births, and signs each one. Every Entity runs in its own supervised `entity-daemon` with its own `entity_<UUID>` database inside the shared `memory.db`, per-Entity skill assignments (`/v1/entities/:id/assignments`), and per-Entity provider configuration (`/v1/entities/:id/provider-config`).
 
-**What's needed:**
-- Workspace abstraction (isolated config, memory, skills per workspace)
-- Agent registry (multiple named agents)
-- Channel-to-agent routing rules
-- Shared vs. isolated memory boundaries
-- Inter-agent communication protocol
+**Remaining gaps:**
+- Channel-to-Entity routing rules
+- Inter-Entity communication protocol
 
 ---
 

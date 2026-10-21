@@ -13,15 +13,15 @@ Date: 2026-03-02
 
 | Track | Test Group | Mode | Status | Command / Evidence |
 |---|---|---|---|---|
-| Unit | Rust workspace unit/integration | CI-Required | Active | `cargo test --workspace --exclude abigail-app` |
-| Unit | Rust lint and compile safety | CI-Required | Active | `cargo clippy --workspace --exclude abigail-app -- -D warnings`, `cargo check -p abigail-app` |
-| Unit | Frontend unit/component tests | CI-Required | Active | `cd tauri-app/src-ui && npm run test:coverage` |
-| UX | Frontend build and type safety | CI-Required | Active | `cd tauri-app/src-ui && npm run build` |
-| E2E | Command surface contract | Local-Required | Active | `cd tauri-app/src-ui && npm run check:command-contract` |
+| Unit | Rust workspace unit/integration | CI-Required | Active | `cargo test --workspace` |
+| Unit | Rust lint and compile safety | CI-Required | Active | `cargo clippy --workspace -- -D warnings`, `cargo check -p abigail-hive-app -p abigail-entity-runtime-app` |
+| Unit | Frontend unit/component tests | CI-Required | Active | `npm test` in `hive-app/src-ui` and `entity-runtime-app/src-ui` |
+| UX | Frontend build and type safety | CI-Required | Active | `npm run build` in `hive-app/src-ui` and `entity-runtime-app/src-ui` |
+| E2E | Release lane and trust claims | CI-Required | Active | `node scripts/check_unsigned_stabilization.mjs`, `node scripts/check_crypto_claims.mjs` |
 | E2E | Daemon chat/skills integration | Local-Required | Active | `cargo test -p entity-daemon --test chat_integration`, `integration_skills` |
 | E2E | Shared chat parity integration | Local-Required | Active | `cargo test -p entity-chat --test e2e_parity` |
 | E2E | Live email tool-use | Env-Gated | Active | `cargo test -p entity-chat --test live_email -- --nocapture` |
-| E2E | Desktop runtime probe | Env-Gated | Active | `.\scripts\tests\live_tauri_skill_secrets_e2e.ps1` |
+| E2E | MVP acceptance (synthetic model) | Local-Required | Active | `scripts/tests/run-mvp-acceptance.ps1` |
 | Security | Cargo/npm advisory scans | CI-Advisory | Active | `audit` job in `.github/workflows/ci.yml` |
 | Security | CodeQL JS/TS analysis | CI-Advisory | Active | `codeql` job in `.github/workflows/ci.yml` |
 

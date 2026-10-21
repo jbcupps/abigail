@@ -11,7 +11,9 @@ This suite validates the GUI/Entity stabilization program:
 - Runtime trust/policy enforcement in message flow paths
 
 Reference roadmap:
-- `documents/GUI_ENTITY_STABILITY_ROADMAP.md`
+- `documents/archive/legacy-tauri-app/GUI_ENTITY_STABILITY_ROADMAP.md`
+
+> **Legacy note:** This suite was written against the retired single-agent app. `tauri-app/...` paths below now live under `legacy/tauri-app/...`, and the command-contract script is `legacy/tauri-app/scripts/check_command_surface.mjs`.
 
 ---
 

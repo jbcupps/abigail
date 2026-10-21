@@ -1,7 +1,7 @@
 # Sprint 3 Internal Message Boundary Report
 
 Date: 2026-03-01  
-Scope: `S3-01..S3-04` from `documents/GUI_ENTITY_STABILITY_ROADMAP.md`.
+Scope: `S3-01..S3-04` from `documents/archive/legacy-tauri-app/GUI_ENTITY_STABILITY_ROADMAP.md`.
 
 ## Scope Decision Notes (Code-First Validation)
 

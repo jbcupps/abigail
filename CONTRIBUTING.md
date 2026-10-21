@@ -2,6 +2,8 @@
 
 Thank you for your interest in contributing to Abigail. This guide explains how to set up a development environment, submit changes, and follow our project conventions.
 
+Abigail is a framework for creating and hosting persistent AI Entities, not a single-agent app. The active product is two desktop apps and two daemons: `hive-app` + `hive-daemon` create, birth, sign, and supervise Entities, and `entity-runtime-app` + `entity-daemon` run each Entity against its own `entity_<UUID>` database in the Hive-owned `memory.db`. See the [README](README.md) and [`docs/architecture.md`](docs/architecture.md). The retired single-agent app is isolated under [`legacy/`](legacy/README.md) and is not part of the workspace or CI.
+
 ## Getting Started
 
 ### Prerequisites
@@ -32,14 +34,16 @@ sudo apt-get install -y \
 git clone https://github.com/jbcupps/abigail.git
 cd abigail
 
-# Build Rust workspace
-cargo build
-
 # Install frontend dependencies (one-time)
-cd tauri-app/src-ui && npm install && cd ../..
+npm ci --prefix hive-app/src-ui
+npm ci --prefix entity-runtime-app/src-ui
 
-# Launch with hot-reload
-cargo tauri dev
+# Build the daemons and the Runtime app that Hive launches
+cargo build -p hive-daemon -p entity-daemon -p abigail-entity-runtime-app
+
+# Serve the Runtime UI for debug Entity windows, then launch Hive with hot-reload
+npm run dev --prefix entity-runtime-app/src-ui &
+cd hive-app && cargo tauri dev
 ```
 
 For Docker-based development, see [documents/HOW_TO_RUN_LOCALLY.md](documents/HOW_TO_RUN_LOCALLY.md).
@@ -48,16 +52,16 @@ For Docker-based development, see [documents/HOW_TO_RUN_LOCALLY.md](documents/HO
 
 ### Branching Strategy
 
-- **`main`** is the protected default branch.
-- Create **short-lived feature branches** from `main` for all work.
-- Branch naming: `feat/description`, `fix/description`, `chore/description`.
+- **`beta`** is the permanent iteration branch. Every push to `beta` produces a tagged `vX.Y.Z-beta.N` installer prerelease for UAT.
+- **`main`** is the protected stable branch. It receives validated changes promoted from `beta`, plus explicitly requested stable hotfixes.
+- Create **short-lived feature branches** for all work. Branch naming: `feat/description`, `fix/description`, `chore/description`.
 
 ### Making Changes
 
-1. Create a feature branch from `main`.
+1. Create a feature branch from `beta` (or from `main` for an approved stable hotfix).
 2. Make your changes with clear, focused commits.
 3. Ensure all checks pass locally before pushing.
-4. Open a pull request against `main`.
+4. Open a pull request against the branch you started from.
 
 ### Commit Conventions
 
@@ -84,7 +88,8 @@ Example: `feat: add skill event filtering by category`
 **TypeScript/React (frontend):**
 
 - Use TypeScript for all new frontend code
-- Follow existing patterns in `tauri-app/src-ui/src/`
+- Follow existing patterns in `hive-app/src-ui/src/` and `entity-runtime-app/src-ui/src/`
+- Follow the design system in [`docs/design/README.md`](docs/design/README.md)
 
 ### Running Checks Locally
 
@@ -92,21 +97,25 @@ Example: `feat: add skill event filtering by category`
 # Rust formatting
 cargo fmt --all -- --check
 
-# Rust linting (excludes abigail-app which needs Tauri)
-cargo clippy --workspace --exclude abigail-app -- -D warnings
+# Rust linting
+cargo clippy --workspace -- -D warnings
 
-# Check abigail-app compiles
-cargo check -p abigail-app
+# Hive and Entity Runtime desktop apps compile
+cargo check -p abigail-hive-app -p abigail-entity-runtime-app
 
-# Rust tests (excludes abigail-app)
-cargo test --workspace --exclude abigail-app
+# Rust tests
+cargo test --workspace
 
-# Frontend build
-cd tauri-app/src-ui && npm run build
+# Frontend builds and tests
+(cd hive-app/src-ui && npm run build && npm test)
+(cd entity-runtime-app/src-ui && npm run build && npm test)
 
-# Frontend tests with coverage
-cd tauri-app/src-ui && npm run test:coverage
+# Release-lane and security-claim guards
+node scripts/check_unsigned_stabilization.mjs
+node scripts/check_crypto_claims.mjs
 ```
+
+`node scripts/check_stability.mjs` runs the Windows stability subset in one step.
 
 ## Pull Request Process
 
@@ -119,17 +128,19 @@ cd tauri-app/src-ui && npm run test:coverage
 
 ### PR Checklist
 
-- [ ] Code compiles without warnings (`cargo clippy --workspace --exclude abigail-app -- -D warnings`)
-- [ ] Tests pass (`cargo test --workspace --exclude abigail-app`)
+- [ ] Code compiles without warnings (`cargo clippy --workspace -- -D warnings`)
+- [ ] Tests pass (`cargo test --workspace`)
 - [ ] Formatting is correct (`cargo fmt --all -- --check`)
-- [ ] Tauri app compiles (`cargo check -p abigail-app`)
-- [ ] Frontend builds (`cd tauri-app/src-ui && npm run build`)
+- [ ] Desktop apps compile (`cargo check -p abigail-hive-app -p abigail-entity-runtime-app`)
+- [ ] Both frontends build and test (`hive-app/src-ui`, `entity-runtime-app/src-ui`)
 - [ ] Documentation updated if needed
 - [ ] No secrets or sensitive data in the diff
 
 ## Architecture Overview
 
-See [CLAUDE.md](CLAUDE.md) for a detailed architecture reference, including crate responsibilities, the security boundary between capabilities and skills, and the Id/Ego routing model.
+- [README.md](README.md): how Hive, the Entity Runtime, and the shared store fit together, the Entity lifecycle, and the framework crates.
+- [docs/architecture.md](docs/architecture.md): process boundaries, persistence scopes, and the skill topology.
+- [CLAUDE.md](CLAUDE.md) and [AGENTS.md](AGENTS.md): project rules and the active implementation plan.
 
 ## Reporting Issues
 

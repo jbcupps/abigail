@@ -1,7 +1,7 @@
 # Sprint 5 Hardening and Cutover Report
 
 Date: 2026-03-01  
-Scope: `S5-01..S5-04` from `documents/GUI_ENTITY_STABILITY_ROADMAP.md`.
+Scope: `S5-01..S5-04` from `documents/archive/legacy-tauri-app/GUI_ENTITY_STABILITY_ROADMAP.md`.
 
 ## Code-First Scope Validation
 

@@ -1,0 +1,63 @@
+# Retired single-agent desktop app. It is its own workspace so the active
+# framework workspace, lockfile, and CI never build it. See ../README.md.
+[workspace]
+
+[package]
+name = "abigail-app"
+version = "0.0.1"
+edition = "2021"
+authors = ["Abigail's Mentor"]
+license = "MIT"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+abigail-core = { path = "../../crates/abigail-core" }
+anyhow = "1"
+base64 = "0.22"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+abigail-memory = { path = "../../crates/abigail-memory" }
+abigail-capabilities = { path = "../../crates/abigail-capabilities" }
+abigail-router = { path = "../../crates/abigail-router" }
+abigail-hive = { path = "../../crates/abigail-hive" }
+abigail-birth = { path = "../../crates/abigail-birth" }
+abigail-soul-crystallization = { path = "../../crates/abigail-soul-crystallization" }
+abigail-skills = { path = "../../crates/abigail-skills" }
+abigail-runtime = { path = "../../crates/abigail-runtime" }
+entity-core = { path = "../../crates/entity-core" }
+entity-chat = { path = "../../crates/entity-chat" }
+abigail-auth = { path = "../../crates/abigail-auth" }
+abigail-identity = { path = "../../crates/abigail-identity" }
+abigail-cli = { path = "../../crates/abigail-cli" }
+soul-forge = { path = "../../crates/soul-forge" }
+skill-browser = { path = "../../skills/skill-browser" }
+abigail-queue = { path = "../../crates/abigail-queue" }
+abigail-persistence = { path = "../../crates/abigail-persistence" }
+abigail-streaming = { path = "../../crates/abigail-streaming" }
+daemon-client = { path = "../../crates/daemon-client" }
+tauri = { version = "2.11", features = ["tray-icon"] }
+tauri-plugin-dialog = "2.0"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+async-trait = "0.1"
+tokio = { version = "1.35", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net", "process", "signal"] }
+tokio-util = { version = "0.7", features = ["io", "compat"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest = { version = "0.13", features = ["json", "stream"] }
+regex = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+which = "8"
+directories = "5"
+axum = "0.7"
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dev-dependencies]
+rand = "0.8"

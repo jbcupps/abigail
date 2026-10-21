@@ -100,7 +100,7 @@ Summary of what the codebase uses today and where hardening would help.
 
 ## 8. Key files
 
-- **Registration / discovery**: `tauri-app/src/lib.rs` (setup), `entity-daemon/src/main.rs` (startup).
+- **Registration / discovery**: `entity-daemon/src/main.rs` (startup); per-Entity assignments via Hive (`/v1/entities/:id/assignments`).
 - **Tool definitions**: `entity-chat/src/lib.rs` (`build_tool_definitions`, `run_tool_use_loop`, `execute_single_tool_call`).
 - **Execution and limits**: `abigail-skills/src/executor.rs`, `abigail-skills/src/sandbox.rs` (`ResourceLimits`, `SkillSandbox`).
 - **Tool descriptor and trait**: `abigail-skills/src/skill.rs` (`ToolDescriptor`, `Skill`).
