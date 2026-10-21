@@ -143,10 +143,14 @@ mod tests {
         )
     }
 
-    /// Changes one character while keeping the value hex.
+    /// Changes the first character to another digit from the same value.
     fn flip_first(value: &str) -> String {
-        let replacement = if value.starts_with('0') { '1' } else { '0' };
-        format!("{replacement}{}", &value[1..])
+        let first = value.as_bytes()[0];
+        let other = value
+            .bytes()
+            .find(|&digit| digit != first)
+            .expect("random hex has two distinct digits");
+        format!("{}{}", other as char, &value[1..])
     }
 
     #[test]
@@ -163,7 +167,12 @@ mod tests {
         assert_eq!(parse_control_token(""), None);
         assert!(is_valid_nonce(&nonce));
         assert!(!is_valid_nonce(&nonce[..10]));
-        assert!(!is_valid_nonce(&format!("g{}", &nonce[1..])));
+        let hyphenated = format!(
+            "{}{}",
+            uuid::Uuid::new_v4().hyphenated(),
+            uuid::Uuid::new_v4().hyphenated()
+        );
+        assert!(!is_valid_nonce(&hyphenated[..64]));
     }
 
     #[test]
