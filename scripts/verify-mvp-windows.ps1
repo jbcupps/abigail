@@ -18,13 +18,19 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'Installer verification requires Windows.' }
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+. (Join-Path $PSScriptRoot 'packaging_channel.ps1')
 $installer = (Resolve-Path -LiteralPath $InstallerPath).Path
 if (-not $ManifestPath) { $ManifestPath = Join-Path (Split-Path $installer -Parent) 'mvp-build.json' }
 $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
-$expectedPayload = @('Abigail.exe', 'resources/abigail-entity-runtime-app.exe', 'resources/hive-daemon.exe', 'resources/entity-daemon.exe')
+# Manifests from before the preview channel existed are stable builds.
+$channelProperty = $manifest.PSObject.Properties['channel']
+$channel = if ($channelProperty) { [string]$channelProperty.Value } else { 'stable' }
+if ($channel -cnotin @('stable', 'preview')) { throw "Unknown installer channel in manifest: $channel" }
+$channelProfile = Get-AbigailPackagingChannel -RepositoryRoot $repoRoot -Channel $channel
+$expectedPayload = @($channelProfile.LauncherFileName, 'resources/abigail-entity-runtime-app.exe', 'resources/hive-daemon.exe', 'resources/entity-daemon.exe')
 if (@($manifest.payload).Count -ne 4 -or
     (@($manifest.payload.relative_path | Sort-Object) -join '|') -ne (($expectedPayload | Sort-Object) -join '|')) {
-    throw 'Installer verification requires the four exact Abigail executable paths.'
+    throw "Installer verification requires the four exact $($channelProfile.ProductName) executable paths."
 }
 if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash -ne $manifest.installer_sha256) {
     throw 'Installer SHA256 differs from the build manifest.'
@@ -46,11 +52,11 @@ foreach ($registryRoot in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uni
     foreach ($key in Get-ChildItem -LiteralPath $registryRoot) {
         $entry = Get-ItemProperty -LiteralPath $key.PSPath
         $display = $entry.PSObject.Properties['DisplayName']
-        if (-not $display -or $display.Value -ne 'Abigail') { continue }
+        if (-not $display -or $display.Value -ne $channelProfile.ProductName) { continue }
         $location = $entry.PSObject.Properties['InstallLocation']
         $previousInstall = if ($location -and $location.Value) { [IO.Path]::GetFullPath($location.Value.Trim().Trim('"')) } else { $null }
         if (-not $previousInstall -or -not $previousInstall.StartsWith($acceptancePrefix, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Installer verification cannot replace an existing Abigail installation outside $acceptanceRoot. Existing location: $previousInstall"
+            throw "Installer verification cannot replace an existing $($channelProfile.ProductName) installation outside $acceptanceRoot. Existing location: $previousInstall"
         }
     }
 }
@@ -68,6 +74,14 @@ $checks = @(foreach ($item in $manifest.payload) {
     }
     $actualHash = (Get-FileHash -LiteralPath $installedPath -Algorithm SHA256).Hash
     if ($actualHash -ne $item.sha256) { throw "Installed binary SHA256 mismatch: $installedPath" }
+    if ($channelProperty) {
+        $kind = switch ($item.relative_path) {
+            ($channelProfile.LauncherFileName) { 'hive' }
+            'resources/abigail-entity-runtime-app.exe' { 'runtime' }
+            default { 'daemon' }
+        }
+        Assert-AbigailChannelBinary -Path $installedPath -ChannelProfile $channelProfile -Kind $kind
+    }
     [ordered]@{ path = $installedPath; sha256 = $actualHash; matches_build = $true }
 })
 $runtimeReportPath = Join-Path $logDir 'windows-runtime.json'
@@ -108,7 +122,7 @@ foreach ($binary in @('hive-daemon.exe', 'entity-daemon.exe')) {
 }
 $reportPath = Join-Path $logDir 'installed-payload.json'
 $report = [ordered]@{
-    verified_at_utc = [DateTime]::UtcNow.ToString('o'); installer = $installer
+    verified_at_utc = [DateTime]::UtcNow.ToString('o'); channel = $channel; installer = $installer
     install_dir = $InstallDir; payload = $checks; daemon_loader_checks = 'passed'
     windows_runtime = $runtimeReport
     runtime_acceptance = 'pending; this check does not launch the application'

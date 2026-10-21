@@ -93,7 +93,12 @@ assert(
   /^\d+\.\d+\.\d+$/.test(testedRustVersion ?? ""),
   "Repository Rust toolchain must pin an exact tested compiler version."
 );
-for (const workflow of [".github/workflows/ci.yml", ".github/workflows/release.yml", ".github/workflows/release-fast.yml"]) {
+for (const workflow of [
+  ".github/workflows/ci.yml",
+  ".github/workflows/release.yml",
+  ".github/workflows/release-fast.yml",
+  ".github/workflows/preview-candidate.yml",
+]) {
   const content = fs.readFileSync(workflow, "utf8");
   const pins = [...content.matchAll(/^\s+toolchain:\s*([^\s#]+)/gm)].map((match) => match[1]);
   const setups = [...content.matchAll(/uses:\s*dtolnay\/rust-toolchain@/g)].length;
