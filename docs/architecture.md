@@ -1,5 +1,32 @@
 # Abigail Architecture
 
+Abigail is a framework for creating and hosting persistent AI Entities. Hive is the control plane that creates, births, signs, and supervises Entities; each Entity runs in its own runtime process against its own database in the Hive-owned store.
+
+## Processes and Boundaries
+
+```mermaid
+flowchart LR
+    HiveApp["hive-app<br/>(Hive desktop shell)"] -->|local HTTP| HiveDaemon["hive-daemon<br/>(control plane)"]
+    HiveDaemon -->|"spawns + supervises<br/>one per open Entity"| EntityDaemon["entity-daemon<br/>(Entity runtime)"]
+    HiveApp -->|"opens window"| RuntimeApp["entity-runtime-app<br/>(chat window)"]
+    RuntimeApp -->|local HTTP| EntityDaemon
+    EntityDaemon -->|"lease-scoped<br/>/v1/entities/:id/persistence"| HiveDaemon
+    HiveDaemon --> Store[("memory.db<br/>abigail/hive<br/>abigail/entity_&lt;UUID&gt;")]
+```
+
+- `hive-app` and `entity-runtime-app` are thin Tauri shells. All state and policy live in the daemons, which talk over explicit local HTTP boundaries (contracts in `hive-core` and `entity-core`).
+- `hive-daemon` owns the Hive master key, the Entity registry (`abigail-identity`), provider and secret management (`abigail-hive`), and the embedded store (`abigail-persistence`). Its supervisor keeps the immortal `Abigail Hive` Entity's daemon alive and starts family Entity daemons on demand.
+- `entity-daemon` runs one Entity: chat (`entity-chat`), routing and agentic runs (`abigail-router`), Superego gating (`abigail-superego`), memory (`abigail-memory`), and skills (`abigail-skills`, `abigail-runtime`).
+
+## Entity Lifecycle
+
+1. `POST /v1/entities` registers a new Entity UUID and identity directory.
+2. `GET /v1/birth/scenarios` and `POST /v1/entities/:id/birth` run the Soul Forge rite (`soul-forge`): three ethical trials or a quickstart path produce Triangle Ethic weights and the soul documents.
+3. During birth, Hive generates the Entity's Ed25519 key (stored encrypted), signs its constitutional documents, countersigns its public key with the Hive master key, and writes a Hive-signed birth certificate.
+4. Loading a born Entity verifies the chain `stable KEK -> Hive master key -> Hive signature over external_pubkey.bin -> constitutional document signatures`; `entity-daemon` refuses to start if the constitution does not verify.
+
+`abigail-birth` (conversational birth orchestrator) and `abigail-soul-crystallization` (LLM-guided soul crystallization) are framework library crates that the Hive birth rite does not call yet; their only consumer today is the retired single-agent app in `legacy/tauri-app`.
+
 ## Skill Topology and Forge Flow
 
 ```mermaid
@@ -30,7 +57,7 @@ This diagram is the canonical high-level flow for persistent skill topology prov
 
 - `Abigail Hive` opens the shared local SurrealDB store before user-facing Entities start.
 - Shared orchestration records live in namespace `abigail`, database `hive`.
-- Per-Entity state lives in namespace `abigail`, database `entity_<uuid>`.
+- Per-Entity state lives in namespace `abigail`, database `entity_<uuid>` (the UUID's hyphens become underscores).
 - The Hive daemon is the only process opening the embedded SurrealKV engine. Entity runtimes call `/v1/entities/:id/persistence` with their Hive-issued runtime lease; the server verifies that the lease matches the requested Entity scope.
 - The coordinator's conversation also has its own Entity database. Background jobs are scoped per Entity so starting one runtime cannot recover or consume another runtime's jobs.
 - The memory path is local-first and desktop-native, with legacy SQLite files used only as first-launch migration inputs.

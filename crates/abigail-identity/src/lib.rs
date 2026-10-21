@@ -1,6 +1,7 @@
 //! Hive identity management — thread-safe manager for multi-agent identities.
 //!
-//! Extracted from `tauri-app/src/identity_manager.rs` as a standalone crate.
+//! Extracted from the retired single-agent app's `identity_manager.rs`
+//! (now `legacy/tauri-app`) as a standalone crate.
 //! Zero Tauri imports — only uses `abigail_core`, `ed25519_dalek`, `serde`, `uuid`, `std`.
 
 use abigail_core::{

@@ -4,8 +4,10 @@ This file tracks the current plan for agents working in the Abigail repository.
 
 ## Current State (2026-03-05)
 
-Abigail is the private Entity Coordinator and Manager for real homes and families. Its product mission is to put persistent, highly configurable, ethically governed AI Entities into the hands of everyday people through one easy install and one obvious app launch. The user (mentor/family head) creates individual Entities that the family actually interacts with. Abigail handles coordination, memory, skills, and security in the background.
+Abigail is a framework for creating and hosting persistent AI Entities, and the private Entity Coordinator and Manager for real homes and families. Its product mission is to put persistent, highly configurable, ethically governed AI Entities into the hands of everyday people through one easy install and one obvious app launch. The user (mentor/family head) creates individual Entities that the family actually interacts with. Abigail handles coordination, memory, skills, and security in the background.
 
+- Hive (`hive-app` + `hive-daemon`) creates, births, and signs Entities. Each Entity runs in `entity-runtime-app` + `entity-daemon` with its own `entity_<UUID>` database in the Hive-owned `memory.db`. The Hive birth rite uses `soul-forge` and `abigail-identity`; `abigail-birth` and `abigail-soul-crystallization` are library crates not yet wired into Hive.
+- The retired single-agent app (`abigail-app`) is isolated in `legacy/tauri-app` as its own Cargo workspace and is outside the framework build, installers, and CI.
 - Abigail Hive is the only place where provider/model management should live.
 - Abigail Hive should remain visible and usable even while an Entity is open.
 - The active implementation split is two app roots: `hive-app` for control-plane work and `entity-runtime-app` for the chat/runtime surface, but the family-facing product must install and launch as one `Abigail` app.

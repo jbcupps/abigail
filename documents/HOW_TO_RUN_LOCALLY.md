@@ -1,270 +1,170 @@
 # How to Run Abigail Locally
 
-This runbook reflects the current interactive onboarding + chat flow in this repository.
+Abigail is a framework for creating and hosting persistent AI Entities. Locally you run the same pieces the installer ships:
+
+- `hive-daemon` (control plane) and the `hive-app` desktop shell. Hive creates, births, and signs Entities, owns `memory.db`, and supervises runtimes.
+- `entity-daemon` (one per open Entity) and the `entity-runtime-app` chat window. Each Entity uses its own `entity_<UUID>` database inside the Hive-owned store.
+
+The retired single-agent app is in [`legacy/tauri-app`](../legacy/README.md) and is not covered here.
 
 ## Prerequisites
 
 ### Required (native development)
 
-- Rust (stable)
-- Node.js 20+
-- `npm`
+- Rust (the version pinned in `rust-toolchain.toml`)
+- Node.js 20+ and `npm`
 - Platform dependencies for Tauri:
   - **Windows**: NSIS (for installer builds)
   - **macOS**: Xcode Command Line Tools
-  - **Ubuntu 22.04+**: `libwebkit2gtk-4.1-dev libappindicator3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev`
+  - **Ubuntu 22.04+**: `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev libxdo-dev`
 
 ### Required (Docker development)
 
-- Docker 20+ and Docker Compose v2. The `docker/` directory contains `Dockerfile` and `docker-compose.yml` for containerized build and test (Docker-first option).
+- Docker 20+ and Docker Compose v2. The `docker/` directory contains `Dockerfile` and `docker-compose.yml` for containerized build and test.
 
 ### Optional
 
-- A local OpenAI-compatible endpoint (Ollama / LM Studio / other local server)
-- Provider API keys (can be supplied in-app during onboarding)
+- A local OpenAI-compatible endpoint (Ollama, LM Studio, or another local server)
+- Provider API keys, or an installed official Claude, Codex, or Grok CLI signed in with your own account. All of these are connected in Hive.
 
-## Quick start (native)
+## Quick start (desktop)
 
 From the repository root:
 
 ```bash
-cd tauri-app/src-ui && npm ci && cd ../..
-cargo tauri dev
+npm ci --prefix hive-app/src-ui
+npm ci --prefix entity-runtime-app/src-ui
+
+# Hive finds these next to its own executable.
+cargo build -p hive-daemon -p entity-daemon -p abigail-entity-runtime-app
+
+# Debug Entity Runtime windows load their UI from this dev server.
+npm run dev --prefix entity-runtime-app/src-ui &
+
+cd hive-app && cargo tauri dev
 ```
+
+Hive starts (or adopts) its daemon, then opens an Entity Runtime window when you open an Entity. If `cargo tauri` is missing, install it with `cargo install tauri-cli`.
 
 ## Quick start (headless daemons)
 
-Run the Hive control plane and Entity agent runtime as separate HTTP daemons without the Tauri GUI:
+Entity runtimes only start when Hive authorizes them, so run Hive and let it open Entities:
 
 ```bash
-# Terminal 1: Start Hive daemon (control plane, port 3141)
-cargo run -p hive-daemon
+# Terminal 1: Hive control plane (default port 43141)
+cargo build -p hive-daemon -p entity-daemon
+cargo run -p hive-daemon -- --data-dir ./target/dev-data
 
-# Terminal 2: Start Entity daemon (agent runtime, port 3142)
-# Requires a registered entity UUID — create one via hive-cli first
+# Terminal 2: create an Entity, then ask Hive to start its runtime
 cargo run -p hive-cli -- create "MyEntity"
-cargo run -p entity-daemon -- --entity-id <uuid-from-above>
+curl -X POST http://127.0.0.1:43141/v1/entities/<uuid>/open   # returns the runtime's local_url
 
-# Terminal 3: Interact via CLI
-cargo run -p hive-cli -- status
-cargo run -p entity-cli -- chat "hello"
-cargo run -p entity-cli -- skills
+# Talk to that runtime
+cargo run -p entity-cli -- --url <local_url> status
+cargo run -p entity-cli -- --url <local_url> chat "hello"
+cargo run -p hive-cli -- entities
 ```
 
-### Daemon CLI flags
+Starting `entity-daemon` by hand fails with "Open this Entity through the Abigail Hive to authorize its runtime": Hive passes each runtime a one-use bootstrap token, and the runtime exchanges it for a lease that scopes its persistence calls to its own Entity database.
+
+### Daemon flags
 
 **hive-daemon:**
-- `--port <PORT>` — Listen port (default: 3141)
-- `--data-dir <PATH>` — Data directory (default: platform app data dir)
+- `--port <PORT>`: listen port (default `43141`)
+- `--data-dir <PATH>`: data root (default: platform app data dir)
+- `--doctor`: run each startup step non-fatally, print `[OK]`/`[FAIL]`, and exit
 
-**entity-daemon:**
-- `--entity-id <UUID>` — Entity UUID (required, must be registered in Hive)
-- `--hive-url <URL>` — Hive daemon URL (default: `http://127.0.0.1:3141`)
-- `--port <PORT>` — Listen port (default: 3142)
+**entity-daemon** (normally set by the Hive supervisor):
+- `--entity-id <UUID>`: registered Entity UUID
+- `--hive-url <URL>`: Hive daemon URL (default `http://127.0.0.1:43141`)
+- `--port <PORT>`: listen port (default `43142`)
+- `--data-dir <PATH>`: must match Hive's `--data-dir`
 
-## Dual runtime debug testing (desktop + browser)
+`hive-cli` and `entity-cli` default to `http://127.0.0.1:43141` and `http://127.0.0.1:43142`; pass `--url` to override.
 
-Abigail now supports a development browser parity mode alongside native Tauri.
+## Browser harness
 
-### Native desktop path
-
-From repo root:
-
-```bash
-cargo tauri dev
-```
-
-Expected runtime indicator: `runtime: native` (no harness override).
-
-### Browser parity path
-
-From `tauri-app/src-ui`:
+`dev-harness/` is a static browser UI that talks directly to the Hive and Runtime daemon APIs. It is the fallback when desktop builds are blocked (for example by Windows Application Control):
 
 ```bash
-npm run dev
+node ./scripts/dev/run_browser_harness.mjs --hive-url http://127.0.0.1:43141 --runtime-url <local_url>
 ```
 
-Open `http://localhost:1420`.
-
-Expected runtime indicator: `runtime: browser-harness`.
-
-### Harness debug panel
-
-Enable with either:
-- query flag: `http://localhost:1420/?harnessDebug=1`
-- or runtime badge toggle (click the runtime badge in browser mode).
-
-The panel exposes:
-- snapshot/state visibility,
-- fault injection (`chat_error`, `chat_timeout`, provider validation error),
-- harness reset,
-- trace on/off control.
-
-### Browser harness validation commands
-
-Run from `tauri-app/src-ui`:
-
-```bash
-npm run build
-npx vitest run src/__tests__/App.browserFlow.test.tsx src/__tests__/HarnessDebug.test.tsx
-npm run test:coverage
-```
-
-If `cargo tauri` is not available:
-
-```bash
-cargo install tauri-cli
-```
+It serves on `http://127.0.0.1:43143`.
 
 ## Quick start (Docker)
 
-Use the development container to avoid installing Rust/Node.js/system deps on your host:
+Use the development container to avoid installing Rust, Node.js, and system dependencies on your host:
 
 ```bash
-# Build the dev image (from repo root; context is parent directory)
 docker compose -f docker/docker-compose.yml build
-
-# Start the dev container
 docker compose -f docker/docker-compose.yml up -d abigail-dev
-
-# Open a shell inside the container
 docker compose -f docker/docker-compose.yml exec abigail-dev bash
 
 # Inside the container:
-cd tauri-app/src-ui && npm ci && cd ../..
+npm ci --prefix hive-app/src-ui && npm ci --prefix entity-runtime-app/src-ui
 cargo build
-cargo test --all
+cargo test --workspace
 ```
 
-The container bind-mounts the repo so edits on your host appear immediately. Cargo build cache is stored in `.cargo-docker/` at the workspace root.
+The container bind-mounts the repo, so host edits appear immediately. Desktop GUIs need X11/Wayland forwarding, which is not covered here; use Docker for building and testing.
 
-**Note**: Running the GUI (`cargo tauri dev`) inside Docker requires X11/Wayland forwarding, which is platform-specific and not covered here. Use Docker for building, testing, and CI validation; use native development for GUI work.
-
-### Build validation (one-shot)
-
-To run a full build + test in an isolated container (mimics CI):
+To run a one-shot build and test in an isolated container:
 
 ```bash
 docker compose -f docker/docker-compose.yml run --rm abigail-build
 ```
 
-## Runtime data locations
+## Runtime data layout
 
-Abigail uses the OS app-data location (via `directories` crate). Typical runtime artifacts include:
+Everything lives under the Hive data root (the OS app-data directory, or `--data-dir`):
 
-- `config.json`
-- constitutional docs copied from `templates/`
-- signature files (`*.sig`) for constitutional docs
-- `external_pubkey.bin` (generated public key)
-- encrypted secrets vault data for provider keys
+- `memory.db`: the embedded SurrealDB store. Hive records are in `abigail/hive`; each Entity's conversations, memories, and jobs are in `abigail/entity_<UUID>` (hyphens become underscores).
+- `identities/<UUID>/`: one directory per Entity with `config.json`, `external_pubkey.bin`, the encrypted `birth_signing_key.vault`, and `docs/` (constitutional documents, their signatures, soul documents, and `birth_certificate.json`).
+- `skill_secrets/` and `entity_secrets/`: encrypted secret vaults.
 
-## Boot and startup lifecycle
+Legacy SQLite files (`abigail_seed.db`, `abigail_memory.db`, `jobs.db`, `calendar.db`, `kb.db`) are read only as first-launch migration inputs.
 
-### First run (interactive birth)
+## Entity lifecycle
 
-On a clean identity state, Abigail runs a staged boot sequence:
+1. **Create** (`POST /v1/entities`): Hive registers a UUID and identity directory.
+2. **Birth** (`POST /v1/entities/:id/birth`): the Soul Forge rite runs three ethical trials, or a quickstart path, to produce Triangle Ethic weights and soul documents.
+3. **Sign**: Hive generates the Entity's Ed25519 key, signs its constitutional documents, countersigns its public key with the Hive master key, and writes a Hive-signed birth certificate.
+4. **Open** (`POST /v1/entities/:id/open`): Hive starts the Entity's `entity-daemon`. Loading a born Entity fails closed if the signature chain or constitution does not verify.
 
-1. **Darkness**
-   - Initializes soul docs and internal keyring state
-   - Checks identity status
-2. **KeyPresentation**
-   - Generates external Ed25519 signing identity
-   - Displays private key once (must be saved by the user)
-   - Signs constitutional docs
-3. **Ignition**
-   - Detects or accepts a local LLM endpoint
-4. **Connectivity**
-   - Optionally stores + validates API keys (OpenAI, Anthropic, xAI, Google, Tavily)
-5. **Genesis / SoulPreview**
-   - Captures identity prompts and crystallizes initial persona text
-6. **Emergence**
-   - Completes constitutional signing/transition
-7. **Life**
-   - Abigail enters normal chat mode
-
-### Subsequent runs
-
-For existing identities, Abigail performs startup checks and then loads chat:
-
-1. LLM heartbeat
-2. Constitutional signature verification
-3. Chat interface
-
-If signatures are invalid/missing, Abigail enters a repair path.
-
-## Key management model (current)
-
-- Abigail generates an external Ed25519 keypair during first-run onboarding.
-- Abigail stores **only** the public key (`external_pubkey.bin`).
-- Abigail never stores the private key; it is shown once and then cleared from UI state.
-- The private key is required to re-sign/recover identity integrity after data loss or reset.
-
-Recommended handling:
-
-- Store private key in a password manager or encrypted vault.
-- Treat loss of this key as loss of signing authority for that identity.
+The Entity's private signing key is stored encrypted in its identity directory (`birth_signing_key.vault`); there is no separate key to copy down during setup.
 
 ## Provider configuration
 
-You can configure providers in two ways:
+Provider and model selection belongs to Hive, never to an individual Entity:
 
-- **Environment variables** (`OPENAI_API_KEY`, `LOCAL_LLM_BASE_URL`, `EXTERNAL_PUBKEY_PATH`)
-- **In-app during onboarding/chat** (encrypted provider-key storage + optional validation)
-
-Reference template: [`example.env`](../example.env)
+- **In Hive**: connect a local server, store a cloud provider key in the Hive vault, or select an installed official CLI. Hive verifies a real model response before saving a CLI connection.
+- **Environment variables** for development: see [`example.env`](../example.env).
 
 ## Installer builds
 
-### CI/release builds
-
-Use the workflows documented in [`RELEASE.md`](RELEASE.md) for tagged releases and artifact retrieval. CI builds for all three platforms:
-
-| Platform | Artifact | Runner |
-|----------|----------|--------|
-| Windows (x64) | `Abigail-windows-x64-setup.exe` | `windows-latest` |
-| macOS (Universal) | `Abigail-macos-universal.dmg` | `macos-latest` |
-| Ubuntu (x64) | `Abigail-linux-x64.deb` | `ubuntu-22.04` |
-
-### npm install (end users)
-
-Users with Node.js 18+ can install with:
-
-```bash
-npx abigail-desktop
-```
-
-This downloads and runs the correct platform installer automatically.
-
-### Local installer build
-
-```bash
-cd tauri-app/src-ui && npm ci && cd ../..
-cd tauri-app && cargo tauri build
-```
-
-Helper scripts from repo root:
-
-- `./scripts/build-installer.sh` (macOS/Linux)
-- `powershell -File scripts/build-installer.ps1` (Windows)
+- Unsigned Windows MVP: `pwsh ./scripts/build-mvp-windows.ps1 -VerifyInstall`. See [`docs/MVP_WINDOWS.md`](../docs/MVP_WINDOWS.md).
+- Release and signing lanes: [`docs/RELEASE_RUNBOOK.md`](../docs/RELEASE_RUNBOOK.md) and [`RELEASE.md`](RELEASE.md).
 
 ## Validation commands
 
-Run from repo root:
+Run from the repo root:
 
 ```bash
-cargo test --workspace --exclude abigail-app
+cargo fmt --all -- --check
+cargo clippy --workspace -- -D warnings
+cargo test --workspace
+cargo check -p abigail-hive-app -p abigail-entity-runtime-app
+(cd hive-app/src-ui && npm run build && npm test)
+(cd entity-runtime-app/src-ui && npm run build && npm test)
 ```
 
-Focused crate tests:
+Daemon HTTP contract tests are gated by `ABIGAIL_DAEMON_INTEGRATION=1` and need the daemon binaries built first:
 
-- `cargo test -p abigail-core`
-- `cargo test -p abigail-identity`
-- `cargo test -p abigail-birth`
-- `cargo test -p abigail-router`
-- `cargo test -p abigail-capabilities`
-- `cargo test -p abigail-memory`
-- `cargo test -p abigail-skills`
-- `cargo test -p hive-core`
-- `cargo test -p entity-core`
+```bash
+cargo build -p hive-daemon -p entity-daemon
+ABIGAIL_DAEMON_INTEGRATION=1 cargo test -p hive-daemon --test integration
+ABIGAIL_DAEMON_INTEGRATION=1 cargo test -p entity-daemon --test integration
+```
 
-Note: some provider/skill tests may require credentials, feature flags, or running external services.
+Some provider and skill tests need credentials, feature flags, or external services.

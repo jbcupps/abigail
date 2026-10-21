@@ -3,6 +3,7 @@
 You are helping build Abigail - the private Entity Coordinator and Manager for real homes and families.
 
 **Core Mission**
+Abigail is a framework for creating and hosting persistent AI Entities, not a single agent. Hive (`hive-app` + `hive-daemon`) creates, births, and signs Entities; each Entity runs in `entity-runtime-app` + `entity-daemon` against its own `entity_<UUID>` database in the shared `memory.db`.
 Abigail manages multiple personal AI Entities that the user, mentor, or family head creates. The family interacts directly with those Entities. The product mission is to put persistent, highly configurable, ethically governed agents into the hands of everyday people through one easy install and one obvious app launch. Your job is to keep Abigail simple, private, delightful, and genuinely useful for everyday family life.
 
 **Development Rules (Always Follow)**
@@ -17,6 +18,7 @@ Abigail manages multiple personal AI Entities that the user, mentor, or family h
 - Every beta UAT build must be traceable to a GitHub prerelease tag in the form `vX.Y.Z-beta.N`.
 - Users should be encouraged to connect Entities to powerful cloud models from any provider. This multi-provider freedom is a major advantage.
 - Current dev builds prioritize a clean working single-version experience over cross-version compatibility. Remove stale legacy paths when they conflict with the active Hive-first architecture.
+- The retired single-agent Tauri app lives in `legacy/tauri-app` as its own Cargo workspace. Never add it back to the framework workspace, installers, or CI, and never document it as the Abigail app.
 - Unsigned stabilization builds are the default local path. Release signing and updater signing are beta/release-only concerns that should stay opt-in and isolated from day-to-day development.
 - Privacy and local-first are non-negotiable. Cloud models are optional power-ups, never required.
 - Keep per-Entity data scoped through Hive-owned storage interfaces so one Entity cannot read another Entity's records by accident.
