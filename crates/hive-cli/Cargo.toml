@@ -8,6 +8,7 @@ name = "hive-cli"
 path = "src/main.rs"
 
 [dependencies]
+abigail-channel = { path = "../abigail-channel" }
 hive-core = { path = "../hive-core" }
 clap.workspace = true
 reqwest.workspace = true

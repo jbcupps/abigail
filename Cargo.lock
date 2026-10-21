@@ -108,6 +108,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "abigail-channel"
+version = "0.0.1"
+dependencies = [
+ "directories 6.0.0",
+]
+
+[[package]]
 name = "abigail-cli"
 version = "0.0.1"
 dependencies = [
@@ -135,6 +142,7 @@ dependencies = [
 name = "abigail-core"
 version = "0.0.1"
 dependencies = [
+ "abigail-channel",
  "aes-gcm 0.11.0",
  "anyhow",
  "argon2",
@@ -161,6 +169,7 @@ dependencies = [
 name = "abigail-diag"
 version = "0.0.1"
 dependencies = [
+ "abigail-channel",
  "tracing",
  "tracing-subscriber",
  "windows-sys 0.61.2",
@@ -5008,6 +5017,7 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 name = "hive-cli"
 version = "0.0.1"
 dependencies = [
+ "abigail-channel",
  "anyhow",
  "clap",
  "hive-core",

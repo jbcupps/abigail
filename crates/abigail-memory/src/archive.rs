@@ -80,10 +80,13 @@ impl ArchiveExporter {
         }
     }
 
-    /// Build an exporter using the default Documents/Abigail/archives/ path.
+    /// Build an exporter using the default Documents/Abigail/archives/ path
+    /// (Documents/Abigail Preview/archives/ for preview builds).
     pub fn with_defaults(pub_key_path: PathBuf, agent_name: Option<&str>) -> Option<Self> {
         let docs = directories::UserDirs::new()?.document_dir()?.to_path_buf();
-        let archive_dir = docs.join("Abigail").join("archives");
+        let archive_dir = abigail_core::channel::current()
+            .documents_dir(&docs)
+            .join("archives");
         let _ = std::fs::create_dir_all(&archive_dir);
         let _ = agent_name; // reserved for per-agent subdirs
         Some(Self {

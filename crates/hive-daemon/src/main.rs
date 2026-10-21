@@ -1,7 +1,7 @@
 //! Hive daemon — control plane HTTP server for the Abigail Hive.
 //!
 //! Wraps `IdentityManager`, `Hive`, and `SecretsVault` behind an Axum REST API.
-//! Listens on `--port` (default 43141).
+//! Listens on `--port` (default: the channel's first Hive port, 43141 for stable).
 
 mod birth;
 mod doctor;
@@ -31,7 +31,7 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 #[command(name = "hive-daemon", about = "Abigail Hive control plane daemon")]
 struct Cli {
     /// Port to listen on
-    #[arg(long, default_value = "43141")]
+    #[arg(long, default_value_t = *abigail_core::channel::current().hive_ports().start())]
     port: u16,
 
     /// Data directory (defaults to platform-specific app data dir)

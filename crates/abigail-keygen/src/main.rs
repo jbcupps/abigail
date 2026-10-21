@@ -17,10 +17,7 @@ fn main() -> eframe::Result<()> {
         return run_gen_master(&args);
     }
 
-    // Resolve data directory
-    let data_dir = directories::ProjectDirs::from("com", "abigail", "Abigail")
-        .map(|d| d.data_local_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."));
+    let data_dir = AppConfig::default_paths().data_dir;
 
     let docs_dir = data_dir.join("docs");
 
@@ -88,17 +85,12 @@ fn main() -> eframe::Result<()> {
 /// Does NOT create any agent folders or constitutional documents.
 fn run_gen_master(args: &[String]) -> eframe::Result<()> {
     // Parse optional --path argument
-    let data_dir = if let Some(pos) = args.iter().position(|a| a == "--path") {
-        args.get(pos + 1).map(PathBuf::from).unwrap_or_else(|| {
-            directories::ProjectDirs::from("com", "abigail", "Abigail")
-                .map(|d| d.data_local_dir().to_path_buf())
-                .unwrap_or_else(|| PathBuf::from("."))
-        })
-    } else {
-        directories::ProjectDirs::from("com", "abigail", "Abigail")
-            .map(|d| d.data_local_dir().to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."))
-    };
+    let data_dir = args
+        .iter()
+        .position(|a| a == "--path")
+        .and_then(|pos| args.get(pos + 1))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| AppConfig::default_paths().data_dir);
 
     // Check if master key already exists
     let master_key_path = data_dir.join("master.key");
