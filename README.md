@@ -30,6 +30,8 @@ That Hive-owned store now runs on embedded SurrealDB, giving Abigail one local-f
 
 Hive checks an installed CLI connection with a real model response before saving it. Installed Codex and Grok cards let you check an existing connection even when sign-in cannot be confirmed during discovery; discovery itself never sends a model request. Gemini CLI is not supported in this MVP. A desktop app alone does not establish a working CLI connection.
 
+The provider-readiness development update keeps installed-tool discovery visible, including signed-out, unknown and unsupported states. Hive connectivity and the saved model selection are shown separately; an identity that needs a model offers a direct setup action. Isolated previews report tool presence only: their CLI account adapters remain unavailable, so use an explicit API or local-server connection there. See [scope and validation](documents/PROVIDER_READINESS_UX.md). These source changes have not replaced the running preview.
+
 Local storage belongs to you. Cloud providers and installed CLIs use their own accounts and processing policies. The official CLI keeps control of account sign-in and tokens; Abigail does not extract or forward account OAuth tokens. The MVP requires a connected, working model; it does not bundle model weights or pretend a placeholder is local intelligence.
 
 ### Discover an Entity with Genesis

@@ -277,6 +277,9 @@ pub struct HiveStatus {
     /// Whether at least one cloud or CLI provider is available.
     #[serde(default)]
     pub any_provider_configured: bool,
+    /// Resolved routing selection, not a live inference/availability check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_connection: Option<HiveDefaultResponse>,
     /// Whether the home has ever completed provider setup.
     #[serde(default)]
     pub setup_complete: bool,
@@ -312,6 +315,9 @@ pub struct CliProviderDetection {
     pub on_path: bool,
     pub is_official: bool,
     pub is_authenticated: bool,
+    /// None means account status was not checked or could not be determined.
+    #[serde(default)]
+    pub authentication: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_hint: Option<String>,
 }
@@ -320,6 +326,9 @@ pub struct CliProviderDetection {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CliDetectResponse {
     pub providers: Vec<CliProviderDetection>,
+    pub presence_only: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unavailable_reason: Option<String>,
 }
 
 /// Set the Hive-level default provider/model that new entities inherit. Omit

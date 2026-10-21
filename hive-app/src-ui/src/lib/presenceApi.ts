@@ -2,6 +2,7 @@ import { isEntityProfile, type EntityProfile } from "../../../../entity-runtime-
 import { resolveHiveUrl } from "./connection";
 import { hiveRequestHeaders, isNativeConnection, nativeOpenEntity } from "../../../../entity-runtime-app/src-ui/src/lib/nativeConnection";
 import type { EntityInfo } from "./daemonClient";
+import { ModelRequiredError } from "./modelReadiness";
 export { createPresenceEntity, listCreationCandidates, CreationError, type CreationAttempt, type CreationCandidate, type CreationOptions } from "./presenceCreation";
 
 const PREVIEW_KEY = "abigail.first-signal.preview.v1";
@@ -61,7 +62,7 @@ export async function requirePresenceReady(signal?: AbortSignal, hiveUrl?: strin
   // The explicitly labeled synthetic transport can run without a model. Only
   // the boolean fixture marker permits that development path.
   if (status.ready_state === "needs_provider" || (!status.any_provider_configured && status.fixture !== true)) {
-    throw new Error("Connect a model in this Hive before opening a conversation. Your saved identity is still here.");
+    throw new ModelRequiredError(base);
   }
   return base;
 }

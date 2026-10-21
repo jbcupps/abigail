@@ -115,13 +115,16 @@ pub async fn get_status(State(state): State<HiveDaemonState>) -> Json<ApiEnvelop
                 .and_then(|id| state.identity_manager.load_agent(&id).ok())
                 .and_then(|config| config.local_llm_base_url)
                 .is_some_and(|url| !url.trim().is_empty());
-            let inference_configured = state
+            let resolved_config = state
                 .identity_manager
                 .hive_agent_id()
                 .ok()
                 .and_then(|id| state.identity_manager.load_agent(&id).ok())
-                .and_then(|config| state.hive.resolve_config(&config).ok())
+                .and_then(|config| state.hive.resolve_config(&config).ok());
+            let inference_configured = resolved_config
+                .as_ref()
                 .is_some_and(|config| config.ego_provider.is_some());
+            let model_connection = resolved_config.as_ref().and_then(configured_model);
             let any_provider_configured = local_configured || inference_configured;
             let helper = state
                 .helper
@@ -142,6 +145,7 @@ pub async fn get_status(State(state): State<HiveDaemonState>) -> Json<ApiEnvelop
                 entities,
                 ready_state: ready_state.to_string(),
                 any_provider_configured,
+                model_connection,
                 setup_complete: any_provider_configured,
                 helper: Some(helper),
             };
@@ -408,22 +412,69 @@ pub async fn get_best_model(
 pub async fn detect_cli(
     State(state): State<HiveDaemonState>,
 ) -> Json<ApiEnvelope<CliDetectResponse>> {
-    if state.process_identity.is_some() {
-        return Json(ApiEnvelope::error(
-            "Installed CLI accounts are unavailable in this preview profile. Connect a profile-specific API provider or explicit local server.",
-        ));
+    let preview = state.process_identity.is_some();
+    match tokio::task::spawn_blocking(move || {
+        cli_discovery(
+            preview,
+            || {
+                abigail_capabilities::cognitive::ALL_CLI_VARIANTS
+                    .iter()
+                    .map(|variant| variant.detect_presence())
+                    .collect()
+            },
+            abigail_hive::detect_cli_providers_full,
+        )
+    })
+    .await
+    {
+        Ok(discovery) => Json(ApiEnvelope::success(discovery)),
+        Err(_) => Json(ApiEnvelope::error(
+            "Installed-tool discovery did not complete. Try checking again.",
+        )),
     }
-    let providers = abigail_hive::detect_cli_providers_full()
+}
+
+fn cli_discovery(
+    preview: bool,
+    presence: impl FnOnce() -> Vec<abigail_capabilities::cognitive::CliDetectionResult>,
+    accounts: impl FnOnce() -> Vec<abigail_capabilities::cognitive::CliDetectionResult>,
+) -> CliDetectResponse {
+    let providers = if preview { presence() } else { accounts() }
         .into_iter()
         .map(|d| CliProviderDetection {
             provider: d.provider_name,
             on_path: d.on_path,
             is_official: d.is_official,
             is_authenticated: d.is_authenticated,
+            authentication: d.authentication,
             auth_hint: d.auth_hint,
         })
         .collect();
-    Json(ApiEnvelope::success(CliDetectResponse { providers }))
+    CliDetectResponse {
+        providers,
+        presence_only: preview,
+        unavailable_reason: preview.then(|| "Installed tools can be found here, but their accounts cannot be used in this isolated preview yet. Choose an API provider or local model instead.".to_string()),
+    }
+}
+
+fn configured_model(config: &abigail_hive::HiveConfig) -> Option<HiveDefaultResponse> {
+    if let Some(provider) = config.ego_provider.as_ref() {
+        Some(HiveDefaultResponse {
+            provider: Some(provider.provider.clone()),
+            model: config.ego_model.clone(),
+        })
+    } else if config
+        .local_llm_base_url
+        .as_deref()
+        .is_some_and(|url| !url.trim().is_empty())
+    {
+        Some(HiveDefaultResponse {
+            provider: Some("local".to_string()),
+            model: None,
+        })
+    } else {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1219,6 +1270,46 @@ mod tests {
     use abigail_hive::Hive;
     use abigail_identity::IdentityManager;
     use std::sync::{Arc, Mutex, OnceLock};
+
+    #[test]
+    fn preview_cli_discovery_never_invokes_account_checks() {
+        let result = cli_discovery(true, Vec::new, || panic!("account probe invoked"));
+        assert!(result.presence_only);
+        assert!(result
+            .unavailable_reason
+            .unwrap()
+            .contains("isolated preview"));
+        let result = cli_discovery(false, || panic!("wrong discovery mode"), Vec::new);
+        assert!(!result.presence_only);
+        assert!(result.unavailable_reason.is_none());
+    }
+
+    #[test]
+    fn model_status_reports_resolved_selection_without_credentials_or_live_probe() {
+        let mut config = abigail_hive::HiveConfig {
+            local_llm_base_url: None,
+            ego_provider: None,
+            ego_model: None,
+            routing_mode: Default::default(),
+            cli_permission_mode: Default::default(),
+        };
+        assert!(configured_model(&config).is_none());
+        config.local_llm_base_url = Some("http://127.0.0.1:1234".into());
+        let local = configured_model(&config).unwrap();
+        assert_eq!(local.provider.as_deref(), Some("local"));
+        assert!(local.model.is_none()); // Do not invent the server's loaded model.
+        config.ego_provider = Some(abigail_hive::ProviderSelection {
+            provider: "openai".into(),
+            auth: abigail_hive::ProviderAuth::ApiKey("synthetic-test-value".into()),
+        });
+        config.ego_model = Some("chosen-fixture-model".into());
+        let selected = configured_model(&config).unwrap();
+        assert_eq!(selected.provider.as_deref(), Some("openai"));
+        assert_eq!(selected.model.as_deref(), Some("chosen-fixture-model"));
+        assert!(!serde_json::to_string(&selected)
+            .unwrap()
+            .contains("synthetic-test-value"));
+    }
 
     #[test]
     fn preview_provider_connection_blocks_ambient_cli_accounts_before_probe() {

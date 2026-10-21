@@ -2,6 +2,19 @@
 @import "../../../entity-runtime-app/src-ui/src/presence/presence.css";
 @config "../tailwind.config.js";
 
+.signal-model-readiness { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 12px clamp(16px, 5vw, 72px); padding: 14px 18px; border: 1px solid #40536d; border-radius: 12px; background: #172334; }
+.signal-model-readiness strong, .signal-model-prompt strong { color: #e8f1ff; font-size: 14px; }
+.signal-model-readiness p, .signal-model-prompt p { color: #b4c3d8; font-size: 12px; line-height: 1.6; margin: 4px 0; }
+.signal-model-readiness .signal-secondary { flex-shrink: 0; }
+.signal-model-selected { margin-top: 0; padding-top: 8px; padding-bottom: 8px; border-color: transparent; background: transparent; }
+.signal-model-selected strong { color: #9cabbc; font-size: 12px; font-weight: 400; }
+.signal-settings { position: relative; display: flex; align-items: stretch; }
+.signal-settings-panel { position: absolute; top: 100%; right: 0; z-index: 35; min-width: 190px; padding: 8px; background: #18283c; border: 1px solid #40536d; border-radius: 8px; box-shadow: 0 12px 24px #0006; }
+.signal-settings-panel button { white-space: nowrap; }
+.signal-model-prompt { position: fixed; z-index: 30; bottom: 24px; right: 24px; width: min(440px, calc(100% - 32px)); padding: 20px; border: 1px solid #567595; border-radius: 14px; background: #18283c; box-shadow: 0 16px 56px #0008; }
+.signal-model-prompt button { margin: 12px 12px 0 0; }
+@media (max-width: 600px) { .signal-model-readiness { align-items: flex-start; flex-direction: column; } .signal-model-prompt { right: 16px; bottom: 16px; } }
+
 /* ═══════════════════════════════════════════════════════════════════
    THEME: Modern Clean (default)
    Professional dark theme — neutral, subtle, indigo accent

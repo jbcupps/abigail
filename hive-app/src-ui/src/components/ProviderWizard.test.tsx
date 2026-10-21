@@ -8,37 +8,62 @@ const json = (data: unknown) => new Response(JSON.stringify({ ok: true, data }),
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Model connection", () => {
-  it("offers supported official installed tools and checks Claude before success", async () => {
+  it("keeps keyboard focus on the discovery summary when its options are collapsed", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ providers: [
+      { provider: "codex-cli", on_path: true, is_official: true, is_authenticated: true, authentication: true },
+    ] })));
+    render(<ProviderWizard onClose={vi.fn()} onComplete={vi.fn()} />);
+    const summary = await screen.findByText(/1 connection tools found/);
+    fireEvent.click(summary);
+    expect(summary.parentElement).not.toHaveAttribute("open");
+    screen.getByRole("button", { name: "Close" }).focus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(summary).toHaveFocus();
+  });
+
+  it("shows incomplete discovery as a retryable error while keeping other routes available", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ presence_only: true })));
+    render(<ProviderWizard onClose={vi.fn()} onComplete={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("incomplete installed-tool status");
+    expect(screen.getByRole("button", { name: /Use a local model/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Paste an API key/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Check again" })).toBeEnabled();
+  });
+
+  it("does not announce a connection when Hive confirms a different selection", async () => {
+    const complete = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/detect")
+      ? json({ providers: [{ provider: "codex-cli", on_path: true, is_official: true, is_authenticated: true }] })
+      : json({ provider: "grok-cli", model: null })));
+    render(<ProviderWizard onClose={vi.fn()} onComplete={complete} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Use ChatGPT" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check and connect" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("did not confirm");
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it("requires an explicit connection check after choosing a signed-in CLI", async () => {
     const completed = vi.fn();
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    const requests = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/detect")) return json({ providers: [
-        { provider: "codex-cli", on_path: true, is_official: true, is_authenticated: false, auth_hint: "Open Codex to check your existing account." },
-        { provider: "gemini-cli", on_path: true, is_official: true, is_authenticated: true },
-        { provider: "grok-cli", on_path: true, is_official: true, is_authenticated: false, auth_hint: "Open Grok to check your existing account." },
-        { provider: "codex-cli", on_path: false, is_official: true, is_authenticated: true },
-        { provider: "grok-cli", on_path: true, is_official: false, is_authenticated: true },
-        { provider: "claude-cli", on_path: true, is_official: false, is_authenticated: true },
-        { provider: "claude-cli", on_path: false, is_official: true, is_authenticated: true },
-        { provider: "claude-cli", on_path: true, is_official: true, is_authenticated: false },
-        { provider: "claude-cli", on_path: true, is_official: true, is_authenticated: true },
+        { provider: "claude-cli", on_path: true, is_official: true, is_authenticated: true, authentication: true },
       ] });
       expect(url).toMatch(/\/v1\/providers\/hive-default$/);
       expect(JSON.parse(init?.body as string)).toEqual({ provider: "claude-cli" });
       return json({ provider: "claude-cli", model: null });
-    }));
+    });
+    vi.stubGlobal("fetch", requests);
     render(<ProviderWizard onClose={vi.fn()} onComplete={completed} />);
-    const claude = await screen.findByRole("button", { name: /Use Claude \(already installed\)/ });
-    expect(screen.getAllByRole("button", { name: /already installed/ })).toHaveLength(3);
-    expect(screen.queryByRole("button", { name: /Use Gemini/ })).not.toBeInTheDocument();
-    expect(screen.getByText("Open Codex to check your existing account.")).toBeInTheDocument();
-    expect(screen.getByText("Open Grok to check your existing account.")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Use Claude" }));
+    expect(requests).toHaveBeenCalledOnce();
+    expect(screen.getByText(/account's usage allowance/)).toBeInTheDocument();
     expect(completed).not.toHaveBeenCalled();
-    fireEvent.click(claude);
-    expect(await screen.findByText(/Claude is connected\./)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Check and connect" }));
+    expect(await screen.findByText(/Claude Code is connected\./)).toBeInTheDocument();
     expect(completed).toHaveBeenCalledOnce();
   });
 
-  it.each([["codex-cli", "Codex"], ["grok-cli", "Grok"]])("waits for the real %s account check and preserves a failed connection for retry", async (provider, label) => {
+  it.each([["codex-cli", "Codex (ChatGPT)"], ["grok-cli", "Grok Build"]])("waits for the real %s account check and preserves a failed connection for retry", async (provider, label) => {
     const completed = vi.fn();
     let resolveProbe: (response: Response) => void = () => undefined;
     const requests = vi.fn(async (url: string, init?: RequestInit) => {
@@ -51,12 +76,13 @@ describe("Model connection", () => {
     });
     vi.stubGlobal("fetch", requests);
     render(<ProviderWizard onClose={vi.fn()} onComplete={completed} />);
-    const card = await screen.findByRole("button", { name: new RegExp(`Use ${label} \\(already installed\\)`) });
-    expect(requests).toHaveBeenCalledOnce(); // Discovery does not perform inference.
+    fireEvent.click(await screen.findByRole("button", { name: `Use ${provider === "codex-cli" ? "ChatGPT" : "Grok"}` }));
+    expect(requests).toHaveBeenCalledOnce(); // Selecting a tool does not send inference.
+    const card = screen.getByRole("button", { name: "Check and connect" });
     fireEvent.click(card);
     expect(await screen.findByRole("status")).toHaveTextContent(`Checking your ${label} connection`);
     expect(card).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Use a local model/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Back" })).toBeDisabled();
     expect(completed).not.toHaveBeenCalled();
     await waitFor(() => expect(requests).toHaveBeenCalledTimes(2));
     resolveProbe(new Response(JSON.stringify({ ok: false, error: `${label} connection check failed. Check its account sign-in and try again.` }), { headers: { "Content-Type": "application/json" } }));
@@ -66,7 +92,7 @@ describe("Model connection", () => {
     fireEvent.click(card);
     await waitFor(() => expect(requests).toHaveBeenCalledTimes(3));
     resolveProbe(json({ provider, model: null }));
-    expect(await screen.findByText(new RegExp(`${label} is connected\\.`))).toBeInTheDocument();
+    expect(await screen.findByText(text => text.startsWith(`${label} is connected.`))).toBeInTheDocument();
     expect(completed).toHaveBeenCalledOnce();
   });
 

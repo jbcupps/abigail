@@ -87,6 +87,7 @@ export interface HiveStatus {
   entities: EntityInfo[];
   ready_state: string; // "needs_provider" | "ready"
   any_provider_configured: boolean;
+  model_connection?: HiveDefault | null;
   setup_complete: boolean;
   helper?: HelperInfo | null;
   fixture?: boolean;
@@ -114,13 +115,29 @@ export interface CliProviderDetection {
   on_path: boolean;
   is_official: boolean;
   is_authenticated: boolean;
+  authentication?: boolean | null;
   auth_hint?: string | null;
 }
 
-export async function detectCliProviders(): Promise<CliProviderDetection[]> {
+export interface CliDiscovery {
+  providers: CliProviderDetection[];
+  presence_only?: boolean;
+  unavailable_reason?: string | null;
+}
+
+export async function detectCliProviders(): Promise<CliDiscovery> {
   const res = await hiveFetch("/v1/providers/detect", { headers: { Accept: "application/json" } });
-  const data = await unwrap<{ providers: CliProviderDetection[] }>(res, "/v1/providers/detect");
-  return data.providers;
+  const data = await unwrap<CliDiscovery>(res, "/v1/providers/detect");
+  if (!data || !Array.isArray(data.providers)
+    || (data.presence_only !== undefined && typeof data.presence_only !== "boolean")
+    || (data.unavailable_reason != null && typeof data.unavailable_reason !== "string")
+    || data.providers.some(item => !item || typeof item.provider !== "string"
+      || typeof item.on_path !== "boolean" || typeof item.is_official !== "boolean"
+      || typeof item.is_authenticated !== "boolean"
+      || (item.authentication != null && typeof item.authentication !== "boolean"))) {
+    throw new Error("Hive returned incomplete installed-tool status. Check again.");
+  }
+  return data;
 }
 
 export interface ProviderModel {

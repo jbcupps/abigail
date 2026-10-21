@@ -1,10 +1,12 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultProfile, type EntityProfile } from "../../../../entity-runtime-app/src-ui/src/presence/profile";
 import type { HiveStatus } from "../lib/daemonClient";
 import { writeCreationDraft } from "../lib/creationDraft";
 import PresenceHome from "./PresenceHome";
+import { ModelRequiredError } from "../lib/modelReadiness";
+vi.mock("../lib/connection", () => ({ resolveHiveUrl: async () => "http://127.0.0.1:43141" }));
 import { createOrResumeGenesis, genesisAction, resolveGenesisConnection, type GenesisSession } from "../lib/genesisClient";
 vi.mock("../lib/genesisClient", async original => ({ ...await original<typeof import("../lib/genesisClient")>(), createOrResumeGenesis: vi.fn(), genesisAction: vi.fn(), resolveGenesisConnection: vi.fn() }));
 
@@ -167,6 +169,7 @@ describe("Presence Home pending operations", () => {
     const onProviders = vi.fn();
     render(<PresenceHome preview={false} status={status} onRefresh={vi.fn()} onProviders={onProviders} />);
     fireEvent.click(screen.getByRole("button", { name: /A new presence/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.change(screen.getByRole("textbox", { name: "What should we call them?" }), { target: { value: "Sol" } });
     fireEvent.change(screen.getByRole("textbox", { name: "What would you like to explore together?" }), { target: { value: "Explore" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
@@ -176,6 +179,7 @@ describe("Presence Home pending operations", () => {
     const home = screen.getByRole("link", { name: "Abigail Hive home" });
     expect(home).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByRole("button", { name: "Your Entities" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Model connections" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Ask Abigail" })).toBeDisabled();
     expect(screen.queryByRole("textbox", { name: "What should they keep in mind?" })).not.toBeInTheDocument();
@@ -373,10 +377,43 @@ describe("Presence Home pending operations", () => {
   it("keeps provider setup available and prevents opening without a configured model", async () => {
     const onProviders = vi.fn();
     render(<PresenceHome preview={false} status={{ ...status, ready_state: "needs_provider", any_provider_configured: false }} onRefresh={vi.fn()} onProviders={onProviders} />);
-    expect(screen.getByRole("button", { name: /Open conversation/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Choose model to chat" })).toBeEnabled();
+    expect(screen.getByRole("status", { name: "Model connection" })).toHaveTextContent("No model connected");
     expect(screen.queryByRole("button", { name: "Ask Abigail" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Connect a model" }));
     expect(onProviders).toHaveBeenCalledOnce();
+    expect(mocks.preparePresence).not.toHaveBeenCalled();
+    expect(mocks.openPresence).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Choose model to chat" }));
+    expect(onProviders).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the actual saved model separately from Hive connectivity", () => {
+    render(<PresenceHome preview={false} status={{ ...status, model_connection: { provider: "openai", model: "selected-fixture-model" } }} onRefresh={vi.fn()} onProviders={vi.fn()} />);
+    expect(screen.getByText("HIVE CONNECTED")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Model connection" })).toHaveTextContent("Model selected: OpenAI · selected-fixture-model");
+  });
+
+  it("offers setup after a fresh missing-model response without starting or changing the Entity", async () => {
+    mocks.requirePresenceReady.mockRejectedValueOnce(new ModelRequiredError(currentHive));
+    const onProviders = vi.fn();
+    render(<PresenceHome preview={false} status={status} onRefresh={vi.fn()} onProviders={onProviders} />);
+    fireEvent.click(screen.getByRole("button", { name: /Open conversation/ }));
+    expect(await screen.findByRole("status", { name: "Conversation needs a model" })).toHaveTextContent("Your saved identity is still here");
+    fireEvent.click(screen.getByRole("button", { name: "Choose model for this conversation" }));
+    expect(onProviders).toHaveBeenCalledOnce();
+    expect(mocks.preparePresence).not.toHaveBeenCalled();
+    expect(mocks.openPresence).not.toHaveBeenCalled();
+    expect(mocks.savePresence).not.toHaveBeenCalled();
+    expect(mocks.createPresenceEntity).not.toHaveBeenCalled();
+  });
+
+  it("does not offer to configure this Hive for a creation pinned to another Hive", async () => {
+    mocks.requirePresenceReady.mockRejectedValueOnce(new ModelRequiredError("http://127.0.0.1:43991"));
+    render(<PresenceHome preview={false} status={status} onRefresh={vi.fn()} onProviders={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Open conversation/ }));
+    expect(await screen.findByRole("status", { name: "Conversation needs a model" })).toHaveTextContent("different Hive");
+    expect(screen.queryByRole("button", { name: "Choose model for this conversation" })).not.toBeInTheDocument();
     expect(mocks.preparePresence).not.toHaveBeenCalled();
     expect(mocks.openPresence).not.toHaveBeenCalled();
   });
@@ -394,7 +431,7 @@ describe("Presence Home pending operations", () => {
       version: 1, profile: defaultProfile("Sol"), entityId: "ada",
       attempt: { attemptId: "confirmed-without-model", hiveUrl: currentHive, name: "Sol", baselineIds: [] },
     });
-    mocks.requirePresenceReady.mockRejectedValueOnce(new Error("Connect a model in this Hive before opening a conversation. Your saved identity is still here."));
+    mocks.requirePresenceReady.mockRejectedValueOnce(new ModelRequiredError(currentHive));
     render(<PresenceHome preview={false} status={{ ...status, ready_state: "needs_provider", any_provider_configured: false }} onRefresh={vi.fn()} onProviders={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: /An unfinished presence/ }));
@@ -404,7 +441,9 @@ describe("Presence Home pending operations", () => {
     expect(mocks.requirePresenceReady).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: action }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Connect a model in this Hive");
+    expect(await screen.findByRole("status", { name: "Conversation needs a model" })).toHaveTextContent("Your saved identity is still here");
+    expect(screen.queryByText("Could not complete that step.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose model for this conversation" })).toBeEnabled();
     expect(mocks.requirePresenceReady).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal), currentHive);
     expect(mocks.preparePresence).not.toHaveBeenCalled();
     expect(mocks.openPresence).not.toHaveBeenCalled();
@@ -484,7 +523,7 @@ describe("Presence Home pending operations", () => {
     expect(mocks.chatDisposed).toHaveBeenCalledExactlyOnceWith("http://127.0.0.1:43200");
     expect(screen.queryByRole("button", { name: "Ask Abigail" })).not.toBeInTheDocument();
     if (unavailable.ready_state === "needs_provider") {
-      fireEvent.click(screen.getByRole("button", { name: "Connect a model" }));
+      fireEvent.click(within(screen.getByRole("status", { name: "Model connection" })).getByRole("button", { name: "Connect a model" }));
       expect(props.onProviders).toHaveBeenCalledOnce();
     }
 

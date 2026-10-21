@@ -112,6 +112,8 @@ pub struct CliDetectionResult {
     pub on_path: bool,
     pub is_official: bool,
     pub is_authenticated: bool,
+    /// None means not checked or inconclusive, never signed out.
+    pub authentication: Option<bool>,
     pub version: Option<String>,
     /// Human-readable hint when not authenticated.
     pub auth_hint: Option<String>,
@@ -132,7 +134,7 @@ impl CliVariant {
     fn auth_strategy(self) -> CliAuthStrategy {
         match self {
             Self::ClaudeCode => CliAuthStrategy::SubCommand("auth", "status"),
-            Self::GeminiCli => CliAuthStrategy::SubCommand("auth", "status"),
+            Self::GeminiCli => CliAuthStrategy::Unknown,
             Self::OpenAiCodex => CliAuthStrategy::SubCommand("login", "status"),
             // Grok does not expose a passive login-status command. Its existing
             // account is checked through ACP when the user selects it in Hive.
@@ -143,11 +145,32 @@ impl CliVariant {
     fn auth_hint(self) -> &'static str {
         match self {
             Self::ClaudeCode => "Run `claude auth login` to authenticate",
-            Self::GeminiCli => "Run `gemini auth login` to authenticate",
+            Self::GeminiCli => {
+                "Gemini CLI is not supported by Abigail onboarding. Use the Google API connection."
+            }
             Self::OpenAiCodex => "Sign in with `codex login`, then check the connection in Hive",
             Self::XaiGrokCli => {
                 "Check your existing connection in Hive. If needed, sign in with `grok login`"
             }
+        }
+    }
+
+    /// Presence only: no subprocess, account lookup, credential read or login.
+    /// Used by isolated previews, whose CLI account adapters remain disabled.
+    pub fn detect_presence(self) -> CliDetectionResult {
+        self.presence_result(resolve_cli_binary(self).is_ok())
+    }
+
+    fn presence_result(self, present: bool) -> CliDetectionResult {
+        CliDetectionResult {
+            provider_name: self.to_string(),
+            binary: self.binary_name().to_string(),
+            on_path: present,
+            is_official: false,
+            is_authenticated: false,
+            authentication: None,
+            version: None,
+            auth_hint: None,
         }
     }
 
@@ -158,15 +181,7 @@ impl CliVariant {
         let on_path = resolved.is_ok();
 
         if !on_path {
-            return CliDetectionResult {
-                provider_name: self.to_string(),
-                binary: binary.to_string(),
-                on_path: false,
-                is_official: false,
-                is_authenticated: false,
-                version: None,
-                auth_hint: None,
-            };
+            return self.presence_result(false);
         }
 
         let resolved = resolved.expect("resolved binary checked above");
@@ -182,7 +197,12 @@ impl CliVariant {
                         .contains("grok build")
             });
         }
-        let is_authenticated = check_auth(&resolved, self.auth_strategy());
+        let authentication = if is_official {
+            check_auth(&resolved, self.auth_strategy())
+        } else {
+            None
+        };
+        let is_authenticated = authentication == Some(true);
 
         CliDetectionResult {
             provider_name: self.to_string(),
@@ -190,6 +210,7 @@ impl CliVariant {
             on_path: true,
             is_official,
             is_authenticated,
+            authentication,
             version,
             auth_hint: if !is_authenticated {
                 Some(self.auth_hint().to_string())
@@ -357,12 +378,22 @@ fn check_version_official(binary: &Path, marker: &str) -> (bool, Option<String>)
 }
 
 /// Check whether the CLI is authenticated using the variant's strategy.
-fn check_auth(binary: &Path, strategy: CliAuthStrategy) -> bool {
+fn check_auth(binary: &Path, strategy: CliAuthStrategy) -> Option<bool> {
     match strategy {
         CliAuthStrategy::SubCommand(arg1, arg2) => {
-            metadata_output(binary, &[arg1, arg2]).is_some_and(|output| output.status.success())
+            // Only the documented signed-in/out exits establish an auth state.
+            // Timeout, spawn failure, signal and unexpected exits remain unknown.
+            auth_exit_state(metadata_output(binary, &[arg1, arg2])?.status.code())
         }
-        CliAuthStrategy::Unknown => false,
+        CliAuthStrategy::Unknown => None,
+    }
+}
+
+fn auth_exit_state(code: Option<i32>) -> Option<bool> {
+    match code {
+        Some(0) => Some(true),
+        Some(1) => Some(false),
+        _ => None,
     }
 }
 
@@ -1067,6 +1098,36 @@ mod tests {
     use super::*;
     use crate::cognitive::provider::Message;
 
+    #[test]
+    fn presence_is_not_authentication_or_vendor_verification() {
+        for present in [true, false] {
+            for variant in ALL_CLI_VARIANTS {
+                let result = variant.presence_result(present);
+                assert_eq!(result.on_path, present);
+                assert!(!result.is_official);
+                assert!(!result.is_authenticated);
+                assert_eq!(result.authentication, None);
+                assert!(result.version.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn auth_status_keeps_inconclusive_checks_unknown() {
+        assert_eq!(auth_exit_state(Some(0)), Some(true));
+        assert_eq!(auth_exit_state(Some(1)), Some(false));
+        assert_eq!(auth_exit_state(Some(2)), None);
+        assert_eq!(auth_exit_state(None), None);
+        assert!(matches!(
+            CliVariant::GeminiCli.auth_strategy(),
+            CliAuthStrategy::Unknown
+        ));
+        assert!(matches!(
+            CliVariant::XaiGrokCli.auth_strategy(),
+            CliAuthStrategy::Unknown
+        ));
+    }
+
     fn command_args(cmd: &Command) -> Vec<String> {
         cmd.as_std()
             .get_args()
@@ -1147,11 +1208,15 @@ mod tests {
         std::fs::create_dir_all(&directory).unwrap();
         let wrapper = directory.join("codex.cmd");
         std::fs::write(&wrapper, "do not execute").unwrap();
-        assert!(resolve_from_directories(CliVariant::OpenAiCodex, &[directory.clone()]).is_none());
+        assert!(resolve_from_directories(
+            CliVariant::OpenAiCodex,
+            std::slice::from_ref(&directory)
+        )
+        .is_none());
         let native = directory.join(if cfg!(windows) { "codex.exe" } else { "codex" });
         std::fs::write(&native, "native fixture").unwrap();
         assert_eq!(
-            resolve_from_directories(CliVariant::OpenAiCodex, &[directory.clone()]),
+            resolve_from_directories(CliVariant::OpenAiCodex, std::slice::from_ref(&directory)),
             Some(native.clone())
         );
         std::fs::remove_file(native).unwrap();
@@ -1184,7 +1249,7 @@ mod tests {
         std::fs::create_dir_all(native.parent().unwrap()).unwrap();
         std::fs::write(&native, "native fixture").unwrap();
         assert_eq!(
-            resolve_from_directories(CliVariant::OpenAiCodex, &[directory.clone()]),
+            resolve_from_directories(CliVariant::OpenAiCodex, std::slice::from_ref(&directory)),
             Some(native.clone())
         );
         std::fs::remove_file(&native).unwrap();

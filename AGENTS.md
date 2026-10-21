@@ -18,6 +18,10 @@ Abigail is the private Entity Coordinator and Manager for real homes and familie
 
 ## Active Plan (Family-First Priorities)
 
+### Provider readiness (2026-10-21)
+
+`dev/provider-readiness-ux` starts at tested product `a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d`. Keep installed-tool presence, authentication hints, explicit connection checks and saved model selection distinct. Preview discovery resolves executable presence only; it must not execute CLI metadata/auth commands or enable the existing account adapters. Preserve API/local routes and route missing-provider conversation attempts to setup without touching saved identity or draft. See [contract and evidence](documents/PROVIDER_READINESS_UX.md). The active hands-on preview, other worktrees and paused Store files remain untouched. No live account grants, provider calls, restart, signing, installation or beta/main publication is part of this update.
+
 ### First Signal / Genesis integration (2026-10-20)
 
 - The [bounded correctness review](documents/GENESIS_FIRST_SIGNAL_REVIEW.md) fixes legacy-birth/premature-open routing for Genesis reservations and canonical-to-presentation text boundaries. Preserve old receipts and names. Its four vault compiler diagnostics and three unused supervisor helpers have received behavior-preserving cleanup. Run final exact-commit checks before claiming source readiness; see [preview preparation](documents/GENESIS_PREVIEW_READINESS.md) for the build-only next step and actual hosted prerequisites. No automatic CI runs for this dev push. Do not confuse the old manually pinned harness with validation of this source or resume paused security work.

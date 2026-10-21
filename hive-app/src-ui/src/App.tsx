@@ -6,6 +6,9 @@ import ProviderWizard from "./components/ProviderWizard";
 import { hiveHealth, getStatus, type HiveStatus } from "./lib/daemonClient";
 import { showAppWindow } from "./lib/window";
 import { isNativeConnection, nativeHiveConnection } from "../../../entity-runtime-app/src-ui/src/lib/nativeConnection";
+import { shouldOfferModelSetup, rememberModelSetupPrompt } from "./lib/modelSetupPrompt";
+import { readCreationDraft } from "./lib/creationDraft";
+import { readGenesisDraft } from "./lib/genesisDraft";
 
 type Phase = "splash" | "loading" | "ready" | "error";
 type Readiness = "pending" | "ok" | "failed";
@@ -19,6 +22,8 @@ export default function App() {
   const [connectionError, setConnectionError] = useState<string>();
   const [status, setStatus] = useState<HiveStatus | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [firstModelPrompt, setFirstModelPrompt] = useState(false);
+  const offeredModelSetup = useRef(false);
   const mounted = useRef(true);
 
   const refreshStatus = useCallback(async () => {
@@ -78,7 +83,23 @@ export default function App() {
     return () => clearInterval(timer);
   }, [phase, preview, refreshStatus]);
 
-  const closeWizard = useCallback(() => setWizardOpen(false), []);
+  useEffect(() => {
+    if (phase !== "ready" || preview || !status || offeredModelSetup.current) return;
+    offeredModelSetup.current = true;
+    // Never interrupt an unfinished creation to repeat provider setup.
+    try {
+      if (shouldOfferModelSetup(status, !!readCreationDraft() || !!readGenesisDraft())) {
+        rememberModelSetupPrompt(status);
+        setFirstModelPrompt(true);
+        setWizardOpen(true);
+      }
+    } catch { /* Retain the draft and leave setup available in Settings. */ }
+  }, [phase, preview, status]);
+
+  const closeWizard = useCallback(() => {
+    setFirstModelPrompt(false);
+    setWizardOpen(false);
+  }, []);
 
   useEffect(() => {
     if (phase !== "loading") return;
@@ -109,6 +130,6 @@ export default function App() {
 
   return <>
     <PresenceHome preview={preview} status={status} onRefresh={() => { if (!preview) void refreshStatus(); }} onProviders={() => setWizardOpen(true)} />
-    {wizardOpen && <ProviderWizard onClose={closeWizard} onComplete={refreshStatus} />}
+    {wizardOpen && <ProviderWizard firstRun={firstModelPrompt} status={status} onClose={closeWizard} onComplete={refreshStatus} />}
   </>;
 }
