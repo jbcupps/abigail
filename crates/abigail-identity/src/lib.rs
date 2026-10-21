@@ -658,12 +658,13 @@ impl IdentityManager {
     /// Custom data roots keep that tree under their own `Documents`; an
     /// explicit `ABIGAIL_DOCUMENTS_DIR` overrides the Documents base.
     pub fn create_documents_folder(&self, agent_id: &str) -> Result<PathBuf, String> {
-        let agent_name = {
+        // Path segments come from the registry entry, never the caller's string.
+        let (agent_id, agent_name) = {
             let gc = self.global_config.read().map_err(|e| e.to_string())?;
             let entry = gc
                 .find_agent(agent_id)
                 .ok_or_else(|| format!("Agent {} not registered", agent_id))?;
-            entry.name.clone()
+            (entry.id.clone(), entry.name.clone())
         };
 
         // Sanitize the name for use as a directory (replace problematic chars)
@@ -1422,6 +1423,31 @@ mod tests {
             expected_base
                 .join(abigail_core::channel::current().documents_folder())
                 .join("Isolated Documents")
+        );
+        let _ = std::fs::remove_dir_all(manager.data_root());
+    }
+
+    #[test]
+    fn documents_folder_names_come_only_from_the_registry() {
+        let manager = test_manager();
+        let base = std::env::var_os("ABIGAIL_DOCUMENTS_DIR")
+            .map(PathBuf::from)
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| manager.data_root().join("Documents"))
+            .join(abigail_core::channel::current().documents_folder());
+
+        assert!(manager.create_documents_folder("../../escape").is_err());
+        assert!(!base.join("../../escape").exists());
+
+        let (dotted, _) = manager.create_agent("../..").unwrap();
+        assert_eq!(
+            manager.create_documents_folder(&dotted).unwrap(),
+            base.join("_____")
+        );
+        let (blank, _) = manager.create_agent("   ").unwrap();
+        assert_eq!(
+            manager.create_documents_folder(&blank).unwrap(),
+            base.join(&blank)
         );
         let _ = std::fs::remove_dir_all(manager.data_root());
     }
