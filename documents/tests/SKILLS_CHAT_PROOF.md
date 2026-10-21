@@ -38,10 +38,9 @@ Prove, with repeatable local evidence, that:
   - Scaffolding creates valid dynamic skill artifacts.
   - The generated skill is discoverable and registerable.
 
-### PROOF-004: GUI harness parity
-- **Layer**: `tauri-app/src-ui`
-- **Check**: `npm run test:coverage`
-- **Criteria**:
+### PROOF-004: GUI harness parity (retired)
+- **Layer**: retired single-agent app UI (now `legacy/tauri-app/src-ui`); not a framework gate. Current chat UI coverage is `npm test` in `entity-runtime-app/src-ui`.
+- **Original criteria**:
   - Browser harness returns tool-call metadata.
   - Chat UI renders tool invocation results.
   - Skill factory and clipboard paths both work through the shared UI contract.

@@ -16,10 +16,10 @@ Validate logic-level correctness for routing, skills, policy, memory, and comman
 
 ## Required Commands
 
-1. `cargo test --workspace --exclude abigail-app`
-2. `cargo clippy --workspace --exclude abigail-app -- -D warnings`
-3. `cargo check -p abigail-app`
-4. `cd tauri-app/src-ui && npm run test:coverage`
+1. `cargo test --workspace`
+2. `cargo clippy --workspace -- -D warnings`
+3. `cargo check -p abigail-hive-app -p abigail-entity-runtime-app`
+4. `npm test` in `hive-app/src-ui` and `entity-runtime-app/src-ui`
 
 ## Priority Test Cases
 
@@ -49,9 +49,9 @@ Validate logic-level correctness for routing, skills, policy, memory, and comman
 - Evidence: `abigail-skills` MCP protocol tests
 
 ### UNIT-UI-001
-- Title: Chat gateway parity normalizes behavior across adapters
+- Title: Entity chat gateway restores history, streams replies, and fails without replaying tools
 - Priority: P0
-- Evidence: `tauri-app/src-ui/src/chat/__tests__/ChatGateway.parity.test.ts`
+- Evidence: `entity-runtime-app/src-ui/src/components/ChatPanel.test.tsx`; backend parity in `cargo test -p entity-chat --test e2e_parity`
 
 ## Redundant Test Policy
 

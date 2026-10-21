@@ -23,7 +23,7 @@ Validate the supported skill surface after IMAP/SMTP retirement:
 - Title: Secret namespace rejects removed email transport keys
 - Priority: P0
 - Type: Automated
-- Evidence: `cargo test -p abigail-runtime`, `cargo test -p abigail-cli`, `cargo test -p abigail-app`
+- Evidence: `cargo test -p abigail-runtime`, `cargo test -p abigail-cli`
 
 ### SKILL-003
 - Title: Instruction registry only injects instructions for active supported skills
@@ -53,7 +53,7 @@ Validate the supported skill surface after IMAP/SMTP retirement:
 - Title: Desktop runtime probe enforces removed-capability checks
 - Priority: P0
 - Type: EnvGated
-- Evidence: `pwsh -File scripts/tests/live_tauri_skill_secrets_e2e.ps1`
+- Status: Retired with the single-agent app. The probe now lives at `legacy/tauri-app/scripts/tests/live_tauri_skill_secrets_e2e.ps1` and is not a framework gate.
 
 ## Exit Criteria
 

@@ -27,7 +27,6 @@ The current token implementation lives in:
 
 - `hive-app/src-ui/src/index.css`
 - `entity-runtime-app/src-ui/src/index.css`
-- `tauri-app/src-ui/src/index.css`
 - each app's `tailwind.config.js`
 
 When the docs and implementation disagree, fix the implementation or update this design system in the same pull request. Do not create a one-off component style to "just get the screen done."

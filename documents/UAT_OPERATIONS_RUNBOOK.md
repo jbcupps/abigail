@@ -58,7 +58,7 @@ Each run creates `target/uat-runs/{runId}/` containing:
 Validates keyset and port availability.
 
 ### Stage 1: Build
-Runs `cargo fmt --check`, `cargo clippy`, `cargo build` (workspace minus `abigail-app`).
+Runs `cargo fmt --check`, `cargo clippy`, `cargo build` (framework workspace).
 
 ### Stage 2: Hive Bootstrap
 Starts `hive-daemon --data-dir {uatDataDir}` and waits for `/health`.

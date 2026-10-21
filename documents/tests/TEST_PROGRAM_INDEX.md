@@ -18,7 +18,8 @@ This is the canonical test-program index for the current architecture:
 - `documents/tests/UX_TEST_PROGRAM.md`
 - `documents/tests/E2E_TEST_PROGRAM.md`
 - `documents/tests/AUTOMATION_MATRIX.md`
-- `documents/tests/VALIDATION_AND_GATE_REPORT.md`
+
+Sprint reports and the consolidated gate report from the retired single-agent app program are archived in `documents/archive/legacy-tauri-app/`.
 
 ## Program Tracks
 
@@ -28,14 +29,16 @@ This is the canonical test-program index for the current architecture:
 
 ## Program Gates
 
-- `Gate-U1`: `cargo test --workspace --exclude abigail-app` passes.
-- `Gate-U2`: `cargo clippy --workspace --exclude abigail-app -- -D warnings` passes.
-- `Gate-U3`: `cargo check -p abigail-app` passes.
-- `Gate-X1`: `cd tauri-app/src-ui && npm run build` passes.
-- `Gate-X2`: `cd tauri-app/src-ui && npm run test:coverage` passes.
-- `Gate-E1`: command-contract check passes (`npm run check:command-contract`).
-- `Gate-E2`: env-gated live E2E suites pass when enabled (browser persistent auth + Tauri probe).
+- `Gate-U1`: `cargo test --workspace` passes.
+- `Gate-U2`: `cargo clippy --workspace -- -D warnings` passes.
+- `Gate-U3`: `cargo check -p abigail-hive-app -p abigail-entity-runtime-app` passes.
+- `Gate-X1`: `npm run build` passes in `hive-app/src-ui` and `entity-runtime-app/src-ui`.
+- `Gate-X2`: `npm test` passes in `hive-app/src-ui` and `entity-runtime-app/src-ui`.
+- `Gate-E1`: release-lane and trust-claim checks pass (`node scripts/check_unsigned_stabilization.mjs`, `node scripts/check_crypto_claims.mjs`).
+- `Gate-E2`: env-gated daemon integration and live E2E suites pass when enabled (`ABIGAIL_DAEMON_INTEGRATION=1`, browser persistent auth).
 - `Gate-S1`: `node scripts/check_stability.mjs` passes.
+
+The retired app's command-contract check (`node legacy/tauri-app/scripts/check_command_surface.mjs`) is no longer a program gate.
 
 ## Legacy Suite Status
 
@@ -56,4 +59,4 @@ Legacy IDs are consolidated into the `UNIT-*`, `UX-*`, and `E2E-*` tracks.
 2. UX gates (`Gate-X1`..`Gate-X2`)
 3. E2E gates (`Gate-E1`..`Gate-E2`)
 4. Stability gate (`Gate-S1`)
-5. Release decision from `documents/tests/VALIDATION_AND_GATE_REPORT.md`
+5. Release decision from CI and the release evidence in `docs/MVP_WINDOWS.md`

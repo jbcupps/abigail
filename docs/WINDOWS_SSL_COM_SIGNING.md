@@ -8,8 +8,9 @@ The supported local signing entry point is `scripts/build-signed-installer.ps1`.
 It builds `hive-app` plus Entity Runtime and both daemons, signs the three internal
 resources before packaging, uses Tauri's signing hook for Hive and the installers,
 and verifies Authenticode, the expected certificate, a timestamp, and file hashes.
-Verification failure stops the release. `build-release-windows.ps1` still targets
-the retired `tauri-app`; do not use it for the family-facing product.
+Verification failure stops the release. The old `build-release-windows.ps1` now
+lives at `legacy/tauri-app/scripts/` and builds only the retired single-agent app;
+do not use it for the family-facing product.
 
 Signing is opt-in. `build-split-installer.ps1`, `release-fast.yml`, and checked-in
 app configs remain suitable for unsigned development. Updater `.sig` files use a
