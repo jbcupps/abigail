@@ -253,6 +253,7 @@ if ($InstallerMode) {
         Write-Host "[HIVE] Verifying installed Abigail Hive at $HiveUrl..."
         $healthy = Wait-ForHealth "$HiveUrl/health" -MaxWaitSec 30
         if (-not $healthy) { throw "Hive did not become healthy within 30s" }
+        Set-UatHiveAccess -HiveUrl $HiveUrl -DataDir (Join-Path $env:LOCALAPPDATA 'abigail\Abigail\data')
         $status = Invoke-UatRequest -Uri "$HiveUrl/v1/status"
         if (-not $status.ok) { throw "Hive /v1/status returned ok=false" }
         Write-HttpTrace $RunRoot 'hive_bootstrap' 'status' @{url="$HiveUrl/v1/status"; installer=$InstallerPath} $status
@@ -270,6 +271,7 @@ if ($InstallerMode) {
 
     $healthy = Wait-ForHealth "$HiveUrl/health" -MaxWaitSec 30
     if (-not $healthy) { throw "Hive did not become healthy within 30s" }
+    Set-UatHiveAccess -HiveUrl $HiveUrl -DataDir $UatDataDir
 
     $status = Invoke-UatRequest -Uri "$HiveUrl/v1/status"
     if (-not $status.ok) { throw "Hive /v1/status returned ok=false" }

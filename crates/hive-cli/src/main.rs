@@ -8,8 +8,13 @@
 //!   hive-cli provider-config <id>
 //!   hive-cli store-secret <key> <value>
 //!   hive-cli secrets
+//!
+//! Like the desktop app, the CLI reads this install's control token from the
+//! Hive data root and only sends it once the daemon proves it holds the same
+//! token.
 
 use clap::{Parser, Subcommand};
+use daemon_client::HiveDaemonClient;
 use hive_core::{
     ApiEnvelope, CreateEntityRequest, CreateEntityResponse, EntityInfo, HiveStatus, ProviderConfig,
     SecretListResponse, StoreSecretRequest,
@@ -21,6 +26,11 @@ struct Cli {
     /// Hive daemon URL
     #[arg(long, default_value_t = abigail_channel::current().default_hive_url(), global = true)]
     url: String,
+
+    /// Hive data directory holding the control token (defaults to this
+    /// channel's data root)
+    #[arg(long, global = true)]
+    data_dir: Option<std::path::PathBuf>,
 
     #[command(subcommand)]
     command: Commands,
@@ -61,8 +71,29 @@ enum Commands {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let client = reqwest::Client::new();
-    let base = cli.url.trim_end_matches('/');
+    let channel = abigail_channel::current();
+    let data_root = cli
+        .data_dir
+        .or_else(|| channel.default_data_root())
+        .ok_or_else(|| anyhow::anyhow!("Pass --data-dir: no default Hive data root here"))?;
+    let token = daemon_client::read_control_token(&data_root).ok_or_else(|| {
+        anyhow::anyhow!(
+            "No Hive control token in {}. Start Abigail first.",
+            data_root.display()
+        )
+    })?;
+    let hive = HiveDaemonClient::adopt(&cli.url, &token, channel.name())
+        .await?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "The daemon at {} is not the {} Hive for {}",
+                cli.url,
+                channel.product_name(),
+                data_root.display()
+            )
+        })?;
+    let client = hive.http();
+    let base = hive.base_url();
 
     match cli.command {
         Commands::Status => {

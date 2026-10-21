@@ -64,6 +64,7 @@ environment.ABIGAIL_ENTITY_DAEMON_PATH = join(binaryDir, 'entity-daemon.exe');
 environment.ABIGAIL_DOCUMENTS_DIR = documentsDir;
 let hive;
 let hiveUrl;
+let hiveToken;
 let restartCount = 0;
 let model;
 let entity;
@@ -82,8 +83,11 @@ async function stage(name, action) {
     stages.push(record); appendFileSync(timeline, JSON.stringify(record) + '\n'); throw error;
   }
 }
+// The Hive control token goes only to the Hive, never to an Entity runtime.
 async function api(url, { method = 'GET', body, timeout = requestTimeout } = {}) {
-  const response = await fetch(url, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' },
+  const headers = { ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+    ...(hiveToken && url.startsWith(`${hiveUrl}/`) ? { authorization: `Bearer ${hiveToken}` } : {}) };
+  const response = await fetch(url, { method, headers,
     body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(timeout) });
   const text = await response.text();
   transport.push({ method, url, status: response.status, request: body, response: text });
@@ -133,6 +137,7 @@ async function startHive() {
     const response = await fetch(`${hiveUrl}/health`, { signal: AbortSignal.timeout(2000) });
     await response.text(); return response.ok;
   }, 'Hive did not become healthy');
+  hiveToken = readFileSync(join(dataDir, 'hive-control.token'), 'utf8').trim();
   return until(async () => {
     const status = await api(`${hiveUrl}/v1/status`, { timeout: 5000 });
     return status.helper?.running && status.helper.local_url ? status : null;

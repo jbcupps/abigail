@@ -5022,6 +5022,7 @@ dependencies = [
  "abigail-channel",
  "anyhow",
  "clap",
+ "daemon-client",
  "hive-core",
  "reqwest 0.13.4",
  "serde_json",

@@ -14,6 +14,7 @@ function parseArgs(argv) {
     port: 43143,
     hiveUrl: "http://127.0.0.1:43141",
     runtimeUrl: "http://127.0.0.1:43142",
+    hiveDataDir: null,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -27,6 +28,9 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg === "--runtime-url" && value) {
       config.runtimeUrl = value;
+      index += 1;
+    } else if (arg === "--hive-data-dir" && value) {
+      config.hiveDataDir = value;
       index += 1;
     }
   }
@@ -51,16 +55,38 @@ function contentTypeFor(filePath) {
 
 const config = parseArgs(process.argv.slice(2));
 
+// The Hive control token lets this page manage the dev Hive like the desktop app.
+function hiveToken() {
+  if (!config.hiveDataDir) return null;
+  try {
+    return fs.readFileSync(path.join(config.hiveDataDir, "hive-control.token"), "utf8").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+// A DNS-rebound page reaches this server under its own hostname.
+function isLoopbackHost(host = "") {
+  return /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(host);
+}
+
 const server = http.createServer((request, response) => {
   const url = new URL(request.url ?? "/", `http://127.0.0.1:${config.port}`);
 
+  if (!isLoopbackHost(request.headers.host)) {
+    response.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("Forbidden");
+    return;
+  }
+
   if (url.pathname === "/config.json") {
-    response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    response.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
     response.end(
       JSON.stringify(
         {
           hiveUrl: config.hiveUrl,
           runtimeUrl: config.runtimeUrl,
+          hiveToken: hiveToken(),
         },
         null,
         2,

@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 abigail-channel = { path = "../abigail-channel" }
 hive-core = { path = "../hive-core" }
+daemon-client = { path = "../daemon-client" }
 clap.workspace = true
 reqwest.workspace = true
 tokio.workspace = true
