@@ -75,6 +75,33 @@ Outputs:
 - `dist/windows-mvp/mvp-build.json`, including installer and executable hashes
 - An isolated installed-payload verification report under `target/manual-test/`
 
+### Preview channel
+
+`-Channel preview` builds **Abigail Preview**, which installs beside stable
+Abigail and never shares its state:
+
+```powershell
+pwsh ./scripts/build-mvp-windows.ps1 -Channel preview -Version 0.0.77 -VerifyInstall
+```
+
+| | Stable | Preview |
+|---|---|---|
+| Hive / Runtime identifiers | `com.abigail`, `com.abigail.entity-runtime` | `com.abigail.preview`, `com.abigail.preview.entity-runtime` |
+| Launcher and install folder | `Abigail.exe`, `%LOCALAPPDATA%\Abigail` | `Abigail Preview.exe`, `%LOCALAPPDATA%\Abigail Preview` |
+| Data root | `%LOCALAPPDATA%\abigail\Abigail\data` | `%LOCALAPPDATA%\AbigailPreview\data` |
+| Logs and runtime descriptor | `%LOCALAPPDATA%\Abigail\{logs,runtime}` | `%LOCALAPPDATA%\AbigailPreview\{logs,runtime}` |
+| Vault credential service | `com.abigail.vault` | `com.abigail.vault.preview` |
+| Documents folder | `Documents\Abigail` | `Documents\Abigail Preview` |
+| Hive ports | 43141-43150 | 43151-43160 |
+
+The channel is compiled in through `ABIGAIL_BUILD_PROFILE=preview`; any other
+non-empty value fails the build. Preview compiles into `target/preview` and
+writes `dist/windows-preview/AbigailPreview-windows-x64-setup.exe`. The builder
+and verifier reject any executable compiled for the other channel. The
+**Abigail Preview Candidate** workflow builds the same unsigned installer on a
+hosted runner from any branch without secrets:
+`gh workflow run preview-candidate.yml --ref beta -f version=0.0.77`.
+
 ## Acceptance
 
 The Windows installer lock regression compiles the real NSIS hooks and checks

@@ -16,19 +16,10 @@ use std::sync::{Arc, Mutex};
 
 /// Durable log directory, resolved independently of the `directories` crate and
 /// `--data-dir`. Mirrors where the Hive runtime descriptor already lives:
-/// `%LOCALAPPDATA%\Abigail\logs`. Falls back to the temp dir if unavailable.
+/// `%LOCALAPPDATA%\Abigail\logs` (`AbigailPreview` for preview builds). Falls
+/// back to `$HOME`, then the temp dir.
 pub fn log_dir() -> PathBuf {
-    if let Ok(local) = std::env::var("LOCALAPPDATA") {
-        if !local.trim().is_empty() {
-            return PathBuf::from(local).join("Abigail").join("logs");
-        }
-    }
-    if let Ok(home) = std::env::var("HOME") {
-        if !home.trim().is_empty() {
-            return PathBuf::from(home).join(".abigail").join("logs");
-        }
-    }
-    std::env::temp_dir().join("Abigail").join("logs")
+    abigail_channel::current().log_dir()
 }
 
 /// A cloneable, synchronous file writer so `tracing` flushes each line before

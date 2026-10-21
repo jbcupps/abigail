@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod genesis_voice;
 
+use abigail_core::channel;
 use daemon_client::HiveDaemonClient;
 use hive_core::{
     ApiEnvelope, CreateForgeApprovalJobRequest, EntityOpenResponse, HiveStatus,
@@ -116,7 +117,7 @@ struct HiveConnectionInfo {
 }
 
 fn hive_url() -> String {
-    std::env::var("ABIGAIL_HIVE_URL").unwrap_or_else(|_| "http://127.0.0.1:43141".to_string())
+    std::env::var("ABIGAIL_HIVE_URL").unwrap_or_else(|_| channel::current().default_hive_url())
 }
 
 #[tauri::command]
@@ -442,9 +443,6 @@ async fn open_entity(
 // `ABIGAIL_HIVE_URL` and starts the daemon itself, so this is skipped entirely.
 // ---------------------------------------------------------------------------
 
-const HIVE_PORT_START: u16 = 43141;
-const HIVE_PORT_END: u16 = 43150;
-
 #[derive(Serialize, Deserialize)]
 struct HiveRuntimeDescriptor {
     hive_url: String,
@@ -456,23 +454,17 @@ fn runtime_dir() -> std::path::PathBuf {
     if let Some(data_dir) = nonempty_env_path("ABIGAIL_DATA_DIR") {
         return data_dir.join("runtime");
     }
-    let base = std::env::var_os("LOCALAPPDATA")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    base.join("Abigail").join("runtime")
+    channel::current().runtime_dir()
 }
 
 fn descriptor_path() -> std::path::PathBuf {
     runtime_dir().join("hive.json")
 }
 
-/// Mirrors `hive_daemon::diag::log_dir()` — same base the daemon uses for its
-/// own file logging, so the shell-captured spawn log lands next to it.
+/// The same directory the daemons use for their own file logging, so the
+/// shell-captured spawn log lands next to it.
 fn logs_dir() -> std::path::PathBuf {
-    let base = std::env::var_os("LOCALAPPDATA")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    base.join("Abigail").join("logs")
+    channel::current().log_dir()
 }
 
 fn read_descriptor() -> Option<HiveRuntimeDescriptor> {
@@ -514,7 +506,8 @@ fn hive_daemon_binary() -> Option<PathBuf> {
 }
 
 fn pick_hive_port() -> Option<u16> {
-    (HIVE_PORT_START..=HIVE_PORT_END)
+    channel::current()
+        .hive_ports()
         .find(|port| std::net::TcpListener::bind(("127.0.0.1", *port)).is_ok())
 }
 

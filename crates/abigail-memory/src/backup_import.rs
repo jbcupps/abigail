@@ -119,7 +119,11 @@ pub fn scan_backup_dirs(data_root: &Path, agent_name: Option<&str>) -> Vec<Backu
 
     if let Some(user_dirs) = directories::UserDirs::new() {
         if let Some(doc_dir) = user_dirs.document_dir() {
-            scan_dirs.push(doc_dir.join("Abigail").join("backups"));
+            scan_dirs.push(
+                abigail_core::channel::current()
+                    .documents_dir(doc_dir)
+                    .join("backups"),
+            );
         }
     }
 

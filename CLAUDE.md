@@ -17,6 +17,7 @@ Abigail manages multiple personal AI Entities that the user, mentor, or family h
 - Every beta UAT build must be traceable to a GitHub prerelease tag in the form `vX.Y.Z-beta.N`.
 - Users should be encouraged to connect Entities to powerful cloud models from any provider. This multi-provider freedom is a major advantage.
 - Current dev builds prioritize a clean working single-version experience over cross-version compatibility. Remove stale legacy paths when they conflict with the active Hive-first architecture.
+- Preview builds must never share an app identity, data root, vault credential, Documents folder, or Hive port with stable Abigail. Keep channel differences in `crates/abigail-channel` and the `tauri.preview.conf.json` overlays.
 - Unsigned stabilization builds are the default local path. Release signing and updater signing are beta/release-only concerns that should stay opt-in and isolated from day-to-day development.
 - Privacy and local-first are non-negotiable. Cloud models are optional power-ups, never required.
 - Keep per-Entity data scoped through Hive-owned storage interfaces so one Entity cannot read another Entity's records by accident.

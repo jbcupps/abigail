@@ -93,7 +93,12 @@ assert(
   /^\d+\.\d+\.\d+$/.test(testedRustVersion ?? ""),
   "Repository Rust toolchain must pin an exact tested compiler version."
 );
-for (const workflow of [".github/workflows/ci.yml", ".github/workflows/release.yml", ".github/workflows/release-fast.yml"]) {
+for (const workflow of [
+  ".github/workflows/ci.yml",
+  ".github/workflows/release.yml",
+  ".github/workflows/release-fast.yml",
+  ".github/workflows/preview-candidate.yml",
+]) {
   const content = fs.readFileSync(workflow, "utf8");
   const pins = [...content.matchAll(/^\s+toolchain:\s*([^\s#]+)/gm)].map((match) => match[1]);
   const setups = [...content.matchAll(/uses:\s*dtolnay\/rust-toolchain@/g)].length;
@@ -189,7 +194,7 @@ assert(
   "Installer build and publication must use the triggering commit rather than a moving branch."
 );
 const installedVerification = release.indexOf("- name: Verify installed unsigned payload and synthetic contract");
-const installerUpload = release.indexOf("- name: Upload NSIS installer");
+const installerUpload = release.indexOf("- name: Upload verified release assets");
 assert(
   installedVerification >= 0 && installedVerification < installerUpload &&
     release.includes("./scripts/verify-mvp-windows.ps1") &&
@@ -202,6 +207,36 @@ assert(
 );
 const ciGate = release.indexOf("- name: Require successful CI gate for this commit");
 const releasePublication = release.indexOf("- name: Create GitHub Release");
+const stableSigningGate = release.indexOf("- name: Require Windows signing for stable publication");
+const releaseTagCreation = release.indexOf("- name: Create git tag if needed");
+assert(
+  stableSigningGate > release.indexOf("\n  publish:") &&
+    stableSigningGate < releaseTagCreation && releaseTagCreation < releasePublication &&
+    release.includes('WINDOWS_SIGNED: ${{ needs.build.outputs.windows_signed }}') &&
+    release.includes('[[ "$RELEASE_CHANNEL" == "stable" && "$WINDOWS_SIGNED" != "true" ]]'),
+  "Stable publication must reject unsigned builds before creating tags or releases; unsigned candidates and beta stabilization remain available."
+);
+const finalStaging = release.indexOf('- name: Stage and verify exact release assets');
+const publishReverification = release.indexOf('- name: Reverify exact bytes before publication');
+assert(
+  finalStaging > installedVerification && finalStaging < installerUpload &&
+    publishReverification > installerUpload && publishReverification < releaseTagCreation &&
+    release.includes('name: abigail-release-assets-windows') &&
+    !release.includes('head -1 || true') &&
+    release.includes('overwrite_files: false') &&
+    release.includes("make_latest: ${{ needs.build.outputs.channel == 'stable' && 'true' || 'false' }}"),
+  'Only the exact staged, verified bytes may be published; refuse ambiguous installer selection and existing asset replacement.'
+);
+assert(
+  release.includes('verify-published-download:') &&
+    release.includes('./scripts/verify_published_release.ps1') &&
+    release.includes("!inputs.publish_release && 'candidate'") &&
+    ci.includes('node --test scripts/tests/test_release_provenance.mjs') &&
+    ci.includes('./scripts/tests/test_release_artifacts.ps1') &&
+    ci.includes('./scripts/tests/test_stage_release_assets.ps1') &&
+    ci.includes('./scripts/tests/test_published_release.ps1'),
+  'Release completion must verify public downloads and channels, preserve candidates, and run negative-path policy tests in CI.'
+);
 assert(
   ciGate >= 0 && ciGate < releasePublication &&
     release.includes('--commit "$RELEASE_SHA"') &&

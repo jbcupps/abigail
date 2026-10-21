@@ -1,0 +1,23 @@
+{
+  "productName": "Abigail Preview",
+  "identifier": "com.abigail.preview",
+  "mainBinaryName": "Abigail Preview",
+  "app": {
+    "windows": [
+      {
+        "title": "Abigail Preview Hive",
+        "width": 1280,
+        "height": 860,
+        "resizable": true,
+        "visible": false
+      }
+    ]
+  },
+  "bundle": {
+    "windows": {
+      "nsis": {
+        "installerHooks": "../scripts/nsis-preview-hooks.nsh"
+      }
+    }
+  }
+}

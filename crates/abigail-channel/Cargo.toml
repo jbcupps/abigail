@@ -1,0 +1,8 @@
+[package]
+name = "abigail-channel"
+version.workspace = true
+edition.workspace = true
+description = "Compile-time stable/preview channel identity for Abigail binaries"
+
+[dependencies]
+directories = "6.0"

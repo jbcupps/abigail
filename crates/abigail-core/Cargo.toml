@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+abigail-channel = { path = "../abigail-channel" }
 ed25519-dalek.workspace = true
 rand.workspace = true
 base64.workspace = true

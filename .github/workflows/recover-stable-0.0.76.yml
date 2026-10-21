@@ -1,0 +1,207 @@
+# One-time publication recovery. Product source is RELEASE_SHA, never github.sha.
+name: Recover verified stable v0.0.76
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: abigail-windows-release-signing
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    if: github.repository == 'jbcupps/abigail' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_SHA: e3ad51181da1ea11bded24ca0c39e2dcfe5fa944
+      RELEASE_TAG: v0.0.76
+      RELEASE_RUN: '39380331517'
+      RELEASE_ARTIFACT: '12246127943'
+      RELEASE_MANIFEST_SHA256: c68564f76053cc0a5b3b6831d00c2fcb9146e9930454316880ca1b4dacd53037
+      WINDOWS_CERTIFICATE_THUMBPRINT: 69BE78FD201A59A29C46F5D37097E0C6DDA04A41
+    steps:
+      - name: Checkout original product source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: e3ad51181da1ea11bded24ca0c39e2dcfe5fa944
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '20'
+
+      - name: Validate pinned build and original main CI gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          function Get-RecoveryJson([string]$Endpoint) {
+            $json = & gh api $Endpoint
+            if ($LASTEXITCODE -ne 0) { throw "GitHub metadata request failed: $Endpoint" }
+            return ($json | ConvertFrom-Json)
+          }
+          function Assert-RecoveryEvidence($Run, $Jobs, $Ci, $CiJobs, $Artifact) {
+            $sha = 'e3ad51181da1ea11bded24ca0c39e2dcfe5fa944'
+            if ($Jobs.total_count -ne @($Jobs.jobs).Count -or $CiJobs.total_count -ne @($CiJobs.jobs).Count) {
+              throw 'Recovery job metadata is incomplete.'
+            }
+            foreach ($item in @($Run, $Ci)) {
+              if ($item.repository.id -ne 1152494386 -or $item.repository.full_name -cne 'jbcupps/abigail' -or
+                  $item.head_repository.id -ne 1152494386 -or $item.head_sha -cne $sha -or
+                  $item.head_branch -cne 'main' -or $item.status -cne 'completed' -or $item.run_attempt -ne 1) {
+                throw 'Recovery run repository, source, branch, status, or attempt mismatch.'
+              }
+            }
+            if ($Run.id -ne 39380331517 -or $Run.path -cne '.github/workflows/release.yml' -or
+                $Run.event -cne 'workflow_dispatch' -or $Run.conclusion -cne 'failure' -or
+                $Ci.id -ne 39376395634 -or $Ci.path -cne '.github/workflows/ci.yml' -or $Ci.event -cne 'push') {
+              throw 'Recovery run or original main CI identity mismatch.'
+            }
+            $build = @($Jobs.jobs | Where-Object { $_.name.StartsWith('build (') })
+            $publish = @($Jobs.jobs | Where-Object name -CEQ 'publish')
+            $gate = @($CiJobs.jobs | Where-Object name -CEQ 'gate')
+            if ($build.Count -ne 1 -or $build[0].status -cne 'completed' -or $build[0].conclusion -cne 'success' -or
+                $publish.Count -ne 1 -or $publish[0].status -cne 'completed' -or $publish[0].conclusion -cne 'failure' -or
+                $gate.Count -ne 1 -or $gate[0].status -cne 'completed' -or $gate[0].conclusion -cne 'success') {
+              throw 'The original build or exact-source main CI gate did not pass.'
+            }
+            foreach ($name in @('Prepare full cloud installer without signing secrets',
+                'Cloud sign and verify installed full Abigail product',
+                'Collect selected cloud installer validation evidence',
+                'Stage and verify exact release assets',
+                'Upload verified release assets (Upload updater artifacts when enabled)')) {
+              $step = @($build[0].steps | Where-Object name -CEQ $name)
+              if ($step.Count -ne 1 -or $step[0].conclusion -cne 'success') { throw "Required build step did not pass: $name" }
+            }
+            $failure = @($publish[0].steps | Where-Object conclusion -CEQ 'failure')
+            if ($failure.Count -ne 1 -or $failure[0].name -cne 'Refuse replacement of an existing release') {
+              throw 'Original publication failed outside the reviewed absence-check guard.'
+            }
+            foreach ($name in @('Require successful CI gate for this commit', 'Create git tag if needed', 'Create GitHub Release')) {
+              $step = @($publish[0].steps | Where-Object name -CEQ $name)
+              if ($step.Count -ne 1 -or $step[0].conclusion -cne 'skipped') { throw 'Original publication may have mutated a release or tag.' }
+            }
+            if ($Artifact.id -ne 12246127943 -or $Artifact.name -cne 'abigail-release-assets-windows' -or
+                $Artifact.expired -isnot [bool] -or $Artifact.expired -or $Artifact.size_in_bytes -ne 86751966 -or
+                $Artifact.digest -cne 'sha256:942a188c532f16270f7b639ac5a222c6fbafeefbc8729df8ec83d61cc64bd1ae' -or
+                $Artifact.workflow_run.id -ne 39380331517 -or $Artifact.workflow_run.repository_id -ne 1152494386 -or
+                $Artifact.workflow_run.head_repository_id -ne 1152494386 -or
+                $Artifact.workflow_run.head_branch -cne 'main' -or $Artifact.workflow_run.head_sha -cne $sha) {
+              throw 'Pinned immutable artifact identity or digest mismatch.'
+            }
+          }
+          $run = Get-RecoveryJson "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:RELEASE_RUN"
+          $jobs = Get-RecoveryJson "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:RELEASE_RUN/jobs?per_page=100"
+          $ci = Get-RecoveryJson "repos/$env:GITHUB_REPOSITORY/actions/runs/39376395634"
+          $ciJobs = Get-RecoveryJson "repos/$env:GITHUB_REPOSITORY/actions/runs/39376395634/jobs?per_page=100"
+          $artifact = Get-RecoveryJson "repos/$env:GITHUB_REPOSITORY/actions/artifacts/$env:RELEASE_ARTIFACT"
+          Assert-RecoveryEvidence $run $jobs $ci $ciJobs $artifact
+          git merge-base --is-ancestor $env:RELEASE_SHA origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'Original product source is no longer on main history.' }
+          New-Item -ItemType Directory -Path recovery-evidence | Out-Null
+          [ordered]@{
+            productSourceCommit = $env:RELEASE_SHA; originalRunId = $run.id; originalRunConclusion = $run.conclusion
+            originalBuildConclusion = 'success'; mainCiRunId = $ci.id; mainCiGate = 'success'
+            artifactId = $artifact.id; artifactDigest = $artifact.digest; recoveryRunId = $env:GITHUB_RUN_ID
+            recoveryWorkflowCommit = $env:GITHUB_SHA; verifiedUtc = [DateTime]::UtcNow.ToString('o')
+          } | ConvertTo-Json | Set-Content recovery-evidence/original-build.json
+
+      - name: Download exact original release artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: '12246127943'
+          path: release-assets
+          merge-multiple: true
+          repository: jbcupps/abigail
+          run-id: '39380331517'
+          github-token: ${{ github.token }}
+
+      - name: Verify original stable bytes and native signatures
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = @('Abigail-windows-x64-setup.exe', 'release-provenance.json', 'windows-signature-evidence.json', 'windows-signatures.json')
+          $files = @(Get-ChildItem -LiteralPath release-assets -Force)
+          if ($files.Count -ne 4 -or @($files | Where-Object { $_.PSIsContainer -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) }).Count -or
+              @(Compare-Object ($expected | Sort-Object) ($files.Name | Sort-Object) -CaseSensitive).Count) {
+            throw 'Recovery artifact must contain exactly the original four flat release files.'
+          }
+          if ($env:RELEASE_MANIFEST_SHA256 -cnotmatch '^[a-f0-9]{64}$' -or
+              (Get-FileHash release-assets/release-provenance.json -Algorithm SHA256).Hash -ine $env:RELEASE_MANIFEST_SHA256) {
+            throw 'Original independently audited provenance bytes do not match.'
+          }
+          node scripts/release_provenance.mjs verify --assets-dir release-assets --source-commit $env:RELEASE_SHA --tag $env:RELEASE_TAG --channel stable --windows-signed true --expected-thumbprint $env:WINDOWS_CERTIFICATE_THUMBPRINT
+          if ($LASTEXITCODE -ne 0) { throw 'Original stable provenance failed verification.' }
+          ./scripts/verify_release_artifacts.ps1 -AssetsDirectory release-assets -SourceCommit $env:RELEASE_SHA -Tag $env:RELEASE_TAG -Channel stable -WindowsSigned true -CertificateThumbprint $env:WINDOWS_CERTIFICATE_THUMBPRINT -ReportPath recovery-evidence/native-signatures.json
+          if ((Get-FileHash release-assets/release-provenance.json -Algorithm SHA256).Hash -ine $env:RELEASE_MANIFEST_SHA256) { throw 'Provenance changed during verification.' }
+
+      - name: Refuse replacement or latest-channel regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $latestJson = & gh api "repos/$env:GITHUB_REPOSITORY/releases/latest"
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to verify the current stable release.' }
+          $latest = $latestJson | ConvertFrom-Json
+          if ($latest.tag_name -cne 'v0.0.75' -or $latest.draft -or $latest.prerelease) { throw 'Latest stable changed; stop this one-time recovery.' }
+          $result = (& gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" 2>&1 | Out-String)
+          if ($LASTEXITCODE -eq 0) { throw 'Release already exists; never overwrite released assets.' }
+          if ($result -notmatch 'HTTP 404') { throw 'Unable to confirm that the release version is unused.' }
+          $LASTEXITCODE = 0
+
+      - name: Create original-source tag with workflow token
+        shell: bash
+        run: |
+          REMOTE_REFS=$(git ls-remote origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")
+          if [[ -n "$REMOTE_REFS" ]]; then
+            git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$RELEASE_SHA"
+          else
+            git tag "$RELEASE_TAG" "$RELEASE_SHA"
+            git push origin "$RELEASE_TAG"
+          fi
+
+      - name: Publish unchanged verified stable files
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        with:
+          tag_name: v0.0.76
+          target_commitish: e3ad51181da1ea11bded24ca0c39e2dcfe5fa944
+          name: Abigail v0.0.76
+          draft: false
+          prerelease: false
+          make_latest: 'true'
+          overwrite_files: false
+          fail_on_unmatched_files: true
+          body: |
+            Signed Windows installer for Abigail v0.0.76.
+
+            `release-provenance.json` records the product source and SHA-256 of each published asset. Windows signing evidence is included. Release verification checks the public tagged and latest-download URLs against these original files.
+          files: |
+            release-assets/Abigail-windows-x64-setup.exe
+            release-assets/release-provenance.json
+            release-assets/windows-signature-evidence.json
+            release-assets/windows-signatures.json
+
+      - name: Verify published original-source download
+        shell: pwsh
+        run: |
+          ./scripts/verify_published_release.ps1 -Repository $env:GITHUB_REPOSITORY -Tag $env:RELEASE_TAG -SourceCommit $env:RELEASE_SHA -Channel stable -WindowsSigned true -CertificateThumbprint $env:WINDOWS_CERTIFICATE_THUMBPRINT -ExpectedAssetsDirectory release-assets -OutputDirectory published-verification
+          $result = Get-Content published-verification/result.json -Raw | ConvertFrom-Json
+          if ($result.verified -isnot [bool] -or -not $result.verified) { throw 'Public distribution was not verified.' }
+
+      - name: Preserve recovery and public-download evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
+        with:
+          name: stable-0.0.76-recovery-verification
+          path: |
+            recovery-evidence/*.json
+            published-verification/*.json
+          if-no-files-found: warn

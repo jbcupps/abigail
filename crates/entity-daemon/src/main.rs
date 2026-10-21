@@ -49,7 +49,7 @@ struct Cli {
     entity_id: String,
 
     /// Hive daemon URL
-    #[arg(long, default_value = "http://127.0.0.1:43141")]
+    #[arg(long, default_value_t = abigail_core::channel::current().default_hive_url())]
     hive_url: String,
 
     /// Port to listen on
