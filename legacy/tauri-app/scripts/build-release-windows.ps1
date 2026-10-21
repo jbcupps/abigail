@@ -1,19 +1,20 @@
 # Build a signed Windows release locally on a Windows machine.
-# LEGACY: This builds the retired tauri-app product. For the family-facing
-# Hive + Entity Runtime installer, use build-signed-installer.ps1 instead.
+# LEGACY: This builds the retired single-agent tauri-app, not the Abigail
+# framework installer. For the family-facing Hive + Entity Runtime installer,
+# use scripts/build-signed-installer.ps1 or scripts/build-mvp-windows.ps1.
 #
 # Example using an SSL.com certificate already available in the Windows cert store:
 #   $env:ABIGAIL_WINDOWS_SIGNING_MODE = "store"
 #   $env:WINDOWS_CERTIFICATE_THUMBPRINT = "YOUR_CERT_THUMBPRINT"
 #   $env:WINDOWS_TIMESTAMP_URL = "http://ts.ssl.com"
-#   .\scripts\build-release-windows.ps1 -Version 0.0.3 -OpenOutput
+#   .\legacy\tauri-app\scripts\build-release-windows.ps1 -Version 0.0.3 -OpenOutput
 #
 # Optional updater signing:
 #   $env:TAURI_SIGNING_PRIVATE_KEY = "<minisign secret box or base64>"
 #   $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "<password>"
 #
 # Optional latest.json generation:
-#   .\scripts\build-release-windows.ps1 -Version 0.0.3 `
+#   .\legacy\tauri-app\scripts\build-release-windows.ps1 -Version 0.0.3 `
 #     -ReleaseBaseUrl "https://github.com/OWNER/REPO/releases/download/v0.0.3"
 
 param(
@@ -35,7 +36,7 @@ $ErrorActionPreference = "Stop"
 
 function Get-RepoRoot {
     if ($PSScriptRoot) {
-        return (Get-Item $PSScriptRoot).Parent.FullName
+        return (Get-Item $PSScriptRoot).Parent.Parent.Parent.FullName
     }
 
     return (Get-Location).Path
@@ -346,7 +347,7 @@ function Stage-OllamaBinary {
         [string]$TempRoot
     )
 
-    $cachedZipPath = Join-Path $RepoRoot "tauri-app\ollama-windows-amd64.zip"
+    $cachedZipPath = Join-Path $RepoRoot "legacy\tauri-app\ollama-windows-amd64.zip"
     $downloadZipPath = Join-Path $TempRoot "ollama-windows-amd64.zip"
     $downloadUrl = "https://github.com/ollama/ollama/releases/download/$OllamaVersionValue/ollama-windows-amd64.zip"
     $zipPath = $cachedZipPath
@@ -478,9 +479,9 @@ function Copy-ArtifactIfPresent {
 }
 
 $repoRoot = Get-RepoRoot
-$tauriConfigPath = Join-Path $repoRoot "tauri-app\tauri.conf.json"
-$tauriAppDir = Join-Path $repoRoot "tauri-app"
-$frontendDir = Join-Path $repoRoot "tauri-app\src-ui"
+$tauriConfigPath = Join-Path $repoRoot "legacy\tauri-app\tauri.conf.json"
+$tauriAppDir = Join-Path $repoRoot "legacy\tauri-app"
+$frontendDir = Join-Path $repoRoot "legacy\tauri-app\src-ui"
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("abigail-windows-release-" + [guid]::NewGuid().ToString("N"))
 Ensure-Directory $tempRoot
 $interactiveSignWrapperPath = Join-Path $repoRoot "scripts\windows_interactive_sign.ps1"
@@ -613,16 +614,13 @@ try {
     Ensure-Directory $resolvedOutputDir
 
     $bundleSearchRoots = @(
-        (Join-Path $repoRoot "target\release\bundle\nsis"),
-        (Join-Path $repoRoot "tauri-app\target\release\bundle\nsis")
+        (Join-Path $repoRoot "legacy\tauri-app\target\release\bundle\nsis")
     )
     $msiSearchRoots = @(
-        (Join-Path $repoRoot "target\release\bundle\msi"),
-        (Join-Path $repoRoot "tauri-app\target\release\bundle\msi")
+        (Join-Path $repoRoot "legacy\tauri-app\target\release\bundle\msi")
     )
     $targetSearchRoots = @(
-        (Join-Path $repoRoot "target"),
-        (Join-Path $repoRoot "tauri-app\target")
+        (Join-Path $repoRoot "legacy\tauri-app\target")
     )
 
     $setupExe = Get-FirstMatchingFile -Paths $bundleSearchRoots -NamePatterns @("*.exe")

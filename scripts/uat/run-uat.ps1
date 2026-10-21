@@ -193,11 +193,11 @@ if ($InstallerMode) {
             if ($LASTEXITCODE -ne 0) { throw "cargo fmt failed: $fmtOut" }
 
             Write-Host "[BUILD] Running cargo clippy..."
-            $clippyOut = & cargo clippy --workspace --exclude abigail-app -- -D warnings 2>&1
+            $clippyOut = & cargo clippy --workspace -- -D warnings 2>&1
             if ($LASTEXITCODE -ne 0) { throw "cargo clippy failed: $($clippyOut | Select-Object -Last 20 | Out-String)" }
 
             Write-Host "[BUILD] Running cargo build..."
-            $buildOut = & cargo build --workspace --exclude abigail-app 2>&1
+            $buildOut = & cargo build --workspace 2>&1
             if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 
             Write-Host "[BUILD] Build succeeded."

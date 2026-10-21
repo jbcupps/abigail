@@ -48,8 +48,8 @@ members = [
     "skills/skill-image",
     "skills/skill-clipboard",
     "skills/skill-system-monitor",
-    "tauri-app",
 ]
+exclude = ["legacy"]
 
 [workspace.package]
 version = "0.0.1"

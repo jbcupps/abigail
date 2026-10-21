@@ -8,18 +8,22 @@ param(
 
 $ErrorActionPreference = "Continue"
 
+$frontendApps = @("hive-app", "entity-runtime-app", "legacy/tauri-app")
+
 Write-Host "Cleaning frontend coverage outputs..."
-if (Test-Path "tauri-app/src-ui/coverage") {
-    Remove-Item -Recurse -Force "tauri-app/src-ui/coverage"
+foreach ($app in $frontendApps) {
+    if (Test-Path "$app/src-ui/coverage") {
+        Remove-Item -Recurse -Force "$app/src-ui/coverage"
+    }
 }
 
 Write-Host "Cleaning frontend build artifacts..."
-if (Test-Path "tauri-app/src-ui/dist") {
-    Remove-Item -Recurse -Force "tauri-app/src-ui/dist"
-}
-$viteCache = "tauri-app/src-ui/node_modules/.vite"
-if (Test-Path $viteCache) {
-    Remove-Item -Recurse -Force $viteCache
+foreach ($app in $frontendApps) {
+    foreach ($generated in @("$app/src-ui/dist", "$app/src-ui/node_modules/.vite")) {
+        if (Test-Path $generated) {
+            Remove-Item -Recurse -Force $generated
+        }
+    }
 }
 
 Write-Host "Cleaning lcov/coverage data..."

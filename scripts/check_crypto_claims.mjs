@@ -44,12 +44,17 @@ const claims = [
     ],
     implementation: [
       {
-        path: "tauri-app/src/commands/identity.rs",
+        path: "crates/abigail-identity/src/lib.rs",
         markers: [
-          "let unlock = HybridUnlockProvider::new();",
-          "state.identity_manager.verify_agent(id)",
-          "verify_constitutional_integrity(config)",
-          "IntegrityStatus::Blocked",
+          "if !verify_agent_signature(&master_pubkey, &agent_pubkey, &sig_bytes) {",
+          "if config.birth_complete && !config.is_hive {\n            self.verify_agent(agent_id)?;",
+        ],
+      },
+      {
+        path: "crates/entity-daemon/src/main.rs",
+        markers: [
+          "abigail_core::verifier::verify_constitutional_integrity(&config).map_err(|error| {",
+          "Entity constitution verification failed",
         ],
       },
       {
@@ -196,8 +201,9 @@ const claims = [
           "append_crypto_audit(",
         ],
       },
+      // Hive does not expose recovery export yet; only the retired app has a UI for it.
       {
-        path: "tauri-app/src-ui/src/components/BootSequence.tsx",
+        path: "legacy/tauri-app/src-ui/src/components/BootSequence.tsx",
         markers: [
           "Save encrypted recovery bundle",
           "Save plaintext key (advanced)",
@@ -205,7 +211,7 @@ const claims = [
         ],
       },
       {
-        path: "tauri-app/src/commands/identity.rs",
+        path: "legacy/tauri-app/src/commands/identity.rs",
         markers: [
           "pub fn save_recovery_key_plaintext(",
         ],
@@ -288,8 +294,9 @@ const claims = [
           "invalid_trusted_signer_configuration_fails_closed",
         ],
       },
+      // Trusted-signer management commands exist only in the retired app today.
       {
-        path: "tauri-app/src/commands/skills.rs",
+        path: "legacy/tauri-app/src/commands/skills.rs",
         markers: [
           "fn add_trusted_signer_entry",
           "fn remove_trusted_signer_entry",

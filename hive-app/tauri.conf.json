@@ -26,10 +26,10 @@
     "active": true,
     "targets": "all",
     "icon": [
-      "../tauri-app/icons/32x32.png",
-      "../tauri-app/icons/128x128.png",
-      "../tauri-app/icons/128x128@2x.png",
-      "../tauri-app/icons/icon.ico"
+      "../icons/32x32.png",
+      "../icons/128x128.png",
+      "../icons/128x128@2x.png",
+      "../icons/icon.ico"
     ],
     "resources": [],
     "windows": {
@@ -39,7 +39,7 @@
       },
       "nsis": {
         "installMode": "currentUser",
-        "installerHooks": "../tauri-app/nsis-hooks.nsh"
+        "installerHooks": "../scripts/nsis-mvp-hooks.nsh"
       }
     },
     "longDescription": "Abigail - private family AI Entity coordinator",

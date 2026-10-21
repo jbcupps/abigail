@@ -9,8 +9,10 @@
 /crates/ @jbcupps
 /skills/ @jbcupps
 
-# Tauri app
-/tauri-app/ @jbcupps
+# Desktop apps (Hive, Entity Runtime) and the retired single-agent app
+/hive-app/ @jbcupps
+/entity-runtime-app/ @jbcupps
+/legacy/ @jbcupps
 
 # CI/CD and GitHub config
 /.github/ @jbcupps

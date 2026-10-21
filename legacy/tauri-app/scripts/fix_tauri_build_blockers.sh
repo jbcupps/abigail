@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
+# LEGACY: prepares and validates a build of the retired single-agent tauri-app.
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LEGACY_APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$LEGACY_APP_DIR/../.." && pwd)"
 cd "$ROOT_DIR"
 
 echo "[1/7] Installing Linux desktop build dependencies (required for Tauri/WebKit on Ubuntu)..."
@@ -26,23 +28,23 @@ export PLAYWRIGHT_DRIVER_VERSION="${PLAYWRIGHT_DRIVER_VERSION:-1.56.1}"
 
 echo "[4/7] Installing frontend dependencies and production assets..."
 (
-  cd tauri-app/src-ui
+  cd "$LEGACY_APP_DIR/src-ui"
   npm install
   npm run build
 )
 
 echo "[5/7] Installing Playwright Chromium for runtime browser skill support..."
 (
-  cd tauri-app/src-ui
+  cd "$LEGACY_APP_DIR/src-ui"
   npx playwright@"$PLAYWRIGHT_DRIVER_VERSION" install chromium
 )
 
-echo "[6/7] Validating Rust workspace compiles..."
-cargo check --workspace
+echo "[6/7] Validating legacy workspace compiles..."
+cargo check --manifest-path "$LEGACY_APP_DIR/Cargo.toml"
 
 echo "[7/7] Validating Tauri desktop build..."
 (
-  cd tauri-app
+  cd "$LEGACY_APP_DIR"
   cargo tauri build --no-bundle
 )
 

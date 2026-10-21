@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "frontend",
+      "name": "legacy-frontend",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["tauri-app/src-ui/node_modules/vite/bin/vite.js", "tauri-app/src-ui", "--config", "tauri-app/src-ui/vite.config.ts", "--port", "1420", "--strictPort"],
+      "runtimeArgs": ["legacy/tauri-app/src-ui/node_modules/vite/bin/vite.js", "legacy/tauri-app/src-ui", "--config", "legacy/tauri-app/src-ui/vite.config.ts", "--port", "1420", "--strictPort"],
       "port": 1420
     },
     {
@@ -38,9 +38,9 @@
       "port": 3142
     },
     {
-      "name": "tauri-app",
+      "name": "legacy-tauri-app",
       "runtimeExecutable": "cargo",
-      "runtimeArgs": ["tauri", "dev"],
+      "runtimeArgs": ["tauri", "dev", "--config", "legacy/tauri-app/tauri.conf.json"],
       "port": 1420
     }
   ]

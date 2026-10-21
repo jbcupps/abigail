@@ -6,88 +6,88 @@
 
 use std::path::Path;
 
-const REGISTRY_TOML: &str = include_str!("../../skills/registry.toml");
+const REGISTRY_TOML: &str = include_str!("../../../skills/registry.toml");
 
 const INSTRUCTIONS: &[(&str, &str)] = &[
     (
         "skill_web_search.md",
-        include_str!("../../skills/instructions/skill_web_search.md"),
+        include_str!("../../../skills/instructions/skill_web_search.md"),
     ),
     (
         "skill_perplexity_search.md",
-        include_str!("../../skills/instructions/skill_perplexity_search.md"),
+        include_str!("../../../skills/instructions/skill_perplexity_search.md"),
     ),
     (
         "skill_filesystem.md",
-        include_str!("../../skills/instructions/skill_filesystem.md"),
+        include_str!("../../../skills/instructions/skill_filesystem.md"),
     ),
     (
         "skill_shell.md",
-        include_str!("../../skills/instructions/skill_shell.md"),
+        include_str!("../../../skills/instructions/skill_shell.md"),
     ),
     (
         "skill_http.md",
-        include_str!("../../skills/instructions/skill_http.md"),
+        include_str!("../../../skills/instructions/skill_http.md"),
     ),
     (
         "skill_browser.md",
-        include_str!("../../skills/instructions/skill_browser.md"),
+        include_str!("../../../skills/instructions/skill_browser.md"),
     ),
     (
         "skill_git.md",
-        include_str!("../../skills/instructions/skill_git.md"),
+        include_str!("../../../skills/instructions/skill_git.md"),
     ),
     (
         "skill_calendar.md",
-        include_str!("../../skills/instructions/skill_calendar.md"),
+        include_str!("../../../skills/instructions/skill_calendar.md"),
     ),
     (
         "skill_knowledge_base.md",
-        include_str!("../../skills/instructions/skill_knowledge_base.md"),
+        include_str!("../../../skills/instructions/skill_knowledge_base.md"),
     ),
     (
         "skill_code_analysis.md",
-        include_str!("../../skills/instructions/skill_code_analysis.md"),
+        include_str!("../../../skills/instructions/skill_code_analysis.md"),
     ),
     (
         "skill_image.md",
-        include_str!("../../skills/instructions/skill_image.md"),
+        include_str!("../../../skills/instructions/skill_image.md"),
     ),
     (
         "skill_clipboard.md",
-        include_str!("../../skills/instructions/skill_clipboard.md"),
+        include_str!("../../../skills/instructions/skill_clipboard.md"),
     ),
     (
         "skill_system_monitor.md",
-        include_str!("../../skills/instructions/skill_system_monitor.md"),
+        include_str!("../../../skills/instructions/skill_system_monitor.md"),
     ),
     (
         "skill_database.md",
-        include_str!("../../skills/instructions/skill_database.md"),
+        include_str!("../../../skills/instructions/skill_database.md"),
     ),
     (
         "skill_document.md",
-        include_str!("../../skills/instructions/skill_document.md"),
+        include_str!("../../../skills/instructions/skill_document.md"),
     ),
     (
         "skill_notification.md",
-        include_str!("../../skills/instructions/skill_notification.md"),
+        include_str!("../../../skills/instructions/skill_notification.md"),
     ),
     (
         "skill_troubleshooting.md",
-        include_str!("../../skills/instructions/skill_troubleshooting.md"),
+        include_str!("../../../skills/instructions/skill_troubleshooting.md"),
     ),
     (
         "skill_github_api.md",
-        include_str!("../../skills/instructions/skill_github_api.md"),
+        include_str!("../../../skills/instructions/skill_github_api.md"),
     ),
     (
         "skill_slack.md",
-        include_str!("../../skills/instructions/skill_slack.md"),
+        include_str!("../../../skills/instructions/skill_slack.md"),
     ),
     (
         "skill_jira.md",
-        include_str!("../../skills/instructions/skill_jira.md"),
+        include_str!("../../../skills/instructions/skill_jira.md"),
     ),
 ];
 

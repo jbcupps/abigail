@@ -1,6 +1,6 @@
 # Dev image for Abigail: Rust + Node + Tauri system deps.
 # Source is bind-mounted at /app (see docker-compose.yml). Use for build/test only;
-# GUI (cargo tauri dev) requires native host. See documents/HOW_TO_RUN_LOCALLY.md.
+# Desktop GUIs (Hive, Entity Runtime) require a native host. See documents/HOW_TO_RUN_LOCALLY.md.
 
 ARG RUST_VERSION=1.75
 ARG NODE_VERSION=20

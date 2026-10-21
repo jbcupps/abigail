@@ -2,7 +2,7 @@
 
 import fs from "node:fs";
 
-const configPath = process.argv[2] ?? "tauri-app/tauri.conf.json";
+const configPath = process.argv[2] ?? "hive-app/tauri.conf.json";
 
 function isTruthy(value) {
   return /^(1|true|yes)$/i.test(String(value ?? "").trim());

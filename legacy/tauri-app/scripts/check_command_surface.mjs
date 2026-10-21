@@ -3,9 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const tauriLibPath = path.join(repoRoot, "tauri-app", "src", "lib.rs");
-const uiSrcPath = path.join(repoRoot, "tauri-app", "src-ui", "src");
+const legacyAppRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(legacyAppRoot, "..", "..");
+const tauriLibPath = path.join(legacyAppRoot, "src", "lib.rs");
+const uiSrcPath = path.join(legacyAppRoot, "src-ui", "src");
 const harnessPath = path.join(uiSrcPath, "browserTauriHarness.ts");
 
 const FRONTEND_EXCLUDE_PATHS = [
@@ -35,7 +36,7 @@ function readFile(filePath) {
 function extractNativeCommands(libSource) {
   const match = libSource.match(/generate_handler!\s*\[([\s\S]*?)\]\s*\)/m);
   if (!match) {
-    throw new Error("Could not locate tauri::generate_handler![] block in tauri-app/src/lib.rs");
+    throw new Error("Could not locate tauri::generate_handler![] block in legacy/tauri-app/src/lib.rs");
   }
   return new Set(
     match[1]
