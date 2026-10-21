@@ -162,10 +162,12 @@ $hiveProc = Start-Process -FilePath $hiveExe `
     -RedirectStandardError $hiveErr `
     -PassThru
 Wait-HttpOk -Url "$hiveUrl/health" -TimeoutSeconds 30
+$hiveToken = (Get-Content -Raw (Join-Path $dataRoot "hive-control.token")).Trim()
 
 Write-Host "Creating test entity..."
 $entityResponse = Invoke-RestMethod -Method Post `
     -Uri "$hiveUrl/v1/entities" `
+    -Headers @{ Authorization = "Bearer $hiveToken" } `
     -ContentType "application/json" `
     -Body (@{ name = $EntityName } | ConvertTo-Json)
 if (-not $entityResponse.ok) {
@@ -193,6 +195,7 @@ if ($desktopBuildSucceeded -and -not $SkipDesktopApps) {
         -WorkingDirectory (Join-Path $workspaceRoot "hive-app") `
         -Environment @{
             ABIGAIL_HIVE_URL = $hiveUrl
+            ABIGAIL_DATA_DIR = $dataRoot
             CARGO_TARGET_DIR = $targetDir
         } `
         -PassThru
@@ -215,6 +218,8 @@ if ($desktopBuildSucceeded -and -not $SkipDesktopApps) {
             "$HarnessPort",
             "--hive-url",
             $hiveUrl,
+            "--hive-data-dir",
+            $dataRoot,
             "--runtime-url",
             $runtimeUrl
         ) `
@@ -238,6 +243,8 @@ if ($LaunchBrowserHarness -and -not $browserHarnessProc) {
             "$HarnessPort",
             "--hive-url",
             $hiveUrl,
+            "--hive-data-dir",
+            $dataRoot,
             "--runtime-url",
             $runtimeUrl
         ) `

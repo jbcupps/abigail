@@ -7,4 +7,4 @@ mod entity;
 mod hive;
 
 pub use entity::{ChatStreamEvent, EntityClient};
-pub use hive::HiveDaemonClient;
+pub use hive::{read_control_token, HiveDaemonClient};

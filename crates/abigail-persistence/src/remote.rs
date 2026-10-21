@@ -54,6 +54,7 @@ pub(crate) struct HiveTransport {
     pub base_url: String,
     pub entity_id: String,
     pub lease_id: String,
+    client: reqwest::Client,
 }
 
 static HIVE_TRANSPORT: OnceLock<HiveTransport> = OnceLock::new();
@@ -99,10 +100,18 @@ impl HiveTransport {
                 "Hive persistence requires a runtime lease".into(),
             ));
         }
+        // Every request carries the lease, so it never goes through a proxy
+        // or follows a redirect.
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| PersistenceError::Remote(e.to_string()))?;
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             entity_id: entity_id.to_string(),
             lease_id: lease_id.to_string(),
+            client,
         })
     }
 
@@ -117,7 +126,8 @@ impl HiveTransport {
     }
 
     pub(crate) async fn call(&self, operation: RemoteOperation) -> crate::client::Result<Value> {
-        let response = reqwest::Client::new()
+        let response = self
+            .client
             .post(format!(
                 "{}/v1/entities/{}/persistence",
                 self.base_url, self.entity_id

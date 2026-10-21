@@ -42,8 +42,10 @@ async function freePort() {
   const server = createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port;
 }
+// The Hive control token goes only to the Hive, never to an Entity runtime.
 async function api(path, body, { method = body === undefined ? 'GET' : 'POST', auth = true, reject = false, base = hiveUrl } = {}) {
-  const response = await fetch(`${base}${path}`, { method, headers: { ...(auth ? { Authorization: `Bearer ${token}` } : {}), ...(body !== undefined ? { 'Content-Type':'application/json' } : {}) },
+  const sendToken = auth && base === hiveUrl;
+  const response = await fetch(`${base}${path}`, { method, headers: { ...(sendToken ? { Authorization: `Bearer ${token}` } : {}), ...(body !== undefined ? { 'Content-Type':'application/json' } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(120000) });
   const raw=await response.text();
   let value; try { value=JSON.parse(raw); } catch { value={ok:false,error:raw}; }
@@ -56,7 +58,7 @@ async function start() {
   child.stdout.pipe(createWriteStream(join(runDir, `hive-${child.pid}.out.log`)));
   child.stderr.pipe(createWriteStream(join(runDir, `hive-${child.pid}.err.log`)));
   await until(async () => (await fetch(`${hiveUrl}/health`)).ok);
-  token = readFileSync(join(dataDir, 'genesis.token'), 'utf8').trim();
+  token = readFileSync(join(dataDir, 'hive-control.token'), 'utf8').trim();
 }
 async function stop() { if (child) { await stopIsolatedWindowsDaemons({ binaryDir, dataDir }); child = null; } }
 const path = id => `/v1/genesis/sessions/${id}`;

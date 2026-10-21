@@ -1,4 +1,5 @@
-import { genesisRequest, resolveGenesisConnection } from "./genesisClient";
+import { resolveHiveConnection } from "./connection";
+import { genesisRequest } from "./genesisClient";
 
 export interface MediaCapabilities {
   portrait_available: boolean; video_available: boolean; portrait_model: string; video_model: string;
@@ -25,7 +26,7 @@ export const actOnGenesisJob = (sessionId: string, jobId: string, action: "retry
 export const approveGenesisAsset = (sessionId: string, assetId: string) => genesisRequest<unknown>(`${pathFor(sessionId)}/assets/${encodeURIComponent(assetId)}/approve`, { identity_confirmed: true });
 export const deleteGenesisAsset = (sessionId: string, assetId: string) => genesisRequest<unknown>(`${pathFor(sessionId)}/assets/${encodeURIComponent(assetId)}`, undefined, "DELETE");
 export async function genesisAssetBlob(sessionId: string, assetId: string): Promise<Blob> {
-  const { base, token } = await resolveGenesisConnection();
+  const { base, token } = await resolveHiveConnection();
   const response = await fetch(`${base}/v1/genesis${pathFor(sessionId)}/assets/${encodeURIComponent(assetId)}`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error("This visual could not be loaded. Try again.");
   return response.blob();

@@ -1,0 +1,15 @@
+{
+  "productName": "Abigail Preview Entity Runtime",
+  "identifier": "com.abigail.preview.entity-runtime",
+  "app": {
+    "windows": [
+      {
+        "title": "Abigail Preview Entity Runtime",
+        "width": 1180,
+        "height": 860,
+        "resizable": true,
+        "visible": false
+      }
+    ]
+  }
+}

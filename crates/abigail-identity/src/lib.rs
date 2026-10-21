@@ -708,7 +708,9 @@ impl IdentityManager {
             }
         };
 
-        let agent_docs = docs_base.join("Abigail").join(&safe_name);
+        let agent_docs = abigail_core::channel::current()
+            .documents_dir(&docs_base)
+            .join(&safe_name);
         std::fs::create_dir_all(&agent_docs)
             .map_err(|e| format!("Failed to create Documents folder: {}", e))?;
 
@@ -1417,7 +1419,9 @@ mod tests {
             .unwrap_or_else(|| manager.data_root().join("Documents"));
         assert_eq!(
             documents,
-            expected_base.join("Abigail").join("Isolated Documents")
+            expected_base
+                .join(abigail_core::channel::current().documents_folder())
+                .join("Isolated Documents")
         );
         let _ = std::fs::remove_dir_all(manager.data_root());
     }

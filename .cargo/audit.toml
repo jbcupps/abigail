@@ -1,0 +1,13 @@
+# cargo-audit policy. CI runs `cargo audit` with this file and fails on any
+# vulnerability that is not listed here. Every exception needs a reason, the
+# dependency path that blocks the fix, and a condition for removing it.
+
+[advisories]
+ignore = [
+    # rsa 0.9 "Marvin" timing side channel. No patched release exists.
+    # Reached only through surrealdb-core -> jsonwebtoken. Abigail embeds
+    # SurrealKV in-process and never exposes SurrealDB JWT/RSA authentication
+    # on a network listener. Remove when jsonwebtoken or surrealdb drops rsa
+    # or a fixed rsa release ships.
+    "RUSTSEC-2023-0071",
+]

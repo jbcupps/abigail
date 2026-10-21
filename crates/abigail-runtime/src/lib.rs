@@ -341,7 +341,7 @@ fn default_allowed_roots(entity_dir: &Path) -> Vec<PathBuf> {
     if let Some(docs_dir) =
         directories::UserDirs::new().and_then(|dirs| dirs.document_dir().map(|d| d.to_path_buf()))
     {
-        allowed_roots.push(docs_dir.join("Abigail"));
+        allowed_roots.push(abigail_core::channel::current().documents_dir(&docs_dir));
     }
     allowed_roots
 }

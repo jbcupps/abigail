@@ -2,7 +2,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ProviderWizard from "./ProviderWizard";
 
-vi.mock("../lib/connection", () => ({ resolveHiveUrl: async () => "http://127.0.0.1:43141" }));
+vi.mock("../lib/connection", () => ({
+  resolveHiveUrl: async () => "http://127.0.0.1:43141",
+  resolveHiveConnection: async () => ({ base: "http://127.0.0.1:43141", token: "control-token" }),
+}));
 const json = (data: unknown) => new Response(JSON.stringify({ ok: true, data }), { headers: { "Content-Type": "application/json" } });
 
 afterEach(() => vi.unstubAllGlobals());

@@ -37,13 +37,29 @@ export async function resolveHiveUrl(): Promise<string> {
   return cached;
 }
 
-// Desktop capability stays in memory, never in a media URL or browser storage.
-export async function resolveGenesisToken(): Promise<string> {
+// The control token stays in memory, never in a URL or browser storage. The
+// native shell only releases it after the daemon proves it holds the same one.
+export async function resolveHiveToken(): Promise<string> {
   if (detectRuntimeMode() === "native") {
     const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<string>("get_genesis_token");
+    return invoke<string>("get_hive_control_token");
   }
-  const token = import.meta.env.VITE_GENESIS_TOKEN as string | undefined;
-  if (!token) throw new Error("Open Genesis in the Abigail app, or configure the local development capability.");
+  const token = import.meta.env.VITE_HIVE_CONTROL_TOKEN as string | undefined;
+  if (!token) throw new Error("Open this in the Abigail app, or configure the local development Hive token.");
   return token;
+}
+
+// Only a plain loopback origin may receive the control token.
+export function localHiveOrigin(base: string): string {
+  const url = new URL(base);
+  if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
+      || url.username || url.password || url.search || url.hash || (url.pathname !== "/" && url.pathname !== "")) {
+    throw new Error("Abigail needs a local Hive connection. Use the Abigail app or a local development Hive.");
+  }
+  return url.origin;
+}
+
+export async function resolveHiveConnection(): Promise<{ base: string; token: string }> {
+  const base = localHiveOrigin(await resolveHiveUrl());
+  return { base, token: await resolveHiveToken() };
 }

@@ -19,9 +19,13 @@ bundling, so that first build needs internet unless those tools are cached.
 Installing on a machine without WebView2 also needs its runtime installation.
 startup.mp4 is optional: a clean checkout uses the existing branded splash
 fallback. The installer contains the app/daemons; models are configured in Hive.
+-Channel preview builds "Abigail Preview", which installs beside stable Abigail
+with its own app identities, data root, vault credential, and Hive ports. It
+compiles into target/preview and writes dist/windows-preview by default.
 #>
 [CmdletBinding()]
 param(
+    [ValidateSet('stable', 'preview')][string]$Channel = 'stable',
     [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.0.1',
     [ValidateSet('debug', 'release')][string]$Configuration = 'debug',
     [ValidateSet('zlib', 'bzip2', 'lzma', 'none')][string]$Compression = 'zlib',
@@ -36,6 +40,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+. (Join-Path $PSScriptRoot 'packaging_channel.ps1')
+$channelProfile = Get-AbigailPackagingChannel -RepositoryRoot $repoRoot -Channel $Channel
 
 function Resolve-RepoPath([string]$Value, [string]$Fallback) {
     if ([string]::IsNullOrWhiteSpace($Value)) { $Value = $Fallback }
@@ -97,8 +103,10 @@ foreach ($command in @('cargo', 'node', 'npm.cmd')) {
 }
 Invoke-Checked 'cargo' @('tauri', '--version') $repoRoot
 $targetRoot = Resolve-RepoPath $TargetDir 'target'
-$outputRoot = Resolve-RepoPath $OutputDir 'dist/windows-mvp'
-Write-Host "Unsigned Abigail MVP: $Configuration; NSIS compression: $Compression; Cargo target: $targetRoot"
+# Separate targets keep a stable build from ever bundling preview binaries.
+if ($channelProfile.TargetSubdir) { $targetRoot = Join-Path $targetRoot $channelProfile.TargetSubdir }
+$outputRoot = Resolve-RepoPath $OutputDir $channelProfile.DefaultOutputDir
+Write-Host "Unsigned $($channelProfile.ProductName) ($Channel): $Configuration; NSIS compression: $Compression; Cargo target: $targetRoot"
 Write-Host 'NSIS is supplied by Tauri; no SSL.com certificate or updater key is required.'
 if ($PreflightOnly) { return }
 if ($SkipBuild -and -not $SkipFrontend) {
@@ -107,7 +115,10 @@ if ($SkipBuild -and -not $SkipFrontend) {
 
 $previousTargetDir = $env:CARGO_TARGET_DIR
 $previousTauriConfig = $env:TAURI_CONFIG
+$previousBuildProfile = $env:ABIGAIL_BUILD_PROFILE
 $env:CARGO_TARGET_DIR = $targetRoot
+# Never inherit a profile from the calling shell; stable builds leave it unset.
+if ($Channel -eq 'preview') { $env:ABIGAIL_BUILD_PROFILE = 'preview' } else { Remove-Item Env:ABIGAIL_BUILD_PROFILE -ErrorAction SilentlyContinue }
 try {
     if (-not $SkipFrontend) {
         foreach ($app in @('hive-app', 'entity-runtime-app')) {
@@ -121,13 +132,26 @@ try {
     $frontends = @(foreach ($app in @('hive-app', 'entity-runtime-app')) { Read-FrontendAssets $app })
 
     if (-not $SkipBuild) {
-        $buildArgs = @('build', '--locked', '-p', 'hive-daemon', '-p', 'entity-daemon',
-            '-p', 'abigail-hive-app', '-p', 'abigail-entity-runtime-app',
-            '--features', 'tauri/custom-protocol')
-        if ($Configuration -eq 'release') { $buildArgs += '--release' }
-        # Apply version to both embedded Tauri contexts, not only installer metadata.
-        $env:TAURI_CONFIG = (@{ version = $Version } | ConvertTo-Json -Compress)
-        Invoke-Checked 'cargo' $buildArgs $repoRoot
+        # TAURI_CONFIG applies to every shell in one cargo run, so preview builds
+        # each shell with its own embedded identity.
+        $builds = if ($Channel -eq 'preview') {
+            @(
+                @{ packages = @('hive-daemon', 'entity-daemon', 'abigail-hive-app'); config = $channelProfile.HiveBuildConfig },
+                @{ packages = @('abigail-entity-runtime-app'); config = $channelProfile.RuntimeBuildConfig }
+            )
+        } else {
+            @(@{ packages = @('hive-daemon', 'entity-daemon', 'abigail-hive-app', 'abigail-entity-runtime-app'); config = [ordered]@{} })
+        }
+        foreach ($build in $builds) {
+            $buildArgs = @('build', '--locked') + @($build.packages | ForEach-Object { '-p', $_ }) +
+                @('--features', 'tauri/custom-protocol')
+            if ($Configuration -eq 'release') { $buildArgs += '--release' }
+            # Apply version to both embedded Tauri contexts, not only installer metadata.
+            $tauriConfig = [ordered]@{ version = $Version }
+            foreach ($key in $build.config.Keys) { $tauriConfig[$key] = $build.config[$key] }
+            $env:TAURI_CONFIG = ($tauriConfig | ConvertTo-Json -Depth 8 -Compress)
+            Invoke-Checked 'cargo' $buildArgs $repoRoot
+        }
         $env:TAURI_CONFIG = $previousTauriConfig
     }
 
@@ -154,9 +178,16 @@ try {
     $runtimeInputs += @('abigail-entity-runtime-app.exe', 'hive-daemon.exe', 'entity-daemon.exe') |
         ForEach-Object { Join-Path $binaryDir $_ }
     Invoke-Checked 'node' (@((Join-Path $PSScriptRoot 'check_windows_runtime.mjs')) + $runtimeInputs) $repoRoot
+    # -SkipBuild can reuse binaries from another channel; a stable daemon in a
+    # preview installer would open the family's stable data.
+    Assert-AbigailChannelBinary -Path $mainBinary -ChannelProfile $channelProfile -Kind hive
+    Assert-AbigailChannelBinary -Path (Join-Path $binaryDir 'abigail-entity-runtime-app.exe') -ChannelProfile $channelProfile -Kind runtime
+    foreach ($daemon in @('hive-daemon.exe', 'entity-daemon.exe')) {
+        Assert-AbigailChannelBinary -Path (Join-Path $binaryDir $daemon) -ChannelProfile $channelProfile -Kind daemon
+    }
     # bundle targets mainBinaryName directly; build normally does the rename.
     # Copy here because this lane deliberately bundles an already built app.
-    $bundledMainBinary = Join-Path $binaryDir 'Abigail.exe'
+    $bundledMainBinary = Join-Path $binaryDir $channelProfile.LauncherFileName
     Copy-Item -LiteralPath $mainBinary -Destination $bundledMainBinary -Force
     $expectedLauncherHash = Get-NsisLauncherHash $bundledMainBinary
     New-Item -ItemType Directory -Force -Path $resourceDir | Out-Null
@@ -173,7 +204,7 @@ try {
     $configPath = Join-Path $workDir 'tauri-unsigned-mvp.json'
     $config = @{
         version = $Version
-        mainBinaryName = 'Abigail'
+        mainBinaryName = $channelProfile.MainBinaryName
         build = @{ beforeBuildCommand = '' }
         bundle = @{
             active = $true
@@ -182,10 +213,14 @@ try {
             resources = @($internalBinaries | ForEach-Object { "resources/$_" })
             windows = @{
                 certificateThumbprint = $null; signCommand = $null; timestampUrl = $null; tsp = $false
-                nsis = @{ compression = $Compression; installerHooks = (Join-Path $PSScriptRoot 'nsis-mvp-hooks.nsh').Replace('\', '/') }
+                nsis = @{ compression = $Compression; installerHooks = $channelProfile.InstallerHooks.Replace('\', '/') }
             }
         }
         plugins = @{ updater = $null }
+    }
+    if ($Channel -eq 'preview') {
+        $config.productName = $channelProfile.ProductName
+        $config.identifier = $channelProfile.HiveIdentifier
     }
     [IO.File]::WriteAllText($configPath, ($config | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
     $bundleStarted = [DateTime]::UtcNow
@@ -198,13 +233,13 @@ try {
         Where-Object { $_.LastWriteTimeUtc -ge $bundleStarted.AddSeconds(-2) })
     if ($installers.Count -ne 1) { throw "Expected exactly one new NSIS installer; found $($installers.Count)." }
     New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
-    $installerPath = Join-Path $outputRoot 'Abigail-windows-x64-setup.exe'
+    $installerPath = Join-Path $outputRoot $channelProfile.InstallerFileName
     Copy-Item -LiteralPath $installers[0].FullName -Destination $installerPath -Force
     $signatureStatus = (Get-AuthenticodeSignature -LiteralPath $installerPath).Status.ToString()
     if ($signatureStatus -ne 'NotSigned') { throw "Unsigned MVP installer has unexpected signature status: $signatureStatus" }
 
     $payload = @([ordered]@{
-        name = 'Abigail'; relative_path = 'Abigail.exe'; source_path = $mainBinary
+        name = $channelProfile.MainBinaryName; relative_path = $channelProfile.LauncherFileName; source_path = $mainBinary
         source_sha256 = (Get-FileHash -LiteralPath $mainBinary -Algorithm SHA256).Hash
         bundle_transform = 'unique __TAURI_BUNDLE_TYPE_VAR_UNK marker -> __TAURI_BUNDLE_TYPE_VAR_NSS'
         sha256 = $expectedLauncherHash
@@ -217,7 +252,15 @@ try {
         }
     }
     $manifestPath = Join-Path $outputRoot 'mvp-build.json'
+    $sourceCommit = $null
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        $sourceCommit = (& git -C $repoRoot rev-parse HEAD 2>$null)
+        if ($LASTEXITCODE -ne 0) { $sourceCommit = $null }
+    }
     $manifest = [ordered]@{
+        channel = $Channel; product_name = $channelProfile.ProductName
+        hive_identifier = $channelProfile.HiveIdentifier; runtime_identifier = $channelProfile.RuntimeIdentifier
+        source_commit = $sourceCommit
         version = $Version; configuration = $Configuration; nsis_compression = $Compression
         signed = $false; installer_signature_status = $signatureStatus
         created_at_utc = [DateTime]::UtcNow.ToString('o'); installer_path = $installerPath
@@ -233,4 +276,5 @@ try {
 } finally {
     $env:CARGO_TARGET_DIR = $previousTargetDir
     $env:TAURI_CONFIG = $previousTauriConfig
+    $env:ABIGAIL_BUILD_PROFILE = $previousBuildProfile
 }

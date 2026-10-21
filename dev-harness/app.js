@@ -19,6 +19,14 @@ const elements = {
   ackPill: document.querySelector("#ack-pill"),
 };
 
+// Held in memory only; sent to the Hive URL from the harness config, never to the runtime.
+let hiveAccess = { url: "", token: null };
+
+function hiveOptions(hiveUrl, options = {}) {
+  if (!hiveAccess.token || hiveUrl !== hiveAccess.url) return options;
+  return { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${hiveAccess.token}` } };
+}
+
 function setJson(target, value) {
   target.textContent = JSON.stringify(value, null, 2);
 }
@@ -71,8 +79,8 @@ async function refreshHive() {
     const healthy = await probeHealth(hiveUrl);
     setPill(elements.hiveHealthPill, healthy ? "Healthy" : "Unreachable", healthy ? "ok" : "warn");
 
-    const status = await fetchJson(`${hiveUrl}/v1/status`);
-    const entities = await fetchJson(`${hiveUrl}/v1/entities`);
+    const status = await fetchJson(`${hiveUrl}/v1/status`, hiveOptions(hiveUrl));
+    const entities = await fetchJson(`${hiveUrl}/v1/entities`, hiveOptions(hiveUrl));
     setJson(elements.hiveStatus, { status, entities });
     renderEntities(entities?.data || []);
   } catch (error) {
@@ -169,6 +177,7 @@ async function refreshAll() {
 async function bootstrap() {
   const config = await fetchJson("./config.json");
   const saved = loadSaved();
+  hiveAccess = { url: config.hiveUrl || "", token: config.hiveToken || null };
 
   elements.hiveUrl.value = saved.hiveUrl || config.hiveUrl || "http://127.0.0.1:43141";
   elements.runtimeUrl.value = saved.runtimeUrl || config.runtimeUrl || "http://127.0.0.1:43142";

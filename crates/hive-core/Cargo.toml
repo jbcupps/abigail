@@ -4,5 +4,10 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+hmac = "0.13"
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true

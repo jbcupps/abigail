@@ -137,6 +137,20 @@ function Invoke-HardFailureBreakout {
 # HTTP helpers
 # ---------------------------------------------------------------------------
 
+# The Hive control token is only ever sent to the Hive URL it was read for.
+$script:HiveAccess = $null
+
+function Set-UatHiveAccess {
+    param([string]$HiveUrl, [string]$DataDir, [int]$MaxWaitSec = 30)
+    $path = Join-Path $DataDir 'hive-control.token'
+    $deadline = (Get-Date).AddSeconds($MaxWaitSec)
+    while (-not (Test-Path $path)) {
+        if ((Get-Date) -ge $deadline) { throw "Hive control token not found at $path" }
+        Start-Sleep -Milliseconds 500
+    }
+    $script:HiveAccess = @{ Url = $HiveUrl.TrimEnd('/'); Token = (Get-Content -Raw $path).Trim() }
+}
+
 function Invoke-UatRequest {
     param(
         [string]$Method = 'GET',
@@ -149,6 +163,9 @@ function Invoke-UatRequest {
         Uri         = $Uri
         ContentType = 'application/json'
         TimeoutSec  = $TimeoutSec
+    }
+    if ($script:HiveAccess -and $Uri.StartsWith("$($script:HiveAccess.Url)/")) {
+        $params['Headers'] = @{ Authorization = "Bearer $($script:HiveAccess.Token)" }
     }
     if ($Body) {
         $params['Body'] = ($Body | ConvertTo-Json -Depth 10)

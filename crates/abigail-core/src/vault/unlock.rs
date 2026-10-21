@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 const KEK_LEN: usize = super::VAULT_KEK_LEN;
-const KEYRING_SERVICE: &str = "com.abigail.vault";
 const KEYRING_ACCOUNT: &str = "abigail.hive.master-kek-v1";
 const PASSPHRASE_ENV: &str = "ABIGAIL_VAULT_PASSPHRASE";
 const RAW_KEK_ENV: &str = "ABIGAIL_VAULT_RAW_KEY";
@@ -343,8 +342,13 @@ fn decode_raw_kek(raw_secret: &str) -> Result<[u8; KEK_LEN]> {
 // OS credential store helpers
 // ---------------------------------------------------------------------------
 
+/// Stable and preview vaults must never read or overwrite each other's root key.
+fn keyring_service() -> &'static str {
+    crate::channel::current().keyring_service()
+}
+
 fn os_keyring_load() -> Result<[u8; KEK_LEN]> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
+    let entry = keyring::Entry::new(keyring_service(), KEYRING_ACCOUNT)
         .map_err(|e| CoreError::Keyring(format!("keyring entry creation failed: {}", e)))?;
     let password = entry
         .get_password()
@@ -380,7 +384,7 @@ fn os_keyring_load_optional() -> Result<Option<[u8; KEK_LEN]>> {
 fn os_keyring_store(kek: &[u8; KEK_LEN]) -> Result<()> {
     use base64::Engine as _;
     let encoded = base64::engine::general_purpose::STANDARD.encode(kek);
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
+    let entry = keyring::Entry::new(keyring_service(), KEYRING_ACCOUNT)
         .map_err(|e| CoreError::Keyring(format!("keyring entry creation failed: {}", e)))?;
     entry
         .set_password(&encoded)
@@ -470,6 +474,18 @@ mod tests {
         assert!(load_windows_kek_fallback_optional(&root).unwrap().is_none());
         assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
         std::fs::remove_dir(&root).unwrap();
+    }
+
+    #[test]
+    fn vault_root_key_uses_the_compiled_channel_credential() {
+        assert_eq!(
+            keyring_service(),
+            crate::channel::current().keyring_service()
+        );
+        assert_ne!(
+            crate::channel::Channel::Stable.keyring_service(),
+            crate::channel::Channel::Preview.keyring_service()
+        );
     }
 
     #[test]

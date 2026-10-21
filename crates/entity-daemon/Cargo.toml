@@ -50,3 +50,4 @@ cron = "0.15"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 daemon-test-harness = { path = "../daemon-test-harness" }
 reqwest.workspace = true
+tower = { version = "0.5", features = ["util"] }

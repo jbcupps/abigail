@@ -12,7 +12,8 @@ use std::sync::{Arc, Mutex};
 pub struct HiveDaemonState {
     pub genesis: Arc<crate::genesis_store::GenesisStore>,
     pub genesis_media: Arc<crate::genesis_media::GenesisMediaService>,
-    pub genesis_token: Arc<String>,
+    /// Per-install credential for the desktop Hive app. See [`crate::access`].
+    pub control_token: Arc<String>,
     pub genesis_control: Arc<crate::genesis::GenesisControl>,
     pub identity_manager: Arc<IdentityManager>,
     pub hive: Arc<Hive>,

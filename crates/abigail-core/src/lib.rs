@@ -1,3 +1,5 @@
+pub use abigail_channel as channel;
+
 pub mod capability_envelope;
 pub mod config;
 pub mod constitutional;

@@ -1,13 +1,15 @@
 //! Hive daemon — control plane HTTP server for the Abigail Hive.
 //!
 //! Wraps `IdentityManager`, `Hive`, and `SecretsVault` behind an Axum REST API.
-//! Listens on `--port` (default 43141).
+//! Listens on `--port` (default: the channel's first Hive port, 43141 for stable).
 
+mod access;
+mod app;
 mod birth;
 mod doctor;
 mod genesis;
-mod genesis_auth;
 mod genesis_director;
+mod genesis_http;
 mod genesis_media;
 mod genesis_retention;
 mod genesis_store;
@@ -20,18 +22,15 @@ mod supervisor;
 use abigail_core::{AppConfig, SecretsVault};
 use abigail_hive::Hive;
 use abigail_identity::IdentityManager;
-use axum::routing::{get, post};
-use axum::Router;
 use clap::Parser;
 use state::HiveDaemonState;
 use std::sync::{Arc, Mutex};
-use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 #[derive(Parser)]
 #[command(name = "hive-daemon", about = "Abigail Hive control plane daemon")]
 struct Cli {
     /// Port to listen on
-    #[arg(long, default_value = "43141")]
+    #[arg(long, default_value_t = *abigail_core::channel::current().hive_ports().start())]
     port: u16,
 
     /// Data directory (defaults to platform-specific app data dir)
@@ -123,7 +122,7 @@ async fn run() -> anyhow::Result<()> {
             &data_root,
             hive.clone(),
         )?),
-        genesis_token: Arc::new(genesis_auth::load_or_create_token(&data_root)?),
+        control_token: Arc::new(access::load_or_create_control_token(&data_root)?),
         genesis_control: Arc::new(genesis::GenesisControl::default()),
         identity_manager,
         hive,
@@ -147,84 +146,7 @@ async fn run() -> anyhow::Result<()> {
         Err(e) => tracing::warn!("Hive helper not started: {}", e),
     }
 
-    // Build router
-    let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::predicate(|origin, _| {
-            origin
-                .to_str()
-                .ok()
-                .and_then(|s| reqwest::Url::parse(s).ok())
-                .is_some_and(|url| {
-                    matches!(
-                        url.host_str(),
-                        Some("localhost" | "127.0.0.1" | "tauri.localhost" | "[::1]" | "::1")
-                    )
-                })
-        }))
-        .allow_methods(Any)
-        .allow_headers(Any);
-
-    let app = Router::new()
-        .merge(genesis::router(state.clone()))
-        .route("/health", get(routes::health))
-        .route("/v1/status", get(routes::get_status))
-        .route("/v1/entities", get(routes::list_entities))
-        .route("/v1/entities", post(routes::create_entity))
-        .route("/v1/entities/:id", get(routes::get_entity))
-        .route("/v1/entities/:id/open", post(routes::open_entity))
-        .route("/v1/entities/:id/close", post(routes::close_entity))
-        .route("/v1/entities/:id/persistence", post(persistence::request))
-        .route("/v1/birth/scenarios", get(birth::get_scenarios))
-        .route(
-            "/v1/entities/:id/birth",
-            get(birth::get_birth_document).post(birth::perform_birth),
-        )
-        .route(
-            "/v1/entities/:id/config",
-            axum::routing::patch(routes::update_entity_config),
-        )
-        .route(
-            "/v1/entities/:id/provider-config",
-            get(routes::get_provider_config),
-        )
-        .route("/v1/entities/:id/sign", post(routes::sign_entity))
-        .route(
-            "/v1/entities/:id/assignments",
-            get(routes::get_skill_assignments).post(routes::set_skill_assignments),
-        )
-        .route(
-            "/v1/entities/:id/forge-approvals",
-            get(routes::get_forge_approval_jobs).post(routes::create_forge_approval_job),
-        )
-        .route("/v1/secrets", post(routes::store_secret))
-        .route("/v1/secrets/list", get(routes::list_secrets))
-        .route("/v1/secrets/:key", get(routes::get_secret))
-        .route("/v1/providers/models", post(routes::discover_models))
-        .route("/v1/providers/best", get(routes::get_best_model))
-        .route("/v1/providers/detect", get(routes::detect_cli))
-        .route("/v1/providers/hive-default", post(routes::set_hive_default))
-        .route("/v1/providers/local", post(routes::set_local_provider))
-        .route(
-            "/v1/providers/profiles/:name",
-            get(routes::get_provider_profile),
-        )
-        .route("/v1/runtime/sessions", post(routes::issue_runtime_session))
-        .route(
-            "/v1/runtime/sessions/:lease_id",
-            get(routes::get_runtime_session),
-        )
-        .route("/v1/runtime/register", post(routes::register_runtime))
-        .route(
-            "/v1/runtime/heartbeat",
-            post(routes::record_runtime_heartbeat),
-        )
-        .route("/v1/runtime/outbox/sync", post(routes::sync_runtime_outbox))
-        .route(
-            "/v1/entities/:id/execution/receipts",
-            get(routes::get_execution_receipts),
-        )
-        .layer(cors)
-        .with_state(state);
+    let app = app::router(state);
 
     tracing::info!("Hive daemon listening on {}", hive_url);
     // The monolith daemon-manager spawns us with `--port 0` and parses this line

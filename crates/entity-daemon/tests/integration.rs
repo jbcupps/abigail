@@ -108,7 +108,10 @@ async fn startup_preserves_an_unchanged_skill_vault_without_delete_sharing() {
     // shared fixture, so it cannot overwrite the envelope under examination.
     tokio::time::timeout(TIMEOUT, async {
         loop {
-            let status = api(client.get(format!("{}/v1/status", hive.url()))).await;
+            let status = api(client
+                .get(format!("{}/v1/status", hive.url()))
+                .bearer_auth(hive.control_token()))
+            .await;
             if status["helper"]["running"] == true {
                 break;
             }
@@ -120,6 +123,7 @@ async fn startup_preserves_an_unchanged_skill_vault_without_delete_sharing() {
 
     api(client
         .post(format!("{}/v1/secrets", hive.url()))
+        .bearer_auth(hive.control_token())
         .json(&serde_json::json!({"key": "tavily", "value": "synthetic-startup-secret"})))
     .await;
     let skill_dir = hive.data_dir().join("skill_secrets");
@@ -141,10 +145,11 @@ async fn startup_preserves_an_unchanged_skill_vault_without_delete_sharing() {
 
     let created = api(client
         .post(format!("{}/v1/entities", hive.url()))
+        .bearer_auth(hive.control_token())
         .json(&serde_json::json!({"name": "locked-vault-startup"})))
     .await;
     let entity_id = created["id"].as_str().unwrap();
-    let entity = EntityDaemonHandle::start(entity_id, hive.url(), None, TIMEOUT)
+    let entity = EntityDaemonHandle::start(entity_id, &hive, TIMEOUT)
         .await
         .expect("An Entity with no missing skill secrets must start with the vault held open");
     let status = api(client.get(format!("{}/v1/status", entity.url()))).await;

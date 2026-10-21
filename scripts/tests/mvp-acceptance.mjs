@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
-import { createWriteStream, existsSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -34,6 +34,7 @@ environment.ABIGAIL_DOCUMENTS_DIR = documentsDir;
 let hive;
 let fixture;
 let hiveUrl;
+let hiveToken;
 let restartCount = 0;
 const transport = [];
 
@@ -67,8 +68,12 @@ async function raw(url, { method = 'GET', body, headers = {}, timeout = 60000 } 
   try { value = JSON.parse(text); } catch { value = text; }
   return { response, value };
 }
-async function api(url, options) {
-  const { response, value } = await raw(url, options);
+// The desktop app's per-install credential; Entity daemons never receive it.
+function withHiveToken(url, headers = {}) {
+  return hiveToken && url.startsWith(`${hiveUrl}/`) ? { authorization: `Bearer ${hiveToken}`, ...headers } : headers;
+}
+async function api(url, options = {}) {
+  const { response, value } = await raw(url, { ...options, headers: withHiveToken(url, options.headers) });
   assert(response.ok, `HTTP ${response.status} from ${url}: ${JSON.stringify(value)}`);
   assert(value?.ok === true, `API rejected ${url}: ${JSON.stringify(value)}`);
   return value.data;
@@ -111,6 +116,7 @@ async function startHive() {
     if (child.exitCode !== null) throw new Error(`Hive exited with code ${child.exitCode}`);
     const { response } = await raw(`${hiveUrl}/health`, { timeout: 2000 }); return response.ok;
   }, 'Hive did not become healthy');
+  hiveToken = readFileSync(join(dataDir, 'hive-control.token'), 'utf8').trim();
   return until(async () => { const status = await api(`${hiveUrl}/v1/status`); return status.helper?.running && status.helper.local_url ? status : null; }, 'Hive helper did not become available');
 }
 async function streamChat(url, message) {
@@ -213,6 +219,12 @@ try {
       assert.equal(issued.response.status, 403, 'Unauthenticated client obtained a runtime lease');
       const disclosed = await raw(`${entity.url}/v1/session/status`);
       assert.equal(disclosed.response.status, 403, 'Unauthenticated client obtained runtime session metadata');
+      for (const path of ['/v1/status', '/v1/entities', '/v1/secrets/list', `/v1/entities/${entity.id}/provider-config`]) {
+        for (const headers of [{}, { authorization: `Bearer ${'0'.repeat(64)}` }]) {
+          const denied = await raw(`${hiveUrl}${path}`, { headers });
+          assert.equal(denied.response.status, 401, `${path} answered without this install's Hive control token`);
+        }
+      }
     }
   });
   await stage('persistence rejects invalid bearer for both Entity scopes', async () => {

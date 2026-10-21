@@ -256,7 +256,7 @@ fn default_skill_recovery_budget() -> u8 {
 }
 
 fn default_hive_daemon_url() -> String {
-    "http://127.0.0.1:43141".to_string()
+    crate::channel::current().default_hive_url()
 }
 
 fn default_entity_daemon_url() -> String {
@@ -522,8 +522,8 @@ pub struct EmailConfig {
 
 impl AppConfig {
     pub fn default_paths() -> Self {
-        let base = directories::ProjectDirs::from("com", "abigail", "Abigail")
-            .map(|d| d.data_local_dir().to_path_buf())
+        let base = crate::channel::current()
+            .default_data_root()
             .unwrap_or_else(|| PathBuf::from("."));
 
         Self {
@@ -589,8 +589,8 @@ impl AppConfig {
     pub fn trusted_config_path(_data_dir: &Path) -> PathBuf {
         // Use the same base directory as `default_paths` to ensure this
         // always resolves to an application-controlled location.
-        let base = directories::ProjectDirs::from("com", "abigail", "Abigail")
-            .map(|d| d.data_local_dir().to_path_buf())
+        let base = crate::channel::current()
+            .default_data_root()
             .unwrap_or_else(|| PathBuf::from("."));
 
         base.join("config.json")
@@ -993,6 +993,18 @@ mod tests {
             theme_id: None,
             autonomy_profile: AutonomyProfile::default(),
         }
+    }
+
+    #[test]
+    fn default_paths_follow_the_compiled_channel() {
+        let channel = crate::channel::current();
+        let config = AppConfig::default_paths();
+        assert_eq!(Some(config.data_dir.clone()), channel.default_data_root());
+        assert_eq!(
+            AppConfig::trusted_config_path(Path::new("ignored")),
+            config.data_dir.join("config.json")
+        );
+        assert_eq!(config.hive_daemon_url, channel.default_hive_url());
     }
 
     #[test]

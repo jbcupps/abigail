@@ -28,7 +28,8 @@ const BUS_TOPIC: &str = abigail_streaming::Topic::JobEvents.as_str();
 /// if the control plane is temporarily unreachable.
 async fn refresh_provider_for_turn(state: &EntityDaemonState) {
     let refresh = async {
-        let client = crate::hive_client::HiveClient::new(&state.hive_url);
+        let client = crate::hive_client::HiveClient::new(&state.hive_url)
+            .with_lease(&state.session_lease.lease_id);
         let config = client.get_provider_config(&state.entity_id).await?;
         let snapshot = serde_json::to_value(&config)?;
         if !state.router.matches_provider_config(&snapshot) {

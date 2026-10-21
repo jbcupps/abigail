@@ -2,6 +2,7 @@
 resolver = "2"
 exclude = ["vendor/tauri-plugin-updater"]
 members = [
+    "crates/abigail-channel",
     "crates/abigail-diag",
     "crates/abigail-persistence",
     "crates/abigail-core",

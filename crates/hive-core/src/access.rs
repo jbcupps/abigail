@@ -1,0 +1,257 @@
+//! Local access contract for the Hive control plane.
+//!
+//! The Hive daemon keeps a per-install control token in its data root. Every
+//! Hive route except `/health`, the adoption challenge, and runtime lease
+//! issuance requires that token or an Entity runtime lease as a bearer. A
+//! desktop shell must never send the token to a daemon until the daemon has
+//! proved it holds the same token for the expected channel and URL.
+
+use hmac::{Hmac, KeyInit, Mac};
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+
+/// File in the Hive data root holding the control token.
+pub const CONTROL_TOKEN_FILE: &str = "hive-control.token";
+
+/// Unauthenticated route that answers an [`AdoptionChallenge`].
+pub const ADOPTION_PATH: &str = "/v1/hive/adoption";
+
+const TOKEN_LEN: usize = 64;
+const NONCE_LEN: usize = 64;
+const ADOPTION_CONTEXT: &[u8] = b"abigail-hive-adoption-v1";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdoptionChallenge {
+    pub nonce: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdoptionProof {
+    pub channel: String,
+    pub proof: String,
+}
+
+/// The token stored in a control-token file, if the contents are well formed.
+pub fn parse_control_token(contents: &str) -> Option<&str> {
+    let token = contents.trim();
+    is_hex(token, TOKEN_LEN).then_some(token)
+}
+
+/// Adoption nonces are 32 random bytes, hex encoded.
+pub fn is_valid_nonce(nonce: &str) -> bool {
+    is_hex(nonce, NONCE_LEN)
+}
+
+/// Compares a presented bearer with the control token without an early exit.
+pub fn tokens_match(presented: &str, expected: &str) -> bool {
+    presented.len() == expected.len()
+        && presented
+            .bytes()
+            .zip(expected.bytes())
+            .fold(0u8, |difference, (a, b)| difference | (a ^ b))
+            == 0
+}
+
+/// Proof that a daemon listening at `hive_url` for `channel` holds `token`.
+/// Binding the URL means a relay listening elsewhere cannot replay a proof.
+pub fn adoption_proof(token: &str, channel: &str, hive_url: &str, nonce: &str) -> String {
+    let bytes = adoption_mac(token, channel, hive_url, nonce)
+        .finalize()
+        .into_bytes();
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+pub fn verify_adoption_proof(
+    token: &str,
+    channel: &str,
+    hive_url: &str,
+    nonce: &str,
+    proof: &str,
+) -> bool {
+    let Some(proof) = decode_hex(proof) else {
+        return false;
+    };
+    adoption_mac(token, channel, hive_url, nonce)
+        .verify_slice(&proof)
+        .is_ok()
+}
+
+fn adoption_mac(token: &str, channel: &str, hive_url: &str, nonce: &str) -> Hmac<Sha256> {
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(token.as_bytes()).expect("HMAC accepts keys of any length");
+    for part in [
+        ADOPTION_CONTEXT,
+        channel.as_bytes(),
+        hive_url.as_bytes(),
+        nonce.as_bytes(),
+    ] {
+        mac.update(&(part.len() as u64).to_be_bytes());
+        mac.update(part);
+    }
+    mac
+}
+
+/// Whether a `Host` header names this machine's loopback interface. Browsers
+/// send the page's own hostname, so this rejects DNS-rebinding requests.
+pub fn is_loopback_host(host: &str) -> bool {
+    let name = match host.strip_prefix('[') {
+        Some(bracketed) => match bracketed.split_once(']') {
+            Some((address, "")) => address,
+            Some((address, rest)) if rest.strip_prefix(':').is_some_and(is_port) => address,
+            _ => return false,
+        },
+        None => match host.split_once(':') {
+            Some((name, port)) if is_port(port) => name,
+            Some(_) => return false,
+            None => host,
+        },
+    };
+    name.eq_ignore_ascii_case("localhost") || name == "127.0.0.1" || name == "::1"
+}
+
+fn is_port(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+        && value.parse::<u16>().is_ok()
+}
+
+fn is_hex(value: &str, len: usize) -> bool {
+    value.len() == len && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn decode_hex(value: &str) -> Option<Vec<u8>> {
+    if !value.len().is_multiple_of(2) || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    (0..value.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&value[i..i + 2], 16).ok())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const URL: &str = "http://127.0.0.1:43141";
+
+    fn random_hex64() -> String {
+        format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        )
+    }
+
+    /// Changes the first character to another digit from the same value.
+    fn flip_first(value: &str) -> String {
+        let first = value.as_bytes()[0];
+        let other = value
+            .bytes()
+            .find(|&digit| digit != first)
+            .expect("random hex has two distinct digits");
+        format!("{}{}", other as char, &value[1..])
+    }
+
+    #[test]
+    fn control_tokens_must_be_64_hex_characters() {
+        let token = random_hex64();
+        let nonce = random_hex64();
+        assert_eq!(
+            parse_control_token(&format!(" {token}\n")),
+            Some(token.as_str())
+        );
+        assert_eq!(parse_control_token(&token[1..]), None);
+        assert_eq!(parse_control_token(&format!("{token}0")), None);
+        assert_eq!(parse_control_token(&format!("g{}", &token[1..])), None);
+        assert_eq!(parse_control_token(""), None);
+        assert!(is_valid_nonce(&nonce));
+        assert!(!is_valid_nonce(&nonce[..10]));
+        let hyphenated = format!(
+            "{}{}",
+            uuid::Uuid::new_v4().hyphenated(),
+            uuid::Uuid::new_v4().hyphenated()
+        );
+        assert!(!is_valid_nonce(&hyphenated[..64]));
+    }
+
+    #[test]
+    fn token_comparison_rejects_prefixes_and_near_misses() {
+        let token = random_hex64();
+        assert!(tokens_match(&token, &token));
+        assert!(!tokens_match(&token[..63], &token));
+        assert!(!tokens_match(&flip_first(&token), &token));
+        assert!(!tokens_match("", &token));
+    }
+
+    #[test]
+    fn adoption_proof_binds_token_channel_url_and_nonce() {
+        let token = random_hex64();
+        let nonce = random_hex64();
+        let proof = adoption_proof(&token, "stable", URL, &nonce);
+        assert_eq!(proof.len(), 64);
+        assert!(verify_adoption_proof(&token, "stable", URL, &nonce, &proof));
+
+        let other_token = flip_first(&token);
+        let other_nonce = flip_first(&nonce);
+        for (token, channel, url, nonce) in [
+            (other_token.as_str(), "stable", URL, nonce.as_str()),
+            (token.as_str(), "preview", URL, nonce.as_str()),
+            (
+                token.as_str(),
+                "stable",
+                "http://127.0.0.1:43142",
+                nonce.as_str(),
+            ),
+            (token.as_str(), "stable", URL, other_nonce.as_str()),
+        ] {
+            assert!(!verify_adoption_proof(token, channel, url, nonce, &proof));
+        }
+        for truncated in [&proof[..62], "zz", ""] {
+            assert!(!verify_adoption_proof(
+                &token, "stable", URL, &nonce, truncated
+            ));
+        }
+    }
+
+    #[test]
+    fn proof_fields_cannot_be_shifted_into_each_other() {
+        let token = random_hex64();
+        let nonce = random_hex64();
+        assert_ne!(
+            adoption_proof(&token, "stable", "ab", &nonce),
+            adoption_proof(&token, "stablea", "b", &nonce)
+        );
+    }
+
+    #[test]
+    fn only_loopback_host_headers_are_local() {
+        for host in [
+            "127.0.0.1",
+            "127.0.0.1:43141",
+            "localhost:43141",
+            "LOCALHOST",
+            "[::1]",
+            "[::1]:43141",
+        ] {
+            assert!(is_loopback_host(host), "{host}");
+        }
+        for host in [
+            "",
+            "attacker.example:43141",
+            "127.0.0.1.attacker.example",
+            "localhost.attacker.example:43141",
+            "127.0.0.2:43141",
+            "0.0.0.0:43141",
+            "127.0.0.1:",
+            "127.0.0.1:99999",
+            "127.0.0.1:43141:1",
+            "[::1",
+            "[::1]x",
+            "[::2]:43141",
+            "user@127.0.0.1",
+        ] {
+            assert!(!is_loopback_host(host), "{host}");
+        }
+    }
+}

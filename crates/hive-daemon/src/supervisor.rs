@@ -332,6 +332,132 @@ pub async fn spawn_entity_daemon(
     Ok((startup.finish(), local_url))
 }
 
+/// A running family entity-daemon tracked by the supervisor.
+struct RunningEntity {
+    local_url: String,
+    child: tokio::process::Child,
+}
+
+/// Supervises on-demand family entity-daemons (start, reuse, stop). The
+/// persistent Hive helper is managed separately by [`supervise_hive_helper`] and
+/// is intentionally NOT tracked here, so it is never stopped by entity lifecycle.
+pub struct HiveSupervisor {
+    hive_url: String,
+    data_root: PathBuf,
+    running: Mutex<HashMap<String, RunningEntity>>,
+}
+
+impl HiveSupervisor {
+    pub fn new(hive_url: String, data_root: PathBuf) -> Arc<Self> {
+        Arc::new(Self {
+            hive_url,
+            data_root,
+            running: Mutex::new(HashMap::new()),
+        })
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, RunningEntity>> {
+        self.running.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Ensure an entity-daemon is running for `entity_id`, returning its URL.
+    /// Idempotent: reuses a live daemon if one is already tracked, otherwise
+    /// spawns a fresh one. A tracked-but-dead daemon is replaced.
+    pub async fn ensure_entity_running(&self, entity_id: &str) -> anyhow::Result<String> {
+        let existing = {
+            let mut map = self.lock();
+            match map.get_mut(entity_id) {
+                Some(entry) => match entry.child.try_wait() {
+                    Ok(None) => Some(entry.local_url.clone()), // still alive
+                    _ => {
+                        map.remove(entity_id); // exited — replace below
+                        None
+                    }
+                },
+                None => None,
+            }
+        };
+
+        if let Some(url) = existing {
+            if matches!(
+                tokio::time::timeout(
+                    Duration::from_secs(3),
+                    wait_for_entity_ready(&url, entity_id)
+                )
+                .await,
+                Ok(Ok(()))
+            ) {
+                return Ok(url);
+            }
+            // Tracked but unhealthy — kill the old daemon, then respawn.
+            if let Some(stale) = self.lock().remove(entity_id) {
+                kill_and_reap(stale.child);
+            }
+        }
+
+        let (child, url) = spawn_entity_daemon(entity_id, &self.hive_url, &self.data_root).await?;
+        self.lock().insert(
+            entity_id.to_string(),
+            RunningEntity {
+                local_url: url.clone(),
+                child,
+            },
+        );
+        tracing::info!("Entity {} running at {}", entity_id, url);
+        Ok(url)
+    }
+
+    /// Stop and forget the entity-daemon for `entity_id`, if running.
+    pub fn stop_entity(&self, entity_id: &str) {
+        if let Some(entry) = self.lock().remove(entity_id) {
+            tracing::info!("Stopped entity {} at {}", entity_id, entry.local_url);
+            kill_and_reap(entry.child);
+        }
+    }
+}
+
+/// Keep the immortal Hive helper running for the lifetime of the Hive daemon. If
+/// it exits, restart it (with exponential backoff on repeated spawn failures).
+/// Runs out-of-band so the control plane serves `/health` immediately. The
+/// helper's live URL is published into `helper_url` so `/v1/status` and the Hive
+/// app's helper chat can reach it.
+pub fn supervise_hive_helper(
+    hive_entity_id: String,
+    hive_url: String,
+    data_root: PathBuf,
+    helper_url: Arc<Mutex<Option<String>>>,
+) {
+    tokio::spawn(async move {
+        let mut backoff = Duration::from_secs(1);
+        loop {
+            match spawn_entity_daemon(&hive_entity_id, &hive_url, &data_root).await {
+                Ok((mut child, url)) => {
+                    backoff = Duration::from_secs(1);
+                    tracing::info!("Hive helper running at {}", url);
+                    if let Ok(mut guard) = helper_url.lock() {
+                        *guard = Some(url.clone());
+                    }
+                    let status = child.wait().await;
+                    if let Ok(mut guard) = helper_url.lock() {
+                        *guard = None;
+                    }
+                    tracing::warn!("Hive helper exited ({:?}); restarting shortly", status);
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to start Hive helper: {:#}; retrying in {:?}",
+                        e,
+                        backoff
+                    );
+                    tokio::time::sleep(backoff).await;
+                    backoff = (backoff * 2).min(Duration::from_secs(30));
+                }
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -686,130 +812,4 @@ mod tests {
             "redirects cannot establish child readiness"
         );
     }
-}
-
-/// A running family entity-daemon tracked by the supervisor.
-struct RunningEntity {
-    local_url: String,
-    child: tokio::process::Child,
-}
-
-/// Supervises on-demand family entity-daemons (start, reuse, stop). The
-/// persistent Hive helper is managed separately by [`supervise_hive_helper`] and
-/// is intentionally NOT tracked here, so it is never stopped by entity lifecycle.
-pub struct HiveSupervisor {
-    hive_url: String,
-    data_root: PathBuf,
-    running: Mutex<HashMap<String, RunningEntity>>,
-}
-
-impl HiveSupervisor {
-    pub fn new(hive_url: String, data_root: PathBuf) -> Arc<Self> {
-        Arc::new(Self {
-            hive_url,
-            data_root,
-            running: Mutex::new(HashMap::new()),
-        })
-    }
-
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, RunningEntity>> {
-        self.running.lock().unwrap_or_else(|p| p.into_inner())
-    }
-
-    /// Ensure an entity-daemon is running for `entity_id`, returning its URL.
-    /// Idempotent: reuses a live daemon if one is already tracked, otherwise
-    /// spawns a fresh one. A tracked-but-dead daemon is replaced.
-    pub async fn ensure_entity_running(&self, entity_id: &str) -> anyhow::Result<String> {
-        let existing = {
-            let mut map = self.lock();
-            match map.get_mut(entity_id) {
-                Some(entry) => match entry.child.try_wait() {
-                    Ok(None) => Some(entry.local_url.clone()), // still alive
-                    _ => {
-                        map.remove(entity_id); // exited — replace below
-                        None
-                    }
-                },
-                None => None,
-            }
-        };
-
-        if let Some(url) = existing {
-            if matches!(
-                tokio::time::timeout(
-                    Duration::from_secs(3),
-                    wait_for_entity_ready(&url, entity_id)
-                )
-                .await,
-                Ok(Ok(()))
-            ) {
-                return Ok(url);
-            }
-            // Tracked but unhealthy — kill the old daemon, then respawn.
-            if let Some(stale) = self.lock().remove(entity_id) {
-                kill_and_reap(stale.child);
-            }
-        }
-
-        let (child, url) = spawn_entity_daemon(entity_id, &self.hive_url, &self.data_root).await?;
-        self.lock().insert(
-            entity_id.to_string(),
-            RunningEntity {
-                local_url: url.clone(),
-                child,
-            },
-        );
-        tracing::info!("Entity {} running at {}", entity_id, url);
-        Ok(url)
-    }
-
-    /// Stop and forget the entity-daemon for `entity_id`, if running.
-    pub fn stop_entity(&self, entity_id: &str) {
-        if let Some(entry) = self.lock().remove(entity_id) {
-            tracing::info!("Stopped entity {} at {}", entity_id, entry.local_url);
-            kill_and_reap(entry.child);
-        }
-    }
-}
-
-/// Keep the immortal Hive helper running for the lifetime of the Hive daemon. If
-/// it exits, restart it (with exponential backoff on repeated spawn failures).
-/// Runs out-of-band so the control plane serves `/health` immediately. The
-/// helper's live URL is published into `helper_url` so `/v1/status` and the Hive
-/// app's helper chat can reach it.
-pub fn supervise_hive_helper(
-    hive_entity_id: String,
-    hive_url: String,
-    data_root: PathBuf,
-    helper_url: Arc<Mutex<Option<String>>>,
-) {
-    tokio::spawn(async move {
-        let mut backoff = Duration::from_secs(1);
-        loop {
-            match spawn_entity_daemon(&hive_entity_id, &hive_url, &data_root).await {
-                Ok((mut child, url)) => {
-                    backoff = Duration::from_secs(1);
-                    tracing::info!("Hive helper running at {}", url);
-                    if let Ok(mut guard) = helper_url.lock() {
-                        *guard = Some(url.clone());
-                    }
-                    let status = child.wait().await;
-                    if let Ok(mut guard) = helper_url.lock() {
-                        *guard = None;
-                    }
-                    tracing::warn!("Hive helper exited ({:?}); restarting shortly", status);
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to start Hive helper: {:#}; retrying in {:?}",
-                        e,
-                        backoff
-                    );
-                    tokio::time::sleep(backoff).await;
-                    backoff = (backoff * 2).min(Duration::from_secs(30));
-                }
-            }
-        }
-    });
 }
