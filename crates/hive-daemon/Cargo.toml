@@ -37,3 +37,5 @@ sha2.workspace = true
 
 [dev-dependencies]
 daemon-test-harness = { path = "../daemon-test-harness" }
+daemon-client = { path = "../daemon-client" }
+tower = { version = "0.5", features = ["util"] }

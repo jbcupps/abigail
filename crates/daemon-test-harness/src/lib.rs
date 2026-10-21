@@ -10,6 +10,7 @@ use std::time::Duration;
 pub struct HiveDaemonHandle {
     child: Option<Child>,
     url: String,
+    control_token: String,
     _tmp: tempfile::TempDir,
 }
 
@@ -42,16 +43,33 @@ impl HiveDaemonHandle {
         let mut handle = Self {
             child: Some(child),
             url: String::new(),
+            control_token: String::new(),
             _tmp: tmp,
         };
         handle.url = parse_listen_url(stdout, timeout).await?;
         wait_for_health(&handle.url, timeout).await?;
+        let token_path = handle._tmp.path().join("hive-control.token");
+        handle.control_token = std::fs::read_to_string(&token_path)
+            .map_err(|e| anyhow::anyhow!("Hive did not write {:?}: {}", token_path, e))?
+            .trim()
+            .to_string();
         tracing::info!("Hive daemon ready at {}", handle.url);
         Ok(handle)
     }
 
     pub fn url(&self) -> &str {
         &self.url
+    }
+
+    /// The per-install credential the desktop Hive app presents.
+    pub fn control_token(&self) -> &str {
+        &self.control_token
+    }
+
+    /// A client that presents the control token on every request, like the
+    /// desktop Hive app after adoption.
+    pub fn client(&self) -> reqwest::Client {
+        authorized_client(&self.control_token)
     }
 
     pub fn data_dir(&self) -> &std::path::Path {
@@ -117,6 +135,7 @@ foreach ($snapshot in @(Get-CimInstance Win32_Process -Filter "Name = 'entity-da
 pub struct EntityDaemonHandle {
     url: String,
     close_url: String,
+    hive_client: reqwest::Client,
 }
 
 impl EntityDaemonHandle {
@@ -124,12 +143,12 @@ impl EntityDaemonHandle {
     /// runtime bootstrap authorization as an installed Abigail app.
     pub async fn start(
         entity_id: &str,
-        hive_url: &str,
-        _data_dir: Option<&std::path::Path>,
+        hive: &HiveDaemonHandle,
         timeout: Duration,
     ) -> anyhow::Result<Self> {
-        let response: serde_json::Value = reqwest::Client::new()
-            .post(format!("{}/v1/entities/{}/open", hive_url, entity_id))
+        let hive_client = hive.client();
+        let response: serde_json::Value = hive_client
+            .post(format!("{}/v1/entities/{}/open", hive.url(), entity_id))
             .timeout(timeout)
             .send()
             .await?
@@ -145,7 +164,8 @@ impl EntityDaemonHandle {
 
         Ok(Self {
             url,
-            close_url: format!("{}/v1/entities/{}/close", hive_url, entity_id),
+            close_url: format!("{}/v1/entities/{}/close", hive.url(), entity_id),
+            hive_client,
         })
     }
 
@@ -157,13 +177,14 @@ impl EntityDaemonHandle {
 impl Drop for EntityDaemonHandle {
     fn drop(&mut self) {
         let close_url = self.close_url.clone();
+        let hive_client = self.hive_client.clone();
         let _ = std::thread::spawn(move || {
             if let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
             {
                 runtime.block_on(async move {
-                    let _ = reqwest::Client::new()
+                    let _ = hive_client
                         .post(close_url)
                         .timeout(Duration::from_secs(3))
                         .send()
@@ -180,6 +201,7 @@ pub struct TestCluster {
     pub entity: EntityDaemonHandle,
     pub hive: HiveDaemonHandle,
     pub entity_id: String,
+    /// Unauthenticated, for the Entity daemon's own API.
     pub client: reqwest::Client,
 }
 
@@ -191,7 +213,8 @@ impl TestCluster {
         let client = reqwest::Client::new();
 
         // Create an entity in the Hive
-        let resp = client
+        let resp = hive
+            .client()
             .post(format!("{}/v1/entities", hive.url()))
             .json(&serde_json::json!({ "name": "test-entity" }))
             .send()
@@ -203,9 +226,7 @@ impl TestCluster {
             .to_string();
 
         // Start entity-daemon using the same data dir
-        let entity =
-            EntityDaemonHandle::start(&entity_id, hive.url(), Some(hive.data_dir()), timeout)
-                .await?;
+        let entity = EntityDaemonHandle::start(&entity_id, &hive, timeout).await?;
 
         Ok(Self {
             hive,
@@ -219,12 +240,31 @@ impl TestCluster {
         self.hive.url()
     }
 
+    /// Presents the Hive control token; see [`HiveDaemonHandle::client`].
+    pub fn hive_client(&self) -> reqwest::Client {
+        self.hive.client()
+    }
+
     pub fn entity_url(&self) -> &str {
         self.entity.url()
     }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
+
+fn authorized_client(control_token: &str) -> reqwest::Client {
+    let mut value = reqwest::header::HeaderValue::from_str(&format!("Bearer {control_token}"))
+        .expect("control tokens are hex");
+    value.set_sensitive(true);
+    reqwest::Client::builder()
+        .no_proxy()
+        .default_headers(reqwest::header::HeaderMap::from_iter([(
+            reqwest::header::AUTHORIZATION,
+            value,
+        )]))
+        .build()
+        .expect("loopback client")
+}
 
 /// Find the daemon binary path in the cargo target directory.
 fn cargo_bin(name: &str) -> PathBuf {

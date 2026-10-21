@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod access;
 pub mod genesis;
 
 // ---------------------------------------------------------------------------
@@ -341,7 +342,7 @@ pub struct SecretListResponse {
     pub keys: Vec<String>,
 }
 
-/// Response returning a single secret value (localhost-only, for entity daemon startup).
+/// Response returning a single secret value, for an Entity runtime's startup sync.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecretValueResponse {
     pub key: String,

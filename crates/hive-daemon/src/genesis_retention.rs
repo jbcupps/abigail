@@ -1,5 +1,5 @@
 //! Opt-in expiration of Genesis records. Identity and real chat are independent.
-use crate::{genesis::GenesisControl, genesis_auth::OWNER, state::HiveDaemonState};
+use crate::{genesis::GenesisControl, genesis_http::OWNER, state::HiveDaemonState};
 use chrono::{DateTime, Duration, Utc};
 use hive_core::genesis::GenesisSession;
 

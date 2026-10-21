@@ -1,10 +1,11 @@
 //! Hive daemon HTTP route handlers.
 
+use crate::access::Principal;
 use crate::state::HiveDaemonState;
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
-    Json,
+    Extension, Json,
 };
 use hive_core::{
     ApiEnvelope, BestModelResponse, CliDetectResponse, CliProviderDetection, CreateEntityRequest,
@@ -758,7 +759,7 @@ pub async fn list_secrets(
 // GET /v1/secrets/:key
 // ---------------------------------------------------------------------------
 
-/// Fetch a single secret value by key (localhost-only, for entity daemon startup sync).
+/// Fetch a single secret value by key, for an Entity runtime's startup sync.
 pub async fn get_secret(
     State(state): State<HiveDaemonState>,
     Path(key): Path<String>,
@@ -874,17 +875,27 @@ fn forbidden_runtime<T: serde::Serialize>() -> (StatusCode, Json<ApiEnvelope<T>>
 // POST /v1/runtime/register
 // ---------------------------------------------------------------------------
 
+/// A runtime may only report for the lease it presented.
+fn presents_lease(principal: &Principal, lease_id: &str) -> bool {
+    principal.lease_id() == Some(lease_id)
+}
+
 pub async fn register_runtime(
     State(state): State<HiveDaemonState>,
+    Extension(principal): Extension<Principal>,
     Json(body): Json<RuntimeRegistrationRequest>,
-) -> Json<ApiEnvelope<RuntimeSessionStatus>> {
-    match state.runtime_control.lock() {
+) -> (StatusCode, Json<ApiEnvelope<RuntimeSessionStatus>>) {
+    if !presents_lease(&principal, &body.lease_id) {
+        return forbidden_runtime();
+    }
+    let response = match state.runtime_control.lock() {
         Ok(mut control) => match control.register_runtime(body) {
             Ok(status) => Json(ApiEnvelope::success(status)),
             Err(e) => Json(ApiEnvelope::error(e)),
         },
         Err(e) => Json(ApiEnvelope::error(e.to_string())),
-    }
+    };
+    (StatusCode::OK, response)
 }
 
 // ---------------------------------------------------------------------------
@@ -893,15 +904,20 @@ pub async fn register_runtime(
 
 pub async fn record_runtime_heartbeat(
     State(state): State<HiveDaemonState>,
+    Extension(principal): Extension<Principal>,
     Json(body): Json<RuntimeHeartbeatRequest>,
-) -> Json<ApiEnvelope<RuntimeHeartbeatResponse>> {
-    match state.runtime_control.lock() {
+) -> (StatusCode, Json<ApiEnvelope<RuntimeHeartbeatResponse>>) {
+    if !presents_lease(&principal, &body.lease_id) {
+        return forbidden_runtime();
+    }
+    let response = match state.runtime_control.lock() {
         Ok(mut control) => match control.record_heartbeat(body) {
             Ok(response) => Json(ApiEnvelope::success(response)),
             Err(e) => Json(ApiEnvelope::error(e)),
         },
         Err(e) => Json(ApiEnvelope::error(e.to_string())),
-    }
+    };
+    (StatusCode::OK, response)
 }
 
 // ---------------------------------------------------------------------------
@@ -989,9 +1005,13 @@ pub async fn create_forge_approval_job(
 
 pub async fn sync_runtime_outbox(
     State(state): State<HiveDaemonState>,
+    Extension(principal): Extension<Principal>,
     Json(body): Json<OutboxSyncRequest>,
-) -> Json<ApiEnvelope<OutboxSyncResponse>> {
-    match state.runtime_control.lock() {
+) -> (StatusCode, Json<ApiEnvelope<OutboxSyncResponse>>) {
+    if !presents_lease(&principal, &body.lease_id) {
+        return forbidden_runtime();
+    }
+    let response = match state.runtime_control.lock() {
         Ok(mut control) => match control
             .sync_outbox(body, |payload| state.identity_manager.sign_payload(payload))
         {
@@ -999,7 +1019,8 @@ pub async fn sync_runtime_outbox(
             Err(e) => Json(ApiEnvelope::error(e)),
         },
         Err(e) => Json(ApiEnvelope::error(e.to_string())),
-    }
+    };
+    (StatusCode::OK, response)
 }
 
 // ---------------------------------------------------------------------------
@@ -1029,7 +1050,7 @@ pub async fn get_execution_receipts(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::runtime_registry::RuntimeControlPlane;
     use abigail_core::SecretsVault;
@@ -1133,7 +1154,7 @@ mod tests {
         }
     }
 
-    fn build_state() -> (HiveDaemonState, String) {
+    pub(crate) fn build_state() -> (HiveDaemonState, String) {
         let data_root = test_vault_root()
             .join("identity-fixtures")
             .join(uuid::Uuid::new_v4().to_string());
@@ -1168,7 +1189,7 @@ mod tests {
                     crate::genesis_media::GenesisMediaService::new(&data_root, hive.clone())
                         .unwrap(),
                 ),
-                genesis_token: Arc::new("test-genesis-token".into()),
+                control_token: Arc::new("c0".repeat(32)),
                 genesis_control: Arc::new(crate::genesis::GenesisControl::default()),
                 identity_manager,
                 hive,

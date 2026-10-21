@@ -1,6 +1,6 @@
 //! Household-scoped Genesis orchestration. Model output never directly edits canon.
 use crate::{
-    genesis_auth::OWNER, genesis_director, genesis_media::CreateMediaRequest,
+    genesis_director, genesis_http::OWNER, genesis_media::CreateMediaRequest,
     state::HiveDaemonState,
 };
 use axum::{
@@ -65,7 +65,7 @@ impl GenesisControl {
     }
 }
 
-pub fn router(state: HiveDaemonState) -> Router<HiveDaemonState> {
+pub fn router() -> Router<HiveDaemonState> {
     Router::new()
         .route("/v1/genesis/sessions", get(list).post(create))
         .route("/v1/genesis/sessions/:id", get(load).delete(remove))
@@ -96,9 +96,8 @@ pub fn router(state: HiveDaemonState) -> Router<HiveDaemonState> {
         )
         // JSON escaping may expand a valid 256 KiB Markdown source sixfold.
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
-        .route_layer(axum::middleware::from_fn_with_state(
-            state,
-            crate::genesis_auth::require_desktop,
+        .route_layer(axum::middleware::from_fn(
+            crate::genesis_http::harden_responses,
         ))
 }
 

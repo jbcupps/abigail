@@ -123,7 +123,10 @@ async fn helper_and_two_distinct_entities_choose_bound_ports_and_match_identity(
         .unwrap();
     let initial = tokio::time::timeout(Duration::from_secs(45), async {
         loop {
-            let status = api(client.get(format!("{}/v1/status", hive.url()))).await;
+            let status = api(client
+                .get(format!("{}/v1/status", hive.url()))
+                .bearer_auth(hive.control_token()))
+            .await;
             if status["helper"]["running"] == true {
                 break status;
             }
@@ -145,25 +148,30 @@ async fn helper_and_two_distinct_entities_choose_bound_ports_and_match_identity(
     assert_eq!(helper_status["entity_id"], helper_id);
     api(client
         .post(format!("{}/v1/providers/local", hive.url()))
+        .bearer_auth(hive.control_token())
         .json(&serde_json::json!({"base_url": model_url})))
     .await;
     let mut ids = Vec::new();
     for name in ["Startup Alpha", "Startup Beta"] {
         let entity = api(client
             .post(format!("{}/v1/entities", hive.url()))
+            .bearer_auth(hive.control_token())
             .json(&serde_json::json!({"name": name})))
         .await;
         let id = entity["id"].as_str().unwrap().to_string();
         api(client.post(format!("{}/v1/entities/{id}/birth", hive.url()))
+            .bearer_auth(hive.control_token())
             .json(&serde_json::json!({"path": "quickstart", "choices": [], "purpose": "Synthetic startup test"}))).await;
         ids.push(id);
     }
     let (alpha, beta) = tokio::join!(
         api(client
             .post(format!("{}/v1/entities/{}/open", hive.url(), ids[0]))
+            .bearer_auth(hive.control_token())
             .json(&serde_json::json!({}))),
         api(client
             .post(format!("{}/v1/entities/{}/open", hive.url(), ids[1]))
+            .bearer_auth(hive.control_token())
             .json(&serde_json::json!({}))),
     );
     let mut urls = std::collections::HashSet::from([helper_url.to_string()]);
@@ -179,7 +187,10 @@ async fn helper_and_two_distinct_entities_choose_bound_ports_and_match_identity(
         let status = api(client.get(format!("{url}/v1/status"))).await;
         assert_eq!(status["entity_id"].as_str(), Some(id.as_str()));
     }
-    let status = api(client.get(format!("{}/v1/status", hive.url()))).await;
+    let status = api(client
+        .get(format!("{}/v1/status", hive.url()))
+        .bearer_auth(hive.control_token()))
+    .await;
     assert_eq!(status["helper"]["running"], true);
     assert_eq!(status["helper"]["local_url"].as_str(), Some(helper_url));
     // HiveDaemonHandle kills/reaps only this fresh profile's supervised tree

@@ -2864,6 +2864,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -3665,6 +3666,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "tower",
  "tower-http",
  "tracing",
  "tracing-subscriber",
@@ -5030,8 +5032,10 @@ dependencies = [
 name = "hive-core"
 version = "0.0.1"
 dependencies = [
+ "hmac 0.13.0",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
 ]
 
 [[package]]
@@ -5053,6 +5057,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "clap",
+ "daemon-client",
  "daemon-test-harness",
  "hive-core",
  "reqwest 0.13.4",
@@ -5061,6 +5066,7 @@ dependencies = [
  "sha2 0.11.0",
  "soul-forge",
  "tokio",
+ "tower",
  "tower-http",
  "tracing",
  "tracing-subscriber",
