@@ -131,7 +131,7 @@ describe("Model connection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     expect(await screen.findByRole("combobox", { name: "Model" })).toHaveValue("test-model");
     expect(paths.indexOf("/v1/providers/models")).toBeLessThan(paths.indexOf("/v1/secrets"));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check and allow model" }));
     await waitFor(() => expect(completed).toHaveBeenCalledOnce());
     expect(screen.getByText(/Messages sent with this model are processed by that provider/)).toBeInTheDocument();
   });

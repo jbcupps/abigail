@@ -1,10 +1,8 @@
 //! One tools-disabled request performs the five Genesis creative roles.
 use crate::state::HiveDaemonState;
-use abigail_capabilities::cognitive::{CompletionRequest, LlmProvider, LocalHttpProvider, Message};
-use abigail_hive::provider_registry::ProviderRegistry;
+use abigail_capabilities::cognitive::{CompletionRequest, LlmProvider, Message};
 use serde::Deserialize;
 use serde_json::Value;
-use std::sync::Arc;
 
 const DIRECTOR: &str = r#"You are the Genesis creative director in Abigail Hive. Help a family discover a coherent fictional AI companion. Be warm, concise, and ask one useful adaptive question at a time. Never claim that fictional memories are real events.
 Genesis Director: interpret the current turn and avoid asking about approved or already proposed details. In quick or surprise mode propose a coherent complete starting definition promptly. In deep mode ask about meaningful unresolved choices. Offer review as soon as name and purpose are clear; nothing requires answering every question.
@@ -62,37 +60,20 @@ pub fn parse_reply(content: &str) -> Result<DirectorReply, String> {
 
 pub async fn direct(state: &HiveDaemonState, context: Value) -> Result<DirectorReply, String> {
     let hive_id = state.identity_manager.hive_agent_id()?;
-    let config = state.identity_manager.load_agent(&hive_id)?;
-    let selected = config
-        .active_provider_preference
-        .as_deref()
-        .ok_or("Connect and select a real model in Hive before starting a Genesis conversation.")?;
-    let provider: Arc<dyn LlmProvider> = if selected == "local" {
-        let url = config
-            .local_llm_base_url
-            .as_deref()
-            .ok_or("Connect a local model in Hive first.")?;
-        Arc::new(LocalHttpProvider::connect(url).await.map_err(|_| {
-            "The selected local model could not be reached. Reconnect it in Hive.".to_string()
-        })?)
-    } else {
-        let selection = state
-            .hive
-            .resolve_provider_profile(selected)
-            .ok_or("The selected model has no available credentials. Reconnect it in Hive.")?;
-        ProviderRegistry::build_ego_with_cli_mode(
-            Some(&selection),
-            config.ego_model.clone(),
-            abigail_core::CliPermissionMode::AllowListOnly,
-        )
-        .provider
-        .ok_or("The selected model could not be initialized. Reconnect it in Hive.")?
-    };
-    let mut request = CompletionRequest::simple(vec![
+    let mut config = state.identity_manager.load_agent(&hive_id)?;
+    config.model_routing = Some(abigail_core::model_routing::effective_policy(&config)?);
+    let resolved = state.hive.resolve_config(&config)?;
+    let provider = abigail_hive::approved_dispatch::ApprovedDispatch::build(
+        resolved.approved_connections.as_deref().unwrap_or_default(),
+    )
+    .await
+    .with_gate(std::sync::Arc::new(crate::model_routing::HiveApprovalGate(
+        state.clone(),
+    )));
+    let request = CompletionRequest::simple(vec![
         Message::new("system", DIRECTOR),
         Message::new("user", context.to_string()),
     ]);
-    request.model_override = config.ego_model;
     let response = tokio::time::timeout(std::time::Duration::from_secs(100), provider.complete(&request))
         .await.map_err(|_| "The model took too long. Your draft is saved; try again.".to_string())?
         .map_err(|_| "The selected model could not complete this turn. Your draft is saved; check the model connection in Hive.".to_string())?;

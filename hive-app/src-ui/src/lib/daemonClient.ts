@@ -162,6 +162,19 @@ export interface HiveDefault {
   model?: string | null;
 }
 
+export interface ModelConnection { provider: string; model: string | null; local_url: string | null }
+export interface ModelRoutingPolicy { connections: ModelConnection[]; allowed: ModelConnection[] }
+export interface RoutingChoices { policy: ModelRoutingPolicy; readiness: { connection: ModelConnection; ready: boolean }[] }
+export async function getRoutingChoices(): Promise<RoutingChoices> {
+  const response = await hiveFetch("/v1/providers/routing", { headers: { Accept: "application/json" } });
+  const data = await unwrap<RoutingChoices>(response, "/v1/providers/routing");
+  if (!data?.policy || !Array.isArray(data.policy.connections) || !Array.isArray(data.policy.allowed) || !Array.isArray(data.readiness)) throw new Error("Model choices could not be read. Check again.");
+  return data;
+}
+export async function chooseRoutingModels(expected: ModelRoutingPolicy, allowed: ModelConnection[]): Promise<RoutingChoices> {
+  return hivePost("/v1/providers/routing", { expected, allowed });
+}
+
 export async function setHiveDefault(provider?: string, model?: string): Promise<HiveDefault> {
   return hivePost<HiveDefault>("/v1/providers/hive-default", { provider, model }, AbortSignal.timeout(75_000));
 }

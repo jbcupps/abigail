@@ -401,6 +401,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub ego_model: Option<String>,
 
+    /// Hive-owned checked connections and explicit automatic-routing choices.
+    #[serde(default)]
+    pub model_routing: Option<crate::model_routing::ModelRoutingPolicy>,
+
     /// Legacy multi-account email config kept only for compatibility loads.
     #[serde(default, skip_serializing)]
     pub email_accounts: Vec<EmailAccountConfig>,
@@ -559,6 +563,7 @@ impl AppConfig {
             provider_catalog: Vec::new(),
             active_provider_preference: None,
             ego_model: None,
+            model_routing: None,
             email_accounts: Vec::new(),
             bundled_ollama: default_bundled_ollama(),
             bundled_model: default_bundled_model(),
@@ -1040,6 +1045,7 @@ mod tests {
             provider_catalog: Vec::new(),
             active_provider_preference: None,
             ego_model: None,
+            model_routing: None,
             email_accounts: Vec::new(),
             bundled_ollama: false,
             bundled_model: None,

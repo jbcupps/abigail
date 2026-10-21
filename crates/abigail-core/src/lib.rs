@@ -9,6 +9,7 @@ pub mod global_config;
 pub mod key_detection;
 pub mod keyring;
 pub mod local_llm_url;
+pub mod model_routing;
 pub mod ops;
 pub mod path_guard;
 pub mod profile;

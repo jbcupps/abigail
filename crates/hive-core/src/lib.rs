@@ -109,6 +109,8 @@ pub enum EntityCreationState {
 /// The Entity uses it to construct its own LLM providers in-process.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {
+    #[serde(default)]
+    pub approved_connections: Option<Vec<abigail_core::model_routing::ResolvedModelConnection>>,
     pub local_llm_base_url: Option<String>,
     pub ego_provider_name: Option<String>,
     pub ego_api_key: Option<String>,

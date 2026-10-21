@@ -62,6 +62,7 @@ fn detect_cli_with_policy(
 /// Fully resolved configuration ready for provider construction.
 #[derive(Debug, Clone)]
 pub struct HiveConfig {
+    pub approved_connections: Option<Vec<abigail_core::model_routing::ResolvedModelConnection>>,
     pub local_llm_base_url: Option<String>,
     pub ego_provider: Option<ProviderSelection>,
     pub ego_model: Option<String>,
@@ -106,6 +107,7 @@ impl ProviderSelection {
 
 /// All providers built and ready to be injected into a router.
 pub struct BuiltProviders {
+    pub approved_dispatch: Option<Arc<crate::approved_dispatch::ApprovedDispatch>>,
     pub id: Arc<dyn LlmProvider>,
     pub local_http: Option<Arc<LocalHttpProvider>>,
     pub ego: Option<Arc<dyn LlmProvider>>,
@@ -412,10 +414,23 @@ impl Hive {
     /// Acquires locks on `secrets` then `hive_secrets` (in documented order).
     pub fn resolve_config(&self, config: &AppConfig) -> Result<HiveConfig, String> {
         abigail_core::profile::current().map_err(|error| error.to_string())?;
+        if let Some(policy) = &config.model_routing {
+            policy.validate()?;
+            let approved = self.resolve_approved_connections(policy);
+            return Ok(HiveConfig {
+                approved_connections: Some(approved),
+                local_llm_base_url: None,
+                ego_provider: None,
+                ego_model: None,
+                routing_mode: RoutingMode::EgoPrimary,
+                cli_permission_mode: CliPermissionMode::AllowListOnly,
+            });
+        }
         // An explicit local choice must never silently select an installed CLI
         // or a previously saved cloud key.
         if config.active_provider_preference.as_deref() == Some("local") {
             return Ok(HiveConfig {
+                approved_connections: None,
                 local_llm_base_url: config.local_llm_base_url.clone(),
                 ego_provider: None,
                 ego_model: None,
@@ -462,6 +477,7 @@ impl Hive {
         );
 
         Ok(HiveConfig {
+            approved_connections: None,
             local_llm_base_url: config.local_llm_base_url.clone(),
             ego_provider,
             ego_model: config.ego_model.clone(),
@@ -470,8 +486,59 @@ impl Hive {
         })
     }
 
+    /// Resolve only named approvals; never scan other provider names.
+    pub fn resolve_approved_connections(
+        &self,
+        policy: &abigail_core::model_routing::ModelRoutingPolicy,
+    ) -> Vec<abigail_core::model_routing::ResolvedModelConnection> {
+        policy
+            .allowed
+            .iter()
+            .map(|connection| {
+                let selection = if connection.provider == "local" {
+                    None
+                } else {
+                    self.resolve_provider_profile(&connection.provider)
+                };
+                let ready = if connection.provider == "local" {
+                    connection.local_url.is_some()
+                } else if connection.provider.ends_with("-cli") {
+                    ambient_providers_allowed()
+                        && abigail_capabilities::cognitive::ALL_CLI_VARIANTS
+                            .iter()
+                            .any(|v| {
+                                let presence = v.detect_presence();
+                                presence.provider_name == connection.provider && presence.on_path
+                            })
+                } else {
+                    selection
+                        .as_ref()
+                        .and_then(|s| s.api_key())
+                        .is_some_and(|key| !key.trim().is_empty())
+                };
+                abigail_core::model_routing::ResolvedModelConnection {
+                    connection: connection.clone(),
+                    api_key: selection.and_then(|s| s.api_key()),
+                    ready,
+                }
+            })
+            .collect()
+    }
+
     /// Build all providers from a resolved HiveConfig (no locking).
     pub async fn build_providers(hive_config: &HiveConfig) -> BuiltProviders {
+        if let Some(connections) = &hive_config.approved_connections {
+            return BuiltProviders {
+                approved_dispatch: Some(Arc::new(
+                    crate::approved_dispatch::ApprovedDispatch::build(connections).await,
+                )),
+                id: Arc::new(crate::approved_dispatch::NoApprovedModel),
+                local_http: None,
+                ego: None,
+                ego_kind: None,
+                routing_mode: RoutingMode::EgoPrimary,
+            };
+        }
         let ego_result = ProviderRegistry::build_ego_with_cli_mode(
             hive_config.ego_provider.as_ref(),
             hive_config.ego_model.clone(),
@@ -482,6 +549,7 @@ impl Hive {
             ProviderRegistry::build_id_auto_detect(hive_config.local_llm_base_url.clone()).await;
 
         BuiltProviders {
+            approved_dispatch: None,
             id: id_result.provider,
             local_http: id_result.local_http,
             ego: ego_result.provider,

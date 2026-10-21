@@ -95,7 +95,13 @@ async fn apply_provider_refresh(state: &EntityDaemonState, payload: &serde_json:
 
     let ego_label = provider_config.ego_provider_name.clone();
     let snapshot = serde_json::to_value(&provider_config).unwrap_or_default();
-    let router = crate::router_build::build_router(provider_config).await;
+    let router = crate::router_build::build_router_guarded(
+        provider_config,
+        &state.hive_url,
+        &state.entity_id,
+        state.process_identity.as_ref(),
+    )
+    .await;
     state.router.swap(std::sync::Arc::new(router));
     state.router.remember_provider_config(snapshot);
     tracing::info!(

@@ -669,6 +669,7 @@ impl IdentityManager {
             provider_catalog: Vec::new(),
             active_provider_preference: None,
             ego_model: None,
+            model_routing: None,
             email_accounts: Vec::new(),
             bundled_ollama: true,
             bundled_model: Some("llama3.2:3b".to_string()),

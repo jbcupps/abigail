@@ -435,7 +435,15 @@ async fn run(cli: Cli, startup: StartupContext) -> anyhow::Result<()> {
     let initial_provider_config = serde_json::to_value(&provider_config).unwrap_or_default();
     let ego_provider_for_discovery = provider_config.ego_provider_name.clone();
     let ego_key_for_discovery = provider_config.ego_api_key.clone();
-    let router = Arc::new(router_build::build_router(provider_config).await);
+    let router = Arc::new(
+        router_build::build_router_guarded(
+            provider_config,
+            &hive_url,
+            &entity_id,
+            process_identity.as_ref(),
+        )
+        .await,
+    );
     let router = Arc::new(state::RouterHandle::new(router));
     router.remember_provider_config(initial_provider_config.clone());
     tracing::info!("Router built");

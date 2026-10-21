@@ -24,6 +24,7 @@ pub(crate) fn provider_config_from_hive_config(
     hive_config: &abigail_hive::HiveConfig,
 ) -> ProviderConfig {
     ProviderConfig {
+        approved_connections: hive_config.approved_connections.clone(),
         local_llm_base_url: hive_config.local_llm_base_url.clone(),
         ego_provider_name: hive_config
             .ego_provider
@@ -108,24 +109,21 @@ pub async fn get_status(State(state): State<HiveDaemonState>) -> Json<ApiEnvelop
                     immortal: a.immortal,
                 })
                 .collect();
-            let local_configured = state
+            let resolved = state
                 .identity_manager
                 .hive_agent_id()
                 .ok()
                 .and_then(|id| state.identity_manager.load_agent(&id).ok())
-                .and_then(|config| config.local_llm_base_url)
-                .is_some_and(|url| !url.trim().is_empty());
-            let resolved_config = state
-                .identity_manager
-                .hive_agent_id()
-                .ok()
-                .and_then(|id| state.identity_manager.load_agent(&id).ok())
-                .and_then(|config| state.hive.resolve_config(&config).ok());
-            let inference_configured = resolved_config
+                .and_then(|mut config| {
+                    config.model_routing =
+                        Some(abigail_core::model_routing::effective_policy(&config).ok()?);
+                    state.hive.resolve_config(&config).ok()
+                });
+            let model_connection = resolved.as_ref().and_then(configured_model);
+            let any_provider_configured = resolved
                 .as_ref()
-                .is_some_and(|config| config.ego_provider.is_some());
-            let model_connection = resolved_config.as_ref().and_then(configured_model);
-            let any_provider_configured = local_configured || inference_configured;
+                .and_then(|c| c.approved_connections.as_ref())
+                .is_some_and(|routes| routes.iter().any(|r| r.ready));
             let helper = state
                 .helper
                 .lock()
@@ -334,27 +332,15 @@ pub(crate) fn resolve_entity_provider_config(
     state: &HiveDaemonState,
     config: &abigail_core::AppConfig,
 ) -> Result<ProviderConfig, String> {
-    let mut config = config.clone();
-    // Inherit the Hive-level default provider/model when this entity has none of
-    // its own, so a name-only entity "just works" with the family's provider.
-    if !config.is_hive && config.active_provider_preference.is_none() && config.ego_model.is_none()
-    {
-        if let Ok(hive_id) = state.identity_manager.hive_agent_id() {
-            if let Ok(hive_config) = state.identity_manager.load_agent(&hive_id) {
-                config.active_provider_preference = hive_config.active_provider_preference;
-                config.ego_model = hive_config.ego_model;
-                if config.local_llm_base_url.is_none() {
-                    config.local_llm_base_url = hive_config.local_llm_base_url;
-                }
-            }
-        }
-    }
-
-    // Resolve via Hive priority chain
-    match state.hive.resolve_config(&config) {
-        Ok(hive_config) => Ok(provider_config_from_hive_config(&hive_config)),
-        Err(e) => Err(e),
-    }
+    // The Hive policy is authoritative even when an Entity has old overrides.
+    let hive_id = state.identity_manager.hive_agent_id()?;
+    let hive_config = state.identity_manager.load_agent(&hive_id)?;
+    let mut effective = config.clone();
+    effective.model_routing = Some(abigail_core::model_routing::effective_policy(&hive_config)?);
+    state
+        .hive
+        .resolve_config(&effective)
+        .map(|resolved| provider_config_from_hive_config(&resolved))
 }
 
 // ---------------------------------------------------------------------------
@@ -369,17 +355,33 @@ pub async fn get_provider_profile(
     State(state): State<HiveDaemonState>,
     Path(name): Path<String>,
 ) -> Json<ApiEnvelope<ProviderProfileResponse>> {
+    let hive_config = match state
+        .identity_manager
+        .hive_agent_id()
+        .and_then(|id| state.identity_manager.load_agent(&id))
+    {
+        Ok(config) => config,
+        Err(error) => return Json(ApiEnvelope::error(error)),
+    };
+    let policy = match abigail_core::model_routing::effective_policy(&hive_config) {
+        Ok(policy) => policy,
+        Err(error) => return Json(ApiEnvelope::error(error)),
+    };
+    let Some(route) = policy.allowed.iter().find(|route| route.provider == name) else {
+        return Json(ApiEnvelope::error(
+            "This provider is not approved in Hive Settings.",
+        ));
+    };
     match state.hive.resolve_provider_profile(&name) {
         Some(selection) => Json(ApiEnvelope::success(ProviderProfileResponse {
             name,
             provider_name: selection.provider.clone(),
             api_key: selection.api_key(),
-            model: None,
+            model: route.model.clone(),
         })),
-        None => Json(ApiEnvelope::error(format!(
-            "No credentials available for provider profile '{}'",
-            name
-        ))),
+        None => Json(ApiEnvelope::error(
+            "This approved provider is unavailable. Reconnect it in Settings.",
+        )),
     }
 }
 
@@ -458,6 +460,15 @@ fn cli_discovery(
 }
 
 fn configured_model(config: &abigail_hive::HiveConfig) -> Option<HiveDefaultResponse> {
+    if let Some(approved) = &config.approved_connections {
+        return approved
+            .iter()
+            .find(|route| route.ready)
+            .map(|route| HiveDefaultResponse {
+                provider: Some(route.connection.provider.clone()),
+                model: route.connection.model.clone(),
+            });
+    }
     if let Some(provider) = config.ego_provider.as_ref() {
         Some(HiveDefaultResponse {
             provider: Some(provider.provider.clone()),
@@ -565,22 +576,38 @@ pub async fn set_hive_default(
     ) {
         return Json(ApiEnvelope::error(error));
     }
-    // Resolve which provider/model to store: explicit, or best available.
-    let (provider, model) = match body.provider.clone() {
-        Some(p) => (Some(p.trim().to_lowercase()), body.model.clone()),
-        None => match state.hive.resolve_best_model() {
-            Some(best)
-                if !best.provider.ends_with("-cli")
-                    || matches!(
-                        best.provider.as_str(),
-                        "claude-cli" | "codex-cli" | "grok-cli"
-                    ) =>
-            {
-                (Some(best.provider), best.model)
-            }
-            Some(_) | None => (None, None),
-        },
+    let expected = match crate::model_routing::current(&state) {
+        Ok(policy) => policy,
+        Err(error) => return Json(ApiEnvelope::error(error)),
     };
+    let Some(selected) = body
+        .provider
+        .as_ref()
+        .map(|p| p.trim().to_lowercase())
+        .filter(|p| !p.is_empty())
+    else {
+        return Json(ApiEnvelope::error(
+            "Choose a model explicitly before allowing it.",
+        ));
+    };
+    let provider = Some(selected);
+    let model = body
+        .model
+        .as_ref()
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty());
+    let route = abigail_core::model_routing::ModelConnection {
+        provider: provider.clone().unwrap_or_default(),
+        model: model.clone(),
+        local_url: None,
+    };
+    if let Err(error) = route.validate() {
+        return Json(ApiEnvelope::error(error));
+    }
+    let mut proposed = expected.clone();
+    if let Err(error) = proposed.approve_checked(route.clone()) {
+        return Json(ApiEnvelope::error(error));
+    }
     if provider.as_deref().is_some_and(|name| {
         name.ends_with("-cli") && !matches!(name, "claude-cli" | "codex-cli" | "grok-cli")
     }) {
@@ -663,32 +690,38 @@ pub async fn set_hive_default(
         }
     }
 
-    let hive_id = match state.identity_manager.hive_agent_id() {
-        Ok(id) => id,
-        Err(e) => return Json(ApiEnvelope::error(e)),
-    };
-    let mut config = match state.identity_manager.load_agent(&hive_id) {
-        Ok(c) => c,
-        Err(e) => return Json(ApiEnvelope::error(e)),
-    };
-
-    config.active_provider_preference = provider
-        .as_ref()
-        .map(|p| p.trim().to_lowercase())
-        .filter(|p| !p.is_empty());
-    config.ego_model = model
-        .as_ref()
-        .map(|m| m.trim().to_string())
-        .filter(|m| !m.is_empty());
-
-    let config_path = config.config_path();
-    if let Err(e) = config.save(&config_path) {
-        return Json(ApiEnvelope::error(e.to_string()));
+    if !route.provider.ends_with("-cli") {
+        use abigail_capabilities::cognitive::{CompletionRequest, Message};
+        let Some(selection) = state.hive.resolve_provider_profile(&route.provider) else {
+            return Json(ApiEnvelope::error(
+                "Reconnect this model in Settings first.",
+            ));
+        };
+        let Some(candidate) = abigail_hive::ProviderRegistry::build_ego_with_cli_mode(
+            Some(&selection),
+            route.model.clone(),
+            abigail_core::CliPermissionMode::AllowListOnly,
+        )
+        .provider
+        else {
+            return Json(ApiEnvelope::error("This model could not be initialized."));
+        };
+        let mut request = CompletionRequest::simple(vec![Message::new(
+            "user",
+            "Reply with READY to confirm this model connection.",
+        )]);
+        request.model_override = route.model.clone();
+        if !matches!(tokio::time::timeout(std::time::Duration::from_secs(30), candidate.complete(&request)).await, Ok(Ok(response)) if !response.content.trim().is_empty())
+        {
+            return Json(ApiEnvelope::error("This model did not answer the connection check. Check its account, usage allowance and selected model, then retry."));
+        }
     }
-
+    if let Err(error) = crate::model_routing::save_checked(&state, route, expected).await {
+        return Json(ApiEnvelope::error(error));
+    }
     Json(ApiEnvelope::success(HiveDefaultResponse {
-        provider: config.active_provider_preference.clone(),
-        model: config.ego_model.clone(),
+        provider,
+        model,
     }))
 }
 
@@ -697,6 +730,10 @@ pub async fn set_local_provider(
     State(state): State<HiveDaemonState>,
     Json(body): Json<LocalProviderRequest>,
 ) -> Json<ApiEnvelope<LocalProviderResponse>> {
+    let expected = match crate::model_routing::current(&state) {
+        Ok(policy) => policy,
+        Err(error) => return Json(ApiEnvelope::error(error)),
+    };
     let base_url = body
         .base_url
         .trim()
@@ -722,19 +759,13 @@ pub async fn set_local_provider(
             error
         )));
     }
-    let hive_id = match state.identity_manager.hive_agent_id() {
-        Ok(id) => id,
-        Err(error) => return Json(ApiEnvelope::error(error)),
+    let route = abigail_core::model_routing::ModelConnection {
+        provider: "local".into(),
+        model: Some(provider.model().to_string()),
+        local_url: Some(base_url.clone()),
     };
-    let mut config = match state.identity_manager.load_agent(&hive_id) {
-        Ok(config) => config,
-        Err(error) => return Json(ApiEnvelope::error(error)),
-    };
-    config.local_llm_base_url = Some(base_url.clone());
-    config.active_provider_preference = Some("local".to_string());
-    config.ego_model = None;
-    if let Err(error) = config.save(&config.config_path()) {
-        return Json(ApiEnvelope::error(error.to_string()));
+    if let Err(error) = crate::model_routing::save_checked(&state, route, expected).await {
+        return Json(ApiEnvelope::error(error));
     }
     Json(ApiEnvelope::success(LocalProviderResponse {
         base_url,
@@ -828,11 +859,19 @@ pub async fn update_entity_config(
     Path(entity_id): Path<String>,
     Json(body): Json<UpdateEntityConfigRequest>,
 ) -> Json<ApiEnvelope<UpdateEntityConfigResponse>> {
+    let _policy_edit = crate::model_routing::POLICY_EDIT.lock().await;
     let mut config = match state.identity_manager.load_agent(&entity_id) {
         Ok(c) => c,
         Err(e) => return Json(ApiEnvelope::error(e)),
     };
 
+    // Legacy compatibility edits are not a new approval ceremony.
+    if config.is_hive && config.model_routing.is_none() {
+        config.model_routing = match abigail_core::model_routing::effective_policy(&config) {
+            Ok(policy) => Some(policy),
+            Err(error) => return Json(ApiEnvelope::error(error)),
+        };
+    }
     if let Some(provider) = body.active_provider_preference {
         let provider = provider.trim().to_lowercase();
         if !provider.is_empty() {
@@ -883,10 +922,10 @@ pub async fn update_entity_config(
         return Json(ApiEnvelope::error(e.to_string()));
     }
 
-    match state.hive.resolve_config(&config) {
-        Ok(hive_config) => Json(ApiEnvelope::success(UpdateEntityConfigResponse {
+    match resolve_entity_provider_config(&state, &config) {
+        Ok(provider_config) => Json(ApiEnvelope::success(UpdateEntityConfigResponse {
             entity_id,
-            provider_config: provider_config_from_hive_config(&hive_config),
+            provider_config,
         })),
         Err(e) => Json(ApiEnvelope::error(e)),
     }
@@ -1287,6 +1326,7 @@ mod tests {
     #[test]
     fn model_status_reports_resolved_selection_without_credentials_or_live_probe() {
         let mut config = abigail_hive::HiveConfig {
+            approved_connections: None,
             local_llm_base_url: None,
             ego_provider: None,
             ego_model: None,
@@ -1866,13 +1906,10 @@ mod tests {
         .0;
 
         assert!(resp.ok, "response error: {:?}", resp.error);
-        // The chosen model is surfaced back on the resolved provider config.
-        assert_eq!(
-            resp.data
-                .as_ref()
-                .and_then(|d| d.provider_config.ego_model.as_deref()),
-            Some("gpt-4.1")
-        );
+        // Compatibility preferences persist, but cannot add a household approval.
+        let resolved = &resp.data.as_ref().unwrap().provider_config;
+        assert!(resolved.ego_model.is_none());
+        assert!(resolved.approved_connections.as_ref().unwrap().is_empty());
         let config = state
             .identity_manager
             .load_agent(&entity_id)
@@ -1884,5 +1921,123 @@ mod tests {
             Some("http://localhost:11434")
         );
         assert_eq!(format!("{:?}", config.routing_mode), "CliOrchestrator");
+    }
+
+    #[tokio::test]
+    async fn routing_policy_persists_and_entity_overrides_cannot_widen_it() {
+        use abigail_core::model_routing::ModelConnection;
+        let (state, entity_id) = build_state();
+        let route = ModelConnection {
+            provider: "openai".into(),
+            model: Some("fixture-approved".into()),
+            local_url: None,
+        };
+        let before = crate::model_routing::current(&state).unwrap();
+        assert!(before.allowed.is_empty());
+        // A fixture stands in for the explicit successful connection check.
+        crate::model_routing::save_checked(&state, route.clone(), before.clone())
+            .await
+            .unwrap();
+        let saved = crate::model_routing::current(&state).unwrap();
+        assert_eq!(saved.allowed, vec![route.clone()]);
+        assert!(
+            crate::model_routing::save_checked(&state, route.clone(), before)
+                .await
+                .is_err()
+        );
+        let mut entity = state.identity_manager.load_agent(&entity_id).unwrap();
+        entity.active_provider_preference = Some("google".into());
+        entity.ego_model = Some("unapproved-model".into());
+        entity.local_llm_base_url = Some("http://127.0.0.1:11434".into());
+        state
+            .hive_secrets
+            .lock()
+            .unwrap()
+            .set_secret("openai", "synthetic-fixture-key");
+        state
+            .hive_secrets
+            .lock()
+            .unwrap()
+            .set_secret("google", "synthetic-unapproved-key");
+        let resolved = resolve_entity_provider_config(&state, &entity).unwrap();
+        let approved = resolved.approved_connections.unwrap();
+        assert_eq!(approved.len(), 1);
+        assert_eq!(approved[0].connection, route);
+        assert!(approved[0].ready);
+        assert!(resolved.ego_provider_name.is_none());
+        assert!(resolved.local_llm_base_url.is_none());
+        let denied = get_provider_profile(State(state.clone()), Path("google".into()))
+            .await
+            .0;
+        assert!(!denied.ok);
+        assert_eq!(
+            state
+                .identity_manager
+                .load_agent(&entity_id)
+                .unwrap()
+                .agent_name,
+            entity.agent_name
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_policy_revokes_runtime_and_genesis_without_touching_identity() {
+        use abigail_core::model_routing::ModelConnection;
+        let (state, entity_id) = build_state();
+        let initial = crate::model_routing::current(&state).unwrap();
+        let route = ModelConnection {
+            provider: "openai".into(),
+            model: Some("fixture-approved".into()),
+            local_url: None,
+        };
+        crate::model_routing::save_checked(&state, route, initial)
+            .await
+            .unwrap();
+        let expected = crate::model_routing::current(&state).unwrap();
+        let result = crate::model_routing::choose(
+            State(state.clone()),
+            Json(crate::model_routing::ChooseModels {
+                allowed: vec![],
+                expected: expected.clone(),
+            }),
+        )
+        .await
+        .0;
+        assert!(result.ok);
+        assert!(crate::model_routing::current(&state)
+            .unwrap()
+            .allowed
+            .is_empty());
+        let stale = crate::model_routing::choose(
+            State(state.clone()),
+            Json(crate::model_routing::ChooseModels {
+                allowed: expected.allowed.clone(),
+                expected,
+            }),
+        )
+        .await
+        .0;
+        assert!(!stale.ok);
+        let entity = state.identity_manager.load_agent(&entity_id).unwrap();
+        assert!(resolve_entity_provider_config(&state, &entity)
+            .unwrap()
+            .approved_connections
+            .unwrap()
+            .is_empty());
+        assert!(
+            !get_status(State(state.clone()))
+                .await
+                .0
+                .data
+                .unwrap()
+                .any_provider_configured
+        );
+        assert!(crate::genesis_director::direct(
+            &state,
+            serde_json::json!({"fixture":"no model call allowed"})
+        )
+        .await
+        .is_err());
+        assert!(state.identity_manager.load_agent(&entity_id).is_ok());
     }
 }

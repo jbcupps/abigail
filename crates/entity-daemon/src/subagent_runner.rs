@@ -73,6 +73,10 @@ impl SubagentRunner {
     /// Returns None (with a log) when the profile cannot be resolved — the
     /// job then runs on the entity's default router.
     async fn profile_router(&self, profile: &str) -> Option<Arc<IdEgoRouter>> {
+        // A job hint cannot widen or bypass the family's approved dispatch set.
+        if self.router.current().approved_dispatch.is_some() {
+            return None;
+        }
         let client = self.hive_client.as_ref()?;
         let resolved = match client.get_provider_profile(profile).await {
             Ok(resp) => resp,
@@ -104,6 +108,7 @@ impl SubagentRunner {
             return None;
         };
         let built = abigail_hive::BuiltProviders {
+            approved_dispatch: None,
             id: self.router.current().id.clone(),
             local_http: None,
             ego: Some(ego),

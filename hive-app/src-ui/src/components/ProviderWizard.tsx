@@ -8,6 +8,7 @@ import {
   type ProviderModel,
 } from "../lib/daemonClient";
 import InstalledConnections from "./InstalledConnections";
+import RoutingChoices from "./RoutingChoices";
 import { MODEL_LABELS, modelSelectionLabel } from "../lib/modelReadiness";
 
 interface ProviderWizardProps {
@@ -63,6 +64,7 @@ export default function ProviderWizard({ onClose, onComplete, status, firstRun =
   const [checkingCli, setCheckingCli] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const inFlight = useRef(false);
+  const setRoutingBusy = useCallback((value: boolean) => { inFlight.current = value; setBusy(value); }, []);
 
   useEffect(() => { dialogRef.current?.focus(); }, [step]);
 
@@ -221,10 +223,12 @@ export default function ProviderWizard({ onClose, onComplete, status, firstRun =
           <div className="flex flex-col gap-3">
             <p className="text-sm font-medium text-theme-text-bright">{modelSelectionLabel(status)}</p>
             {firstRun && <p className="text-sm text-theme-text">Give your Entity a way to talk. Choose a connection now, or keep creating and return to Settings later.</p>}
+            {status && <RoutingChoices busy={busy} onSaved={onComplete} onBusyChange={setRoutingBusy} />}
             <p className="text-sm text-theme-text-dim">
               Connect a model to start chatting. Local models process messages on your computer;
               cloud models send messages to the selected provider. Memory stays here.
             </p>
+            <p className="text-xs text-theme-text-dim">Connecting checks a small test message and allows that model for Abigail. It can then fall back only to your other checked models. Change these choices here any time.</p>
             <button
               type="button"
               disabled={busy}
@@ -343,7 +347,7 @@ export default function ProviderWizard({ onClose, onComplete, status, firstRun =
         {step === "model" && (
           <div className="flex flex-col gap-3">
             <p className="text-sm text-theme-text-dim">
-              Choose a model for {PROVIDER_LABELS[provider] ?? provider}.
+              Choose a model for {PROVIDER_LABELS[provider] ?? provider}. The check sends a small test message using this account's API allowance.
             </p>
             <select
               aria-label="Model"
@@ -365,7 +369,7 @@ export default function ProviderWizard({ onClose, onComplete, status, firstRun =
                 onClick={() => void saveModel()}
                 className="rounded-theme-md bg-theme-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
               >
-                {busy ? "Saving…" : "Save"}
+                {busy ? "Saving…" : "Check and allow model"}
               </button>
             </div>
           </div>

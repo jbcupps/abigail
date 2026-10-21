@@ -32,6 +32,8 @@ Hive checks an installed CLI connection with a real model response before saving
 
 The provider-readiness development update keeps installed-tool discovery visible, including signed-out, unknown and unsupported states. Hive connectivity and the saved model selection are shown separately; an identity that needs a model offers a direct setup action. Isolated previews report tool presence only: their CLI account adapters remain unavailable, so use an explicit API or local-server connection there. See [scope and validation](documents/PROVIDER_READINESS_UX.md). These source changes have not replaced the running preview.
 
+Choose which checked models Abigail may use in **Settings > Model connections**. It tries your first choice, then an available approved alternative; it never adds a new provider on its own. Clearing all choices pauses model use without removing Entities or conversations. The same choices govern creation and conversation, with API, Ollama and LM Studio connections retained. See [approved routing and validation](documents/APPROVED_MODEL_ROUTING.md). This development implementation has not replaced the hands-on preview.
+
 Local storage belongs to you. Cloud providers and installed CLIs use their own accounts and processing policies. The official CLI keeps control of account sign-in and tokens; Abigail does not extract or forward account OAuth tokens. The MVP requires a connected, working model; it does not bundle model weights or pretend a placeholder is local intelligence.
 
 ### Discover an Entity with Genesis

@@ -12,6 +12,7 @@ mod genesis_director;
 mod genesis_media;
 mod genesis_retention;
 mod genesis_store;
+mod model_routing;
 mod persistence;
 mod presence;
 mod presence_profile;
@@ -335,6 +336,10 @@ async fn run(
         .route("/v1/providers/detect", get(routes::detect_cli))
         .route("/v1/providers/hive-default", post(routes::set_hive_default))
         .route("/v1/providers/local", post(routes::set_local_provider))
+        .route(
+            "/v1/providers/routing",
+            get(model_routing::get).post(model_routing::choose),
+        )
         .route(
             "/v1/providers/profiles/:name",
             get(routes::get_provider_profile),

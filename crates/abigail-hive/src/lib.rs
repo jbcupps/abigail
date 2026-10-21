@@ -3,6 +3,7 @@
 //! Entities and the router request providers through the Hive — never touching
 //! vault internals directly.
 
+pub mod approved_dispatch;
 pub mod best_model;
 pub mod hive;
 pub mod model_registry;

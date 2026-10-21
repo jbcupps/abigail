@@ -198,6 +198,7 @@ pub struct RoutingDiagnosis {
 /// serves as a failsafe when the cloud provider fails.
 #[derive(Clone)]
 pub struct IdEgoRouter {
+    pub approved_dispatch: Option<Arc<abigail_hive::approved_dispatch::ApprovedDispatch>>,
     pub id: Arc<dyn LlmProvider>,
     pub ego: Option<Arc<dyn LlmProvider>>,
     pub ego_provider: Option<EgoProvider>,
@@ -392,6 +393,7 @@ impl IdEgoRouter {
         let id_result = ProviderRegistry::build_id(local_llm_base_url);
 
         Self {
+            approved_dispatch: None,
             id: id_result.provider,
             ego: ego_result.provider,
             ego_provider: ego_result.kind.map(EgoProvider::from),
@@ -414,6 +416,7 @@ impl IdEgoRouter {
         let id_result = ProviderRegistry::build_id_auto_detect(local_llm_base_url).await;
 
         Self {
+            approved_dispatch: None,
             id: id_result.provider,
             ego: ego_result.provider,
             ego_provider: ego_result.kind.map(EgoProvider::from),
@@ -449,6 +452,7 @@ impl IdEgoRouter {
         };
 
         let router = Self {
+            approved_dispatch: providers.approved_dispatch,
             id: providers.id,
             ego: providers.ego,
             ego_provider,
@@ -476,7 +480,9 @@ impl IdEgoRouter {
 
     /// Return true if an Ego provider is configured.
     pub fn has_ego(&self) -> bool {
-        self.ego.is_some()
+        self.approved_dispatch
+            .as_ref()
+            .map_or_else(|| self.ego.is_some(), |d| d.has_cloud())
     }
 
     /// Return the name of the current Ego provider.
@@ -486,7 +492,9 @@ impl IdEgoRouter {
 
     /// Return true if the Id provider is an external HTTP server.
     pub fn is_using_http_provider(&self) -> bool {
-        self.local_http.is_some()
+        self.approved_dispatch
+            .as_ref()
+            .map_or_else(|| self.local_http.is_some(), |d| d.has_local())
     }
 
     /// Get the best available provider for simple completion (no routing).
@@ -495,6 +503,11 @@ impl IdEgoRouter {
     /// by the birth pipeline which needs a single provider reference rather
     /// than the full routing surface.
     pub fn best_available_provider(&self) -> Option<Arc<dyn LlmProvider>> {
+        if let Some(dispatch) = &self.approved_dispatch {
+            return dispatch
+                .is_ready()
+                .then(|| dispatch.clone() as Arc<dyn LlmProvider>);
+        }
         if let Some(ref ego) = self.ego {
             Some(ego.clone())
         } else {
@@ -507,15 +520,33 @@ impl IdEgoRouter {
     /// Return a status snapshot for diagnostics.
     pub fn status(&self) -> RouterStatusInfo {
         RouterStatusInfo {
-            has_ego: self.ego.is_some(),
-            ego_provider: self.ego_provider.as_ref().map(|p| p.to_string()),
-            has_local_http: self.local_http.is_some(),
+            has_ego: self.has_ego(),
+            ego_provider: self
+                .approved_dispatch
+                .as_ref()
+                .and_then(|d| d.primary())
+                .map(|c| c.provider.clone())
+                .or_else(|| self.ego_provider.as_ref().map(|p| p.to_string())),
+            has_local_http: self.is_using_http_provider(),
             mode: self.mode,
         }
     }
 
     /// Diagnose what the router would do for a given message without calling any LLM.
     pub fn diagnose(&self, user_message: &str) -> RoutingDiagnosis {
+        if let Some(dispatch) = &self.approved_dispatch {
+            let primary = dispatch.primary();
+            return RoutingDiagnosis {
+                mode: "approved_models".into(),
+                target: primary
+                    .map_or("unavailable", |route| route.provider.as_str())
+                    .into(),
+                selected_model: primary.and_then(|route| route.model.clone()),
+                selection_reason: "approved_order_pending_readiness_check".into(),
+                ego_provider: primary.map(|route| route.provider.clone()),
+                has_local_llm: dispatch.has_local(),
+            };
+        }
         let target = self.target_for_mode(user_message);
         let target_str = match target {
             FastPathTarget::Ego => "ego",
@@ -593,6 +624,51 @@ impl IdEgoRouter {
     ///
     /// Routes to Ego (cloud/CLI) with Id fallback, supports streaming and tools.
     pub async fn route_unified(&self, req: RoutingRequest) -> anyhow::Result<RoutingResponse> {
+        if let Some(dispatch) = &self.approved_dispatch {
+            let primary = dispatch.primary();
+            let mut trace = ExecutionTrace::new(
+                "approved_models",
+                primary.map(|c| c.provider.clone()),
+                primary.and_then(|c| c.model.clone()),
+                if req.force_id_only {
+                    "approved_local"
+                } else {
+                    "approved_order"
+                },
+            );
+            let result = dispatch
+                .dispatch(
+                    &CompletionRequest {
+                        messages: req.messages,
+                        tools: req.tools,
+                        model_override: req.model_override,
+                    },
+                    req.stream_tx,
+                    req.force_id_only,
+                )
+                .await;
+            for attempt in result.attempts {
+                if let Some(error) = attempt.error {
+                    trace.record_error(
+                        &attempt.connection.provider,
+                        attempt.connection.model,
+                        &error,
+                        attempt.started,
+                    );
+                } else {
+                    trace.record_success(
+                        &attempt.connection.provider,
+                        attempt.connection.model,
+                        attempt.started,
+                    );
+                }
+            }
+            self.record_health_from_trace(&trace);
+            return Ok(RoutingResponse {
+                completion: result.response.map_err(anyhow::Error::msg)?,
+                trace: Some(trace),
+            });
+        }
         let last_msg = req.messages.last().map_or("", |m| &m.content).to_string();
 
         let (target, model_override) = if req.force_id_only {
@@ -725,6 +801,19 @@ impl IdEgoRouter {
     /// Route using the fast path.
     #[deprecated(since = "0.4.0", note = "Use route_unified() instead")]
     pub async fn route_fast(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
+        if self.approved_dispatch.is_some() {
+            let result = self
+                .route_unified(RoutingRequest {
+                    messages,
+                    tools: None,
+                    model_override: None,
+                    stream_tx: None,
+                    force_id_only: false,
+                })
+                .await;
+            return result.map(|result| result.completion);
+        }
+
         let last_msg = messages.last().map_or("", |m| &m.content);
         let target = self.target_for_mode(last_msg);
         let request = CompletionRequest {
@@ -769,6 +858,19 @@ impl IdEgoRouter {
         messages: Vec<Message>,
         tools: Vec<ToolDefinition>,
     ) -> anyhow::Result<CompletionResponse> {
+        if self.approved_dispatch.is_some() {
+            let result = self
+                .route_unified(RoutingRequest {
+                    messages,
+                    tools: Some(tools),
+                    model_override: None,
+                    stream_tx: None,
+                    force_id_only: false,
+                })
+                .await;
+            return result.map(|result| result.completion);
+        }
+
         let last_msg = messages.last().map_or("", |m| &m.content);
         let target = self.target_for_mode(last_msg);
         let request = CompletionRequest {
@@ -811,6 +913,19 @@ impl IdEgoRouter {
         note = "Use route_unified() with force_id_only instead"
     )]
     pub async fn id_only(&self, messages: Vec<Message>) -> anyhow::Result<CompletionResponse> {
+        if self.approved_dispatch.is_some() {
+            let result = self
+                .route_unified(RoutingRequest {
+                    messages,
+                    tools: None,
+                    model_override: None,
+                    stream_tx: None,
+                    force_id_only: true,
+                })
+                .await;
+            return result.map(|result| result.completion);
+        }
+
         let request = CompletionRequest::simple(messages);
         match self.id.complete(&request).await {
             Ok(response) => Ok(response),
@@ -834,6 +949,19 @@ impl IdEgoRouter {
         messages: Vec<Message>,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
+        if self.approved_dispatch.is_some() {
+            let result = self
+                .route_unified(RoutingRequest {
+                    messages,
+                    tools: None,
+                    model_override: None,
+                    stream_tx: Some(tx),
+                    force_id_only: true,
+                })
+                .await;
+            return result.map(|result| result.completion);
+        }
+
         let request = CompletionRequest::simple(messages);
         match self.id.stream(&request, tx.clone()).await {
             Ok(response) => Ok(response),
@@ -854,6 +982,19 @@ impl IdEgoRouter {
         messages: Vec<Message>,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
+        if self.approved_dispatch.is_some() {
+            let result = self
+                .route_unified(RoutingRequest {
+                    messages,
+                    tools: None,
+                    model_override: None,
+                    stream_tx: Some(tx),
+                    force_id_only: false,
+                })
+                .await;
+            return result.map(|result| result.completion);
+        }
+
         tracing::debug!(
             "Routing stream: mode={:?}, has_ego={}",
             self.mode,
@@ -902,6 +1043,19 @@ impl IdEgoRouter {
         tools: Vec<ToolDefinition>,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<CompletionResponse> {
+        if self.approved_dispatch.is_some() {
+            let result = self
+                .route_unified(RoutingRequest {
+                    messages,
+                    tools: Some(tools),
+                    model_override: None,
+                    stream_tx: Some(tx),
+                    force_id_only: false,
+                })
+                .await;
+            return result.map(|result| result.completion);
+        }
+
         tracing::debug!(
             "Routing stream with tools: mode={:?}, has_ego={}",
             self.mode,
@@ -997,6 +1151,25 @@ impl IdEgoRouter {
         &self,
         messages: Vec<Message>,
     ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
+        if self.approved_dispatch.is_some() {
+            let result = self
+                .route_unified(RoutingRequest {
+                    messages,
+                    tools: None,
+                    model_override: None,
+                    stream_tx: None,
+                    force_id_only: false,
+                })
+                .await;
+            let result = result?;
+            return Ok((
+                result.completion,
+                result
+                    .trace
+                    .expect("unified routing always records a trace"),
+            ));
+        }
+
         let last_msg = messages.last().map_or("", |m| &m.content).to_string();
         let target = self.target_for_mode(&last_msg);
         let model_override: Option<String> = None;
@@ -1075,6 +1248,25 @@ impl IdEgoRouter {
         tools: Vec<ToolDefinition>,
         forced_model_override: Option<String>,
     ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
+        if self.approved_dispatch.is_some() {
+            let result = self
+                .route_unified(RoutingRequest {
+                    messages,
+                    tools: Some(tools),
+                    model_override: forced_model_override,
+                    stream_tx: None,
+                    force_id_only: false,
+                })
+                .await;
+            let result = result?;
+            return Ok((
+                result.completion,
+                result
+                    .trace
+                    .expect("unified routing always records a trace"),
+            ));
+        }
+
         let last_msg = messages.last().map_or("", |m| &m.content).to_string();
         let target = self.target_for_mode(&last_msg);
         let model_override = forced_model_override;
@@ -1145,6 +1337,25 @@ impl IdEgoRouter {
         &self,
         messages: Vec<Message>,
     ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
+        if self.approved_dispatch.is_some() {
+            let result = self
+                .route_unified(RoutingRequest {
+                    messages,
+                    tools: None,
+                    model_override: None,
+                    stream_tx: None,
+                    force_id_only: true,
+                })
+                .await;
+            let result = result?;
+            return Ok((
+                result.completion,
+                result
+                    .trace
+                    .expect("unified routing always records a trace"),
+            ));
+        }
+
         let mut trace = ExecutionTrace::new(
             &self.routing_mode_str(),
             self.ego_provider.as_ref().map(|p| p.to_string()),
@@ -1182,6 +1393,25 @@ impl IdEgoRouter {
         messages: Vec<Message>,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
+        if self.approved_dispatch.is_some() {
+            let result = self
+                .route_unified(RoutingRequest {
+                    messages,
+                    tools: None,
+                    model_override: None,
+                    stream_tx: Some(tx),
+                    force_id_only: true,
+                })
+                .await;
+            let result = result?;
+            return Ok((
+                result.completion,
+                result
+                    .trace
+                    .expect("unified routing always records a trace"),
+            ));
+        }
+
         let mut trace = ExecutionTrace::new(
             &self.routing_mode_str(),
             self.ego_provider.as_ref().map(|p| p.to_string()),
@@ -1216,6 +1446,25 @@ impl IdEgoRouter {
         messages: Vec<Message>,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
+        if self.approved_dispatch.is_some() {
+            let result = self
+                .route_unified(RoutingRequest {
+                    messages,
+                    tools: None,
+                    model_override: None,
+                    stream_tx: Some(tx),
+                    force_id_only: false,
+                })
+                .await;
+            let result = result?;
+            return Ok((
+                result.completion,
+                result
+                    .trace
+                    .expect("unified routing always records a trace"),
+            ));
+        }
+
         let last_msg = messages.last().map_or("", |m| &m.content).to_string();
         let target = self.target_for_mode(&last_msg);
         let model_override: Option<String> = None;
@@ -1282,6 +1531,25 @@ impl IdEgoRouter {
         tools: Vec<ToolDefinition>,
         tx: tokio::sync::mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<(CompletionResponse, ExecutionTrace)> {
+        if self.approved_dispatch.is_some() {
+            let result = self
+                .route_unified(RoutingRequest {
+                    messages,
+                    tools: Some(tools),
+                    model_override: None,
+                    stream_tx: Some(tx),
+                    force_id_only: false,
+                })
+                .await;
+            let result = result?;
+            return Ok((
+                result.completion,
+                result
+                    .trace
+                    .expect("unified routing always records a trace"),
+            ));
+        }
+
         let last_msg = messages.last().map_or("", |m| &m.content).to_string();
         let target = self.target_for_mode(&last_msg);
         let model_override: Option<String> = None;
@@ -1343,6 +1611,34 @@ mod tests {
     use super::*;
     use abigail_capabilities::cognitive::Message;
     use abigail_core::RoutingMode;
+
+    #[tokio::test]
+    async fn empty_approved_policy_cannot_use_legacy_slots_or_caller_model_override() {
+        let legacy = Arc::new(TestProvider::new());
+        let mut router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
+        router.id = legacy.clone();
+        router.ego = Some(legacy.clone());
+        router.approved_dispatch = Some(Arc::new(
+            abigail_hive::approved_dispatch::ApprovedDispatch::build(&[]).await,
+        ));
+        assert!(router
+            .route_unified(RoutingRequest {
+                messages: vec![],
+                tools: None,
+                model_override: Some("unapproved".into()),
+                stream_tx: None,
+                force_id_only: false
+            })
+            .await
+            .is_err());
+        #[allow(deprecated)]
+        {
+            assert!(router.route_fast(vec![]).await.is_err());
+            assert!(router.id_only(vec![]).await.is_err());
+        }
+        assert_eq!(legacy.calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(router.best_available_provider().is_none());
+    }
 
     struct TestProvider {
         calls: std::sync::atomic::AtomicUsize,
