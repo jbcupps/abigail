@@ -8,6 +8,7 @@ mod capability_matcher;
 mod execution_ledger;
 mod hive_client;
 mod job_scheduler;
+mod loopback;
 mod memory_consumer;
 mod outbox;
 mod pipeline;
@@ -94,8 +95,23 @@ async fn run() -> anyhow::Result<()> {
         .map(|id| id.to_string())
         .map_err(|e| anyhow::anyhow!("--entity-id must be a valid UUID: {}", e))?;
 
-    // 1. Fetch provider config from Hive
-    let hive_client = HiveClient::new(&cli.hive_url);
+    // 1. Exchange the supervisor's one-use bootstrap for a lease; every other
+    // Hive request is authorized by that lease.
+    let session_lease = HiveClient::new(&cli.hive_url)
+        .issue_runtime_session(&entity_id, Some(format!("entity-runtime-{}", entity_id)))
+        .await?;
+    tracing::info!(
+        "Issued runtime session for runtime {}",
+        session_lease.runtime_id
+    );
+    abigail_persistence::configure_hive_transport(
+        &cli.hive_url,
+        &entity_id,
+        &session_lease.lease_id,
+    )?;
+    let hive_client = HiveClient::new(&cli.hive_url).with_lease(&session_lease.lease_id);
+
+    // 2. Fetch provider config from Hive
     let entity_info = hive_client.get_entity(&entity_id).await?;
     tracing::info!(
         "Entity '{}' (birth_complete={})",
@@ -122,20 +138,7 @@ async fn run() -> anyhow::Result<()> {
         provider_config.routing_mode
     );
 
-    let session_lease = hive_client
-        .issue_runtime_session(&entity_id, Some(format!("entity-runtime-{}", entity_id)))
-        .await?;
-    tracing::info!(
-        "Issued runtime session for runtime {}",
-        session_lease.runtime_id
-    );
-    abigail_persistence::configure_hive_transport(
-        &cli.hive_url,
-        &entity_id,
-        &session_lease.lease_id,
-    )?;
-
-    // 2/3. Build providers + router from the resolved config (shared with the
+    // 3. Build providers + router from the resolved config (shared with the
     // governance hot-swap path). Keep a JSON snapshot so the supervision loop
     // can detect hive-side provider changes.
     let initial_provider_config = serde_json::to_value(&provider_config).unwrap_or_default();
@@ -324,7 +327,7 @@ async fn run() -> anyhow::Result<()> {
     }
 
     // 6. Register HiveManagementSkill (built-in)
-    let http_hive_ops = Arc::new(hive_client::HttpHiveOps::new(&cli.hive_url));
+    let http_hive_ops = Arc::new(hive_client::HttpHiveOps::new(hive_client.clone()));
     register_hive_management_skill(&registry, http_hive_ops);
 
     // 6b. Register SkillFactory (allows entity to author skills via chat)
@@ -872,6 +875,7 @@ async fn run() -> anyhow::Result<()> {
         .route("/v1/memory/search", post(routes::memory_search))
         .route("/v1/memory/recent", get(routes::memory_recent))
         .route("/v1/memory/insert", post(routes::memory_insert))
+        .layer(axum::middleware::from_fn(loopback::require_loopback_host))
         .layer(cors)
         .with_state(state.clone());
 

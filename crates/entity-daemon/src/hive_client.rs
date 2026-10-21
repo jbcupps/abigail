@@ -14,21 +14,48 @@ use hive_core::{
 pub struct HiveClient {
     base_url: String,
     client: reqwest::Client,
+    lease_id: Option<std::sync::Arc<str>>,
 }
 
 impl HiveClient {
+    /// Without a lease, the Hive only answers the bootstrap exchange in
+    /// [`Self::issue_runtime_session`].
     pub fn new(base_url: &str) -> Self {
         // Control-plane calls share the supervision loop with heartbeats and
         // outbox sync; an unbounded request (e.g. a half-open connection
-        // across a hive restart) would stop heartbeats permanently.
+        // across a hive restart) would stop heartbeats permanently. Requests
+        // carry the lease, so they never go through a proxy or a redirect.
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(15))
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .unwrap_or_default();
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             client,
+            lease_id: None,
         }
+    }
+
+    pub fn with_lease(mut self, lease_id: &str) -> Self {
+        self.lease_id = Some(lease_id.into());
+        self
+    }
+
+    fn authorized(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match &self.lease_id {
+            Some(lease_id) => request.bearer_auth(lease_id),
+            None => request,
+        }
+    }
+
+    fn get(&self, url: &str) -> reqwest::RequestBuilder {
+        self.authorized(self.client.get(url))
+    }
+
+    fn post(&self, url: &str) -> reqwest::RequestBuilder {
+        self.authorized(self.client.post(url))
     }
 
     /// Fetch provider configuration for an entity.
@@ -37,7 +64,7 @@ impl HiveClient {
             "{}/v1/entities/{}/provider-config",
             self.base_url, entity_id
         );
-        let resp: ApiEnvelope<ProviderConfig> = self.client.get(&url).send().await?.json().await?;
+        let resp: ApiEnvelope<ProviderConfig> = self.get(&url).send().await?.json().await?;
         if resp.ok {
             resp.data
                 .ok_or_else(|| anyhow::anyhow!("Empty data in provider-config response"))
@@ -57,7 +84,7 @@ impl HiveClient {
     ) -> anyhow::Result<hive_core::EntityBirthDocument> {
         let url = format!("{}/v1/entities/{}/birth", self.base_url, entity_id);
         let resp: ApiEnvelope<hive_core::EntityBirthDocument> =
-            self.client.get(&url).send().await?.json().await?;
+            self.get(&url).send().await?.json().await?;
         if resp.ok {
             resp.data
                 .ok_or_else(|| anyhow::anyhow!("Empty data in birth document response"))
@@ -76,7 +103,7 @@ impl HiveClient {
     ) -> anyhow::Result<hive_core::ProviderProfileResponse> {
         let url = format!("{}/v1/providers/profiles/{}", self.base_url, name);
         let resp: ApiEnvelope<hive_core::ProviderProfileResponse> =
-            self.client.get(&url).send().await?.json().await?;
+            self.get(&url).send().await?.json().await?;
         if resp.ok {
             resp.data
                 .ok_or_else(|| anyhow::anyhow!("Empty data in provider-profile response"))
@@ -91,8 +118,7 @@ impl HiveClient {
     /// Fetch a secret value from Hive by key. Returns None if not found.
     pub async fn get_secret(&self, key: &str) -> anyhow::Result<Option<String>> {
         let url = format!("{}/v1/secrets/{}", self.base_url, key);
-        let resp: ApiEnvelope<SecretValueResponse> =
-            self.client.get(&url).send().await?.json().await?;
+        let resp: ApiEnvelope<SecretValueResponse> = self.get(&url).send().await?.json().await?;
         if resp.ok {
             Ok(resp.data.map(|d| d.value))
         } else {
@@ -103,7 +129,7 @@ impl HiveClient {
     /// Fetch entity info.
     pub async fn get_entity(&self, entity_id: &str) -> anyhow::Result<EntityInfo> {
         let url = format!("{}/v1/entities/{}", self.base_url, entity_id);
-        let resp: ApiEnvelope<EntityInfo> = self.client.get(&url).send().await?.json().await?;
+        let resp: ApiEnvelope<EntityInfo> = self.get(&url).send().await?.json().await?;
         if resp.ok {
             resp.data
                 .ok_or_else(|| anyhow::anyhow!("Empty data in entity response"))
@@ -157,14 +183,8 @@ impl HiveClient {
         request: &RuntimeRegistrationRequest,
     ) -> anyhow::Result<RuntimeSessionStatus> {
         let url = format!("{}/v1/runtime/register", self.base_url);
-        let resp: ApiEnvelope<RuntimeSessionStatus> = self
-            .client
-            .post(&url)
-            .json(request)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let resp: ApiEnvelope<RuntimeSessionStatus> =
+            self.post(&url).json(request).send().await?.json().await?;
         if resp.ok {
             resp.data
                 .ok_or_else(|| anyhow::anyhow!("Empty data in runtime register response"))
@@ -181,14 +201,8 @@ impl HiveClient {
         request: &RuntimeHeartbeatRequest,
     ) -> anyhow::Result<RuntimeHeartbeatResponse> {
         let url = format!("{}/v1/runtime/heartbeat", self.base_url);
-        let resp: ApiEnvelope<RuntimeHeartbeatResponse> = self
-            .client
-            .post(&url)
-            .json(request)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let resp: ApiEnvelope<RuntimeHeartbeatResponse> =
+            self.post(&url).json(request).send().await?.json().await?;
         if resp.ok {
             resp.data
                 .ok_or_else(|| anyhow::anyhow!("Empty data in runtime heartbeat response"))
@@ -206,7 +220,7 @@ impl HiveClient {
     ) -> anyhow::Result<SkillAssignmentsResponse> {
         let url = format!("{}/v1/entities/{}/assignments", self.base_url, entity_id);
         let resp: ApiEnvelope<SkillAssignmentsResponse> =
-            self.client.get(&url).send().await?.json().await?;
+            self.get(&url).send().await?.json().await?;
         if resp.ok {
             resp.data
                 .ok_or_else(|| anyhow::anyhow!("Empty data in assignments response"))
@@ -227,7 +241,7 @@ impl HiveClient {
             self.base_url, entity_id
         );
         let resp: ApiEnvelope<ForgeApprovalJobsResponse> =
-            self.client.get(&url).send().await?.json().await?;
+            self.get(&url).send().await?.json().await?;
         if resp.ok {
             resp.data
                 .ok_or_else(|| anyhow::anyhow!("Empty data in forge approvals response"))
@@ -244,14 +258,8 @@ impl HiveClient {
         request: &OutboxSyncRequest,
     ) -> anyhow::Result<OutboxSyncResponse> {
         let url = format!("{}/v1/runtime/outbox/sync", self.base_url);
-        let resp: ApiEnvelope<OutboxSyncResponse> = self
-            .client
-            .post(&url)
-            .json(request)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let resp: ApiEnvelope<OutboxSyncResponse> =
+            self.post(&url).json(request).send().await?.json().await?;
         if resp.ok {
             resp.data
                 .ok_or_else(|| anyhow::anyhow!("Empty data in outbox sync response"))
@@ -273,10 +281,8 @@ pub struct HttpHiveOps {
 }
 
 impl HttpHiveOps {
-    pub fn new(hive_url: &str) -> Self {
-        Self {
-            client: HiveClient::new(hive_url),
-        }
+    pub fn new(client: HiveClient) -> Self {
+        Self { client }
     }
 }
 
@@ -285,7 +291,6 @@ impl HiveOperations for HttpHiveOps {
     async fn list_agents(&self) -> Result<Vec<HiveAgentInfo>, String> {
         let url = format!("{}/v1/entities", self.client.base_url);
         let resp: ApiEnvelope<Vec<EntityInfo>> = self
-            .client
             .client
             .get(&url)
             .send()
@@ -322,7 +327,6 @@ impl HiveOperations for HttpHiveOps {
             name: name.to_string(),
         };
         let resp: ApiEnvelope<CreateEntityResponse> = self
-            .client
             .client
             .post(&url)
             .json(&body)
@@ -364,7 +368,6 @@ impl HiveOperations for HttpHiveOps {
         };
         let resp: ApiEnvelope<String> = self
             .client
-            .client
             .post(&url)
             .json(&body)
             .send()
@@ -384,7 +387,6 @@ impl HiveOperations for HttpHiveOps {
     async fn get_skill_secret_names(&self) -> Result<Vec<String>, String> {
         let url = format!("{}/v1/secrets/list", self.client.base_url);
         let resp: ApiEnvelope<SecretListResponse> = self
-            .client
             .client
             .get(&url)
             .send()
