@@ -108,11 +108,13 @@ stopped so its next launch loads the new signed identity.
 
 ## Local authorization and retention
 
-Genesis is scoped to the existing local household profile. Its HTTP routes require
-the private `genesis.token` capability; the native app retrieves it through Tauri.
-Browser development needs `VITE_HIVE_DAEMON_URL` and `VITE_GENESIS_TOKEN` for an
-isolated loopback daemon. Never embed a personal token in committed files or URLs.
-This capability is local profile protection, not a multi-user account system.
+Genesis is scoped to the existing local household profile. Like every Hive route,
+its HTTP routes require the per-install Hive control token (`hive-control.token` in
+the data root); the native app retrieves it through Tauri once the daemon has proved
+it holds the same token. Browser development needs `VITE_HIVE_DAEMON_URL` and
+`VITE_HIVE_CONTROL_TOKEN` for an isolated loopback daemon. Never embed a personal
+token in committed files or URLs. This is local profile protection, not a
+multi-user account system.
 
 Drafts have optimistic revisions and exclusive per-draft actions. At most two model
 requests run concurrently, with 20 requests per minute. Limits include 100 sessions,

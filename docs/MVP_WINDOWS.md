@@ -180,6 +180,32 @@ Hive remains the sole owner of the embedded memory engine. Entity runtimes use
 lease-scoped HTTP calls to their own database; this avoids multi-process file
 locks while retaining one shared local storage substrate.
 
+## Local access control
+
+Loopback is not a trust boundary: other local accounts, unrelated processes,
+and DNS-rebound browser pages can reach `127.0.0.1`. The Hive answers only
+`/health`, its adoption challenge, and bootstrap-authorized lease issuance
+without a credential:
+
+- The desktop app presents a per-install control token, `hive-control.token` in
+  the data root. The daemon creates it on first start and replaces a damaged one;
+  the older `genesis.token` is deleted.
+- Each Entity runtime exchanges its one-use supervisor bootstrap for a lease before
+  any other Hive call, then presents that lease. A family Entity reaches only its
+  own records and runtime reports plus household secret and provider-profile reads. Only the immortal
+  Hive helper may also list or create Entities and store secrets. The desktop
+  token cannot act as a runtime.
+- Hive and Entity daemons refuse requests that do not name a loopback `Host`.
+- The Hive app adopts a recorded or freshly spawned daemon only after it returns an
+  HMAC over the token, channel, its own URL, and a fresh nonce. A stale descriptor,
+  reused port, other channel, or relay is never adopted and never receives the
+  token. `hive-cli` reads the token from `--data-dir` and adopts the same way.
+
+An older daemon left running across an upgrade has no adoption endpoint, so the
+new app would start a second daemon that cannot open the locked store. The
+installer's running-process guard is expected to prevent this; it still needs
+Windows validation.
+
 ## Verified MVP build — 2026-10-02
 
 The prior unsigned Windows x64 installer was built, silently installed into an isolated
