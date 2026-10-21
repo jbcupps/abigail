@@ -238,7 +238,7 @@ pub fn build_memory_context(
     let recall_queries = recall_queries(user_message);
 
     // Layer 1: Recent turns from the current session.
-    if let Ok(recent) = store.recent_turns(session_id, budget.recent_turns_limit) {
+    if let Ok(recent) = store.recent_dialogue_turns(session_id, budget.recent_turns_limit) {
         for turn in &recent {
             let len = turn.content.len();
             if total_chars + len > budget.max_total_chars {
@@ -255,7 +255,7 @@ pub fn build_memory_context(
         let mut turn_lines = Vec::new();
         let mut seen_turn_ids = HashSet::new();
         for query in &recall_queries {
-            if let Ok(turns) = store.search_turns(query, budget.memory_search_limit * 4) {
+            if let Ok(turns) = store.search_dialogue_turns(query, budget.memory_search_limit * 4) {
                 for turn in turns
                     .into_iter()
                     .filter(|turn| turn.session_id != session_id)
@@ -2066,6 +2066,73 @@ mod tests {
         assert!(recalled.content.contains("older-session"));
         assert!(recalled.content.contains("Recalled Memories"));
         assert!(recalled.content.contains("127.0.0.1"));
+    }
+
+    #[test]
+    fn memory_fallback_keeps_dialogue_and_does_not_send_monitor_records_to_models() {
+        let store = abigail_memory::MemoryStore::open_in_memory().unwrap();
+        for (role, content) in [
+            ("user", "Our ship is Comet Teacup"),
+            ("assistant", "Comet Teacup is ready"),
+            ("mentor_monitor", "internal Comet monitor one"),
+            ("mentor_monitor", "internal Comet monitor two"),
+            ("system", "internal Comet system record"),
+        ] {
+            store
+                .insert_turn(&abigail_memory::ConversationTurn::new(
+                    "current", role, content,
+                ))
+                .unwrap();
+        }
+        store
+            .insert_turn(&abigail_memory::ConversationTurn::new(
+                "older",
+                "assistant",
+                "Comet destination is Moon Lagoon",
+            ))
+            .unwrap();
+        // More internal matches than the recall search limit must not starve
+        // the older, genuine dialogue or become recalled conversation text.
+        for _ in 0..8 {
+            store
+                .insert_turn(&abigail_memory::ConversationTurn::new(
+                    "older",
+                    "mentor_monitor",
+                    "internal Comet monitor recall",
+                ))
+                .unwrap();
+        }
+        let budget = ContextBudget {
+            recent_turns_limit: 2,
+            memory_search_limit: 1,
+            max_total_chars: 8000,
+        };
+        for history in [None, Some(vec![])] {
+            let messages = build_contextual_messages_with_memory(
+                &store,
+                "current",
+                "Active system prompt",
+                history,
+                "Where is Comet going?",
+                &budget,
+            );
+            assert!(messages
+                .iter()
+                .all(|m| matches!(m.role.as_str(), "system" | "user" | "assistant")));
+            assert!(messages
+                .iter()
+                .any(|m| m.content == "Our ship is Comet Teacup"));
+            assert!(messages
+                .iter()
+                .any(|m| m.content == "Comet Teacup is ready"));
+            assert!(messages.iter().any(|m| m.content.contains("Moon Lagoon")));
+            assert!(!messages
+                .iter()
+                .any(|m| m.content.contains("internal Comet")));
+        }
+        // Context filtering must not delete or reinterpret durable audit data.
+        assert_eq!(store.total_turn_count().unwrap(), 14);
+        assert_eq!(store.search_turns("internal Comet", 20).unwrap().len(), 11);
     }
 
     #[test]

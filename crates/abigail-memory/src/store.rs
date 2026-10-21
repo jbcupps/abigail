@@ -377,9 +377,35 @@ impl MemoryStore {
     }
 
     pub fn recent_turns(&self, session_id: &str, limit: usize) -> Result<Vec<ConversationTurn>> {
+        self.recent_turns_filtered(session_id, limit, false)
+    }
+
+    /// Conversation context excludes internal monitor/system records. Filter
+    /// before applying the limit so those records cannot crowd out dialogue.
+    pub fn recent_dialogue_turns(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<ConversationTurn>> {
+        self.recent_turns_filtered(session_id, limit, true)
+    }
+
+    fn recent_turns_filtered(
+        &self,
+        session_id: &str,
+        limit: usize,
+        dialogue_only: bool,
+    ) -> Result<Vec<ConversationTurn>> {
+        // Keep the existing scoped-read grammar for remote Hive persistence.
+        // It intentionally accepts one equality predicate, not arbitrary SQL.
+        // Retrieve this session, then filter before limiting dialogue in Rust.
+        let limit_clause = if dialogue_only {
+            String::new()
+        } else {
+            format!(" LIMIT {}", limit.max(1))
+        };
         let sql = format!(
-            "SELECT * FROM conversation_turn WHERE session_id = $session_id ORDER BY turn_number DESC, created_at DESC LIMIT {}",
-            limit.max(1)
+            "SELECT * FROM conversation_turn WHERE session_id = $session_id ORDER BY turn_number DESC, created_at DESC{limit_clause}"
         );
         let bindings = [binding("session_id", session_id)?];
         let mut turns: Vec<ConversationTurn> = self
@@ -388,6 +414,10 @@ impl MemoryStore {
             .into_iter()
             .map(TryFrom::try_from)
             .collect::<Result<Vec<_>>>()?;
+        if dialogue_only {
+            turns.retain(|turn| matches!(turn.role.as_str(), "user" | "assistant"));
+            turns.truncate(limit.max(1));
+        }
         // Newly recorded turns may share the default number zero. Restore
         // chronological order within each number rather than preserving the
         // database's descending order for equal-numbered turns.
@@ -413,10 +443,29 @@ impl MemoryStore {
     }
 
     pub fn search_turns(&self, query: &str, limit: usize) -> Result<Vec<ConversationTurn>> {
+        self.search_turns_filtered(query, limit, false)
+    }
+
+    /// Search user/assistant dialogue without recalling internal audit records.
+    pub fn search_dialogue_turns(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ConversationTurn>> {
+        self.search_turns_filtered(query, limit, true)
+    }
+
+    fn search_turns_filtered(
+        &self,
+        query: &str,
+        limit: usize,
+        dialogue_only: bool,
+    ) -> Result<Vec<ConversationTurn>> {
         let query = query.to_ascii_lowercase();
         let mut turns: Vec<ConversationTurn> = self
             .all_turns()?
             .into_iter()
+            .filter(|turn| !dialogue_only || matches!(turn.role.as_str(), "user" | "assistant"))
             .filter(|turn| contains_case_insensitive(&turn.content, &query))
             .collect();
         turns.sort_by_key(|turn| std::cmp::Reverse(turn.created_at));

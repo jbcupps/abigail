@@ -18,6 +18,10 @@ Abigail is the private Entity Coordinator and Manager for real homes and familie
 
 ## Active Plan (Family-First Priorities)
 
+### Real local-model acceptance (2026-10-21)
+
+The authorized AILap isolated preview at `10e5ca46` now uses an already-downloaded Gemma 3 4B through LM Studio, pinned as its sole approved route. Quick creation, real chat, streaming, exact Entity-history reopen and context recall passed through production APIs. This does not prove native visual acceptance or all Genesis modes. Empty-history replay leaked `mentor_monitor` into the model protocol; the bounded correction filters dialogue before retrieval limits and leaves internal records and monitor execution intact. See [evidence and remaining gaps](documents/LOCAL_MODEL_ACCEPTANCE.md). Preserve prepared bytes, existing profiles and stable processes; no provider credentials or CLI account access were used.
+
 ### Provider readiness (2026-10-21)
 
 `dev/provider-readiness-ux` starts at tested product `a18249a3b622e8b34d0f20ec1f0e24fc0dc7183d`. Keep installed-tool presence, authentication hints, explicit connection checks and saved model selection distinct. Preview discovery resolves executable presence only; it must not execute CLI metadata/auth commands or enable the existing account adapters. Preserve API/local routes and route missing-provider conversation attempts to setup without touching saved identity or draft. See [contract and evidence](documents/PROVIDER_READINESS_UX.md). The active hands-on preview, other worktrees and paused Store files remain untouched. No live account grants, provider calls, restart, signing, installation or beta/main publication is part of this update.

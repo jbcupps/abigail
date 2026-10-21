@@ -36,6 +36,8 @@ Choose which checked models Abigail may use in **Settings > Model connections**.
 
 Local storage belongs to you. Cloud providers and installed CLIs use their own accounts and processing policies. The official CLI keeps control of account sign-in and tokens; Abigail does not extract or forward account OAuth tokens. The MVP requires a connected, working model; it does not bundle model weights or pretend a placeholder is local intelligence.
 
+The local-model development check now demonstrates quick creation, real conversation, streaming, and saved history after reopening with an existing LM Studio model. Use a context window large enough for Abigail's full prompt; this check used Gemma 3 4B at 32K. Guided Genesis proposal formatting and occasional model identity confusion remain open. A source correction keeps internal monitor records out of conversation replay without deleting them. See the [bounded live evidence and limitations](documents/LOCAL_MODEL_ACCEPTANCE.md).
+
 ### Discover an Entity with Genesis
 
 Start with a spark, take a deeper conversation, or import a `.md` / `.markdown`
