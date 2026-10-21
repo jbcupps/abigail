@@ -22,7 +22,7 @@ Date: 2026-03-02
 | E2E | Shared chat parity integration | Local-Required | Active | `cargo test -p entity-chat --test e2e_parity` |
 | E2E | Live email tool-use | Env-Gated | Active | `cargo test -p entity-chat --test live_email -- --nocapture` |
 | E2E | Desktop runtime probe | Env-Gated | Active | `.\scripts\tests\live_tauri_skill_secrets_e2e.ps1` |
-| Security | Cargo/npm advisory scans | CI-Advisory | Active | `audit` job in `.github/workflows/ci.yml` |
+| Security | Cargo/npm advisory scans | CI-Required | Active | `audit` job in `.github/workflows/ci.yml`; exceptions in `.cargo/audit.toml` |
 | Security | CodeQL JS/TS analysis | CI-Advisory | Active | `codeql` job in `.github/workflows/ci.yml` |
 
 ## Deprecated Matrix Entries
