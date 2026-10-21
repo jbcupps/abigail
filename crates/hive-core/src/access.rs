@@ -133,61 +133,85 @@ fn decode_hex(value: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
 
-    const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    const NONCE: &str = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
     const URL: &str = "http://127.0.0.1:43141";
+
+    fn random_hex64() -> String {
+        format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        )
+    }
+
+    /// Changes one character while keeping the value hex.
+    fn flip_first(value: &str) -> String {
+        let replacement = if value.starts_with('0') { '1' } else { '0' };
+        format!("{replacement}{}", &value[1..])
+    }
 
     #[test]
     fn control_tokens_must_be_64_hex_characters() {
-        assert_eq!(parse_control_token(&format!(" {TOKEN}\n")), Some(TOKEN));
-        assert_eq!(parse_control_token(&TOKEN[1..]), None);
-        assert_eq!(parse_control_token(&format!("{TOKEN}0")), None);
-        assert_eq!(parse_control_token(&TOKEN.replace('a', "g")), None);
+        let token = random_hex64();
+        let nonce = random_hex64();
+        assert_eq!(
+            parse_control_token(&format!(" {token}\n")),
+            Some(token.as_str())
+        );
+        assert_eq!(parse_control_token(&token[1..]), None);
+        assert_eq!(parse_control_token(&format!("{token}0")), None);
+        assert_eq!(parse_control_token(&format!("g{}", &token[1..])), None);
         assert_eq!(parse_control_token(""), None);
-        assert!(is_valid_nonce(NONCE));
-        assert!(!is_valid_nonce("short"));
+        assert!(is_valid_nonce(&nonce));
+        assert!(!is_valid_nonce(&nonce[..10]));
+        assert!(!is_valid_nonce(&format!("g{}", &nonce[1..])));
     }
 
     #[test]
     fn token_comparison_rejects_prefixes_and_near_misses() {
-        assert!(tokens_match(TOKEN, TOKEN));
-        assert!(!tokens_match(&TOKEN[..63], TOKEN));
-        assert!(!tokens_match(&TOKEN.replace('f', "e"), TOKEN));
-        assert!(!tokens_match("", TOKEN));
+        let token = random_hex64();
+        assert!(tokens_match(&token, &token));
+        assert!(!tokens_match(&token[..63], &token));
+        assert!(!tokens_match(&flip_first(&token), &token));
+        assert!(!tokens_match("", &token));
     }
 
     #[test]
     fn adoption_proof_binds_token_channel_url_and_nonce() {
-        let proof = adoption_proof(TOKEN, "stable", URL, NONCE);
+        let token = random_hex64();
+        let nonce = random_hex64();
+        let proof = adoption_proof(&token, "stable", URL, &nonce);
         assert_eq!(proof.len(), 64);
-        assert!(verify_adoption_proof(TOKEN, "stable", URL, NONCE, &proof));
+        assert!(verify_adoption_proof(&token, "stable", URL, &nonce, &proof));
 
-        let other_token = TOKEN.replace('0', "1");
-        let other_nonce = NONCE.replace('f', "e");
+        let other_token = flip_first(&token);
+        let other_nonce = flip_first(&nonce);
         for (token, channel, url, nonce) in [
-            (other_token.as_str(), "stable", URL, NONCE),
-            (TOKEN, "preview", URL, NONCE),
-            (TOKEN, "stable", "http://127.0.0.1:43142", NONCE),
-            (TOKEN, "stable", URL, other_nonce.as_str()),
+            (other_token.as_str(), "stable", URL, nonce.as_str()),
+            (token.as_str(), "preview", URL, nonce.as_str()),
+            (
+                token.as_str(),
+                "stable",
+                "http://127.0.0.1:43142",
+                nonce.as_str(),
+            ),
+            (token.as_str(), "stable", URL, other_nonce.as_str()),
         ] {
             assert!(!verify_adoption_proof(token, channel, url, nonce, &proof));
         }
-        assert!(!verify_adoption_proof(
-            TOKEN,
-            "stable",
-            URL,
-            NONCE,
-            &proof[..62]
-        ));
-        assert!(!verify_adoption_proof(TOKEN, "stable", URL, NONCE, "zz"));
-        assert!(!verify_adoption_proof(TOKEN, "stable", URL, NONCE, ""));
+        for truncated in [&proof[..62], "zz", ""] {
+            assert!(!verify_adoption_proof(
+                &token, "stable", URL, &nonce, truncated
+            ));
+        }
     }
 
     #[test]
     fn proof_fields_cannot_be_shifted_into_each_other() {
+        let token = random_hex64();
+        let nonce = random_hex64();
         assert_ne!(
-            adoption_proof(TOKEN, "stable", "ab", NONCE),
-            adoption_proof(TOKEN, "stablea", "b", NONCE)
+            adoption_proof(&token, "stable", "ab", &nonce),
+            adoption_proof(&token, "stablea", "b", &nonce)
         );
     }
 

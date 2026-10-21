@@ -381,38 +381,30 @@ mod tests {
     #[tokio::test]
     async fn control_plane_routes_reject_requests_without_a_credential() {
         let f = fixture();
-        let entity = &f.entity_id;
-        for (method, path, body) in [
-            (Method::GET, "/v1/status".to_string(), None),
-            (Method::GET, "/v1/entities".to_string(), None),
+        for (method, route, body) in [
+            (Method::GET, "/v1/status", None),
+            (Method::GET, "/v1/entities", None),
             (
                 Method::POST,
-                "/v1/entities".to_string(),
+                "/v1/entities",
                 Some(serde_json::json!({"name": "Intruder"})),
             ),
-            (Method::GET, "/v1/secrets/list".to_string(), None),
-            (Method::GET, "/v1/secrets/openai".to_string(), None),
+            (Method::GET, "/v1/secrets/list", None),
+            (Method::GET, "/v1/secrets/openai", None),
             (
                 Method::POST,
-                "/v1/secrets".to_string(),
+                "/v1/secrets",
                 Some(serde_json::json!({"key": "openai", "value": "sk-x"})),
             ),
-            (
-                Method::GET,
-                format!("/v1/entities/{entity}/provider-config"),
-                None,
-            ),
-            (Method::POST, format!("/v1/entities/{entity}/open"), None),
-            (
-                Method::GET,
-                "/v1/providers/profiles/openai".to_string(),
-                None,
-            ),
-            (Method::GET, "/v1/genesis/sessions".to_string(), None),
+            (Method::GET, "/v1/entities/:id/provider-config", None),
+            (Method::POST, "/v1/entities/:id/open", None),
+            (Method::GET, "/v1/providers/profiles/openai", None),
+            (Method::GET, "/v1/genesis/sessions", None),
         ] {
+            let path = route.replace(":id", &f.entity_id);
             for bearer in [None, Some("not-a-real-credential")] {
                 let (status, body) = f.send(method.clone(), &path, bearer, body.clone()).await;
-                assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {path}");
+                assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {route}");
                 assert_eq!(body["ok"], false);
             }
         }
@@ -476,54 +468,55 @@ mod tests {
         let f = fixture();
         let (other_id, _) = f.state.identity_manager.create_agent("Other").unwrap();
         let lease = f.lease_for(&f.entity_id).lease_id;
-        let own = &f.entity_id;
+        let concrete = |route: &str| {
+            route
+                .replace(":lease_id", &lease)
+                .replace(":other", &other_id)
+                .replace(":id", &f.entity_id)
+        };
 
-        for path in [
-            format!("/v1/entities/{own}"),
-            format!("/v1/entities/{own}/provider-config"),
-            format!("/v1/entities/{own}/assignments"),
-            format!("/v1/entities/{own}/execution/receipts"),
-            format!("/v1/runtime/sessions/{lease}"),
-            "/v1/secrets/list".to_string(),
-            "/v1/secrets/openai".to_string(),
+        for route in [
+            "/v1/entities/:id",
+            "/v1/entities/:id/provider-config",
+            "/v1/entities/:id/assignments",
+            "/v1/entities/:id/execution/receipts",
+            "/v1/runtime/sessions/:lease_id",
+            "/v1/secrets/list",
+            "/v1/secrets/openai",
         ] {
-            let (status, _) = f.send(Method::GET, &path, Some(&lease), None).await;
-            assert_eq!(status, StatusCode::OK, "{path}");
+            let (status, _) = f
+                .send(Method::GET, &concrete(route), Some(&lease), None)
+                .await;
+            assert_eq!(status, StatusCode::OK, "{route}");
         }
-        for (method, path, body) in [
-            (Method::GET, format!("/v1/entities/{other_id}"), None),
-            (
-                Method::GET,
-                format!("/v1/entities/{other_id}/provider-config"),
-                None,
-            ),
-            (
-                Method::GET,
-                format!("/v1/entities/{other_id}/execution/receipts"),
-                None,
-            ),
-            (Method::GET, "/v1/entities".to_string(), None),
+        for (method, route, body) in [
+            (Method::GET, "/v1/entities/:other", None),
+            (Method::GET, "/v1/entities/:other/provider-config", None),
+            (Method::GET, "/v1/entities/:other/execution/receipts", None),
+            (Method::GET, "/v1/entities", None),
             (
                 Method::POST,
-                "/v1/entities".to_string(),
+                "/v1/entities",
                 Some(serde_json::json!({"name": "Spawned"})),
             ),
             (
                 Method::POST,
-                "/v1/secrets".to_string(),
+                "/v1/secrets",
                 Some(serde_json::json!({"key": "openai", "value": "sk-family"})),
             ),
             (
                 Method::PATCH,
-                format!("/v1/entities/{own}/config"),
+                "/v1/entities/:id/config",
                 Some(serde_json::json!({"ego_model": "other"})),
             ),
-            (Method::POST, format!("/v1/entities/{own}/open"), None),
-            (Method::GET, "/v1/status".to_string(), None),
-            (Method::GET, "/v1/genesis/sessions".to_string(), None),
+            (Method::POST, "/v1/entities/:id/open", None),
+            (Method::GET, "/v1/status", None),
+            (Method::GET, "/v1/genesis/sessions", None),
         ] {
-            let (status, body) = f.send(method.clone(), &path, Some(&lease), body).await;
-            assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}");
+            let (status, body) = f
+                .send(method.clone(), &concrete(route), Some(&lease), body)
+                .await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{method} {route}");
             assert_eq!(body["ok"], false);
         }
     }
@@ -547,16 +540,14 @@ mod tests {
             .send(Method::GET, "/v1/entities", Some(&lease), None)
             .await;
         assert_eq!(status, StatusCode::OK);
-        for (method, path) in [
-            (Method::GET, "/v1/status".to_string()),
-            (Method::POST, format!("/v1/entities/{}/open", f.entity_id)),
-            (
-                Method::GET,
-                format!("/v1/entities/{}/provider-config", f.entity_id),
-            ),
+        for (method, route) in [
+            (Method::GET, "/v1/status"),
+            (Method::POST, "/v1/entities/:id/open"),
+            (Method::GET, "/v1/entities/:id/provider-config"),
         ] {
+            let path = route.replace(":id", &f.entity_id);
             let (status, _) = f.send(method.clone(), &path, Some(&lease), None).await;
-            assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}");
+            assert_eq!(status, StatusCode::FORBIDDEN, "{method} {route}");
         }
     }
 
