@@ -2,6 +2,8 @@
 
 Dated log of environment, dependency, CI, container, or infrastructure changes. No sensitive data.
 
+> **Historical log:** Entries below record changes as they happened. References to `tauri-app` describe the retired single-agent app, which now lives in `legacy/tauri-app/` outside the framework workspace. See `README.md` for the current Hive and Entity Runtime layout.
+
 ## 2026-02-23 (Hive/Entity Separation Phase 1)
 
 - **Architecture:** Implemented Hive/Entity separation — seven new crates (`hive-core`, `entity-core`, `abigail-identity`, `hive-daemon`, `entity-daemon`, `hive-cli`, `entity-cli`) splitting the monolith into independent control-plane and agent-runtime HTTP daemons.

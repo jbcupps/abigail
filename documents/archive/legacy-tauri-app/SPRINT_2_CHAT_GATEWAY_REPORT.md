@@ -1,7 +1,7 @@
 # Sprint 2 Chat Gateway Report
 
 **Date:** 2026-03-01  
-**Roadmap:** `documents/GUI_ENTITY_STABILITY_ROADMAP.md` (Sprint 2: `S2-01..S2-05`)  
+**Roadmap:** `documents/archive/legacy-tauri-app/GUI_ENTITY_STABILITY_ROADMAP.md` (Sprint 2: `S2-01..S2-05`)  
 **Status:** **PASS**
 
 ## Scope Completion (S2-01..S2-05)
@@ -32,7 +32,7 @@
 3. `cd /Users/jamescupps/Repo/abigail/abigail && cargo check -p abigail-app` -> **PASS**
 
 Validation evidence is recorded in:
-- `documents/tests/VALIDATION_AND_GATE_REPORT.md` (Sprint 2 section).
+- `documents/archive/legacy-tauri-app/VALIDATION_AND_GATE_REPORT.md` (Sprint 2 section).
 
 ## Exit Criteria Check
 

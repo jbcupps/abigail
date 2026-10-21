@@ -176,7 +176,7 @@ Impact: harder transport abstraction and lifecycle durability for entity-initiat
 
 ## Program Artifacts
 
-- Stability execution roadmap: `documents/GUI_ENTITY_STABILITY_ROADMAP.md`
+- Stability execution roadmap: `documents/archive/legacy-tauri-app/GUI_ENTITY_STABILITY_ROADMAP.md`
 - Stability suite plan: `documents/tests/MESSAGE_FLOW_STABILITY_TEST_PLAN.md`
 - Program index: `documents/tests/TEST_PROGRAM_INDEX.md`
 

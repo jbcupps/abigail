@@ -13,13 +13,13 @@ Use these artifacts in order:
 
 1. `documents/ARCHITECTURE_SKILL_TOPOLOGY_AND_FORGE.md`  
    Canonical topology + Forge contract (persistent topics, registry authority, Superego gates, watcher re-provision).
-2. `documents/GUI_ENTITY_STABILITY_ROADMAP.md`  
+2. `documents/archive/legacy-tauri-app/GUI_ENTITY_STABILITY_ROADMAP.md`  
    Sprint backlog, goals, and program gates.
-3. `documents/tests/SPRINT_*_KICKOFF_CHECKLIST.md`  
+3. `documents/archive/legacy-tauri-app/SPRINT_*_KICKOFF_CHECKLIST.md`  
    Sprint entry criteria and execution checklist.
-4. `documents/tests/SPRINT_*_REPORT.md`  
+4. `documents/archive/legacy-tauri-app/SPRINT_*_REPORT.md`  
    Sprint closure evidence and residual risks.
-5. `documents/tests/VALIDATION_AND_GATE_REPORT.md`  
+5. `documents/archive/legacy-tauri-app/VALIDATION_AND_GATE_REPORT.md`  
    Consolidated gate status.
 6. `documents/RELEASE.md`  
    Release posture, release workflow, and release gating requirements.

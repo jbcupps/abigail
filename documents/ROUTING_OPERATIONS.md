@@ -2,9 +2,7 @@
 
 Operator reference for Abigail's LLM routing system: diagnostics, telemetry interpretation, configuration, and troubleshooting.
 
-For the current GUI/Entity decoupling and stabilization phase, also track:
-- `documents/GUI_ENTITY_STABILITY_ROADMAP.md`
-- `documents/GUI_ENTITY_CODE_REVIEW_REPORT.md`
+Routing runs inside each Entity's runtime (`entity-daemon`); provider and model choices are managed by Hive. The earlier GUI/Entity decoupling roadmap is archived in `documents/archive/legacy-tauri-app/`.
 
 ## Routing Modes
 
