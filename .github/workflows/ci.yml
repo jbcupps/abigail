@@ -2,7 +2,8 @@
 #
 # Runs parallel jobs on push to main/beta and PRs, plus a weekly scheduled run
 # that catches newly published advisories. The "gate" job requires stability,
-# lint, test, frontend, and the dependency audit to pass; CodeQL is advisory.
+# lint, test, frontend, packaging, and the dependency audit to pass; CodeQL is
+# advisory.
 # Configure branch protection to require the "gate" check.
 
 name: CI
@@ -195,6 +196,14 @@ jobs:
         shell: bash
         run: bash scripts/test_validate_tauri_signing_key.sh
 
+      - name: Reject unknown build profiles
+        shell: bash
+        run: |
+          if ABIGAIL_BUILD_PROFILE=previw cargo check --locked -p abigail-channel; then
+            echo "::error::An unknown ABIGAIL_BUILD_PROFILE must fail the build instead of producing a stable build."
+            exit 1
+          fi
+
   # -- Tests (3-platform matrix) ----------------------------------------------
   test:
     name: Test (${{ matrix.platform }})
@@ -235,6 +244,12 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --exclude abigail-app
+
+      # Runs after the stable suite so only these crates recompile as preview.
+      - name: Run preview channel isolation tests
+        env:
+          ABIGAIL_BUILD_PROFILE: preview
+        run: cargo test --locked -p abigail-channel -p abigail-core -p abigail-diag --lib
 
       - name: Upload Rust coverage to Codecov
         if: matrix.platform == 'ubuntu-22.04' && hashFiles('lcov.info') != ''
@@ -277,6 +292,30 @@ jobs:
         run: |
           cd hive-app/src-ui && npm test
           cd ../../entity-runtime-app/src-ui && npm test
+
+  # -- Packaging contracts ---------------------------------------------------
+  # Linux checks of the Windows packaging lanes: the preview workflow, Tauri
+  # overlays, and NSIS hooks must agree with the scripts and the Rust channel.
+  packaging:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "20"
+
+      - name: Install NSIS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nsis
+
+      - name: Verify preview and stable packaging contracts
+        env:
+          ABIGAIL_REQUIRE_MAKENSIS: "1"
+        run: node --test scripts/tests/test_preview_channel_packaging.mjs
 
   # -- Security audit (required) ----------------------------------------------
   audit:
@@ -339,11 +378,11 @@ jobs:
           category: "/language:javascript-typescript"
 
   # -- Gate (aggregator) -----------------------------------------------------
-  # Requires stability, lint, test, frontend, and audit to succeed. CodeQL is
-  # advisory (warn but don't block). This is the single required status
-  # check for branch protection.
+  # Requires stability, lint, test, frontend, packaging, and audit to succeed.
+  # CodeQL is advisory (warn but don't block). This is the single required
+  # status check for branch protection.
   gate:
-    needs: [stability, lint, test, frontend, audit, codeql]
+    needs: [stability, lint, test, frontend, packaging, audit, codeql]
     if: always()
     runs-on: ubuntu-22.04
     steps:
@@ -354,18 +393,20 @@ jobs:
           echo "lint:     ${{ needs.lint.result }}"
           echo "test:     ${{ needs.test.result }}"
           echo "frontend: ${{ needs.frontend.result }}"
+          echo "packaging:${{ needs.packaging.result }}"
           echo "audit:    ${{ needs.audit.result }}"
           echo "codeql:   ${{ needs.codeql.result }}"
 
           failed=false
 
           # Critical jobs -- must succeed
-          for job in stability lint test frontend audit; do
+          for job in stability lint test frontend packaging audit; do
             case "$job" in
               stability) result="${{ needs.stability.result }}" ;;
               lint)     result="${{ needs.lint.result }}" ;;
               test)     result="${{ needs.test.result }}" ;;
               frontend) result="${{ needs.frontend.result }}" ;;
+              packaging) result="${{ needs.packaging.result }}" ;;
               audit)    result="${{ needs.audit.result }}" ;;
               *)        result="unknown" ;;
             esac
