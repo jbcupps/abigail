@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+abigail-core = { path = "../abigail-core" }
 hmac = "0.13"
 serde.workspace = true
 serde_json.workspace = true

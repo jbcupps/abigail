@@ -1,7 +1,9 @@
 //! Durable idempotent Entity creation receipts.
 
 use crate::IdentityManager;
-use abigail_core::{AgentCreationRecord, AgentCreationState, AgentEntry, GlobalConfig};
+use abigail_core::{
+    validate_entity_name, AgentCreationRecord, AgentCreationState, AgentEntry, GlobalConfig,
+};
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -47,20 +49,6 @@ fn validate_key(key: &str) -> Result<(), AgentCreationError> {
     if !Uuid::parse_str(key).is_ok_and(|uuid| uuid.to_string() == key) {
         return Err(AgentCreationError::InvalidRequest(
             "creation_key must be a canonical UUID.".into(),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_name(name: &str) -> Result<(), AgentCreationError> {
-    if name.is_empty()
-        || name.trim() != name
-        || name.chars().count() > 80
-        || name.chars().any(char::is_control)
-    {
-        return Err(AgentCreationError::InvalidRequest(
-            "Entity name must be trimmed, contain 1 to 80 characters, and have no control characters."
-                .into(),
         ));
     }
     Ok(())
@@ -197,7 +185,7 @@ impl IdentityManager {
         fingerprint: Option<&str>,
     ) -> Result<AgentCreationStatus, AgentCreationError> {
         validate_key(key)?;
-        validate_name(name)?;
+        validate_entity_name(name).map_err(AgentCreationError::InvalidRequest)?;
         validate_fingerprint(fingerprint)?;
         let mut config = self
             .global_config
@@ -229,7 +217,7 @@ impl IdentityManager {
         fingerprint: Option<&str>,
     ) -> Result<(String, PathBuf), AgentCreationError> {
         validate_key(key)?;
-        validate_name(name)?;
+        validate_entity_name(name).map_err(AgentCreationError::InvalidRequest)?;
         validate_fingerprint(fingerprint)?;
         let mut config = self
             .global_config

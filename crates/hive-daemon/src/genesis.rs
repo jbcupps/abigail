@@ -829,6 +829,7 @@ async fn activate(
     state: &HiveDaemonState,
     mut draft: GenesisSession,
 ) -> Result<GenesisSession, String> {
+    abigail_core::validate_entity_name(&draft.definition.name)?;
     if !draft.definition.creation_ready() {
         return Err("Confirm a name and purpose before awakening.".into());
     }

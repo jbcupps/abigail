@@ -6,6 +6,7 @@ pub mod constitutional;
 pub mod document;
 pub mod dpapi;
 pub mod encrypted_storage;
+mod entity_name;
 pub mod error;
 pub mod global_config;
 pub mod key_detection;
@@ -32,6 +33,7 @@ pub use config::{
 };
 pub use constitutional::load_preprompt_context;
 pub use document::{CoreDocument, DocumentTier};
+pub use entity_name::validate_entity_name;
 pub use error::{CoreError, Result};
 pub use global_config::{AgentCreationRecord, AgentCreationState, AgentEntry, GlobalConfig};
 pub use key_detection::redact_secrets;

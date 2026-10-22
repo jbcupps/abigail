@@ -167,6 +167,16 @@ impl EntityDefinition {
             return Err("An owner is required".into());
         }
         for field in GenesisField::ALL {
+            if field == GenesisField::Name {
+                // Saved drafts predate the canonical name contract. Keep them
+                // viewable/editable, while direct edits and activation enforce
+                // the current rule before any identity mutation.
+                validate_text(&self.name, MAX_FIELD_BYTES)?;
+                if self.name.contains(['\r', '\n']) {
+                    return Err("An Entity name must fit on one line".into());
+                }
+                continue;
+            }
             FieldUpdate {
                 field,
                 value: self.field_value(field),
@@ -309,6 +319,9 @@ impl FieldUpdate {
                 self.field.label()
             ));
         }
+        if self.field == GenesisField::Name {
+            return abigail_core::validate_entity_name(&string_value(self.value.clone())?);
+        }
         if self.field == GenesisField::Personality {
             return serde_json::from_value::<Personality>(self.value.clone())
                 .map_err(|e| format!("Invalid personality: {e}"))?
@@ -317,22 +330,7 @@ impl FieldUpdate {
         if self.field.is_list() {
             return validate_list(&list_value(self.value.clone())?);
         }
-        if self.field == GenesisField::Name
-            && self
-                .value
-                .as_str()
-                .is_some_and(|name| name.contains(['\r', '\n']))
-        {
-            return Err("An Entity name must fit on one line".into());
-        }
-        validate_text(
-            &string_value(self.value.clone())?,
-            if self.field == GenesisField::Name {
-                160
-            } else {
-                MAX_FIELD_BYTES
-            },
-        )
+        validate_text(&string_value(self.value.clone())?, MAX_FIELD_BYTES)
     }
 }
 
@@ -461,13 +459,7 @@ pub struct GenesisCreationSeed {
 
 impl GenesisCreationSeed {
     pub fn validate(&self) -> Result<(), String> {
-        if self.name.is_empty()
-            || self.name.trim() != self.name
-            || self.name.chars().count() > 80
-            || self.name.chars().any(char::is_control)
-        {
-            return Err("Choose a name of 1 to 80 characters without control characters.".into());
-        }
+        abigail_core::validate_entity_name(&self.name)?;
         if self.purpose.trim().is_empty() {
             return Err("Review a nonempty purpose before creating this identity.".into());
         }

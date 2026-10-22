@@ -5,7 +5,7 @@
 
 use abigail_core::{
     encrypted_storage, generate_master_key, load_master_key, sign_agent_key,
-    verify_agent_signature, AgentEntry, AppConfig, GlobalConfig, SecretsVault,
+    validate_entity_name, verify_agent_signature, AgentEntry, AppConfig, GlobalConfig, SecretsVault,
 };
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -495,6 +495,7 @@ impl IdentityManager {
     /// Keypair generation and signing are deferred to the birth sequence.
     /// Returns (uuid, agent_dir).
     pub fn create_agent(&self, name: &str) -> Result<(String, PathBuf), String> {
+        validate_entity_name(name)?;
         let uuid = Uuid::new_v4().to_string();
         let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
         let agent_dir = self.identities_dir().join(&uuid);
@@ -668,6 +669,7 @@ impl IdentityManager {
 
     /// Update an agent's name in the global config.
     pub fn update_agent_name(&self, agent_id: &str, new_name: &str) -> Result<(), String> {
+        validate_entity_name(new_name)?;
         let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
         if let Some(entry) = gc.agents.iter_mut().find(|a| a.id == agent_id) {
             if entry.is_hive {
