@@ -960,14 +960,15 @@ async fn run_runtime_outbox_heartbeat(
 ) -> Result<(), String> {
     state.reconcile_durable_activity(state::ActivityReconcileMode::Heartbeat)?;
 
-    let outbox_status = state.outbox.status()?;
+    let records = state.outbox.snapshot()?;
+    state.reconcile_outbox_batch(&records)?;
     let runtime_url = state.runtime_url.read().await.clone();
     let heartbeat = hive_core::RuntimeHeartbeatRequest {
         lease_id: state.session_lease.lease_id.clone(),
         runtime_id: state.runtime_id.clone(),
         local_url: runtime_url,
-        outbox_depth: outbox_status.queued_records,
-        outbox_oldest_at_utc: outbox_status.oldest_record_at_utc.clone(),
+        outbox_depth: records.len(),
+        outbox_oldest_at_utc: records.first().map(|record| record.created_at_utc.clone()),
     };
 
     if let Err(error) = hive_client.heartbeat(&heartbeat).await {
@@ -975,7 +976,6 @@ async fn run_runtime_outbox_heartbeat(
         return Err(error);
     }
 
-    let records = state.outbox.snapshot()?;
     if !records.is_empty() {
         let sync_result = hive_client
             .sync_outbox(&hive_core::OutboxSyncRequest {

@@ -10,7 +10,7 @@ use abigail_queue::JobQueue;
 use abigail_router::{ConstraintStore, IdEgoRouter};
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use abigail_streaming::StreamBroker;
-use entity_core::{ChatMemoryHook, SkillApplyAcknowledgement};
+use entity_core::{ChatMemoryHook, EntityOutboxRecord, SkillApplyAcknowledgement};
 use hive_core::{ForgeApprovalJob, RuntimeSessionLease, SkillAssignment};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -271,6 +271,26 @@ impl EntityDaemonState {
             )?;
         }
         Ok(metadata.len())
+    }
+
+    pub(crate) fn reconcile_outbox_batch(
+        &self,
+        records: &[EntityOutboxRecord],
+    ) -> Result<(), String> {
+        for record in records {
+            if record.entity_id != self.entity_id {
+                return Err(format!(
+                    "Runtime outbox record {} belongs to a different Entity",
+                    record.record_id
+                ));
+            }
+            self.append_or_repair_execution_event(
+                &record.record_id,
+                &record.kind,
+                &record.payload,
+            )?;
+        }
+        Ok(())
     }
 
     fn reconcile_activity_fact(
