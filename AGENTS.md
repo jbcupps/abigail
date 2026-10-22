@@ -18,11 +18,17 @@ Abigail is the private Entity Coordinator and Manager for real homes and familie
 
 ## Active Plan (Family-First Priorities)
 
-### Entity Genesis (2026-10-17)
+### Entity Genesis (updated 2026-10-22)
 
 - Entity creation now runs through Hive's resumable Genesis workspace and authenticated local Genesis API, using the selected Hive model with tools disabled. AI and Markdown output are reviewable proposals, never silent canonical edits.
+- Slim First Signal creates a canonical UUID before dispatch, journals only version 1 plus that key and the reviewed canonical creation seed, and retries the exact keyed Genesis session. Hive's durable receipt permanently binds that key and seed fingerprint to at most one Entity UUID; conflicts fail closed and deleted/missing Entities make the receipt terminally unavailable. Do not revive standalone candidate matching or reuse creation keys.
 - Canonical schema v1, sources, conversation, revisions, media metadata and generation jobs belong to the Hive store. Local household capability authentication is not multi-account or child-role authorization.
 - Approved narrative is included in signed birth documents; fictional lore and memories never modify operational permissions. Media failures do not prevent activation.
+- Presence uses only canonical `PresenceCard`/`PresenceChoice`, stays outside `docs/` and prompts, grants no authority, and has a 32 KiB read/write limit. The old standalone First Signal journals, animated Presence builder, separate Presence home, and unkeyed candidate recovery remain deferred.
+- New birth certificates use scoring version `triangle-ethic-v1`; their v2 signature binds all hidden weights. User-facing Genesis, quest, journey, Presence, catalog and generic birth responses must remain weight/axis-free. Full certificates and weights are restricted to local signed/runtime files and the matching Entity Runtime lease.
+- The canonical Rust catalog owns all 24 badge requirements/XP/unlocks and the seven bond floors: Spark 0, Kindling 80, Ember 180, Hearthfire 350, Beacon 600, Constellation 950, Legacy 1400. All ten creation badges total 120 XP. Journey progress uses only durable messages, sessions, UTC days, ISO weeks, successful skill uses and confirmed memories; quests never send messages or run skills.
+- Hive journey events are idempotent, owner/Entity-validated, closed metadata rows only: IDs, kind, timestamp, and the allowed session/skill/tool/memory identifiers or memory weight. Never copy messages, replies, prompts, model output, tool arguments/results, memory content or arbitrary Runtime payload into journey storage.
+- An unfinished Genesis card in `needs_provider` opens Provider Wizard with `Connect a model to continue Genesis`; it must not enter Genesis until a successful model connection refreshes state. First Signal remains locally available.
 - Portraits are versioned and films require the approved portrait reference. Media work requires explicit cost confirmation and server-side budget checks. Do not activate the retired Sora API or claim fixture tests prove live model/media/device acceptance.
 - Genesis retention is opt-in per creation record. Expiry rechecks ownership and inactivity under the same action lock, deletes sources/transcript/media, and preserves awakened Entities and real conversations. Canonical Markdown exports restore deterministically; mixed freeform sections yield additional reviewable proposals.
 - Track design, provider configuration and exact acceptance evidence in `docs/ENTITY_GENESIS.md`. Preserve existing installer and CLI safeguards.
