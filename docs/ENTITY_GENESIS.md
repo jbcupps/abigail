@@ -221,12 +221,13 @@ The exact badge curve is:
 | Memory Keeper | 3 confirmed lasting memories | 80 |
 | Living Archive | 15 confirmed lasting memories | 180 |
 
-Badges and counters are monotonic and come only from durable Runtime facts,
-never pending proposals. Conversation turns reconcile the full durable history
-for mentor messages, distinct sessions, active UTC days and active ISO weeks.
-Committed successful tool calls and explicit non-ephemeral memory inserts add
-content-free fallback facts and queue `skill_used` or `memory_confirmed`
-outbox events.
+Creation badges are monotonic and derive from confirmed Genesis state, never
+pending proposals. Long-term activity badges and their monotonic counters
+derive only from durable Runtime facts. Conversation turns reconcile the full
+durable history for mentor messages, distinct sessions, active UTC days and
+active ISO weeks. Committed successful tool calls and explicit non-ephemeral
+memory inserts add content-free fallback facts and queue `skill_used` or
+`memory_confirmed` outbox events.
 
 Hive validates lease owner and Entity IDs before storing recognized events in
 the closed, schematized `entity_journey_event` table, keyed idempotently by
@@ -246,11 +247,12 @@ sends a message or executes a skill automatically.
 ### 4. Model setup gate
 
 An Entity card linked to unfinished Genesis while Hive reports
-`needs_provider` shows `Connect a model to continue Genesis` as both its
-subtitle and primary action. That action opens Provider Wizard and cannot enter
-Genesis. A successful connection refreshes Hive state and restores
-`Continue <name>'s Genesis`. Local First Signal creation remains available;
-already-born Runtime cards retain their existing provider-required gate.
+`needs_provider` shows the subtitle `Connect a model to continue Genesis` and
+the primary-action button `Connect a model to continue`. That button opens
+Provider Wizard and cannot enter Genesis. A successful connection refreshes
+Hive state and restores `Continue <name>'s Genesis`. Local First Signal
+creation remains available; already-born Runtime cards retain their existing
+provider-required gate.
 
 ### Deferred standalone recovery slices
 
