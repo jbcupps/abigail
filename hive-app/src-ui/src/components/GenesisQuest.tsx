@@ -51,6 +51,10 @@ export default function GenesisQuest({ session, busy, stage, onStage, change, on
   const awakened = Boolean(session.awakening && definition.entity_id);
 
   useEffect(() => { void getQuestCatalog().then(setCatalog).catch((error) => setCatalogError(error instanceof Error ? error.message : String(error))); }, []);
+  const acceptedCard = catalog?.temperament_cards.find((card) => session.proposals.some((proposal) => proposal.status === "accepted" && proposal.rationale.startsWith(`Temperament card: ${card.title}.`)));
+  useEffect(() => {
+    if (acceptedCard && !quest.presence) setPresence((previous) => ({ ...previous, temperament: acceptedCard.temperament }));
+  }, [acceptedCard, quest.presence]);
   useEffect(() => { setReservation({ name: definition.name, purpose: definition.purpose }); }, [definition.name, definition.purpose]);
   useEffect(() => {
     if (!awakened || !definition.entity_id) return;
@@ -78,7 +82,7 @@ export default function GenesisQuest({ session, busy, stage, onStage, change, on
         <div className="quest-cards">{catalog.temperament_cards.map((card) => <article key={card.id} className="quest-card">
           <header><strong>{card.title}</strong><span>{TEMPERAMENTS[card.temperament]}</span></header>
           <p>{card.tagline}</p>
-          <dl>{Object.entries(card.stats).map(([trait, value]) => <div key={trait}><dt>{TRAIT_LABELS[trait] ?? trait}</dt><dd><meter min={0} max={100} value={value} aria-label={`${TRAIT_LABELS[trait] ?? trait} ${value}`} /></dd></div>)}</dl>
+          <dl>{Object.entries(card.stats).map(([trait, value]) => <div key={trait}><dt>{TRAIT_LABELS[trait] ?? trait}</dt><dd className="quest-stat" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value} aria-label={TRAIT_LABELS[trait] ?? trait}><span style={{ width: `${value}%` }} /></dd></div>)}</dl>
           <button type="button" disabled={busy} onClick={() => void change("choose_temperament", { card_id: card.id })}>Suggest {card.title}</button>
         </article>)}</div>
         {pendingTemperament.map((proposal) => <div className="quest-pending" key={proposal.id}><p>{proposal.rationale}</p><div className="genesis-actions"><button type="button" className="genesis-primary" disabled={busy} onClick={() => void change("review_proposal", { proposal_id: proposal.id, accept: true, replace_confirmed: false })}>Accept temperament</button><button type="button" disabled={busy} onClick={() => void change("review_proposal", { proposal_id: proposal.id, accept: false, replace_confirmed: false })}>Not this one</button></div></div>)}

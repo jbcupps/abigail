@@ -138,7 +138,8 @@
 .quest-card dl { display: grid; gap: 4px; margin: 8px 0 12px; font-size: 11px; }
 .quest-card dl div { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 8px; }
 .quest-card dd { margin: 0; }
-.quest-card meter { width: 100%; height: 6px; }
+.quest-stat { height: 6px; border-radius: 3px; background: var(--color-border-dim); overflow: hidden; }
+.quest-stat span { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--color-primary-dim), var(--color-primary)); }
 .quest-card button { margin-top: auto; }
 .quest-pending { margin: 16px 0; padding: 12px; border: 1px solid var(--color-primary-dim); border-radius: var(--radius-md); background: var(--color-primary-glow); }
 .genesis fieldset { border: 0; padding: 0; margin: 16px 0; min-width: 0; }

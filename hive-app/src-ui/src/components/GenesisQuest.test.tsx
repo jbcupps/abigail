@@ -69,6 +69,15 @@ describe("Genesis quest", () => {
     expect(screen.getByText(/never read by the model and grants nothing/)).toBeInTheDocument();
   });
 
+  it("starts Presence from the temperament card the mentor accepted", async () => {
+    const accepted = session();
+    accepted.proposals = [{ id: "p1", field: "personality", value: {}, rationale: "Temperament card: Curious Explorer. Asks wonderful questions.", status: "accepted" }];
+    renderStage("presence", accepted);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Temperament" })).toHaveValue("curious"));
+    fireEvent.click(screen.getByRole("button", { name: "Choose this Presence" }));
+    expect(change).toHaveBeenCalledWith("set_presence", { presence: { temperament: "curious", identity: "aether", crest: "orbit", motion: "calm" } });
+  });
+
   it("offers first quests and milestones after awakening without sending anything", async () => {
     vi.mocked(getEntityJourney).mockResolvedValue({ entity_id: "e1", name: "Nova", level: { level: 2, title: "Kindling", xp: 80, level_floor: 50, next_level_at: 120 }, badges: [], mentor_messages: 0, next_milestone: { badge: "first_words", title: "First Words", target: 1, progress: 0 }, unlocked: { palettes: ["aether"], crests: ["orbit"] }, first_quests: [{ id: "say-hello", title: "Say hello", prompt: "Hi Nova!", milestone: "first_words", target: 1, complete: false }], presence: null, certificate: null });
     const awakened = session();
