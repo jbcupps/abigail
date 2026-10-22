@@ -785,7 +785,7 @@ pub async fn memory_insert(
             );
             return Json(ApiEnvelope::error(if error.contains("backpressure") {
                 format!(
-                    "Memory activity backpressure prevented this save; no memory was inserted. {error}"
+                    "I couldn't safely save this memory because of activity backpressure; no memory was inserted. {error}"
                 )
             } else {
                 "I couldn't safely save an activity reservation, so no memory was inserted."
