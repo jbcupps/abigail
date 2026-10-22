@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod access;
 pub mod genesis;
+pub mod genesis_quest;
 
 // ---------------------------------------------------------------------------
 // Generic API envelope

@@ -426,6 +426,9 @@ pub struct GenesisSession {
     /// The awakened Entity and its actual chat history remain independent.
     #[serde(default)]
     pub retention_days: Option<u16>,
+    /// Presentation-only quest progress; never model-writable or prompt input.
+    #[serde(default)]
+    pub quest: crate::genesis_quest::QuestState,
     pub state: GenesisState,
     pub definition: EntityDefinition,
     pub messages: Vec<GenesisMessage>,
@@ -464,6 +467,7 @@ impl GenesisSession {
             awakening: None,
             chronicle: vec![],
             retention_days: None,
+            quest: Default::default(),
             state: GenesisState::Draft,
             definition: EntityDefinition::new(owner_id, now.clone()),
             messages: vec![],
@@ -530,6 +534,7 @@ impl GenesisSession {
             }
             .validate()?;
         }
+        self.quest.validate()?;
         self.definition.validate()
     }
 
