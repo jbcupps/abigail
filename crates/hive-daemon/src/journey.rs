@@ -251,12 +251,13 @@ impl JourneyStore {
             return Ok(false);
         }
 
-        #[cfg(test)]
-        let mut successful_writes = 0;
-        for prepared_event in prepared
+        for (successful_writes, prepared_event) in prepared
             .into_iter()
             .filter(|prepared_event| prepared_event.needs_write)
+            .enumerate()
         {
+            #[cfg(not(test))]
+            let _ = successful_writes;
             #[cfg(test)]
             {
                 let mut faults = self.test_faults.lock().unwrap();
@@ -270,10 +271,6 @@ impl JourneyStore {
                 &prepared_event.event.record_id,
                 &prepared_event.event,
             )?;
-            #[cfg(test)]
-            {
-                successful_writes += 1;
-            }
         }
         Ok(true)
     }
