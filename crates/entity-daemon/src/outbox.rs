@@ -173,6 +173,7 @@ impl RuntimeOutbox {
         Ok(outbox)
     }
 
+    #[cfg(test)]
     pub fn enqueue(
         &self,
         entity_id: &str,
@@ -182,6 +183,7 @@ impl RuntimeOutbox {
         self.enqueue_with_id(uuid::Uuid::new_v4().to_string(), entity_id, kind, payload)
     }
 
+    #[cfg(test)]
     pub fn enqueue_with_id(
         &self,
         record_id: String,
@@ -410,6 +412,7 @@ impl RuntimeOutbox {
         Ok(reservation)
     }
 
+    #[cfg(test)]
     pub fn commit_reservation(
         &self,
         record_id: &str,
