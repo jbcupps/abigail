@@ -890,6 +890,10 @@ mod tests {
             "An action completed, but the final reply is unavailable. \
              Verify the result before repeating the action."
         );
+        assert_eq!(
+            response.completion_risk,
+            Some(entity_core::CompletionRisk::ActionCompletedVerifyBeforeRepeating)
+        );
         let queued = state.outbox.snapshot().unwrap();
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].payload["successful_skill_count"], 1);
@@ -923,10 +927,15 @@ mod tests {
 
         assert_eq!(executions.load(Ordering::SeqCst), 1);
         assert_eq!(
-            error,
-            "An action completed, but the response was withheld for safety. \
-             Verify the result before repeating the action. Safety check: secret-leak"
+            error.code,
+            Some(entity_core::CompletionRisk::ActionCompletedVerifyBeforeRepeating)
         );
+        assert!(!error.interrupted);
+        assert_eq!(
+            error.message,
+            "An action completed. Verify the result before repeating it."
+        );
+        assert!(!error.message.contains("secret-leak"));
         let queued = state.outbox.snapshot().unwrap();
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].payload["session_id"], "session-tool-blocked");
@@ -1013,9 +1022,13 @@ mod tests {
             .expect_err("cancelled turn is not a complete assistant reply");
 
         assert_eq!(
-            error,
-            "An action may have completed before cancellation. \
-             Verify the result before repeating the action."
+            error.code,
+            Some(entity_core::CompletionRisk::ActionMayHaveCompletedVerifyBeforeRepeating)
+        );
+        assert!(error.interrupted);
+        assert_eq!(
+            error.message,
+            "An action may have completed. Verify the result before repeating it."
         );
         assert!(state.outbox.snapshot().unwrap().is_empty());
         assert_eq!(state.outbox.reservations().unwrap().len(), 1);
@@ -1205,6 +1218,10 @@ mod tests {
             response.reply,
             "tool-assisted reply\n\nThe action completed, but this reply and its history could not \
              be saved. Verify the result before repeating the action."
+        );
+        assert_eq!(
+            response.completion_risk,
+            Some(entity_core::CompletionRisk::ActionCompletedVerifyBeforeRepeating)
         );
         assert!(
             state
@@ -1430,8 +1447,8 @@ mod tests {
             .expect("turn should complete before timeout")
             .expect("ego stage should deliver an outcome");
         let err = outcome.expect_err("secret-leaking reply must be withheld");
-        assert!(err.contains("withheld"), "unexpected error: {err}");
-        assert!(err.contains("secret-leak"), "unexpected error: {err}");
+        assert!(err.message.contains("withheld"), "unexpected error: {err}");
+        assert!(err.code.is_none());
     }
 
     #[tokio::test]
@@ -1477,8 +1494,8 @@ mod tests {
             .expect("turn should complete before timeout")
             .expect("ego stage should deliver an outcome");
         let err = outcome.expect_err("secret-leaking reply must be withheld");
-        assert!(err.contains("withheld"), "unexpected error: {err}");
-        assert!(err.contains("secret-leak"), "unexpected error: {err}");
+        assert!(err.message.contains("withheld"), "unexpected error: {err}");
+        assert!(err.code.is_none());
 
         let streamed = tokio::time::timeout(std::time::Duration::from_secs(5), collector)
             .await

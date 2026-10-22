@@ -255,7 +255,7 @@ describe("Chat gateway parity", () => {
     expect(tauriHarness.unlistenCalls.sort()).toEqual(["chat-internal-envelope"]);
   });
 
-  it("returns equivalent interruption semantics across adapters on cancel", async () => {
+  it("returns duplicate-action-safe interruption semantics across adapters on local cancel", async () => {
     const tauriHarness = createTauriMockHarness();
     tauriHarness.invokeFn = async (command: string): Promise<unknown> => {
       if (command === "cancel_chat_stream") return true;
@@ -297,9 +297,164 @@ describe("Chat gateway parity", () => {
     expect(entityRun.done).toBeUndefined();
     expect(tauriRun.error?.interrupted).toBe(true);
     expect(entityRun.error?.interrupted).toBe(true);
-    expect(tauriRun.error?.message).toContain("Interrupted by user");
-    expect(entityRun.error?.message).toContain("Interrupted by user");
+    expect(tauriRun.error).toMatchObject({
+      code: "action_may_have_completed_verify_before_repeating",
+      message: "An action may have completed. Verify the result before repeating it.",
+    });
+    expect(entityRun.error).toMatchObject({
+      code: "action_may_have_completed_verify_before_repeating",
+      message: "An action may have completed. Verify the result before repeating it.",
+    });
     expect(tauriHarness.activeListeners.size).toBe(0);
+  });
+
+  it("preserves a structured post-tool superego risk without exposing backend detail", async () => {
+    const fetchFn = vi.fn(async () =>
+      makeSseResponse([
+        {
+          event: "error",
+          data: JSON.stringify({
+            code: "action_completed_verify_before_repeating",
+            message: "secret-leak: sensitive backend finding",
+            interrupted: false,
+          }),
+        },
+      ]),
+    );
+    const gateway = new EntityHttpChatGateway({
+      baseUrl: "http://entity.local",
+      fetchFn: fetchFn as never,
+      maxReconnectAttempts: 0,
+      allowNonStreamingFallback: false,
+    });
+
+    const run = await startGatewayRun(gateway, requestFixture);
+    await run.waitForTerminal();
+
+    expect(run.done).toBeUndefined();
+    expect(run.error).toEqual({
+      code: "action_completed_verify_before_repeating",
+      message: "An action completed. Verify the result before repeating it.",
+      interrupted: false,
+      cause: expect.anything(),
+    });
+    expect(run.error?.message).not.toContain("secret-leak");
+  });
+
+  it("preserves completion risk on a successful provider/history warning response", async () => {
+    const fetchFn = vi.fn(async () =>
+      makeSseResponse([
+        {
+          event: "done",
+          data: JSON.stringify({
+            ...responseFixture,
+            completion_risk: "action_completed_verify_before_repeating",
+          }),
+        },
+      ]),
+    );
+    const gateway = new EntityHttpChatGateway({
+      baseUrl: "http://entity.local",
+      fetchFn: fetchFn as never,
+      maxReconnectAttempts: 0,
+    });
+
+    const run = await startGatewayRun(gateway, requestFixture);
+    await run.waitForTerminal();
+
+    expect(run.error).toBeUndefined();
+    expect(run.done?.completion_risk).toBe("action_completed_verify_before_repeating");
+  });
+
+  it("preserves a structured completion risk from the non-streaming envelope", async () => {
+    const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/v1/chat/stream")) {
+        return new Response("stream unavailable", { status: 503 });
+      }
+      if (url.endsWith("/v1/chat")) {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            error: "untrusted backend detail",
+            error_code: "action_may_have_completed_verify_before_repeating",
+            interrupted: true,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    const gateway = new EntityHttpChatGateway({
+      baseUrl: "http://entity.local",
+      fetchFn: fetchFn as never,
+      maxReconnectAttempts: 0,
+    });
+
+    const run = await startGatewayRun(gateway, requestFixture);
+    await run.waitForTerminal();
+
+    expect(run.error).toMatchObject({
+      code: "action_may_have_completed_verify_before_repeating",
+      message: "An action may have completed. Verify the result before repeating it.",
+      interrupted: true,
+    });
+  });
+
+  it("keeps a backend completion-risk result that arrives during cancellation", async () => {
+    const encoder = new TextEncoder();
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let markStreamReady = () => undefined;
+    const streamReady = new Promise<void>((resolve) => {
+      markStreamReady = resolve;
+    });
+    const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/v1/chat/stream")) {
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+              markStreamReady();
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        );
+      }
+      if (url.endsWith("/v1/chat/cancel")) {
+        streamController?.enqueue(
+          encoder.encode(
+            `event: error\ndata: ${JSON.stringify({
+              code: "action_completed_verify_before_repeating",
+              message: "untrusted backend detail",
+              interrupted: false,
+            })}\n\n`,
+          ),
+        );
+        streamController?.close();
+        await Promise.resolve();
+        return new Response(JSON.stringify({ ok: true, data: { cancelled: true } }));
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    const gateway = new EntityHttpChatGateway({
+      baseUrl: "http://entity.local",
+      cancelPath: "/v1/chat/cancel",
+      fetchFn: fetchFn as never,
+      maxReconnectAttempts: 0,
+      allowNonStreamingFallback: false,
+    });
+
+    const run = await startGatewayRun(gateway, requestFixture);
+    await streamReady;
+    await run.stream.cancel();
+    await run.waitForTerminal();
+
+    expect(run.error).toMatchObject({
+      code: "action_completed_verify_before_repeating",
+      message: "An action completed. Verify the result before repeating it.",
+      interrupted: false,
+    });
   });
 
   it("falls back to HTTP chat when SSE stream times out", async () => {

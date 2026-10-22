@@ -1778,6 +1778,10 @@ mod tests {
             "An action completed, but the final reply is unavailable. \
              Verify the result before repeating the action."
         );
+        assert_eq!(
+            result.completion_risk,
+            Some(entity_core::CompletionRisk::ActionCompletedVerifyBeforeRepeating)
+        );
     }
 
     #[tokio::test]
@@ -1815,6 +1819,10 @@ mod tests {
             result.content,
             "An action completed, but the final reply is unavailable. \
              Verify the result before repeating the action."
+        );
+        assert_eq!(
+            result.completion_risk,
+            Some(entity_core::CompletionRisk::ActionCompletedVerifyBeforeRepeating)
         );
         let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
         assert_eq!(

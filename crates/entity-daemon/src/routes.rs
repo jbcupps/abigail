@@ -1218,6 +1218,37 @@ pub(crate) mod tests {
         uuid::Uuid::from_bytes(bytes).to_string()
     }
 
+    #[test]
+    fn completion_risk_errors_have_stable_http_and_sse_codes() {
+        for (risk, interrupted, expected_message) in [
+            (
+                entity_core::CompletionRisk::ActionCompletedVerifyBeforeRepeating,
+                false,
+                "An action completed. Verify the result before repeating it.",
+            ),
+            (
+                entity_core::CompletionRisk::ActionMayHaveCompletedVerifyBeforeRepeating,
+                true,
+                "An action may have completed. Verify the result before repeating it.",
+            ),
+        ] {
+            let failure =
+                crate::pipeline::TurnFailure::completion_risk(risk, interrupted);
+            let envelope = chat_error_envelope(failure.clone());
+            assert!(!envelope.ok);
+            assert_eq!(envelope.error.as_deref(), Some(expected_message));
+            assert_eq!(envelope.error_code.as_deref(), Some(risk.as_str()));
+            assert_eq!(envelope.interrupted, Some(interrupted));
+
+            let sse: serde_json::Value =
+                serde_json::from_str(&chat_error_sse_data(&failure)).unwrap();
+            assert_eq!(sse["code"], risk.as_str());
+            assert_eq!(sse["message"], expected_message);
+            assert_eq!(sse["interrupted"], interrupted);
+            assert!(!sse.to_string().contains("secret-leak"));
+        }
+    }
+
     #[tokio::test]
     async fn session_diagnostics_never_disclose_lease_without_own_bearer() {
         let state = build_state();

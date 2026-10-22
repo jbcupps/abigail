@@ -581,3 +581,28 @@ pub trait ChatMemoryHook: Send + Sync {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn completion_risk_codes_are_stable_and_old_chat_responses_default_safely() {
+        assert_eq!(
+            serde_json::to_value(CompletionRisk::ActionCompletedVerifyBeforeRepeating).unwrap(),
+            "action_completed_verify_before_repeating"
+        );
+        assert_eq!(
+            serde_json::to_value(CompletionRisk::ActionMayHaveCompletedVerifyBeforeRepeating)
+                .unwrap(),
+            "action_may_have_completed_verify_before_repeating"
+        );
+
+        let response: ChatResponse = serde_json::from_value(serde_json::json!({
+            "reply": "legacy response"
+        }))
+        .unwrap();
+        assert_eq!(response.reply, "legacy response");
+        assert_eq!(response.completion_risk, None);
+    }
+}
