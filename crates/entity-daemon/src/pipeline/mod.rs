@@ -767,9 +767,9 @@ mod tests {
     #[tokio::test]
     async fn ledger_failure_keeps_one_real_activity_and_reconciliation_repairs_the_ledger() {
         let (mut state, executions) = build_tool_state(1);
-        let outbox_root = outbox_root("abigail-pipeline-ledger-outbox");
+        let outbox_dir = outbox_root("abigail-pipeline-ledger-outbox");
         let ledger_root = outbox_root("abigail-pipeline-ledger");
-        state.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        state.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_dir, 4).unwrap());
         state.execution_ledger = Arc::new(
             crate::execution_ledger::ExecutionLedger::load_with_saver(
                 &ledger_root,
@@ -789,7 +789,7 @@ mod tests {
 
         let mut restarted = build_state();
         restarted.memory = state.memory.clone();
-        restarted.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        restarted.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_dir, 4).unwrap());
         restarted.execution_ledger =
             Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
         restarted
@@ -804,7 +804,7 @@ mod tests {
         assert_eq!(ledger.len(), 1);
         assert_eq!(ledger[0].event_id, queued[0].record_id);
         assert!(crate::execution_ledger::verify_chain(&ledger));
-        let _ = std::fs::remove_dir_all(outbox_root);
+        let _ = std::fs::remove_dir_all(outbox_dir);
         let _ = std::fs::remove_dir_all(ledger_root);
     }
 
