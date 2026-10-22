@@ -14,20 +14,13 @@ interface ForgeScenarioInfo {
   choices: ForgeChoice[];
 }
 
-interface ForgeInvokeOutput {
-  archetype: string;
-  weights: { deontology: number; teleology: number; areteology: number; welfare: number };
-  soul_hash: string;
-  sigil: string;
-}
-
 export interface ForgeDisplayOutput {
   archetype: string;
   soul_hash: string;
   sigil: string;
 }
 
-function sanitizeForgeOutput(output: ForgeInvokeOutput): ForgeDisplayOutput {
+function toForgeDisplayOutput(output: ForgeDisplayOutput): ForgeDisplayOutput {
   return {
     archetype: output.archetype,
     soul_hash: output.soul_hash,
@@ -83,8 +76,8 @@ export default function ForgeScenario({ onComplete }: Props) {
     try {
       // Send all selections to backend
       const choiceIds = scenarios.map((s) => selections[s.id]).filter(Boolean);
-      const output = await invoke<ForgeInvokeOutput>("crystallize_forge", { choices: choiceIds });
-      setSoulOutput(sanitizeForgeOutput(output));
+      const output = await invoke<ForgeDisplayOutput>("crystallize_forge", { choices: choiceIds });
+      setSoulOutput(toForgeDisplayOutput(output));
     } catch (e) {
       console.error("Failed to crystallize:", e);
     } finally {

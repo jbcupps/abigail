@@ -47,6 +47,28 @@ pub struct ForgeUndoStatus {
 static FORGE_AUDIT: OnceLock<Mutex<Vec<ForgeAuditEvent>>> = OnceLock::new();
 static FORGE_UNDO: OnceLock<Mutex<Vec<ForgeUndoEntry>>> = OnceLock::new();
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForgeChoiceDto {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForgeScenarioDto {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub choices: Vec<ForgeChoiceDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForgeDisplayOutput {
+    pub archetype: String,
+    pub soul_hash: String,
+    pub sigil: String,
+}
+
 fn audit_log() -> &'static Mutex<Vec<ForgeAuditEvent>> {
     FORGE_AUDIT.get_or_init(|| Mutex::new(Vec::new()))
 }
@@ -79,14 +101,52 @@ fn push_audit(what_changed: String, risk_level: &str, outcome: &str) {
 }
 
 #[tauri::command]
-pub fn get_forge_scenarios(_state: State<AppState>) -> Result<serde_json::Value, String> {
-    // Stub for now
-    Ok(serde_json::json!([]))
+pub fn get_forge_scenarios() -> Result<Vec<ForgeScenarioDto>, String> {
+    let engine = soul_forge::SoulForgeEngine::new();
+    Ok(engine
+        .scenarios()
+        .iter()
+        .map(|scenario| ForgeScenarioDto {
+            id: scenario.id.clone(),
+            title: scenario.title.clone(),
+            description: scenario.description.clone(),
+            choices: scenario
+                .choices
+                .iter()
+                .map(|choice| ForgeChoiceDto {
+                    id: choice.id.clone(),
+                    label: choice.label.clone(),
+                    description: choice.description.clone(),
+                })
+                .collect(),
+        })
+        .collect())
 }
 
 #[tauri::command]
-pub fn crystallize_forge(_state: State<AppState>) -> Result<(), String> {
-    Ok(())
+pub fn crystallize_forge(choices: Vec<String>) -> Result<ForgeDisplayOutput, String> {
+    let engine = soul_forge::SoulForgeEngine::new();
+    if choices.len() != engine.scenarios().len() {
+        return Err(format!(
+            "Expected {} choices, got {}",
+            engine.scenarios().len(),
+            choices.len()
+        ));
+    }
+
+    let ordered_choices = engine
+        .scenarios()
+        .iter()
+        .zip(choices)
+        .map(|(scenario, choice_id)| (scenario.id.clone(), choice_id))
+        .collect::<Vec<_>>();
+    let output = engine.crystallize(&ordered_choices)?;
+
+    Ok(ForgeDisplayOutput {
+        archetype: output.archetype,
+        soul_hash: output.soul_hash,
+        sigil: output.sigil,
+    })
 }
 
 #[cfg(test)]
@@ -120,10 +180,7 @@ mod forge_command_tests {
                 .expect("scenario choices should be an array");
             assert!(!choices.is_empty());
             for choice in choices {
-                assert_eq!(
-                    keys(choice),
-                    BTreeSet::from(["description", "id", "label"])
-                );
+                assert_eq!(keys(choice), BTreeSet::from(["description", "id", "label"]));
             }
         }
 
@@ -208,8 +265,8 @@ mod forge_command_tests {
 
         let mut wrong_scenario = valid;
         wrong_scenario[0] = engine.scenarios()[1].choices[0].id.clone();
-        let wrong_scenario_error = crystallize_forge(wrong_scenario)
-            .expect_err("choice from another scenario must fail");
+        let wrong_scenario_error =
+            crystallize_forge(wrong_scenario).expect_err("choice from another scenario must fail");
         assert!(wrong_scenario_error.contains("Unknown choice"));
         assert!(wrong_scenario_error.contains(&engine.scenarios()[0].id));
     }
