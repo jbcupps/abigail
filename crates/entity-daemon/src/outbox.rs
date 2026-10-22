@@ -423,4 +423,186 @@ mod tests {
             .unwrap();
         assert_eq!(outbox.status().unwrap().queued_records, 0);
     }
+
+    #[test]
+    fn reservations_count_toward_capacity_and_survive_commit_restart() {
+        let root = root("abigail-outbox-reservation-capacity");
+        let outbox = RuntimeOutbox::load(&root, 2).unwrap();
+        let reserved_id = uuid::Uuid::new_v4().to_string();
+        let existing = outbox
+            .enqueue(
+                "entity-1",
+                "memory_confirmed",
+                serde_json::json!({"memory_id": "existing"}),
+            )
+            .unwrap();
+
+        let reservation = outbox
+            .reserve_slot(reserved_id.clone(), "entity-1", "skill_used")
+            .unwrap();
+        assert_eq!(reservation.record_id, reserved_id);
+        let full_error = outbox
+            .reserve_slot(uuid::Uuid::new_v4().to_string(), "entity-1", "skill_used")
+            .unwrap_err();
+        assert!(full_error.contains("backpressure"), "{full_error}");
+        assert_eq!(outbox.snapshot().unwrap()[0].record_id, existing.record_id);
+        assert_eq!(outbox.reservations().unwrap().len(), 1);
+
+        let record = outbox
+            .commit_reservation(
+                &reserved_id,
+                serde_json::json!({
+                    "session_id": "session-1",
+                    "successful_skill_count": 2
+                }),
+            )
+            .unwrap();
+        assert_eq!(record.record_id, reserved_id);
+        assert!(outbox.reservations().unwrap().is_empty());
+        assert_eq!(outbox.snapshot().unwrap().len(), 2);
+        drop(outbox);
+
+        let restarted = RuntimeOutbox::load(&root, 2).unwrap();
+        assert!(restarted.reservations().unwrap().is_empty());
+        assert_eq!(restarted.snapshot().unwrap().len(), 2);
+        assert_eq!(restarted.snapshot().unwrap()[1].record_id, reserved_id);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reservation_mutations_publish_only_after_successful_save() {
+        let reserve_root = root("abigail-outbox-reserve-save");
+        let reserve_id = uuid::Uuid::new_v4().to_string();
+        let outbox = RuntimeOutbox::load_with_saver(&reserve_root, 2, fail_save_on(1)).unwrap();
+        let error = outbox
+            .reserve_slot(reserve_id, "entity-1", "skill_used")
+            .unwrap_err();
+        assert!(error.contains("injected outbox save failure"), "{error}");
+        assert!(outbox.reservations().unwrap().is_empty());
+        assert!(RuntimeOutbox::load(&reserve_root, 2)
+            .unwrap()
+            .reservations()
+            .unwrap()
+            .is_empty());
+
+        let commit_root = root("abigail-outbox-commit-save");
+        let commit_id = uuid::Uuid::new_v4().to_string();
+        let outbox = RuntimeOutbox::load_with_saver(&commit_root, 2, fail_save_on(2)).unwrap();
+        outbox
+            .reserve_slot(commit_id.clone(), "entity-1", "skill_used")
+            .unwrap();
+        let error = outbox
+            .commit_reservation(
+                &commit_id,
+                serde_json::json!({
+                    "session_id": "session-1",
+                    "successful_skill_count": 1
+                }),
+            )
+            .unwrap_err();
+        assert!(error.contains("injected outbox save failure"), "{error}");
+        assert_eq!(outbox.reservations().unwrap()[0].record_id, commit_id);
+        assert!(outbox.snapshot().unwrap().is_empty());
+        let restarted = RuntimeOutbox::load(&commit_root, 2).unwrap();
+        assert_eq!(restarted.reservations().unwrap()[0].record_id, commit_id);
+        assert!(restarted.snapshot().unwrap().is_empty());
+
+        let release_root = root("abigail-outbox-release-save");
+        let release_id = uuid::Uuid::new_v4().to_string();
+        let outbox = RuntimeOutbox::load_with_saver(&release_root, 2, fail_save_on(2)).unwrap();
+        outbox
+            .reserve_slot(release_id.clone(), "entity-1", "memory_confirmed")
+            .unwrap();
+        let error = outbox.release_reservation(&release_id).unwrap_err();
+        assert!(error.contains("injected outbox save failure"), "{error}");
+        assert_eq!(outbox.reservations().unwrap()[0].record_id, release_id);
+        drop(outbox);
+        assert_eq!(
+            RuntimeOutbox::load(&release_root, 2)
+                .unwrap()
+                .reservations()
+                .unwrap()[0]
+                .record_id,
+            release_id
+        );
+
+        let _ = std::fs::remove_dir_all(reserve_root);
+        let _ = std::fs::remove_dir_all(commit_root);
+        let _ = std::fs::remove_dir_all(release_root);
+    }
+
+    #[test]
+    fn released_reservations_restore_capacity_across_restart() {
+        let root = root("abigail-outbox-release");
+        let first_id = uuid::Uuid::new_v4().to_string();
+        let second_id = uuid::Uuid::new_v4().to_string();
+        let outbox = RuntimeOutbox::load(&root, 1).unwrap();
+        outbox
+            .reserve_slot(first_id.clone(), "entity-1", "skill_used")
+            .unwrap();
+        outbox.release_reservation(&first_id).unwrap();
+        assert!(outbox.reservations().unwrap().is_empty());
+        outbox
+            .reserve_slot(second_id.clone(), "entity-1", "memory_confirmed")
+            .unwrap();
+        drop(outbox);
+
+        let restarted = RuntimeOutbox::load(&root, 1).unwrap();
+        assert_eq!(restarted.reservations().unwrap()[0].record_id, second_id);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn acknowledged_ids_survive_restart_and_block_duplicate_reservations() {
+        let root = root("abigail-outbox-acknowledged");
+        let record_id = uuid::Uuid::new_v4().to_string();
+        let outbox = RuntimeOutbox::load(&root, 1).unwrap();
+        outbox
+            .reserve_slot(record_id.clone(), "entity-1", "memory_confirmed")
+            .unwrap();
+        outbox
+            .commit_reservation(
+                &record_id,
+                serde_json::json!({
+                    "memory_id": "memory-1",
+                    "memory_weight": "distilled"
+                }),
+            )
+            .unwrap();
+        outbox
+            .acknowledge(std::slice::from_ref(&record_id))
+            .unwrap();
+        assert!(outbox.is_acknowledged(&record_id).unwrap());
+        assert!(outbox.snapshot().unwrap().is_empty());
+        assert!(outbox.reservations().unwrap().is_empty());
+        drop(outbox);
+
+        let restarted = RuntimeOutbox::load(&root, 1).unwrap();
+        assert!(restarted.is_acknowledged(&record_id).unwrap());
+        let error = restarted
+            .reserve_slot(record_id, "entity-1", "memory_confirmed")
+            .unwrap_err();
+        assert!(error.contains("acknowledged"), "{error}");
+        assert!(restarted.snapshot().unwrap().is_empty());
+        assert!(restarted.reservations().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn legacy_outbox_files_default_reservations_and_acknowledged_ids() {
+        let root = root("abigail-outbox-legacy-defaults");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(super::OUTBOX_FILE_NAME),
+            br#"{"records":[],"last_sync_at_utc":null,"last_sync_error":null}"#,
+        )
+        .unwrap();
+
+        let outbox = RuntimeOutbox::load(&root, 1).unwrap();
+        assert!(outbox.reservations().unwrap().is_empty());
+        assert!(!outbox
+            .is_acknowledged(&uuid::Uuid::new_v4().to_string())
+            .unwrap());
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
