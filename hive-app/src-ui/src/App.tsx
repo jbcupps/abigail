@@ -5,7 +5,8 @@ import CreateEntityCard from "./components/CreateEntityCard";
 import GenesisWorkspace from "./components/GenesisWorkspace";
 import GenesisNotifications from "./components/GenesisNotifications";
 import GenesisMediaConnections from "./components/GenesisMediaConnections";
-import GenesisEntityPortrait, { useGenesisEntityPortraits } from "./components/GenesisEntityPortrait";
+import GenesisEntityPortrait, { useGenesisEntities } from "./components/GenesisEntityPortrait";
+import EntityJourneyChip from "./components/EntityJourneyChip";
 import ProviderWizard from "./components/ProviderWizard";
 import ChatPanel from "./components/ChatPanel";
 import { completeEntitySetup, hiveHealth, getStatus, type EntityInfo, type HiveStatus } from "./lib/daemonClient";
@@ -23,14 +24,19 @@ export default function App() {
   const [status, setStatus] = useState<HiveStatus | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [genesisOpen, setGenesisOpen] = useState(false);
+  const [genesisResume, setGenesisResume] = useState<string | undefined>();
   const [openError, setOpenError] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const openingRef = useRef(false);
   const mounted = useRef(true);
-  const portraits = useGenesisEntityPortraits(`${genesisOpen}:${status?.entities.map(entity => entity.id).join(",") ?? ""}`);
+  const cardsKey = `${genesisOpen}:${status?.entities.map(entity => `${entity.id}:${entity.birth_complete}`).join(",") ?? ""}`;
+  const { portraits, awaiting } = useGenesisEntities(cardsKey);
+  const openGenesis = useCallback((sessionId?: string) => { setGenesisResume(sessionId); setGenesisOpen(true); }, []);
 
   const handleOpen = useCallback(async (entity: EntityInfo) => {
     if (openingRef.current) return;
+    // Genesis signs this Entity's approved story at awakening; never generic setup.
+    if (awaiting[entity.id]) { openGenesis(awaiting[entity.id]); return; }
     openingRef.current = true;
     setOpeningId(entity.id);
     setOpenError(null);
@@ -45,7 +51,7 @@ export default function App() {
       openingRef.current = false;
       if (mounted.current) setOpeningId(null);
     }
-  }, []);
+  }, [awaiting, openGenesis]);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -161,9 +167,9 @@ export default function App() {
           </div>
         )}
 
-        <GenesisNotifications onOpen={() => setGenesisOpen(true)} />
+        <GenesisNotifications onOpen={() => openGenesis()} />
         <GenesisMediaConnections />
-        {genesisOpen && <GenesisWorkspace onClose={() => setGenesisOpen(false)} onCreated={() => void refreshStatus()} />}
+        {genesisOpen && <GenesisWorkspace resumeId={genesisResume} onClose={() => setGenesisOpen(false)} onCreated={() => void refreshStatus()} />}
         <section className={genesisOpen ? "mt-8" : undefined}>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-xs uppercase tracking-wide text-theme-text-dim">
@@ -182,7 +188,7 @@ export default function App() {
             style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}
           >
             <li>
-              <CreateEntityCard onOpen={() => setGenesisOpen(true)} />
+              <CreateEntityCard onOpen={() => openGenesis()} />
             </li>
             {familyEntities.map((entity) => (
               <li
@@ -192,17 +198,20 @@ export default function App() {
                 <GenesisEntityPortrait entityId={entity.id} name={entity.name} portrait={portraits[entity.id]} />
                 <div className="font-medium text-theme-text-bright mt-3">{entity.name}</div>
                 <div className="text-xs text-theme-text-dim mt-1">
-                  {entity.birth_complete
-                    ? "Ready"
-                    : "Setup pending"}
+                  {awaiting[entity.id]
+                    ? "Being created in Genesis"
+                    : entity.birth_complete
+                      ? "Ready"
+                      : "Setup pending"}
                 </div>
+                {entity.birth_complete && <EntityJourneyChip entityId={entity.id} refreshKey={cardsKey} />}
                 <button
                   type="button"
                   onClick={() => void handleOpen(entity)}
                   disabled={needsProvider || openingId !== null}
                   className="mt-3 self-start rounded-theme-md bg-theme-primary px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
                 >
-                  {openingId === entity.id ? "Opening…" : `Open ${entity.name}`}
+                  {openingId === entity.id ? "Opening…" : awaiting[entity.id] ? `Continue ${entity.name}'s Genesis` : `Open ${entity.name}`}
                 </button>
               </li>
             ))}

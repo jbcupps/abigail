@@ -1,4 +1,5 @@
 import { resolveHiveConnection } from "./connection";
+import type { QuestView } from "./questClient";
 
 export type GenesisMode = "guided" | "voice" | "markdown" | "hybrid" | "quick" | "deep";
 export type GenesisState = "draft" | "discovering" | "review" | "portrait_pending" | "portrait_approved" | "manifesting" | "ready" | "failed" | "cancelled";
@@ -35,6 +36,8 @@ export interface GenesisSession {
   composer_draft: string; last_error?: string | null;
   essence?: EssenceProgress; awakening?: string | null; choices?: string[];
   retention_days?: number | null;
+  /** Presentation-only quest progress, computed by Hive. */
+  quest?: QuestView;
 }
 
 export const GENESIS_MODES: { value: GenesisMode; label: string; detail: string }[] = [

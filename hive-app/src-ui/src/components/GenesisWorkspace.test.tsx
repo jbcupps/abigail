@@ -2,11 +2,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import GenesisWorkspace from "./GenesisWorkspace";
 import { createGenesisSession, genesisAction, getGenesisSession, importGenesisMarkdown, listGenesisSessions, sendGenesisMessage, type GenesisSession } from "../lib/genesisClient";
+import { getEntityJourney, getQuestCatalog } from "../lib/questClient";
+import { questFixture } from "../test/questFixture";
 
 vi.mock("../lib/genesisClient", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/genesisClient")>(), createGenesisSession: vi.fn(), genesisAction: vi.fn(), getGenesisSession: vi.fn(), listGenesisSessions: vi.fn(), sendGenesisMessage: vi.fn(), importGenesisMarkdown: vi.fn(), deleteGenesisSession: vi.fn(), exportGenesisMarkdown: vi.fn() }));
 vi.mock("./GenesisStudio", () => ({ default: ({ onUpdate }: { onUpdate: (updates: unknown[]) => Promise<void> }) => <button type="button" onClick={() => void onUpdate([{ field: "visual_style", value: "Watercolor" }])}>Set studio style</button> }));
 vi.mock("./GenesisVoice", () => ({ default: () => <p>Voice controls</p> }));
 vi.mock("../lib/entityWindow", () => ({ openEntity: vi.fn() }));
+vi.mock("../lib/questClient", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/questClient")>(), getQuestCatalog: vi.fn(), getEntityJourney: vi.fn() }));
 
 let saved: GenesisSession;
 beforeEach(() => {
@@ -117,6 +120,30 @@ describe("Genesis creation workflow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Reload saved session" }));
     await waitFor(() => expect(getGenesisSession).toHaveBeenCalledWith("creation"));
     expect(screen.getByRole("textbox", { name: "Tell me what you imagine" })).toHaveValue("Keep this idea");
+  });
+
+  it("offers Meet only after awakening and celebrates the first awakening", async () => {
+    vi.mocked(getEntityJourney).mockRejectedValue(new Error("offline"));
+    vi.mocked(getQuestCatalog).mockResolvedValue({ stages: [], badges: [], temperament_cards: [], trials: [], palettes: [], crests: [], instincts: "" });
+    saved.definition.entity_id = "allocated";
+    saved.state = "review";
+    saved.quest = questFixture();
+    const activation = vi.mocked(genesisAction).getMockImplementation()!;
+    vi.mocked(genesisAction).mockImplementation(async (session, action, args) => {
+      const next = await activation(session, action, args);
+      if (action !== "activate") return next;
+      saved = { ...next, state: "ready", awakening: "I am Nova.", quest: questFixture({ badges: [{ badge: "first_light", title: "First Light", hint: "Awaken your Entity.", xp: 50, earned_at: "now" }] }) };
+      return structuredClone(saved);
+    });
+    await start();
+    expect(screen.getByRole("navigation", { name: /Genesis quest/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Meet Nova" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apply identity refinements" }));
+    const dialog = await screen.findByRole("dialog", { name: "Nova has awakened" });
+    expect(dialog).toHaveTextContent("First Light");
+    fireEvent.click(screen.getByRole("button", { name: "Stay in Genesis" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Meet Nova" })).toBeInTheDocument();
   });
 
   it("saves pending definition edits even after an independent style change", async () => {

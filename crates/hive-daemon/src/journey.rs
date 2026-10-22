@@ -137,6 +137,10 @@ pub fn record_awakening(state: &HiveDaemonState, session: &GenesisSession) -> Re
         .map_err(|e| e.to_string())
 }
 
+/// Recent turns scanned for milestones: far above the highest target, and the
+/// journey keeps the highest count ever observed.
+const MILESTONE_WINDOW: usize = 500;
+
 /// Messages the mentor has sent this Entity. Hive owns the embedded store, so
 /// this reads the Entity's own scoped conversation turns, never another's.
 fn mentor_messages(state: &HiveDaemonState, entity_id: &str) -> Result<u64, String> {
@@ -147,7 +151,7 @@ fn mentor_messages(state: &HiveDaemonState, entity_id: &str) -> Result<u64, Stri
     let memory =
         abigail_memory::MemoryStore::open_with_config(&config).map_err(|e| e.to_string())?;
     Ok(memory
-        .all_turns()
+        .recent_turns_all_sessions(MILESTONE_WINDOW)
         .map_err(|e| e.to_string())?
         .iter()
         .filter(|turn| turn.role == "user")
