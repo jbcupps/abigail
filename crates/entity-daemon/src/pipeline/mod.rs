@@ -209,6 +209,22 @@ mod tests {
         reply: &'static str,
     }
 
+    struct FailingAssistantTurnStore {
+        attempts: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl crate::memory_consumer::AssistantTurnStore for FailingAssistantTurnStore {
+        async fn persist(
+            &self,
+            _memory: Arc<MemoryStore>,
+            _turn: abigail_memory::ConversationTurn,
+        ) -> Result<(), String> {
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            Err("injected assistant store failure".to_string())
+        }
+    }
+
     #[async_trait]
     impl LlmProvider for MockProvider {
         async fn complete(
@@ -762,6 +778,61 @@ mod tests {
             .unwrap();
         assert_eq!(restarted.outbox.snapshot().unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn assistant_store_failure_preserves_completed_tool_activity_without_retry() {
+        let (mut state, executions) = build_tool_state(1);
+        let outbox_root = outbox_root("abigail-pipeline-assistant-store");
+        let ledger_root = outbox_root("abigail-pipeline-assistant-ledger");
+        state.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        state.execution_ledger =
+            Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
+        let store_attempts = Arc::new(AtomicUsize::new(0));
+        state.assistant_turn_store = Arc::new(FailingAssistantTurnStore {
+            attempts: store_attempts.clone(),
+        });
+        let _handles = spawn(state.clone()).await.expect("pipeline spawn");
+
+        let (_, outcome) = run_turn(&state, "session-assistant-store").await;
+        let response = outcome.expect("completed external action must remain successful");
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        assert_eq!(store_attempts.load(Ordering::SeqCst), 1);
+        let reply = response.reply.to_ascii_lowercase();
+        assert!(reply.contains("action completed"), "{reply}");
+        assert!(reply.contains("history could not be saved"), "{reply}");
+        assert!(!reply.contains("retry"), "{reply}");
+        assert!(
+            state
+                .memory
+                .recent_turns("session-assistant-store", 10)
+                .unwrap()
+                .iter()
+                .all(|turn| turn.role != "assistant"),
+            "the injected failure must leave no assistant recovery fact"
+        );
+
+        let queued = state.outbox.snapshot().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].kind, "skill_used");
+        assert_eq!(queued[0].payload["session_id"], "session-assistant-store");
+        assert_eq!(queued[0].payload["successful_skill_count"], 1);
+        assert!(state.outbox.reservations().unwrap().is_empty());
+        assert_eq!(state.execution_ledger.recent(None, 10).len(), 1);
+
+        let mut restarted = build_state();
+        restarted.memory = state.memory.clone();
+        restarted.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        restarted.execution_ledger =
+            Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
+        restarted
+            .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)
+            .unwrap();
+        assert_eq!(restarted.outbox.snapshot().unwrap().len(), 1);
+        assert_eq!(restarted.execution_ledger.recent(None, 10).len(), 1);
+        assert!(restarted.outbox.reservations().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(outbox_root);
+        let _ = std::fs::remove_dir_all(ledger_root);
     }
 
     #[tokio::test]
