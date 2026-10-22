@@ -12,7 +12,7 @@ export function portraitsFromSessions(sessions: GenesisSession[]): EntityPortrai
   const seen = new Set<string>();
   const newest = [...sessions].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   for (const session of newest) {
-    const entityId = session.definition.entity_id;
+    const entityId = session.effective_entity_id ?? session.definition.entity_id;
     const assetId = session.definition.portrait_asset_id;
     const awakened = session.state === "ready" || Boolean((session as GenesisSession & { awakening?: string }).awakening);
     if (entityId && awakened && !seen.has(entityId)) {
@@ -28,7 +28,7 @@ export function portraitsFromSessions(sessions: GenesisSession[]): EntityPortrai
 export function awaitingFromSessions(sessions: GenesisSession[]): Record<string, string> {
   const awaiting: Record<string, string> = {};
   for (const session of sessions) {
-    const entityId = session.definition.entity_id;
+    const entityId = session.effective_entity_id ?? session.definition.entity_id;
     if (entityId && !session.awakening) awaiting[entityId] = session.id;
   }
   return awaiting;

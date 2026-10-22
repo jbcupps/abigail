@@ -135,7 +135,21 @@ fn signals(state: &HiveDaemonState, session: &GenesisSession) -> QuestSignals {
 }
 fn view(state: &HiveDaemonState, session: GenesisSession) -> Value {
     let signals = signals(state, &session);
-    view_with(session, signals)
+    let effective_entity_id = session.definition.entity_id.clone().or_else(|| {
+        match crate::genesis_creation::receipt_entity_id(&state.identity_manager, &session) {
+            Ok(entity_id) => entity_id,
+            Err(error) => {
+                tracing::warn!(
+                    session_id = %session.id,
+                    "Genesis allocation receipt could not be presented: {error}"
+                );
+                None
+            }
+        }
+    });
+    let mut value = view_with(session, signals);
+    value["effective_entity_id"] = json!(effective_entity_id);
+    value
 }
 fn view_with(session: GenesisSession, signals: QuestSignals) -> Value {
     let essence = session.essence();

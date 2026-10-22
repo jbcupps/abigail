@@ -36,6 +36,8 @@ export interface GenesisRevision { revision: number; reason: string; created_at:
 export interface EssenceProgress { identity: number; personality: number; purpose: number; memories_lore: number; appearance: number; voice_presence: number }
 export interface GenesisSession {
   id: string; owner_id: string; mode: GenesisMode; state: GenesisState;
+  /** Presentation-only Entity link recovered by Hive from canonical data or its durable allocation receipt. */
+  effective_entity_id?: string | null;
   definition: EntityDefinition; messages: GenesisMessage[]; proposals: GenesisProposal[];
   conflicts: GenesisConflict[]; sources: GenesisSource[]; revisions: GenesisRevision[];
   asset_ids: string[]; job_ids: string[]; revision: number; created_at: string; updated_at: string;
