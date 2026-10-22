@@ -222,4 +222,51 @@ mod tests {
         assert!(!verify_chain(&events));
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    #[test]
+    fn exact_outbox_retry_keeps_one_execution_event() {
+        let dir = std::env::temp_dir().join(format!(
+            "abigail-execution-ledger-outbox-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let record_id = uuid::Uuid::new_v4().to_string();
+        let payload = serde_json::json!({
+            "session_id": "session-1",
+            "skill_id": "com.abigail.calendar",
+            "tool_name": "list_events"
+        });
+        let ledger = ExecutionLedger::load(&dir).unwrap();
+
+        let first = ledger
+            .append_outbox_event(&record_id, "entity-1", "skill_used", &payload, "soul-ref")
+            .unwrap();
+        let retry = ledger
+            .append_outbox_event(&record_id, "entity-1", "skill_used", &payload, "soul-ref")
+            .unwrap();
+
+        assert_eq!(first.event_id, record_id);
+        assert_eq!(retry.event_id, first.event_id);
+        assert_eq!(retry.event_hash, first.event_hash);
+        assert_eq!(ledger.recent(None, 10).len(), 1);
+        let conflict = ledger
+            .append_outbox_event(
+                &record_id,
+                "entity-1",
+                "skill_used",
+                &serde_json::json!({
+                    "session_id": "session-1",
+                    "skill_id": "com.abigail.weather",
+                    "tool_name": "forecast"
+                }),
+                "soul-ref",
+            )
+            .unwrap_err();
+        assert!(conflict.contains("conflicts"), "{conflict}");
+
+        drop(ledger);
+        let restarted = ExecutionLedger::load(&dir).unwrap();
+        assert_eq!(restarted.recent(None, 10).len(), 1);
+        assert!(verify_chain(&restarted.recent(None, 10)));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
