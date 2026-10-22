@@ -25,10 +25,11 @@ use std::sync::Mutex;
 const JOURNEY_TABLE: &str = "entity_journey";
 const JOURNEY_EVENT_TABLE: &str = "entity_journey_event";
 const JOURNEY_EVENT_SELECT: &str =
-    "record_id, owner_id, entity_id, kind, occurred_at, session_id, skill_id, tool_name, memory_id, memory_weight";
+    "record_id, owner_id, entity_id, kind, occurred_at, session_id, skill_id, tool_name, successful_skill_count, memory_id, memory_weight";
 const PRESENCE_FILE: &str = "presence.json";
 const MAX_PRESENCE_BYTES: usize = 32 * 1024;
 const MAX_EVENT_IDENTIFIER_BYTES: usize = 160;
+const MAX_SUCCESSFUL_SKILL_COUNT_PER_TURN: u32 = 256;
 
 pub struct JourneyStore {
     handle: PersistenceHandle,
@@ -68,6 +69,8 @@ struct JourneyEventRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    successful_skill_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     memory_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     memory_weight: Option<String>,
@@ -80,10 +83,24 @@ struct PreparedJourneyEvent {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SkillUsedMetadata {
+struct LegacySkillUsedMetadata {
     session_id: String,
     skill_id: String,
     tool_name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AggregateSkillUsedMetadata {
+    session_id: String,
+    successful_skill_count: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SkillUsedMetadata {
+    Aggregate(AggregateSkillUsedMetadata),
+    Legacy(LegacySkillUsedMetadata),
 }
 
 #[derive(Deserialize)]
@@ -402,7 +419,25 @@ impl JourneyStore {
                 bail!("Saved journey event ownership does not match its scope");
             }
             match row.kind.as_str() {
-                "skill_used" => activity.successful_skill_uses += 1,
+                "skill_used" => {
+                    let count = match (
+                        row.successful_skill_count,
+                        row.skill_id.as_deref(),
+                        row.tool_name.as_deref(),
+                    ) {
+                        (Some(count), None, None)
+                            if (1..=MAX_SUCCESSFUL_SKILL_COUNT_PER_TURN).contains(&count) =>
+                        {
+                            u64::from(count)
+                        }
+                        (None, Some(_), Some(_)) => 1,
+                        _ => bail!("Saved skill journey event metadata is invalid"),
+                    };
+                    activity.successful_skill_uses = activity
+                        .successful_skill_uses
+                        .checked_add(count)
+                        .ok_or_else(|| anyhow!("Saved skill journey activity count overflowed"))?;
+                }
                 "memory_confirmed" => activity.confirmed_memories += 1,
                 _ => bail!("Saved journey event has an unsupported kind"),
             }
@@ -452,6 +487,7 @@ fn journey_event(
         session_id: None,
         skill_id: None,
         tool_name: None,
+        successful_skill_count: None,
         memory_id: None,
         memory_weight: None,
     };
@@ -459,12 +495,26 @@ fn journey_event(
         "skill_used" => {
             let metadata: SkillUsedMetadata = serde_json::from_value(record.payload.clone())
                 .context("Invalid skill journey metadata")?;
-            validate_event_identifier(&metadata.session_id, "session ID")?;
-            validate_event_identifier(&metadata.skill_id, "skill ID")?;
-            validate_event_identifier(&metadata.tool_name, "tool name")?;
-            event.session_id = Some(metadata.session_id);
-            event.skill_id = Some(metadata.skill_id);
-            event.tool_name = Some(metadata.tool_name);
+            match metadata {
+                SkillUsedMetadata::Aggregate(metadata) => {
+                    validate_event_identifier(&metadata.session_id, "session ID")?;
+                    if !(1..=MAX_SUCCESSFUL_SKILL_COUNT_PER_TURN)
+                        .contains(&metadata.successful_skill_count)
+                    {
+                        bail!("Invalid successful skill count");
+                    }
+                    event.session_id = Some(metadata.session_id);
+                    event.successful_skill_count = Some(metadata.successful_skill_count);
+                }
+                SkillUsedMetadata::Legacy(metadata) => {
+                    validate_event_identifier(&metadata.session_id, "session ID")?;
+                    validate_event_identifier(&metadata.skill_id, "skill ID")?;
+                    validate_event_identifier(&metadata.tool_name, "tool name")?;
+                    event.session_id = Some(metadata.session_id);
+                    event.skill_id = Some(metadata.skill_id);
+                    event.tool_name = Some(metadata.tool_name);
+                }
+            }
         }
         "memory_confirmed" => {
             let metadata: MemoryConfirmedMetadata = serde_json::from_value(record.payload.clone())

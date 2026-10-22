@@ -17,6 +17,7 @@ DEFINE FIELD OVERWRITE occurred_at ON TABLE entity_journey_event TYPE string;
 DEFINE FIELD OVERWRITE session_id ON TABLE entity_journey_event TYPE option<string>;
 DEFINE FIELD OVERWRITE skill_id ON TABLE entity_journey_event TYPE option<string>;
 DEFINE FIELD OVERWRITE tool_name ON TABLE entity_journey_event TYPE option<string>;
+DEFINE FIELD OVERWRITE successful_skill_count ON TABLE entity_journey_event TYPE option<int>;
 DEFINE FIELD OVERWRITE memory_id ON TABLE entity_journey_event TYPE option<string>;
 DEFINE FIELD OVERWRITE memory_weight ON TABLE entity_journey_event TYPE option<string>;
 UPDATE entity_journey_event CONTENT {
@@ -28,6 +29,7 @@ UPDATE entity_journey_event CONTENT {
     session_id: session_id,
     skill_id: skill_id,
     tool_name: tool_name,
+    successful_skill_count: successful_skill_count,
     memory_id: memory_id,
     memory_weight: memory_weight
 };
