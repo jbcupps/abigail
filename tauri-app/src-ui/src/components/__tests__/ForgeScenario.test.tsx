@@ -29,12 +29,6 @@ describe("ForgeScenario public display boundary", () => {
       if (command === "crystallize_forge") {
         return Promise.resolve({
           archetype: "The Guardian",
-          weights: {
-            deontology: 0.91,
-            teleology: 0.42,
-            areteology: 0.73,
-            welfare: 0.88,
-          },
           soul_hash: "soul-hash",
           sigil: "<guardian>",
         });
@@ -43,13 +37,16 @@ describe("ForgeScenario public display boundary", () => {
     });
   });
 
-  it("sanitizes hidden weights before display state and completion callbacks", async () => {
+  it("uses the ordered, weight-free backend DTO for display and completion", async () => {
     const onComplete = vi.fn();
     render(<ForgeScenario onComplete={onComplete} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /protect the family/i }));
     fireEvent.click(screen.getByRole("button", { name: /forge soul/i }));
     expect(await screen.findByRole("heading", { name: /soul forged/i })).toBeInTheDocument();
+    expect(mockInvoke).toHaveBeenCalledWith("crystallize_forge", {
+      choices: ["protect"],
+    });
 
     for (const hiddenAxis of ["Deontology", "Teleology", "Areteology", "Welfare"]) {
       expect(screen.queryByText(hiddenAxis)).not.toBeInTheDocument();
