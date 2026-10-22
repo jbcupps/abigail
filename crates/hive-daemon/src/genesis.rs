@@ -347,7 +347,12 @@ pub(crate) fn delete_genesis_record_unlocked(
         draft.awakening.is_none() && linked_entity.is_some() && !linked_elsewhere;
     if delete_allocation && registered {
         if let Some(entity_id) = linked_entity.as_deref() {
-            if state.identity_manager.load_agent(entity_id)?.birth_complete {
+            let config_exists = state
+                .identity_manager
+                .agent_dir(entity_id)?
+                .join("config.json")
+                .exists();
+            if config_exists && state.identity_manager.load_agent(entity_id)?.birth_complete {
                 return Err("This Entity finished birth but not awakening. Retry activation before deleting its Genesis record so signed identity and chat are preserved.".into());
             }
         }
@@ -1647,6 +1652,24 @@ mod tests {
 
         assert!(delete_genesis_record_unlocked(&state, &id).unwrap());
         assert!(state.genesis.load(OWNER, &id).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn deletion_retries_after_files_were_removed_but_registry_save_failed() {
+        let (state, _) = crate::routes::tests::build_state();
+        let id = begin(&state).await;
+        reserve(&state, &id).await;
+        let (entity_id, agent_dir) = state.identity_manager.create_agent("Nova").unwrap();
+        let mut draft = session(&state, &id).unwrap();
+        let revision = draft.revision;
+        draft.definition.entity_id = Some(entity_id.clone());
+        draft.touch(&now());
+        state.genesis.save(&draft, revision).unwrap();
+        std::fs::remove_dir_all(agent_dir).unwrap();
+
+        assert!(delete_genesis_record_unlocked(&state, &id).unwrap());
+        assert!(state.genesis.load(OWNER, &id).unwrap().is_none());
+        assert!(state.identity_manager.load_agent(&entity_id).is_err());
     }
 
     #[tokio::test]
