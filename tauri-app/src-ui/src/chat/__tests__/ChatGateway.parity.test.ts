@@ -50,7 +50,7 @@ async function startGatewayRun(gateway: ChatGateway, request: ChatGatewayRequest
   let errorCalls = 0;
   let resolved = false;
 
-  let resolveTerminal = () => undefined;
+  let resolveTerminal: () => void = () => {};
   const terminal = new Promise<void>((resolve) => {
     resolveTerminal = () => {
       if (resolved) return;
@@ -404,7 +404,7 @@ describe("Chat gateway parity", () => {
   it("keeps a backend completion-risk result that arrives during cancellation", async () => {
     const encoder = new TextEncoder();
     let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
-    let markStreamReady = () => undefined;
+    let markStreamReady: () => void = () => {};
     const streamReady = new Promise<void>((resolve) => {
       markStreamReady = resolve;
     });

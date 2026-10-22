@@ -150,7 +150,7 @@ export class EntityHttpChatGateway implements ChatGateway {
     let activeController: AbortController | null = null;
     let requestTimeoutId: ReturnType<typeof setTimeout> | null = null;
     let idleTimeoutId: ReturnType<typeof setTimeout> | null = null;
-    let resolveTerminal = () => undefined;
+    let resolveTerminal: () => void = () => {};
     const terminalResult = new Promise<void>((resolve) => {
       resolveTerminal = resolve;
     });
