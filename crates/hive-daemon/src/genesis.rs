@@ -313,6 +313,11 @@ pub(crate) fn delete_genesis_record_unlocked(
     id: &str,
 ) -> Result<bool, String> {
     let mut draft = session(state, id)?;
+    let unawakened_entity = draft
+        .awakening
+        .is_none()
+        .then(|| draft.definition.entity_id.clone())
+        .flatten();
     state
         .genesis_media
         .delete_session(OWNER, id)
@@ -320,6 +325,34 @@ pub(crate) fn delete_genesis_record_unlocked(
     draft.definition.portrait_asset_id = None;
     draft.definition.manifestation_asset_id = None;
     media_sync_entity_record(state, &draft)?;
+    if let Some(entity_id) = unawakened_entity {
+        let linked_elsewhere = state
+            .genesis
+            .list(OWNER)
+            .map_err(|e| e.to_string())?
+            .iter()
+            .any(|other| {
+                other.id != id && other.definition.entity_id.as_deref() == Some(entity_id.as_str())
+            });
+        if !linked_elsewhere {
+            // A deleted draft must not leave an allocation that generic setup
+            // can claim after the Genesis guards lose their owning record.
+            state.supervisor.stop_entity(&entity_id);
+            state
+                .runtime_control
+                .lock()
+                .map_err(|e| e.to_string())?
+                .revoke_entity_sessions(&entity_id);
+            let registered = state
+                .identity_manager
+                .list_agents()?
+                .iter()
+                .any(|agent| agent.id == entity_id);
+            if registered {
+                state.identity_manager.delete_agent(&entity_id)?;
+            }
+        }
+    }
     // Activated Entities and their real conversation history are independent records.
     state.genesis.delete(OWNER, id).map_err(|e| e.to_string())
 }
@@ -1384,6 +1417,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cleared_trials_use_quickstart_without_revoking_earned_badges() {
+        let (state, _) = crate::routes::tests::build_state();
+        let id = begin(&state).await;
+        reserve(&state, &id).await;
+        for scenario in soul_forge::SoulForgeEngine::new().scenarios() {
+            act(
+                &state,
+                &id,
+                json!({"action":"choose_trial","scenario_id":scenario.id,"choice_id":scenario.choices[0].id}),
+            )
+            .await
+            .unwrap();
+        }
+        let cleared = act(&state, &id, json!({"action":"clear_trials"}))
+            .await
+            .unwrap();
+        assert_eq!(cleared["quest"]["soul_path"], "quickstart");
+        assert!(cleared["quest"]["badges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|badge| badge["badge"] == "trial_walker" && !badge["earned_at"].is_null()));
+
+        let awakened = act(&state, &id, json!({"action":"activate"}))
+            .await
+            .unwrap();
+        let entity_id = awakened["definition"]["entity_id"].as_str().unwrap();
+        let config = state.identity_manager.load_agent(entity_id).unwrap();
+        let certificate: hive_core::BirthCertificate = serde_json::from_str(
+            &std::fs::read_to_string(config.docs_dir.join("birth_certificate.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(certificate.birth_path, "quickstart");
+    }
+
+    #[tokio::test]
     async fn generic_birth_and_open_wait_for_genesis_awakening() {
         let (state, unrelated) = crate::routes::tests::build_state();
         let id = begin(&state).await;
@@ -1448,6 +1517,67 @@ mod tests {
         // Never stored, so saving the allocation fails.
         assert!(activate(&state, draft).await.is_err());
         assert_eq!(state.identity_manager.list_agents().unwrap().len(), before);
+    }
+
+    #[tokio::test]
+    async fn deleting_an_unawakened_record_cannot_release_its_genesis_allocation() {
+        let (state, _) = crate::routes::tests::build_state();
+        let id = begin(&state).await;
+        reserve(&state, &id).await;
+        let (entity_id, _) = state.identity_manager.create_agent("Nova").unwrap();
+        let mut draft = session(&state, &id).unwrap();
+        let revision = draft.revision;
+        draft.definition.entity_id = Some(entity_id.clone());
+        draft.touch(&now());
+        state.genesis.save(&draft, revision).unwrap();
+
+        assert!(delete_genesis_record_unlocked(&state, &id).unwrap());
+        let Json(generic) = crate::birth::perform_birth(
+            State(state.clone()),
+            Path(entity_id.clone()),
+            Json(BirthRiteRequest {
+                path: "quickstart".into(),
+                choices: vec![],
+                purpose: None,
+            }),
+        )
+        .await;
+        assert!(
+            !generic.ok,
+            "deleting Genesis must not expose its allocation to generic birth"
+        );
+        assert!(state.identity_manager.load_agent(&entity_id).is_err());
+    }
+
+    #[tokio::test]
+    async fn deleting_an_awakened_record_preserves_entity_and_signed_birth_guard() {
+        let (state, _) = crate::routes::tests::build_state();
+        let id = begin(&state).await;
+        reserve(&state, &id).await;
+        let awakened = act(&state, &id, json!({"action":"activate"}))
+            .await
+            .unwrap();
+        let entity_id = awakened["definition"]["entity_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        assert!(delete_genesis_record_unlocked(&state, &id).unwrap());
+        assert!(state.identity_manager.load_agent(&entity_id).is_ok());
+        let Json(generic) = crate::birth::perform_birth(
+            State(state),
+            Path(entity_id),
+            Json(BirthRiteRequest {
+                path: "quickstart".into(),
+                choices: vec![],
+                purpose: None,
+            }),
+        )
+        .await;
+        assert!(
+            !generic.ok,
+            "the signed Genesis narrative must keep guarding generic birth"
+        );
     }
 
     #[tokio::test]

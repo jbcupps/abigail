@@ -516,6 +516,19 @@ mod tests {
             (Method::POST, "/v1/entities/:id/open", None),
             (Method::GET, "/v1/status", None),
             (Method::GET, "/v1/genesis/sessions", None),
+            (Method::GET, "/v1/entities/:id/journey", None),
+            (Method::GET, "/v1/entities/:id/presence", None),
+            (
+                Method::PUT,
+                "/v1/entities/:id/presence",
+                Some(serde_json::json!({
+                    "temperament": "gentle",
+                    "identity": "aether",
+                    "crest": "orbit",
+                    "motion": "still"
+                })),
+            ),
+            (Method::GET, "/v1/genesis/quest/catalog", None),
         ] {
             let (status, body) = f
                 .send(method.clone(), &concrete(route), Some(&lease), body)

@@ -448,9 +448,20 @@ pub(crate) mod tests {
         let Json(unlocked) = put(Palette::Hearth, Crest::Orbit).await;
         assert!(unlocked.ok, "{:?}", unlocked.error);
 
-        std::fs::write(presence_path(&state, &entity_id).unwrap(), b"{\"name\":1}").unwrap();
-        let Json(damaged) = get_presence(State(state), Path(entity_id)).await;
+        let path = presence_path(&state, &entity_id).unwrap();
+        std::fs::write(&path, b"{\"name\":1}").unwrap();
+        let Json(damaged) = get_presence(State(state.clone()), Path(entity_id.clone())).await;
         assert!(!damaged.ok, "damaged cards are reported, never reset");
+        assert_eq!(std::fs::read(&path).unwrap(), b"{\"name\":1}");
+
+        let oversized = vec![b' '; MAX_PRESENCE_BYTES + 1];
+        std::fs::write(&path, &oversized).unwrap();
+        let Json(too_large) = get_presence(State(state), Path(entity_id)).await;
+        assert_eq!(
+            too_large.error.as_deref(),
+            Some("The saved Presence card is too large")
+        );
+        assert_eq!(std::fs::read(path).unwrap(), oversized);
     }
 
     fn store() -> JourneyStore {
@@ -475,6 +486,72 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(after.mentor_messages, 5);
         assert_eq!(after.updated_at, "t1");
+    }
+
+    #[test]
+    fn wrong_owner_cannot_overwrite_an_existing_journey() {
+        let store = store();
+        let id = uuid::Uuid::new_v4().to_string();
+        let other = EntityJourney::new(&id, "another-household", "t1");
+        store
+            .handle
+            .upsert(
+                JOURNEY_TABLE,
+                &id,
+                &JourneyRecord {
+                    entity_id: id.clone(),
+                    owner_id: "another-household".into(),
+                    payload: serde_json::to_string(&other).unwrap(),
+                },
+            )
+            .unwrap();
+
+        assert!(store.update(OWNER, &id, "t2", |_| true).is_err());
+        assert!(store.load(OWNER, &id).unwrap().is_none());
+        assert_eq!(
+            store
+                .load("another-household", &id)
+                .unwrap()
+                .unwrap()
+                .owner_id,
+            "another-household"
+        );
+    }
+
+    #[test]
+    fn concurrent_updates_preserve_every_earned_badge() {
+        let store = std::sync::Arc::new(store());
+        let id = uuid::Uuid::new_v4().to_string();
+        let start = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let mut workers = Vec::new();
+        for badge in [Badge::Named, Badge::Purposeful] {
+            let store = store.clone();
+            let id = id.clone();
+            let start = start.clone();
+            workers.push(std::thread::spawn(move || {
+                start.wait();
+                store
+                    .update(OWNER, &id, "t", |journey| {
+                        journey.observe(
+                            &[EarnedBadge {
+                                badge,
+                                earned_at: "t".into(),
+                            }],
+                            0,
+                            "t",
+                        )
+                    })
+                    .unwrap();
+            }));
+        }
+        start.wait();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+
+        let earned = store.load(OWNER, &id).unwrap().unwrap().earned_badges();
+        assert!(earned.contains(&Badge::Named));
+        assert!(earned.contains(&Badge::Purposeful));
     }
 
     #[test]
