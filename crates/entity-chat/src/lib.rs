@@ -1773,12 +1773,11 @@ mod tests {
         assert_eq!(executions.load(Ordering::SeqCst), 1);
         assert_eq!(result.tool_calls_made.len(), 1);
         assert!(result.tool_calls_made[0].success);
-        let content = result.content.to_ascii_lowercase();
-        assert!(content.contains("completed"), "{content}");
-        assert!(content.contains("final reply"), "{content}");
-        assert!(content.contains("unavailable"), "{content}");
-        assert!(!content.contains("try again"), "{content}");
-        assert!(!content.contains("retry"), "{content}");
+        assert_eq!(
+            result.content,
+            "An action completed, but the final reply is unavailable. \
+             Verify the result before repeating the action."
+        );
     }
 
     #[tokio::test]
@@ -1812,12 +1811,11 @@ mod tests {
         assert_eq!(executions.load(Ordering::SeqCst), 1);
         assert_eq!(result.tool_calls_made.len(), 1);
         assert!(result.tool_calls_made[0].success);
-        let content = result.content.to_ascii_lowercase();
-        assert!(content.contains("completed"), "{content}");
-        assert!(content.contains("final reply"), "{content}");
-        assert!(content.contains("unavailable"), "{content}");
-        assert!(!content.contains("try again"), "{content}");
-        assert!(!content.contains("retry"), "{content}");
+        assert_eq!(
+            result.content,
+            "An action completed, but the final reply is unavailable. \
+             Verify the result before repeating the action."
+        );
         let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
         assert_eq!(
             events

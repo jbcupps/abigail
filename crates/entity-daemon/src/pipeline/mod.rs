@@ -213,6 +213,70 @@ mod tests {
         attempts: Arc<AtomicUsize>,
     }
 
+    struct RejectUnexpectedHiveClient {
+        heartbeat_calls: AtomicUsize,
+        sync_calls: AtomicUsize,
+    }
+
+    struct LedgerCheckingAckClient {
+        ledger: Arc<crate::execution_ledger::ExecutionLedger>,
+        heartbeat_calls: AtomicUsize,
+        sync_calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl crate::RuntimeHeartbeatClient for RejectUnexpectedHiveClient {
+        async fn heartbeat(
+            &self,
+            _request: &hive_core::RuntimeHeartbeatRequest,
+        ) -> Result<hive_core::RuntimeHeartbeatResponse, String> {
+            self.heartbeat_calls.fetch_add(1, Ordering::SeqCst);
+            Err("Hive heartbeat ran before local ledger reconciliation".to_string())
+        }
+
+        async fn sync_outbox(
+            &self,
+            _request: &hive_core::OutboxSyncRequest,
+        ) -> Result<hive_core::OutboxSyncResponse, String> {
+            self.sync_calls.fetch_add(1, Ordering::SeqCst);
+            Err("Hive sync ran before local ledger reconciliation".to_string())
+        }
+    }
+
+    #[async_trait]
+    impl crate::RuntimeHeartbeatClient for LedgerCheckingAckClient {
+        async fn heartbeat(
+            &self,
+            _request: &hive_core::RuntimeHeartbeatRequest,
+        ) -> Result<hive_core::RuntimeHeartbeatResponse, String> {
+            self.heartbeat_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(hive_core::RuntimeHeartbeatResponse {
+                accepted: true,
+                server_time_utc: chrono::Utc::now().to_rfc3339(),
+            })
+        }
+
+        async fn sync_outbox(
+            &self,
+            request: &hive_core::OutboxSyncRequest,
+        ) -> Result<hive_core::OutboxSyncResponse, String> {
+            self.sync_calls.fetch_add(1, Ordering::SeqCst);
+            if self.ledger.recent(None, 10).len() != request.records.len() {
+                return Err("Hive sync observed records missing from the local ledger".to_string());
+            }
+            Ok(hive_core::OutboxSyncResponse {
+                accepted_record_ids: request
+                    .records
+                    .iter()
+                    .map(|record| record.record_id.clone())
+                    .collect(),
+                pending_records: 0,
+                server_time_utc: chrono::Utc::now().to_rfc3339(),
+                execution_receipts: Vec::new(),
+            })
+        }
+    }
+
     #[async_trait]
     impl crate::memory_consumer::AssistantTurnStore for FailingAssistantTurnStore {
         async fn persist(
@@ -821,12 +885,11 @@ mod tests {
         assert_eq!(executions.load(Ordering::SeqCst), 1);
         assert_eq!(response.tool_calls_made.len(), 1);
         assert!(response.tool_calls_made[0].success);
-        let reply = response.reply.to_ascii_lowercase();
-        assert!(reply.contains("completed"), "{reply}");
-        assert!(reply.contains("final reply"), "{reply}");
-        assert!(reply.contains("unavailable"), "{reply}");
-        assert!(!reply.contains("try again"), "{reply}");
-        assert!(!reply.contains("retry"), "{reply}");
+        assert_eq!(
+            response.reply,
+            "An action completed, but the final reply is unavailable. \
+             Verify the result before repeating the action."
+        );
         let queued = state.outbox.snapshot().unwrap();
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].payload["successful_skill_count"], 1);
@@ -835,27 +898,77 @@ mod tests {
 
     #[tokio::test]
     async fn superego_block_after_completed_tool_commits_activity_without_retry() {
-        let (state, executions) =
+        let (mut state, executions) =
             build_tool_state_with_provider(Arc::new(ToolThenOutcomeProvider {
                 calls: AtomicUsize::new(0),
                 outcome: SecondRoundOutcome::Reply(
                     "secret result: sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789",
                 ),
             }));
+        state.soul_ref = "superego-soul-a".to_string();
+        let outbox_dir = outbox_root("abigail-pipeline-superego-outbox");
+        let ledger_root = outbox_root("abigail-pipeline-superego-ledger");
+        state.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_dir, 4).unwrap());
+        state.execution_ledger = Arc::new(
+            crate::execution_ledger::ExecutionLedger::load_with_saver(
+                &ledger_root,
+                |_path, _bytes| anyhow::bail!("injected superego ledger save failure"),
+            )
+            .unwrap(),
+        );
         let _handles = spawn(state.clone()).await.expect("pipeline spawn");
 
         let (_, outcome) = run_turn(&state, "session-tool-blocked").await;
         let error = outcome.expect_err("unsafe final reply must remain blocked");
 
         assert_eq!(executions.load(Ordering::SeqCst), 1);
-        assert!(error.contains("withheld"), "{error}");
-        assert!(!error.to_ascii_lowercase().contains("try again"), "{error}");
-        assert!(!error.to_ascii_lowercase().contains("retry"), "{error}");
+        assert_eq!(
+            error,
+            "An action completed, but the response was withheld for safety. \
+             Verify the result before repeating the action. Safety check: secret-leak"
+        );
         let queued = state.outbox.snapshot().unwrap();
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].payload["session_id"], "session-tool-blocked");
         assert_eq!(queued[0].payload["successful_skill_count"], 1);
         assert!(state.outbox.reservations().unwrap().is_empty());
+        assert!(state.execution_ledger.recent(None, 10).is_empty());
+
+        let client = RejectUnexpectedHiveClient {
+            heartbeat_calls: AtomicUsize::new(0),
+            sync_calls: AtomicUsize::new(0),
+        };
+        let reconcile_error = crate::run_runtime_outbox_heartbeat(&state, &client)
+            .await
+            .expect_err("ledger failure must stop Hive heartbeat and sync");
+        assert!(
+            reconcile_error.contains("injected superego ledger save failure"),
+            "{reconcile_error}"
+        );
+        assert_eq!(client.heartbeat_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(client.sync_calls.load(Ordering::SeqCst), 0);
+
+        let record_id = queued[0].record_id.clone();
+        state
+            .outbox
+            .acknowledge(std::slice::from_ref(&record_id))
+            .unwrap();
+        let mut restarted = build_state();
+        restarted.soul_ref = "superego-soul-b".to_string();
+        restarted.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_dir, 4).unwrap());
+        restarted.execution_ledger =
+            Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
+        restarted
+            .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)
+            .expect("acknowledged blocked activity must repair without an assistant source");
+        let repaired = restarted.execution_ledger.recent(None, 10);
+        assert_eq!(repaired.len(), 1);
+        assert_eq!(repaired[0].event_id, record_id);
+        assert_eq!(repaired[0].soul_ref, "superego-soul-a");
+        assert!(restarted.outbox.snapshot().unwrap().is_empty());
+        assert!(restarted.outbox.is_acknowledged(&record_id).unwrap());
+        let _ = std::fs::remove_dir_all(outbox_dir);
+        let _ = std::fs::remove_dir_all(ledger_root);
     }
 
     #[tokio::test]
@@ -899,12 +1012,11 @@ mod tests {
             .expect("ego stage returns an outcome")
             .expect_err("cancelled turn is not a complete assistant reply");
 
-        assert!(
-            error.to_ascii_lowercase().contains("interrupted"),
-            "{error}"
+        assert_eq!(
+            error,
+            "An action may have completed before cancellation. \
+             Verify the result before repeating the action."
         );
-        assert!(!error.to_ascii_lowercase().contains("try again"), "{error}");
-        assert!(!error.to_ascii_lowercase().contains("retry"), "{error}");
         assert!(state.outbox.snapshot().unwrap().is_empty());
         assert_eq!(state.outbox.reservations().unwrap().len(), 1);
         let reopened =
@@ -1039,6 +1151,28 @@ mod tests {
             persisted["record_ledger_metadata"][0]["soul_ref"],
             "reservation-soul-a"
         );
+        state_b
+            .outbox
+            .acknowledge(std::slice::from_ref(&expected_id))
+            .unwrap();
+        drop(state_b);
+        std::fs::remove_file(ledger_root.join("execution_ledger.json")).unwrap();
+
+        let mut state_c = build_state();
+        state_c.soul_ref = "later-soul-c".to_string();
+        state_c.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_dir, 4).unwrap());
+        state_c.execution_ledger =
+            Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
+        state_c
+            .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)
+            .expect("acknowledged metadata must repair the ledger without a source fact");
+
+        let repaired = state_c.execution_ledger.recent(None, 10);
+        assert_eq!(repaired.len(), 1);
+        assert_eq!(repaired[0].event_id, expected_id);
+        assert_eq!(repaired[0].soul_ref, "reservation-soul-a");
+        assert!(state_c.outbox.snapshot().unwrap().is_empty());
+        assert!(state_c.outbox.is_acknowledged(&expected_id).unwrap());
         let _ = std::fs::remove_dir_all(outbox_dir);
         let _ = std::fs::remove_dir_all(ledger_root);
     }
@@ -1046,11 +1180,17 @@ mod tests {
     #[tokio::test]
     async fn assistant_store_failure_preserves_completed_tool_activity_without_retry() {
         let (mut state, executions) = build_tool_state(1);
+        state.soul_ref = "assistant-history-soul-a".to_string();
         let outbox_dir = outbox_root("abigail-pipeline-assistant-store");
         let ledger_root = outbox_root("abigail-pipeline-assistant-ledger");
         state.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_dir, 4).unwrap());
-        state.execution_ledger =
-            Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
+        state.execution_ledger = Arc::new(
+            crate::execution_ledger::ExecutionLedger::load_with_saver(
+                &ledger_root,
+                |_path, _bytes| anyhow::bail!("injected assistant-history ledger save failure"),
+            )
+            .unwrap(),
+        );
         let store_attempts = Arc::new(AtomicUsize::new(0));
         state.assistant_turn_store = Arc::new(FailingAssistantTurnStore {
             attempts: store_attempts.clone(),
@@ -1061,10 +1201,11 @@ mod tests {
         let response = outcome.expect("completed external action must remain successful");
         assert_eq!(executions.load(Ordering::SeqCst), 1);
         assert_eq!(store_attempts.load(Ordering::SeqCst), 1);
-        let reply = response.reply.to_ascii_lowercase();
-        assert!(reply.contains("action completed"), "{reply}");
-        assert!(reply.contains("history could not be saved"), "{reply}");
-        assert!(!reply.contains("retry"), "{reply}");
+        assert_eq!(
+            response.reply,
+            "tool-assisted reply\n\nThe action completed, but this reply and its history could not \
+             be saved. Verify the result before repeating the action."
+        );
         assert!(
             state
                 .memory
@@ -1077,22 +1218,46 @@ mod tests {
 
         let queued = state.outbox.snapshot().unwrap();
         assert_eq!(queued.len(), 1);
+        let record_id = queued[0].record_id.clone();
         assert_eq!(queued[0].kind, "skill_used");
         assert_eq!(queued[0].payload["session_id"], "session-assistant-store");
         assert_eq!(queued[0].payload["successful_skill_count"], 1);
         assert!(state.outbox.reservations().unwrap().is_empty());
-        assert_eq!(state.execution_ledger.recent(None, 10).len(), 1);
+        assert!(state.execution_ledger.recent(None, 10).is_empty());
+
+        state.execution_ledger =
+            Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
+        let client = LedgerCheckingAckClient {
+            ledger: state.execution_ledger.clone(),
+            heartbeat_calls: AtomicUsize::new(0),
+            sync_calls: AtomicUsize::new(0),
+        };
+        crate::run_runtime_outbox_heartbeat(&state, &client)
+            .await
+            .expect("queued history-failure activity must enter the ledger before sync");
+        assert_eq!(client.heartbeat_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(client.sync_calls.load(Ordering::SeqCst), 1);
+        assert!(state.outbox.snapshot().unwrap().is_empty());
+        assert!(state.outbox.is_acknowledged(&record_id).unwrap());
+        let ledger = state.execution_ledger.recent(None, 10);
+        assert_eq!(ledger.len(), 1);
+        assert_eq!(ledger[0].event_id, record_id);
+        assert_eq!(ledger[0].soul_ref, "assistant-history-soul-a");
 
         let mut restarted = build_state();
-        restarted.memory = state.memory.clone();
+        restarted.soul_ref = "assistant-history-soul-b".to_string();
         restarted.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_dir, 4).unwrap());
         restarted.execution_ledger =
             Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
         restarted
             .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)
             .unwrap();
-        assert_eq!(restarted.outbox.snapshot().unwrap().len(), 1);
-        assert_eq!(restarted.execution_ledger.recent(None, 10).len(), 1);
+        assert!(restarted.outbox.snapshot().unwrap().is_empty());
+        let restarted_ledger = restarted.execution_ledger.recent(None, 10);
+        assert_eq!(restarted_ledger.len(), 1);
+        assert_eq!(restarted_ledger[0].event_id, record_id);
+        assert_eq!(restarted_ledger[0].soul_ref, "assistant-history-soul-a");
+        assert!(restarted.outbox.is_acknowledged(&record_id).unwrap());
         assert!(restarted.outbox.reservations().unwrap().is_empty());
         let _ = std::fs::remove_dir_all(outbox_dir);
         let _ = std::fs::remove_dir_all(ledger_root);
