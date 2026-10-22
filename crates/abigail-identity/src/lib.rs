@@ -1498,6 +1498,60 @@ mod tests {
     }
 
     #[test]
+    fn generic_creation_and_renaming_share_the_entity_name_contract() {
+        let manager = test_manager();
+        let invalid = [
+            " Leading".to_string(),
+            "Trailing ".to_string(),
+            "Line\nBreak".to_string(),
+            "Control\u{0007}Bell".to_string(),
+            "a".repeat(81),
+        ];
+        for name in &invalid {
+            assert!(
+                manager.create_agent(name).is_err(),
+                "unkeyed creation accepted {name:?}"
+            );
+            assert!(matches!(
+                manager.create_agent_idempotent(name, &Uuid::new_v4().to_string()),
+                Err(AgentCreationError::InvalidRequest(_))
+            ));
+        }
+
+        let eighty_multibyte = "界".repeat(80);
+        let (multibyte_id, _) = manager.create_agent(&eighty_multibyte).unwrap();
+        assert_eq!(
+            manager
+                .list_agents()
+                .unwrap()
+                .into_iter()
+                .find(|agent| agent.id == multibyte_id)
+                .unwrap()
+                .name,
+            eighty_multibyte
+        );
+
+        let (rename_id, _) = manager.create_agent("Original").unwrap();
+        for name in &invalid {
+            assert!(
+                manager.update_agent_name(&rename_id, name).is_err(),
+                "rename accepted {name:?}"
+            );
+            assert_eq!(
+                manager
+                    .list_agents()
+                    .unwrap()
+                    .into_iter()
+                    .find(|agent| agent.id == rename_id)
+                    .unwrap()
+                    .name,
+                "Original"
+            );
+        }
+        let _ = std::fs::remove_dir_all(manager.data_root());
+    }
+
+    #[test]
     fn custom_data_root_keeps_documents_inside_that_root() {
         let manager = test_manager();
         let (id, _) = manager.create_agent("Isolated Documents").unwrap();

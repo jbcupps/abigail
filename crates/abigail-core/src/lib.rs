@@ -49,3 +49,27 @@ pub use vault::external::{ExternalVault, ReadOnlyFileVault};
 pub use vault::scoped::{ScopedVault, VaultScope};
 pub use vault::unlock::{HybridUnlockProvider, PassphraseUnlockProvider, UnlockProvider};
 pub use verifier::{verify_constitutional_integrity, write_sig_file, Verifier};
+
+#[cfg(test)]
+mod entity_name_contract_tests {
+    use super::validate_entity_name;
+
+    #[test]
+    fn entity_names_are_trimmed_bounded_unicode_without_controls() {
+        for invalid in [
+            "",
+            " Nova",
+            "Nova ",
+            "No\nva",
+            "No\rva",
+            "No\u{0007}va",
+            &"a".repeat(81),
+        ] {
+            assert!(
+                validate_entity_name(invalid).is_err(),
+                "accepted invalid Entity name {invalid:?}"
+            );
+        }
+        assert!(validate_entity_name(&"界".repeat(80)).is_ok());
+    }
+}

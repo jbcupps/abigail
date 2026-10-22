@@ -1399,6 +1399,64 @@ mod tests {
     }
 
     #[test]
+    fn direct_name_updates_use_the_canonical_entity_name_contract() {
+        for invalid in [
+            " Leading".to_string(),
+            "Trailing ".to_string(),
+            "Line\nBreak".to_string(),
+            "Control\u{0007}Bell".to_string(),
+            "a".repeat(81),
+        ] {
+            let mut draft = session();
+            assert!(
+                draft
+                    .apply_updates(
+                        vec![update(GenesisField::Name, json!(invalid))],
+                        "name",
+                        NOW,
+                    )
+                    .is_err(),
+                "accepted an invalid direct name update"
+            );
+            assert!(draft.definition.name.is_empty());
+        }
+
+        let mut draft = session();
+        let eighty_multibyte = "界".repeat(80);
+        draft
+            .apply_updates(
+                vec![update(
+                    GenesisField::Name,
+                    json!(eighty_multibyte.clone()),
+                )],
+                "name",
+                NOW,
+            )
+            .unwrap();
+        assert_eq!(draft.definition.name, eighty_multibyte);
+    }
+
+    #[test]
+    fn creation_seeds_use_the_canonical_entity_name_contract() {
+        let seed = |name| GenesisCreationSeed {
+            mode: GenesisMode::Quick,
+            name,
+            purpose: "Help the household".into(),
+            presence: crate::genesis_quest::PresenceChoice::default(),
+        };
+        for invalid in [
+            " Leading".to_string(),
+            "Trailing ".to_string(),
+            "Line\nBreak".to_string(),
+            "Control\u{0007}Bell".to_string(),
+            "a".repeat(81),
+        ] {
+            assert!(seed(invalid).validate().is_err());
+        }
+        assert!(seed("界".repeat(80)).validate().is_ok());
+    }
+
+    #[test]
     fn proposals_do_not_become_canon_without_approval() {
         let mut s = session();
         s.propose(

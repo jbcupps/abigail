@@ -2017,6 +2017,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn activation_loads_legacy_invalid_names_but_fails_before_allocation() {
+        let (state, _) = crate::routes::tests::build_state();
+        let before = state.identity_manager.list_agents().unwrap().len();
+        let mut legacy =
+            GenesisSession::new(id(), OWNER.into(), GenesisMode::Guided, now());
+        legacy.definition.name = " Legacy Name ".into();
+        legacy.definition.purpose = "Preserve a compatible old draft".into();
+        let creation_key = legacy.id.clone();
+        state.genesis.create(&legacy).unwrap();
+
+        let loaded = session(&state, &creation_key).unwrap();
+        assert_eq!(loaded.definition.name, " Legacy Name ");
+        let error = activate(&state, loaded).await.unwrap_err();
+        assert!(error.contains("name"), "{error}");
+        assert_eq!(
+            state.identity_manager.list_agents().unwrap().len(),
+            before,
+            "invalid legacy data must fail before allocating an Entity"
+        );
+        assert_eq!(
+            state
+                .identity_manager
+                .entity_creation_status(&creation_key)
+                .unwrap(),
+            abigail_identity::AgentCreationStatus::Absent
+        );
+    }
+
+    #[tokio::test]
     async fn session_list_derives_receipt_only_entity_link_without_rewriting_canon() {
         let (state, _) = crate::routes::tests::build_state();
         let id = begin(&state).await;
