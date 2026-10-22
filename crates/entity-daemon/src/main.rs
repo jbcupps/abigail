@@ -1177,6 +1177,10 @@ mod supervision_tests {
         (state, outbox_root, ledger_root, record_id)
     }
 
+    fn outbox_document(root: &std::path::Path) -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(root.join("runtime_outbox.json")).unwrap()).unwrap()
+    }
+
     #[tokio::test]
     async fn reconciliation_failure_stops_before_hive_heartbeat_or_sync() {
         let mut state = crate::routes::tests::build_state();
@@ -1230,6 +1234,19 @@ mod supervision_tests {
         let original = state_a.execution_ledger.recent(None, 10);
         assert_eq!(original.len(), 1);
         assert_eq!(original[0].soul_ref, "historical-soul-a");
+        let persisted = outbox_document(&outbox_root);
+        let metadata = &persisted["record_ledger_metadata"][0];
+        assert_eq!(metadata["record_id"], record_id);
+        assert_eq!(metadata["entity_id"], state_a.entity_id);
+        assert_eq!(metadata["kind"], "skill_used");
+        assert_eq!(metadata["session_id"], "session-repair");
+        assert_eq!(metadata["soul_ref"], "historical-soul-a");
+        assert!(
+            metadata["payload_digest"]
+                .as_str()
+                .is_some_and(|digest| !digest.is_empty()),
+            "{metadata}"
+        );
         std::fs::remove_file(ledger_root.join("execution_ledger.json")).unwrap();
 
         let mut state_b = crate::routes::tests::build_state();
@@ -1267,6 +1284,16 @@ mod supervision_tests {
         let original = state_a.execution_ledger.recent(None, 10);
         assert_eq!(original.len(), 1);
         assert_eq!(original[0].soul_ref, "historical-soul-a");
+        let mut legacy_outbox = outbox_document(&outbox_root);
+        legacy_outbox
+            .as_object_mut()
+            .unwrap()
+            .remove("record_ledger_metadata");
+        std::fs::write(
+            outbox_root.join("runtime_outbox.json"),
+            serde_json::to_vec_pretty(&legacy_outbox).unwrap(),
+        )
+        .unwrap();
 
         let mut state_b = crate::routes::tests::build_state();
         state_b.soul_ref = "current-soul-b".to_string();
@@ -1286,6 +1313,10 @@ mod supervision_tests {
         assert_eq!(reconciled[0].event_hash, original[0].event_hash);
         assert!(state_b.outbox.snapshot().unwrap().is_empty());
         assert!(state_b.outbox.is_acknowledged(&record_id).unwrap());
+        assert_eq!(
+            outbox_document(&outbox_root)["record_ledger_metadata"][0]["soul_ref"],
+            "historical-soul-a"
+        );
         let _ = std::fs::remove_dir_all(outbox_root);
         let _ = std::fs::remove_dir_all(ledger_root);
     }
