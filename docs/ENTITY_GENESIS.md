@@ -106,6 +106,47 @@ first greeting is persisted once in real chat history. Later intentional revisio
 apply when the mentor chooses to evolve the Entity; an already running Runtime is
 stopped so its next launch loads the new signed identity.
 
+Genesis owns birth for the Entities it allocates. Until awakening, Hive refuses
+generic setup (`POST /v1/entities/:id/birth`) and opening for that Entity, and the
+Entity card routes back to its Genesis record. Afterwards generic birth still
+refuses to replace the signed Genesis story. If saving the draft fails right after
+an Entity identity is allocated, the allocation is removed so no orphan remains.
+
+## Genesis Quest
+
+The **Quest** tab and the progress rail present creation as seven stages:
+Reservation, Shaping the Soul, Ethics, Instincts, Presence, Birth and Awakening.
+Only Reservation (a confirmed name and purpose) is required. The quest is
+presentation and UX only:
+
+- **Temperament stat cards** create an ordinary pending personality proposal. The
+  mentor still accepts or rejects it. A card fills description and style only where
+  they are empty.
+- **Ethics** records answers to the three Soul Forge trials. When all three are
+  answered, awakening forges the soul from them (`birth_path: forge`); otherwise it
+  uses the balanced quickstart soul. Trial weight effects are not displayed, so the
+  mentor chooses on values.
+- **Instincts** shows the constitutional `instincts.md` template read-only.
+- **Presence** stores a cosmetic card (temperament, palette, crest, motion) as
+  `presence.json` beside the Entity, outside the `docs/` folder that runtimes read
+  for the system prompt. Display name, purpose and boundaries are copied from the
+  approved definition; requests carry only enumerated cosmetic choices. Presence
+  grants nothing and is never read into prompts.
+- **Badges and XP** come only from confirmed state, never from pending proposals.
+  Badges are monotonic, so undo does not remove one. Bond levels are Spark,
+  Kindling, Ember, Hearthfire and Beacon. Some palettes and crests unlock with
+  badges.
+- **Awakening** shows a one-time First Light celebration with the signed
+  certificate's archetype and signature check. It then suggests three first quests.
+  Nothing is sent automatically; First Words, Getting Acquainted and Kindred
+  milestones count the mentor's real messages to that Entity.
+
+Quest progress is saved in the Genesis record (`quest`, defaulted for older
+records). Each Entity's durable journey (badges and mentoring count) lives in the
+Hive-owned `entity_journey` table, so it outlives an expired Genesis record.
+`GET /v1/entities/:id/journey` and `GET`/`PUT /v1/entities/:id/presence` are
+desktop-only routes.
+
 ## Local authorization and retention
 
 Genesis is scoped to the existing local household profile. Like every Hive route,
@@ -144,7 +185,8 @@ retried without logging narrative content.
 ## Staged enhancements
 
 The initial implementation includes a living-portrait toggle, character seeds,
-versioned alternatives, a creation chronicle and intentional Entity evolution.
+versioned alternatives, a creation chronicle, intentional Entity evolution and the
+Genesis Quest.
 Relationship visualization and dedicated voice casting remain later enhancements,
 as requested in the specification's staged-innovation section. Relationships and
 voice descriptions are already editable canonical fields.
