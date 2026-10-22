@@ -9,14 +9,15 @@ use axum::{
 };
 use hive_core::{
     ApiEnvelope, BestModelResponse, CliDetectResponse, CliProviderDetection, CreateEntityRequest,
-    CreateEntityResponse, CreateForgeApprovalJobRequest, EntityInfo, EntityOpenResponse,
-    ExecutionReceiptsResponse, ForgeApprovalJobsResponse, HelperInfo, HiveDefaultResponse,
-    HiveStatus, LocalProviderRequest, LocalProviderResponse, OutboxSyncRequest, OutboxSyncResponse,
-    ProviderConfig, ProviderModelInfo, ProviderModelsRequest, ProviderModelsResponse,
-    ProviderProfileResponse, RuntimeHeartbeatRequest, RuntimeHeartbeatResponse,
-    RuntimeRegistrationRequest, RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus,
-    SecretListResponse, SecretValueResponse, SetHiveDefaultRequest, SetSkillAssignmentsRequest,
-    SignEntityRequest, SkillAssignmentsResponse, StoreSecretRequest, UpdateEntityConfigRequest,
+    CreateEntityResponse, CreateForgeApprovalJobRequest, EntityCreationResponse,
+    EntityCreationState, EntityInfo, EntityOpenResponse, ExecutionReceiptsResponse,
+    ForgeApprovalJobsResponse, HelperInfo, HiveDefaultResponse, HiveStatus, LocalProviderRequest,
+    LocalProviderResponse, OutboxSyncRequest, OutboxSyncResponse, ProviderConfig,
+    ProviderModelInfo, ProviderModelsRequest, ProviderModelsResponse, ProviderProfileResponse,
+    RuntimeHeartbeatRequest, RuntimeHeartbeatResponse, RuntimeRegistrationRequest,
+    RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus, SecretListResponse,
+    SecretValueResponse, SetHiveDefaultRequest, SetSkillAssignmentsRequest, SignEntityRequest,
+    SkillAssignmentsResponse, StoreSecretRequest, UpdateEntityConfigRequest,
     UpdateEntityConfigResponse,
 };
 
@@ -141,13 +142,92 @@ pub async fn list_entities(
 pub async fn create_entity(
     State(state): State<HiveDaemonState>,
     Json(body): Json<CreateEntityRequest>,
-) -> Json<ApiEnvelope<CreateEntityResponse>> {
-    match state.identity_manager.create_agent(&body.name) {
-        Ok((id, dir)) => Json(ApiEnvelope::success(CreateEntityResponse {
-            id,
-            directory: dir.to_string_lossy().to_string(),
-        })),
-        Err(e) => Json(ApiEnvelope::error(e)),
+) -> (StatusCode, Json<ApiEnvelope<CreateEntityResponse>>) {
+    if let Some(key) = body.creation_key {
+        return match state
+            .identity_manager
+            .create_agent_idempotent(&body.name, &key)
+        {
+            Ok((id, dir)) => (
+                StatusCode::OK,
+                Json(ApiEnvelope::success(CreateEntityResponse {
+                    id,
+                    directory: dir.to_string_lossy().to_string(),
+                    creation_key: Some(key),
+                })),
+            ),
+            Err(error) => (
+                creation_error_status(&error),
+                Json(ApiEnvelope::error(error.to_string())),
+            ),
+        };
+    }
+    (
+        StatusCode::OK,
+        match state.identity_manager.create_agent(&body.name) {
+            Ok((id, dir)) => Json(ApiEnvelope::success(CreateEntityResponse {
+                id,
+                directory: dir.to_string_lossy().to_string(),
+                creation_key: None,
+            })),
+            Err(error) => Json(ApiEnvelope::error(error)),
+        },
+    )
+}
+
+fn creation_error_status(error: &abigail_identity::AgentCreationError) -> StatusCode {
+    use abigail_identity::AgentCreationError;
+    match error {
+        AgentCreationError::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+        AgentCreationError::Conflict(_) => StatusCode::CONFLICT,
+        AgentCreationError::Unavailable(_) => StatusCode::GONE,
+        AgentCreationError::Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+#[cfg(test)]
+#[path = "creation_http_tests.rs"]
+mod creation_http_tests;
+
+// ---------------------------------------------------------------------------
+// GET /v1/entity-creations/:creation_key
+// ---------------------------------------------------------------------------
+
+pub async fn get_entity_creation(
+    State(state): State<HiveDaemonState>,
+    Path(creation_key): Path<String>,
+) -> (StatusCode, Json<ApiEnvelope<EntityCreationResponse>>) {
+    use abigail_identity::AgentCreationStatus;
+    match state.identity_manager.entity_creation_status(&creation_key) {
+        Ok(status) => {
+            let status = match status {
+                AgentCreationStatus::Absent => EntityCreationState::Absent,
+                AgentCreationStatus::Reserved { name } => EntityCreationState::Reserved { name },
+                AgentCreationStatus::Complete {
+                    name,
+                    id,
+                    directory,
+                } => EntityCreationState::Complete {
+                    name,
+                    id,
+                    directory: directory.to_string_lossy().to_string(),
+                },
+                AgentCreationStatus::Unavailable { name, id } => {
+                    EntityCreationState::Unavailable { name, id }
+                }
+            };
+            (
+                StatusCode::OK,
+                Json(ApiEnvelope::success(EntityCreationResponse {
+                    creation_key,
+                    status,
+                })),
+            )
+        }
+        Err(error) => (
+            creation_error_status(&error),
+            Json(ApiEnvelope::error(error.to_string())),
+        ),
     }
 }
 
@@ -566,6 +646,15 @@ pub async fn open_entity(
     State(state): State<HiveDaemonState>,
     Path(entity_id): Path<String>,
 ) -> Json<ApiEnvelope<EntityOpenResponse>> {
+    match crate::genesis::awaiting_awakening(&state, &entity_id) {
+        Ok(false) => {}
+        Ok(true) => {
+            return Json(ApiEnvelope::error(
+                "This Entity is still being created. Finish its awakening in Genesis first.",
+            ))
+        }
+        Err(error) => return Json(ApiEnvelope::error(error)),
+    }
     match state.supervisor.ensure_entity_running(&entity_id).await {
         Ok(local_url) => Json(ApiEnvelope::success(EntityOpenResponse {
             entity_id,
@@ -1008,17 +1097,52 @@ pub async fn sync_runtime_outbox(
     Extension(principal): Extension<Principal>,
     Json(body): Json<OutboxSyncRequest>,
 ) -> (StatusCode, Json<ApiEnvelope<OutboxSyncResponse>>) {
-    if !presents_lease(&principal, &body.lease_id) {
-        return forbidden_runtime();
+    let entity_id = match &principal {
+        Principal::Runtime {
+            lease_id,
+            entity_id,
+        } if lease_id == &body.lease_id => entity_id.clone(),
+        _ => return forbidden_runtime(),
+    };
+    let records = body.records.clone();
+    if let Err(error) =
+        state
+            .journeys
+            .prevalidate_runtime_events(crate::genesis_http::OWNER, &entity_id, &records)
+    {
+        return (StatusCode::OK, Json(ApiEnvelope::error(error.to_string())));
     }
-    let response = match state.runtime_control.lock() {
-        Ok(mut control) => match control
-            .sync_outbox(body, |payload| state.identity_manager.sign_payload(payload))
-        {
-            Ok(response) => Json(ApiEnvelope::success(response)),
-            Err(e) => Json(ApiEnvelope::error(e)),
+    let synced = match state.runtime_control.lock() {
+        Ok(mut control) => {
+            control.sync_outbox(body, |payload| state.identity_manager.sign_payload(payload))
+        }
+        Err(error) => Err(error.to_string()),
+    };
+    let response = match synced {
+        Ok(response) => match state.journeys.persist_runtime_events(
+            crate::genesis_http::OWNER,
+            &entity_id,
+            &records,
+        ) {
+            Ok(recognized) => {
+                if recognized {
+                    if let Err(error) = state
+                        .journeys
+                        .reconcile_runtime_event_projection(crate::genesis_http::OWNER, &entity_id)
+                    {
+                        return (
+                            StatusCode::OK,
+                            Json(ApiEnvelope::error(format!(
+                                "Journey projection refresh failed: {error}"
+                            ))),
+                        );
+                    }
+                }
+                Json(ApiEnvelope::success(response))
+            }
+            Err(error) => Json(ApiEnvelope::error(error.to_string())),
         },
-        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+        Err(error) => Json(ApiEnvelope::error(error)),
     };
     (StatusCode::OK, response)
 }
@@ -1188,6 +1312,15 @@ pub(crate) mod tests {
                 genesis_media: Arc::new(
                     crate::genesis_media::GenesisMediaService::new(&data_root, hive.clone())
                         .unwrap(),
+                ),
+                journeys: Arc::new(
+                    crate::journey::JourneyStore::new(
+                        abigail_persistence::PersistenceHandle::open_ephemeral(
+                            abigail_persistence::EntityScope::Hive,
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap(),
                 ),
                 control_token: Arc::new("c0".repeat(32)),
                 genesis_control: Arc::new(crate::genesis::GenesisControl::default()),
@@ -1553,6 +1686,66 @@ pub(crate) mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
         assert!(response.0.ok);
+    }
+
+    #[tokio::test]
+    async fn runtime_outbox_sync_persists_idempotent_journey_events_for_its_lease_entity() {
+        let (state, entity_id) = build_state();
+        let lease = state.runtime_control.lock().unwrap().issue_session(
+            RuntimeSessionRequest {
+                entity_id: entity_id.clone(),
+                runtime_id: Some("runtime-journey".to_string()),
+            },
+            None,
+            Some(state.hive_url.clone()),
+        );
+        let principal = Principal::Runtime {
+            lease_id: lease.lease_id.clone(),
+            entity_id: entity_id.clone(),
+        };
+        let event = hive_core::EntityOutboxRecord {
+            record_id: uuid::Uuid::new_v4().to_string(),
+            entity_id: entity_id.clone(),
+            kind: "skill_used".to_string(),
+            created_at_utc: "2026-10-22T12:00:00Z".to_string(),
+            payload: serde_json::json!({
+                "session_id": "session-1",
+                "skill_id": "com.abigail.calendar",
+                "tool_name": "list_events",
+            }),
+        };
+        let request = || OutboxSyncRequest {
+            lease_id: lease.lease_id.clone(),
+            runtime_id: lease.runtime_id.clone(),
+            records: vec![event.clone()],
+        };
+
+        for _ in 0..2 {
+            let (status, response) = sync_runtime_outbox(
+                State(state.clone()),
+                Extension(principal.clone()),
+                Json(request()),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert!(response.0.ok, "{:?}", response.0.error);
+        }
+        assert_eq!(
+            state
+                .journeys
+                .load(crate::genesis_http::OWNER, &entity_id)
+                .unwrap()
+                .unwrap()
+                .successful_skill_uses,
+            1
+        );
+
+        let mut mismatched = request();
+        mismatched.records[0].record_id = uuid::Uuid::new_v4().to_string();
+        mismatched.records[0].entity_id = uuid::Uuid::new_v4().to_string();
+        let (_, response) =
+            sync_runtime_outbox(State(state), Extension(principal), Json(mismatched)).await;
+        assert!(!response.0.ok);
     }
 
     #[tokio::test]

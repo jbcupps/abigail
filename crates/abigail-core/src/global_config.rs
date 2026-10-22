@@ -1,5 +1,25 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+/// Durable assignment of a client creation key to one Entity ID.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentCreationRecord {
+    pub name: String,
+    pub entity_id: String,
+    /// Immutable digest of the original keyed request, when that protocol supplies one.
+    #[serde(default)]
+    pub request_fingerprint: Option<String>,
+    pub state: AgentCreationState,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentCreationState {
+    Reserved,
+    Complete,
+    Unavailable,
+}
 
 /// An entry in the global config representing a registered agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,6 +44,9 @@ pub struct GlobalConfig {
     /// List of registered agents.
     #[serde(default)]
     pub agents: Vec<AgentEntry>,
+    /// Creation receipts survive Entity deletion so replay cannot allocate a replacement.
+    #[serde(default)]
+    pub creation_attempts: BTreeMap<String, AgentCreationRecord>,
     /// Path to hive-level secrets vault (shared API keys across all agents).
     #[serde(default)]
     pub hive_secrets_path: Option<PathBuf>,
@@ -42,6 +65,7 @@ impl GlobalConfig {
         Self {
             master_key_path: data_root.join("master.key"),
             agents: Vec::new(),
+            creation_attempts: BTreeMap::new(),
             hive_secrets_path: Some(data_root.join("hive_secrets.bin")),
             default_theme: default_hive_theme(),
         }

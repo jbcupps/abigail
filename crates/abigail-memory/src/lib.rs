@@ -26,6 +26,6 @@ pub use protected_topics::{
 pub use schema::*;
 pub use store::{
     ConversationTurn, Memory, MemoryStore, MemoryWeight, Result as MemoryResult, SessionSummary,
-    StoreError,
+    StoreError, SuccessfulToolUse,
 };
 pub use subscriber::{spawn_chat_topic_subscriber, ChatTopicEnvelope};

@@ -1,9 +1,9 @@
 //! Journal: persists committed Ego actions and emits lifecycle events.
 //!
 //! Subscribes to `Topic::EgoAction` and handles the bookkeeping that used to
-//! live inline in the chat handlers: archiving the assistant turn to memory,
-//! queueing the outbox record for hive sync, triggering auto-archive, and
-//! publishing chat lifecycle events.
+//! live inline in the chat handlers: triggering auto-archive and publishing
+//! chat lifecycle events. Durable journey events are staged by the Ego producer
+//! before it publishes a successful action.
 
 use super::EgoActionPayload;
 use crate::state::EntityDaemonState;
@@ -35,7 +35,9 @@ pub async fn spawn(state: EntityDaemonState) -> anyhow::Result<SubscriptionHandl
                 tracing::warn!("Journal: malformed EgoAction payload");
                 return;
             };
-            record(state, action).await;
+            if let Err(error) = record(state, action).await {
+                tracing::error!("Journal could not queue Runtime outbox events: {error}");
+            }
         })
     });
 
@@ -51,21 +53,9 @@ pub async fn spawn(state: EntityDaemonState) -> anyhow::Result<SubscriptionHandl
     Ok(handle)
 }
 
-async fn record(state: EntityDaemonState, action: EgoActionPayload) {
+async fn record(state: EntityDaemonState, action: EgoActionPayload) -> Result<(), String> {
     match (action.status.as_str(), action.response) {
         ("success", Some(response)) => {
-            // The Ego stage persisted this reply before acknowledging the turn.
-
-            let _ = state.queue_outbox_record(
-                "chat_assistant_turn",
-                serde_json::json!({
-                    "session_id": action.session_id.clone(),
-                    "reply": response.reply.clone(),
-                    "provider": response.provider.clone(),
-                    "model_used": response.model_used.clone(),
-                }),
-            );
-
             state.maybe_auto_archive();
 
             crate::routes::publish_chat_lifecycle_event(
@@ -97,6 +87,91 @@ async fn record(state: EntityDaemonState, action: EgoActionPayload) {
                     "error": action.error.unwrap_or_else(|| "unknown".to_string()),
                 }),
             );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn journal_does_not_requeue_events_staged_before_a_successful_action() {
+        let state = crate::routes::tests::build_state();
+        for (skill_id, tool_name) in [
+            ("com.abigail.calendar", "list_events"),
+            ("com.abigail.weather", "forecast"),
+        ] {
+            state
+                .queue_outbox_record(
+                    "skill_used",
+                    serde_json::json!({
+                        "session_id": "session-1",
+                        "skill_id": skill_id,
+                        "tool_name": tool_name,
+                    }),
+                )
+                .unwrap();
+        }
+        let staged = state.outbox.snapshot().unwrap();
+        let response = entity_core::ChatResponse {
+            reply: "private assistant reply".to_string(),
+            provider: Some("fixture".to_string()),
+            tool_calls_made: vec![
+                entity_core::ToolCallRecord {
+                    skill_id: "com.abigail.calendar".to_string(),
+                    tool_name: "list_events".to_string(),
+                    success: true,
+                },
+                entity_core::ToolCallRecord {
+                    skill_id: "com.abigail.mail".to_string(),
+                    tool_name: "send_message".to_string(),
+                    success: false,
+                },
+                entity_core::ToolCallRecord {
+                    skill_id: "com.abigail.weather".to_string(),
+                    tool_name: "forecast".to_string(),
+                    success: true,
+                },
+            ],
+            tier: None,
+            model_used: None,
+            complexity_score: None,
+            execution_trace: None,
+            session_id: Some("session-1".to_string()),
+            completion_risk: None,
+        };
+        record(
+            state.clone(),
+            EgoActionPayload {
+                session_id: "session-1".to_string(),
+                status: "success".to_string(),
+                error: None,
+                error_code: None,
+                interrupted: false,
+                response: Some(response),
+                user_message: "private mentor prompt".to_string(),
+                superego_verdict: Some("clear".to_string()),
+                superego_findings: vec![],
+            },
+        )
+        .await
+        .unwrap();
+
+        let records = state.outbox.snapshot().unwrap();
+        assert_eq!(
+            serde_json::to_value(&records).unwrap(),
+            serde_json::to_value(&staged).unwrap(),
+            "the auto-committing journal must not duplicate pre-staged outbox events"
+        );
+        for event in records {
+            let serialized = event.payload.to_string();
+            assert!(!serialized.contains("private assistant reply"));
+            assert!(!serialized.contains("private mentor prompt"));
+            assert!(event.payload.get("reply").is_none());
+            assert!(event.payload.get("message").is_none());
+            assert!(event.payload.get("content").is_none());
         }
     }
 }

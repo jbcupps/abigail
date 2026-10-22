@@ -48,6 +48,39 @@ pub struct ChatHistoryResponse {
     pub messages: Vec<SessionMessage>,
 }
 
+/// Stable duplicate-action risk attached to chat outcomes after a tool may
+/// have produced an external side effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompletionRisk {
+    ActionCompletedVerifyBeforeRepeating,
+    ActionMayHaveCompletedVerifyBeforeRepeating,
+}
+
+impl CompletionRisk {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ActionCompletedVerifyBeforeRepeating => {
+                "action_completed_verify_before_repeating"
+            }
+            Self::ActionMayHaveCompletedVerifyBeforeRepeating => {
+                "action_may_have_completed_verify_before_repeating"
+            }
+        }
+    }
+
+    pub const fn public_message(self) -> &'static str {
+        match self {
+            Self::ActionCompletedVerifyBeforeRepeating => {
+                "An action completed. Verify the result before repeating it."
+            }
+            Self::ActionMayHaveCompletedVerifyBeforeRepeating => {
+                "An action may have completed. Verify the result before repeating it."
+            }
+        }
+    }
+}
+
 /// Chat response from the Entity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatResponse {
@@ -78,6 +111,10 @@ pub struct ChatResponse {
     /// Session ID echoed back so the frontend can track it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Duplicate-action warning for a successful response that followed a
+    /// completed external action but could not complete every local step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_risk: Option<CompletionRisk>,
 }
 
 /// Record of a single tool call made during a chat turn.
@@ -579,5 +616,30 @@ pub trait ChatMemoryHook: Send + Sync {
     ) -> Result<(), String> {
         let _ = (id, content, weight, created_at);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn completion_risk_codes_are_stable_and_old_chat_responses_default_safely() {
+        assert_eq!(
+            serde_json::to_value(CompletionRisk::ActionCompletedVerifyBeforeRepeating).unwrap(),
+            "action_completed_verify_before_repeating"
+        );
+        assert_eq!(
+            serde_json::to_value(CompletionRisk::ActionMayHaveCompletedVerifyBeforeRepeating)
+                .unwrap(),
+            "action_may_have_completed_verify_before_repeating"
+        );
+
+        let response: ChatResponse = serde_json::from_value(serde_json::json!({
+            "reply": "legacy response"
+        }))
+        .unwrap();
+        assert_eq!(response.reply, "legacy response");
+        assert_eq!(response.completion_risk, None);
     }
 }

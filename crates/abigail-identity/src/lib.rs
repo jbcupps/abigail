@@ -4,7 +4,7 @@
 //! Zero Tauri imports — only uses `abigail_core`, `ed25519_dalek`, `serde`, `uuid`, `std`.
 
 use abigail_core::{
-    encrypted_storage, generate_master_key, load_master_key, sign_agent_key,
+    encrypted_storage, generate_master_key, load_master_key, sign_agent_key, validate_entity_name,
     verify_agent_signature, AgentEntry, AppConfig, GlobalConfig, SecretsVault,
 };
 use ed25519_dalek::{SigningKey, VerifyingKey};
@@ -13,8 +13,10 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use uuid::Uuid;
 
+mod creation;
 mod hive;
 
+pub use creation::{AgentCreationError, AgentCreationStatus};
 pub use hive::{HiveEntity, HIVE_ENTITY_NAME};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,6 +193,85 @@ impl IdentityManager {
 
     fn shared_memory_db_path(&self) -> PathBuf {
         HiveEntity::memory_db_path(&self.data_root)
+    }
+
+    fn initialize_agent_files(
+        &self,
+        agent_id: &str,
+        name: &str,
+        theme: &str,
+    ) -> Result<PathBuf, String> {
+        let agent_dir = self.identities_dir().join(agent_id);
+        let config_path = agent_dir.join("config.json");
+        if config_path.try_exists().map_err(|e| e.to_string())? {
+            let bytes = std::fs::read(&config_path).map_err(|e| e.to_string())?;
+            let existing: AppConfig = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+            if existing.schema_version > abigail_core::CONFIG_SCHEMA_VERSION
+                || existing.is_hive
+                || existing.data_dir != agent_dir
+                || existing.agent_name.as_deref() != Some(name)
+            {
+                return Err(
+                    "Reserved Entity config does not match the creation attempt.".to_string(),
+                );
+            }
+            return Ok(agent_dir);
+        }
+        std::fs::create_dir_all(&agent_dir).map_err(|e| e.to_string())?;
+        let docs_dir = agent_dir.join("docs");
+        std::fs::create_dir_all(&docs_dir).map_err(|e| e.to_string())?;
+
+        let config = AppConfig {
+            schema_version: abigail_core::CONFIG_SCHEMA_VERSION,
+            data_dir: agent_dir.clone(),
+            models_dir: agent_dir.join("models"),
+            docs_dir: docs_dir.clone(),
+            db_path: self.shared_memory_db_path(),
+            openai_api_key: None,
+            email: None,
+            birth_complete: false,
+            birth_stage: None,
+            external_pubkey_path: None,
+            local_llm_base_url: None,
+            routing_mode: abigail_core::RoutingMode::default(),
+            trinity: None,
+            agent_name: Some(name.to_string()),
+            birth_timestamp: None,
+            is_hive: false,
+            mcp_servers: Default::default(),
+            mcp_trust_policy: Default::default(),
+            approved_skill_ids: Default::default(),
+            trusted_skill_signers: Default::default(),
+            sao_endpoint: None,
+            provider_catalog: Vec::new(),
+            active_provider_preference: None,
+            ego_model: None,
+            email_accounts: Vec::new(),
+            bundled_ollama: true,
+            bundled_model: Some("llama3.2:3b".to_string()),
+            first_model_pull_complete: false,
+            preloaded_skills_version: 0,
+            primary_color: None,
+            avatar_url: None,
+            share_skills_across_identities: false,
+            allow_minor_visual_adaptation: true,
+            allow_avatar_swap: false,
+            memory_disclosure_enabled: true,
+            forge_advanced_mode: false,
+            signed_skill_allowlist: Vec::new(),
+            known_recipients_by_identity: std::collections::HashMap::new(),
+            skill_recovery_budget: 3,
+            last_provider_change_at: None,
+            cli_permission_mode: Default::default(),
+            runtime_mode: Default::default(),
+            hive_daemon_url: "http://127.0.0.1:43141".to_string(),
+            entity_daemon_url: "http://127.0.0.1:43142".to_string(),
+            iggy_connection: None,
+            theme_id: Some(theme.to_string()),
+            autonomy_profile: Default::default(),
+        };
+        config.save(&config_path).map_err(|e| e.to_string())?;
+        Ok(agent_dir)
     }
 
     /// Create a new IdentityManager, loading GlobalConfig and master key from disk.
@@ -414,82 +495,30 @@ impl IdentityManager {
     /// Keypair generation and signing are deferred to the birth sequence.
     /// Returns (uuid, agent_dir).
     pub fn create_agent(&self, name: &str) -> Result<(String, PathBuf), String> {
+        validate_entity_name(name)?;
         let uuid = Uuid::new_v4().to_string();
+        let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
         let agent_dir = self.identities_dir().join(&uuid);
-
-        // Create agent directory structure
-        std::fs::create_dir_all(&agent_dir).map_err(|e| e.to_string())?;
-        let docs_dir = agent_dir.join("docs");
-        std::fs::create_dir_all(&docs_dir).map_err(|e| e.to_string())?;
-
-        // Create agent-specific config (no keypair yet — birth will generate it)
-        let config = AppConfig {
-            schema_version: abigail_core::CONFIG_SCHEMA_VERSION,
-            data_dir: agent_dir.clone(),
-            models_dir: agent_dir.join("models"),
-            docs_dir: docs_dir.clone(),
-            db_path: self.shared_memory_db_path(),
-            openai_api_key: None,
-            email: None,
-            birth_complete: false,
-            birth_stage: None,
-            external_pubkey_path: None,
-            local_llm_base_url: None,
-            routing_mode: abigail_core::RoutingMode::default(),
-            trinity: None,
-            agent_name: Some(name.to_string()),
-            birth_timestamp: None,
-            is_hive: false,
-            mcp_servers: Default::default(),
-            mcp_trust_policy: Default::default(),
-            approved_skill_ids: Default::default(),
-            trusted_skill_signers: Default::default(),
-            sao_endpoint: None,
-            provider_catalog: Vec::new(),
-            active_provider_preference: None,
-            ego_model: None,
-            email_accounts: Vec::new(),
-            bundled_ollama: true,
-            bundled_model: Some("llama3.2:3b".to_string()),
-            first_model_pull_complete: false,
-            preloaded_skills_version: 0,
-            primary_color: None,
-            avatar_url: None,
-            share_skills_across_identities: false,
-            allow_minor_visual_adaptation: true,
-            allow_avatar_swap: false,
-            memory_disclosure_enabled: true,
-            forge_advanced_mode: false,
-            signed_skill_allowlist: Vec::new(),
-            known_recipients_by_identity: std::collections::HashMap::new(),
-            skill_recovery_budget: 3,
-            last_provider_change_at: None,
-            cli_permission_mode: Default::default(),
-            runtime_mode: Default::default(),
-            hive_daemon_url: "http://127.0.0.1:43141".to_string(),
-            entity_daemon_url: "http://127.0.0.1:43142".to_string(),
-            iggy_connection: None,
-            theme_id: {
-                let gc = self.global_config.read().map_err(|e| e.to_string())?;
-                Some(gc.default_theme.clone())
-            },
-            autonomy_profile: Default::default(),
-        };
-        let config_path = agent_dir.join("config.json");
-        config.save(&config_path).map_err(|e| e.to_string())?;
-
-        // Register in global config
+        if gc
+            .creation_attempts
+            .values()
+            .any(|attempt| attempt.entity_id == uuid)
+            || agent_dir.try_exists().map_err(|e| e.to_string())?
         {
-            let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
-            gc.register_agent(AgentEntry {
-                id: uuid.clone(),
-                name: name.to_string(),
-                is_hive: false,
-                directory: self.registry_directory_for(&uuid),
-            })
-            .map_err(|e| e.to_string())?;
-            gc.save(&self.data_root).map_err(|e| e.to_string())?;
+            return Err("New Entity directory already exists.".to_string());
         }
+        self.initialize_agent_files(&uuid, name, &gc.default_theme)?;
+        let mut next = gc.clone();
+        next.register_agent(AgentEntry {
+            id: uuid.clone(),
+            name: name.to_string(),
+            is_hive: false,
+            directory: self.registry_directory_for(&uuid),
+        })
+        .map_err(|e| e.to_string())?;
+        next.save(&self.data_root).map_err(|e| e.to_string())?;
+        *gc = next;
+        drop(gc);
 
         // Create per-agent Documents folder
         let _ = self.create_documents_folder(&uuid);
@@ -640,6 +669,7 @@ impl IdentityManager {
 
     /// Update an agent's name in the global config.
     pub fn update_agent_name(&self, agent_id: &str, new_name: &str) -> Result<(), String> {
+        validate_entity_name(new_name)?;
         let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
         if let Some(entry) = gc.agents.iter_mut().find(|a| a.id == agent_id) {
             if entry.is_hive {
@@ -930,55 +960,89 @@ impl IdentityManager {
 
     /// Delete an agent and all its data from disk.
     pub fn delete_agent(&self, agent_id: &str) -> Result<(), String> {
-        let agent_dir = {
-            let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
-            let entry = gc
-                .find_agent(agent_id)
-                .ok_or_else(|| format!("Agent {} not registered", agent_id))?
-                .clone();
-            if entry.is_hive {
-                return Err("Abigail Hive is immortal and cannot be deleted.".to_string());
-            }
-
-            let dir = self.resolve_agent_dir(&entry.directory)?;
-
-            gc.remove_agent(agent_id);
-            gc.save(&self.data_root).map_err(|e| e.to_string())?;
-            dir
-        };
-
+        let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
+        let entry = gc
+            .find_agent(agent_id)
+            .ok_or_else(|| format!("Agent {} not registered", agent_id))?
+            .clone();
+        if entry.is_hive {
+            return Err("Abigail Hive is immortal and cannot be deleted.".to_string());
+        }
+        let agent_dir = self.resolve_agent_dir(&entry.directory)?;
+        // Keep the durable registry guard until private files are gone. If file
+        // removal fails, callers can retry without exposing an orphan Entity.
         if agent_dir.exists() {
             tracing::info!("Deleting agent data directory: {}", agent_dir.display());
             std::fs::remove_dir_all(&agent_dir)
                 .map_err(|e| format!("Failed to delete agent directory: {}", e))?;
         }
-
+        let previous = gc.clone();
+        gc.remove_agent(agent_id);
+        for receipt in gc
+            .creation_attempts
+            .values_mut()
+            .filter(|receipt| receipt.entity_id == agent_id)
+        {
+            receipt.state = abigail_core::AgentCreationState::Unavailable;
+        }
+        if let Err(error) = gc.save(&self.data_root) {
+            // The on-disk registry still contains the agent, so keep memory in
+            // sync with it and let a retry remove the now-empty registration.
+            *gc = previous;
+            return Err(error.to_string());
+        }
         Ok(())
     }
 
     /// Archive an agent by moving its directory to Hive backups and
     /// removing it from the active registry.
     pub fn archive_agent(&self, agent_id: &str) -> Result<String, String> {
-        let (agent_name, agent_dir) = {
-            let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
-            let entry = gc
-                .find_agent(agent_id)
-                .ok_or_else(|| format!("Agent {} not registered", agent_id))?
-                .clone();
-            if entry.is_hive {
-                return Err("Abigail Hive is immortal and cannot be archived.".to_string());
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+        self.archive_agent_transaction(
+            agent_id,
+            &timestamp,
+            |source, destination| std::fs::rename(source, destination),
+            |next| {
+                next.save(&self.data_root)
+                    .map_err(|error| error.to_string())
+            },
+        )
+    }
+
+    fn archive_agent_transaction<MoveData, SaveRegistry>(
+        &self,
+        agent_id: &str,
+        timestamp: &str,
+        mut move_data: MoveData,
+        save_registry: SaveRegistry,
+    ) -> Result<String, String>
+    where
+        MoveData: FnMut(&Path, &Path) -> std::io::Result<()>,
+        SaveRegistry: FnOnce(&GlobalConfig) -> Result<(), String>,
+    {
+        let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
+        let entry = gc
+            .find_agent(agent_id)
+            .ok_or_else(|| format!("Agent {} not registered", agent_id))?
+            .clone();
+        if entry.is_hive {
+            return Err("Abigail Hive is immortal and cannot be archived.".to_string());
+        }
+
+        let agent_dir = self.resolve_agent_dir(&entry.directory)?;
+        let metadata = std::fs::symlink_metadata(&agent_dir).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                format!("Agent directory not found: {}", agent_dir.display())
+            } else {
+                format!(
+                    "Failed to inspect agent directory '{}': {error}",
+                    agent_dir.display()
+                )
             }
-
-            let dir = self.resolve_agent_dir(&entry.directory)?;
-
-            gc.remove_agent(agent_id);
-            gc.save(&self.data_root).map_err(|e| e.to_string())?;
-            (entry.name, dir)
-        };
-
-        if !agent_dir.exists() {
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(format!(
-                "Agent directory not found: {}",
+                "Agent directory is not a real directory: {}",
                 agent_dir.display()
             ));
         }
@@ -986,20 +1050,49 @@ impl IdentityManager {
         let backups_dir = self.data_root.join("backups");
         std::fs::create_dir_all(&backups_dir)
             .map_err(|e| format!("Failed to create backups directory: {}", e))?;
+        let safe_name = entry
+            .name
+            .replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
+        let backup_path = backups_dir.join(format!("{timestamp}_{safe_name}"));
+        if backup_path
+            .try_exists()
+            .map_err(|error| format!("Failed to inspect archive destination: {error}"))?
+        {
+            return Err(format!(
+                "Archive destination already exists: {}",
+                backup_path.display()
+            ));
+        }
 
-        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
-        let safe_name =
-            agent_name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
-        let backup_name = format!("{}_{}", timestamp, safe_name);
-        let backup_path = backups_dir.join(backup_name);
+        let mut next = gc.clone();
+        next.remove_agent(agent_id);
+        for receipt in next
+            .creation_attempts
+            .values_mut()
+            .filter(|receipt| receipt.entity_id == agent_id)
+        {
+            receipt.state = abigail_core::AgentCreationState::Unavailable;
+        }
 
-        std::fs::rename(&agent_dir, &backup_path)
-            .map_err(|e| format!("Failed to archive agent directory: {}", e))?;
+        move_data(&agent_dir, &backup_path)
+            .map_err(|error| format!("Failed to archive agent directory: {error}"))?;
+        if let Err(save_error) = save_registry(&next) {
+            if let Err(rollback_error) = move_data(&backup_path, &agent_dir) {
+                return Err(format!(
+                    "Failed to save archived registry: {save_error}; failed to roll the archive move back: {rollback_error}"
+                ));
+            }
+            return Err(format!(
+                "Failed to save archived registry; archive move was rolled back: {save_error}"
+            ));
+        }
+        *gc = next;
+        drop(gc);
 
         // Best-effort: write backup metadata into the archive
         let metadata = BackupMetadata {
             agent_id: agent_id.to_string(),
-            agent_name: agent_name.clone(),
+            agent_name: entry.name,
             backup_type: "archive".to_string(),
             created_at: chrono::Utc::now().to_rfc3339(),
             source_directory: agent_dir.to_string_lossy().to_string(),
@@ -1409,6 +1502,60 @@ mod tests {
     }
 
     #[test]
+    fn generic_creation_and_renaming_share_the_entity_name_contract() {
+        let manager = test_manager();
+        let invalid = [
+            " Leading".to_string(),
+            "Trailing ".to_string(),
+            "Line\nBreak".to_string(),
+            "Control\u{0007}Bell".to_string(),
+            "a".repeat(81),
+        ];
+        for name in &invalid {
+            assert!(
+                manager.create_agent(name).is_err(),
+                "unkeyed creation accepted {name:?}"
+            );
+            assert!(matches!(
+                manager.create_agent_idempotent(name, &Uuid::new_v4().to_string()),
+                Err(AgentCreationError::InvalidRequest(_))
+            ));
+        }
+
+        let eighty_multibyte = "界".repeat(80);
+        let (multibyte_id, _) = manager.create_agent(&eighty_multibyte).unwrap();
+        assert_eq!(
+            manager
+                .list_agents()
+                .unwrap()
+                .into_iter()
+                .find(|agent| agent.id == multibyte_id)
+                .unwrap()
+                .name,
+            eighty_multibyte
+        );
+
+        let (rename_id, _) = manager.create_agent("Original").unwrap();
+        for name in &invalid {
+            assert!(
+                manager.update_agent_name(&rename_id, name).is_err(),
+                "rename accepted {name:?}"
+            );
+            assert_eq!(
+                manager
+                    .list_agents()
+                    .unwrap()
+                    .into_iter()
+                    .find(|agent| agent.id == rename_id)
+                    .unwrap()
+                    .name,
+                "Original"
+            );
+        }
+        let _ = std::fs::remove_dir_all(manager.data_root());
+    }
+
+    #[test]
     fn custom_data_root_keeps_documents_inside_that_root() {
         let manager = test_manager();
         let (id, _) = manager.create_agent("Isolated Documents").unwrap();
@@ -1620,6 +1767,153 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn failed_agent_directory_removal_keeps_the_registry_guard() {
+        let manager = test_manager();
+        let (agent_id, agent_dir) = manager.create_agent("Deletion guard").unwrap();
+        std::fs::remove_dir_all(&agent_dir).unwrap();
+        std::fs::write(&agent_dir, b"not a directory").unwrap();
+
+        assert!(manager.delete_agent(&agent_id).is_err());
+        assert!(manager
+            .global_config
+            .read()
+            .unwrap()
+            .find_agent(&agent_id)
+            .is_some());
+        assert!(GlobalConfig::load(manager.data_root())
+            .unwrap()
+            .find_agent(&agent_id)
+            .is_some());
+
+        std::fs::remove_file(&agent_dir).unwrap();
+        manager.delete_agent(&agent_id).unwrap();
+        assert!(GlobalConfig::load(manager.data_root())
+            .unwrap()
+            .find_agent(&agent_id)
+            .is_none());
+        let _ = std::fs::remove_dir_all(manager.data_root());
+    }
+
+    fn assert_registered_with_complete_receipt(
+        manager: &IdentityManager,
+        agent_id: &str,
+        creation_key: &str,
+    ) {
+        let memory = manager.global_config.read().unwrap();
+        assert!(memory.find_agent(agent_id).is_some());
+        assert_eq!(
+            memory.creation_attempts[creation_key].state,
+            abigail_core::AgentCreationState::Complete
+        );
+        drop(memory);
+        let disk = GlobalConfig::load(manager.data_root()).unwrap();
+        assert!(disk.find_agent(agent_id).is_some());
+        assert_eq!(
+            disk.creation_attempts[creation_key].state,
+            abigail_core::AgentCreationState::Complete
+        );
+    }
+
+    #[test]
+    fn archive_missing_source_keeps_registry_and_receipt_unchanged() {
+        let manager = test_manager();
+        let creation_key = Uuid::new_v4().to_string();
+        let (agent_id, agent_dir) = manager
+            .create_agent_idempotent("Missing archive source", &creation_key)
+            .unwrap();
+        std::fs::remove_dir_all(agent_dir).unwrap();
+
+        assert!(manager.archive_agent(&agent_id).is_err());
+        assert_registered_with_complete_receipt(&manager, &agent_id, &creation_key);
+        let _ = std::fs::remove_dir_all(manager.data_root());
+    }
+
+    #[test]
+    fn archive_destination_collision_keeps_source_registry_and_receipt() {
+        let manager = test_manager();
+        let creation_key = Uuid::new_v4().to_string();
+        let (agent_id, agent_dir) = manager
+            .create_agent_idempotent("Collision", &creation_key)
+            .unwrap();
+        let timestamp = "20261022_010203";
+        let destination = manager
+            .data_root()
+            .join("backups")
+            .join(format!("{timestamp}_Collision"));
+        std::fs::create_dir_all(&destination).unwrap();
+        std::fs::write(destination.join("existing"), b"do not replace").unwrap();
+
+        let result = manager.archive_agent_transaction(
+            &agent_id,
+            timestamp,
+            |source, destination| std::fs::rename(source, destination),
+            |next| {
+                next.save(manager.data_root())
+                    .map_err(|error| error.to_string())
+            },
+        );
+        assert!(result.is_err());
+        assert!(agent_dir.is_dir());
+        assert!(destination.join("existing").is_file());
+        assert_registered_with_complete_receipt(&manager, &agent_id, &creation_key);
+        let _ = std::fs::remove_dir_all(manager.data_root());
+    }
+
+    #[test]
+    fn archive_rename_failure_keeps_registry_and_receipt_unchanged() {
+        let manager = test_manager();
+        let creation_key = Uuid::new_v4().to_string();
+        let (agent_id, agent_dir) = manager
+            .create_agent_idempotent("Rename failure", &creation_key)
+            .unwrap();
+        let result = manager.archive_agent_transaction(
+            &agent_id,
+            "20261022_010204",
+            |_, _| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "injected rename failure",
+                ))
+            },
+            |_| panic!("registry save must not run after rename failure"),
+        );
+
+        assert!(result.is_err());
+        assert!(agent_dir.is_dir());
+        assert_registered_with_complete_receipt(&manager, &agent_id, &creation_key);
+        let _ = std::fs::remove_dir_all(manager.data_root());
+    }
+
+    #[test]
+    fn archive_config_save_failure_rolls_move_back_before_releasing_registry_guard() {
+        let manager = test_manager();
+        let creation_key = Uuid::new_v4().to_string();
+        let (agent_id, agent_dir) = manager
+            .create_agent_idempotent("Save rollback", &creation_key)
+            .unwrap();
+        let timestamp = "20261022_010205";
+        let destination = manager
+            .data_root()
+            .join("backups")
+            .join(format!("{timestamp}_Save_rollback"));
+        let result = manager.archive_agent_transaction(
+            &agent_id,
+            timestamp,
+            |source, destination| std::fs::rename(source, destination),
+            |_| Err("injected config-save failure".into()),
+        );
+
+        assert!(result.is_err());
+        assert!(agent_dir.is_dir(), "the source move must be rolled back");
+        assert!(
+            !destination.exists(),
+            "rollback must remove the archive path"
+        );
+        assert_registered_with_complete_receipt(&manager, &agent_id, &creation_key);
+        let _ = std::fs::remove_dir_all(manager.data_root());
     }
 
     #[test]

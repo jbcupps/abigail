@@ -43,20 +43,23 @@ pub fn policy(method: &Method, route: &str) -> Access {
     use Access::*;
     match (method.as_str(), route) {
         ("GET", "/health") | ("POST", contract::ADOPTION_PATH | "/v1/runtime/sessions") => Public,
-        ("GET" | "POST", "/v1/entities") | ("POST", "/v1/secrets") => HiveAdmin,
+        ("GET" | "POST", "/v1/entities")
+        | ("GET", "/v1/entity-creations/:creation_key")
+        | ("POST", "/v1/secrets") => HiveAdmin,
         ("GET", "/v1/secrets/list" | "/v1/secrets/:key" | "/v1/providers/profiles/:name") => {
             Household
         }
         (
             "GET",
             "/v1/entities/:id"
-            | "/v1/entities/:id/birth"
             | "/v1/entities/:id/provider-config"
             | "/v1/entities/:id/assignments"
             | "/v1/entities/:id/forge-approvals",
         ) => Entity,
         ("POST", "/v1/entities/:id/persistence")
-        | ("GET", "/v1/entities/:id/execution/receipts") => EntityRuntime,
+        | ("GET", "/v1/entities/:id/birth" | "/v1/entities/:id/execution/receipts") => {
+            EntityRuntime
+        }
         ("GET", "/v1/runtime/sessions/:lease_id")
         | ("POST", "/v1/runtime/register" | "/v1/runtime/heartbeat" | "/v1/runtime/outbox/sync") => {
             Runtime
@@ -328,6 +331,189 @@ mod tests {
         }
     }
 
+    fn hidden_weight_paths(value: &serde_json::Value) -> Vec<String> {
+        const HIDDEN: [&str; 5] = [
+            "weights",
+            "deontology",
+            "teleology",
+            "areteology",
+            "welfare",
+        ];
+        fn visit(value: &serde_json::Value, path: &str, found: &mut Vec<String>) {
+            match value {
+                serde_json::Value::Object(object) => {
+                    for (key, child) in object {
+                        let child_path = format!("{path}.{key}");
+                        if HIDDEN.contains(&key.as_str()) {
+                            found.push(child_path.clone());
+                        }
+                        visit(child, &child_path, found);
+                    }
+                }
+                serde_json::Value::Array(array) => {
+                    for (index, child) in array.iter().enumerate() {
+                        visit(child, &format!("{path}[{index}]"), found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        visit(value, "$", &mut found);
+        found
+    }
+
+    #[tokio::test]
+    async fn router_user_surfaces_hide_weights_and_full_birth_requires_matching_runtime() {
+        let f = fixture();
+        let desktop = f.desktop();
+        let mut surfaces = Vec::new();
+
+        let (status, created) = f
+            .send(
+                Method::POST,
+                "/v1/genesis/sessions",
+                Some(&desktop),
+                Some(serde_json::json!({})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(created["ok"], true, "{created}");
+        let genesis_id = created["data"]["id"].as_str().unwrap();
+        let revision = created["data"]["revision"].as_u64().unwrap();
+        surfaces.push(("Genesis create", created.clone()));
+
+        let (status, loaded) = f
+            .send(
+                Method::GET,
+                &format!("/v1/genesis/sessions/{genesis_id}"),
+                Some(&desktop),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(loaded["ok"], true, "{loaded}");
+        surfaces.push(("Genesis load", loaded));
+
+        let (status, action) = f
+            .send(
+                Method::POST,
+                &format!("/v1/genesis/sessions/{genesis_id}/actions"),
+                Some(&desktop),
+                Some(serde_json::json!({
+                    "action": "save_draft",
+                    "expected_revision": revision,
+                    "text": "A private draft"
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(action["ok"], true, "{action}");
+        surfaces.push(("Genesis action", action));
+
+        let (status, catalog) = f
+            .send(
+                Method::GET,
+                "/v1/genesis/quest/catalog",
+                Some(&desktop),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(catalog["ok"], true, "{catalog}");
+        surfaces.push(("quest catalog", catalog));
+
+        let (status, scenarios) = f
+            .send(Method::GET, "/v1/birth/scenarios", Some(&desktop), None)
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(scenarios["ok"], true, "{scenarios}");
+        surfaces.push(("birth scenarios", scenarios));
+
+        let birth_path = format!("/v1/entities/{}/birth", f.entity_id);
+        let (status, birth) = f
+            .send(
+                Method::POST,
+                &birth_path,
+                Some(&desktop),
+                Some(serde_json::json!({
+                    "path": "quickstart",
+                    "choices": [],
+                    "purpose": "Help the family"
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(birth["ok"], true, "{birth}");
+        surfaces.push(("generic birth POST", birth));
+
+        let (status, journey) = f
+            .send(
+                Method::GET,
+                &format!("/v1/entities/{}/journey", f.entity_id),
+                Some(&desktop),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(journey["ok"], true, "{journey}");
+        surfaces.push(("journey", journey));
+
+        let presence_path = format!("/v1/entities/{}/presence", f.entity_id);
+        let (status, presence_put) = f
+            .send(
+                Method::PUT,
+                &presence_path,
+                Some(&desktop),
+                Some(serde_json::json!({
+                    "temperament": "gentle",
+                    "identity": "aether",
+                    "crest": "orbit",
+                    "motion": "still"
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(presence_put["ok"], true, "{presence_put}");
+        surfaces.push(("Presence PUT", presence_put));
+        let (status, presence_get) = f
+            .send(Method::GET, &presence_path, Some(&desktop), None)
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(presence_get["ok"], true, "{presence_get}");
+        surfaces.push(("Presence GET", presence_get));
+
+        let leaks: Vec<_> = surfaces
+            .iter()
+            .filter_map(|(surface, value)| {
+                let paths = hidden_weight_paths(value);
+                (!paths.is_empty()).then(|| format!("{surface}: {}", paths.join(", ")))
+            })
+            .collect();
+        assert!(
+            leaks.is_empty(),
+            "hidden ethical scoring leaked through HTTP routes:\n{}",
+            leaks.join("\n")
+        );
+
+        let (status, denied) = f.send(Method::GET, &birth_path, Some(&desktop), None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(denied["ok"], false);
+
+        let runtime = f.lease_for(&f.entity_id).lease_id;
+        let (status, full) = f.send(Method::GET, &birth_path, Some(&runtime), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(full["ok"], true, "{full}");
+        let certificate = &full["data"]["certificate"];
+        assert_eq!(certificate["scoring_version"], hive_core::SCORING_VERSION);
+        for axis in ["deontology", "teleology", "areteology", "welfare"] {
+            assert!(
+                certificate["weights"][axis].is_number(),
+                "runtime certificate lacks {axis}: {certificate}"
+            );
+        }
+    }
+
     #[test]
     fn every_route_has_the_intended_access() {
         use Access::*;
@@ -338,12 +524,13 @@ mod tests {
             ("GET", "/v1/status", Desktop),
             ("GET", "/v1/entities", HiveAdmin),
             ("POST", "/v1/entities", HiveAdmin),
+            ("GET", "/v1/entity-creations/:creation_key", HiveAdmin),
             ("GET", "/v1/entities/:id", Entity),
             ("POST", "/v1/entities/:id/open", Desktop),
             ("POST", "/v1/entities/:id/close", Desktop),
             ("POST", "/v1/entities/:id/persistence", EntityRuntime),
             ("GET", "/v1/birth/scenarios", Desktop),
-            ("GET", "/v1/entities/:id/birth", Entity),
+            ("GET", "/v1/entities/:id/birth", EntityRuntime),
             ("POST", "/v1/entities/:id/birth", Desktop),
             ("PATCH", "/v1/entities/:id/config", Desktop),
             ("GET", "/v1/entities/:id/provider-config", Entity),
@@ -352,6 +539,10 @@ mod tests {
             ("POST", "/v1/entities/:id/assignments", Desktop),
             ("GET", "/v1/entities/:id/forge-approvals", Entity),
             ("POST", "/v1/entities/:id/forge-approvals", Desktop),
+            ("GET", "/v1/entities/:id/journey", Desktop),
+            ("GET", "/v1/entities/:id/presence", Desktop),
+            ("PUT", "/v1/entities/:id/presence", Desktop),
+            ("GET", "/v1/genesis/quest/catalog", Desktop),
             ("POST", "/v1/secrets", HiveAdmin),
             ("GET", "/v1/secrets/list", Household),
             ("GET", "/v1/secrets/:key", Household),
@@ -384,6 +575,11 @@ mod tests {
         for (method, route, body) in [
             (Method::GET, "/v1/status", None),
             (Method::GET, "/v1/entities", None),
+            (
+                Method::GET,
+                "/v1/entity-creations/00000000-0000-4000-8000-000000000000",
+                None,
+            ),
             (
                 Method::POST,
                 "/v1/entities",
@@ -477,6 +673,7 @@ mod tests {
 
         for route in [
             "/v1/entities/:id",
+            "/v1/entities/:id/birth",
             "/v1/entities/:id/provider-config",
             "/v1/entities/:id/assignments",
             "/v1/entities/:id/execution/receipts",
@@ -491,9 +688,15 @@ mod tests {
         }
         for (method, route, body) in [
             (Method::GET, "/v1/entities/:other", None),
+            (Method::GET, "/v1/entities/:other/birth", None),
             (Method::GET, "/v1/entities/:other/provider-config", None),
             (Method::GET, "/v1/entities/:other/execution/receipts", None),
             (Method::GET, "/v1/entities", None),
+            (
+                Method::GET,
+                "/v1/entity-creations/00000000-0000-4000-8000-000000000000",
+                None,
+            ),
             (
                 Method::POST,
                 "/v1/entities",
@@ -512,6 +715,19 @@ mod tests {
             (Method::POST, "/v1/entities/:id/open", None),
             (Method::GET, "/v1/status", None),
             (Method::GET, "/v1/genesis/sessions", None),
+            (Method::GET, "/v1/entities/:id/journey", None),
+            (Method::GET, "/v1/entities/:id/presence", None),
+            (
+                Method::PUT,
+                "/v1/entities/:id/presence",
+                Some(serde_json::json!({
+                    "temperament": "gentle",
+                    "identity": "aether",
+                    "crest": "orbit",
+                    "motion": "still"
+                })),
+            ),
+            (Method::GET, "/v1/genesis/quest/catalog", None),
         ] {
             let (status, body) = f
                 .send(method.clone(), &concrete(route), Some(&lease), body)
@@ -538,6 +754,15 @@ mod tests {
         assert_eq!(body["ok"], true, "{body}");
         let (status, _) = f
             .send(Method::GET, "/v1/entities", Some(&lease), None)
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = f
+            .send(
+                Method::GET,
+                "/v1/entity-creations/00000000-0000-4000-8000-000000000000",
+                Some(&lease),
+                None,
+            )
             .await;
         assert_eq!(status, StatusCode::OK);
         for (method, route) in [
@@ -688,6 +913,233 @@ mod tests {
             .to_ascii_lowercase();
         assert!(allowed.contains("authorization"), "{allowed}");
         assert!(!allowed.contains('*'), "{allowed}");
+    }
+
+    #[tokio::test]
+    async fn real_http_outbox_replay_is_acknowledged_without_duplicate_receipt() {
+        let f = fixture();
+        let lease = f.lease_for(&f.entity_id);
+        let record_id = uuid::Uuid::new_v4().to_string();
+        let request = serde_json::json!({
+            "lease_id": lease.lease_id,
+            "runtime_id": lease.runtime_id,
+            "records": [{
+                "record_id": record_id,
+                "entity_id": f.entity_id,
+                "kind": "skill_used",
+                "created_at_utc": "2026-10-22T12:00:00Z",
+                "payload": {
+                    "session_id": "session-1",
+                    "skill_id": "com.abigail.calendar",
+                    "tool_name": "list_events"
+                }
+            }]
+        });
+
+        for _ in 0..2 {
+            let (status, response) = f
+                .send(
+                    Method::POST,
+                    "/v1/runtime/outbox/sync",
+                    Some(&lease.lease_id),
+                    Some(request.clone()),
+                )
+                .await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(response["ok"], true, "{response}");
+            assert_eq!(
+                response["data"]["accepted_record_ids"],
+                serde_json::json!([record_id])
+            );
+        }
+
+        let (status, response) = f
+            .send(
+                Method::GET,
+                &format!("/v1/entities/{}/execution/receipts", f.entity_id),
+                Some(&lease.lease_id),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response["data"]["receipts"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn real_http_journey_partial_failure_retries_and_acknowledges_once() {
+        let f = fixture();
+        let lease = f.lease_for(&f.entity_id);
+        let skill_id = uuid::Uuid::new_v4().to_string();
+        let memory_id = uuid::Uuid::new_v4().to_string();
+        let request = serde_json::json!({
+            "lease_id": lease.lease_id,
+            "runtime_id": lease.runtime_id,
+            "records": [
+                {
+                    "record_id": skill_id,
+                    "entity_id": f.entity_id,
+                    "kind": "skill_used",
+                    "created_at_utc": "2026-10-22T12:00:00Z",
+                    "payload": {
+                        "session_id": "session-1",
+                        "skill_id": "com.abigail.calendar",
+                        "tool_name": "list_events"
+                    }
+                },
+                {
+                    "record_id": memory_id,
+                    "entity_id": f.entity_id,
+                    "kind": "memory_confirmed",
+                    "created_at_utc": "2026-10-22T12:01:00Z",
+                    "payload": {
+                        "memory_id": "memory-1",
+                        "memory_weight": "distilled"
+                    }
+                }
+            ]
+        });
+        f.state.journeys.fail_event_writes_after(1);
+
+        let (_, failed) = f
+            .send(
+                Method::POST,
+                "/v1/runtime/outbox/sync",
+                Some(&lease.lease_id),
+                Some(request.clone()),
+            )
+            .await;
+        assert_eq!(failed["ok"], false, "{failed}");
+
+        let (_, retried) = f
+            .send(
+                Method::POST,
+                "/v1/runtime/outbox/sync",
+                Some(&lease.lease_id),
+                Some(request),
+            )
+            .await;
+        assert_eq!(retried["ok"], true, "{retried}");
+        assert_eq!(
+            retried["data"]["accepted_record_ids"],
+            serde_json::json!([skill_id, memory_id])
+        );
+        let journey = f
+            .state
+            .journeys
+            .load(crate::genesis_http::OWNER, &f.entity_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(journey.successful_skill_uses, 1);
+        assert_eq!(journey.confirmed_memories, 1);
+        assert_eq!(
+            f.state
+                .runtime_control
+                .lock()
+                .unwrap()
+                .execution_receipts(&f.entity_id, 500)
+                .receipts
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn real_http_projection_failure_retries_the_exact_record_without_duplicates() {
+        let f = fixture();
+        let lease = f.lease_for(&f.entity_id);
+        let record_id = uuid::Uuid::new_v4().to_string();
+        let request = serde_json::json!({
+            "lease_id": lease.lease_id,
+            "runtime_id": lease.runtime_id,
+            "records": [{
+                "record_id": record_id,
+                "entity_id": f.entity_id,
+                "kind": "skill_used",
+                "created_at_utc": "2026-10-22T12:00:00Z",
+                "payload": {
+                    "session_id": "session-1",
+                    "skill_id": "com.abigail.calendar",
+                    "tool_name": "list_events"
+                }
+            }]
+        });
+        f.state.journeys.fail_next_projection_write();
+
+        let (_, failed) = f
+            .send(
+                Method::POST,
+                "/v1/runtime/outbox/sync",
+                Some(&lease.lease_id),
+                Some(request.clone()),
+            )
+            .await;
+        assert_eq!(failed["ok"], false, "{failed}");
+        assert!(
+            f.state
+                .journeys
+                .load(crate::genesis_http::OWNER, &f.entity_id)
+                .unwrap()
+                .is_none(),
+            "the injected projection failure must not erase the durable event"
+        );
+        assert_eq!(
+            f.state
+                .runtime_control
+                .lock()
+                .unwrap()
+                .execution_receipts(&f.entity_id, 500)
+                .receipts
+                .len(),
+            1,
+            "the prior control-plane mutation must remain deduplicated for retry"
+        );
+
+        let (_, replay) = f
+            .send(
+                Method::POST,
+                "/v1/runtime/outbox/sync",
+                Some(&lease.lease_id),
+                Some(request),
+            )
+            .await;
+        assert_eq!(replay["ok"], true, "{replay}");
+        assert_eq!(
+            replay["data"]["accepted_record_ids"],
+            serde_json::json!([record_id])
+        );
+        assert_eq!(
+            replay["data"]["execution_receipts"],
+            serde_json::json!([]),
+            "an exact replay must not mint a second receipt"
+        );
+        assert_eq!(
+            f.state
+                .journeys
+                .load(crate::genesis_http::OWNER, &f.entity_id)
+                .unwrap()
+                .unwrap()
+                .successful_skill_uses,
+            1
+        );
+        assert_eq!(
+            f.state
+                .journeys
+                .event_activity(crate::genesis_http::OWNER, &f.entity_id)
+                .unwrap()
+                .successful_skill_uses,
+            1,
+            "the exact retry must not duplicate the durable event row"
+        );
+        assert_eq!(
+            f.state
+                .runtime_control
+                .lock()
+                .unwrap()
+                .execution_receipts(&f.entity_id, 500)
+                .receipts
+                .len(),
+            1
+        );
     }
 
     #[test]

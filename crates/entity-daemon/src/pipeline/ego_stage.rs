@@ -9,7 +9,7 @@
 use super::{EgoActionPayload, IdReactionPayload, TurnContext};
 use crate::state::EntityDaemonState;
 use abigail_streaming::{Envelope, SubscriptionHandle, Topic, TopicConfig, BUS_STREAM};
-use entity_core::ChatResponse;
+use entity_core::{ChatResponse, CompletionRisk};
 
 const CONSUMER_GROUP: &str = "ego-stage";
 
@@ -92,6 +92,25 @@ async fn respond(
         &budget,
     );
     let tools = entity_chat::build_tool_definitions(&state.registry);
+    let assistant_turn_id = uuid::Uuid::new_v4().to_string();
+    let activity_record_id = (!tools.is_empty()).then(|| {
+        crate::state::deterministic_journey_record_id(
+            &state.entity_id,
+            "skill_used",
+            &assistant_turn_id,
+        )
+    });
+    let reservation_error = activity_record_id.as_ref().and_then(|record_id| {
+        state
+            .outbox
+            .reserve_slot_with_soul_ref(
+                record_id.clone(),
+                &state.entity_id,
+                "skill_used",
+                &state.soul_ref,
+            )
+            .err()
+    });
     // Snapshot the active router for this turn (hot-swap applies on the next).
     let router = state.router.current();
     // Chat turns are depth 0; jobs submitted from this turn nest below it and
@@ -101,61 +120,83 @@ async fn respond(
         correlation_id: Some(correlation_id.clone()),
     };
 
-    let result: anyhow::Result<entity_chat::ToolUseResult> = if let Some(stream_tx) = stream_tx {
-        // Tokens pass through the incremental superego gate on their way to
-        // the client: the relay cuts the stream on the first blocking finding
-        // so blocked content never reaches the SSE channel (see stream_gate).
-        let gated_tx = super::stream_gate::spawn_gated_relay(stream_tx);
-        let pipeline_fut = entity_chat::stream_chat_pipeline(
-            &router,
-            &state.executor,
-            messages,
-            tools,
-            gated_tx,
-            payload.model_override.clone(),
-            Some(&job_ctx),
-        );
-        tokio::pin!(pipeline_fut);
-        let cancelled = async {
-            match cancel.as_ref() {
-                Some(token) => token.cancelled().await,
-                None => std::future::pending().await,
-            }
-        };
-        tokio::select! {
-            res = &mut pipeline_fut => res.map(|p| entity_chat::ToolUseResult {
-                content: p.content,
-                tool_calls_made: p.tool_calls_made,
-                execution_trace: p.execution_trace,
-            }),
-            _ = cancelled => Err(anyhow::anyhow!("Interrupted by user")),
-        }
-    } else if tools.is_empty() {
-        router
-            .route_unified(abigail_router::RoutingRequest {
+    let result: anyhow::Result<entity_chat::ToolUseResult> =
+        if let Some(error) = reservation_error.as_ref() {
+            Err(anyhow::anyhow!(error.clone()))
+        } else if let Some(stream_tx) = stream_tx {
+            // Tokens pass through the incremental superego gate on their way to
+            // the client: the relay cuts the stream on the first blocking finding
+            // so blocked content never reaches the SSE channel (see stream_gate).
+            let gated_tx = super::stream_gate::spawn_gated_relay(stream_tx);
+            let pipeline_fut = entity_chat::stream_chat_pipeline(
+                &router,
+                &state.executor,
                 messages,
-                tools: None,
-                model_override: payload.model_override.clone(),
-                stream_tx: None,
-                force_id_only: false,
-            })
+                tools,
+                gated_tx,
+                payload.model_override.clone(),
+                Some(&job_ctx),
+            );
+            tokio::pin!(pipeline_fut);
+            let cancelled = async {
+                match cancel.as_ref() {
+                    Some(token) => token.cancelled().await,
+                    None => std::future::pending().await,
+                }
+            };
+            tokio::select! {
+                res = &mut pipeline_fut => res.map(|p| entity_chat::ToolUseResult {
+                    content: p.content,
+                    tool_calls_made: p.tool_calls_made,
+                    execution_trace: p.execution_trace,
+                    completion_risk: p.completion_risk,
+                }),
+                _ = cancelled => Err(anyhow::anyhow!("Interrupted by user")),
+            }
+        } else if tools.is_empty() {
+            router
+                .route_unified(abigail_router::RoutingRequest {
+                    messages,
+                    tools: None,
+                    model_override: payload.model_override.clone(),
+                    stream_tx: None,
+                    force_id_only: false,
+                })
+                .await
+                .map(|r| entity_chat::ToolUseResult {
+                    content: r.completion.content,
+                    tool_calls_made: Vec::new(),
+                    execution_trace: r.trace,
+                    completion_risk: None,
+                })
+        } else {
+            entity_chat::run_tool_use_loop_with_model_override(
+                &router,
+                &state.executor,
+                messages,
+                tools,
+                payload.model_override.clone(),
+                Some(&job_ctx),
+            )
             .await
-            .map(|r| entity_chat::ToolUseResult {
-                content: r.completion.content,
-                tool_calls_made: Vec::new(),
-                execution_trace: r.trace,
-            })
-    } else {
-        entity_chat::run_tool_use_loop_with_model_override(
-            &router,
-            &state.executor,
-            messages,
-            tools,
-            payload.model_override.clone(),
-            Some(&job_ctx),
-        )
-        .await
-    };
+        };
+
+    let successful_skill_count = result
+        .as_ref()
+        .map(|tool_result| {
+            tool_result
+                .tool_calls_made
+                .iter()
+                .filter(|record| record.success)
+                .count()
+        })
+        .unwrap_or(0);
+    let cancellation_may_follow_tool_activity = result.as_ref().err().is_some_and(|error| {
+        error
+            .to_string()
+            .to_ascii_lowercase()
+            .contains("interrupted by user")
+    });
 
     let mut action = match result {
         Ok(tool_result) => {
@@ -198,18 +239,28 @@ async fn respond(
             let findings: Vec<String> = gate.findings().iter().map(|f| f.rule.clone()).collect();
 
             match gate {
-                abigail_superego::GateDecision::Block(_) => EgoActionPayload {
-                    session_id: payload.session_id.clone(),
-                    status: "blocked".to_string(),
-                    error: Some(format!(
-                        "Response withheld by superego: {}",
-                        findings.join(", ")
-                    )),
-                    response: None,
-                    user_message: payload.message.clone(),
-                    superego_verdict: Some("block".to_string()),
-                    superego_findings: findings,
-                },
+                abigail_superego::GateDecision::Block(_) => {
+                    let (error, error_code) = if successful_skill_count > 0 {
+                        let risk = CompletionRisk::ActionCompletedVerifyBeforeRepeating;
+                        (risk.public_message().to_string(), Some(risk))
+                    } else {
+                        (
+                            format!("Response withheld by superego: {}", findings.join(", ")),
+                            None,
+                        )
+                    };
+                    EgoActionPayload {
+                        session_id: payload.session_id.clone(),
+                        status: "blocked".to_string(),
+                        error: Some(error),
+                        error_code,
+                        interrupted: false,
+                        response: None,
+                        user_message: payload.message.clone(),
+                        superego_verdict: Some("block".to_string()),
+                        superego_findings: findings,
+                    }
+                }
                 gate => {
                     let response = ChatResponse {
                         reply: tool_result.content,
@@ -220,11 +271,14 @@ async fn respond(
                         complexity_score,
                         execution_trace: tool_result.execution_trace,
                         session_id: Some(payload.session_id.clone()),
+                        completion_risk: tool_result.completion_risk,
                     };
                     EgoActionPayload {
                         session_id: payload.session_id.clone(),
                         status: "success".to_string(),
                         error: None,
+                        error_code: None,
+                        interrupted: false,
                         response: Some(response),
                         user_message: payload.message.clone(),
                         superego_verdict: Some(gate.verdict().to_string()),
@@ -238,16 +292,26 @@ async fn respond(
             // Preserve the user-interruption signal verbatim (the client detects
             // it); turn any other failure into a warm, non-technical message so a
             // family member never sees a raw error. The cause stays in the logs.
-            let user_error = if detail.to_lowercase().contains("interrupted by user") {
-                detail
-            } else {
-                tracing::warn!("Ego stage: chat turn failed: {}", detail);
-                friendly_turn_error()
-            };
+            let (user_error, error_code, interrupted) =
+                if let Some(error) = reservation_error.as_deref() {
+                    (activity_reservation_error(error), None, false)
+                } else if detail.to_lowercase().contains("interrupted by user") {
+                    if activity_record_id.is_some() {
+                        let risk = CompletionRisk::ActionMayHaveCompletedVerifyBeforeRepeating;
+                        (risk.public_message().to_string(), Some(risk), true)
+                    } else {
+                        ("Interrupted by user".to_string(), None, true)
+                    }
+                } else {
+                    tracing::warn!("Ego stage: chat turn failed: {}", detail);
+                    (friendly_turn_error(), None, false)
+                };
             EgoActionPayload {
                 session_id: payload.session_id.clone(),
                 status: "error".to_string(),
                 error: Some(user_error),
+                error_code,
+                interrupted,
                 response: None,
                 user_message: payload.message.clone(),
                 superego_verdict: None,
@@ -256,20 +320,74 @@ async fn respond(
         }
     };
 
-    if let Some(ref response) = action.response {
-        let turn =
-            abigail_memory::ConversationTurn::new(&action.session_id, "assistant", &response.reply)
-                .with_metadata(
-                    response.provider.clone(),
-                    response.model_used.clone(),
-                    response.tier.clone(),
-                    response.complexity_score,
-                );
-        if let Err(error) = crate::memory_consumer::persist_turn(state.memory.clone(), turn).await {
+    let assistant_store_error = if let Some(ref response) = action.response {
+        let turn = committed_assistant_turn(&assistant_turn_id, &action.session_id, response);
+        state
+            .assistant_turn_store
+            .persist(state.memory.clone(), turn)
+            .await
+            .err()
+    } else {
+        None
+    };
+    let assistant_turn_durable = assistant_store_error.is_none() && action.response.is_some();
+    if let Some(error) = assistant_store_error {
+        if successful_skill_count > 0 {
+            tracing::error!(
+                session_id = %action.session_id,
+                "Completed tool response could not be saved to conversation history: {error}"
+            );
+            if let Some(response) = action.response.as_mut() {
+                response.reply = completed_action_unsaved_reply(&response.reply);
+                response.completion_risk =
+                    Some(CompletionRisk::ActionCompletedVerifyBeforeRepeating);
+            }
+        } else {
             action.status = "error".to_string();
             action.error = Some(format!("Unable to save this conversation: {}", error));
             action.response = None;
         }
+    }
+
+    match (successful_skill_count, activity_record_id.as_deref()) {
+        (count, Some(record_id)) if count > 0 => {
+            let payload = serde_json::json!({
+                "session_id": action.session_id,
+                "successful_skill_count": count,
+            });
+            if let Err(error) = state.commit_outbox_reservation(record_id, payload) {
+                if assistant_turn_durable {
+                    tracing::error!(
+                        session_id = %action.session_id,
+                        activity_record_id = %record_id,
+                        "Successful tool activity will be recovered from its durable assistant turn: {error}"
+                    );
+                } else {
+                    tracing::error!(
+                        session_id = %action.session_id,
+                        activity_record_id = %record_id,
+                        "Successful tool activity remains reserved for manual recovery because its response and outbox commit could not be saved: {error}"
+                    );
+                }
+            }
+        }
+        (0, Some(record_id)) if cancellation_may_follow_tool_activity => {
+            tracing::warn!(
+                session_id = %action.session_id,
+                activity_record_id = %record_id,
+                "Cancelled tool-capable turn may have completed activity; retaining its reservation for quarantine/manual recovery"
+            );
+        }
+        (_, Some(record_id)) => {
+            if let Err(error) = state.outbox.release_reservation(record_id) {
+                tracing::error!(
+                    session_id = %action.session_id,
+                    activity_record_id = %record_id,
+                    "Unused tool activity reservation could not be released: {error}"
+                );
+            }
+        }
+        _ => {}
     }
 
     // Publish the committed action for the journal, superego, and any other
@@ -293,9 +411,17 @@ async fn respond(
     // Deliver the outcome to the waiting handler.
     let outcome = match (action.status.as_str(), action.response) {
         ("success", Some(response)) => Ok(response),
-        _ => Err(action
-            .error
-            .unwrap_or_else(|| "ego stage failed without detail".to_string())),
+        _ => {
+            let message = action
+                .error
+                .unwrap_or_else(|| "ego stage failed without detail".to_string());
+            let failure = match action.error_code {
+                Some(code) => super::TurnFailure::completion_risk(code, action.interrupted),
+                None if action.interrupted => super::TurnFailure::interrupted(),
+                None => super::TurnFailure::plain(message),
+            };
+            Err(failure)
+        }
     };
     if done.send(outcome).is_err() {
         tracing::debug!(
@@ -305,6 +431,47 @@ async fn respond(
     }
 }
 
+fn activity_reservation_error(error: &str) -> String {
+    if error.contains("backpressure") {
+        format!("Activity backpressure prevented this turn, so no tools were run. {error}")
+    } else {
+        "I couldn't safely save an activity reservation, so no tools were run.".to_string()
+    }
+}
+
+fn completed_action_unsaved_reply(reply: &str) -> String {
+    format!(
+        "{reply}\n\nThe action completed, but this reply and its history could not be saved. \
+         Verify the result before repeating the action."
+    )
+}
+
+fn committed_assistant_turn(
+    turn_id: &str,
+    session_id: &str,
+    response: &ChatResponse,
+) -> abigail_memory::ConversationTurn {
+    let successful_tool_uses = response
+        .tool_calls_made
+        .iter()
+        .filter(|record| record.success)
+        .map(|record| abigail_memory::SuccessfulToolUse {
+            skill_id: record.skill_id.clone(),
+            tool_name: record.tool_name.clone(),
+        })
+        .collect();
+    let mut turn = abigail_memory::ConversationTurn::new(session_id, "assistant", &response.reply)
+        .with_metadata(
+            response.provider.clone(),
+            response.model_used.clone(),
+            response.tier.clone(),
+            response.complexity_score,
+        )
+        .with_successful_tool_uses(successful_tool_uses);
+    turn.id = turn_id.to_string();
+    turn
+}
+
 /// Warm, non-technical message shown to a family member when a chat turn fails
 /// outright (for example, no language model is reachable). The technical cause
 /// is recorded in the daemon logs, not surfaced to the family.
@@ -312,4 +479,49 @@ fn friendly_turn_error() -> String {
     "I'm having trouble reaching a language model right now. Please try again in a \
      moment — or ask whoever set up Abigail to connect a model in the Hive."
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn committed_assistant_turn_keeps_only_successful_content_free_tool_metadata() {
+        let response = ChatResponse {
+            reply: "private assistant reply".to_string(),
+            provider: Some("fixture".to_string()),
+            tool_calls_made: vec![
+                entity_core::ToolCallRecord {
+                    skill_id: "com.abigail.calendar".to_string(),
+                    tool_name: "list_events".to_string(),
+                    success: true,
+                },
+                entity_core::ToolCallRecord {
+                    skill_id: "com.abigail.mail".to_string(),
+                    tool_name: "send_message".to_string(),
+                    success: false,
+                },
+            ],
+            tier: None,
+            model_used: Some("fixture-model".to_string()),
+            complexity_score: Some(4),
+            execution_trace: None,
+            session_id: Some("session-1".to_string()),
+            completion_risk: None,
+        };
+
+        let turn = committed_assistant_turn("assistant-turn-1", "session-1", &response);
+
+        assert_eq!(turn.id, "assistant-turn-1");
+        assert_eq!(turn.role, "assistant");
+        assert_eq!(turn.successful_tool_uses.len(), 1);
+        assert_eq!(
+            turn.successful_tool_uses[0].skill_id,
+            "com.abigail.calendar"
+        );
+        assert_eq!(turn.successful_tool_uses[0].tool_name, "list_events");
+        let metadata = serde_json::to_string(&turn.successful_tool_uses).unwrap();
+        assert!(!metadata.contains("private assistant reply"));
+        assert!(!metadata.contains("send_message"));
+    }
 }

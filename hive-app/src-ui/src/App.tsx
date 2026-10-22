@@ -5,7 +5,8 @@ import CreateEntityCard from "./components/CreateEntityCard";
 import GenesisWorkspace from "./components/GenesisWorkspace";
 import GenesisNotifications from "./components/GenesisNotifications";
 import GenesisMediaConnections from "./components/GenesisMediaConnections";
-import GenesisEntityPortrait, { useGenesisEntityPortraits } from "./components/GenesisEntityPortrait";
+import GenesisEntityPortrait, { useGenesisEntities } from "./components/GenesisEntityPortrait";
+import EntityJourneyChip from "./components/EntityJourneyChip";
 import ProviderWizard from "./components/ProviderWizard";
 import ChatPanel from "./components/ChatPanel";
 import { completeEntitySetup, hiveHealth, getStatus, type EntityInfo, type HiveStatus } from "./lib/daemonClient";
@@ -14,6 +15,7 @@ import { openEntity } from "./lib/entityWindow";
 
 type Phase = "splash" | "loading" | "ready" | "error";
 type Readiness = "pending" | "ok" | "failed";
+type GenesisLaunchRequest = { resumeId?: string };
 
 const READY_CEILING_MS = 20_000;
 
@@ -23,14 +25,68 @@ export default function App() {
   const [status, setStatus] = useState<HiveStatus | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [genesisOpen, setGenesisOpen] = useState(false);
+  const [genesisResume, setGenesisResume] = useState<string | undefined>();
+  const [genesisLaunch, setGenesisLaunch] = useState(0);
+  const [genesisRetry, setGenesisRetry] = useState(0);
+  const [genesisSwitch, setGenesisSwitch] = useState<GenesisLaunchRequest | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const openingRef = useRef(false);
+  const activeGenesisLaunch = useRef(0);
+  const genesisSwitchTrigger = useRef<HTMLElement | null>(null);
   const mounted = useRef(true);
-  const portraits = useGenesisEntityPortraits(`${genesisOpen}:${status?.entities.map(entity => entity.id).join(",") ?? ""}`);
+  const needsProvider = status?.ready_state === "needs_provider";
+  const cardsKey = `${genesisOpen}:${status?.ready_state ?? "unknown"}:${needsProvider}:${status?.entities.map(entity => `${entity.id}:${entity.birth_complete}`).join(",") ?? ""}:retry=${genesisRetry}`;
+  const {
+    portraits,
+    awaiting,
+    loading: genesisEntitiesLoading,
+    error: genesisEntitiesError,
+  } = useGenesisEntities(cardsKey);
+  const launchGenesis = useCallback((sessionId?: string) => {
+    setGenesisResume(sessionId);
+    setGenesisLaunch((launch) => {
+      const next = launch + 1;
+      activeGenesisLaunch.current = next;
+      return next;
+    });
+    setGenesisOpen(true);
+  }, []);
+  const openGenesis = useCallback((sessionId?: string) => {
+    if (genesisOpen) {
+      setGenesisSwitch((current) => {
+        if (current) return current;
+        genesisSwitchTrigger.current = document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+        return { resumeId: sessionId };
+      });
+      return;
+    }
+    launchGenesis(sessionId);
+  }, [genesisOpen, launchGenesis]);
+  const dismissGenesisSwitch = useCallback(() => {
+    setGenesisSwitch(null);
+    queueMicrotask(() => {
+      genesisSwitchTrigger.current?.focus();
+      genesisSwitchTrigger.current = null;
+    });
+  }, []);
+  const closeGenesis = useCallback((launch: number) => {
+    if (activeGenesisLaunch.current !== launch) return;
+    setGenesisSwitch(null);
+    setGenesisOpen(false);
+  }, []);
 
   const handleOpen = useCallback(async (entity: EntityInfo) => {
     if (openingRef.current) return;
+    if (
+      !entity.birth_complete
+      && !awaiting[entity.id]
+      && (genesisEntitiesLoading || Boolean(genesisEntitiesError))
+    ) return;
+    // Genesis signs this Entity's approved story at awakening; never generic setup.
+    if (awaiting[entity.id]) { openGenesis(awaiting[entity.id]); return; }
     openingRef.current = true;
     setOpeningId(entity.id);
     setOpenError(null);
@@ -45,7 +101,7 @@ export default function App() {
       openingRef.current = false;
       if (mounted.current) setOpeningId(null);
     }
-  }, []);
+  }, [awaiting, genesisEntitiesError, genesisEntitiesLoading, openGenesis]);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -124,10 +180,15 @@ export default function App() {
   const entities = status?.entities ?? [];
   const familyEntities = entities.filter((entity) => !entity.is_hive);
   const helperUrl = status?.helper?.running ? (status.helper.local_url ?? null) : null;
-  const needsProvider = status?.ready_state === "needs_provider";
 
   return (
-    <div className="theme-modern flex h-screen bg-theme-bg text-theme-text font-primary">
+    <>
+      <div
+        data-testid="app-shell"
+        className="theme-modern flex h-screen bg-theme-bg text-theme-text font-primary"
+        inert={genesisSwitch ? true : undefined}
+        aria-hidden={genesisSwitch ? true : undefined}
+      >
       <div className="min-w-0 flex-1 overflow-y-auto p-4 md:p-8">
         <header className="mb-6 flex items-start justify-between gap-4">
           <div>
@@ -161,9 +222,9 @@ export default function App() {
           </div>
         )}
 
-        <GenesisNotifications onOpen={() => setGenesisOpen(true)} />
+        <GenesisNotifications onOpen={() => openGenesis()} />
         <GenesisMediaConnections />
-        {genesisOpen && <GenesisWorkspace onClose={() => setGenesisOpen(false)} onCreated={() => void refreshStatus()} />}
+        {genesisOpen && <GenesisWorkspace key={genesisLaunch} resumeId={genesisResume} onClose={() => closeGenesis(genesisLaunch)} onCreated={() => void refreshStatus()} />}
         <section className={genesisOpen ? "mt-8" : undefined}>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-xs uppercase tracking-wide text-theme-text-dim">
@@ -172,7 +233,10 @@ export default function App() {
             <button
               type="button"
               className="text-xs text-theme-primary hover:underline"
-              onClick={() => void refreshStatus()}
+              onClick={() => {
+                setGenesisRetry((generation) => generation + 1);
+                void refreshStatus();
+              }}
             >
               Refresh
             </button>
@@ -182,30 +246,68 @@ export default function App() {
             style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}
           >
             <li>
-              <CreateEntityCard onOpen={() => setGenesisOpen(true)} />
+              <CreateEntityCard onOpen={() => openGenesis()} />
             </li>
-            {familyEntities.map((entity) => (
-              <li
-                key={entity.id}
-                className="flex flex-col rounded-theme-lg border border-theme-border bg-theme-surface p-4"
-              >
-                <GenesisEntityPortrait entityId={entity.id} name={entity.name} portrait={portraits[entity.id]} />
-                <div className="font-medium text-theme-text-bright mt-3">{entity.name}</div>
-                <div className="text-xs text-theme-text-dim mt-1">
-                  {entity.birth_complete
-                    ? "Ready"
-                    : "Setup pending"}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void handleOpen(entity)}
-                  disabled={needsProvider || openingId !== null}
-                  className="mt-3 self-start rounded-theme-md bg-theme-primary px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+            {familyEntities.map((entity) => {
+              const awaitingSession = awaiting[entity.id];
+              const linkageUnresolved = !entity.birth_complete
+                && !awaitingSession
+                && (Boolean(genesisEntitiesLoading) || Boolean(genesisEntitiesError));
+              const linkageChecking = linkageUnresolved && Boolean(genesisEntitiesLoading);
+              const linkageFailed = linkageUnresolved
+                && !genesisEntitiesLoading
+                && Boolean(genesisEntitiesError);
+              return (
+                <li
+                  key={entity.id}
+                  className="flex flex-col rounded-theme-lg border border-theme-border bg-theme-surface p-4"
                 >
-                  {openingId === entity.id ? "Opening…" : `Open ${entity.name}`}
-                </button>
-              </li>
-            ))}
+                  <GenesisEntityPortrait entityId={entity.id} name={entity.name} portrait={portraits[entity.id]} />
+                  <div className="font-medium text-theme-text-bright mt-3">{entity.name}</div>
+                  <div className="text-xs text-theme-text-dim mt-1">
+                    {linkageChecking
+                      ? "Checking Genesis linkage…"
+                      : linkageFailed
+                        ? "Genesis linkage could not be checked."
+                        : needsProvider && awaitingSession
+                          ? "Connect a model to continue Genesis"
+                          : awaitingSession
+                            ? "Being created in Genesis"
+                            : entity.birth_complete
+                              ? "Ready"
+                              : "Setup pending"}
+                  </div>
+                  {entity.birth_complete && <EntityJourneyChip entityId={entity.id} refreshKey={cardsKey} />}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (linkageFailed) setGenesisRetry((generation) => generation + 1);
+                      else if (linkageChecking) return;
+                      else if (needsProvider && awaitingSession) setWizardOpen(true);
+                      else void handleOpen(entity);
+                    }}
+                    disabled={
+                      linkageChecking
+                      || (needsProvider && !awaitingSession && !linkageFailed)
+                      || openingId !== null
+                    }
+                    className="mt-3 self-start rounded-theme-md bg-theme-primary px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+                  >
+                    {openingId === entity.id
+                      ? "Opening…"
+                      : linkageChecking
+                        ? "Checking Genesis…"
+                        : linkageFailed
+                          ? "Retry Genesis check"
+                          : needsProvider && awaitingSession
+                            ? "Connect a model to continue"
+                            : awaitingSession
+                              ? `Continue ${entity.name}'s Genesis`
+                              : `Open ${entity.name}`}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
           {openError && <p role="alert" className="mt-3 text-xs text-theme-danger">{openError}</p>}
         </section>
@@ -229,6 +331,26 @@ export default function App() {
       {wizardOpen && (
         <ProviderWizard onClose={closeWizard} onComplete={refreshStatus} />
       )}
-    </div>
+      </div>
+      {genesisSwitch && (
+        <div className="theme-modern fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 text-theme-text font-primary" role="dialog" aria-modal="true" aria-labelledby="switch-genesis-title" onKeyDown={(event) => {
+          if (event.key === "Escape") dismissGenesisSwitch();
+        }}>
+          <div className="w-full max-w-md rounded-theme-lg border border-theme-border bg-theme-bg-elevated p-5 shadow-2xl">
+            <h2 id="switch-genesis-title" className="text-lg font-semibold text-theme-text-bright">Switch Genesis workspace?</h2>
+            <p className="mt-2 text-sm text-theme-text-dim">Unsaved words or selections in the current workspace would be left behind. Stay here and use Save and exit first if you want to keep them.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="rounded-theme-md border border-theme-border px-3 py-2 text-sm" autoFocus onClick={dismissGenesisSwitch}>Stay here</button>
+              <button type="button" className="rounded-theme-md bg-theme-primary px-3 py-2 text-sm font-medium text-white" onClick={() => {
+                const request = genesisSwitch;
+                genesisSwitchTrigger.current = null;
+                setGenesisSwitch(null);
+                launchGenesis(request.resumeId);
+              }}>Switch workspace</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

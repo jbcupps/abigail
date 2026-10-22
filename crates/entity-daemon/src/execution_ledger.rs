@@ -2,6 +2,8 @@ use hive_core::ExecutionEvent;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::Arc;
 use std::sync::Mutex;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -9,11 +11,15 @@ struct LedgerFile {
     events: Vec<ExecutionEvent>,
 }
 
-#[derive(Debug)]
 pub struct ExecutionLedger {
     path: PathBuf,
     events: Mutex<Vec<ExecutionEvent>>,
+    #[cfg(test)]
+    test_save: Option<Arc<TestSave>>,
 }
+
+#[cfg(test)]
+type TestSave = dyn Fn(&Path, &[u8]) -> anyhow::Result<()> + Send + Sync;
 
 impl ExecutionLedger {
     pub fn load(entity_dir: impl AsRef<Path>) -> anyhow::Result<Self> {
@@ -29,11 +35,24 @@ impl ExecutionLedger {
         Ok(Self {
             path,
             events: Mutex::new(events),
+            #[cfg(test)]
+            test_save: None,
         })
+    }
+
+    #[cfg(test)]
+    pub fn load_with_saver(
+        entity_dir: impl AsRef<Path>,
+        save: impl Fn(&Path, &[u8]) -> anyhow::Result<()> + Send + Sync + 'static,
+    ) -> anyhow::Result<Self> {
+        let mut ledger = Self::load(entity_dir)?;
+        ledger.test_save = Some(Arc::new(save));
+        Ok(ledger)
     }
 
     pub fn append_outbox_event(
         &self,
+        record_id: &str,
         entity_id: &str,
         kind: &str,
         payload: &serde_json::Value,
@@ -43,9 +62,32 @@ impl ExecutionLedger {
             .get("session_id")
             .and_then(|value| value.as_str())
             .map(|value| value.to_string());
-        self.append_event(entity_id, session_id, kind, payload, soul_ref)
+        let payload_digest = execution_payload_digest(payload)?;
+        self.append_event_digest_with_id(
+            record_id.to_string(),
+            entity_id,
+            session_id,
+            kind,
+            payload_digest,
+            soul_ref,
+        )
     }
 
+    pub(crate) fn append_outbox_metadata(
+        &self,
+        metadata: &crate::outbox::OutboxLedgerMetadata,
+    ) -> Result<ExecutionEvent, String> {
+        self.append_event_digest_with_id(
+            metadata.record_id.clone(),
+            &metadata.entity_id,
+            metadata.session_id.clone(),
+            &metadata.kind,
+            metadata.payload_digest.clone(),
+            &metadata.soul_ref,
+        )
+    }
+
+    #[cfg(test)]
     pub fn append_event(
         &self,
         entity_id: &str,
@@ -54,11 +96,61 @@ impl ExecutionLedger {
         payload: &serde_json::Value,
         soul_ref: &str,
     ) -> Result<ExecutionEvent, String> {
+        self.append_event_with_id(
+            uuid::Uuid::new_v4().to_string(),
+            entity_id,
+            session_id,
+            event_kind,
+            payload,
+            soul_ref,
+        )
+    }
+
+    #[cfg(test)]
+    fn append_event_with_id(
+        &self,
+        event_id: String,
+        entity_id: &str,
+        session_id: Option<String>,
+        event_kind: &str,
+        payload: &serde_json::Value,
+        soul_ref: &str,
+    ) -> Result<ExecutionEvent, String> {
+        self.append_event_digest_with_id(
+            event_id,
+            entity_id,
+            session_id,
+            event_kind,
+            execution_payload_digest(payload)?,
+            soul_ref,
+        )
+    }
+
+    fn append_event_digest_with_id(
+        &self,
+        event_id: String,
+        entity_id: &str,
+        session_id: Option<String>,
+        event_kind: &str,
+        payload_digest: String,
+        soul_ref: &str,
+    ) -> Result<ExecutionEvent, String> {
         let mut events = self.events.lock().map_err(|e| e.to_string())?;
+        if let Some(existing) = events.iter().find(|event| event.event_id == event_id) {
+            if existing.entity_id == entity_id
+                && existing.session_id == session_id
+                && existing.event_kind == event_kind
+                && existing.payload_digest == payload_digest
+            {
+                return Ok(existing.clone());
+            }
+            return Err(format!(
+                "Execution event ID {event_id} conflicts with different event data"
+            ));
+        }
+
         let previous_hash = events.last().map(|event| event.event_hash.clone());
         let created_at_utc = chrono::Utc::now().to_rfc3339();
-        let payload_digest = sha256_hex(&serde_json::to_vec(payload).map_err(|e| e.to_string())?);
-        let event_id = uuid::Uuid::new_v4().to_string();
         let event_hash = event_hash(EventHashInput {
             event_id: &event_id,
             entity_id,
@@ -81,8 +173,10 @@ impl ExecutionLedger {
             created_at_utc,
             soul_ref: soul_ref.to_string(),
         };
-        events.push(event.clone());
-        self.persist(&events)?;
+        let mut next = events.clone();
+        next.push(event.clone());
+        self.persist(&next)?;
+        *events = next;
         Ok(event)
     }
 
@@ -113,11 +207,18 @@ impl ExecutionLedger {
             events: events.to_vec(),
         })
         .map_err(|e| e.to_string())?;
-        let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-        std::fs::rename(&tmp, &self.path).map_err(|e| e.to_string())?;
-        Ok(())
+        #[cfg(test)]
+        if let Some(save) = &self.test_save {
+            return save(&self.path, &bytes).map_err(|e| e.to_string());
+        }
+        abigail_core::secure_fs::write_bytes_atomic(&self.path, &bytes).map_err(|e| e.to_string())
     }
+}
+
+pub(crate) fn execution_payload_digest(payload: &serde_json::Value) -> Result<String, String> {
+    Ok(sha256_hex(
+        &serde_json::to_vec(payload).map_err(|error| error.to_string())?,
+    ))
 }
 
 pub fn verify_chain(events: &[ExecutionEvent]) -> bool {
@@ -220,6 +321,53 @@ mod tests {
         assert!(verify_chain(&events));
         events[1].payload_digest = "tampered".to_string();
         assert!(!verify_chain(&events));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn exact_outbox_retry_keeps_one_execution_event() {
+        let dir = std::env::temp_dir().join(format!(
+            "abigail-execution-ledger-outbox-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let record_id = uuid::Uuid::new_v4().to_string();
+        let payload = serde_json::json!({
+            "session_id": "session-1",
+            "skill_id": "com.abigail.calendar",
+            "tool_name": "list_events"
+        });
+        let ledger = ExecutionLedger::load(&dir).unwrap();
+
+        let first = ledger
+            .append_outbox_event(&record_id, "entity-1", "skill_used", &payload, "soul-ref")
+            .unwrap();
+        let retry = ledger
+            .append_outbox_event(&record_id, "entity-1", "skill_used", &payload, "soul-ref")
+            .unwrap();
+
+        assert_eq!(first.event_id, record_id);
+        assert_eq!(retry.event_id, first.event_id);
+        assert_eq!(retry.event_hash, first.event_hash);
+        assert_eq!(ledger.recent(None, 10).len(), 1);
+        let conflict = ledger
+            .append_outbox_event(
+                &record_id,
+                "entity-1",
+                "skill_used",
+                &serde_json::json!({
+                    "session_id": "session-1",
+                    "skill_id": "com.abigail.weather",
+                    "tool_name": "forecast"
+                }),
+                "soul-ref",
+            )
+            .unwrap_err();
+        assert!(conflict.contains("conflicts"), "{conflict}");
+
+        drop(ledger);
+        let restarted = ExecutionLedger::load(&dir).unwrap();
+        assert_eq!(restarted.recent(None, 10).len(), 1);
+        assert!(verify_chain(&restarted.recent(None, 10)));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

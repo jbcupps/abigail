@@ -1,20 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createGenesisSession, deleteGenesisSession, displayGenesisValue, essenceFor, exportGenesisMarkdown, GENESIS_MODES, genesisAction, getGenesisSession, importGenesisMarkdown, listGenesisSessions, sendGenesisMessage, type FieldUpdate, type GenesisMode, type GenesisSession } from "../lib/genesisClient";
+import { deleteGenesisSession, displayGenesisValue, essenceFor, exportGenesisMarkdown, GENESIS_MODES, genesisAction, getGenesisSession, importGenesisMarkdown, listGenesisSessions, sendGenesisMessage, type FieldUpdate, type GenesisCreationSeed, type GenesisSession } from "../lib/genesisClient";
+import { createGenesisLaunchService } from "../lib/genesisLaunchDraft";
 import { openEntity } from "../lib/entityWindow";
 import GenesisDefinition from "./GenesisDefinition";
+import GenesisFirstSignal from "./GenesisFirstSignal";
 import GenesisStudio from "./GenesisStudio";
 import GenesisVoice from "./GenesisVoice";
 import GenesisChime from "./GenesisChime";
 import GenesisRetention from "./GenesisRetention";
+import GenesisQuest, { QuestRail } from "./GenesisQuest";
+import GenesisCelebration from "./GenesisCelebration";
+import type { BadgeView, QuestStageId } from "../lib/questClient";
 
-type Tab = "conversation" | "definition" | "sources" | "chronicle";
+type Tab = "conversation" | "quest" | "definition" | "sources" | "chronicle";
+const TAB_LABELS: Record<Tab, string> = { conversation: "Discovery", quest: "Quest", definition: "Definition", sources: "Markdown", chronicle: "Chronicle" };
 const DIMENSIONS = [["identity", "Identity"], ["personality", "Personality"], ["purpose", "Purpose"], ["memories_lore", "Memories & lore"], ["appearance", "Appearance"], ["voice_presence", "Voice & presence"]] as const;
 const SPARKS = ["A compassionate guide for everyday life", "An ancient librarian who fears forgetting", "A curious companion for family discoveries"];
 
-export default function GenesisWorkspace({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+export default function GenesisWorkspace({ onClose, onCreated, resumeId }: { onClose: () => void; onCreated: () => void; resumeId?: string }) {
   const [sessions, setSessions] = useState<GenesisSession[]>([]);
   const [session, setSession] = useState<GenesisSession | null>(null);
-  const [mode, setMode] = useState<GenesisMode>("guided");
   const [composer, setComposer] = useState("");
   const [tab, setTab] = useState<Tab>("conversation");
   const [busy, setBusy] = useState(false);
@@ -25,6 +30,9 @@ export default function GenesisWorkspace({ onClose, onCreated }: { onClose: () =
   const [selectedProposals, setSelectedProposals] = useState<string[]>([]);
   const [replaceImportFacts, setReplaceImportFacts] = useState(false);
   const [confirmation, setConfirmation] = useState<string | null>(null);
+  const [questStage, setQuestStage] = useState<QuestStageId>("reservation");
+  const [celebration, setCelebration] = useState<BadgeView[] | null>(null);
+  const [launchGenesis] = useState(() => createGenesisLaunchService());
   const flight = useRef(false);
   const mounted = useRef(true);
   const latest = useRef(session);
@@ -44,13 +52,22 @@ export default function GenesisWorkspace({ onClose, onCreated }: { onClose: () =
     finally { flight.current = false; if (mounted.current) setBusy(false); }
   };
   const adopt = (next: GenesisSession) => { latest.current = next; if (mounted.current) setSession(next); return next; };
-  const start = (startMode: GenesisMode) => operation(async () => {
-    const next = await createGenesisSession(startMode);
-    adopt(next); setComposer(next.composer_draft || ""); setTab(startMode === "markdown" ? "sources" : "conversation");
-  });
+  const begin = async (seed: GenesisCreationSeed) => {
+    if (flight.current) throw new Error("Another Genesis step is still being saved.");
+    flight.current = true; setBusy(true); setError(""); setNotice("");
+    try {
+      const next = await launchGenesis(seed);
+      adopt(next); setComposer(next.composer_draft || ""); setTab(next.quest ? "quest" : "conversation");
+      setQuestStage(next.quest?.current ?? "reservation");
+    } finally {
+      flight.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  };
   const resume = (id: string) => operation(async () => {
     const next = await getGenesisSession(id);
     adopt(next); setComposer(next.composer_draft || ""); setPendingEdits([]); setTab("conversation");
+    setQuestStage(next.quest?.current ?? "reservation");
   });
   const change = async (action: string, args: Record<string, unknown> = {}) => operation(async () => {
     if (!latest.current) return;
@@ -70,6 +87,12 @@ export default function GenesisWorkspace({ onClose, onCreated }: { onClose: () =
       latest.current = next; setSession(next);
     }
   }, []);
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (!resumeId || resumed.current) return;
+    resumed.current = true;
+    void resume(resumeId).then(() => { if (latest.current?.quest) setTab("quest"); });
+  }, [resumeId]);
   const saveAndExit = () => operation(async () => {
     let current = latest.current;
     if (!current) { onClose(); return; }
@@ -97,7 +120,12 @@ export default function GenesisWorkspace({ onClose, onCreated }: { onClose: () =
     if (current.conflicts.some((conflict) => !conflict.resolved)) throw new Error("Resolve conflicting choices before awakening your Entity.");
     if (pendingEdits.length) current = adopt(await genesisAction(current, "update", { updates: pendingEdits }));
     if (!["review", "portrait_pending", "portrait_approved", "manifesting", "ready", "failed"].includes(current.state)) current = adopt(await genesisAction(current, "review"));
-    adopt(await genesisAction(current, "activate")); setPendingEdits([]); setTab("conversation"); onCreated();
+    const before = new Set(current.quest?.badges.filter((badge) => badge.earned_at).map((badge) => badge.badge));
+    const firstAwakening = !current.awakening;
+    const awakened = adopt(await genesisAction(current, "activate")); setPendingEdits([]); setTab("conversation"); onCreated();
+    if (firstAwakening && awakened.awakening && awakened.quest && awakened.definition.entity_id) {
+      setCelebration(awakened.quest.badges.filter((badge) => badge.earned_at && !before.has(badge.badge)));
+    }
   });
   const voiceCommand = (command: string) => {
     if (command === "accept suggestions") void approveSuggestions();
@@ -128,8 +156,7 @@ export default function GenesisWorkspace({ onClose, onCreated }: { onClose: () =
   if (!session) return <section className="genesis genesis-launch" aria-label="Entity Genesis">
     <header className="genesis-header"><div><div className="genesis-eyebrow">Entity Genesis</div><h2>Every presence begins with a spark.</h2><p>Discover someone your family will come to know. Bring an idea, a story, or simply your curiosity.</p></div><button type="button" onClick={onClose}>Back to Hive</button></header>
     {error && <p role="alert" className="genesis-error">{error}</p>}
-    <div className="genesis-mode-grid">{GENESIS_MODES.map((choice) => <button type="button" className={mode === choice.value ? "is-selected" : ""} aria-pressed={mode === choice.value} onClick={() => setMode(choice.value)} key={choice.value}><strong>{choice.label}</strong><span>{choice.detail}</span></button>)}</div>
-    <div className="genesis-actions"><button type="button" className="genesis-primary" disabled={busy || loading} onClick={() => void start(mode)}>{busy ? "Preparing your session…" : "Begin Genesis"}</button><button type="button" disabled={busy || loading} onClick={() => void operation(async () => { const next = await createGenesisSession("quick"); adopt(next); adopt(await sendGenesisMessage(next, "Suggest three distinctive possible Entities for family life. Keep them as proposals for me to choose; do not assume my approval.")); })}>Surprise me</button></div>
+    <GenesisFirstSignal onBegin={begin} />
     <h3>Return to a creation</h3>
     {loading ? <p role="status">Loading saved creations…</p> : sessions.length === 0 ? <p className="genesis-muted">Your saved sessions will appear here. Every confirmed choice is kept by Hive.</p> : <ul className="genesis-session-list">{sessions.map((item) => <li key={item.id}><div><strong>{item.definition.name || "An unnamed spark"}</strong><span>{item.state.replace(/_/g, " ")} · {new Date(item.updated_at).toLocaleString()}</span></div><button type="button" disabled={busy} onClick={() => void resume(item.id)}>Resume{item.definition.name ? ` ${item.definition.name}` : " creation"}</button><button type="button" disabled={busy} onClick={() => setConfirmation(`session:${item.id}`)}>{item.definition.entity_id ? "Delete Genesis record and media" : "Delete draft"}</button>{confirmation === `session:${item.id}` && <div className="genesis-confirm"><p>Permanently delete this creation session, sources, and generated media? An awakened Entity and its chat history remain available.</p><button type="button" onClick={() => void operation(async () => { await deleteGenesisSession(item.id); setSessions((previous) => previous.filter((draft) => draft.id !== item.id)); setConfirmation(null); })}>Confirm deletion</button><button type="button" onClick={() => setConfirmation(null)}>Keep creation</button></div>}</li>)}</ul>}
   </section>;
@@ -161,6 +188,7 @@ export default function GenesisWorkspace({ onClose, onCreated }: { onClose: () =
     {session.last_error && <div className="genesis-error" role="alert"><strong>Your last step needs attention.</strong><p>{session.last_error}</p><p>Your saved source and confirmed choices are still available. Review the available suggestions, try again through Discovery, or edit Definition directly.</p></div>}
     {error && <div className="genesis-error" role="alert">{error}<button type="button" disabled={busy} onClick={() => void operation(async () => { await refresh(true); setNotice("Reloaded the saved session. Your composer is preserved."); })}>Reload saved session</button></div>}
     {notice && <p className="genesis-notice" role="status">{notice}</p>}
+    {session.quest && <QuestRail quest={session.quest} onSelect={(stage) => { setQuestStage(stage); setTab("quest"); }} />}
     <div className="genesis-layout">
       <aside className="genesis-panel genesis-essence" aria-label="Essence constellation">
         <div className="genesis-eyebrow">Essence constellation</div><h3>A character, becoming clear</h3>
@@ -169,13 +197,14 @@ export default function GenesisWorkspace({ onClose, onCreated }: { onClose: () =
         <p className="genesis-muted">This shows defined characteristics, never your Entity’s value. Explore as much or as little as you like.</p>
         <div className="genesis-readiness"><strong>{creationReady ? "A coherent beginning is ready." : "The essentials"}</strong><p>{!definition.name.trim() ? "Choose a name. " : ""}{!definition.purpose.trim() ? "Give your Entity a purpose. " : ""}{unresolved.length > 0 ? `Resolve ${unresolved.length} conflicting ${unresolved.length === 1 ? "choice" : "choices"}. ` : ""}{creationReady ? "You can awaken your Entity now and keep refining later. Portraits and films are optional." : "Everything else can evolve together."}</p></div>
         <button type="button" className="genesis-primary" disabled={busy || !creationReady} onClick={() => void awaken()}>{definition.entity_id ? "Apply identity refinements" : "Awaken Entity"}</button>
-        {definition.entity_id && <button type="button" disabled={busy} onClick={() => void operation(() => openEntity(definition.entity_id!))}>Meet {definition.name}</button>}
+        {definition.entity_id && session.awakening && <button type="button" disabled={busy} onClick={() => void operation(() => openEntity(definition.entity_id!))}>Meet {definition.name}</button>}
         <button type="button" disabled={busy} onClick={() => { setTab("definition"); void change("review"); }}>Review definition</button>
         <p className="genesis-muted">Fictional traits and lore never grant permission to use tools or connected accounts.</p>
       </aside>
 
       <main className="genesis-panel genesis-discovery">
-        <nav className="genesis-tabs" aria-label="Creation sections">{(["conversation", "definition", "sources", "chronicle"] as Tab[]).map((item) => <button type="button" aria-current={tab === item ? "page" : undefined} key={item} onClick={() => setTab(item)}>{item === "conversation" ? "Discovery" : item === "sources" ? "Markdown" : item === "chronicle" ? "Chronicle" : "Definition"}</button>)}</nav>
+        <nav className="genesis-tabs" aria-label="Creation sections">{(Object.keys(TAB_LABELS) as Tab[]).filter((item) => item !== "quest" || session.quest).map((item) => <button type="button" aria-current={tab === item ? "page" : undefined} key={item} onClick={() => setTab(item)}>{TAB_LABELS[item]}</button>)}</nav>
+        {session.quest && tab === "quest" && <GenesisQuest session={{ ...session, quest: session.quest }} busy={busy} stage={questStage} onStage={setQuestStage} change={change} onSave={saveUpdates} onAwaken={() => void awaken()} onMeet={() => void operation(() => openEntity(definition.entity_id!))} />}
         <div hidden={tab !== "conversation"}>
           <label>Creation mode<select value={session.mode} disabled={busy} onChange={(event) => void change("set_mode", { mode: event.target.value })}>{GENESIS_MODES.map((choice) => <option value={choice.value} key={choice.value}>{choice.label}</option>)}</select></label>
           <div className="genesis-messages" aria-label="Creation conversation" aria-live="polite">
@@ -209,5 +238,6 @@ export default function GenesisWorkspace({ onClose, onCreated }: { onClose: () =
       </main>
       <GenesisStudio session={session} busy={busy} onUpdate={saveUpdates} onRefresh={refresh} />
     </div>
+    {celebration && definition.entity_id && <GenesisCelebration entityId={definition.entity_id} name={definition.name} presence={session.quest?.presence ?? null} newBadges={celebration} onClose={() => setCelebration(null)} onMeet={() => { setCelebration(null); void operation(() => openEntity(definition.entity_id!)); }} />}
   </section>;
 }

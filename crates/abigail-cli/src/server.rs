@@ -537,6 +537,7 @@ async fn chat_with_pipeline(
             content: r.completion.content,
             tool_calls_made: Vec::new(),
             execution_trace: r.trace,
+            completion_risk: None,
         })
     } else {
         entity_chat::run_tool_use_loop(router, executor, messages, tools).await
@@ -563,6 +564,7 @@ async fn chat_with_pipeline(
                 complexity_score,
                 execution_trace: tool_result.execution_trace,
                 session_id: body.session_id.clone(),
+                completion_risk: tool_result.completion_risk,
             }))
         }
         Err(e) => {
@@ -599,6 +601,7 @@ async fn chat_bare(
         complexity_score: None,
         execution_trace: None,
         session_id: None,
+        completion_risk: None,
     }))
 }
 

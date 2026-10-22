@@ -6,6 +6,7 @@ pub mod constitutional;
 pub mod document;
 pub mod dpapi;
 pub mod encrypted_storage;
+mod entity_name;
 pub mod error;
 pub mod global_config;
 pub mod key_detection;
@@ -32,8 +33,9 @@ pub use config::{
 };
 pub use constitutional::load_preprompt_context;
 pub use document::{CoreDocument, DocumentTier};
+pub use entity_name::validate_entity_name;
 pub use error::{CoreError, Result};
-pub use global_config::{AgentEntry, GlobalConfig};
+pub use global_config::{AgentCreationRecord, AgentCreationState, AgentEntry, GlobalConfig};
 pub use key_detection::redact_secrets;
 pub use keyring::{
     generate_external_keypair, generate_master_key, load_master_key, parse_private_key,
@@ -49,3 +51,27 @@ pub use vault::external::{ExternalVault, ReadOnlyFileVault};
 pub use vault::scoped::{ScopedVault, VaultScope};
 pub use vault::unlock::{HybridUnlockProvider, PassphraseUnlockProvider, UnlockProvider};
 pub use verifier::{verify_constitutional_integrity, write_sig_file, Verifier};
+
+#[cfg(test)]
+mod entity_name_contract_tests {
+    use super::validate_entity_name;
+
+    #[test]
+    fn entity_names_are_trimmed_bounded_unicode_without_controls() {
+        for invalid in [
+            "",
+            " Nova",
+            "Nova ",
+            "No\nva",
+            "No\rva",
+            "No\u{0007}va",
+            &"a".repeat(81),
+        ] {
+            assert!(
+                validate_entity_name(invalid).is_err(),
+                "accepted invalid Entity name {invalid:?}"
+            );
+        }
+        assert!(validate_entity_name(&"界".repeat(80)).is_ok());
+    }
+}

@@ -244,6 +244,19 @@ pub async fn get_execution_events(
 // POST /v1/chat
 // ---------------------------------------------------------------------------
 
+fn chat_error_envelope(error: crate::pipeline::TurnFailure) -> ApiEnvelope<ChatResponse> {
+    match error.code {
+        Some(code) => ApiEnvelope::coded_error(error.message, code.as_str(), error.interrupted),
+        None => ApiEnvelope::error(error.message),
+    }
+}
+
+fn chat_error_sse_data(error: &crate::pipeline::TurnFailure) -> String {
+    serde_json::to_string(error).unwrap_or_else(|_| {
+        r#"{"message":"The reply could not be completed.","interrupted":false}"#.to_string()
+    })
+}
+
 pub async fn chat(
     State(state): State<EntityDaemonState>,
     Json(body): Json<ChatRequest>,
@@ -310,7 +323,7 @@ pub async fn chat(
 
     match tokio::time::timeout(crate::pipeline::CHAT_TURN_TIMEOUT, done_rx).await {
         Ok(Ok(Ok(response))) => Json(ApiEnvelope::success(response)),
-        Ok(Ok(Err(e))) => Json(ApiEnvelope::error(e)),
+        Ok(Ok(Err(error))) => Json(chat_error_envelope(error)),
         Ok(Err(_)) => Json(ApiEnvelope::error(
             "chat pipeline dropped the turn".to_string(),
         )),
@@ -443,9 +456,15 @@ pub async fn chat_stream(
                     )
                     .await;
             }
-            Ok(Ok(Err(e))) => {
+            Ok(Ok(Err(error))) => {
                 fwd_task.abort();
-                let _ = sse_tx.send(Event::default().event("error").data(e)).await;
+                let _ = sse_tx
+                    .send(
+                        Event::default()
+                            .event("error")
+                            .data(chat_error_sse_data(&error)),
+                    )
+                    .await;
             }
             Ok(Err(_)) => {
                 fwd_task.abort();
@@ -754,6 +773,11 @@ pub async fn memory_insert(
         "crystallized" => Memory::crystallized(body.content),
         _ => Memory::ephemeral(body.content),
     };
+    let memory = if memory.weight != abigail_memory::MemoryWeight::Ephemeral {
+        memory.with_explicit_confirmation()
+    } else {
+        memory
+    };
 
     let entry = MemoryEntry {
         id: memory.id.clone(),
@@ -761,18 +785,37 @@ pub async fn memory_insert(
         weight: memory.weight.as_str().to_string(),
         created_at: memory.created_at.to_rfc3339(),
     };
+    let journey_record_id = (memory.weight != abigail_memory::MemoryWeight::Ephemeral).then(|| {
+        crate::state::deterministic_journey_record_id(
+            &state.entity_id,
+            "memory_confirmed",
+            &entry.id,
+        )
+    });
+    if let Some(record_id) = journey_record_id.as_ref() {
+        if let Err(error) = state.outbox.reserve_slot_with_soul_ref(
+            record_id.clone(),
+            &state.entity_id,
+            "memory_confirmed",
+            &state.soul_ref,
+        ) {
+            tracing::warn!(
+                memory_id = %entry.id,
+                "Explicit memory was not inserted because activity capacity could not be reserved: {error}"
+            );
+            return Json(ApiEnvelope::error(if error.contains("backpressure") {
+                format!(
+                    "I couldn't safely save this memory because of activity backpressure; no memory was inserted. {error}"
+                )
+            } else {
+                "I couldn't safely save an activity reservation, so no memory was inserted."
+                    .to_string()
+            }));
+        }
+    }
 
     match state.memory.insert_memory(&memory) {
         Ok(()) => {
-            let _ = state.queue_outbox_record(
-                "memory_insert",
-                serde_json::json!({
-                    "id": entry.id.clone(),
-                    "content": entry.content.clone(),
-                    "weight": entry.weight.clone(),
-                    "created_at": entry.created_at.clone(),
-                }),
-            );
             if let Some(ref hook) = state.memory_hook {
                 if let Err(e) = hook.on_memory_persisted(
                     &entry.id,
@@ -783,9 +826,38 @@ pub async fn memory_insert(
                     tracing::warn!("Memory hook error: {}", e);
                 }
             }
+            if let Some(record_id) = journey_record_id {
+                if let Err(error) = state.commit_outbox_reservation(
+                    &record_id,
+                    serde_json::json!({
+                        "memory_id": entry.id.clone(),
+                        "memory_weight": entry.weight.clone(),
+                    }),
+                ) {
+                    // The memory itself is already durable and explicitly
+                    // marked. Reconciliation will stage this exact fact
+                    // without asking the family to repeat the insertion.
+                    tracing::error!(
+                        memory_id = %entry.id,
+                        activity_record_id = %record_id,
+                        "Explicit memory activity will be recovered from durable metadata: {error}"
+                    );
+                }
+            }
             Json(ApiEnvelope::success(entry))
         }
-        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+        Err(e) => {
+            if let Some(record_id) = journey_record_id {
+                if let Err(release_error) = state.outbox.release_reservation(&record_id) {
+                    tracing::error!(
+                        memory_id = %entry.id,
+                        activity_record_id = %record_id,
+                        "Failed memory reservation could not be released: {release_error}"
+                    );
+                }
+            }
+            Json(ApiEnvelope::error(e.to_string()))
+        }
     }
 }
 
@@ -1031,7 +1103,7 @@ fn queue_job_record(job: JobRecord) -> QueueJobRecord {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use abigail_capabilities::cognitive::{CompletionRequest, CompletionResponse, LlmProvider};
     use abigail_core::{AppConfig, RoutingMode};
@@ -1043,8 +1115,12 @@ mod tests {
     use async_trait::async_trait;
     use axum::extract::{Path, Query, State};
     use axum::Json;
+    use sha2::{Digest, Sha256};
     use std::path::PathBuf;
-    use std::sync::Arc;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
 
     struct MockProvider;
 
@@ -1061,7 +1137,7 @@ mod tests {
         }
     }
 
-    fn build_state() -> EntityDaemonState {
+    pub(crate) fn build_state() -> EntityDaemonState {
         let mut router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
         router.id = Arc::new(MockProvider);
         router.ego = None;
@@ -1104,6 +1180,7 @@ mod tests {
             executor,
             docs_dir,
             memory,
+            assistant_turn_store: Arc::new(crate::memory_consumer::DurableAssistantTurnStore),
             job_queue,
             stream_broker,
             memory_hook: None,
@@ -1143,6 +1220,51 @@ mod tests {
             .map(|dir| dir.join("target").join("test-data"))
             .unwrap_or_else(|_| std::env::temp_dir())
             .join(format!("{prefix}_{}", uuid::Uuid::new_v4()))
+    }
+
+    fn expected_journey_record_id(entity_id: &str, kind: &str, source_id: &str) -> String {
+        let mut digest = Sha256::new();
+        digest.update(b"abigail-runtime-journey-event-v1");
+        for value in [entity_id, kind, source_id] {
+            digest.update((value.len() as u64).to_be_bytes());
+            digest.update(value.as_bytes());
+        }
+        let hash = digest.finalize();
+        let mut bytes = [0_u8; 16];
+        bytes.copy_from_slice(&hash[..16]);
+        bytes[6] = (bytes[6] & 0x0f) | 0x50;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        uuid::Uuid::from_bytes(bytes).to_string()
+    }
+
+    #[test]
+    fn completion_risk_errors_have_stable_http_and_sse_codes() {
+        for (risk, interrupted, expected_message) in [
+            (
+                entity_core::CompletionRisk::ActionCompletedVerifyBeforeRepeating,
+                false,
+                "An action completed. Verify the result before repeating it.",
+            ),
+            (
+                entity_core::CompletionRisk::ActionMayHaveCompletedVerifyBeforeRepeating,
+                true,
+                "An action may have completed. Verify the result before repeating it.",
+            ),
+        ] {
+            let failure = crate::pipeline::TurnFailure::completion_risk(risk, interrupted);
+            let envelope = chat_error_envelope(failure.clone());
+            assert!(!envelope.ok);
+            assert_eq!(envelope.error.as_deref(), Some(expected_message));
+            assert_eq!(envelope.error_code.as_deref(), Some(risk.as_str()));
+            assert_eq!(envelope.interrupted, Some(interrupted));
+
+            let sse: serde_json::Value =
+                serde_json::from_str(&chat_error_sse_data(&failure)).unwrap();
+            assert_eq!(sse["code"], risk.as_str());
+            assert_eq!(sse["message"], expected_message);
+            assert_eq!(sse["interrupted"], interrupted);
+            assert!(!sse.to_string().contains("secret-leak"));
+        }
     }
 
     #[tokio::test]
@@ -1266,6 +1388,268 @@ mod tests {
         .await
         .0;
         assert!(other.data.unwrap().messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn memory_insert_outbox_confirms_only_explicit_non_ephemeral_memory_without_content() {
+        let state = build_state();
+        let ephemeral = memory_insert(
+            State(state.clone()),
+            Json(MemoryInsertRequest {
+                content: "temporary private note".to_string(),
+                weight: "ephemeral".to_string(),
+            }),
+        )
+        .await
+        .0;
+        assert!(ephemeral.ok);
+        assert!(state.outbox.snapshot().unwrap().is_empty());
+
+        let durable = memory_insert(
+            State(state.clone()),
+            Json(MemoryInsertRequest {
+                content: "durable private note".to_string(),
+                weight: "distilled".to_string(),
+            }),
+        )
+        .await
+        .0;
+        assert!(durable.ok);
+        let entry = durable.data.unwrap();
+        let records = state.outbox.snapshot().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].kind, "memory_confirmed");
+        assert_eq!(
+            records[0].record_id,
+            expected_journey_record_id(&state.entity_id, "memory_confirmed", &entry.id),
+            "a confirmed memory retry must address the same journey event"
+        );
+        assert_eq!(records[0].payload["memory_id"], entry.id);
+        assert_eq!(records[0].payload["memory_weight"], "distilled");
+        assert!(records[0].payload.get("content").is_none());
+        assert!(!records[0]
+            .payload
+            .to_string()
+            .contains("durable private note"));
+        let memories = state.memory.all_memories().unwrap();
+        let ephemeral = memories
+            .iter()
+            .find(|memory| memory.content == "temporary private note")
+            .unwrap();
+        let durable = memories
+            .iter()
+            .find(|memory| memory.id == entry.id)
+            .unwrap();
+        assert!(!ephemeral.explicitly_confirmed);
+        assert!(durable.explicitly_confirmed);
+    }
+
+    #[tokio::test]
+    async fn explicit_memory_save_failure_returns_error_and_preserves_the_prior_outbox() {
+        let mut state = build_state();
+        let root = test_scratch_dir("abigail-memory-outbox-save");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let saver_calls = calls.clone();
+        let outbox = crate::outbox::RuntimeOutbox::load_with_saver(&root, 4, move |path, bytes| {
+            if saver_calls.fetch_add(1, Ordering::SeqCst) == 1 {
+                anyhow::bail!("injected memory outbox save failure");
+            }
+            abigail_core::secure_fs::write_bytes_atomic(path, bytes)?;
+            Ok(())
+        })
+        .unwrap();
+        let existing = outbox
+            .enqueue(
+                &state.entity_id,
+                "skill_used",
+                serde_json::json!({
+                    "session_id": "already-queued",
+                    "skill_id": "com.abigail.calendar",
+                    "tool_name": "list_events"
+                }),
+            )
+            .unwrap();
+        state.outbox = Arc::new(outbox);
+
+        let response = memory_insert(
+            State(state.clone()),
+            Json(MemoryInsertRequest {
+                content: "durable private fallback".to_string(),
+                weight: "crystallized".to_string(),
+            }),
+        )
+        .await
+        .0;
+
+        assert!(
+            !response.ok,
+            "event staging failure must not report success"
+        );
+        assert!(
+            response
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("safely save")),
+            "{:?}",
+            response.error
+        );
+        assert!(
+            state
+                .memory
+                .all_memories()
+                .unwrap()
+                .iter()
+                .all(|memory| memory.content != "durable private fallback"),
+            "reservation save failure must happen before memory insertion"
+        );
+        let queued = state.outbox.snapshot().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].record_id, existing.record_id);
+        assert!(state.outbox.reservations().unwrap().is_empty());
+        let restarted = crate::outbox::RuntimeOutbox::load(&root, 4).unwrap();
+        assert_eq!(
+            restarted.snapshot().unwrap()[0].record_id,
+            existing.record_id
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn explicit_memory_capacity_returns_error_without_evicting_queued_records() {
+        let mut state = build_state();
+        let root = test_scratch_dir("abigail-memory-outbox-capacity");
+        let outbox = crate::outbox::RuntimeOutbox::load(&root, 1).unwrap();
+        let existing = outbox
+            .enqueue(
+                &state.entity_id,
+                "skill_used",
+                serde_json::json!({
+                    "session_id": "already-queued",
+                    "skill_id": "com.abigail.weather",
+                    "tool_name": "forecast"
+                }),
+            )
+            .unwrap();
+        state.outbox = Arc::new(outbox);
+
+        let response = memory_insert(
+            State(state.clone()),
+            Json(MemoryInsertRequest {
+                content: "durable capacity fallback".to_string(),
+                weight: "distilled".to_string(),
+            }),
+        )
+        .await
+        .0;
+
+        assert!(
+            !response.ok,
+            "outbox capacity must not report memory success"
+        );
+        assert!(
+            response
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("safely save")),
+            "{:?}",
+            response.error
+        );
+        assert!(state
+            .memory
+            .all_memories()
+            .unwrap()
+            .iter()
+            .all(|memory| memory.content != "durable capacity fallback"));
+        let queued = state.outbox.snapshot().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].record_id, existing.record_id);
+        assert!(state.outbox.reservations().unwrap().is_empty());
+        let restarted = crate::outbox::RuntimeOutbox::load(&root, 1).unwrap();
+        assert_eq!(
+            restarted.snapshot().unwrap()[0].record_id,
+            existing.record_id
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn explicit_memory_post_commit_failure_returns_success_and_recovers_after_restart() {
+        let mut state = build_state();
+        state.soul_ref = "memory-reservation-soul-a".to_string();
+        let root = test_scratch_dir("abigail-memory-post-commit");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let saver_calls = calls.clone();
+        state.outbox = Arc::new(
+            crate::outbox::RuntimeOutbox::load_with_saver(&root, 4, move |path, bytes| {
+                let call = saver_calls.fetch_add(1, Ordering::SeqCst) + 1;
+                if call == 2 {
+                    anyhow::bail!("injected memory activity commit failure");
+                }
+                abigail_core::secure_fs::write_bytes_atomic(path, bytes)?;
+                Ok(())
+            })
+            .unwrap(),
+        );
+
+        let response = memory_insert(
+            State(state.clone()),
+            Json(MemoryInsertRequest {
+                content: "durable recovered memory".to_string(),
+                weight: "distilled".to_string(),
+            }),
+        )
+        .await
+        .0;
+
+        assert!(
+            response.ok,
+            "a durable memory must remain a successful operation: {:?}",
+            response.error
+        );
+        assert!(response.error.is_none());
+        let entry = response.data.unwrap();
+        assert!(state
+            .memory
+            .all_memories()
+            .unwrap()
+            .iter()
+            .any(|memory| memory.id == entry.id && memory.explicitly_confirmed));
+        assert!(state.outbox.snapshot().unwrap().is_empty());
+        let expected_id =
+            expected_journey_record_id(&state.entity_id, "memory_confirmed", &entry.id);
+        assert_eq!(
+            state.outbox.reservations().unwrap()[0].record_id,
+            expected_id
+        );
+        assert_eq!(
+            state.outbox.reservations().unwrap()[0].soul_ref,
+            "memory-reservation-soul-a"
+        );
+
+        let mut restarted = build_state();
+        restarted.soul_ref = "memory-current-soul-b".to_string();
+        restarted.memory = state.memory.clone();
+        restarted.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&root, 4).unwrap());
+        restarted
+            .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)
+            .unwrap();
+        let recovered = restarted.outbox.snapshot().unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].record_id, expected_id);
+        assert_eq!(recovered[0].payload["memory_id"], entry.id);
+        assert_eq!(recovered[0].payload["memory_weight"], "distilled");
+        assert!(recovered[0].payload.get("content").is_none());
+        assert!(restarted.outbox.reservations().unwrap().is_empty());
+        let ledger = restarted.execution_ledger.recent(None, 10);
+        assert_eq!(ledger.len(), 1);
+        assert_eq!(ledger[0].event_id, expected_id);
+        assert_eq!(ledger[0].soul_ref, "memory-reservation-soul-a");
+
+        restarted
+            .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)
+            .unwrap();
+        assert_eq!(restarted.outbox.snapshot().unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

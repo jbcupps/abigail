@@ -77,11 +77,11 @@
 .genesis-asset-list { display: grid; gap: 16px; }
 .genesis-asset-list img, .genesis-asset-list video { width: 100%; max-height: 300px; object-fit: contain; border-radius: var(--radius-lg); background: var(--color-bg-inset); }
 .genesis-asset-list p { font-size: 12px; }
-.genesis-mode-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin: 24px 0; }
-.genesis-mode-grid button { padding: 20px; text-align: left; }
-.genesis-mode-grid strong { display: block; color: var(--color-text-bright); font-weight: 600; font-size: 18px; margin-bottom: 8px; }
-.genesis-mode-grid span { color: var(--color-text-dim); }
-.genesis-mode-grid button.is-selected { border-color: var(--color-primary-dim); background: var(--color-primary-glow); }
+.first-signal { display: grid; grid-template-columns: minmax(240px, .9fr) minmax(300px, 1.1fr); gap: 28px; align-items: start; margin: 24px 0 32px; padding: 24px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-dim); }
+.first-signal-copy h3 { margin-top: 4px; font-size: 22px; }
+.first-signal-presence { min-width: 0; }
+.first-signal-presence > button[type=submit] { width: 100%; margin-top: 8px; }
+.first-signal .quest-swatches button { flex: 1 1 110px; justify-content: center; }
 .genesis-session-list { padding: 0; list-style: none; margin: 16px 0; }
 .genesis-session-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px 0; border-top: 1px solid var(--color-border-dim); }
 .genesis-session-list li > div:first-child { flex: 1; }
@@ -97,7 +97,7 @@
 @keyframes genesis-arrive { from { opacity: 0; } to { opacity: 1; } }
 @keyframes genesis-orbit { from { transform: rotateX(55deg) rotate(0deg); opacity: 0; } to { transform: rotateX(55deg) rotate(360deg); opacity: 1; } }
 @media (max-width: 1100px) { .genesis-layout { grid-template-columns: minmax(150px,.75fr) minmax(270px,2fr); } .genesis-studio { grid-column: 1 / -1; } .genesis-manifestation { height: 260px; } .genesis-header { flex-direction: column; } .genesis-asset-list { grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); } }
-@media (max-width: 700px) { .genesis-layout { grid-template-columns: minmax(0,1fr); } .genesis-discovery { grid-row: 1; } .genesis-panel { padding: 16px 0; } .genesis-mode-grid { grid-template-columns: minmax(0,1fr); } .genesis-essence .genesis-stars { display: none; } .genesis-messages { max-height: 45vh; } .genesis-header .genesis-actions { width: 100%; } .genesis-traits { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 700px) { .genesis-layout, .first-signal { grid-template-columns: minmax(0,1fr); } .first-signal { padding: 16px; } .genesis-discovery { grid-row: 1; } .genesis-panel { padding: 16px 0; } .genesis-essence .genesis-stars { display: none; } .genesis-messages { max-height: 45vh; } .genesis-header .genesis-actions { width: 100%; } .genesis-traits { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (prefers-reduced-motion: reduce) { .genesis *, .genesis *:before, .genesis *:after { animation: none !important; transition: none !important; } }
 
 /* The approved portrait remains quietly present after emergence finishes. */
@@ -113,3 +113,84 @@
 @media (prefers-reduced-motion: reduce) {
   .genesis-manifestation img { animation: none !important; transform: none !important; filter: none !important; }
 }
+
+/* Genesis Quest: presentation only. */
+.quest-rail { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; margin: 4px 0 20px; padding: 12px 16px; background: var(--color-surface-dim); border-radius: var(--radius-lg); }
+.quest-rail ol { display: flex; flex: 1 1 520px; margin: 0; padding: 0; list-style: none; }
+.quest-rail li { flex: 1; position: relative; min-width: 0; }
+.quest-rail li + li:before { content: ''; position: absolute; top: 21px; right: calc(50% + 10px); left: calc(-50% + 10px); height: 1px; background: var(--color-border); }
+.quest-rail li.is-complete + li:before { background: var(--color-primary-dim); }
+.genesis .quest-rail button { display: flex; flex-direction: column; align-items: center; width: 100%; gap: 2px; border: 0; background: transparent; padding: 12px 4px 4px; font-size: 12px; min-height: 0; text-align: center; }
+.quest-rail button > span:nth-child(2) { color: var(--color-text-bright); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.quest-rail small { color: var(--color-text-dim); font-size: 11px; }
+.quest-node { width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--color-border); background: var(--color-bg-elevated); margin-bottom: 4px; }
+.quest-rail li.is-complete .quest-node { background: var(--color-primary-dim); border-color: var(--color-primary-dim); }
+.quest-rail li.is-current .quest-node { border-color: var(--color-primary-dim); box-shadow: 0 0 0 4px var(--color-primary-glow); }
+.quest-level { flex: 0 1 220px; font-size: 12px; }
+.quest-level > span { display: flex; justify-content: space-between; gap: 8px; color: var(--color-text-dim); }
+.quest-level strong { color: var(--color-text-bright); font-weight: 600; }
+.quest-tier-path { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 6px; padding: 0; list-style: none; }
+.quest-tier-path li { display: grid; gap: 2px; padding: 8px; border: 1px solid var(--color-border-dim); border-radius: var(--radius-md); color: var(--color-text-dim); }
+.quest-tier-path li.is-current { border-color: var(--color-primary-dim); background: var(--color-primary-glow); color: var(--color-text-bright); }
+.quest-tier-path li.is-next { border-color: var(--color-border); color: var(--color-text); }
+.quest-tier-path small { font-size: 11px; }
+.quest-stage-head h3 { margin-top: 4px; }
+.quest-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.quest-card { display: flex; flex-direction: column; padding: 12px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-bg-elevated); }
+.quest-card header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.quest-card header strong { color: var(--color-text-bright); }
+.quest-card header span, .quest-card > p { color: var(--color-text-dim); font-size: 12px; }
+.quest-card dl { display: grid; gap: 4px; margin: 8px 0 12px; font-size: 11px; }
+.quest-card dl div { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 8px; }
+.quest-card dd { margin: 0; }
+.quest-stat { height: 6px; border-radius: 3px; background: var(--color-border-dim); overflow: hidden; }
+.quest-stat span { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--color-primary-dim), var(--color-primary)); }
+.quest-card button { margin-top: auto; }
+.quest-pending { margin: 16px 0; padding: 12px; border: 1px solid var(--color-primary-dim); border-radius: var(--radius-md); background: var(--color-primary-glow); }
+.genesis fieldset { border: 0; padding: 0; margin: 16px 0; min-width: 0; }
+.genesis legend { font-weight: 600; color: var(--color-text-bright); margin-bottom: 4px; }
+.quest-choices { display: grid; gap: 8px; }
+.genesis .quest-choices button { display: flex; flex-direction: column; align-items: flex-start; text-align: left; }
+.quest-choices button span { color: var(--color-text-dim); font-size: 12px; }
+.genesis .quest-choices button[aria-pressed=true], .genesis .quest-swatches button[aria-pressed=true] { border-color: var(--color-primary-dim); background: var(--color-primary-glow); }
+.quest-instincts { max-height: 260px; }
+.quest-presence-preview { display: flex; align-items: center; gap: 16px; padding: 16px; border-radius: var(--radius-lg); background: var(--color-bg-inset); }
+.quest-presence-preview strong { display: block; font-size: 18px; color: var(--color-text-bright); }
+.quest-presence-preview span { color: var(--color-text-dim); font-size: 12px; }
+.quest-swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.genesis .quest-swatches button { display: inline-flex; align-items: center; gap: 8px; }
+.quest-swatches button > span:first-child { width: 18px; height: 18px; border-radius: 50%; }
+.quest-swatches small { color: var(--color-text-dim); }
+.quest-checklist, .quest-first { padding-left: 20px; }
+.quest-checklist li, .quest-first li { margin: 8px 0; color: var(--color-text-dim); }
+.quest-checklist li.is-complete, .quest-first li.is-complete { color: var(--color-text); }
+.quest-first strong { color: var(--color-text-bright); }
+.quest-milestone { display: grid; gap: 4px; margin: 12px 0; font-size: 14px; }
+.quest-nav { border-top: 1px solid var(--color-border-dim); padding-top: 12px; }
+.quest-badges ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; padding: 0; list-style: none; }
+.quest-badges li { display: flex; gap: 8px; align-items: flex-start; padding: 8px; border-radius: var(--radius-md); border: 1px solid var(--color-border-dim); opacity: .6; }
+.quest-badges li.is-earned { opacity: 1; border-color: var(--color-primary-dim); }
+.quest-badges strong { display: block; font-size: 12px; color: var(--color-text-bright); }
+.quest-badges small { display: block; }
+.quest-badge-mark { color: var(--color-primary-dim); width: 14px; text-align: center; }
+.genesis-celebration { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px; background: var(--color-overlay); }
+.genesis-celebration-card { position: relative; isolation: isolate; overflow: hidden; width: min(440px, 100%); padding: 32px 24px 20px; text-align: center; border: 1px solid var(--color-primary-dim); border-radius: var(--radius-lg); background: var(--color-bg-elevated); animation: genesis-arrive .6s ease-out both; }
+.genesis-celebration-card .presence-crest { margin: 0 auto 8px; display: block; }
+.genesis-celebration-card .genesis-actions { justify-content: center; }
+.genesis-celebration-soul strong { color: var(--color-text-bright); }
+.genesis-celebration-soul span { display: block; color: var(--color-text-dim); font-size: 12px; }
+.genesis-celebration-badges { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 0; list-style: none; }
+.genesis-celebration-badges li { padding: 4px 10px; border-radius: 999px; background: var(--color-primary-glow); color: var(--color-text-bright); font-size: 12px; }
+.genesis-celebration-glow { position: absolute; inset: 0; z-index: -1; background: radial-gradient(circle at 50% 30%, var(--color-primary-glow), transparent 60%); }
+.genesis-celebration-glow span { position: absolute; bottom: -8px; left: calc(6% + var(--spark) * 8%); width: 4px; height: 4px; border-radius: 50%; background: var(--color-primary-dim); opacity: 0; animation: quest-spark 3.2s ease-out calc(var(--spark) * 160ms) 2; }
+@keyframes quest-spark { 0% { transform: translateY(0); opacity: 0; } 20% { opacity: .9; } 100% { transform: translateY(-280px); opacity: 0; } }
+@media (max-width: 700px) { .quest-rail li small { display: none; } }
+@media (prefers-reduced-motion: reduce) { .genesis-celebration-card, .genesis-celebration-glow span { animation: none !important; } .genesis-celebration-glow span { display: none; } }
+
+/* Presence crests appear on Entity cards too, so they are not scoped. */
+.presence-crest { flex-shrink: 0; }
+.presence-crest.is-calm .presence-crest-glyph { transform-origin: 32px 32px; animation: presence-breathe 6s ease-in-out infinite; }
+.presence-crest.is-lively .presence-crest-glyph { transform-origin: 32px 32px; animation: presence-turn 14s linear infinite; }
+@keyframes presence-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+@keyframes presence-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .presence-crest .presence-crest-glyph { animation: none !important; } }

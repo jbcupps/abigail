@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod access;
 pub mod genesis;
+pub mod genesis_quest;
 
 // ---------------------------------------------------------------------------
 // Generic API envelope
@@ -20,6 +21,10 @@ pub struct ApiEnvelope<T> {
     pub data: Option<T>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interrupted: Option<bool>,
 }
 
 impl<T: Serialize> ApiEnvelope<T> {
@@ -28,6 +33,8 @@ impl<T: Serialize> ApiEnvelope<T> {
             ok: true,
             data: Some(data),
             error: None,
+            error_code: None,
+            interrupted: None,
         }
     }
 
@@ -36,6 +43,22 @@ impl<T: Serialize> ApiEnvelope<T> {
             ok: false,
             data: None,
             error: Some(msg.into()),
+            error_code: None,
+            interrupted: None,
+        }
+    }
+
+    pub fn coded_error(
+        msg: impl Into<String>,
+        error_code: impl Into<String>,
+        interrupted: bool,
+    ) -> Self {
+        Self {
+            ok: false,
+            data: None,
+            error: Some(msg.into()),
+            error_code: Some(error_code.into()),
+            interrupted: Some(interrupted),
         }
     }
 }
@@ -61,6 +84,8 @@ pub struct EntityInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateEntityRequest {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_key: Option<String>,
 }
 
 /// Response after creating a new entity.
@@ -68,6 +93,34 @@ pub struct CreateEntityRequest {
 pub struct CreateEntityResponse {
     pub id: String,
     pub directory: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_key: Option<String>,
+}
+
+/// Exact creation-key recovery. An explicit absent result proves API support.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityCreationResponse {
+    pub creation_key: String,
+    #[serde(flatten)]
+    pub status: EntityCreationState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum EntityCreationState {
+    Absent,
+    Reserved {
+        name: String,
+    },
+    Complete {
+        name: String,
+        id: String,
+        directory: String,
+    },
+    Unavailable {
+        name: String,
+        id: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -140,16 +193,29 @@ pub struct EthicWeights {
     pub welfare: f32,
 }
 
+/// The current internal Triangle Ethic scoring contract.
+pub const SCORING_VERSION: &str = "triangle-ethic-v1";
+/// The injective canonical payload used for newly signed birth certificates.
+pub const BIRTH_CERTIFICATE_PAYLOAD_VERSION: u8 = 3;
+
 /// A signed birth certificate — the entity's character sheet, vouched for by
 /// the Hive master key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BirthCertificate {
+    /// Signature payload format. Historical v1/v2 certificates omitted this
+    /// field and are dispatched from their raw persisted shape.
+    #[serde(default)]
+    pub payload_version: u8,
     pub entity_id: String,
     pub entity_name: String,
     /// Soul archetype (e.g. "The Guardian").
     pub archetype: String,
     /// Flavor line for the archetype.
     pub epithet: String,
+    /// The internal scoring contract used to forge this soul. Legacy
+    /// certificates deserialize to an empty value and retain their v1 signature.
+    #[serde(default)]
+    pub scoring_version: String,
     pub weights: EthicWeights,
     /// Deterministic hash of the forged soul configuration.
     pub soul_hash: String,
@@ -164,10 +230,37 @@ pub struct BirthCertificate {
     pub signature: String,
 }
 
+/// The user-facing part of a birth certificate. Internal scoring weights,
+/// hashes, and signing material remain in the runtime certificate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BirthCertificateSummary {
+    pub archetype: String,
+    pub epithet: String,
+    pub sigil: String,
+    pub birth_path: String,
+    pub scoring_version: String,
+    pub issued_at_utc: String,
+    pub signature_verified: bool,
+}
+
+impl BirthCertificate {
+    pub fn summary(&self, signature_verified: bool) -> BirthCertificateSummary {
+        BirthCertificateSummary {
+            archetype: self.archetype.clone(),
+            epithet: self.epithet.clone(),
+            sigil: self.sigil.clone(),
+            birth_path: self.birth_path.clone(),
+            scoring_version: self.scoring_version.clone(),
+            issued_at_utc: self.issued_at_utc.clone(),
+            signature_verified,
+        }
+    }
+}
+
 /// Response after performing the birth rite.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BirthRiteResponse {
-    pub certificate: BirthCertificate,
+    pub certificate: BirthCertificateSummary,
     /// True when the rite was re-run on an already-born entity (re-tempering).
     pub retempered: bool,
 }
@@ -536,6 +629,9 @@ pub struct ForgeApprovalJobsResponse {
 // Runtime outbox sync
 // ---------------------------------------------------------------------------
 
+/// Maximum successful tool uses represented by one content-free turn aggregate.
+pub const MAX_SUCCESSFUL_SKILL_COUNT_PER_TURN: u32 = 256;
+
 /// Durable entity-scoped write queued locally while the runtime is active.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityOutboxRecord {
@@ -615,6 +711,45 @@ pub struct OutboxSyncResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn birth_certificate_summary_omits_internal_scoring_material() {
+        let certificate = BirthCertificate {
+            payload_version: BIRTH_CERTIFICATE_PAYLOAD_VERSION,
+            entity_id: "entity-1".into(),
+            entity_name: "Nova".into(),
+            archetype: "The Balanced".into(),
+            epithet: "Ready to become anything.".into(),
+            scoring_version: SCORING_VERSION.into(),
+            weights: EthicWeights {
+                deontology: 0.25,
+                teleology: 0.25,
+                areteology: 0.25,
+                welfare: 0.25,
+            },
+            soul_hash: "hash".into(),
+            sigil: "sigil".into(),
+            birth_path: "quickstart".into(),
+            issued_at_utc: "2026-10-22T00:00:00Z".into(),
+            master_public_key: "public".into(),
+            signature: "signature".into(),
+        };
+        let json = serde_json::to_value(certificate.summary(true)).unwrap();
+        for hidden in [
+            "weights",
+            "deontology",
+            "teleology",
+            "areteology",
+            "welfare",
+            "soul_hash",
+            "master_public_key",
+            "signature",
+        ] {
+            assert!(json.get(hidden).is_none(), "{hidden} leaked: {json}");
+        }
+        assert_eq!(json["scoring_version"], SCORING_VERSION);
+        assert_eq!(json["signature_verified"], true);
+    }
 
     #[test]
     fn update_entity_config_request_serializes_patch_fields() {

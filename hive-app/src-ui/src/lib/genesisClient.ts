@@ -1,7 +1,14 @@
 import { resolveHiveConnection } from "./connection";
+import type { PresenceChoice, QuestView } from "./questClient";
 
 export type GenesisMode = "guided" | "voice" | "markdown" | "hybrid" | "quick" | "deep";
 export type GenesisState = "draft" | "discovering" | "review" | "portrait_pending" | "portrait_approved" | "manifesting" | "ready" | "failed" | "cancelled";
+export interface GenesisCreationSeed {
+  mode: GenesisMode;
+  name: string;
+  purpose: string;
+  presence: PresenceChoice;
+}
 export interface Personality {
   description: string;
   empathy?: number; curiosity?: number; assertiveness?: number; humor?: number;
@@ -29,12 +36,17 @@ export interface GenesisRevision { revision: number; reason: string; created_at:
 export interface EssenceProgress { identity: number; personality: number; purpose: number; memories_lore: number; appearance: number; voice_presence: number }
 export interface GenesisSession {
   id: string; owner_id: string; mode: GenesisMode; state: GenesisState;
+  /** Presentation-only Entity link recovered by Hive from canonical data or its durable allocation receipt. */
+  effective_entity_id?: string | null;
   definition: EntityDefinition; messages: GenesisMessage[]; proposals: GenesisProposal[];
   conflicts: GenesisConflict[]; sources: GenesisSource[]; revisions: GenesisRevision[];
   asset_ids: string[]; job_ids: string[]; revision: number; created_at: string; updated_at: string;
   composer_draft: string; last_error?: string | null;
   essence?: EssenceProgress; awakening?: string | null; choices?: string[];
   retention_days?: number | null;
+  creation_seed?: GenesisCreationSeed | null;
+  /** Presentation-only quest progress, computed by Hive. */
+  quest?: QuestView;
 }
 
 export const GENESIS_MODES: { value: GenesisMode; label: string; detail: string }[] = [
@@ -61,6 +73,7 @@ export async function genesisRequest<T>(path: string, body?: unknown, method = b
 
 export const listGenesisSessions = () => genesisRequest<GenesisSession[]>("/sessions");
 export const createGenesisSession = (mode: GenesisMode) => genesisRequest<GenesisSession>("/sessions", { mode });
+export const createOrResumeGenesis = (seed: GenesisCreationSeed, creationKey: string) => genesisRequest<GenesisSession>("/sessions", { mode: seed.mode, creation_key: creationKey, seed });
 export const getGenesisSession = (id: string) => genesisRequest<GenesisSession>(`/sessions/${encodeURIComponent(id)}`);
 export const deleteGenesisSession = (id: string) => genesisRequest<unknown>(`/sessions/${encodeURIComponent(id)}`, undefined, "DELETE");
 export const genesisAction = (session: GenesisSession, action: string, args: Record<string, unknown> = {}) => genesisRequest<GenesisSession>(`/sessions/${encodeURIComponent(session.id)}/actions`, { action, expected_revision: session.revision, ...args });

@@ -47,6 +47,28 @@ pub struct ForgeUndoStatus {
 static FORGE_AUDIT: OnceLock<Mutex<Vec<ForgeAuditEvent>>> = OnceLock::new();
 static FORGE_UNDO: OnceLock<Mutex<Vec<ForgeUndoEntry>>> = OnceLock::new();
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForgeChoiceDto {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForgeScenarioDto {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub choices: Vec<ForgeChoiceDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForgeDisplayOutput {
+    pub archetype: String,
+    pub soul_hash: String,
+    pub sigil: String,
+}
+
 fn audit_log() -> &'static Mutex<Vec<ForgeAuditEvent>> {
     FORGE_AUDIT.get_or_init(|| Mutex::new(Vec::new()))
 }
@@ -79,14 +101,175 @@ fn push_audit(what_changed: String, risk_level: &str, outcome: &str) {
 }
 
 #[tauri::command]
-pub fn get_forge_scenarios(_state: State<AppState>) -> Result<serde_json::Value, String> {
-    // Stub for now
-    Ok(serde_json::json!([]))
+pub fn get_forge_scenarios() -> Result<Vec<ForgeScenarioDto>, String> {
+    let engine = soul_forge::SoulForgeEngine::new();
+    Ok(engine
+        .scenarios()
+        .iter()
+        .map(|scenario| ForgeScenarioDto {
+            id: scenario.id.clone(),
+            title: scenario.title.clone(),
+            description: scenario.description.clone(),
+            choices: scenario
+                .choices
+                .iter()
+                .map(|choice| ForgeChoiceDto {
+                    id: choice.id.clone(),
+                    label: choice.label.clone(),
+                    description: choice.description.clone(),
+                })
+                .collect(),
+        })
+        .collect())
 }
 
 #[tauri::command]
-pub fn crystallize_forge(_state: State<AppState>) -> Result<(), String> {
-    Ok(())
+pub fn crystallize_forge(choices: Vec<String>) -> Result<ForgeDisplayOutput, String> {
+    let engine = soul_forge::SoulForgeEngine::new();
+    if choices.len() != engine.scenarios().len() {
+        return Err(format!(
+            "Expected {} choices, got {}",
+            engine.scenarios().len(),
+            choices.len()
+        ));
+    }
+
+    let ordered_choices = engine
+        .scenarios()
+        .iter()
+        .zip(choices)
+        .map(|(scenario, choice_id)| (scenario.id.clone(), choice_id))
+        .collect::<Vec<_>>();
+    let output = engine.crystallize(&ordered_choices)?;
+
+    Ok(ForgeDisplayOutput {
+        archetype: output.archetype,
+        soul_hash: output.soul_hash,
+        sigil: output.sigil,
+    })
+}
+
+#[cfg(test)]
+mod forge_command_tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    fn keys(value: &serde_json::Value) -> BTreeSet<&str> {
+        value
+            .as_object()
+            .expect("expected JSON object")
+            .keys()
+            .map(String::as_str)
+            .collect()
+    }
+
+    #[test]
+    fn scenario_command_exposes_only_weight_free_presentation_fields() {
+        let scenarios = get_forge_scenarios().expect("scenario command should succeed");
+        let value = serde_json::to_value(&scenarios).expect("scenarios should serialize");
+        let scenarios_json = value.as_array().expect("scenarios should be an array");
+
+        assert_eq!(scenarios_json.len(), 3);
+        for scenario in scenarios_json {
+            assert_eq!(
+                keys(scenario),
+                BTreeSet::from(["choices", "description", "id", "title"])
+            );
+            let choices = scenario["choices"]
+                .as_array()
+                .expect("scenario choices should be an array");
+            assert!(!choices.is_empty());
+            for choice in choices {
+                assert_eq!(keys(choice), BTreeSet::from(["description", "id", "label"]));
+            }
+        }
+
+        let encoded = serde_json::to_string(&value).expect("scenario JSON should encode");
+        for hidden in [
+            "\"weights\"",
+            "\"deontology\"",
+            "\"teleology\"",
+            "\"areteology\"",
+            "\"welfare\"",
+        ] {
+            assert!(
+                !encoded.contains(hidden),
+                "scenario response leaked hidden field {hidden}: {encoded}"
+            );
+        }
+    }
+
+    #[test]
+    fn crystallize_command_maps_ordered_choice_ids_and_returns_display_dto() {
+        let engine = soul_forge::SoulForgeEngine::new();
+        let choices: Vec<String> = engine
+            .scenarios()
+            .iter()
+            .map(|scenario| scenario.choices[0].id.clone())
+            .collect();
+        let expected_pairs: Vec<(String, String)> = engine
+            .scenarios()
+            .iter()
+            .zip(&choices)
+            .map(|(scenario, choice)| (scenario.id.clone(), choice.clone()))
+            .collect();
+        let expected = engine
+            .crystallize(&expected_pairs)
+            .expect("engine fixture should crystallize");
+
+        let output =
+            crystallize_forge(choices).expect("ordered command choices should crystallize");
+        assert_eq!(output.archetype, expected.archetype);
+        assert_eq!(output.soul_hash, expected.soul_hash);
+        assert_eq!(output.sigil, expected.sigil);
+
+        let value = serde_json::to_value(output).expect("output should serialize");
+        assert_eq!(
+            keys(&value),
+            BTreeSet::from(["archetype", "sigil", "soul_hash"])
+        );
+        let encoded = serde_json::to_string(&value).expect("output JSON should encode");
+        for hidden in [
+            "\"weights\"",
+            "\"deontology\"",
+            "\"teleology\"",
+            "\"areteology\"",
+            "\"welfare\"",
+            "\"choices_made\"",
+        ] {
+            assert!(
+                !encoded.contains(hidden),
+                "crystallize response leaked hidden field {hidden}: {encoded}"
+            );
+        }
+    }
+
+    #[test]
+    fn crystallize_command_rejects_invalid_ordered_choices() {
+        let engine = soul_forge::SoulForgeEngine::new();
+        let valid: Vec<String> = engine
+            .scenarios()
+            .iter()
+            .map(|scenario| scenario.choices[0].id.clone())
+            .collect();
+
+        let wrong_count = crystallize_forge(valid[..valid.len() - 1].to_vec())
+            .expect_err("missing scenario choice must fail");
+        assert!(wrong_count.contains("Expected 3 choices"));
+
+        let mut unknown = valid.clone();
+        unknown[0] = "not-a-real-choice".to_string();
+        let unknown_error =
+            crystallize_forge(unknown).expect_err("unknown scenario choice must fail");
+        assert!(unknown_error.contains("Unknown choice"));
+
+        let mut wrong_scenario = valid;
+        wrong_scenario[0] = engine.scenarios()[1].choices[0].id.clone();
+        let wrong_scenario_error =
+            crystallize_forge(wrong_scenario).expect_err("choice from another scenario must fail");
+        assert!(wrong_scenario_error.contains("Unknown choice"));
+        assert!(wrong_scenario_error.contains(&engine.scenarios()[0].id));
+    }
 }
 
 #[tauri::command]

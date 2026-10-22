@@ -106,6 +106,209 @@ first greeting is persisted once in real chat history. Later intentional revisio
 apply when the mentor chooses to evolve the Entity; an already running Runtime is
 stopped so its next launch loads the new signed identity.
 
+Genesis owns birth for the Entities it allocates. Until awakening, Hive refuses
+generic setup (`POST /v1/entities/:id/birth`) and opening for that Entity, and the
+Entity card routes back to its Genesis record. Afterwards generic birth still
+refuses to replace the signed Genesis story. If saving `definition.entity_id`
+is interrupted after allocation, the durable creation receipt retains the same
+Entity UUID. Session views derive a presentation-only effective link from that
+receipt so the card still routes to Genesis; an exact retry saves the canonical
+link without allocating a replacement.
+
+## Genesis Quest and owner decisions
+
+The following four product decisions were implemented on 2026-10-22.
+
+### 1. Canonical Presence, slim First Signal and durable creation
+
+The **Quest** tab and progress rail present creation as seven stages:
+Reservation, Shaping the Soul, Ethics, Instincts, Presence, Birth and Awakening.
+Only Reservation (a confirmed name and purpose) is required. The quest is
+presentation and UX only:
+
+- **Temperament stat cards** create an ordinary pending personality proposal.
+  The mentor still accepts or rejects it. A card fills description and style
+  only where they are empty.
+- **Ethics** records answers to the three Soul Forge trials. When all three are
+  answered, awakening forges the soul from them (`birth_path: forge`);
+  otherwise it uses the balanced quickstart soul. Trial weight effects are not
+  displayed, so the mentor chooses on values.
+- **Instincts** shows the constitutional `instincts.md` template read-only.
+- **Presence** uses the canonical `PresenceCard` and `PresenceChoice` types. It
+  stores a cosmetic `presence.json` beside the Entity, outside the `docs/`
+  folder that runtimes read for the system prompt. Display name, purpose and
+  boundaries are copied from the approved definition; requests carry only
+  enumerated temperament, palette, crest and motion choices. Presence grants
+  nothing, never enters prompts and is symmetrically limited to 32 KiB on read
+  and write. Missing cards produce an empty result; malformed or oversized
+  cards fail without replacement.
+
+The slim First Signal collects name, purpose and those canonical Presence
+choices, then uses Quick mode to enter the existing Genesis workspace. Before
+dispatch, the Hive frontend journals exactly version 1, a canonical UUID
+`creation_key`, and the canonical `GenesisCreationSeed`; it serializes access
+with a Web Lock or process-local fallback. The journal clears only when Hive
+returns that same key as the durable Genesis session ID. Failures, malformed
+journals and response-ID mismatches preserve the record for an exact retry.
+
+Hive permanently binds each creation key to one request fingerprint and at most
+one Entity UUID in the defaulted global creation-receipt ledger. Reservation
+precedes file creation; replay is idempotent across concurrency and restart;
+seed/name conflicts fail closed. Completion and registry publication are
+atomic. Deleting or losing the receipt's Entity makes the key terminally
+`unavailable`, never reusable. Genesis activation and optional keyed generic
+creation share this receipt mechanism, and
+`GET /v1/entity-creations/:creation_key` reports `absent`, `reserved`,
+`complete` or `unavailable` under Hive's control-token policy.
+
+### 2. Hidden, versioned ethics
+
+New signed birth certificates carry the exact immutable scoring version
+`triangle-ethic-v1`. Their explicit v3 signature payload uses canonical
+length-prefixed fields and binds every displayed certificate field, the scoring
+version, and the exact bits of all four hidden ethics weights. Genuine raw v1
+documents with no `scoring_version` key and prior scoring-stamped raw v2
+documents continue to verify against their byte-stable payloads. Explicit v3,
+raw v2, and raw v1 dispatch is unambiguous; removing or injecting version fields
+cannot downgrade or upgrade a signature.
+
+User-facing Genesis, quest, journey, Presence, catalog and generic birth
+responses expose only the weight-free `BirthCertificateSummary`: archetype,
+epithet, sigil, birth path, issue timestamp, scoring version and verification
+result. Ethics weights, axis values and scoring structures are absent from
+those surfaces. The full certificate remains only in local signed/runtime
+artifacts and the matching Entity Runtime's lease-scoped birth document;
+desktop control-token access cannot retrieve it.
+
+The legacy desktop Soul Forge also sanitizes at its Rust command boundary.
+Scenario DTOs contain only IDs, titles, descriptions and weight-free choices;
+the crystallization DTO contains only archetype, soul hash and sigil. Hidden
+weights remain inside `soul-forge` and never enter frontend state or completion
+callbacks.
+
+### 3. Data-driven mentoring journey
+
+Badge titles, hints, XP, activity requirements, cosmetic unlocks and bond tiers
+come from one Rust catalog, which the frontend renders without a duplicate
+curve. Creation awards at most 120 XP, so completing all ten creation badges
+reaches Kindling but remains below Ember.
+
+| Bond level | XP floor |
+| --- | ---: |
+| Spark | 0 |
+| Kindling | 80 |
+| Ember | 180 |
+| Hearthfire | 350 |
+| Beacon | 600 |
+| Constellation | 950 |
+| Legacy | 1400 |
+
+The exact badge curve is:
+
+| Badge | Durable requirement | XP |
+| --- | --- | ---: |
+| First Spark | Begin creation | 5 |
+| A Name Is Given | Confirm a name | 10 |
+| A Reason to Be | Confirm a purpose | 10 |
+| Soul Shaper | Confirm identity plus values or three traits | 15 |
+| Storyteller | Confirm lore and a created memory | 15 |
+| Trial Walker | Answer all three Soul Forge trials | 15 |
+| Keeper of Instincts | Read the constitutional instincts | 10 |
+| A Face for the Hearth | Choose Presence | 10 |
+| Curator | Review an imported Markdown document | 10 |
+| First Light | Confirm Genesis awakening and its Entity link | 20 |
+| First Words | 1 mentor message | 15 |
+| Getting Acquainted | 5 mentor messages | 25 |
+| Kindred | 25 mentor messages | 40 |
+| Hearth Regular | 100 mentor messages | 80 |
+| Trusted Companion | 500 mentor messages | 180 |
+| Returning Companion | 5 conversation sessions | 50 |
+| Seasoned Companion | 25 conversation sessions | 120 |
+| Steady Rhythm | 7 active UTC days | 80 |
+| Hearth Season | 4 active ISO weeks | 120 |
+| Constellation Keeper | 12 active ISO weeks | 220 |
+| Skill Explorer | 5 successful skill uses | 80 |
+| Skill Weaver | 25 successful skill uses | 160 |
+| Memory Keeper | 3 confirmed lasting memories | 80 |
+| Living Archive | 15 confirmed lasting memories | 180 |
+
+Creation badges are monotonic and derive from confirmed Genesis state, never
+pending proposals. In particular, First Light comes only from a confirmed
+Genesis awakening/link; generic birth does not award it. Long-term activity badges and their monotonic counters
+derive only from durable Runtime facts. Conversation turns reconcile the full
+durable history for mentor messages, distinct sessions, active UTC days and
+active ISO weeks. Committed successful tool calls and explicit non-ephemeral
+memory inserts add content-free fallback facts. Runtime atomically reserves
+outbox capacity and persists the active `soul_ref` before either tool execution
+or explicit lasting-memory insertion. A committed assistant turn queues one aggregate `skill_used` event
+with only its session ID and successful-use count; a confirmed memory queues
+`memory_confirmed` with only its ID and weight class. If post-side-effect
+staging fails, the successful response is preserved and startup/heartbeat
+reconciliation rebuilds the same deterministic record from the durable fact.
+If a later provider round cannot produce the final reply, the completed tool
+records return as a non-retry partial result and still commit one aggregate;
+superego blocking or assistant-history failure cannot erase that activity. Each
+of those outcomes explicitly tells the mentor that an action completed and to
+verify the result before repeating it.
+Cancellation after possible tool activity retains the reservation for
+quarantine/manual recovery and says an action may have completed, so the mentor
+should verify before repeating it.
+The Entity API carries these outcomes with stable
+`action_completed_verify_before_repeating` or
+`action_may_have_completed_verify_before_repeating` codes. Entity Runtime and
+Hive chat replace any backend detail with fixed plain-language guidance to
+verify the result before repeating the action.
+Persisted acknowledgements prevent an old fact from being queued again, but do
+not prevent reconciliation from repairing a missing local execution-ledger
+entry. Content-free acknowledged-record metadata preserves the original
+`soul_ref`, kind, session and payload digest, so repair after a soul change
+recreates the historical event without requeue; an existing matching ledger
+event remains authoritative. Before each heartbeat, Runtime first reconciles
+durable assistant and memory sources, then captures one immutable queued batch.
+It reconciles exactly that batch and every retained acknowledged metadata row
+into the ledger, including blocked/history-failure facts with no assistant
+source row, before calling Hive. Only the captured batch is synced; records
+staged concurrently remain queued for the next heartbeat. A reconciliation
+failure stops that tick before Hive heartbeat or sync.
+Reservations with no matching durable assistant or memory fact stay active for
+a conservative 24-hour recovery window; after that they move atomically to a
+persisted, non-capacity quarantine for diagnosis without inventing activity.
+
+Hive validates lease owner and Entity IDs before storing recognized events in
+the closed, schematized `entity_journey_event` table, keyed idempotently by
+Runtime `record_id`. Its complete allowlist is `record_id`, `owner_id`,
+`entity_id`, `kind`, `occurred_at`, and optional `session_id`, `skill_id`,
+`tool_name`, `successful_skill_count`, `memory_id`, `memory_weight`. New skill
+events use the bounded positive aggregate count; `skill_id` and `tool_name`
+remain only for already-issued per-tool records. It never stores arbitrary
+Runtime payloads, messages, replies, prompts, model output, tool
+arguments/results or memory content. Unknown event kinds remain valid ordinary
+outbox records but do not create or advance a journey. Projection merges
+durable Entity facts and event counts by per-counter maximum.
+
+Quest progress is saved in the defaulted Genesis `quest` field. Each Entity's
+durable counters and badges live in Hive-owned `entity_journey`, so they outlive
+an expired Genesis record. Suggested first quests remain copy only: no quest
+sends a message or executes a skill automatically.
+
+### 4. Model setup gate
+
+An Entity card linked to unfinished Genesis while Hive reports
+`needs_provider` shows the subtitle `Connect a model to continue Genesis` and
+the primary-action button `Connect a model to continue`. That button opens
+Provider Wizard and cannot enter Genesis. A successful connection refreshes
+Hive state and restores `Continue <name>'s Genesis`. Local First Signal
+creation remains available; already-born Runtime cards retain their existing
+provider-required gate.
+
+### Deferred standalone recovery slices
+
+The old standalone First Signal application was not imported. Deferred work is
+limited to migration/recovery of its old browser journals, candidate matching
+for unkeyed legacy direct-creation requests, and its animated Presence builder
+and separate Presence home. These are not compatibility promises for the
+current Hive-first flow.
+
 ## Local authorization and retention
 
 Genesis is scoped to the existing local household profile. Like every Hive route,
@@ -144,10 +347,58 @@ retried without logging narrative content.
 ## Staged enhancements
 
 The initial implementation includes a living-portrait toggle, character seeds,
-versioned alternatives, a creation chronicle and intentional Entity evolution.
+versioned alternatives, a creation chronicle, intentional Entity evolution and the
+Genesis Quest.
 Relationship visualization and dedicated voice casting remain later enhancements,
 as requested in the specification's staged-innovation section. Relationships and
 voice descriptions are already editable canonical fields.
+
+## Final-review source verification — 2026-10-22
+
+Fresh final-branch verification on
+`cursor/genesis-quest-gamification-4871` passed:
+
+- `cargo fmt --all -- --check`;
+- `cargo clippy --workspace --exclude abigail-app -- -D warnings`;
+- `cargo test --workspace --exclude abigail-app`: 1,137 tests passed and 10
+  pre-existing tests were ignored;
+- strict all-target Clippy for `entity-core`, `entity-chat`, `entity-daemon`,
+  `hive-core`, `hive-daemon`, `abigail-persistence`, `abigail-app`,
+  `abigail-cli` and `soul-forge`;
+- `cd entity-runtime-app/src-ui && npm test && npm run build`: production build
+  plus 10 tests across 3 files;
+- `cd hive-app/src-ui && npm test && npm run build`: production build plus
+  95 tests across 19 files;
+- `cd tauri-app/src-ui && npm test && npm run build`: production build plus
+  58 tests across 14 files;
+- `cd tauri-app/src-ui && npm run check:command-contract`: 105 frontend
+  commands aligned with 170 native registrations and 81 harness cases.
+
+The ethics-key scan found no occurrence in the tracked Hive reveal and only a
+weight-rejection assertion in the legacy Tauri frontend. Rust presentation
+commands mention axis keys only in tests that reject leakage; calculation
+remains internal. The journey producer scan confirms that capacity is reserved
+atomically before tool or explicit-memory side effects, assistant metadata is
+durable before one aggregate `skill_used` commit, exact fact retries map to one
+outbox row and one atomic local ledger event, and the journal does not enqueue a
+duplicate. Post-commit failures preserve the successful result and recover from
+content-free durable metadata. Partial provider failure, response blocking and
+history-save failure still preserve completed tool counts; cancellation retains
+the reservation when the current loop boundary cannot prove whether activity
+ran. Acknowledged IDs are never requeued but still repair a missing local
+ledger with their historical soul reference. Reconciliation errors stop the
+Hive heartbeat/sync attempt. The heartbeat's barrier-tested immutable snapshot
+ensures a concurrently staged record is neither synced nor acknowledged until
+the next cycle, and every synced ID already exists exactly once in the ledger.
+Stable completion-risk codes survive nonstreaming, streaming and cancellation
+races; both family chat surfaces render only fixed duplicate-safe copy rather
+than sensitive backend text. Stale unmatched reservations enter non-capacity
+quarantine without creating an event. None adds content to
+`entity_journey_event`.
+
+This is source, build and automated fixture verification only. No installer,
+installed WebView, live provider, microphone, paid media or subjective visual
+acceptance was run or claimed for this change.
 
 ## Verification — 2026-10-17
 

@@ -277,9 +277,7 @@ impl OllamaManager {
         #[cfg(not(windows))]
         {
             let _ = &on_progress;
-            return Err(
-                "Automatic Ollama install is currently supported on Windows only".to_string(),
-            );
+            Err("Automatic Ollama install is currently supported on Windows only".to_string())
         }
 
         #[cfg(windows)]

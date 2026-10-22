@@ -1,15 +1,19 @@
 //! Entity daemon shared state.
 
 use crate::execution_ledger::ExecutionLedger;
-use crate::outbox::RuntimeOutbox;
+use crate::outbox::{
+    DurableRecordReconcile, OutboxLedgerMetadata, ReservationRecovery, RuntimeOutbox,
+};
 use abigail_core::AppConfig;
 use abigail_memory::{ArchiveExporter, MemoryStore};
 use abigail_queue::JobQueue;
 use abigail_router::{ConstraintStore, IdEgoRouter};
 use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use abigail_streaming::StreamBroker;
-use entity_core::{ChatMemoryHook, SkillApplyAcknowledgement};
+use entity_core::{ChatMemoryHook, EntityOutboxRecord, SkillApplyAcknowledgement};
 use hive_core::{ForgeApprovalJob, RuntimeSessionLease, SkillAssignment};
+use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -80,6 +84,8 @@ pub struct EntityDaemonState {
     pub docs_dir: PathBuf,
     /// Surreal-backed memory store for persistent memory across conversations.
     pub memory: Arc<MemoryStore>,
+    /// Durable assistant-turn boundary, injectable for failure-path verification.
+    pub assistant_turn_store: Arc<dyn crate::memory_consumer::AssistantTurnStore>,
     /// Persistent async job queue for delegated sub-agent tasks.
     pub job_queue: Arc<JobQueue>,
     /// Backing stream broker for topic-based event publishing.
@@ -120,6 +126,33 @@ pub struct EntityDaemonState {
 
 /// Default number of turns between automatic archive exports.
 pub const ARCHIVE_INTERVAL_TURNS: u32 = 50;
+const ACTIVE_RESERVATION_GRACE_SECONDS: i64 = 60;
+const UNMATCHED_RESERVATION_QUARANTINE_HOURS: i64 = 24;
+
+#[derive(Clone, Copy, Debug)]
+pub enum ActivityReconcileMode {
+    Startup,
+    Heartbeat,
+}
+
+pub(crate) fn deterministic_journey_record_id(
+    entity_id: &str,
+    kind: &str,
+    source_id: &str,
+) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"abigail-runtime-journey-event-v1");
+    for value in [entity_id, kind, source_id] {
+        digest.update((value.len() as u64).to_be_bytes());
+        digest.update(value.as_bytes());
+    }
+    let hash = digest.finalize();
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&hash[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes).to_string()
+}
 
 impl EntityDaemonState {
     pub fn queue_outbox_record(
@@ -127,12 +160,191 @@ impl EntityDaemonState {
         kind: &str,
         payload: serde_json::Value,
     ) -> Result<(), String> {
-        self.outbox
-            .enqueue(&self.entity_id, kind, payload.clone())
-            .map(|_| ())?;
-        self.execution_ledger
-            .append_outbox_event(&self.entity_id, kind, &payload, &self.soul_ref)
-            .map(|_| ())
+        let record_id = uuid::Uuid::new_v4().to_string();
+        let record = self.outbox.enqueue_with_ledger_metadata(
+            record_id,
+            &self.entity_id,
+            kind,
+            payload.clone(),
+            &self.soul_ref,
+        )?;
+        self.append_or_repair_execution_event(&record.record_id, kind, &payload)
+    }
+
+    pub fn commit_outbox_reservation(
+        &self,
+        record_id: &str,
+        payload: serde_json::Value,
+    ) -> Result<(), String> {
+        let record = self.outbox.commit_reservation_with_ledger_metadata(
+            record_id,
+            payload.clone(),
+            &self.soul_ref,
+        )?;
+        self.append_or_repair_execution_event(&record.record_id, &record.kind, &payload)
+    }
+
+    pub fn reconcile_durable_activity(&self, mode: ActivityReconcileMode) -> Result<usize, String> {
+        let recovery = match mode {
+            ActivityReconcileMode::Startup => ReservationRecovery::All,
+            ActivityReconcileMode::Heartbeat => ReservationRecovery::StaleBefore(
+                chrono::Utc::now() - chrono::Duration::seconds(ACTIVE_RESERVATION_GRACE_SECONDS),
+            ),
+        };
+        let mut reconciled = self.reconcile_outbox_execution_ledger()?;
+        let mut durable_record_ids = HashSet::new();
+
+        for turn in self.memory.all_turns().map_err(|error| error.to_string())? {
+            if turn.role != "assistant" || turn.successful_tool_uses.is_empty() {
+                continue;
+            }
+            let successful_skill_count =
+                u32::try_from(turn.successful_tool_uses.len()).map_err(|_| {
+                    "Durable assistant activity exceeds the supported skill count".to_string()
+                })?;
+            if successful_skill_count > hive_core::MAX_SUCCESSFUL_SKILL_COUNT_PER_TURN {
+                return Err(format!(
+                    "Durable assistant activity exceeds the per-turn limit of {}",
+                    hive_core::MAX_SUCCESSFUL_SKILL_COUNT_PER_TURN
+                ));
+            }
+            let record_id =
+                deterministic_journey_record_id(&self.entity_id, "skill_used", &turn.id);
+            durable_record_ids.insert(record_id.clone());
+            reconciled += self.reconcile_activity_fact(
+                &record_id,
+                "skill_used",
+                &turn.created_at.to_rfc3339(),
+                serde_json::json!({
+                    "session_id": turn.session_id,
+                    "successful_skill_count": successful_skill_count,
+                }),
+                recovery.clone(),
+            )?;
+        }
+
+        for memory in self
+            .memory
+            .all_memories()
+            .map_err(|error| error.to_string())?
+        {
+            if !memory.explicitly_confirmed
+                || memory.weight == abigail_memory::MemoryWeight::Ephemeral
+            {
+                continue;
+            }
+            let record_id =
+                deterministic_journey_record_id(&self.entity_id, "memory_confirmed", &memory.id);
+            durable_record_ids.insert(record_id.clone());
+            reconciled += self.reconcile_activity_fact(
+                &record_id,
+                "memory_confirmed",
+                &memory.created_at.to_rfc3339(),
+                serde_json::json!({
+                    "memory_id": memory.id,
+                    "memory_weight": memory.weight.as_str(),
+                }),
+                recovery.clone(),
+            )?;
+        }
+
+        self.outbox.quarantine_stale_unmatched_reservations(
+            &durable_record_ids,
+            chrono::Utc::now() - chrono::Duration::hours(UNMATCHED_RESERVATION_QUARANTINE_HOURS),
+        )?;
+
+        Ok(reconciled)
+    }
+
+    fn reconcile_outbox_execution_ledger(&self) -> Result<usize, String> {
+        let metadata = self.outbox.ledger_reconciliation_metadata(&self.soul_ref)?;
+        for record in &metadata {
+            if record.entity_id != self.entity_id {
+                return Err(format!(
+                    "Runtime outbox ledger metadata for record {} belongs to a different Entity",
+                    record.record_id
+                ));
+            }
+            let event = self.execution_ledger.append_outbox_metadata(record)?;
+            self.outbox.persist_authoritative_record_ledger_metadata(
+                OutboxLedgerMetadata::from_execution_event(&event),
+            )?;
+        }
+        Ok(metadata.len())
+    }
+
+    pub(crate) fn reconcile_outbox_batch(
+        &self,
+        records: &[EntityOutboxRecord],
+    ) -> Result<(), String> {
+        for record in records {
+            if record.entity_id != self.entity_id {
+                return Err(format!(
+                    "Runtime outbox record {} belongs to a different Entity",
+                    record.record_id
+                ));
+            }
+            self.append_or_repair_execution_event(
+                &record.record_id,
+                &record.kind,
+                &record.payload,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn reconcile_activity_fact(
+        &self,
+        record_id: &str,
+        kind: &str,
+        created_at_utc: &str,
+        payload: serde_json::Value,
+        recovery: ReservationRecovery,
+    ) -> Result<usize, String> {
+        let disposition = self.outbox.reconcile_durable_record(
+            record_id,
+            &self.entity_id,
+            kind,
+            created_at_utc,
+            payload.clone(),
+            recovery,
+        )?;
+        match disposition {
+            DurableRecordReconcile::Deferred => return Ok(0),
+            DurableRecordReconcile::Queued(record) => {
+                self.append_or_repair_execution_event(&record.record_id, &record.kind, &payload)?;
+            }
+            DurableRecordReconcile::Acknowledged => {
+                self.append_or_repair_execution_event(record_id, kind, &payload)?;
+            }
+        }
+        Ok(1)
+    }
+
+    fn append_or_repair_execution_event(
+        &self,
+        record_id: &str,
+        kind: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(), String> {
+        let historical_metadata = self.outbox.record_ledger_metadata(record_id)?;
+        if let Some(metadata) = historical_metadata.as_ref() {
+            metadata.validate_source(record_id, &self.entity_id, kind, payload)?;
+        }
+        let soul_ref = historical_metadata
+            .as_ref()
+            .map(|metadata| metadata.soul_ref.as_str())
+            .unwrap_or(&self.soul_ref);
+        let event = self.execution_ledger.append_outbox_event(
+            record_id,
+            &self.entity_id,
+            kind,
+            payload,
+            soul_ref,
+        )?;
+        self.outbox.persist_authoritative_record_ledger_metadata(
+            OutboxLedgerMetadata::from_execution_event(&event),
+        )
     }
 
     pub async fn record_hive_sync_success(&self) {

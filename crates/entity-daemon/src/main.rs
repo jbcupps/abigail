@@ -587,6 +587,7 @@ async fn run() -> anyhow::Result<()> {
         executor,
         docs_dir,
         memory,
+        assistant_turn_store: Arc::new(memory_consumer::DurableAssistantTurnStore),
         job_queue,
         stream_broker,
         memory_hook: None,
@@ -608,6 +609,13 @@ async fn run() -> anyhow::Result<()> {
         turns: Arc::new(pipeline::TurnRegistry::default()),
         soul_ref,
     };
+
+    if let Err(error) = state.reconcile_durable_activity(state::ActivityReconcileMode::Startup) {
+        tracing::warn!(
+            "Durable Runtime activity reconciliation will retry on heartbeat: {}",
+            error
+        );
+    }
 
     // Spawn the bicameral chat pipeline (Id stage → Ego stage → journal).
     // Fatal on failure: without the pipeline every chat request would hang
@@ -912,6 +920,76 @@ async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[async_trait::async_trait]
+trait RuntimeHeartbeatClient: Send + Sync {
+    async fn heartbeat(
+        &self,
+        request: &hive_core::RuntimeHeartbeatRequest,
+    ) -> Result<hive_core::RuntimeHeartbeatResponse, String>;
+
+    async fn sync_outbox(
+        &self,
+        request: &hive_core::OutboxSyncRequest,
+    ) -> Result<hive_core::OutboxSyncResponse, String>;
+}
+
+#[async_trait::async_trait]
+impl RuntimeHeartbeatClient for HiveClient {
+    async fn heartbeat(
+        &self,
+        request: &hive_core::RuntimeHeartbeatRequest,
+    ) -> Result<hive_core::RuntimeHeartbeatResponse, String> {
+        HiveClient::heartbeat(self, request)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    async fn sync_outbox(
+        &self,
+        request: &hive_core::OutboxSyncRequest,
+    ) -> Result<hive_core::OutboxSyncResponse, String> {
+        HiveClient::sync_outbox(self, request)
+            .await
+            .map_err(|error| error.to_string())
+    }
+}
+
+async fn run_runtime_outbox_heartbeat(
+    state: &EntityDaemonState,
+    hive_client: &impl RuntimeHeartbeatClient,
+) -> Result<(), String> {
+    state.reconcile_durable_activity(state::ActivityReconcileMode::Heartbeat)?;
+
+    let records = state.outbox.snapshot()?;
+    state.reconcile_outbox_batch(&records)?;
+    let runtime_url = state.runtime_url.read().await.clone();
+    let heartbeat = hive_core::RuntimeHeartbeatRequest {
+        lease_id: state.session_lease.lease_id.clone(),
+        runtime_id: state.runtime_id.clone(),
+        local_url: runtime_url,
+        outbox_depth: records.len(),
+        outbox_oldest_at_utc: records.first().map(|record| record.created_at_utc.clone()),
+    };
+
+    if let Err(error) = hive_client.heartbeat(&heartbeat).await {
+        let _ = state.outbox.mark_sync_error(&error);
+        return Err(error);
+    }
+
+    if !records.is_empty() {
+        let sync_result = hive_client
+            .sync_outbox(&hive_core::OutboxSyncRequest {
+                lease_id: state.session_lease.lease_id.clone(),
+                runtime_id: state.runtime_id.clone(),
+                records,
+            })
+            .await;
+        state.outbox.finish_sync(sync_result)?;
+    }
+    state.record_hive_sync_success().await;
+    Ok(())
+}
+
 fn spawn_runtime_supervision(
     state: EntityDaemonState,
     hive_client: HiveClient,
@@ -982,55 +1060,423 @@ fn spawn_runtime_supervision(
                 }
             }
 
-            let outbox_status = match state.outbox.status() {
-                Ok(status) => status,
-                Err(error) => {
-                    state.record_hive_sync_error(error).await;
-                    continue;
-                }
-            };
-            let runtime_url = state.runtime_url.read().await.clone();
-
-            let heartbeat = hive_core::RuntimeHeartbeatRequest {
-                lease_id: state.session_lease.lease_id.clone(),
-                runtime_id: state.runtime_id.clone(),
-                local_url: runtime_url,
-                outbox_depth: outbox_status.queued_records,
-                outbox_oldest_at_utc: outbox_status.oldest_record_at_utc.clone(),
-            };
-
-            match hive_client.heartbeat(&heartbeat).await {
-                Ok(_) => {
-                    if let Ok(records) = state.outbox.snapshot() {
-                        if !records.is_empty() {
-                            match hive_client
-                                .sync_outbox(&hive_core::OutboxSyncRequest {
-                                    lease_id: state.session_lease.lease_id.clone(),
-                                    runtime_id: state.runtime_id.clone(),
-                                    records,
-                                })
-                                .await
-                            {
-                                Ok(response) => {
-                                    let _ = state.outbox.acknowledge(&response.accepted_record_ids);
-                                }
-                                Err(error) => {
-                                    let error = error.to_string();
-                                    let _ = state.outbox.mark_sync_error(&error);
-                                    state.record_hive_sync_error(error).await;
-                                    continue;
-                                }
-                            }
-                        }
-                    }
-                    state.record_hive_sync_success().await;
-                }
-                Err(error) => {
-                    let error = error.to_string();
-                    let _ = state.outbox.mark_sync_error(&error);
-                    state.record_hive_sync_error(error).await;
-                }
+            if let Err(error) = run_runtime_outbox_heartbeat(&state, &hive_client).await {
+                tracing::warn!("Runtime heartbeat/outbox sync deferred: {error}");
+                state.record_hive_sync_error(error).await;
+                continue;
             }
         }
     });
+}
+
+#[cfg(test)]
+mod supervision_tests {
+    use super::*;
+    use abigail_memory::{ConversationTurn, SuccessfulToolUse};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingHeartbeatClient {
+        heartbeat_calls: AtomicUsize,
+        sync_calls: AtomicUsize,
+    }
+
+    struct SuccessfulHeartbeatClient {
+        heartbeat_calls: AtomicUsize,
+        sync_calls: AtomicUsize,
+    }
+
+    struct BarrierBatchHeartbeatClient {
+        first_heartbeat_captured: Arc<tokio::sync::Barrier>,
+        release_first_heartbeat: Arc<tokio::sync::Barrier>,
+        heartbeat_calls: AtomicUsize,
+        synced_batches: std::sync::Mutex<Vec<Vec<String>>>,
+        ledger: Arc<crate::execution_ledger::ExecutionLedger>,
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeHeartbeatClient for CountingHeartbeatClient {
+        async fn heartbeat(
+            &self,
+            _request: &hive_core::RuntimeHeartbeatRequest,
+        ) -> Result<hive_core::RuntimeHeartbeatResponse, String> {
+            self.heartbeat_calls.fetch_add(1, Ordering::SeqCst);
+            Err("unexpected Hive heartbeat".to_string())
+        }
+
+        async fn sync_outbox(
+            &self,
+            _request: &hive_core::OutboxSyncRequest,
+        ) -> Result<hive_core::OutboxSyncResponse, String> {
+            self.sync_calls.fetch_add(1, Ordering::SeqCst);
+            Err("unexpected Hive outbox sync".to_string())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeHeartbeatClient for SuccessfulHeartbeatClient {
+        async fn heartbeat(
+            &self,
+            _request: &hive_core::RuntimeHeartbeatRequest,
+        ) -> Result<hive_core::RuntimeHeartbeatResponse, String> {
+            self.heartbeat_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(hive_core::RuntimeHeartbeatResponse {
+                accepted: true,
+                server_time_utc: chrono::Utc::now().to_rfc3339(),
+            })
+        }
+
+        async fn sync_outbox(
+            &self,
+            _request: &hive_core::OutboxSyncRequest,
+        ) -> Result<hive_core::OutboxSyncResponse, String> {
+            self.sync_calls.fetch_add(1, Ordering::SeqCst);
+            Err("an acknowledged record must not be requeued".to_string())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeHeartbeatClient for BarrierBatchHeartbeatClient {
+        async fn heartbeat(
+            &self,
+            _request: &hive_core::RuntimeHeartbeatRequest,
+        ) -> Result<hive_core::RuntimeHeartbeatResponse, String> {
+            if self.heartbeat_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.first_heartbeat_captured.wait().await;
+                self.release_first_heartbeat.wait().await;
+            }
+            Ok(hive_core::RuntimeHeartbeatResponse {
+                accepted: true,
+                server_time_utc: chrono::Utc::now().to_rfc3339(),
+            })
+        }
+
+        async fn sync_outbox(
+            &self,
+            request: &hive_core::OutboxSyncRequest,
+        ) -> Result<hive_core::OutboxSyncResponse, String> {
+            let ledger = self.ledger.recent(None, usize::MAX);
+            for record in &request.records {
+                let occurrences = ledger
+                    .iter()
+                    .filter(|event| event.event_id == record.record_id)
+                    .count();
+                if occurrences != 1 {
+                    return Err(format!(
+                        "synced record {} had {occurrences} local ledger events",
+                        record.record_id
+                    ));
+                }
+            }
+            let accepted_record_ids = request
+                .records
+                .iter()
+                .map(|record| record.record_id.clone())
+                .collect::<Vec<_>>();
+            self.synced_batches
+                .lock()
+                .map_err(|error| error.to_string())?
+                .push(accepted_record_ids.clone());
+            Ok(hive_core::OutboxSyncResponse {
+                accepted_record_ids,
+                pending_records: 0,
+                server_time_utc: chrono::Utc::now().to_rfc3339(),
+                execution_receipts: Vec::new(),
+            })
+        }
+    }
+
+    fn stage_acknowledged_tool_activity(
+        label: &str,
+    ) -> (
+        EntityDaemonState,
+        std::path::PathBuf,
+        std::path::PathBuf,
+        String,
+    ) {
+        let mut state = crate::routes::tests::build_state();
+        state.soul_ref = "historical-soul-a".to_string();
+        let outbox_root = std::env::temp_dir().join(format!(
+            "abigail-soul-outbox-{label}-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let ledger_root = std::env::temp_dir().join(format!(
+            "abigail-soul-ledger-{label}-{}",
+            uuid::Uuid::new_v4()
+        ));
+        state.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        state.execution_ledger =
+            Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
+        let session_id = format!("session-{label}");
+        let assistant = ConversationTurn::new(&session_id, "assistant", "private reply")
+            .with_successful_tool_uses(vec![SuccessfulToolUse {
+                skill_id: "com.abigail.calendar".to_string(),
+                tool_name: "create_event".to_string(),
+            }]);
+        let record_id = crate::state::deterministic_journey_record_id(
+            &state.entity_id,
+            "skill_used",
+            &assistant.id,
+        );
+        let payload = serde_json::json!({
+            "session_id": assistant.session_id.clone(),
+            "successful_skill_count": 1,
+        });
+        state.memory.insert_turn(&assistant).unwrap();
+        state
+            .outbox
+            .reserve_slot(record_id.clone(), &state.entity_id, "skill_used")
+            .unwrap();
+        state
+            .commit_outbox_reservation(&record_id, payload)
+            .unwrap();
+        state
+            .outbox
+            .acknowledge(std::slice::from_ref(&record_id))
+            .unwrap();
+        (state, outbox_root, ledger_root, record_id)
+    }
+
+    fn outbox_document(root: &std::path::Path) -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(root.join("runtime_outbox.json")).unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn heartbeat_syncs_only_the_captured_ledger_verified_batch() {
+        let mut state = crate::routes::tests::build_state();
+        state.soul_ref = "batch-soul-a".to_string();
+        let outbox_root = std::env::temp_dir().join(format!(
+            "abigail-heartbeat-batch-outbox-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let ledger_root = std::env::temp_dir().join(format!(
+            "abigail-heartbeat-batch-ledger-{}",
+            uuid::Uuid::new_v4()
+        ));
+        state.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        state.execution_ledger =
+            Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
+
+        let first = state
+            .outbox
+            .enqueue_with_ledger_metadata(
+                uuid::Uuid::new_v4().to_string(),
+                &state.entity_id,
+                "skill_used",
+                serde_json::json!({
+                    "session_id": "captured-session",
+                    "successful_skill_count": 1,
+                }),
+                &state.soul_ref,
+            )
+            .unwrap();
+        let capture_barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let release_barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let client = Arc::new(BarrierBatchHeartbeatClient {
+            first_heartbeat_captured: capture_barrier.clone(),
+            release_first_heartbeat: release_barrier.clone(),
+            heartbeat_calls: AtomicUsize::new(0),
+            synced_batches: std::sync::Mutex::new(Vec::new()),
+            ledger: state.execution_ledger.clone(),
+        });
+
+        let heartbeat_state = state.clone();
+        let heartbeat_client = client.clone();
+        let first_cycle = tokio::spawn(async move {
+            run_runtime_outbox_heartbeat(&heartbeat_state, heartbeat_client.as_ref()).await
+        });
+        capture_barrier.wait().await;
+
+        let second = state
+            .outbox
+            .enqueue_with_ledger_metadata(
+                uuid::Uuid::new_v4().to_string(),
+                &state.entity_id,
+                "memory_confirmed",
+                serde_json::json!({
+                    "memory_id": "staged-after-capture",
+                    "memory_weight": "distilled",
+                }),
+                &state.soul_ref,
+            )
+            .unwrap();
+        release_barrier.wait().await;
+        first_cycle
+            .await
+            .expect("heartbeat task")
+            .expect("first heartbeat");
+
+        assert_eq!(
+            client.synced_batches.lock().unwrap().as_slice(),
+            &[vec![first.record_id.clone()]]
+        );
+        let after_first = state.outbox.snapshot().unwrap();
+        assert_eq!(after_first.len(), 1);
+        assert_eq!(after_first[0].record_id, second.record_id);
+        assert!(state.outbox.is_acknowledged(&first.record_id).unwrap());
+        assert!(!state.outbox.is_acknowledged(&second.record_id).unwrap());
+
+        run_runtime_outbox_heartbeat(&state, client.as_ref())
+            .await
+            .expect("next heartbeat");
+        assert_eq!(
+            client.synced_batches.lock().unwrap().as_slice(),
+            &[
+                vec![first.record_id.clone()],
+                vec![second.record_id.clone()]
+            ]
+        );
+        assert!(state.outbox.snapshot().unwrap().is_empty());
+        let ledger = state.execution_ledger.recent(None, 10);
+        for record_id in [&first.record_id, &second.record_id] {
+            assert_eq!(
+                ledger
+                    .iter()
+                    .filter(|event| event.event_id == *record_id)
+                    .count(),
+                1
+            );
+        }
+        let _ = std::fs::remove_dir_all(outbox_root);
+        let _ = std::fs::remove_dir_all(ledger_root);
+    }
+
+    #[tokio::test]
+    async fn reconciliation_failure_stops_before_hive_heartbeat_or_sync() {
+        let mut state = crate::routes::tests::build_state();
+        let ledger_root = std::env::temp_dir().join(format!(
+            "abigail-heartbeat-ledger-failure-{}",
+            uuid::Uuid::new_v4()
+        ));
+        state.execution_ledger = Arc::new(
+            crate::execution_ledger::ExecutionLedger::load_with_saver(
+                &ledger_root,
+                |_path, _bytes| anyhow::bail!("injected heartbeat ledger save failure"),
+            )
+            .unwrap(),
+        );
+        let assistant = ConversationTurn::new("session-heartbeat", "assistant", "private reply")
+            .with_successful_tool_uses(vec![SuccessfulToolUse {
+                skill_id: "com.abigail.calendar".to_string(),
+                tool_name: "create_event".to_string(),
+            }]);
+        let expected_record_id = crate::state::deterministic_journey_record_id(
+            &state.entity_id,
+            "skill_used",
+            &assistant.id,
+        );
+        state.memory.insert_turn(&assistant).unwrap();
+        let client = CountingHeartbeatClient {
+            heartbeat_calls: AtomicUsize::new(0),
+            sync_calls: AtomicUsize::new(0),
+        };
+
+        let error = run_runtime_outbox_heartbeat(&state, &client)
+            .await
+            .unwrap_err();
+
+        assert!(
+            error.contains("injected heartbeat ledger save failure"),
+            "{error}"
+        );
+        assert_eq!(client.heartbeat_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(client.sync_calls.load(Ordering::SeqCst), 0);
+        let queued = state.outbox.snapshot().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].record_id, expected_record_id);
+        let _ = std::fs::remove_dir_all(ledger_root);
+    }
+
+    #[tokio::test]
+    async fn acknowledged_activity_repairs_missing_ledger_with_historical_soul_and_heartbeats() {
+        let (state_a, outbox_root, ledger_root, record_id) =
+            stage_acknowledged_tool_activity("repair");
+        let original = state_a.execution_ledger.recent(None, 10);
+        assert_eq!(original.len(), 1);
+        assert_eq!(original[0].soul_ref, "historical-soul-a");
+        let persisted = outbox_document(&outbox_root);
+        let metadata = &persisted["record_ledger_metadata"][0];
+        assert_eq!(metadata["record_id"], record_id);
+        assert_eq!(metadata["entity_id"], state_a.entity_id);
+        assert_eq!(metadata["kind"], "skill_used");
+        assert_eq!(metadata["session_id"], "session-repair");
+        assert_eq!(metadata["soul_ref"], "historical-soul-a");
+        assert!(
+            metadata["payload_digest"]
+                .as_str()
+                .is_some_and(|digest| !digest.is_empty()),
+            "{metadata}"
+        );
+        std::fs::remove_file(ledger_root.join("execution_ledger.json")).unwrap();
+
+        let mut state_b = crate::routes::tests::build_state();
+        state_b.soul_ref = "current-soul-b".to_string();
+        state_b.memory = state_a.memory.clone();
+        state_b.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        state_b.execution_ledger =
+            Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
+        let client = SuccessfulHeartbeatClient {
+            heartbeat_calls: AtomicUsize::new(0),
+            sync_calls: AtomicUsize::new(0),
+        };
+
+        run_runtime_outbox_heartbeat(&state_b, &client)
+            .await
+            .expect("historical acknowledged activity must repair before heartbeat");
+
+        let repaired = state_b.execution_ledger.recent(None, 10);
+        assert_eq!(repaired.len(), 1);
+        assert_eq!(repaired[0].event_id, record_id);
+        assert_eq!(repaired[0].soul_ref, "historical-soul-a");
+        assert!(crate::execution_ledger::verify_chain(&repaired));
+        assert!(state_b.outbox.snapshot().unwrap().is_empty());
+        assert!(state_b.outbox.is_acknowledged(&record_id).unwrap());
+        assert_eq!(client.heartbeat_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(client.sync_calls.load(Ordering::SeqCst), 0);
+        let _ = std::fs::remove_dir_all(outbox_root);
+        let _ = std::fs::remove_dir_all(ledger_root);
+    }
+
+    #[test]
+    fn reconciliation_keeps_existing_historical_soul_event_authoritative() {
+        let (state_a, outbox_root, ledger_root, record_id) =
+            stage_acknowledged_tool_activity("existing");
+        let original = state_a.execution_ledger.recent(None, 10);
+        assert_eq!(original.len(), 1);
+        assert_eq!(original[0].soul_ref, "historical-soul-a");
+        let mut legacy_outbox = outbox_document(&outbox_root);
+        legacy_outbox
+            .as_object_mut()
+            .unwrap()
+            .remove("record_ledger_metadata");
+        std::fs::write(
+            outbox_root.join("runtime_outbox.json"),
+            serde_json::to_vec_pretty(&legacy_outbox).unwrap(),
+        )
+        .unwrap();
+
+        let mut state_b = crate::routes::tests::build_state();
+        state_b.soul_ref = "current-soul-b".to_string();
+        state_b.memory = state_a.memory.clone();
+        state_b.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        state_b.execution_ledger =
+            Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
+
+        state_b
+            .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)
+            .expect("matching historical ledger event must remain authoritative");
+
+        let reconciled = state_b.execution_ledger.recent(None, 10);
+        assert_eq!(reconciled.len(), 1);
+        assert_eq!(reconciled[0].event_id, record_id);
+        assert_eq!(reconciled[0].soul_ref, "historical-soul-a");
+        assert_eq!(reconciled[0].event_hash, original[0].event_hash);
+        assert!(state_b.outbox.snapshot().unwrap().is_empty());
+        assert!(state_b.outbox.is_acknowledged(&record_id).unwrap());
+        assert_eq!(
+            outbox_document(&outbox_root)["record_ledger_metadata"][0]["soul_ref"],
+            "historical-soul-a"
+        );
+        let _ = std::fs::remove_dir_all(outbox_root);
+        let _ = std::fs::remove_dir_all(ledger_root);
+    }
 }

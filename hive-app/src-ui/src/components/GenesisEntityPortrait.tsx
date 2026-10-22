@@ -12,7 +12,7 @@ export function portraitsFromSessions(sessions: GenesisSession[]): EntityPortrai
   const seen = new Set<string>();
   const newest = [...sessions].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   for (const session of newest) {
-    const entityId = session.definition.entity_id;
+    const entityId = session.effective_entity_id ?? session.definition.entity_id;
     const assetId = session.definition.portrait_asset_id;
     const awakened = session.state === "ready" || Boolean((session as GenesisSession & { awakening?: string }).awakening);
     if (entityId && awakened && !seen.has(entityId)) {
@@ -23,21 +23,58 @@ export function portraitsFromSessions(sessions: GenesisSession[]): EntityPortrai
   return portraits;
 }
 
+/** Entities Genesis allocated but has not awakened, mapped to their creation
+ * session. Generic setup would bypass their approved story. */
+export function awaitingFromSessions(sessions: GenesisSession[]): Record<string, string> {
+  const awaiting: Record<string, string> = {};
+  for (const session of sessions) {
+    const entityId = session.effective_entity_id ?? session.definition.entity_id;
+    if (entityId && !session.awakening) awaiting[entityId] = session.id;
+  }
+  return awaiting;
+}
+
+export interface GenesisEntities {
+  portraits: EntityPortraits;
+  awaiting: Record<string, string>;
+  loading: boolean;
+  error: string | null;
+}
+
 /** Call once in the collection parent; change refreshKey after leaving Genesis
  * or switching the Hive connection to refresh every card together. */
-export function useGenesisEntityPortraits(refreshKey?: unknown): EntityPortraits {
-  const [portraits, setPortraits] = useState<EntityPortraits>({});
+export function useGenesisEntities(refreshKey?: unknown): GenesisEntities {
+  const [entities, setEntities] = useState<GenesisEntities>({
+    portraits: {},
+    awaiting: {},
+    loading: true,
+    error: null,
+  });
   useEffect(() => {
     let current = true;
+    setEntities((prior) => ({ ...prior, loading: true, error: null }));
     void listGenesisSessions().then((sessions) => {
-      if (current) setPortraits(portraitsFromSessions(sessions));
-    }).catch(() => {
+      if (current) {
+        setEntities({
+          portraits: portraitsFromSessions(sessions),
+          awaiting: awaitingFromSessions(sessions),
+          loading: false,
+          error: null,
+        });
+      }
+    }).catch((error: unknown) => {
       // Existing Entities remain usable if Genesis or its capability is absent.
-      if (current) setPortraits({});
+      if (current) {
+        setEntities((prior) => ({
+          ...prior,
+          loading: false,
+          error: error instanceof Error ? error.message : "Genesis records could not be refreshed.",
+        }));
+      }
     });
     return () => { current = false; };
   }, [refreshKey]);
-  return portraits;
+  return entities;
 }
 
 export default function GenesisEntityPortrait({ entityId, name, portrait }: {

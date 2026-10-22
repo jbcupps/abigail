@@ -5,7 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::fmt::Write;
 
 pub const GENESIS_SCHEMA_VERSION: u32 = 1;
 pub const MAX_MARKDOWN_BYTES: usize = 256 * 1024;
@@ -165,6 +167,16 @@ impl EntityDefinition {
             return Err("An owner is required".into());
         }
         for field in GenesisField::ALL {
+            if field == GenesisField::Name {
+                // Saved drafts predate the canonical name contract. Keep them
+                // viewable/editable, while direct edits and activation enforce
+                // the current rule before any identity mutation.
+                validate_text(&self.name, MAX_FIELD_BYTES)?;
+                if self.name.contains(['\r', '\n']) {
+                    return Err("An Entity name must fit on one line".into());
+                }
+                continue;
+            }
             FieldUpdate {
                 field,
                 value: self.field_value(field),
@@ -307,6 +319,9 @@ impl FieldUpdate {
                 self.field.label()
             ));
         }
+        if self.field == GenesisField::Name {
+            return abigail_core::validate_entity_name(&string_value(self.value.clone())?);
+        }
         if self.field == GenesisField::Personality {
             return serde_json::from_value::<Personality>(self.value.clone())
                 .map_err(|e| format!("Invalid personality: {e}"))?
@@ -315,22 +330,7 @@ impl FieldUpdate {
         if self.field.is_list() {
             return validate_list(&list_value(self.value.clone())?);
         }
-        if self.field == GenesisField::Name
-            && self
-                .value
-                .as_str()
-                .is_some_and(|name| name.contains(['\r', '\n']))
-        {
-            return Err("An Entity name must fit on one line".into());
-        }
-        validate_text(
-            &string_value(self.value.clone())?,
-            if self.field == GenesisField::Name {
-                160
-            } else {
-                MAX_FIELD_BYTES
-            },
-        )
+        validate_text(&string_value(self.value.clone())?, MAX_FIELD_BYTES)
     }
 }
 
@@ -414,6 +414,9 @@ pub struct GenesisSession {
     pub id: String,
     pub owner_id: String,
     pub mode: GenesisMode,
+    /// Original reviewed keyed-creation input. Later edits never mutate it.
+    #[serde(default)]
+    pub creation_seed: Option<GenesisCreationSeed>,
     #[serde(default)]
     pub composer_draft: String,
     #[serde(default)]
@@ -426,6 +429,9 @@ pub struct GenesisSession {
     /// The awakened Entity and its actual chat history remain independent.
     #[serde(default)]
     pub retention_days: Option<u16>,
+    /// Presentation-only quest progress; never model-writable or prompt input.
+    #[serde(default)]
+    pub quest: crate::genesis_quest::QuestState,
     pub state: GenesisState,
     pub definition: EntityDefinition,
     pub messages: Vec<GenesisMessage>,
@@ -440,6 +446,37 @@ pub struct GenesisSession {
     pub revision: u64,
     #[serde(default)]
     pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GenesisCreationSeed {
+    pub mode: GenesisMode,
+    pub name: String,
+    pub purpose: String,
+    pub presence: crate::genesis_quest::PresenceChoice,
+}
+
+impl GenesisCreationSeed {
+    pub fn validate(&self) -> Result<(), String> {
+        abigail_core::validate_entity_name(&self.name)?;
+        if self.purpose.trim().is_empty() {
+            return Err("Review a nonempty purpose before creating this identity.".into());
+        }
+        validate_text(&self.purpose, MAX_FIELD_BYTES)
+    }
+
+    pub fn fingerprint(&self) -> Result<String, String> {
+        self.validate()?;
+        let encoded = serde_json::to_vec(self).map_err(|error| error.to_string())?;
+        let digest = Sha256::digest(encoded);
+        let mut fingerprint = String::with_capacity(7 + digest.len() * 2);
+        fingerprint.push_str("sha256:");
+        for byte in digest {
+            write!(&mut fingerprint, "{byte:02x}").map_err(|error| error.to_string())?;
+        }
+        Ok(fingerprint)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -459,11 +496,13 @@ impl GenesisSession {
             id,
             owner_id: owner_id.clone(),
             mode,
+            creation_seed: None,
             composer_draft: String::new(),
             choices: vec![],
             awakening: None,
             chronicle: vec![],
             retention_days: None,
+            quest: Default::default(),
             state: GenesisState::Draft,
             definition: EntityDefinition::new(owner_id, now.clone()),
             messages: vec![],
@@ -483,6 +522,9 @@ impl GenesisSession {
     pub fn validate(&self) -> Result<(), String> {
         if self.schema_version != GENESIS_SCHEMA_VERSION {
             return Err("Unsupported Genesis session schema".into());
+        }
+        if let Some(seed) = &self.creation_seed {
+            seed.validate()?;
         }
         if self.id.is_empty() || self.owner_id != self.definition.owner_id {
             return Err("Invalid Genesis ownership".into());
@@ -530,6 +572,7 @@ impl GenesisSession {
             }
             .validate()?;
         }
+        self.quest.validate()?;
         self.definition.validate()
     }
 
@@ -1264,6 +1307,40 @@ fn markdown_value(field: GenesisField, body: &str) -> Result<Value, String> {
 mod tests {
     use super::*;
     const NOW: &str = "2026-10-17T12:00:00Z";
+
+    #[test]
+    fn creation_seed_round_trips_presence_and_legacy_sessions_default_to_none() {
+        let mut seeded = session();
+        seeded.creation_seed = Some(GenesisCreationSeed {
+            mode: GenesisMode::Quick,
+            name: "Signal".into(),
+            purpose: "Help the household notice small wonders".into(),
+            presence: crate::genesis_quest::PresenceChoice::default(),
+        });
+        let value = serde_json::to_value(&seeded).unwrap();
+        let restored: GenesisSession = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(restored.creation_seed, seeded.creation_seed);
+
+        let mut legacy = value;
+        legacy.as_object_mut().unwrap().remove("creation_seed");
+        let restored: GenesisSession = serde_json::from_value(legacy).unwrap();
+        assert!(restored.creation_seed.is_none());
+    }
+
+    #[test]
+    fn creation_seed_fingerprint_is_deterministic_and_covers_presence() {
+        let seed = GenesisCreationSeed {
+            mode: GenesisMode::Quick,
+            name: "Signal".into(),
+            purpose: "Notice small wonders".into(),
+            presence: crate::genesis_quest::PresenceChoice::default(),
+        };
+        assert_eq!(seed.fingerprint().unwrap(), seed.fingerprint().unwrap());
+        let mut changed = seed.clone();
+        changed.presence.motion = crate::genesis_quest::Motion::Still;
+        assert_ne!(seed.fingerprint().unwrap(), changed.fingerprint().unwrap());
+    }
+
     fn session() -> GenesisSession {
         GenesisSession::new(
             "draft-a".into(),
@@ -1311,6 +1388,61 @@ mod tests {
             .is_err());
         assert_eq!(s.definition.name, "");
         assert_eq!(s.revision, 0);
+    }
+
+    #[test]
+    fn direct_name_updates_use_the_canonical_entity_name_contract() {
+        for invalid in [
+            " Leading".to_string(),
+            "Trailing ".to_string(),
+            "Line\nBreak".to_string(),
+            "Control\u{0007}Bell".to_string(),
+            "a".repeat(81),
+        ] {
+            let mut draft = session();
+            assert!(
+                draft
+                    .apply_updates(
+                        vec![update(GenesisField::Name, json!(invalid))],
+                        "name",
+                        NOW,
+                    )
+                    .is_err(),
+                "accepted an invalid direct name update"
+            );
+            assert!(draft.definition.name.is_empty());
+        }
+
+        let mut draft = session();
+        let eighty_multibyte = "界".repeat(80);
+        draft
+            .apply_updates(
+                vec![update(GenesisField::Name, json!(eighty_multibyte.clone()))],
+                "name",
+                NOW,
+            )
+            .unwrap();
+        assert_eq!(draft.definition.name, eighty_multibyte);
+    }
+
+    #[test]
+    fn creation_seeds_use_the_canonical_entity_name_contract() {
+        let seed = |name| GenesisCreationSeed {
+            mode: GenesisMode::Quick,
+            name,
+            purpose: "Help the household".into(),
+            presence: crate::genesis_quest::PresenceChoice::default(),
+        };
+        for invalid in [
+            " Leading".to_string(),
+            "Trailing ".to_string(),
+            "Line\nBreak".to_string(),
+            "Control\u{0007}Bell".to_string(),
+            "a".repeat(81),
+        ] {
+            assert!(seed(invalid).validate().is_err());
+        }
+        assert!(seed("界".repeat(80)).validate().is_ok());
     }
 
     #[test]

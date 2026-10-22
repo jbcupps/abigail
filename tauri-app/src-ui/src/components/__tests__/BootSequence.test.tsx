@@ -1,8 +1,10 @@
 import "../../test/tauri-mock";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import type { ComponentProps } from "react";
+import { beforeEach, describe, expect, expectTypeOf, it, vi, type Mock } from "vitest";
 import BootSequence from "../BootSequence";
+import ForgeScenario from "../ForgeScenario";
 
 const mockInvoke = invoke as unknown as Mock;
 
@@ -111,6 +113,18 @@ describe("BootSequence", () => {
       screen.getByRole("button", { name: /save plaintext key \(advanced\)/i })
     ).toBeInTheDocument();
     expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it("accepts only the weight-free Forge display contract", () => {
+    type ForgeCompletion = Parameters<
+      ComponentProps<typeof ForgeScenario>["onComplete"]
+    >[0];
+
+    expectTypeOf<ForgeCompletion>().toEqualTypeOf<{
+      archetype: string;
+      soul_hash: string;
+      sigil: string;
+    }>();
   });
 });
 

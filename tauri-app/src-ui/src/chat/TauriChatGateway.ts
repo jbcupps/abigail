@@ -7,7 +7,7 @@ import {
   type ChatGatewayRequest,
   type ChatGatewayResponse,
   type ChatGatewayStream,
-  INTERRUPTED_BY_USER_MESSAGE,
+  ACTION_MAY_HAVE_COMPLETED_MESSAGE,
   normalizeChatGatewayError,
   normalizeChatGatewayResponse,
 } from "./chatGateway";
@@ -152,7 +152,11 @@ export class TauriChatGateway implements ChatGateway {
         try {
           const canceled = await this.invokeFn<boolean>("cancel_chat_stream");
           if (canceled) {
-            await finalizeError(INTERRUPTED_BY_USER_MESSAGE);
+            await finalizeError({
+              code: "action_may_have_completed_verify_before_repeating",
+              message: ACTION_MAY_HAVE_COMPLETED_MESSAGE,
+              interrupted: true,
+            });
           }
         } catch (error) {
           await finalizeError(error);

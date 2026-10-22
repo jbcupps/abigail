@@ -6,14 +6,16 @@
 
 pub mod job_tools;
 
-use abigail_capabilities::cognitive::{Message, StreamEvent, ToolCall, ToolDefinition};
+use abigail_capabilities::cognitive::{
+    CompletionResponse, Message, StreamEvent, ToolCall, ToolDefinition,
+};
 use abigail_queue::JobQueue;
 use abigail_router::IdEgoRouter;
 use abigail_skills::manifest::SkillId;
 use abigail_skills::skill::ToolParams;
 pub use abigail_skills::JobContext;
 use abigail_skills::{SkillExecutor, SkillRegistry};
-use entity_core::{SessionMessage, ToolCallRecord};
+use entity_core::{CompletionRisk, SessionMessage, ToolCallRecord};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -701,6 +703,8 @@ pub struct ToolUseResult {
     /// the text response (captures fallback chain and timing).
     /// All attribution (tier, model, provider, complexity) is derived from this.
     pub execution_trace: Option<entity_core::ExecutionTrace>,
+    /// Present when a tool side effect completed but a later response step did not.
+    pub completion_risk: Option<CompletionRisk>,
 }
 
 impl ToolUseResult {
@@ -720,6 +724,16 @@ impl ToolUseResult {
             .as_ref()
             .and_then(|t| t.complexity_score)
     }
+}
+
+fn has_successful_tool_call(records: &[ToolCallRecord]) -> bool {
+    records.iter().any(|record| record.success)
+}
+
+fn partial_tool_completion_message() -> String {
+    "An action completed, but the final reply is unavailable. \
+     Verify the result before repeating the action."
+        .to_string()
 }
 
 /// Configuration for the tool-use loop's async delegation behavior.
@@ -791,7 +805,7 @@ pub async fn run_tool_use_loop_with_jobs(
     for round in 0..MAX_TOOL_ROUNDS {
         tracing::debug!("Tool-use loop (with jobs) round {}", round);
 
-        let resp = router
+        let resp = match router
             .route_unified(abigail_router::RoutingRequest {
                 messages: messages.clone(),
                 tools: Some(tools.clone()),
@@ -799,7 +813,22 @@ pub async fn run_tool_use_loop_with_jobs(
                 stream_tx: None,
                 force_id_only: false,
             })
-            .await?;
+            .await
+        {
+            Ok(response) => response,
+            Err(error) if has_successful_tool_call(&all_records) => {
+                tracing::warn!(
+                    "Provider failed after successful tool activity; returning a non-retry partial result: {error}"
+                );
+                return Ok(ToolUseResult {
+                    content: partial_tool_completion_message(),
+                    tool_calls_made: all_records,
+                    execution_trace: last_trace,
+                    completion_risk: Some(CompletionRisk::ActionCompletedVerifyBeforeRepeating),
+                });
+            }
+            Err(error) => return Err(error),
+        };
         let response = resp.completion;
         last_trace = resp.trace;
 
@@ -810,6 +839,7 @@ pub async fn run_tool_use_loop_with_jobs(
                     content: response.content,
                     tool_calls_made: all_records,
                     execution_trace: last_trace,
+                    completion_risk: None,
                 });
             }
         };
@@ -847,6 +877,8 @@ pub async fn run_tool_use_loop_with_jobs(
     );
     Ok(ToolUseResult {
         content: "I attempted several tool calls but hit the maximum number of rounds.".into(),
+        completion_risk: has_successful_tool_call(&all_records)
+            .then_some(CompletionRisk::ActionCompletedVerifyBeforeRepeating),
         tool_calls_made: all_records,
         execution_trace: last_trace,
     })
@@ -869,7 +901,7 @@ pub async fn run_tool_use_loop_with_model_override(
     for round in 0..MAX_TOOL_ROUNDS {
         tracing::debug!("Tool-use loop round {}", round);
 
-        let resp = router
+        let resp = match router
             .route_unified(abigail_router::RoutingRequest {
                 messages: messages.clone(),
                 tools: Some(tools.clone()),
@@ -877,7 +909,22 @@ pub async fn run_tool_use_loop_with_model_override(
                 stream_tx: None,
                 force_id_only: false,
             })
-            .await?;
+            .await
+        {
+            Ok(response) => response,
+            Err(error) if has_successful_tool_call(&all_records) => {
+                tracing::warn!(
+                    "Provider failed after successful tool activity; returning a non-retry partial result: {error}"
+                );
+                return Ok(ToolUseResult {
+                    content: partial_tool_completion_message(),
+                    tool_calls_made: all_records,
+                    execution_trace: last_trace,
+                    completion_risk: Some(CompletionRisk::ActionCompletedVerifyBeforeRepeating),
+                });
+            }
+            Err(error) => return Err(error),
+        };
         let response = resp.completion;
         last_trace = resp.trace;
 
@@ -888,6 +935,7 @@ pub async fn run_tool_use_loop_with_model_override(
                     content: response.content,
                     tool_calls_made: all_records,
                     execution_trace: last_trace,
+                    completion_risk: None,
                 });
             }
         };
@@ -912,6 +960,8 @@ pub async fn run_tool_use_loop_with_model_override(
     );
     Ok(ToolUseResult {
         content: "I attempted several tool calls but hit the maximum number of rounds. Here's what I have so far.".to_string(),
+        completion_risk: has_successful_tool_call(&all_records)
+            .then_some(CompletionRisk::ActionCompletedVerifyBeforeRepeating),
         tool_calls_made: all_records,
         execution_trace: last_trace,
     })
@@ -942,7 +992,7 @@ pub async fn run_tool_use_loop_with_delegation(
     for round in 0..effective_rounds {
         tracing::debug!("Tool-use loop (delegatable) round {}", round);
 
-        let resp = router
+        let resp = match router
             .route_unified(abigail_router::RoutingRequest {
                 messages: messages.clone(),
                 tools: Some(tools.clone()),
@@ -950,7 +1000,22 @@ pub async fn run_tool_use_loop_with_delegation(
                 stream_tx: None,
                 force_id_only: false,
             })
-            .await?;
+            .await
+        {
+            Ok(response) => response,
+            Err(error) if has_successful_tool_call(&all_records) => {
+                tracing::warn!(
+                    "Provider failed after successful tool activity; returning a non-retry partial result: {error}"
+                );
+                return Ok(ToolUseOutcome::Completed(ToolUseResult {
+                    content: partial_tool_completion_message(),
+                    tool_calls_made: all_records,
+                    execution_trace: last_trace,
+                    completion_risk: Some(CompletionRisk::ActionCompletedVerifyBeforeRepeating),
+                }));
+            }
+            Err(error) => return Err(error),
+        };
         let response = resp.completion;
         last_trace = resp.trace;
 
@@ -961,6 +1026,7 @@ pub async fn run_tool_use_loop_with_delegation(
                     content: response.content,
                     tool_calls_made: all_records,
                     execution_trace: last_trace,
+                    completion_risk: None,
                 }));
             }
         };
@@ -1035,6 +1101,7 @@ pub async fn run_tool_use_loop_with_delegation(
                     ),
                     tool_calls_made: all_records,
                     execution_trace: last_trace,
+                    completion_risk: None,
                 },
                 job_id,
             });
@@ -1046,6 +1113,8 @@ pub async fn run_tool_use_loop_with_delegation(
         content: "I attempted several tool calls but hit the maximum number of rounds. \
                   Here's what I have so far."
             .to_string(),
+        completion_risk: has_successful_tool_call(&all_records)
+            .then_some(CompletionRisk::ActionCompletedVerifyBeforeRepeating),
         tool_calls_made: all_records,
         execution_trace: last_trace,
     }))
@@ -1065,6 +1134,7 @@ pub struct IntermediateToolResult {
     pub final_text: Option<String>,
     /// Execution trace from the final LLM call in the tool-use rounds.
     pub execution_trace: Option<entity_core::ExecutionTrace>,
+    pub completion_risk: Option<CompletionRisk>,
 }
 
 /// Run tool-use rounds non-streaming, but stop *before* the final text
@@ -1090,7 +1160,7 @@ pub async fn run_tool_use_loop_rounds_only(
     for round in 0..MAX_TOOL_ROUNDS {
         tracing::debug!("Tool-use loop (rounds-only) round {}", round);
 
-        let resp = router
+        let resp = match router
             .route_unified(abigail_router::RoutingRequest {
                 messages: messages.clone(),
                 tools: Some(tools.to_vec()),
@@ -1098,7 +1168,22 @@ pub async fn run_tool_use_loop_rounds_only(
                 stream_tx: None,
                 force_id_only: false,
             })
-            .await?;
+            .await
+        {
+            Ok(response) => response,
+            Err(error) if has_successful_tool_call(&all_records) => {
+                tracing::warn!(
+                    "Provider failed after successful tool activity; returning a non-retry partial result: {error}"
+                );
+                return Ok(IntermediateToolResult {
+                    tool_calls_made: all_records,
+                    final_text: Some(partial_tool_completion_message()),
+                    execution_trace: last_trace,
+                    completion_risk: Some(CompletionRisk::ActionCompletedVerifyBeforeRepeating),
+                });
+            }
+            Err(error) => return Err(error),
+        };
         let response = resp.completion;
         last_trace = resp.trace;
 
@@ -1109,6 +1194,7 @@ pub async fn run_tool_use_loop_rounds_only(
                     tool_calls_made: all_records,
                     final_text: Some(response.content),
                     execution_trace: last_trace,
+                    completion_risk: None,
                 });
             }
         };
@@ -1134,6 +1220,7 @@ pub async fn run_tool_use_loop_rounds_only(
         tool_calls_made: all_records,
         final_text: None,
         execution_trace: last_trace,
+        completion_risk: None,
     })
 }
 
@@ -1148,6 +1235,7 @@ pub struct StreamPipelineResult {
     pub tool_calls_made: Vec<ToolCallRecord>,
     /// Authoritative execution trace for the final streaming LLM call.
     pub execution_trace: Option<entity_core::ExecutionTrace>,
+    pub completion_risk: Option<CompletionRisk>,
 }
 
 /// Stream each provider round, executing any requested tools before continuing
@@ -1165,6 +1253,7 @@ pub async fn stream_chat_pipeline(
 ) -> anyhow::Result<StreamPipelineResult> {
     let mut messages = messages;
     let mut tool_calls_made = Vec::new();
+    let mut last_trace = None;
 
     for round in 0..=MAX_TOOL_ROUNDS {
         // After the execution budget is exhausted, request a final answer
@@ -1190,7 +1279,29 @@ pub async fn stream_chat_pipeline(
             }
         };
         let (stream_resp, ()) = tokio::join!(provider_call, relay);
-        let stream_resp = stream_resp?;
+        let stream_resp = match stream_resp {
+            Ok(response) => response,
+            Err(error) if has_successful_tool_call(&tool_calls_made) => {
+                tracing::warn!(
+                    "Streaming provider failed after successful tool activity; returning a non-retry partial result: {error}"
+                );
+                let content = partial_tool_completion_message();
+                let _ = tx
+                    .send(StreamEvent::Done(CompletionResponse {
+                        content: content.clone(),
+                        tool_calls: None,
+                    }))
+                    .await;
+                return Ok(StreamPipelineResult {
+                    content,
+                    tool_calls_made,
+                    execution_trace: last_trace,
+                    completion_risk: Some(CompletionRisk::ActionCompletedVerifyBeforeRepeating),
+                });
+            }
+            Err(error) => return Err(error),
+        };
+        last_trace = stream_resp.trace.clone();
         let response = stream_resp.completion;
         let tool_calls = match response.tool_calls.as_ref() {
             Some(calls) if !calls.is_empty() => calls,
@@ -1200,6 +1311,7 @@ pub async fn stream_chat_pipeline(
                     content: response.content,
                     tool_calls_made,
                     execution_trace: stream_resp.trace,
+                    completion_risk: None,
                 });
             }
         };
@@ -1372,7 +1484,10 @@ mod tests {
         ToolDescriptor, ToolOutput,
     };
     use std::collections::HashMap;
-    use std::sync::Arc;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
 
     // ── Test helpers ─────────────────────────────────────────────────
 
@@ -1484,6 +1599,100 @@ mod tests {
         finish: Option<Arc<tokio::sync::Notify>>,
     }
 
+    struct ToolThenProviderFailure {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for ToolThenProviderFailure {
+        async fn complete(
+            &self,
+            _request: &CompletionRequest,
+        ) -> anyhow::Result<CompletionResponse> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Ok(CompletionResponse {
+                    content: String::new(),
+                    tool_calls: Some(vec![ToolCall {
+                        id: "partial-call-1".into(),
+                        name: "test.echo::echo".into(),
+                        arguments: r#"{"input":"completed"}"#.into(),
+                    }]),
+                });
+            }
+            anyhow::bail!("provider failed after the side effect; please try again")
+        }
+
+        async fn stream(
+            &self,
+            _request: &CompletionRequest,
+            tx: tokio::sync::mpsc::Sender<StreamEvent>,
+        ) -> anyhow::Result<CompletionResponse> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                let response = CompletionResponse {
+                    content: String::new(),
+                    tool_calls: Some(vec![ToolCall {
+                        id: "partial-stream-call-1".into(),
+                        name: "test.echo::echo".into(),
+                        arguments: r#"{"input":"completed"}"#.into(),
+                    }]),
+                };
+                tx.send(StreamEvent::Done(response.clone())).await?;
+                return Ok(response);
+            }
+            anyhow::bail!("stream provider failed after the side effect; please try again")
+        }
+    }
+
+    struct CountingSkill {
+        inner: StubSkill,
+        executions: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl Skill for CountingSkill {
+        fn manifest(&self) -> &SkillManifest {
+            self.inner.manifest()
+        }
+
+        async fn initialize(&mut self, config: SkillConfig) -> SkillResult<()> {
+            self.inner.initialize(config).await
+        }
+
+        async fn shutdown(&mut self) -> SkillResult<()> {
+            self.inner.shutdown().await
+        }
+
+        fn health(&self) -> SkillHealth {
+            self.inner.health()
+        }
+
+        fn tools(&self) -> Vec<ToolDescriptor> {
+            self.inner.tools()
+        }
+
+        async fn execute_tool(
+            &self,
+            tool_name: &str,
+            params: ToolParams,
+            context: &ExecutionContext,
+        ) -> SkillResult<ToolOutput> {
+            self.executions.fetch_add(1, Ordering::SeqCst);
+            self.inner.execute_tool(tool_name, params, context).await
+        }
+
+        fn capabilities(&self) -> Vec<abigail_skills::manifest::CapabilityDescriptor> {
+            self.inner.capabilities()
+        }
+
+        fn get_capability(&self, name: &str) -> Option<&dyn std::any::Any> {
+            self.inner.get_capability(name)
+        }
+
+        fn triggers(&self) -> Vec<TriggerDescriptor> {
+            self.inner.triggers()
+        }
+    }
+
     #[async_trait::async_trait]
     impl LlmProvider for StreamingOnlyProvider {
         async fn complete(&self, _: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
@@ -1538,6 +1747,117 @@ mod tests {
             .unwrap();
         let tools = build_tool_definitions(&registry);
         (SkillExecutor::new(registry), tools)
+    }
+
+    fn counting_test_executor() -> (SkillExecutor, Vec<ToolDefinition>, Arc<AtomicUsize>) {
+        let registry = Arc::new(SkillRegistry::new());
+        let executions = Arc::new(AtomicUsize::new(0));
+        registry
+            .register(
+                SkillId("test.echo".into()),
+                Arc::new(CountingSkill {
+                    inner: StubSkill {
+                        manifest: test_manifest("test.echo"),
+                        tool_descriptors: vec![valid_tool("echo")],
+                    },
+                    executions: executions.clone(),
+                }),
+            )
+            .unwrap();
+        let tools = build_tool_definitions(&registry);
+        (SkillExecutor::new(registry), tools, executions)
+    }
+
+    #[tokio::test]
+    async fn nonstreaming_second_round_failure_returns_completed_partial_without_retry() {
+        let provider = Arc::new(ToolThenProviderFailure {
+            calls: AtomicUsize::new(0),
+        });
+        let mut router = IdEgoRouter::new(
+            None,
+            None,
+            None,
+            None,
+            abigail_core::RoutingMode::EgoPrimary,
+        );
+        router.id = provider;
+        let (executor, tools, executions) = counting_test_executor();
+
+        let result = run_tool_use_loop(
+            &router,
+            &executor,
+            vec![Message::new("user", "perform one action")],
+            tools,
+        )
+        .await
+        .expect("completed side effects require a non-retry partial result");
+
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        assert_eq!(result.tool_calls_made.len(), 1);
+        assert!(result.tool_calls_made[0].success);
+        assert_eq!(
+            result.content,
+            "An action completed, but the final reply is unavailable. \
+             Verify the result before repeating the action."
+        );
+        assert_eq!(
+            result.completion_risk,
+            Some(entity_core::CompletionRisk::ActionCompletedVerifyBeforeRepeating)
+        );
+    }
+
+    #[tokio::test]
+    async fn streaming_second_round_failure_returns_completed_partial_and_final_done() {
+        let provider = Arc::new(ToolThenProviderFailure {
+            calls: AtomicUsize::new(0),
+        });
+        let mut router = IdEgoRouter::new(
+            None,
+            None,
+            None,
+            None,
+            abigail_core::RoutingMode::EgoPrimary,
+        );
+        router.id = provider;
+        let (executor, tools, executions) = counting_test_executor();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+
+        let result = stream_chat_pipeline(
+            &router,
+            &executor,
+            vec![Message::new("user", "perform one streamed action")],
+            tools,
+            tx,
+            None,
+            None,
+        )
+        .await
+        .expect("completed streamed side effects require a non-retry partial result");
+
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        assert_eq!(result.tool_calls_made.len(), 1);
+        assert!(result.tool_calls_made[0].success);
+        assert_eq!(
+            result.content,
+            "An action completed, but the final reply is unavailable. \
+             Verify the result before repeating the action."
+        );
+        assert_eq!(
+            result.completion_risk,
+            Some(entity_core::CompletionRisk::ActionCompletedVerifyBeforeRepeating)
+        );
+        let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, StreamEvent::Done(_)))
+                .count(),
+            1
+        );
+        assert!(matches!(
+            events.last(),
+            Some(StreamEvent::Done(response)) if response.content == result.content
+        ));
     }
 
     #[tokio::test]
@@ -2165,6 +2485,7 @@ mod tests {
                 success: true,
             }],
             execution_trace: Some(trace),
+            completion_risk: None,
         };
         assert_eq!(result.content, "done");
         assert_eq!(result.tool_calls_made.len(), 1);
@@ -2191,6 +2512,7 @@ mod tests {
             content: "done".into(),
             tool_calls_made: vec![],
             execution_trace: Some(trace),
+            completion_risk: None,
         };
         let trace_ref = result.execution_trace.as_ref().unwrap();
         assert!(!trace_ref.fallback_occurred);
@@ -2206,6 +2528,7 @@ mod tests {
             content: "streamed".into(),
             tool_calls_made: vec![],
             execution_trace: None,
+            completion_risk: None,
         };
         assert!(result.execution_trace.is_none());
     }
