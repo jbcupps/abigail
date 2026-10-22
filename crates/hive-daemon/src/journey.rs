@@ -898,6 +898,29 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn unknown_runtime_event_does_not_create_or_advance_a_journey() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let unknown = outbox_event(
+            &entity_id,
+            "chat_assistant_turn",
+            serde_json::json!({
+                "reply": "private model output",
+                "payload": {"arbitrary": true},
+            }),
+        );
+        let projected = store
+            .record_runtime_events(OWNER, &entity_id, &[unknown])
+            .unwrap();
+        assert!(projected.earned.is_empty());
+        assert_eq!(projected.activity(), JourneyActivity::default());
+        assert!(
+            store.load(OWNER, &entity_id).unwrap().is_none(),
+            "unknown events must not create progression state"
+        );
+    }
+
+    #[test]
     fn runtime_events_survive_reopen_and_concurrent_kinds_do_not_lose_counts() {
         let handle = PersistenceHandle::open_ephemeral(EntityScope::Hive).unwrap();
         let store = std::sync::Arc::new(JourneyStore::new(handle.clone()).unwrap());
