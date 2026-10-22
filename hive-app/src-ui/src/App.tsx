@@ -32,6 +32,7 @@ export default function App() {
   const [openingId, setOpeningId] = useState<string | null>(null);
   const openingRef = useRef(false);
   const activeGenesisLaunch = useRef(0);
+  const genesisSwitchTrigger = useRef<HTMLElement | null>(null);
   const mounted = useRef(true);
   const cardsKey = `${genesisOpen}:${status?.entities.map(entity => `${entity.id}:${entity.birth_complete}`).join(",") ?? ""}`;
   const { portraits, awaiting } = useGenesisEntities(cardsKey);
@@ -46,11 +47,24 @@ export default function App() {
   }, []);
   const openGenesis = useCallback((sessionId?: string) => {
     if (genesisOpen) {
-      setGenesisSwitch({ resumeId: sessionId });
+      setGenesisSwitch((current) => {
+        if (current) return current;
+        genesisSwitchTrigger.current = document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+        return { resumeId: sessionId };
+      });
       return;
     }
     launchGenesis(sessionId);
   }, [genesisOpen, launchGenesis]);
+  const dismissGenesisSwitch = useCallback(() => {
+    setGenesisSwitch(null);
+    queueMicrotask(() => {
+      genesisSwitchTrigger.current?.focus();
+      genesisSwitchTrigger.current = null;
+    });
+  }, []);
   const closeGenesis = useCallback((launch: number) => {
     if (activeGenesisLaunch.current !== launch) return;
     setGenesisSwitch(null);
@@ -157,7 +171,13 @@ export default function App() {
   const needsProvider = status?.ready_state === "needs_provider";
 
   return (
-    <div className="theme-modern flex h-screen bg-theme-bg text-theme-text font-primary">
+    <>
+      <div
+        data-testid="app-shell"
+        className="theme-modern flex h-screen bg-theme-bg text-theme-text font-primary"
+        inert={genesisSwitch ? true : undefined}
+        aria-hidden={genesisSwitch ? true : undefined}
+      >
       <div className="min-w-0 flex-1 overflow-y-auto p-4 md:p-8">
         <header className="mb-6 flex items-start justify-between gap-4">
           <div>
@@ -262,15 +282,19 @@ export default function App() {
       {wizardOpen && (
         <ProviderWizard onClose={closeWizard} onComplete={refreshStatus} />
       )}
+      </div>
       {genesisSwitch && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="switch-genesis-title">
+        <div className="theme-modern fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 text-theme-text font-primary" role="dialog" aria-modal="true" aria-labelledby="switch-genesis-title" onKeyDown={(event) => {
+          if (event.key === "Escape") dismissGenesisSwitch();
+        }}>
           <div className="w-full max-w-md rounded-theme-lg border border-theme-border bg-theme-bg-elevated p-5 shadow-2xl">
             <h2 id="switch-genesis-title" className="text-lg font-semibold text-theme-text-bright">Switch Genesis workspace?</h2>
             <p className="mt-2 text-sm text-theme-text-dim">Unsaved words or selections in the current workspace would be left behind. Stay here and use Save and exit first if you want to keep them.</p>
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" className="rounded-theme-md border border-theme-border px-3 py-2 text-sm" autoFocus onClick={() => setGenesisSwitch(null)}>Stay here</button>
+              <button type="button" className="rounded-theme-md border border-theme-border px-3 py-2 text-sm" autoFocus onClick={dismissGenesisSwitch}>Stay here</button>
               <button type="button" className="rounded-theme-md bg-theme-primary px-3 py-2 text-sm font-medium text-white" onClick={() => {
                 const request = genesisSwitch;
+                genesisSwitchTrigger.current = null;
                 setGenesisSwitch(null);
                 launchGenesis(request.resumeId);
               }}>Switch workspace</button>
@@ -278,6 +302,6 @@ export default function App() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

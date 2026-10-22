@@ -38,6 +38,11 @@ vi.mock("./components/GenesisWorkspace", () => ({
   },
 }));
 
+vi.mock("./components/GenesisEntityPortrait", () => ({
+  default: ({ name }: { name: string }) => <span>{name} portrait</span>,
+  useGenesisEntities: () => ({ portraits: {}, awaiting: { ada: "session-a" } }),
+}));
+
 describe("Abigail Hive app", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -95,13 +100,16 @@ describe("Abigail Hive app", () => {
     fireEvent.click(launch);
     expect(await screen.findByTestId("genesis-workspace")).toHaveTextContent("1:new");
 
-    fireEvent.click(launch);
+    fireEvent.click(screen.getByRole("button", { name: "Continue Ada's Genesis" }));
     expect(screen.getByRole("dialog", { name: "Switch Genesis workspace?" })).toBeInTheDocument();
+    expect(screen.getByTestId("app-shell")).toHaveAttribute("inert");
     expect(screen.getByTestId("genesis-workspace")).toHaveTextContent("1:new");
+    // A second trigger cannot silently replace the request already being confirmed.
+    fireEvent.click(launch);
     fireEvent.click(screen.getByRole("button", { name: "Switch workspace" }));
-    await waitFor(() => expect(screen.getByTestId("genesis-workspace")).toHaveTextContent("2:new"));
+    await waitFor(() => expect(screen.getByTestId("genesis-workspace")).toHaveTextContent("2:session-a"));
 
     act(() => mocks.genesisClosers[0]());
-    await waitFor(() => expect(screen.getByTestId("genesis-workspace")).toHaveTextContent("2:new"));
+    await waitFor(() => expect(screen.getByTestId("genesis-workspace")).toHaveTextContent("2:session-a"));
   });
 });
