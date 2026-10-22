@@ -35,7 +35,9 @@ pub async fn spawn(state: EntityDaemonState) -> anyhow::Result<SubscriptionHandl
                 tracing::warn!("Journal: malformed EgoAction payload");
                 return;
             };
-            record(state, action).await;
+            if let Err(error) = record(state, action).await {
+                tracing::error!("Journal could not queue Runtime outbox events: {error}");
+            }
         })
     });
 
@@ -51,12 +53,13 @@ pub async fn spawn(state: EntityDaemonState) -> anyhow::Result<SubscriptionHandl
     Ok(handle)
 }
 
-async fn record(state: EntityDaemonState, action: EgoActionPayload) {
+async fn record(state: EntityDaemonState, action: EgoActionPayload) -> Result<(), String> {
+    let mut outbox_errors = 0;
     match (action.status.as_str(), action.response) {
         ("success", Some(response)) => {
             // The Ego stage persisted this reply before acknowledging the turn.
 
-            let _ = state.queue_outbox_record(
+            if let Err(error) = state.queue_outbox_record(
                 "chat_assistant_turn",
                 serde_json::json!({
                     "session_id": action.session_id.clone(),
@@ -64,20 +67,34 @@ async fn record(state: EntityDaemonState, action: EgoActionPayload) {
                     "provider": response.provider.clone(),
                     "model_used": response.model_used.clone(),
                 }),
-            );
+            ) {
+                outbox_errors += 1;
+                tracing::error!(
+                    session_id = %action.session_id,
+                    "Committed assistant outbox event could not be queued: {error}"
+                );
+            }
             for tool in response
                 .tool_calls_made
                 .iter()
                 .filter(|record| record.success)
             {
-                let _ = state.queue_outbox_record(
+                if let Err(error) = state.queue_outbox_record(
                     "skill_used",
                     serde_json::json!({
                         "session_id": action.session_id.clone(),
                         "skill_id": tool.skill_id.clone(),
                         "tool_name": tool.tool_name.clone(),
                     }),
-                );
+                ) {
+                    outbox_errors += 1;
+                    tracing::error!(
+                        session_id = %action.session_id,
+                        skill_id = %tool.skill_id,
+                        tool_name = %tool.tool_name,
+                        "Committed skill-use journey event could not be queued: {error}"
+                    );
+                }
             }
 
             state.maybe_auto_archive();
@@ -112,6 +129,13 @@ async fn record(state: EntityDaemonState, action: EgoActionPayload) {
                 }),
             );
         }
+    }
+    if outbox_errors == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "Runtime outbox rejected {outbox_errors} committed event(s)"
+        ))
     }
 }
 

@@ -191,6 +191,7 @@ mod tests {
                 id: uuid::Uuid::new_v4().to_string(),
                 content: "memory".into(),
                 weight: MemoryWeight::Distilled,
+                explicitly_confirmed: false,
                 created_at: chrono::Utc::now(),
             })
             .unwrap();

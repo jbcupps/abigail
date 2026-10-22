@@ -220,6 +220,7 @@ impl From<MemoryRow> for Memory {
             id: row.id,
             content: row.content,
             weight,
+            explicitly_confirmed: false,
             created_at: row.created_at,
         }
     }

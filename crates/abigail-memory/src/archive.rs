@@ -52,6 +52,8 @@ struct SerializableMemory {
     id: String,
     content: String,
     weight: String,
+    #[serde(default)]
+    explicitly_confirmed: bool,
     created_at: String,
 }
 
@@ -113,6 +115,7 @@ impl ArchiveExporter {
                 id: m.id,
                 content: m.content,
                 weight: m.weight.as_str().to_string(),
+                explicitly_confirmed: m.explicitly_confirmed,
                 created_at: m.created_at.to_rfc3339(),
             })
             .collect();
@@ -230,6 +233,7 @@ impl ArchiveExporter {
                 id: m.id.clone(),
                 content: m.content.clone(),
                 weight,
+                explicitly_confirmed: m.explicitly_confirmed,
                 created_at: chrono::DateTime::parse_from_rfc3339(&m.created_at)
                     .map(|dt| dt.with_timezone(&chrono::Utc))
                     .unwrap_or_else(|_| chrono::Utc::now()),

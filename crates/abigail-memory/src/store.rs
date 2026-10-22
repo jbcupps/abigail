@@ -37,6 +37,8 @@ pub struct Memory {
     pub id: String,
     pub content: String,
     pub weight: MemoryWeight,
+    #[serde(default)]
+    pub explicitly_confirmed: bool,
     pub created_at: chrono::DateTime<Utc>,
 }
 
@@ -53,14 +55,27 @@ impl Memory {
         Self::new(content, MemoryWeight::Crystallized)
     }
 
+    pub fn with_explicit_confirmation(mut self) -> Self {
+        self.explicitly_confirmed = true;
+        self
+    }
+
     fn new(content: String, weight: MemoryWeight) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
             content,
             weight,
+            explicitly_confirmed: false,
             created_at: Utc::now(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuccessfulToolUse {
+    pub skill_id: String,
+    pub tool_name: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -75,6 +90,8 @@ pub struct ConversationTurn {
     pub tier: Option<String>,
     pub complexity_score: Option<u8>,
     pub token_estimate: Option<u32>,
+    #[serde(default)]
+    pub successful_tool_uses: Vec<SuccessfulToolUse>,
     pub created_at: chrono::DateTime<Utc>,
 }
 
@@ -91,6 +108,7 @@ impl ConversationTurn {
             tier: None,
             complexity_score: None,
             token_estimate: None,
+            successful_tool_uses: Vec::new(),
             created_at: Utc::now(),
         }
     }
@@ -106,6 +124,11 @@ impl ConversationTurn {
         self.model = model;
         self.tier = tier;
         self.complexity_score = complexity_score;
+        self
+    }
+
+    pub fn with_successful_tool_uses(mut self, tool_uses: Vec<SuccessfulToolUse>) -> Self {
+        self.successful_tool_uses = tool_uses;
         self
     }
 }
@@ -709,6 +732,8 @@ struct MemoryDoc {
     id: String,
     content: String,
     weight: String,
+    #[serde(default)]
+    explicitly_confirmed: bool,
     created_at: String,
 }
 
@@ -718,6 +743,7 @@ impl From<&Memory> for MemoryDoc {
             id: value.id.clone(),
             content: value.content.clone(),
             weight: value.weight.as_str().to_string(),
+            explicitly_confirmed: value.explicitly_confirmed,
             created_at: value.created_at.to_rfc3339(),
         }
     }
@@ -731,6 +757,7 @@ impl TryFrom<MemoryDoc> for Memory {
             id: value.id,
             content: value.content,
             weight: parse_weight(&value.weight)?,
+            explicitly_confirmed: value.explicitly_confirmed,
             created_at: parse_timestamp(&value.created_at)?,
         })
     }
@@ -748,6 +775,8 @@ struct TurnDoc {
     tier: Option<String>,
     complexity_score: Option<u8>,
     token_estimate: Option<u32>,
+    #[serde(default)]
+    successful_tool_uses: Vec<SuccessfulToolUse>,
     created_at: String,
 }
 
@@ -764,6 +793,7 @@ impl From<&ConversationTurn> for TurnDoc {
             tier: value.tier.clone(),
             complexity_score: value.complexity_score,
             token_estimate: value.token_estimate,
+            successful_tool_uses: value.successful_tool_uses.clone(),
             created_at: value.created_at.to_rfc3339(),
         }
     }
@@ -784,6 +814,7 @@ impl TryFrom<TurnDoc> for ConversationTurn {
             tier: value.tier,
             complexity_score: value.complexity_score,
             token_estimate: value.token_estimate,
+            successful_tool_uses: value.successful_tool_uses,
             created_at: parse_timestamp(&value.created_at)?,
         })
     }

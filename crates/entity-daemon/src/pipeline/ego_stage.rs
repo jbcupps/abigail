@@ -257,14 +257,7 @@ async fn respond(
     };
 
     if let Some(ref response) = action.response {
-        let turn =
-            abigail_memory::ConversationTurn::new(&action.session_id, "assistant", &response.reply)
-                .with_metadata(
-                    response.provider.clone(),
-                    response.model_used.clone(),
-                    response.tier.clone(),
-                    response.complexity_score,
-                );
+        let turn = committed_assistant_turn(&action.session_id, response);
         if let Err(error) = crate::memory_consumer::persist_turn(state.memory.clone(), turn).await {
             action.status = "error".to_string();
             action.error = Some(format!("Unable to save this conversation: {}", error));
@@ -303,6 +296,29 @@ async fn respond(
             correlation_id
         );
     }
+}
+
+fn committed_assistant_turn(
+    session_id: &str,
+    response: &ChatResponse,
+) -> abigail_memory::ConversationTurn {
+    let successful_tool_uses = response
+        .tool_calls_made
+        .iter()
+        .filter(|record| record.success)
+        .map(|record| abigail_memory::SuccessfulToolUse {
+            skill_id: record.skill_id.clone(),
+            tool_name: record.tool_name.clone(),
+        })
+        .collect();
+    abigail_memory::ConversationTurn::new(session_id, "assistant", &response.reply)
+        .with_metadata(
+            response.provider.clone(),
+            response.model_used.clone(),
+            response.tier.clone(),
+            response.complexity_score,
+        )
+        .with_successful_tool_uses(successful_tool_uses)
 }
 
 /// Warm, non-technical message shown to a family member when a chat turn fails

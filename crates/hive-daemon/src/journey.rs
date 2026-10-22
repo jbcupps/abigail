@@ -193,6 +193,7 @@ impl JourneyStore {
 
     /// Persist recognized metadata-only Runtime events. The outbox record ID
     /// is the durable table key, so a retried sync cannot increment twice.
+    #[cfg(test)]
     pub fn record_runtime_events(
         &self,
         owner_id: &str,
@@ -504,8 +505,32 @@ fn conversation_activity(
     }
     let memory =
         abigail_memory::MemoryStore::open_with_config(&config).map_err(|e| e.to_string())?;
+    durable_entity_activity(&memory)
+}
+
+fn durable_entity_activity(
+    memory: &abigail_memory::MemoryStore,
+) -> Result<JourneyActivity, String> {
     let turns = memory.all_turns().map_err(|e| e.to_string())?;
-    Ok(summarize_conversations(&turns))
+    let mut activity = summarize_conversations(&turns);
+    let mut assistant_turn_ids = HashSet::new();
+    for turn in turns.iter().filter(|turn| turn.role == "assistant") {
+        if assistant_turn_ids.insert(turn.id.as_str()) {
+            activity.successful_skill_uses += turn.successful_tool_uses.len() as u64;
+        }
+    }
+
+    let memories = memory.all_memories().map_err(|e| e.to_string())?;
+    let mut memory_ids = HashSet::new();
+    activity.confirmed_memories = memories
+        .iter()
+        .filter(|memory| {
+            memory.explicitly_confirmed
+                && memory.weight != abigail_memory::MemoryWeight::Ephemeral
+                && memory_ids.insert(memory.id.as_str())
+        })
+        .count() as u64;
+    Ok(activity)
 }
 
 fn summarize_conversations(turns: &[abigail_memory::ConversationTurn]) -> JourneyActivity {
@@ -528,6 +553,26 @@ fn summarize_conversations(turns: &[abigail_memory::ConversationTurn]) -> Journe
         active_days: days.len() as u64,
         active_weeks: weeks.len() as u64,
         ..Default::default()
+    }
+}
+
+fn merge_activity_sources(
+    durable: JourneyActivity,
+    event_rows: JourneyActivity,
+) -> JourneyActivity {
+    JourneyActivity {
+        mentor_messages: durable.mentor_messages.max(event_rows.mentor_messages),
+        conversation_sessions: durable
+            .conversation_sessions
+            .max(event_rows.conversation_sessions),
+        active_days: durable.active_days.max(event_rows.active_days),
+        active_weeks: durable.active_weeks.max(event_rows.active_weeks),
+        successful_skill_uses: durable
+            .successful_skill_uses
+            .max(event_rows.successful_skill_uses),
+        confirmed_memories: durable
+            .confirmed_memories
+            .max(event_rows.confirmed_memories),
     }
 }
 
@@ -654,13 +699,12 @@ fn journey_view(state: &HiveDaemonState, entity_id: &str) -> Result<serde_json::
     validate_entity_id(entity_id).map_err(|e| e.to_string())?;
     let name = registered_name(state, entity_id)?;
     let born = state.identity_manager.load_agent(entity_id)?.birth_complete;
-    let mut activity = conversation_activity(state, entity_id)?;
+    let durable_activity = conversation_activity(state, entity_id)?;
     let event_activity = state
         .journeys
         .event_activity(OWNER, entity_id)
         .map_err(|e| e.to_string())?;
-    activity.successful_skill_uses = event_activity.successful_skill_uses;
-    activity.confirmed_memories = event_activity.confirmed_memories;
+    let activity = merge_activity_sources(durable_activity, event_activity);
     let now = chrono::Utc::now().to_rfc3339();
     let journey = if born {
         // Self-heals a journey whose awakening record could not be written.

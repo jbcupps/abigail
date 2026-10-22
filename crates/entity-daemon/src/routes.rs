@@ -754,6 +754,11 @@ pub async fn memory_insert(
         "crystallized" => Memory::crystallized(body.content),
         _ => Memory::ephemeral(body.content),
     };
+    let memory = if memory.weight != abigail_memory::MemoryWeight::Ephemeral {
+        memory.with_explicit_confirmation()
+    } else {
+        memory
+    };
 
     let entry = MemoryEntry {
         id: memory.id.clone(),
@@ -765,13 +770,18 @@ pub async fn memory_insert(
     match state.memory.insert_memory(&memory) {
         Ok(()) => {
             if entry.weight != "ephemeral" {
-                let _ = state.queue_outbox_record(
+                if let Err(error) = state.queue_outbox_record(
                     "memory_confirmed",
                     serde_json::json!({
                         "memory_id": entry.id.clone(),
                         "memory_weight": entry.weight.clone(),
                     }),
-                );
+                ) {
+                    tracing::error!(
+                        memory_id = %entry.id,
+                        "Explicit memory is durable, but its journey event could not be queued: {error}"
+                    );
+                }
             }
             if let Some(ref hook) = state.memory_hook {
                 if let Err(e) = hook.on_memory_persisted(
