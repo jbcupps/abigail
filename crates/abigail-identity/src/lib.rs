@@ -930,29 +930,30 @@ impl IdentityManager {
 
     /// Delete an agent and all its data from disk.
     pub fn delete_agent(&self, agent_id: &str) -> Result<(), String> {
-        let agent_dir = {
-            let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
-            let entry = gc
-                .find_agent(agent_id)
-                .ok_or_else(|| format!("Agent {} not registered", agent_id))?
-                .clone();
-            if entry.is_hive {
-                return Err("Abigail Hive is immortal and cannot be deleted.".to_string());
-            }
-
-            let dir = self.resolve_agent_dir(&entry.directory)?;
-
-            gc.remove_agent(agent_id);
-            gc.save(&self.data_root).map_err(|e| e.to_string())?;
-            dir
-        };
-
+        let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
+        let entry = gc
+            .find_agent(agent_id)
+            .ok_or_else(|| format!("Agent {} not registered", agent_id))?
+            .clone();
+        if entry.is_hive {
+            return Err("Abigail Hive is immortal and cannot be deleted.".to_string());
+        }
+        let agent_dir = self.resolve_agent_dir(&entry.directory)?;
+        // Keep the durable registry guard until private files are gone. If file
+        // removal fails, callers can retry without exposing an orphan Entity.
         if agent_dir.exists() {
             tracing::info!("Deleting agent data directory: {}", agent_dir.display());
             std::fs::remove_dir_all(&agent_dir)
                 .map_err(|e| format!("Failed to delete agent directory: {}", e))?;
         }
-
+        let previous = gc.clone();
+        gc.remove_agent(agent_id);
+        if let Err(error) = gc.save(&self.data_root) {
+            // The on-disk registry still contains the agent, so keep memory in
+            // sync with it and let a retry remove the now-empty registration.
+            *gc = previous;
+            return Err(error.to_string());
+        }
         Ok(())
     }
 
@@ -1620,6 +1621,34 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn failed_agent_directory_removal_keeps_the_registry_guard() {
+        let manager = test_manager();
+        let (agent_id, agent_dir) = manager.create_agent("Deletion guard").unwrap();
+        std::fs::remove_dir_all(&agent_dir).unwrap();
+        std::fs::write(&agent_dir, b"not a directory").unwrap();
+
+        assert!(manager.delete_agent(&agent_id).is_err());
+        assert!(manager
+            .global_config
+            .read()
+            .unwrap()
+            .find_agent(&agent_id)
+            .is_some());
+        assert!(GlobalConfig::load(manager.data_root())
+            .unwrap()
+            .find_agent(&agent_id)
+            .is_some());
+
+        std::fs::remove_file(&agent_dir).unwrap();
+        manager.delete_agent(&agent_id).unwrap();
+        assert!(GlobalConfig::load(manager.data_root())
+            .unwrap()
+            .find_agent(&agent_id)
+            .is_none());
+        let _ = std::fs::remove_dir_all(manager.data_root());
     }
 
     #[test]
