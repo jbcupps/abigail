@@ -1085,6 +1085,14 @@ mod supervision_tests {
         sync_calls: AtomicUsize,
     }
 
+    struct BarrierBatchHeartbeatClient {
+        first_heartbeat_captured: Arc<tokio::sync::Barrier>,
+        release_first_heartbeat: Arc<tokio::sync::Barrier>,
+        heartbeat_calls: AtomicUsize,
+        synced_batches: std::sync::Mutex<Vec<Vec<String>>>,
+        ledger: Arc<crate::execution_ledger::ExecutionLedger>,
+    }
+
     #[async_trait::async_trait]
     impl RuntimeHeartbeatClient for CountingHeartbeatClient {
         async fn heartbeat(
@@ -1123,6 +1131,57 @@ mod supervision_tests {
         ) -> Result<hive_core::OutboxSyncResponse, String> {
             self.sync_calls.fetch_add(1, Ordering::SeqCst);
             Err("an acknowledged record must not be requeued".to_string())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeHeartbeatClient for BarrierBatchHeartbeatClient {
+        async fn heartbeat(
+            &self,
+            _request: &hive_core::RuntimeHeartbeatRequest,
+        ) -> Result<hive_core::RuntimeHeartbeatResponse, String> {
+            if self.heartbeat_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.first_heartbeat_captured.wait().await;
+                self.release_first_heartbeat.wait().await;
+            }
+            Ok(hive_core::RuntimeHeartbeatResponse {
+                accepted: true,
+                server_time_utc: chrono::Utc::now().to_rfc3339(),
+            })
+        }
+
+        async fn sync_outbox(
+            &self,
+            request: &hive_core::OutboxSyncRequest,
+        ) -> Result<hive_core::OutboxSyncResponse, String> {
+            let ledger = self.ledger.recent(None, usize::MAX);
+            for record in &request.records {
+                let occurrences = ledger
+                    .iter()
+                    .filter(|event| event.event_id == record.record_id)
+                    .count();
+                if occurrences != 1 {
+                    return Err(format!(
+                        "synced record {} had {occurrences} local ledger events",
+                        record.record_id
+                    ));
+                }
+            }
+            let accepted_record_ids = request
+                .records
+                .iter()
+                .map(|record| record.record_id.clone())
+                .collect::<Vec<_>>();
+            self.synced_batches
+                .lock()
+                .map_err(|error| error.to_string())?
+                .push(accepted_record_ids.clone());
+            Ok(hive_core::OutboxSyncResponse {
+                accepted_record_ids,
+                pending_records: 0,
+                server_time_utc: chrono::Utc::now().to_rfc3339(),
+                execution_receipts: Vec::new(),
+            })
         }
     }
 
@@ -1179,6 +1238,106 @@ mod supervision_tests {
 
     fn outbox_document(root: &std::path::Path) -> serde_json::Value {
         serde_json::from_slice(&std::fs::read(root.join("runtime_outbox.json")).unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn heartbeat_syncs_only_the_captured_ledger_verified_batch() {
+        let mut state = crate::routes::tests::build_state();
+        state.soul_ref = "batch-soul-a".to_string();
+        let outbox_root = std::env::temp_dir().join(format!(
+            "abigail-heartbeat-batch-outbox-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let ledger_root = std::env::temp_dir().join(format!(
+            "abigail-heartbeat-batch-ledger-{}",
+            uuid::Uuid::new_v4()
+        ));
+        state.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        state.execution_ledger =
+            Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
+
+        let first = state
+            .outbox
+            .enqueue_with_ledger_metadata(
+                uuid::Uuid::new_v4().to_string(),
+                &state.entity_id,
+                "skill_used",
+                serde_json::json!({
+                    "session_id": "captured-session",
+                    "successful_skill_count": 1,
+                }),
+                &state.soul_ref,
+            )
+            .unwrap();
+        let capture_barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let release_barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let client = Arc::new(BarrierBatchHeartbeatClient {
+            first_heartbeat_captured: capture_barrier.clone(),
+            release_first_heartbeat: release_barrier.clone(),
+            heartbeat_calls: AtomicUsize::new(0),
+            synced_batches: std::sync::Mutex::new(Vec::new()),
+            ledger: state.execution_ledger.clone(),
+        });
+
+        let heartbeat_state = state.clone();
+        let heartbeat_client = client.clone();
+        let first_cycle = tokio::spawn(async move {
+            run_runtime_outbox_heartbeat(&heartbeat_state, heartbeat_client.as_ref()).await
+        });
+        capture_barrier.wait().await;
+
+        let second = state
+            .outbox
+            .enqueue_with_ledger_metadata(
+                uuid::Uuid::new_v4().to_string(),
+                &state.entity_id,
+                "memory_confirmed",
+                serde_json::json!({
+                    "memory_id": "staged-after-capture",
+                    "memory_weight": "distilled",
+                }),
+                &state.soul_ref,
+            )
+            .unwrap();
+        release_barrier.wait().await;
+        first_cycle
+            .await
+            .expect("heartbeat task")
+            .expect("first heartbeat");
+
+        assert_eq!(
+            client.synced_batches.lock().unwrap().as_slice(),
+            &[vec![first.record_id.clone()]]
+        );
+        let after_first = state.outbox.snapshot().unwrap();
+        assert_eq!(after_first.len(), 1);
+        assert_eq!(after_first[0].record_id, second.record_id);
+        assert!(state.outbox.is_acknowledged(&first.record_id).unwrap());
+        assert!(!state.outbox.is_acknowledged(&second.record_id).unwrap());
+
+        run_runtime_outbox_heartbeat(&state, client.as_ref())
+            .await
+            .expect("next heartbeat");
+        assert_eq!(
+            client.synced_batches.lock().unwrap().as_slice(),
+            &[
+                vec![first.record_id.clone()],
+                vec![second.record_id.clone()]
+            ]
+        );
+        assert!(state.outbox.snapshot().unwrap().is_empty());
+        let ledger = state.execution_ledger.recent(None, 10);
+        for record_id in [&first.record_id, &second.record_id] {
+            assert_eq!(
+                ledger
+                    .iter()
+                    .filter(|event| event.event_id == *record_id)
+                    .count(),
+                1
+            );
+        }
+        let _ = std::fs::remove_dir_all(outbox_root);
+        let _ = std::fs::remove_dir_all(ledger_root);
     }
 
     #[tokio::test]
