@@ -150,8 +150,14 @@ mod tests {
             .unwrap();
         let record_id = uuid::Uuid::new_v4().to_string();
         let mut legacy = valid_event(&record_id);
+        legacy["memory_id"] = serde_json::json!("memory-1");
+        legacy["memory_weight"] = serde_json::json!("distilled");
         legacy["payload"] = serde_json::json!({"message": "private prompt"});
+        legacy["message"] = serde_json::json!("private message");
         legacy["content"] = serde_json::json!("private memory");
+        legacy["reply"] = serde_json::json!("private reply");
+        legacy["prompt"] = serde_json::json!("private prompt");
+        legacy["model_output"] = serde_json::json!("private model output");
         legacy["arbitrary"] = serde_json::json!({"reply": "private model output"});
         handle
             .upsert("entity_journey_event", &record_id, &legacy)
@@ -163,12 +169,31 @@ mod tests {
             .select_record::<serde_json::Value>("entity_journey_event", &record_id)
             .unwrap()
             .unwrap();
+        for allowed in [
+            "record_id",
+            "owner_id",
+            "entity_id",
+            "kind",
+            "occurred_at",
+            "session_id",
+            "skill_id",
+            "tool_name",
+            "memory_id",
+            "memory_weight",
+        ] {
+            assert_eq!(
+                migrated.get(allowed),
+                legacy.get(allowed),
+                "migration changed allowed field {allowed}: {migrated}"
+            );
+        }
         for forbidden in [
             "payload",
             "message",
             "content",
             "reply",
             "prompt",
+            "model_output",
             "arbitrary",
         ] {
             assert!(

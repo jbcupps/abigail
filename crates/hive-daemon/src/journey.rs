@@ -897,6 +897,41 @@ pub(crate) mod tests {
         assert_eq!(std::fs::read(path).unwrap(), oversized);
     }
 
+    #[tokio::test]
+    async fn generic_birth_does_not_award_genesis_first_light() {
+        let (state, entity_id) = crate::routes::tests::build_state();
+        let Json(birth) = crate::birth::perform_birth(
+            State(state.clone()),
+            Path(entity_id.clone()),
+            Json(hive_core::BirthRiteRequest {
+                path: "quickstart".into(),
+                choices: vec![],
+                purpose: None,
+            }),
+        )
+        .await;
+        assert!(birth.ok, "{:?}", birth.error);
+
+        let journey = journey_view(&state, &entity_id).unwrap();
+        let first_light = journey["badges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|badge| badge["badge"] == "first_light")
+            .unwrap();
+        assert!(
+            first_light["earned_at"].is_null(),
+            "generic birth is not a confirmed Genesis awakening"
+        );
+        assert!(state
+            .journeys
+            .load(OWNER, &entity_id)
+            .unwrap()
+            .unwrap()
+            .genesis_session_id
+            .is_none());
+    }
+
     #[test]
     fn presence_write_cap_preserves_an_existing_card() {
         let directory =
