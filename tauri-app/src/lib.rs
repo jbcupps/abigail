@@ -1495,10 +1495,8 @@ mod tests {
 
     #[test]
     fn profile_root_for_data_dir_uses_parent_of_data_directory() {
-        let data_dir = PathBuf::from(r"C:\Users\jbcup\AppData\Local\abigail\Abigail\data");
-        assert_eq!(
-            profile_root_for_data_dir(&data_dir),
-            PathBuf::from(r"C:\Users\jbcup\AppData\Local\abigail\Abigail")
-        );
+        let profile_root = std::env::temp_dir().join("abigail-profile-root-test");
+        let data_dir = profile_root.join("data");
+        assert_eq!(profile_root_for_data_dir(&data_dir), profile_root);
     }
 }
