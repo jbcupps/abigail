@@ -536,6 +536,7 @@ fn reservation_is_recoverable(
 mod tests {
     use super::{DurableRecordReconcile, ReservationRecovery, RuntimeOutbox};
     use hive_core::OutboxSyncResponse;
+    use std::collections::HashSet;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -567,6 +568,21 @@ mod tests {
             serde_json::to_value(actual).unwrap(),
             serde_json::to_value(expected).unwrap()
         );
+    }
+
+    fn age_reservation(root: &std::path::Path, record_id: &str, age: chrono::Duration) {
+        let path = root.join(super::OUTBOX_FILE_NAME);
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let reservation = document["reservations"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|reservation| reservation["record_id"] == record_id)
+            .expect("reservation to age");
+        reservation["created_at_utc"] =
+            serde_json::Value::String((chrono::Utc::now() - age).to_rfc3339());
+        std::fs::write(path, serde_json::to_vec_pretty(&document).unwrap()).unwrap();
     }
 
     #[test]
@@ -997,6 +1013,132 @@ mod tests {
         let restarted = RuntimeOutbox::load(&root, 1).unwrap();
         assert!(restarted.snapshot().unwrap().is_empty());
         assert_eq!(restarted.reservations().unwrap()[0].record_id, record_id);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stale_unmatched_reservation_is_quarantined_without_inventing_activity_and_restores_capacity()
+    {
+        let root = root("abigail-outbox-quarantine");
+        let stale_id = uuid::Uuid::new_v4().to_string();
+        let replacement_id = uuid::Uuid::new_v4().to_string();
+        let outbox = RuntimeOutbox::load(&root, 1).unwrap();
+        outbox
+            .reserve_slot(stale_id.clone(), "entity-1", "skill_used")
+            .unwrap();
+        drop(outbox);
+        age_reservation(&root, &stale_id, chrono::Duration::hours(25));
+
+        let outbox = RuntimeOutbox::load(&root, 1).unwrap();
+        let quarantined = outbox
+            .quarantine_stale_unmatched_reservations(
+                &HashSet::new(),
+                chrono::Utc::now() - chrono::Duration::hours(24),
+            )
+            .unwrap();
+
+        assert_eq!(quarantined, 1);
+        assert!(outbox.reservations().unwrap().is_empty());
+        assert!(
+            outbox.snapshot().unwrap().is_empty(),
+            "quarantine must never invent an activity record"
+        );
+        let diagnostic = outbox.quarantined_reservations().unwrap();
+        assert_eq!(diagnostic.len(), 1);
+        assert_eq!(diagnostic[0].reservation.record_id, stale_id);
+        assert!(!diagnostic[0].quarantined_at_utc.is_empty());
+        assert!(diagnostic[0].reason.contains("durable fact"));
+
+        outbox
+            .reserve_slot(replacement_id.clone(), "entity-1", "memory_confirmed")
+            .expect("quarantine must restore active capacity");
+        drop(outbox);
+
+        let restarted = RuntimeOutbox::load(&root, 1).unwrap();
+        assert_eq!(
+            restarted.quarantined_reservations().unwrap(),
+            diagnostic,
+            "quarantine diagnostics must survive restart"
+        );
+        assert_eq!(
+            restarted.reservations().unwrap()[0].record_id,
+            replacement_id
+        );
+        let error = restarted
+            .reserve_slot(stale_id, "entity-1", "skill_used")
+            .unwrap_err();
+        assert!(error.contains("quarantined"), "{error}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn fresh_unmatched_and_stale_matching_reservations_remain_active_and_consume_capacity() {
+        let root = root("abigail-outbox-quarantine-protected");
+        let fresh_id = uuid::Uuid::new_v4().to_string();
+        let matching_id = uuid::Uuid::new_v4().to_string();
+        let outbox = RuntimeOutbox::load(&root, 2).unwrap();
+        outbox
+            .reserve_slot(fresh_id.clone(), "entity-1", "skill_used")
+            .unwrap();
+        outbox
+            .reserve_slot(matching_id.clone(), "entity-1", "memory_confirmed")
+            .unwrap();
+        drop(outbox);
+        age_reservation(&root, &matching_id, chrono::Duration::hours(25));
+
+        let outbox = RuntimeOutbox::load(&root, 2).unwrap();
+        let quarantined = outbox
+            .quarantine_stale_unmatched_reservations(
+                &HashSet::from([matching_id.clone()]),
+                chrono::Utc::now() - chrono::Duration::hours(24),
+            )
+            .unwrap();
+
+        assert_eq!(quarantined, 0);
+        assert!(outbox.quarantined_reservations().unwrap().is_empty());
+        let active_ids = outbox
+            .reservations()
+            .unwrap()
+            .into_iter()
+            .map(|reservation| reservation.record_id)
+            .collect::<HashSet<_>>();
+        assert_eq!(active_ids, HashSet::from([fresh_id, matching_id]));
+        let error = outbox
+            .reserve_slot(uuid::Uuid::new_v4().to_string(), "entity-1", "skill_used")
+            .unwrap_err();
+        assert!(error.contains("backpressure"), "{error}");
+        assert!(outbox.snapshot().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn quarantine_save_failure_leaves_active_and_diagnostic_state_unchanged() {
+        let root = root("abigail-outbox-quarantine-save");
+        let stale_id = uuid::Uuid::new_v4().to_string();
+        let outbox = RuntimeOutbox::load(&root, 1).unwrap();
+        outbox
+            .reserve_slot(stale_id.clone(), "entity-1", "skill_used")
+            .unwrap();
+        drop(outbox);
+        age_reservation(&root, &stale_id, chrono::Duration::hours(25));
+
+        let outbox = RuntimeOutbox::load_with_saver(&root, 1, fail_save_on(1)).unwrap();
+        let error = outbox
+            .quarantine_stale_unmatched_reservations(
+                &HashSet::new(),
+                chrono::Utc::now() - chrono::Duration::hours(24),
+            )
+            .unwrap_err();
+        assert!(error.contains("injected outbox save failure"), "{error}");
+        assert_eq!(outbox.reservations().unwrap()[0].record_id, stale_id);
+        assert!(outbox.quarantined_reservations().unwrap().is_empty());
+        assert!(outbox.snapshot().unwrap().is_empty());
+        drop(outbox);
+
+        let restarted = RuntimeOutbox::load(&root, 1).unwrap();
+        assert_eq!(restarted.reservations().unwrap()[0].record_id, stale_id);
+        assert!(restarted.quarantined_reservations().unwrap().is_empty());
+        assert!(restarted.snapshot().unwrap().is_empty());
         let _ = std::fs::remove_dir_all(root);
     }
 }

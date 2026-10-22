@@ -520,6 +520,21 @@ mod tests {
         std::env::temp_dir().join(format!("{label}-{}", uuid::Uuid::new_v4()))
     }
 
+    fn age_runtime_reservation(root: &std::path::Path, record_id: &str, age: chrono::Duration) {
+        let path = root.join("runtime_outbox.json");
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let reservation = document["reservations"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|reservation| reservation["record_id"] == record_id)
+            .expect("reservation to age");
+        reservation["created_at_utc"] =
+            serde_json::Value::String((chrono::Utc::now() - age).to_rfc3339());
+        std::fs::write(path, serde_json::to_vec_pretty(&document).unwrap()).unwrap();
+    }
+
     #[tokio::test]
     async fn chat_turn_flows_through_id_and_ego_stages() {
         let state = build_state();
@@ -907,6 +922,37 @@ mod tests {
         assert!(state.outbox.snapshot().unwrap().is_empty());
         assert!(state.outbox.is_acknowledged(&record_id).unwrap());
         assert!(state.outbox.reservations().unwrap().is_empty());
+    }
+
+    #[test]
+    fn heartbeat_reconciliation_quarantines_stale_unmatched_reservation_without_activity() {
+        let mut state = build_state();
+        let root = outbox_root("abigail-pipeline-quarantine");
+        let stale_id = uuid::Uuid::new_v4().to_string();
+        let outbox = crate::outbox::RuntimeOutbox::load(&root, 1).unwrap();
+        outbox
+            .reserve_slot(stale_id.clone(), &state.entity_id, "skill_used")
+            .unwrap();
+        drop(outbox);
+        age_runtime_reservation(&root, &stale_id, chrono::Duration::hours(25));
+        state.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&root, 1).unwrap());
+
+        state
+            .reconcile_durable_activity(crate::state::ActivityReconcileMode::Heartbeat)
+            .unwrap();
+
+        assert!(state.outbox.reservations().unwrap().is_empty());
+        assert_eq!(
+            state.outbox.quarantined_reservations().unwrap()[0]
+                .reservation
+                .record_id,
+            stale_id
+        );
+        assert!(
+            state.outbox.snapshot().unwrap().is_empty(),
+            "an unmatched reservation must never become an activity fact"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]
