@@ -34,19 +34,43 @@ export function awaitingFromSessions(sessions: GenesisSession[]): Record<string,
   return awaiting;
 }
 
-export interface GenesisEntities { portraits: EntityPortraits; awaiting: Record<string, string> }
+export interface GenesisEntities {
+  portraits: EntityPortraits;
+  awaiting: Record<string, string>;
+  loading: boolean;
+  error: string | null;
+}
 
 /** Call once in the collection parent; change refreshKey after leaving Genesis
  * or switching the Hive connection to refresh every card together. */
 export function useGenesisEntities(refreshKey?: unknown): GenesisEntities {
-  const [entities, setEntities] = useState<GenesisEntities>({ portraits: {}, awaiting: {} });
+  const [entities, setEntities] = useState<GenesisEntities>({
+    portraits: {},
+    awaiting: {},
+    loading: true,
+    error: null,
+  });
   useEffect(() => {
     let current = true;
+    setEntities((prior) => ({ ...prior, loading: true, error: null }));
     void listGenesisSessions().then((sessions) => {
-      if (current) setEntities({ portraits: portraitsFromSessions(sessions), awaiting: awaitingFromSessions(sessions) });
-    }).catch(() => {
+      if (current) {
+        setEntities({
+          portraits: portraitsFromSessions(sessions),
+          awaiting: awaitingFromSessions(sessions),
+          loading: false,
+          error: null,
+        });
+      }
+    }).catch((error: unknown) => {
       // Existing Entities remain usable if Genesis or its capability is absent.
-      if (current) setEntities({ portraits: {}, awaiting: {} });
+      if (current) {
+        setEntities((prior) => ({
+          ...prior,
+          loading: false,
+          error: error instanceof Error ? error.message : "Genesis records could not be refreshed.",
+        }));
+      }
     });
     return () => { current = false; };
   }, [refreshKey]);
