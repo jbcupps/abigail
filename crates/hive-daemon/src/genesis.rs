@@ -313,43 +313,67 @@ pub(crate) fn delete_genesis_record_unlocked(
     id: &str,
 ) -> Result<bool, String> {
     let mut draft = session(state, id)?;
-    let unawakened_entity = draft
-        .awakening
-        .is_none()
-        .then(|| draft.definition.entity_id.clone())
-        .flatten();
-    state
-        .genesis_media
-        .delete_session(OWNER, id)
-        .map_err(|e| e.to_string())?;
-    draft.definition.portrait_asset_id = None;
-    draft.definition.manifestation_asset_id = None;
-    media_sync_entity_record(state, &draft)?;
-    if let Some(entity_id) = unawakened_entity {
-        let linked_elsewhere = state
+    let linked_entity = draft.definition.entity_id.clone();
+    // Session locks are per draft, so serialize cleanup separately when
+    // damaged or legacy records happen to share one allocation.
+    let _entity_guard = linked_entity
+        .as_ref()
+        .map(|entity_id| {
+            state
+                .genesis_control
+                .lock(&format!("delete-entity-{entity_id}"))
+        })
+        .transpose()?;
+    let linked_elsewhere = match &linked_entity {
+        Some(entity_id) => state
             .genesis
             .list(OWNER)
             .map_err(|e| e.to_string())?
             .iter()
             .any(|other| {
                 other.id != id && other.definition.entity_id.as_deref() == Some(entity_id.as_str())
-            });
-        if !linked_elsewhere {
+            }),
+        None => false,
+    };
+    let registered = match &linked_entity {
+        Some(entity_id) => state
+            .identity_manager
+            .list_agents()?
+            .iter()
+            .any(|agent| agent.id == *entity_id),
+        None => false,
+    };
+    let delete_allocation =
+        draft.awakening.is_none() && linked_entity.is_some() && !linked_elsewhere;
+    if delete_allocation && registered {
+        if let Some(entity_id) = linked_entity.as_deref() {
+            if state.identity_manager.load_agent(entity_id)?.birth_complete {
+                return Err("This Entity finished birth but not awakening. Retry activation before deleting its Genesis record so signed identity and chat are preserved.".into());
+            }
+        }
+    }
+
+    state
+        .genesis_media
+        .delete_session(OWNER, id)
+        .map_err(|e| e.to_string())?;
+    draft.definition.portrait_asset_id = None;
+    draft.definition.manifestation_asset_id = None;
+    if draft.awakening.is_some() && registered {
+        media_sync_entity_record(state, &draft)?;
+    }
+    if delete_allocation {
+        if let Some(entity_id) = linked_entity.as_deref() {
             // A deleted draft must not leave an allocation that generic setup
             // can claim after the Genesis guards lose their owning record.
-            state.supervisor.stop_entity(&entity_id);
+            state.supervisor.stop_entity(entity_id);
             state
                 .runtime_control
                 .lock()
                 .map_err(|e| e.to_string())?
-                .revoke_entity_sessions(&entity_id);
-            let registered = state
-                .identity_manager
-                .list_agents()?
-                .iter()
-                .any(|agent| agent.id == entity_id);
+                .revoke_entity_sessions(entity_id);
             if registered {
-                state.identity_manager.delete_agent(&entity_id)?;
+                state.identity_manager.delete_agent(entity_id)?;
             }
         }
     }
@@ -1578,6 +1602,105 @@ mod tests {
             !generic.ok,
             "the signed Genesis narrative must keep guarding generic birth"
         );
+    }
+
+    #[tokio::test]
+    async fn deleting_a_born_but_unfinished_record_requires_activation_recovery() {
+        let (state, _) = crate::routes::tests::build_state();
+        let id = begin(&state).await;
+        reserve(&state, &id).await;
+        let awakened = act(&state, &id, json!({"action":"activate"}))
+            .await
+            .unwrap();
+        let entity_id = awakened["definition"]["entity_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        // Simulate a crash after durable birth/awakening side effects but
+        // before the Genesis lifecycle marker made it to the session record.
+        let mut draft = session(&state, &id).unwrap();
+        let revision = draft.revision;
+        draft.awakening = None;
+        draft.state = GenesisState::Review;
+        draft.definition.status = GenesisState::Review;
+        draft.touch(&now());
+        state.genesis.save(&draft, revision).unwrap();
+
+        let error = delete_genesis_record_unlocked(&state, &id).unwrap_err();
+        assert!(error.contains("awakening"), "{error}");
+        assert!(state.genesis.load(OWNER, &id).unwrap().is_some());
+        assert!(state.identity_manager.load_agent(&entity_id).is_ok());
+    }
+
+    #[tokio::test]
+    async fn deletion_retries_after_an_unawakened_allocation_was_already_removed() {
+        let (state, _) = crate::routes::tests::build_state();
+        let id = begin(&state).await;
+        reserve(&state, &id).await;
+        let (entity_id, _) = state.identity_manager.create_agent("Nova").unwrap();
+        let mut draft = session(&state, &id).unwrap();
+        let revision = draft.revision;
+        draft.definition.entity_id = Some(entity_id.clone());
+        draft.touch(&now());
+        state.genesis.save(&draft, revision).unwrap();
+        state.identity_manager.delete_agent(&entity_id).unwrap();
+
+        assert!(delete_genesis_record_unlocked(&state, &id).unwrap());
+        assert!(state.genesis.load(OWNER, &id).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn concurrent_shared_record_deletion_never_releases_an_allocation() {
+        let (state, _) = crate::routes::tests::build_state();
+        let first = begin(&state).await;
+        let second = begin(&state).await;
+        reserve(&state, &first).await;
+        reserve(&state, &second).await;
+        let (entity_id, _) = state.identity_manager.create_agent("Nova").unwrap();
+        for session_id in [&first, &second] {
+            let mut draft = session(&state, session_id).unwrap();
+            let revision = draft.revision;
+            draft.definition.entity_id = Some(entity_id.clone());
+            draft.touch(&now());
+            state.genesis.save(&draft, revision).unwrap();
+        }
+
+        let start = Arc::new(std::sync::Barrier::new(3));
+        let workers: Vec<_> = [first.clone(), second.clone()]
+            .into_iter()
+            .map(|session_id| {
+                let state = state.clone();
+                let start = start.clone();
+                std::thread::spawn(move || {
+                    let _guard = state.genesis_control.lock(&session_id).unwrap();
+                    start.wait();
+                    delete_genesis_record_unlocked(&state, &session_id)
+                })
+            })
+            .collect();
+        start.wait();
+        let results: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect();
+        assert!(results.iter().any(Result::is_ok));
+
+        let remaining = state.genesis.list(OWNER).unwrap();
+        assert!(
+            state.identity_manager.load_agent(&entity_id).is_err()
+                || remaining.iter().any(|draft| {
+                    draft.definition.entity_id.as_deref() == Some(entity_id.as_str())
+                }),
+            "a registered allocation must retain at least one Genesis guard"
+        );
+        for draft in remaining
+            .into_iter()
+            .filter(|draft| draft.definition.entity_id.as_deref() == Some(entity_id.as_str()))
+        {
+            let _guard = state.genesis_control.lock(&draft.id).unwrap();
+            delete_genesis_record_unlocked(&state, &draft.id).unwrap();
+        }
+        assert!(state.identity_manager.load_agent(&entity_id).is_err());
     }
 
     #[tokio::test]
