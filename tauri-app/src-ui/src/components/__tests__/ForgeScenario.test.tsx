@@ -69,7 +69,7 @@ describe("ForgeScenario public display boundary", () => {
     fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
     fireEvent.click(screen.getByRole("button", { name: /tell the truth kindly/i }));
     fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
-    fireEvent.click(screen.getByRole("button", { name: /^ask first$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^ask first/i }));
     fireEvent.click(screen.getByRole("button", { name: /forge soul/i }));
     expect(await screen.findByRole("heading", { name: /soul forged/i })).toBeInTheDocument();
     expect(mockInvoke).toHaveBeenCalledWith("crystallize_forge", {
