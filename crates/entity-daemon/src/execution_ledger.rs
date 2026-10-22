@@ -54,6 +54,7 @@ impl ExecutionLedger {
         )
     }
 
+    #[cfg(test)]
     pub fn append_event(
         &self,
         entity_id: &str,
