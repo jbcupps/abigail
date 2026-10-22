@@ -1,7 +1,7 @@
 //! Entity daemon shared state.
 
 use crate::execution_ledger::ExecutionLedger;
-use crate::outbox::{ReservationRecovery, RuntimeOutbox};
+use crate::outbox::{DurableRecordReconcile, ReservationRecovery, RuntimeOutbox};
 use abigail_core::AppConfig;
 use abigail_memory::{ArchiveExporter, MemoryStore};
 use abigail_queue::JobQueue;
@@ -259,24 +259,35 @@ impl EntityDaemonState {
         payload: serde_json::Value,
         recovery: ReservationRecovery,
     ) -> Result<usize, String> {
-        let Some(record) = self.outbox.reconcile_durable_record(
+        let disposition = self.outbox.reconcile_durable_record(
             record_id,
             &self.entity_id,
             kind,
             created_at_utc,
             payload.clone(),
             recovery,
-        )?
-        else {
-            return Ok(0);
-        };
-        self.execution_ledger.append_outbox_event(
-            &record.record_id,
-            &self.entity_id,
-            &record.kind,
-            &payload,
-            &self.soul_ref,
         )?;
+        match disposition {
+            DurableRecordReconcile::Deferred => return Ok(0),
+            DurableRecordReconcile::Queued(record) => {
+                self.execution_ledger.append_outbox_event(
+                    &record.record_id,
+                    &self.entity_id,
+                    &record.kind,
+                    &payload,
+                    &self.soul_ref,
+                )?;
+            }
+            DurableRecordReconcile::Acknowledged => {
+                self.execution_ledger.append_outbox_event(
+                    record_id,
+                    &self.entity_id,
+                    kind,
+                    &payload,
+                    &self.soul_ref,
+                )?;
+            }
+        }
         Ok(1)
     }
 

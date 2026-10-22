@@ -920,6 +920,76 @@ async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[async_trait::async_trait]
+trait RuntimeHeartbeatClient: Send + Sync {
+    async fn heartbeat(
+        &self,
+        request: &hive_core::RuntimeHeartbeatRequest,
+    ) -> Result<hive_core::RuntimeHeartbeatResponse, String>;
+
+    async fn sync_outbox(
+        &self,
+        request: &hive_core::OutboxSyncRequest,
+    ) -> Result<hive_core::OutboxSyncResponse, String>;
+}
+
+#[async_trait::async_trait]
+impl RuntimeHeartbeatClient for HiveClient {
+    async fn heartbeat(
+        &self,
+        request: &hive_core::RuntimeHeartbeatRequest,
+    ) -> Result<hive_core::RuntimeHeartbeatResponse, String> {
+        HiveClient::heartbeat(self, request)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    async fn sync_outbox(
+        &self,
+        request: &hive_core::OutboxSyncRequest,
+    ) -> Result<hive_core::OutboxSyncResponse, String> {
+        HiveClient::sync_outbox(self, request)
+            .await
+            .map_err(|error| error.to_string())
+    }
+}
+
+async fn run_runtime_outbox_heartbeat(
+    state: &EntityDaemonState,
+    hive_client: &impl RuntimeHeartbeatClient,
+) -> Result<(), String> {
+    state.reconcile_durable_activity(state::ActivityReconcileMode::Heartbeat)?;
+
+    let outbox_status = state.outbox.status()?;
+    let runtime_url = state.runtime_url.read().await.clone();
+    let heartbeat = hive_core::RuntimeHeartbeatRequest {
+        lease_id: state.session_lease.lease_id.clone(),
+        runtime_id: state.runtime_id.clone(),
+        local_url: runtime_url,
+        outbox_depth: outbox_status.queued_records,
+        outbox_oldest_at_utc: outbox_status.oldest_record_at_utc.clone(),
+    };
+
+    if let Err(error) = hive_client.heartbeat(&heartbeat).await {
+        let _ = state.outbox.mark_sync_error(&error);
+        return Err(error);
+    }
+
+    let records = state.outbox.snapshot()?;
+    if !records.is_empty() {
+        let sync_result = hive_client
+            .sync_outbox(&hive_core::OutboxSyncRequest {
+                lease_id: state.session_lease.lease_id.clone(),
+                runtime_id: state.runtime_id.clone(),
+                records,
+            })
+            .await;
+        state.outbox.finish_sync(sync_result)?;
+    }
+    state.record_hive_sync_success().await;
+    Ok(())
+}
+
 fn spawn_runtime_supervision(
     state: EntityDaemonState,
     hive_client: HiveClient,
@@ -990,59 +1060,10 @@ fn spawn_runtime_supervision(
                 }
             }
 
-            if let Err(error) =
-                state.reconcile_durable_activity(state::ActivityReconcileMode::Heartbeat)
-            {
-                tracing::warn!("Durable Runtime activity reconciliation deferred: {error}");
-                state
-                    .record_hive_sync_error(format!(
-                        "Durable activity reconciliation failed: {error}"
-                    ))
-                    .await;
-            }
-
-            let outbox_status = match state.outbox.status() {
-                Ok(status) => status,
-                Err(error) => {
-                    state.record_hive_sync_error(error).await;
-                    continue;
-                }
-            };
-            let runtime_url = state.runtime_url.read().await.clone();
-
-            let heartbeat = hive_core::RuntimeHeartbeatRequest {
-                lease_id: state.session_lease.lease_id.clone(),
-                runtime_id: state.runtime_id.clone(),
-                local_url: runtime_url,
-                outbox_depth: outbox_status.queued_records,
-                outbox_oldest_at_utc: outbox_status.oldest_record_at_utc.clone(),
-            };
-
-            match hive_client.heartbeat(&heartbeat).await {
-                Ok(_) => {
-                    if let Ok(records) = state.outbox.snapshot() {
-                        if !records.is_empty() {
-                            let sync_result = hive_client
-                                .sync_outbox(&hive_core::OutboxSyncRequest {
-                                    lease_id: state.session_lease.lease_id.clone(),
-                                    runtime_id: state.runtime_id.clone(),
-                                    records,
-                                })
-                                .await
-                                .map_err(|error| error.to_string());
-                            if let Err(error) = state.outbox.finish_sync(sync_result) {
-                                state.record_hive_sync_error(error).await;
-                                continue;
-                            }
-                        }
-                    }
-                    state.record_hive_sync_success().await;
-                }
-                Err(error) => {
-                    let error = error.to_string();
-                    let _ = state.outbox.mark_sync_error(&error);
-                    state.record_hive_sync_error(error).await;
-                }
+            if let Err(error) = run_runtime_outbox_heartbeat(&state, &hive_client).await {
+                tracing::warn!("Runtime heartbeat/outbox sync deferred: {error}");
+                state.record_hive_sync_error(error).await;
+                continue;
             }
         }
     });

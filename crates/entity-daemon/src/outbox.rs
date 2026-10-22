@@ -29,6 +29,12 @@ pub enum ReservationRecovery {
     StaleBefore(chrono::DateTime<chrono::Utc>),
 }
 
+pub enum DurableRecordReconcile {
+    Queued(EntityOutboxRecord),
+    Acknowledged,
+    Deferred,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct PersistedOutbox {
     #[serde(default)]
@@ -326,7 +332,7 @@ impl RuntimeOutbox {
         created_at_utc: &str,
         payload: serde_json::Value,
         recovery: ReservationRecovery,
-    ) -> Result<Option<EntityOutboxRecord>, String> {
+    ) -> Result<DurableRecordReconcile, String> {
         validate_record_id(record_id)?;
         chrono::DateTime::parse_from_rfc3339(created_at_utc)
             .map_err(|_| "Durable activity fact has an invalid timestamp".to_string())?;
@@ -361,7 +367,7 @@ impl RuntimeOutbox {
                 self.save_locked(&next).map_err(|e| e.to_string())?;
                 *inner = next;
             }
-            return Ok(None);
+            return Ok(DurableRecordReconcile::Acknowledged);
         }
 
         if let Some(existing) = inner
@@ -385,11 +391,11 @@ impl RuntimeOutbox {
                 self.save_locked(&next).map_err(|e| e.to_string())?;
                 *inner = next;
             }
-            return Ok(Some(existing));
+            return Ok(DurableRecordReconcile::Queued(existing));
         }
 
         if reservation.is_some() && !recover_reservation {
-            return Ok(None);
+            return Ok(DurableRecordReconcile::Deferred);
         }
         if reservation.is_none()
             && inner.records.len() + inner.reservations.len() >= self.max_records
@@ -413,7 +419,7 @@ impl RuntimeOutbox {
         next.records.push(record.clone());
         self.save_locked(&next).map_err(|e| e.to_string())?;
         *inner = next;
-        Ok(Some(record))
+        Ok(DurableRecordReconcile::Queued(record))
     }
 
     #[cfg(test)]
@@ -527,7 +533,7 @@ fn reservation_is_recoverable(
 
 #[cfg(test)]
 mod tests {
-    use super::{ReservationRecovery, RuntimeOutbox};
+    use super::{DurableRecordReconcile, ReservationRecovery, RuntimeOutbox};
     use hive_core::OutboxSyncResponse;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -938,7 +944,7 @@ mod tests {
                 ReservationRecovery::StaleBefore(chrono::Utc::now() - chrono::Duration::minutes(1)),
             )
             .unwrap();
-        assert!(active.is_none());
+        assert!(matches!(active, DurableRecordReconcile::Deferred));
         assert!(outbox.snapshot().unwrap().is_empty());
         assert_eq!(outbox.reservations().unwrap().len(), 1);
 
@@ -951,8 +957,10 @@ mod tests {
                 payload,
                 ReservationRecovery::All,
             )
-            .unwrap()
-            .expect("startup reconciliation should recover the durable fact");
+            .unwrap();
+        let DurableRecordReconcile::Queued(recovered) = recovered else {
+            panic!("startup reconciliation should recover the durable fact");
+        };
         assert_eq!(recovered.record_id, record_id);
         assert!(outbox.reservations().unwrap().is_empty());
         assert_eq!(outbox.snapshot().unwrap().len(), 1);
