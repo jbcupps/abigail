@@ -1214,7 +1214,7 @@ pub(crate) mod tests {
         assert_eq!(projected.successful_skill_uses, 4);
 
         let duplicate = store
-            .record_runtime_events(OWNER, &entity_id, &[aggregate.clone()])
+            .record_runtime_events(OWNER, &entity_id, std::slice::from_ref(&aggregate))
             .unwrap();
         assert_eq!(duplicate.successful_skill_uses, 4);
 
