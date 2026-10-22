@@ -1483,6 +1483,47 @@ mod tests {
     }
 
     #[test]
+    fn first_light_requires_awakening_and_a_canonical_or_effective_entity_link() {
+        let has_first_light = |session: &GenesisSession, signals| {
+            satisfied_badges(session, signals).contains(&Badge::FirstLight)
+        };
+        let mut legacy = session();
+        legacy.awakening = Some("I am here.".into());
+
+        assert!(
+            !has_first_light(&legacy, QuestSignals::default()),
+            "a malformed legacy awakening without any Entity link must not earn First Light"
+        );
+        assert!(
+            !has_first_light(
+                &session(),
+                QuestSignals {
+                    awakened: true,
+                    ..Default::default()
+                }
+            ),
+            "an effective link without the session's awakening must not earn First Light"
+        );
+
+        legacy.definition.entity_id = Some("entity-1".into());
+        assert!(
+            has_first_light(&legacy, QuestSignals::default()),
+            "a canonical link plus awakening confirms First Light"
+        );
+        legacy.definition.entity_id = None;
+        assert!(
+            has_first_light(
+                &legacy,
+                QuestSignals {
+                    awakened: true,
+                    ..Default::default()
+                }
+            ),
+            "a server-confirmed effective receipt link plus awakening confirms First Light"
+        );
+    }
+
+    #[test]
     fn temperament_card_proposes_scores_and_keeps_confirmed_words() {
         let current = Personality {
             description: "Our own words".into(),
