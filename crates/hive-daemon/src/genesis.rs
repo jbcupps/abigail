@@ -2003,6 +2003,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_list_derives_receipt_only_entity_link_without_rewriting_canon() {
+        let (state, _) = crate::routes::tests::build_state();
+        let id = begin(&state).await;
+        reserve(&state, &id).await;
+        let mut draft = session(&state, &id).unwrap();
+        assert!(crate::genesis_creation::ensure_entity_link(
+            &state.identity_manager,
+            &mut draft,
+            |_, _| Err("interrupted link save".into()),
+        )
+        .is_err());
+        let entity_id = match state.identity_manager.entity_creation_status(&id).unwrap() {
+            abigail_identity::AgentCreationStatus::Complete { id, .. } => id,
+            status => panic!("expected completed receipt, got {status:?}"),
+        };
+
+        let canonical = state.genesis.load(OWNER, &id).unwrap().unwrap();
+        assert!(
+            canonical.definition.entity_id.is_none(),
+            "presentation recovery must not silently rewrite canonical Genesis data"
+        );
+        let Json(response) = list(State(state)).await;
+        let sessions = response.data.unwrap();
+        let presented = sessions
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|session| session["id"] == id)
+            .unwrap();
+        assert_eq!(presented["definition"]["entity_id"], Value::Null);
+        assert_eq!(
+            presented["effective_entity_id"],
+            serde_json::json!(entity_id)
+        );
+    }
+
+    #[tokio::test]
     async fn deleting_an_unawakened_record_cannot_release_its_genesis_allocation() {
         let (state, _) = crate::routes::tests::build_state();
         let id = begin(&state).await;

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
 const mocks = vi.hoisted(() => ({
+  completeEntitySetup: vi.fn(),
   connectLocalModel: vi.fn(),
   detectCliProviders: vi.fn(),
   getStatus: vi.fn(),
@@ -13,9 +14,14 @@ const mocks = vi.hoisted(() => ({
   genesisWorkspace: vi.fn(),
   genesisMounts: 0,
   genesisClosers: [] as Array<() => void>,
+  genesisEntities: { portraits: {}, awaiting: { ada: "session-a" } } as {
+    portraits: Record<string, unknown>;
+    awaiting: Record<string, string>;
+  },
 }));
 
 vi.mock("./lib/daemonClient", () => ({
+  completeEntitySetup: mocks.completeEntitySetup,
   connectLocalModel: mocks.connectLocalModel,
   detectCliProviders: mocks.detectCliProviders,
   getStatus: mocks.getStatus,
@@ -44,7 +50,7 @@ vi.mock("./components/GenesisWorkspace", () => ({
 
 vi.mock("./components/GenesisEntityPortrait", () => ({
   default: ({ name }: { name: string }) => <span>{name} portrait</span>,
-  useGenesisEntities: () => ({ portraits: {}, awaiting: { ada: "session-a" } }),
+  useGenesisEntities: () => mocks.genesisEntities,
 }));
 
 describe("Abigail Hive app", () => {
@@ -52,6 +58,7 @@ describe("Abigail Hive app", () => {
     vi.clearAllMocks();
     mocks.genesisMounts = 0;
     mocks.genesisClosers.length = 0;
+    mocks.genesisEntities = { portraits: {}, awaiting: { ada: "session-a" } };
     mocks.hiveHealth.mockResolvedValue(true);
     mocks.detectCliProviders.mockResolvedValue([]);
     mocks.connectLocalModel.mockResolvedValue({ model: "family-model" });
@@ -119,7 +126,11 @@ describe("Abigail Hive app", () => {
     await waitFor(() => expect(screen.getByTestId("genesis-workspace")).toHaveTextContent("2:session-a"));
   });
 
-  it("routes an awaiting Genesis card through model setup, then restores its saved session", async () => {
+  it("routes a receipt-only Genesis card through model setup, then restores its saved session", async () => {
+    mocks.genesisEntities = {
+      portraits: {},
+      awaiting: { ada: "receipt-only-session" },
+    };
     const needsProvider = {
       entity_count: 3,
       entities: [
@@ -175,6 +186,7 @@ describe("Abigail Hive app", () => {
     fireEvent.click(setupButton);
     expect(await screen.findByRole("dialog", { name: "Connect a model" })).toBeInTheDocument();
     expect(screen.queryByTestId("genesis-workspace")).not.toBeInTheDocument();
+    expect(mocks.completeEntitySetup).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /^Use a local model/ }));
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
@@ -183,6 +195,7 @@ describe("Abigail Hive app", () => {
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Continue Ada's Genesis" }));
-    expect(await screen.findByTestId("genesis-workspace")).toHaveTextContent("1:session-a");
+    expect(await screen.findByTestId("genesis-workspace")).toHaveTextContent("1:receipt-only-session");
+    expect(mocks.completeEntitySetup).not.toHaveBeenCalled();
   });
 });

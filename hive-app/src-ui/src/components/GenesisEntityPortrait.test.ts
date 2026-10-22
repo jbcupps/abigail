@@ -2,8 +2,16 @@ import { describe, expect, it } from "vitest";
 import type { GenesisSession } from "../lib/genesisClient";
 import { awaitingFromSessions, portraitsFromSessions } from "./GenesisEntityPortrait";
 
-function session(id: string, updatedAt: string, portrait: string | null, state = "ready", awakening?: string): GenesisSession {
-  return { id, updated_at: updatedAt, state, awakening, definition: { entity_id: "nova", portrait_asset_id: portrait }, asset_ids: ["unapproved-candidate"] } as unknown as GenesisSession;
+function session(id: string, updatedAt: string, portrait: string | null, state = "ready", awakening?: string, effectiveEntityId?: string): GenesisSession {
+  return {
+    id,
+    updated_at: updatedAt,
+    state,
+    awakening,
+    effective_entity_id: effectiveEntityId,
+    definition: { entity_id: effectiveEntityId ? null : "nova", portrait_asset_id: portrait },
+    asset_ids: ["unapproved-candidate"],
+  } as unknown as GenesisSession;
 }
 
 describe("persistent Entity portraits", () => {
@@ -20,6 +28,13 @@ describe("persistent Entity portraits", () => {
   it("routes Entities still being created back to their Genesis session", () => {
     expect(awaitingFromSessions([session("creating", "2026-10-17", null, "review")])).toEqual({ nova: "creating" });
     expect(awaitingFromSessions([session("born", "2026-10-17", null, "ready", "I am Nova")])).toEqual({});
+  });
+
+  it("routes a receipt-only allocation without rewriting definition.entity_id", () => {
+    const receiptOnly = session("receipt-only", "2026-10-17", null, "review", undefined, "nova");
+    expect(receiptOnly.definition.entity_id).toBeNull();
+    expect(receiptOnly.effective_entity_id).toBe("nova");
+    expect(awaitingFromSessions([receiptOnly])).toEqual({ nova: "receipt-only" });
   });
 
   it("does not resurrect an older image after a newer canonical deletion", () => {
