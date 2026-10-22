@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
 const mocks = vi.hoisted(() => ({
+  connectLocalModel: vi.fn(),
+  detectCliProviders: vi.fn(),
   getStatus: vi.fn(),
   hiveHealth: vi.fn(),
   openEntity: vi.fn(),
@@ -14,6 +16,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./lib/daemonClient", () => ({
+  connectLocalModel: mocks.connectLocalModel,
+  detectCliProviders: mocks.detectCliProviders,
   getStatus: mocks.getStatus,
   hiveHealth: mocks.hiveHealth,
 }));
@@ -49,6 +53,8 @@ describe("Abigail Hive app", () => {
     mocks.genesisMounts = 0;
     mocks.genesisClosers.length = 0;
     mocks.hiveHealth.mockResolvedValue(true);
+    mocks.detectCliProviders.mockResolvedValue([]);
+    mocks.connectLocalModel.mockResolvedValue({ model: "family-model" });
     mocks.getStatus.mockResolvedValue({
       entity_count: 2,
       entities: [
@@ -111,5 +117,72 @@ describe("Abigail Hive app", () => {
 
     act(() => mocks.genesisClosers[0]());
     await waitFor(() => expect(screen.getByTestId("genesis-workspace")).toHaveTextContent("2:session-a"));
+  });
+
+  it("routes an awaiting Genesis card through model setup, then restores its saved session", async () => {
+    const needsProvider = {
+      entity_count: 3,
+      entities: [
+        {
+          id: "hive",
+          name: "Abigail Hive",
+          birth_complete: true,
+          birth_date: null,
+          is_hive: true,
+          immortal: true,
+        },
+        {
+          id: "ada",
+          name: "Ada",
+          birth_complete: false,
+          birth_date: null,
+          is_hive: false,
+          immortal: false,
+        },
+        {
+          id: "grace",
+          name: "Grace",
+          birth_complete: true,
+          birth_date: null,
+          is_hive: false,
+          immortal: false,
+        },
+      ],
+      ready_state: "needs_provider",
+      any_provider_configured: false,
+      setup_complete: false,
+      helper: { running: false, local_url: null },
+    };
+    mocks.getStatus
+      .mockResolvedValueOnce(needsProvider)
+      .mockResolvedValue({
+        ...needsProvider,
+        ready_state: "ready",
+        any_provider_configured: true,
+        setup_complete: true,
+      });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /skip/i }));
+    await screen.findByRole("heading", { name: "Abigail Hive" });
+
+    expect(screen.getByText("Connect a model to continue Genesis")).toBeInTheDocument();
+    const setupButton = screen.getByRole("button", { name: "Connect a model to continue" });
+    expect(setupButton).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Create or resume an Entity" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Open Grace" })).toBeDisabled();
+
+    fireEvent.click(setupButton);
+    expect(await screen.findByRole("dialog", { name: "Connect a model" })).toBeInTheDocument();
+    expect(screen.queryByTestId("genesis-workspace")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Use a local model/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await waitFor(() => expect(mocks.connectLocalModel).toHaveBeenCalledOnce());
+    await screen.findByRole("button", { name: "Continue Ada's Genesis" });
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue Ada's Genesis" }));
+    expect(await screen.findByTestId("genesis-workspace")).toHaveTextContent("1:session-a");
   });
 });

@@ -242,7 +242,9 @@ export default function App() {
                 <GenesisEntityPortrait entityId={entity.id} name={entity.name} portrait={portraits[entity.id]} />
                 <div className="font-medium text-theme-text-bright mt-3">{entity.name}</div>
                 <div className="text-xs text-theme-text-dim mt-1">
-                  {awaiting[entity.id]
+                  {needsProvider && awaiting[entity.id]
+                    ? "Connect a model to continue Genesis"
+                    : awaiting[entity.id]
                     ? "Being created in Genesis"
                     : entity.birth_complete
                       ? "Ready"
@@ -251,11 +253,20 @@ export default function App() {
                 {entity.birth_complete && <EntityJourneyChip entityId={entity.id} refreshKey={cardsKey} />}
                 <button
                   type="button"
-                  onClick={() => void handleOpen(entity)}
-                  disabled={needsProvider || openingId !== null}
+                  onClick={() => {
+                    if (needsProvider && awaiting[entity.id]) setWizardOpen(true);
+                    else void handleOpen(entity);
+                  }}
+                  disabled={(needsProvider && !awaiting[entity.id]) || openingId !== null}
                   className="mt-3 self-start rounded-theme-md bg-theme-primary px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
                 >
-                  {openingId === entity.id ? "Opening…" : awaiting[entity.id] ? `Continue ${entity.name}'s Genesis` : `Open ${entity.name}`}
+                  {openingId === entity.id
+                    ? "Opening…"
+                    : needsProvider && awaiting[entity.id]
+                      ? "Connect a model to continue"
+                      : awaiting[entity.id]
+                        ? `Continue ${entity.name}'s Genesis`
+                        : `Open ${entity.name}`}
                 </button>
               </li>
             ))}
