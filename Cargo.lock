@@ -5033,6 +5033,7 @@ dependencies = [
 name = "hive-core"
 version = "0.0.1"
 dependencies = [
+ "abigail-core",
  "hmac 0.13.0",
  "serde",
  "serde_json",

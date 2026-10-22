@@ -4,8 +4,8 @@
 //! Zero Tauri imports — only uses `abigail_core`, `ed25519_dalek`, `serde`, `uuid`, `std`.
 
 use abigail_core::{
-    encrypted_storage, generate_master_key, load_master_key, sign_agent_key,
-    validate_entity_name, verify_agent_signature, AgentEntry, AppConfig, GlobalConfig, SecretsVault,
+    encrypted_storage, generate_master_key, load_master_key, sign_agent_key, validate_entity_name,
+    verify_agent_signature, AgentEntry, AppConfig, GlobalConfig, SecretsVault,
 };
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -1002,7 +1002,10 @@ impl IdentityManager {
             agent_id,
             &timestamp,
             |source, destination| std::fs::rename(source, destination),
-            |next| next.save(&self.data_root).map_err(|error| error.to_string()),
+            |next| {
+                next.save(&self.data_root)
+                    .map_err(|error| error.to_string())
+            },
         )
     }
 
@@ -1047,10 +1050,9 @@ impl IdentityManager {
         let backups_dir = self.data_root.join("backups");
         std::fs::create_dir_all(&backups_dir)
             .map_err(|e| format!("Failed to create backups directory: {}", e))?;
-        let safe_name =
-            entry
-                .name
-                .replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
+        let safe_name = entry
+            .name
+            .replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
         let backup_path = backups_dir.join(format!("{timestamp}_{safe_name}"));
         if backup_path
             .try_exists()
@@ -1848,7 +1850,10 @@ mod tests {
             &agent_id,
             timestamp,
             |source, destination| std::fs::rename(source, destination),
-            |next| next.save(manager.data_root()).map_err(|error| error.to_string()),
+            |next| {
+                next.save(manager.data_root())
+                    .map_err(|error| error.to_string())
+            },
         );
         assert!(result.is_err());
         assert!(agent_dir.is_dir());
@@ -1903,7 +1908,10 @@ mod tests {
 
         assert!(result.is_err());
         assert!(agent_dir.is_dir(), "the source move must be rolled back");
-        assert!(!destination.exists(), "rollback must remove the archive path");
+        assert!(
+            !destination.exists(),
+            "rollback must remove the archive path"
+        );
         assert_registered_with_complete_receipt(&manager, &agent_id, &creation_key);
         let _ = std::fs::remove_dir_all(manager.data_root());
     }

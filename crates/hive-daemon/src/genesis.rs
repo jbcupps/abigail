@@ -2025,8 +2025,7 @@ mod tests {
             .create_agent("Original Valid Name")
             .unwrap();
         let before = state.identity_manager.list_agents().unwrap().len();
-        let mut legacy =
-            GenesisSession::new(id(), OWNER.into(), GenesisMode::Guided, now());
+        let mut legacy = GenesisSession::new(id(), OWNER.into(), GenesisMode::Guided, now());
         legacy.definition.name = " Legacy Name ".into();
         legacy.definition.purpose = "Preserve a compatible old draft".into();
         legacy.definition.entity_id = Some(entity_id.clone());

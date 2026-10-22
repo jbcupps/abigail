@@ -1417,10 +1417,7 @@ mod tests {
         let eighty_multibyte = "界".repeat(80);
         draft
             .apply_updates(
-                vec![update(
-                    GenesisField::Name,
-                    json!(eighty_multibyte.clone()),
-                )],
+                vec![update(GenesisField::Name, json!(eighty_multibyte.clone()))],
                 "name",
                 NOW,
             )

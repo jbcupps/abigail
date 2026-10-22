@@ -100,18 +100,10 @@ pub fn certificate_payload_v3(certificate: &BirthCertificate) -> Vec<u8> {
         "entity_name",
         certificate.entity_name.as_bytes(),
     );
-    field(
-        &mut payload,
-        "archetype",
-        certificate.archetype.as_bytes(),
-    );
+    field(&mut payload, "archetype", certificate.archetype.as_bytes());
     field(&mut payload, "epithet", certificate.epithet.as_bytes());
     field(&mut payload, "sigil", certificate.sigil.as_bytes());
-    field(
-        &mut payload,
-        "soul_hash",
-        certificate.soul_hash.as_bytes(),
-    );
+    field(&mut payload, "soul_hash", certificate.soul_hash.as_bytes());
     field(
         &mut payload,
         "birth_path",
@@ -625,7 +617,11 @@ mod tests {
             ),
             ("epithet", "/epithet", serde_json::json!("Tampered epithet")),
             ("sigil", "/sigil", serde_json::json!("tampered-sigil")),
-            ("soul hash", "/soul_hash", serde_json::json!("tampered-hash")),
+            (
+                "soul hash",
+                "/soul_hash",
+                serde_json::json!("tampered-hash"),
+            ),
             ("birth path", "/birth_path", serde_json::json!("forge")),
             (
                 "issued at",
