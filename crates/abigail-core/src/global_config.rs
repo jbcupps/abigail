@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 pub struct AgentCreationRecord {
     pub name: String,
     pub entity_id: String,
+    /// Immutable digest of the original keyed request, when that protocol supplies one.
+    #[serde(default)]
+    pub request_fingerprint: Option<String>,
     pub state: AgentCreationState,
 }
 
@@ -15,6 +18,7 @@ pub struct AgentCreationRecord {
 pub enum AgentCreationState {
     Reserved,
     Complete,
+    Unavailable,
 }
 
 /// An entry in the global config representing a registered agent.

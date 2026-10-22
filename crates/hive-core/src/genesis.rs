@@ -5,7 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::fmt::Write;
 
 pub const GENESIS_SCHEMA_VERSION: u32 = 1;
 pub const MAX_MARKDOWN_BYTES: usize = 256 * 1024;
@@ -470,6 +472,18 @@ impl GenesisCreationSeed {
             return Err("Review a nonempty purpose before creating this identity.".into());
         }
         validate_text(&self.purpose, MAX_FIELD_BYTES)
+    }
+
+    pub fn fingerprint(&self) -> Result<String, String> {
+        self.validate()?;
+        let encoded = serde_json::to_vec(self).map_err(|error| error.to_string())?;
+        let digest = Sha256::digest(encoded);
+        let mut fingerprint = String::with_capacity(7 + digest.len() * 2);
+        fingerprint.push_str("sha256:");
+        for byte in digest {
+            write!(&mut fingerprint, "{byte:02x}").map_err(|error| error.to_string())?;
+        }
+        Ok(fingerprint)
     }
 }
 
@@ -1319,6 +1333,20 @@ mod tests {
         legacy.as_object_mut().unwrap().remove("creation_seed");
         let restored: GenesisSession = serde_json::from_value(legacy).unwrap();
         assert!(restored.creation_seed.is_none());
+    }
+
+    #[test]
+    fn creation_seed_fingerprint_is_deterministic_and_covers_presence() {
+        let seed = GenesisCreationSeed {
+            mode: GenesisMode::Quick,
+            name: "Signal".into(),
+            purpose: "Notice small wonders".into(),
+            presence: crate::genesis_quest::PresenceChoice::default(),
+        };
+        assert_eq!(seed.fingerprint().unwrap(), seed.fingerprint().unwrap());
+        let mut changed = seed.clone();
+        changed.presence.motion = crate::genesis_quest::Motion::Still;
+        assert_ne!(seed.fingerprint().unwrap(), changed.fingerprint().unwrap());
     }
 
     fn session() -> GenesisSession {

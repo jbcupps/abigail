@@ -976,6 +976,13 @@ impl IdentityManager {
         }
         let previous = gc.clone();
         gc.remove_agent(agent_id);
+        for receipt in gc
+            .creation_attempts
+            .values_mut()
+            .filter(|receipt| receipt.entity_id == agent_id)
+        {
+            receipt.state = abigail_core::AgentCreationState::Unavailable;
+        }
         if let Err(error) = gc.save(&self.data_root) {
             // The on-disk registry still contains the agent, so keep memory in
             // sync with it and let a retry remove the now-empty registration.
@@ -1001,6 +1008,13 @@ impl IdentityManager {
             let dir = self.resolve_agent_dir(&entry.directory)?;
 
             gc.remove_agent(agent_id);
+            for receipt in gc
+                .creation_attempts
+                .values_mut()
+                .filter(|receipt| receipt.entity_id == agent_id)
+            {
+                receipt.state = abigail_core::AgentCreationState::Unavailable;
+            }
             gc.save(&self.data_root).map_err(|e| e.to_string())?;
             (entry.name, dir)
         };

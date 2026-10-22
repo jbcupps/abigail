@@ -78,8 +78,13 @@ pub fn ensure_entity_link(
             );
         }
     };
+    let fingerprint = draft
+        .creation_seed
+        .as_ref()
+        .map(|seed| seed.fingerprint())
+        .transpose()?;
     let (entity_id, _) = identities
-        .create_agent_idempotent(&name, &draft.id)
+        .create_agent_idempotent_with_fingerprint(&name, &draft.id, fingerprint.as_deref())
         .map_err(|error| error.to_string())?;
     let mut linked = draft.clone();
     linked.definition.entity_id = Some(entity_id);
@@ -124,14 +129,21 @@ mod tests {
             .is_some());
         assert!(crate::genesis::awaiting_awakening(&state, &entity_id).unwrap());
 
-        draft.definition.name = "Vesper reviewed".into();
-        ensure_entity_link(&state.identity_manager, &mut draft, |linked, revision| {
+        let mut retry = state.genesis.load(OWNER, &draft.id).unwrap().unwrap();
+        retry.definition.name = "Vesper reviewed".into();
+        ensure_entity_link(&state.identity_manager, &mut retry, |linked, revision| {
             assert_eq!(revision, 0);
             assert_eq!(linked.definition.entity_id, allocated);
-            Ok(())
+            state
+                .genesis
+                .save(linked, revision)
+                .map_err(|error| error.to_string())
         })
         .unwrap();
-        assert_eq!(draft.definition.entity_id, allocated);
+        drop(retry);
+        let reloaded = state.genesis.load(OWNER, &draft.id).unwrap().unwrap();
+        assert_eq!(reloaded.definition.entity_id, allocated);
+        assert_eq!(reloaded.revision, 1);
         assert_eq!(
             state.identity_manager.list_agents().unwrap().len(),
             baseline + 1

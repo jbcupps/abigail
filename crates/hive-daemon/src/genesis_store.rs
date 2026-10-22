@@ -164,6 +164,9 @@ impl GenesisStore {
         {
             bail!("Genesis creation timestamps are immutable");
         }
+        if session.creation_seed != existing.creation_seed {
+            bail!("Genesis creation seed is immutable");
+        }
         self.handle.upsert(
             SESSION_TABLE,
             &session.id,
@@ -298,6 +301,25 @@ mod tests {
         proposed.id = uuid::Uuid::new_v4().to_string();
         proposed.creation_seed = None;
         assert!(store.create_or_resume(&proposed).is_err());
+    }
+
+    #[test]
+    fn save_rejects_creation_seed_changes() {
+        let store = store();
+        let original = keyed("owner-a");
+        store.create_or_resume(&original).unwrap();
+        let mut changed = original.clone();
+        changed.creation_seed.as_mut().unwrap().purpose = "Changed after creation".into();
+        changed.touch("later");
+        assert!(store.save(&changed, 0).is_err());
+        assert_eq!(
+            store
+                .load("owner-a", &original.id)
+                .unwrap()
+                .unwrap()
+                .creation_seed,
+            original.creation_seed
+        );
     }
 
     #[test]

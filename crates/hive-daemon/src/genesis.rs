@@ -288,19 +288,13 @@ async fn create(
                 return Err("Creation mode differs from the original input.".into());
             }
             check_unlocked(seed.presence, &[])?;
-            if state
-                .genesis
-                .load(OWNER, &key)
-                .map_err(|e| e.to_string())?
-                .is_none()
-                && state
-                    .identity_manager
-                    .entity_creation_status(&key)
-                    .map_err(|e| e.to_string())?
-                    != abigail_identity::AgentCreationStatus::Absent
-            {
-                return Err("This creation already reserved an Entity but its Genesis record is unavailable. No replacement was created.".into());
-            }
+            let fingerprint = seed.fingerprint()?;
+            // Bind the key before the session write. A failed store write or
+            // later draft deletion can never free it for different input.
+            state
+                .identity_manager
+                .reserve_agent_creation(&seed.name, &key, Some(&fingerprint))
+                .map_err(|error| error.to_string())?;
             let time = now();
             let mut session = GenesisSession::new(key, OWNER.into(), body.mode, time.clone());
             session.definition.name = seed.name.clone();
@@ -354,6 +348,27 @@ pub(crate) fn delete_genesis_record_unlocked(
     id: &str,
 ) -> Result<bool, String> {
     let mut draft = session(state, id)?;
+    let retire_key = if draft.awakening.is_none() {
+        draft.creation_seed.clone()
+    } else {
+        None
+    };
+    if let Some(seed) = &retire_key {
+        let status = state
+            .identity_manager
+            .entity_creation_status(&draft.id)
+            .map_err(|error| error.to_string())?;
+        if !matches!(
+            status,
+            abigail_identity::AgentCreationStatus::Unavailable { .. }
+        ) {
+            let fingerprint = seed.fingerprint()?;
+            state
+                .identity_manager
+                .reserve_agent_creation(&seed.name, &draft.id, Some(&fingerprint))
+                .map_err(|error| error.to_string())?;
+        }
+    }
     let linked_entity =
         draft
             .definition
@@ -429,6 +444,12 @@ pub(crate) fn delete_genesis_record_unlocked(
                 state.identity_manager.delete_agent(entity_id)?;
             }
         }
+    }
+    if retire_key.is_some() {
+        state
+            .identity_manager
+            .abandon_agent_creation(&draft.id)
+            .map_err(|error| error.to_string())?;
     }
     // Activated Entities and their real conversation history are independent records.
     state.genesis.delete(OWNER, id).map_err(|e| e.to_string())
@@ -1391,6 +1412,193 @@ mod tests {
         .await;
         assert!(replayed.ok, "{:?}", replayed.error);
         assert_eq!(replayed.data.unwrap()["revision"], 0);
+    }
+
+    #[tokio::test]
+    async fn deleting_unactivated_keyed_session_permanently_retires_its_seed_key() {
+        let (state, _) = crate::routes::tests::build_state();
+        let key = id();
+        let seed = GenesisCreationSeed {
+            mode: GenesisMode::Quick,
+            name: "Signal".into(),
+            purpose: "Notice small wonders".into(),
+            presence: PresenceChoice::default(),
+        };
+        let Json(created) = create(
+            State(state.clone()),
+            Json(CreateRequest {
+                mode: seed.mode,
+                creation_key: Some(key.clone()),
+                seed: Some(seed.clone()),
+            }),
+        )
+        .await;
+        assert!(created.ok, "{:?}", created.error);
+        assert!(matches!(
+            state.identity_manager.entity_creation_status(&key).unwrap(),
+            abigail_identity::AgentCreationStatus::Reserved { .. }
+        ));
+
+        assert!(delete_genesis_record_unlocked(&state, &key).unwrap());
+        assert!(matches!(
+            state.identity_manager.entity_creation_status(&key).unwrap(),
+            abigail_identity::AgentCreationStatus::Unavailable { .. }
+        ));
+        let Json(same_retry) = create(
+            State(state.clone()),
+            Json(CreateRequest {
+                mode: seed.mode,
+                creation_key: Some(key.clone()),
+                seed: Some(seed.clone()),
+            }),
+        )
+        .await;
+        assert!(!same_retry.ok);
+        let mut changed = seed;
+        changed.purpose = "A different permanent request".into();
+        let Json(changed_retry) = create(
+            State(state),
+            Json(CreateRequest {
+                mode: changed.mode,
+                creation_key: Some(key),
+                seed: Some(changed),
+            }),
+        )
+        .await;
+        assert!(!changed_retry.ok);
+    }
+
+    #[tokio::test]
+    async fn failed_keyed_session_write_still_binds_the_original_seed() {
+        let (state, _) = crate::routes::tests::build_state();
+        for index in 0..100 {
+            state
+                .genesis
+                .create(&GenesisSession::new(
+                    format!("full-{index}"),
+                    OWNER.into(),
+                    GenesisMode::Guided,
+                    now(),
+                ))
+                .unwrap();
+        }
+        let key = id();
+        let seed = GenesisCreationSeed {
+            mode: GenesisMode::Quick,
+            name: "Signal".into(),
+            purpose: "Original purpose".into(),
+            presence: PresenceChoice::default(),
+        };
+        let Json(failed) = create(
+            State(state.clone()),
+            Json(CreateRequest {
+                mode: seed.mode,
+                creation_key: Some(key.clone()),
+                seed: Some(seed.clone()),
+            }),
+        )
+        .await;
+        assert!(!failed.ok);
+        assert!(state.genesis.load(OWNER, &key).unwrap().is_none());
+        assert!(matches!(
+            state.identity_manager.entity_creation_status(&key).unwrap(),
+            abigail_identity::AgentCreationStatus::Reserved { .. }
+        ));
+        let fingerprint = state
+            .identity_manager
+            .global_config()
+            .read()
+            .unwrap()
+            .creation_attempts[&key]
+            .request_fingerprint
+            .clone();
+        let expected_fingerprint = seed.fingerprint().unwrap();
+        assert_eq!(fingerprint.as_deref(), Some(expected_fingerprint.as_str()));
+
+        let mut changed = seed;
+        changed.purpose = "Different purpose".into();
+        let Json(conflict) = create(
+            State(state),
+            Json(CreateRequest {
+                mode: changed.mode,
+                creation_key: Some(key),
+                seed: Some(changed),
+            }),
+        )
+        .await;
+        assert!(!conflict.ok);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reserved_cleanup_failure_keeps_session_and_receipt_for_retry() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (state, _) = crate::routes::tests::build_state();
+        let key = id();
+        let seed = GenesisCreationSeed {
+            mode: GenesisMode::Quick,
+            name: "Signal".into(),
+            purpose: "Original purpose".into(),
+            presence: PresenceChoice::default(),
+        };
+        let Json(created) = create(
+            State(state.clone()),
+            Json(CreateRequest {
+                mode: seed.mode,
+                creation_key: Some(key.clone()),
+                seed: Some(seed.clone()),
+            }),
+        )
+        .await;
+        assert!(created.ok);
+        let receipt = state
+            .identity_manager
+            .global_config()
+            .read()
+            .unwrap()
+            .creation_attempts[&key]
+            .clone();
+        let partial = state
+            .identity_manager
+            .identities_dir()
+            .join(&receipt.entity_id);
+        std::fs::create_dir_all(partial.join("config.json")).unwrap();
+        std::fs::write(partial.join("partial"), b"unfinished").unwrap();
+        assert!(state
+            .identity_manager
+            .create_agent_idempotent_with_fingerprint(
+                &seed.name,
+                &key,
+                Some(&seed.fingerprint().unwrap()),
+            )
+            .is_err());
+
+        let root = state.identity_manager.data_root();
+        let original_mode = std::fs::metadata(root).unwrap().permissions().mode();
+        std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let failed = delete_genesis_record_unlocked(&state, &key);
+        std::fs::set_permissions(root, std::fs::Permissions::from_mode(original_mode)).unwrap();
+        assert!(failed.is_err());
+        assert!(state.genesis.load(OWNER, &key).unwrap().is_some());
+        assert_eq!(
+            abigail_core::GlobalConfig::load(root)
+                .unwrap()
+                .creation_attempts[&key]
+                .state,
+            abigail_core::AgentCreationState::Reserved
+        );
+        assert!(!partial.exists());
+
+        assert!(delete_genesis_record_unlocked(&state, &key).unwrap());
+        assert!(state.genesis.load(OWNER, &key).unwrap().is_none());
+        assert_eq!(
+            abigail_core::GlobalConfig::load(root)
+                .unwrap()
+                .creation_attempts[&key]
+                .state,
+            abigail_core::AgentCreationState::Unavailable
+        );
     }
 
     async fn act(state: &HiveDaemonState, id: &str, mut body: Value) -> Result<Value, String> {
