@@ -1304,6 +1304,48 @@ pub(crate) mod tests {
             .payload
             .to_string()
             .contains("durable private note"));
+        let memories = state.memory.all_memories().unwrap();
+        let ephemeral = memories
+            .iter()
+            .find(|memory| memory.content == "temporary private note")
+            .unwrap();
+        let durable = memories
+            .iter()
+            .find(|memory| memory.id == entry.id)
+            .unwrap();
+        assert!(!ephemeral.explicitly_confirmed);
+        assert!(durable.explicitly_confirmed);
+    }
+
+    #[tokio::test]
+    async fn explicit_memory_remains_confirmed_when_event_enqueue_fails() {
+        let mut state = build_state();
+        let blocked_root =
+            std::env::temp_dir().join(format!("abigail-memory-outbox-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&blocked_root, b"not a directory").unwrap();
+        state.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&blocked_root, 64).unwrap());
+
+        let response = memory_insert(
+            State(state.clone()),
+            Json(MemoryInsertRequest {
+                content: "durable private fallback".to_string(),
+                weight: "crystallized".to_string(),
+            }),
+        )
+        .await
+        .0;
+
+        assert!(response.ok, "{:?}", response.error);
+        let entry = response.data.unwrap();
+        let saved = state
+            .memory
+            .all_memories()
+            .unwrap()
+            .into_iter()
+            .find(|memory| memory.id == entry.id)
+            .unwrap();
+        assert!(saved.explicitly_confirmed);
+        let _ = std::fs::remove_file(blocked_root);
     }
 
     #[tokio::test]

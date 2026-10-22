@@ -976,6 +976,66 @@ mod tests {
     }
 
     #[test]
+    fn legacy_rows_default_content_free_journey_metadata() {
+        let turn_doc: TurnDoc = serde_json::from_value(serde_json::json!({
+            "id": "turn-old",
+            "session_id": "session-old",
+            "turn_number": 1,
+            "role": "assistant",
+            "content": "private historical reply",
+            "provider": null,
+            "model": null,
+            "tier": null,
+            "complexity_score": null,
+            "token_estimate": null,
+            "created_at": "2026-01-01T00:00:00Z"
+        }))
+        .unwrap();
+        let turn = ConversationTurn::try_from(turn_doc).unwrap();
+        assert!(turn.successful_tool_uses.is_empty());
+
+        let memory_doc: MemoryDoc = serde_json::from_value(serde_json::json!({
+            "id": "memory-old",
+            "content": "private historical memory",
+            "weight": "distilled",
+            "created_at": "2026-01-01T00:00:00Z"
+        }))
+        .unwrap();
+        let memory = Memory::try_from(memory_doc).unwrap();
+        assert!(!memory.explicitly_confirmed);
+    }
+
+    #[test]
+    fn content_free_journey_metadata_round_trips_with_real_entity_records() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        let turn = ConversationTurn::new(
+            "session-1",
+            "assistant",
+            "private reply that must not enter journey metadata",
+        )
+        .with_successful_tool_uses(vec![SuccessfulToolUse {
+            skill_id: "com.abigail.calendar".to_string(),
+            tool_name: "list_events".to_string(),
+        }]);
+        store.insert_turn(&turn).unwrap();
+
+        let memory =
+            Memory::distilled("private memory that must not enter journey events".to_string())
+                .with_explicit_confirmation();
+        store.insert_memory(&memory).unwrap();
+
+        let saved_turn = store.all_turns().unwrap().pop().unwrap();
+        assert_eq!(saved_turn.successful_tool_uses, turn.successful_tool_uses);
+        let metadata = serde_json::to_string(&saved_turn.successful_tool_uses).unwrap();
+        assert!(!metadata.contains("private reply"));
+        assert!(!metadata.contains("arguments"));
+        assert!(!metadata.contains("output"));
+
+        let saved_memory = store.all_memories().unwrap().pop().unwrap();
+        assert!(saved_memory.explicitly_confirmed);
+    }
+
+    #[test]
     fn recent_turns_restore_chronology_for_default_numbers_and_stable_timestamp_ties() {
         let store = MemoryStore::open_in_memory().unwrap();
         let mut user = ConversationTurn::new("history", "user", "Remember pasta");

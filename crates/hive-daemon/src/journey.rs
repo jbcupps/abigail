@@ -1322,4 +1322,66 @@ pub(crate) mod tests {
         assert_eq!(activity.active_days, 3);
         assert_eq!(activity.active_weeks, 2);
     }
+
+    #[test]
+    fn durable_entity_facts_scan_more_than_five_hundred_turns_and_merge_by_max() {
+        let memory = abigail_memory::MemoryStore::open_in_memory().unwrap();
+        for index in 0..525 {
+            let mut turn = abigail_memory::ConversationTurn::new(
+                &format!("session-{}", index % 7),
+                "user",
+                "private mentor message",
+            );
+            turn.id = format!("user-turn-{index:04}");
+            memory.insert_turn(&turn).unwrap();
+        }
+        let assistant =
+            abigail_memory::ConversationTurn::new("session-0", "assistant", "private model output")
+                .with_successful_tool_uses(vec![
+                    abigail_memory::SuccessfulToolUse {
+                        skill_id: "com.abigail.calendar".to_string(),
+                        tool_name: "list_events".to_string(),
+                    },
+                    abigail_memory::SuccessfulToolUse {
+                        skill_id: "com.abigail.weather".to_string(),
+                        tool_name: "forecast".to_string(),
+                    },
+                ]);
+        memory.insert_turn(&assistant).unwrap();
+        memory
+            .insert_memory(
+                &abigail_memory::Memory::distilled("explicit private memory".to_string())
+                    .with_explicit_confirmation(),
+            )
+            .unwrap();
+        memory
+            .insert_memory(&abigail_memory::Memory::crystallized(
+                "system-generated private memory".to_string(),
+            ))
+            .unwrap();
+        memory
+            .insert_memory(
+                &abigail_memory::Memory::ephemeral("temporary private memory".to_string())
+                    .with_explicit_confirmation(),
+            )
+            .unwrap();
+
+        let durable = durable_entity_activity(&memory).unwrap();
+        assert_eq!(durable.mentor_messages, 525);
+        assert_eq!(durable.conversation_sessions, 7);
+        assert_eq!(durable.successful_skill_uses, 2);
+        assert_eq!(durable.confirmed_memories, 1);
+
+        let merged = merge_activity_sources(
+            durable,
+            JourneyActivity {
+                successful_skill_uses: 1,
+                confirmed_memories: 3,
+                ..Default::default()
+            },
+        );
+        assert_eq!(merged.mentor_messages, 525);
+        assert_eq!(merged.successful_skill_uses, 2);
+        assert_eq!(merged.confirmed_memories, 3);
+    }
 }

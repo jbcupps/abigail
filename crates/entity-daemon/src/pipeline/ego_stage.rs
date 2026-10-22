@@ -313,3 +313,46 @@ fn friendly_turn_error() -> String {
      moment — or ask whoever set up Abigail to connect a model in the Hive."
         .to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn committed_assistant_turn_keeps_only_successful_content_free_tool_metadata() {
+        let response = ChatResponse {
+            reply: "private assistant reply".to_string(),
+            provider: Some("fixture".to_string()),
+            tool_calls_made: vec![
+                entity_core::ToolCallRecord {
+                    skill_id: "com.abigail.calendar".to_string(),
+                    tool_name: "list_events".to_string(),
+                    success: true,
+                },
+                entity_core::ToolCallRecord {
+                    skill_id: "com.abigail.mail".to_string(),
+                    tool_name: "send_message".to_string(),
+                    success: false,
+                },
+            ],
+            tier: None,
+            model_used: Some("fixture-model".to_string()),
+            complexity_score: Some(4),
+            execution_trace: None,
+            session_id: Some("session-1".to_string()),
+        };
+
+        let turn = committed_assistant_turn("session-1", &response);
+
+        assert_eq!(turn.role, "assistant");
+        assert_eq!(turn.successful_tool_uses.len(), 1);
+        assert_eq!(
+            turn.successful_tool_uses[0].skill_id,
+            "com.abigail.calendar"
+        );
+        assert_eq!(turn.successful_tool_uses[0].tool_name, "list_events");
+        let metadata = serde_json::to_string(&turn.successful_tool_uses).unwrap();
+        assert!(!metadata.contains("private assistant reply"));
+        assert!(!metadata.contains("send_message"));
+    }
+}

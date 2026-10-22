@@ -160,7 +160,8 @@ mod tests {
                 superego_findings: vec![],
             },
         )
-        .await;
+        .await
+        .unwrap();
 
         let records = state.outbox.snapshot().unwrap();
         let skill_events = records
@@ -179,5 +180,48 @@ mod tests {
             assert!(event.payload.get("message").is_none());
             assert!(event.payload.get("content").is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn committed_action_surfaces_outbox_enqueue_failure() {
+        let mut state = crate::routes::tests::build_state();
+        let blocked_root =
+            std::env::temp_dir().join(format!("abigail-blocked-outbox-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&blocked_root, b"not a directory").unwrap();
+        state.outbox =
+            std::sync::Arc::new(crate::outbox::RuntimeOutbox::load(&blocked_root, 64).unwrap());
+
+        let error = record(
+            state,
+            EgoActionPayload {
+                session_id: "session-1".to_string(),
+                status: "success".to_string(),
+                error: None,
+                response: Some(entity_core::ChatResponse {
+                    reply: "private assistant reply".to_string(),
+                    provider: Some("fixture".to_string()),
+                    tool_calls_made: vec![entity_core::ToolCallRecord {
+                        skill_id: "com.abigail.calendar".to_string(),
+                        tool_name: "list_events".to_string(),
+                        success: true,
+                    }],
+                    tier: None,
+                    model_used: None,
+                    complexity_score: None,
+                    execution_trace: None,
+                    session_id: Some("session-1".to_string()),
+                }),
+                user_message: "private mentor prompt".to_string(),
+                superego_verdict: Some("clear".to_string()),
+                superego_findings: vec![],
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.contains("outbox"), "{error}");
+        assert!(!error.contains("private assistant reply"));
+        assert!(!error.contains("private mentor prompt"));
+        let _ = std::fs::remove_file(blocked_root);
     }
 }
