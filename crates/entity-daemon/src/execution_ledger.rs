@@ -11,7 +11,6 @@ struct LedgerFile {
     events: Vec<ExecutionEvent>,
 }
 
-#[derive(Debug)]
 pub struct ExecutionLedger {
     path: PathBuf,
     events: Mutex<Vec<ExecutionEvent>>,
