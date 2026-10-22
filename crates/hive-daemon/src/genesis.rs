@@ -2017,13 +2017,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn activation_loads_legacy_invalid_names_but_fails_before_allocation() {
+    async fn activation_loads_legacy_invalid_names_but_fails_before_identity_mutation() {
         let (state, _) = crate::routes::tests::build_state();
+        let (entity_id, _) = state
+            .identity_manager
+            .create_agent("Original Valid Name")
+            .unwrap();
         let before = state.identity_manager.list_agents().unwrap().len();
         let mut legacy =
             GenesisSession::new(id(), OWNER.into(), GenesisMode::Guided, now());
         legacy.definition.name = " Legacy Name ".into();
         legacy.definition.purpose = "Preserve a compatible old draft".into();
+        legacy.definition.entity_id = Some(entity_id.clone());
         let creation_key = legacy.id.clone();
         state.genesis.create(&legacy).unwrap();
 
@@ -2034,8 +2039,19 @@ mod tests {
         assert_eq!(
             state.identity_manager.list_agents().unwrap().len(),
             before,
-            "invalid legacy data must fail before allocating an Entity"
+            "invalid legacy data must not allocate another Entity"
         );
+        let identity = state
+            .identity_manager
+            .list_agents()
+            .unwrap()
+            .into_iter()
+            .find(|agent| agent.id == entity_id)
+            .unwrap();
+        assert_eq!(identity.name, "Original Valid Name");
+        let config = state.identity_manager.load_agent(&entity_id).unwrap();
+        assert_eq!(config.agent_name.as_deref(), Some("Original Valid Name"));
+        assert!(!config.birth_complete);
         assert_eq!(
             state
                 .identity_manager
