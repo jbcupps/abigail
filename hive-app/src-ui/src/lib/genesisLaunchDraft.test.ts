@@ -40,7 +40,7 @@ describe("First Signal launch journal", () => {
     localStorage.setItem(GENESIS_LAUNCH_DRAFT_KEY, raw);
 
     expect(() => readGenesisLaunchDraft()).toThrow(/saved First Signal/i);
-    await expect(dispatchGenesisLaunch(seed, key, vi.fn())).rejects.toThrow(/saved First Signal/i);
+    await expect(dispatchGenesisLaunch(seed, key, vi.fn(async () => session()))).rejects.toThrow(/saved First Signal/i);
     expect(localStorage.getItem(GENESIS_LAUNCH_DRAFT_KEY)).toBe(raw);
   });
 
@@ -94,5 +94,48 @@ describe("First Signal launch journal", () => {
 
     expect(dispatch).toHaveBeenCalledTimes(2);
     expect(maximumActive).toBe(1);
+  });
+
+  it("stops a stale rendered recovery after another view clears the saved draft", async () => {
+    const rendered = { version: 1 as const, creation_key: key, seed };
+    localStorage.setItem(GENESIS_LAUNCH_DRAFT_KEY, JSON.stringify(rendered));
+    expect(readGenesisLaunchDraft()).toEqual(rendered);
+    localStorage.removeItem(GENESIS_LAUNCH_DRAFT_KEY);
+    const dispatch = vi.fn();
+
+    await expect(dispatchGenesisLaunch(seed, key, { expectedDraft: rendered, dispatch })).rejects.toThrow(/saved creation changed/i);
+
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(localStorage.getItem(GENESIS_LAUNCH_DRAFT_KEY)).toBeNull();
+  });
+
+  it.each([
+    ["noncanonical UUID", { version: 1, creation_key: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA", seed }],
+    ["blank name", { version: 1, creation_key: key, seed: { ...seed, name: "   " } }],
+    ["untrimmed name", { version: 1, creation_key: key, seed: { ...seed, name: " Nova" } }],
+    ["long name", { version: 1, creation_key: key, seed: { ...seed, name: "N".repeat(81) } }],
+    ["controlled name", { version: 1, creation_key: key, seed: { ...seed, name: "No\u0000va" } }],
+    ["blank purpose", { version: 1, creation_key: key, seed: { ...seed, purpose: "\n\t" } }],
+    ["untrimmed purpose", { version: 1, creation_key: key, seed: { ...seed, purpose: " Purpose " } }],
+    ["long purpose", { version: 1, creation_key: key, seed: { ...seed, purpose: "P".repeat(2001) } }],
+    ["controlled purpose", { version: 1, creation_key: key, seed: { ...seed, purpose: "Keep\u0000stories" } }],
+    ["invalid mode", { version: 1, creation_key: key, seed: { ...seed, mode: "automatic" } }],
+    ["invalid temperament", { version: 1, creation_key: key, seed: { ...seed, presence: { ...seed.presence, temperament: "bold" } } }],
+    ["invalid palette", { version: 1, creation_key: key, seed: { ...seed, presence: { ...seed.presence, identity: "gold" } } }],
+    ["invalid crest", { version: 1, creation_key: key, seed: { ...seed, presence: { ...seed.presence, crest: "crown" } } }],
+    ["invalid motion", { version: 1, creation_key: key, seed: { ...seed, presence: { ...seed.presence, motion: "spin" } } }],
+  ])("retains and rejects a semantically invalid journal: %s", (_label, invalid) => {
+    const raw = JSON.stringify(invalid);
+    localStorage.setItem(GENESIS_LAUNCH_DRAFT_KEY, raw);
+
+    expect(() => readGenesisLaunchDraft()).toThrow(/invalid format/i);
+    expect(localStorage.getItem(GENESIS_LAUNCH_DRAFT_KEY)).toBe(raw);
+  });
+
+  it("accepts document whitespace inside a trimmed purpose", () => {
+    const valid = { version: 1 as const, creation_key: key, seed: { ...seed, purpose: "Keep stories\n\twith care" } };
+    localStorage.setItem(GENESIS_LAUNCH_DRAFT_KEY, JSON.stringify(valid));
+
+    expect(readGenesisLaunchDraft()).toEqual(valid);
   });
 });

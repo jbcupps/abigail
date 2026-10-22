@@ -10,6 +10,10 @@ export interface GenesisLaunchDraft {
 }
 
 type Dispatch = (seed: GenesisCreationSeed, creationKey: string) => Promise<GenesisSession>;
+export interface DispatchGenesisLaunchOptions {
+  expectedDraft?: GenesisLaunchDraft;
+  dispatch?: Dispatch;
+}
 type LockManagerLike = {
   request<T>(name: string, callback: () => Promise<T>): Promise<T>;
 };
@@ -27,21 +31,46 @@ function hasExactKeys(value: Record<string, unknown>, keys: string[]): boolean {
 }
 
 function isCreationKey(value: unknown): value is string {
-  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+}
+
+function charLength(value: string): number {
+  return [...value].length;
+}
+
+function isName(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value === value.trim()
+    && charLength(value) <= 80
+    && !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
+}
+
+function isPurpose(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value === value.trim()
+    && charLength(value) <= 2000
+    && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(value);
 }
 
 function isSeed(value: unknown): value is GenesisCreationSeed {
   if (!isRecord(value) || !hasExactKeys(value, ["mode", "name", "purpose", "presence"])) return false;
   const presence = value.presence;
-  return ["guided", "voice", "markdown", "hybrid", "quick", "deep"].includes(String(value.mode))
-    && typeof value.name === "string"
-    && typeof value.purpose === "string"
+  return typeof value.mode === "string"
+    && ["guided", "voice", "markdown", "hybrid", "quick", "deep"].includes(value.mode)
+    && isName(value.name)
+    && isPurpose(value.purpose)
     && isRecord(presence)
     && hasExactKeys(presence, ["temperament", "identity", "crest", "motion"])
-    && ["gentle", "curious", "direct", "playful", "steady"].includes(String(presence.temperament))
-    && ["aether", "ember", "lumen", "tide", "aurora", "starlight", "hearth"].includes(String(presence.identity))
-    && ["orbit", "bloom", "wave", "lantern", "compass", "constellation"].includes(String(presence.crest))
-    && ["calm", "lively", "still"].includes(String(presence.motion));
+    && typeof presence.temperament === "string"
+    && ["gentle", "curious", "direct", "playful", "steady"].includes(presence.temperament)
+    && typeof presence.identity === "string"
+    && ["aether", "ember", "lumen", "tide", "aurora", "starlight", "hearth"].includes(presence.identity)
+    && typeof presence.crest === "string"
+    && ["orbit", "bloom", "wave", "lantern", "compass", "constellation"].includes(presence.crest)
+    && typeof presence.motion === "string"
+    && ["calm", "lively", "still"].includes(presence.motion);
 }
 
 function sameSeed(left: GenesisCreationSeed, right: GenesisCreationSeed): boolean {
@@ -52,6 +81,12 @@ function sameSeed(left: GenesisCreationSeed, right: GenesisCreationSeed): boolea
     && left.presence.identity === right.presence.identity
     && left.presence.crest === right.presence.crest
     && left.presence.motion === right.presence.motion;
+}
+
+function sameDraft(left: GenesisLaunchDraft, right: GenesisLaunchDraft): boolean {
+  return left.version === right.version
+    && left.creation_key === right.creation_key
+    && sameSeed(left.seed, right.seed);
 }
 
 export function readGenesisLaunchDraft(): GenesisLaunchDraft | null {
@@ -87,10 +122,20 @@ async function withLaunchLock<T>(work: () => Promise<T>): Promise<T> {
 export function dispatchGenesisLaunch(
   seed: GenesisCreationSeed,
   creationKey: string,
-  dispatch: Dispatch = createOrResumeGenesis,
+  optionsOrDispatch: DispatchGenesisLaunchOptions | Dispatch = {},
 ): Promise<GenesisSession> {
   return withLaunchLock(async () => {
+    if (!isCreationKey(creationKey) || !isSeed(seed)) {
+      throw new Error("First Signal requires a canonical creation key and reviewed name, purpose, and Presence.");
+    }
+    const options = typeof optionsOrDispatch === "function"
+      ? { dispatch: optionsOrDispatch }
+      : optionsOrDispatch;
+    const dispatch = options.dispatch ?? createOrResumeGenesis;
     const existing = readGenesisLaunchDraft();
+    if (options.expectedDraft && (!existing || !sameDraft(existing, options.expectedDraft))) {
+      throw new Error("The saved creation changed since this First Signal was shown. Reload before retrying.");
+    }
     if (existing && existing.creation_key !== creationKey) {
       throw new Error("The saved First Signal creation key is immutable. Resume that launch before beginning another.");
     }
@@ -98,7 +143,7 @@ export function dispatchGenesisLaunch(
       throw new Error("The reviewed input differs from the saved First Signal. Resume the saved launch without changing it.");
     }
 
-    const draft: GenesisLaunchDraft = existing ?? { version: 1, creation_key: creationKey, seed };
+    const draft: GenesisLaunchDraft = options.expectedDraft ?? existing ?? { version: 1, creation_key: creationKey, seed };
     if (!existing) localStorage.setItem(GENESIS_LAUNCH_DRAFT_KEY, JSON.stringify(draft));
 
     const created = await dispatch(draft.seed, draft.creation_key);

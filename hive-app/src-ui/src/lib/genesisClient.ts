@@ -42,6 +42,7 @@ export interface GenesisSession {
   composer_draft: string; last_error?: string | null;
   essence?: EssenceProgress; awakening?: string | null; choices?: string[];
   retention_days?: number | null;
+  creation_seed?: GenesisCreationSeed | null;
   /** Presentation-only quest progress, computed by Hive. */
   quest?: QuestView;
 }

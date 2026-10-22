@@ -473,10 +473,8 @@ pub(crate) mod tests {
 
     #[test]
     fn presence_write_cap_preserves_an_existing_card() {
-        let directory = std::env::temp_dir().join(format!(
-            "abigail-presence-cap-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("abigail-presence-cap-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let path = directory.join(PRESENCE_FILE);
         let existing = br#"{"name":"Existing"}"#;

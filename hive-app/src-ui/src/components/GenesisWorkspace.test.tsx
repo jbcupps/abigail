@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import GenesisWorkspace from "./GenesisWorkspace";
 import { createGenesisSession, createOrResumeGenesis, genesisAction, getGenesisSession, importGenesisMarkdown, listGenesisSessions, sendGenesisMessage, type GenesisSession } from "../lib/genesisClient";
+import { GENESIS_LAUNCH_DRAFT_KEY, type GenesisLaunchDraft } from "../lib/genesisLaunchDraft";
 import { getEntityJourney, getQuestCatalog } from "../lib/questClient";
 import { questFixture } from "../test/questFixture";
 
@@ -13,6 +14,7 @@ vi.mock("../lib/questClient", async (importOriginal) => ({ ...await importOrigin
 
 let saved: GenesisSession;
 beforeEach(() => {
+  localStorage.clear();
   saved = {
     id: "creation", owner_id: "local", mode: "guided", state: "discovering", revision: 1, created_at: "2026-10-17T12:00:00Z", updated_at: "2026-10-17T12:00:00Z", composer_draft: "",
     messages: [], proposals: [], conflicts: [], sources: [], revisions: [], asset_ids: [], job_ids: [],
@@ -36,7 +38,7 @@ beforeEach(() => {
     return structuredClone(saved);
   });
 });
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
+afterEach(() => { cleanup(); vi.resetAllMocks(); localStorage.clear(); });
 
 async function start(onClose = vi.fn()) {
   render(<GenesisWorkspace onClose={onClose} onCreated={vi.fn()} />);
@@ -63,6 +65,75 @@ describe("Genesis creation workflow", () => {
       purpose: "Help our family explore",
       presence: expect.objectContaining({ temperament: "gentle", identity: "aether", crest: "orbit", motion: "calm" }),
     }), expect.stringMatching(/^[0-9a-f-]{36}$/));
+  });
+
+  it("stops a stale recovery view instead of dispatching a new request key", async () => {
+    const draft: GenesisLaunchDraft = {
+      version: 1,
+      creation_key: "11111111-1111-4111-8111-111111111111",
+      seed: {
+        mode: "quick",
+        name: "Nova",
+        purpose: "Help our family explore",
+        presence: { temperament: "gentle", identity: "aether", crest: "orbit", motion: "calm" },
+      },
+    };
+    localStorage.setItem(GENESIS_LAUNCH_DRAFT_KEY, JSON.stringify(draft));
+    render(<GenesisWorkspace onClose={vi.fn()} onCreated={vi.fn()} />);
+    const resume = await screen.findByRole("button", { name: "Resume First Signal" });
+    localStorage.removeItem(GENESIS_LAUNCH_DRAFT_KEY);
+
+    fireEvent.click(resume);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/saved creation changed/i);
+    expect(createOrResumeGenesis).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Resume First Signal" })).toBeEnabled();
+  });
+
+  it("freezes and retries the exact retained request after an ambiguous failure", async () => {
+    saved.quest = questFixture();
+    vi.mocked(createOrResumeGenesis)
+      .mockRejectedValueOnce(new TypeError("Network request failed"))
+      .mockImplementationOnce(async (_seed, creationKey) => ({ ...structuredClone(saved), id: creationKey }));
+    render(<GenesisWorkspace onClose={vi.fn()} onCreated={vi.fn()} />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Name" }), { target: { value: " Nova " } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Purpose" }), { target: { value: " Help our family explore " } });
+    fireEvent.click(screen.getByRole("button", { name: "Begin Genesis Quest" }));
+
+    const resume = await screen.findByRole("button", { name: "Resume First Signal" });
+    expect(screen.getByRole("textbox", { name: "Name" })).toBeDisabled();
+    const retained = JSON.parse(localStorage.getItem(GENESIS_LAUNCH_DRAFT_KEY)!) as GenesisLaunchDraft;
+    fireEvent.click(resume);
+
+    expect(await screen.findByRole("region", { name: "Genesis quest" })).toBeInTheDocument();
+    expect(createOrResumeGenesis).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(createOrResumeGenesis).mock.calls[0]).toEqual([retained.seed, retained.creation_key]);
+    expect(vi.mocked(createOrResumeGenesis).mock.calls[1]).toEqual([retained.seed, retained.creation_key]);
+    expect(localStorage.getItem(GENESIS_LAUNCH_DRAFT_KEY)).toBeNull();
+  });
+
+  it("replays an exact reviewed journal before the Quest catalog is available", async () => {
+    saved.quest = questFixture();
+    const draft: GenesisLaunchDraft = {
+      version: 1,
+      creation_key: "22222222-2222-4222-8222-222222222222",
+      seed: {
+        mode: "quick",
+        name: "Aster",
+        purpose: "Keep family stories",
+        presence: { temperament: "steady", identity: "aether", crest: "orbit", motion: "still" },
+      },
+    };
+    localStorage.setItem(GENESIS_LAUNCH_DRAFT_KEY, JSON.stringify(draft));
+    vi.mocked(getQuestCatalog).mockRejectedValue(new Error("catalog unavailable"));
+    render(<GenesisWorkspace onClose={vi.fn()} onCreated={vi.fn()} />);
+
+    const resume = await screen.findByRole("button", { name: "Resume First Signal" });
+    expect(getQuestCatalog).not.toHaveBeenCalled();
+    fireEvent.click(resume);
+
+    expect(await screen.findByRole("region", { name: "Genesis quest" })).toBeInTheDocument();
+    expect(createOrResumeGenesis).toHaveBeenCalledWith(draft.seed, draft.creation_key);
   });
 
   it("changes automatic retention only after an explicit save and permits turning it off", async () => {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { deleteGenesisSession, displayGenesisValue, essenceFor, exportGenesisMarkdown, GENESIS_MODES, genesisAction, getGenesisSession, importGenesisMarkdown, listGenesisSessions, sendGenesisMessage, type FieldUpdate, type GenesisCreationSeed, type GenesisSession } from "../lib/genesisClient";
-import { dispatchGenesisLaunch, readGenesisLaunchDraft } from "../lib/genesisLaunchDraft";
+import { dispatchGenesisLaunch, type GenesisLaunchDraft } from "../lib/genesisLaunchDraft";
 import { openEntity } from "../lib/entityWindow";
 import GenesisDefinition from "./GenesisDefinition";
 import GenesisFirstSignal from "./GenesisFirstSignal";
@@ -51,12 +51,18 @@ export default function GenesisWorkspace({ onClose, onCreated, resumeId }: { onC
     finally { flight.current = false; if (mounted.current) setBusy(false); }
   };
   const adopt = (next: GenesisSession) => { latest.current = next; if (mounted.current) setSession(next); return next; };
-  const begin = (seed: GenesisCreationSeed) => operation(async () => {
-    const creationKey = readGenesisLaunchDraft()?.creation_key ?? crypto.randomUUID();
-    const next = await dispatchGenesisLaunch(seed, creationKey);
-    adopt(next); setComposer(next.composer_draft || ""); setTab(next.quest ? "quest" : "conversation");
-    setQuestStage(next.quest?.current ?? "reservation");
-  });
+  const begin = async (seed: GenesisCreationSeed, creationKey: string, expectedDraft?: GenesisLaunchDraft) => {
+    if (flight.current) throw new Error("Another Genesis step is still being saved.");
+    flight.current = true; setBusy(true); setError(""); setNotice("");
+    try {
+      const next = await dispatchGenesisLaunch(seed, creationKey, { expectedDraft });
+      adopt(next); setComposer(next.composer_draft || ""); setTab(next.quest ? "quest" : "conversation");
+      setQuestStage(next.quest?.current ?? "reservation");
+    } finally {
+      flight.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  };
   const resume = (id: string) => operation(async () => {
     const next = await getGenesisSession(id);
     adopt(next); setComposer(next.composer_draft || ""); setPendingEdits([]); setTab("conversation");
@@ -149,7 +155,7 @@ export default function GenesisWorkspace({ onClose, onCreated, resumeId }: { onC
   if (!session) return <section className="genesis genesis-launch" aria-label="Entity Genesis">
     <header className="genesis-header"><div><div className="genesis-eyebrow">Entity Genesis</div><h2>Every presence begins with a spark.</h2><p>Discover someone your family will come to know. Bring an idea, a story, or simply your curiosity.</p></div><button type="button" onClick={onClose}>Back to Hive</button></header>
     {error && <p role="alert" className="genesis-error">{error}</p>}
-    <GenesisFirstSignal onBegin={async (seed) => { await begin(seed); }} />
+    <GenesisFirstSignal onBegin={begin} />
     <h3>Return to a creation</h3>
     {loading ? <p role="status">Loading saved creations…</p> : sessions.length === 0 ? <p className="genesis-muted">Your saved sessions will appear here. Every confirmed choice is kept by Hive.</p> : <ul className="genesis-session-list">{sessions.map((item) => <li key={item.id}><div><strong>{item.definition.name || "An unnamed spark"}</strong><span>{item.state.replace(/_/g, " ")} · {new Date(item.updated_at).toLocaleString()}</span></div><button type="button" disabled={busy} onClick={() => void resume(item.id)}>Resume{item.definition.name ? ` ${item.definition.name}` : " creation"}</button><button type="button" disabled={busy} onClick={() => setConfirmation(`session:${item.id}`)}>{item.definition.entity_id ? "Delete Genesis record and media" : "Delete draft"}</button>{confirmation === `session:${item.id}` && <div className="genesis-confirm"><p>Permanently delete this creation session, sources, and generated media? An awakened Entity and its chat history remain available.</p><button type="button" onClick={() => void operation(async () => { await deleteGenesisSession(item.id); setSessions((previous) => previous.filter((draft) => draft.id !== item.id)); setConfirmation(null); })}>Confirm deletion</button><button type="button" onClick={() => setConfirmation(null)}>Keep creation</button></div>}</li>)}</ul>}
   </section>;
