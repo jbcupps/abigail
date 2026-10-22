@@ -418,7 +418,14 @@ pub(crate) mod tests {
         state
             .journeys
             .update(OWNER, &entity_id, "t", |j| {
-                j.observe(&[], 1, "t") && j.earned_badges().contains(&Badge::FirstWords)
+                j.observe(
+                    &[],
+                    JourneyActivity {
+                        mentor_messages: 1,
+                        ..Default::default()
+                    },
+                    "t",
+                ) && j.earned_badges().contains(&Badge::FirstWords)
             })
             .unwrap();
         let Json(unlocked) = put(Palette::Hearth, Crest::Orbit).await;
@@ -468,7 +475,16 @@ pub(crate) mod tests {
         let first = JourneyStore::new(handle.clone()).unwrap();
         let id = uuid::Uuid::new_v4().to_string();
         first
-            .update(OWNER, &id, "t1", |j| j.observe(&[], 5, "t1"))
+            .update(OWNER, &id, "t1", |j| {
+                j.observe(
+                    &[],
+                    JourneyActivity {
+                        mentor_messages: 5,
+                        ..Default::default()
+                    },
+                    "t1",
+                )
+            })
             .unwrap();
         drop(first);
         let reopened = JourneyStore::new(handle).unwrap();
@@ -476,7 +492,9 @@ pub(crate) mod tests {
         assert!(journey.earned_badges().contains(&Badge::GettingAcquainted));
         assert!(reopened.load("another-household", &id).unwrap().is_none());
         let after = reopened
-            .update(OWNER, &id, "t2", |j| j.observe(&[], 0, "t2"))
+            .update(OWNER, &id, "t2", |j| {
+                j.observe(&[], JourneyActivity::default(), "t2")
+            })
             .unwrap();
         assert_eq!(after.mentor_messages, 5);
         assert_eq!(after.updated_at, "t1");
@@ -531,7 +549,7 @@ pub(crate) mod tests {
                                 badge,
                                 earned_at: "t".into(),
                             }],
-                            0,
+                            JourneyActivity::default(),
                             "t",
                         )
                     })
@@ -553,5 +571,160 @@ pub(crate) mod tests {
         let store = store();
         assert!(store.load(OWNER, "../escape").is_err());
         assert!(store.update(OWNER, "x", "t", |_| true).is_err());
+    }
+
+    fn outbox_event(
+        entity_id: &str,
+        kind: &str,
+        payload: serde_json::Value,
+    ) -> hive_core::EntityOutboxRecord {
+        hive_core::EntityOutboxRecord {
+            record_id: uuid::Uuid::new_v4().to_string(),
+            entity_id: entity_id.to_string(),
+            kind: kind.to_string(),
+            created_at_utc: "2026-10-22T12:00:00Z".to_string(),
+            payload,
+        }
+    }
+
+    #[test]
+    fn runtime_events_are_idempotent_owner_scoped_and_redacted() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let skill = outbox_event(
+            &entity_id,
+            "skill_used",
+            serde_json::json!({
+                "session_id": "session-1",
+                "skill_id": "com.abigail.calendar",
+                "tool_name": "list_events",
+            }),
+        );
+        let first = store
+            .record_runtime_events(OWNER, &entity_id, std::slice::from_ref(&skill))
+            .unwrap();
+        assert_eq!(first.successful_skill_uses, 1);
+        let duplicate = store
+            .record_runtime_events(OWNER, &entity_id, std::slice::from_ref(&skill))
+            .unwrap();
+        assert_eq!(duplicate.successful_skill_uses, 1);
+
+        let unknown = outbox_event(
+            &entity_id,
+            "chat_assistant_turn",
+            serde_json::json!({
+                "message": "private prompt",
+                "reply": "private model output",
+                "content": "private memory",
+                "payload": {"arbitrary": true},
+            }),
+        );
+        let unchanged = store
+            .record_runtime_events(OWNER, &entity_id, &[unknown])
+            .unwrap();
+        assert_eq!(unchanged.successful_skill_uses, 1);
+        assert_eq!(unchanged.confirmed_memories, 0);
+
+        let rows = store
+            .handle
+            .query_vec::<serde_json::Value>("SELECT * FROM entity_journey_event", &[])
+            .unwrap();
+        assert_eq!(rows.len(), 1, "unknown event kinds are not persisted");
+        let row = serde_json::to_string(&rows[0]).unwrap();
+        for forbidden in ["message", "reply", "content", "prompt", "payload", "model"] {
+            assert!(
+                !row.contains(forbidden),
+                "journey event leaked forbidden field {forbidden}: {row}"
+            );
+        }
+
+        let wrong_entity = uuid::Uuid::new_v4().to_string();
+        assert!(store
+            .record_runtime_events(OWNER, &wrong_entity, std::slice::from_ref(&skill))
+            .is_err());
+        assert!(store
+            .record_runtime_events(
+                "another-household",
+                &entity_id,
+                std::slice::from_ref(&skill),
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn runtime_events_survive_reopen_and_concurrent_kinds_do_not_lose_counts() {
+        let handle = PersistenceHandle::open_ephemeral(EntityScope::Hive).unwrap();
+        let store = std::sync::Arc::new(JourneyStore::new(handle.clone()).unwrap());
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let start = std::sync::Arc::new(std::sync::Barrier::new(9));
+        let mut workers = Vec::new();
+        for index in 0..8 {
+            let store = store.clone();
+            let entity_id = entity_id.clone();
+            let start = start.clone();
+            workers.push(std::thread::spawn(move || {
+                let event = if index % 2 == 0 {
+                    outbox_event(
+                        &entity_id,
+                        "skill_used",
+                        serde_json::json!({
+                            "session_id": format!("session-{index}"),
+                            "skill_id": "com.abigail.calendar",
+                            "tool_name": "list_events",
+                        }),
+                    )
+                } else {
+                    outbox_event(
+                        &entity_id,
+                        "memory_confirmed",
+                        serde_json::json!({
+                            "memory_id": format!("memory-{index}"),
+                            "memory_weight": "distilled",
+                        }),
+                    )
+                };
+                start.wait();
+                store
+                    .record_runtime_events(OWNER, &entity_id, &[event])
+                    .unwrap();
+            }));
+        }
+        start.wait();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        drop(store);
+
+        let reopened = JourneyStore::new(handle).unwrap();
+        let activity = reopened.event_activity(OWNER, &entity_id).unwrap();
+        assert_eq!(activity.successful_skill_uses, 4);
+        assert_eq!(activity.confirmed_memories, 4);
+        let journey = reopened.load(OWNER, &entity_id).unwrap().unwrap();
+        assert_eq!(journey.successful_skill_uses, 4);
+        assert_eq!(journey.confirmed_memories, 4);
+    }
+
+    #[test]
+    fn conversation_summary_counts_all_distinct_user_activity() {
+        let turn = |id: &str, session: &str, role: &str, at: &str| {
+            let mut turn = abigail_memory::ConversationTurn::new(session, role, "private text");
+            turn.id = id.to_string();
+            turn.created_at = chrono::DateTime::parse_from_rfc3339(at)
+                .unwrap()
+                .with_timezone(&chrono::Utc);
+            turn
+        };
+        let turns = vec![
+            turn("a", "session-1", "user", "2026-01-01T10:00:00Z"),
+            turn("a", "session-1", "user", "2026-01-01T10:00:00Z"),
+            turn("b", "session-1", "user", "2026-01-02T10:00:00Z"),
+            turn("c", "session-2", "user", "2026-01-08T10:00:00Z"),
+            turn("d", "session-2", "assistant", "2026-01-08T10:01:00Z"),
+        ];
+        let activity = summarize_conversations(&turns);
+        assert_eq!(activity.mentor_messages, 3);
+        assert_eq!(activity.conversation_sessions, 2);
+        assert_eq!(activity.active_days, 3);
+        assert_eq!(activity.active_weeks, 2);
     }
 }

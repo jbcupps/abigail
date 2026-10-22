@@ -1654,6 +1654,66 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn runtime_outbox_sync_persists_idempotent_journey_events_for_its_lease_entity() {
+        let (state, entity_id) = build_state();
+        let lease = state.runtime_control.lock().unwrap().issue_session(
+            RuntimeSessionRequest {
+                entity_id: entity_id.clone(),
+                runtime_id: Some("runtime-journey".to_string()),
+            },
+            None,
+            Some(state.hive_url.clone()),
+        );
+        let principal = Principal::Runtime {
+            lease_id: lease.lease_id.clone(),
+            entity_id: entity_id.clone(),
+        };
+        let event = hive_core::EntityOutboxRecord {
+            record_id: uuid::Uuid::new_v4().to_string(),
+            entity_id: entity_id.clone(),
+            kind: "skill_used".to_string(),
+            created_at_utc: "2026-10-22T12:00:00Z".to_string(),
+            payload: serde_json::json!({
+                "session_id": "session-1",
+                "skill_id": "com.abigail.calendar",
+                "tool_name": "list_events",
+            }),
+        };
+        let request = || OutboxSyncRequest {
+            lease_id: lease.lease_id.clone(),
+            runtime_id: lease.runtime_id.clone(),
+            records: vec![event.clone()],
+        };
+
+        for _ in 0..2 {
+            let (status, response) = sync_runtime_outbox(
+                State(state.clone()),
+                Extension(principal.clone()),
+                Json(request()),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert!(response.0.ok, "{:?}", response.0.error);
+        }
+        assert_eq!(
+            state
+                .journeys
+                .load(crate::genesis_http::OWNER, &entity_id)
+                .unwrap()
+                .unwrap()
+                .successful_skill_uses,
+            1
+        );
+
+        let mut mismatched = request();
+        mismatched.records[0].record_id = uuid::Uuid::new_v4().to_string();
+        mismatched.records[0].entity_id = uuid::Uuid::new_v4().to_string();
+        let (_, response) =
+            sync_runtime_outbox(State(state), Extension(principal), Json(mismatched)).await;
+        assert!(!response.0.ok);
+    }
+
+    #[tokio::test]
     async fn close_entity_preserves_the_immortal_hive_helper_session() {
         let (state, _) = build_state();
         let hive_id = state.identity_manager.hive_agent_id().unwrap();

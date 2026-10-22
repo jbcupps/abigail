@@ -1245,17 +1245,49 @@ mod tests {
             badge: Badge::Named,
             earned_at: "earlier".into(),
         }];
-        assert!(journey.observe(&creation, 0, NOW));
+        assert!(journey.observe(&creation, JourneyActivity::default(), NOW));
         assert_eq!(
             journey.earned_badges(),
             vec![Badge::Named, Badge::FirstLight]
         );
-        assert!(!journey.observe(&creation, 0, NOW));
-        assert!(journey.observe(&[], 6, "later"));
+        assert!(!journey.observe(&creation, JourneyActivity::default(), NOW));
+        assert!(journey.observe(
+            &[],
+            JourneyActivity {
+                mentor_messages: 6,
+                conversation_sessions: 5,
+                active_days: 7,
+                active_weeks: 4,
+                successful_skill_uses: 5,
+                confirmed_memories: 3,
+            },
+            "later"
+        ));
         assert!(journey.earned_badges().contains(&Badge::GettingAcquainted));
+        assert!(journey.earned_badges().contains(&Badge::ReturningCompanion));
+        assert!(journey.earned_badges().contains(&Badge::SteadyRhythm));
+        assert!(journey.earned_badges().contains(&Badge::HearthSeason));
+        assert!(journey.earned_badges().contains(&Badge::SkillExplorer));
+        assert!(journey.earned_badges().contains(&Badge::MemoryKeeper));
         assert!(!journey.earned_badges().contains(&Badge::Kindred));
-        assert!(!journey.observe(&[], 2, "cleared"));
+        assert!(!journey.observe(
+            &[],
+            JourneyActivity {
+                mentor_messages: 2,
+                conversation_sessions: 1,
+                active_days: 1,
+                active_weeks: 1,
+                successful_skill_uses: 1,
+                confirmed_memories: 1,
+            },
+            "cleared"
+        ));
         assert_eq!(journey.mentor_messages, 6);
+        assert_eq!(journey.conversation_sessions, 5);
+        assert_eq!(journey.active_days, 7);
+        assert_eq!(journey.active_weeks, 4);
+        assert_eq!(journey.successful_skill_uses, 5);
+        assert_eq!(journey.confirmed_memories, 3);
         assert_eq!(journey.earned[0].earned_at, "earlier");
         assert!(journey.validate().is_ok());
     }
@@ -1264,13 +1296,161 @@ mod tests {
     fn levels_cover_every_badge_and_first_quests_track_milestones() {
         let all = xp_for(&Badge::ALL);
         assert_eq!(bond_level(0).level, 1);
-        assert_eq!(bond_level(all).title, "Beacon");
+        assert_eq!(bond_level(all).title, "Legacy");
         assert_eq!(bond_level(all).next_level_at, None);
-        assert_eq!(bond_level(55).next_level_at, Some(120));
+        assert_eq!(bond_level(55).next_level_at, Some(80));
         let quests = first_quests("Nova", Some(Temperament::Curious), 1);
         assert_eq!(quests.len(), 3);
         assert!(quests[0].prompt.contains("Nova"));
         assert!(quests[0].complete && !quests[1].complete);
+    }
+
+    #[test]
+    fn canonical_catalog_has_exact_curve_and_activity_requirements() {
+        let mut badges = BADGE_DEFINITIONS
+            .iter()
+            .map(|definition| definition.badge)
+            .collect::<Vec<_>>();
+        badges.sort();
+        let mut expected_badges = Badge::ALL.to_vec();
+        expected_badges.sort();
+        assert_eq!(badges, expected_badges, "every badge has one definition");
+
+        let tiers = BOND_TIER_DEFINITIONS
+            .iter()
+            .map(|tier| (tier.title, tier.floor))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tiers,
+            vec![
+                ("Spark", 0),
+                ("Kindling", 80),
+                ("Ember", 180),
+                ("Hearthfire", 350),
+                ("Beacon", 600),
+                ("Constellation", 950),
+                ("Legacy", 1400),
+            ]
+        );
+        assert!(BOND_TIER_DEFINITIONS
+            .windows(2)
+            .all(|pair| pair[0].floor < pair[1].floor));
+
+        let creation_xp: u32 = BADGE_DEFINITIONS
+            .iter()
+            .filter(|definition| definition.requirement.is_none())
+            .map(|definition| definition.xp)
+            .sum();
+        assert_eq!(creation_xp, 120);
+        assert_eq!(bond_level(creation_xp).title, "Kindling");
+        assert!(creation_xp < 180, "creation must never reach Ember");
+
+        let requirements = BADGE_DEFINITIONS
+            .iter()
+            .filter_map(|definition| {
+                definition.requirement.map(|requirement| {
+                    (
+                        definition.badge,
+                        requirement.metric,
+                        requirement.target,
+                        definition.xp,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            requirements,
+            vec![
+                (Badge::FirstWords, JourneyMetric::MentorMessages, 1, 15),
+                (
+                    Badge::GettingAcquainted,
+                    JourneyMetric::MentorMessages,
+                    5,
+                    25,
+                ),
+                (Badge::Kindred, JourneyMetric::MentorMessages, 25, 40),
+                (Badge::HearthRegular, JourneyMetric::MentorMessages, 100, 80,),
+                (
+                    Badge::TrustedCompanion,
+                    JourneyMetric::MentorMessages,
+                    500,
+                    180,
+                ),
+                (
+                    Badge::ReturningCompanion,
+                    JourneyMetric::ConversationSessions,
+                    5,
+                    50,
+                ),
+                (
+                    Badge::SeasonedCompanion,
+                    JourneyMetric::ConversationSessions,
+                    25,
+                    120,
+                ),
+                (Badge::SteadyRhythm, JourneyMetric::ActiveDays, 7, 80),
+                (Badge::HearthSeason, JourneyMetric::ActiveWeeks, 4, 120),
+                (
+                    Badge::ConstellationKeeper,
+                    JourneyMetric::ActiveWeeks,
+                    12,
+                    220,
+                ),
+                (
+                    Badge::SkillExplorer,
+                    JourneyMetric::SuccessfulSkillUses,
+                    5,
+                    80,
+                ),
+                (
+                    Badge::SkillWeaver,
+                    JourneyMetric::SuccessfulSkillUses,
+                    25,
+                    160,
+                ),
+                (Badge::MemoryKeeper, JourneyMetric::ConfirmedMemories, 3, 80,),
+                (
+                    Badge::LivingArchive,
+                    JourneyMetric::ConfirmedMemories,
+                    15,
+                    180,
+                ),
+            ]
+        );
+
+        let serialized = serde_json::to_value(serde_json::json!({
+            "badges": BADGE_DEFINITIONS,
+            "tiers": BOND_TIER_DEFINITIONS,
+        }))
+        .unwrap();
+        assert_eq!(serialized["tiers"][6]["title"], "Legacy");
+        assert_eq!(
+            serialized["badges"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|definition| definition["badge"] == "skill_explorer")
+                .unwrap()["requirement"],
+            json!({"metric":"successful_skill_uses","target":5})
+        );
+    }
+
+    #[test]
+    fn older_journeys_default_every_activity_counter() {
+        let mut value =
+            serde_json::to_value(EntityJourney::new("entity", LOCAL_OWNER_ID, NOW)).unwrap();
+        for field in [
+            "mentor_messages",
+            "conversation_sessions",
+            "active_days",
+            "active_weeks",
+            "successful_skill_uses",
+            "confirmed_memories",
+        ] {
+            value.as_object_mut().unwrap().remove(field);
+        }
+        let restored: EntityJourney = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.activity(), JourneyActivity::default());
     }
 
     #[test]

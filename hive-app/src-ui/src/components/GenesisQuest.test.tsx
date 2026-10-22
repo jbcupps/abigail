@@ -8,7 +8,18 @@ import { questFixture } from "../test/questFixture";
 vi.mock("../lib/questClient", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/questClient")>(), getQuestCatalog: vi.fn(), getEntityJourney: vi.fn() }));
 
 const catalog: QuestCatalog = {
-  stages: [], badges: questFixture().badges, instincts: "# Instincts\nProtect the family.",
+  stages: [],
+  badges: questFixture().badges.map(({ earned_at: _earnedAt, ...badge }) => ({ ...badge, requirement: null, unlocks: { palettes: [], crests: [] } })),
+  tiers: [
+    { level: 1, title: "Spark", floor: 0 },
+    { level: 2, title: "Kindling", floor: 80 },
+    { level: 3, title: "Ember", floor: 180 },
+    { level: 4, title: "Hearthfire", floor: 350 },
+    { level: 5, title: "Beacon", floor: 600 },
+    { level: 6, title: "Constellation", floor: 950 },
+    { level: 7, title: "Legacy", floor: 1400 },
+  ],
+  instincts: "# Instincts\nProtect the family.",
   temperament_cards: [{ id: "curious-explorer", title: "Curious Explorer", temperament: "curious", tagline: "Asks wonderful questions.", description: "", communication_style: "", stats: { empathy: 65, curiosity: 90 } }],
   trials: [{ id: "trial-one", title: "The Lost Wallet", description: "You find a wallet.", choices: [{ id: "return", label: "Return it", description: "Find the owner." }] }],
   palettes: [{ palette: "aether", unlocked_by: null }, { palette: "aurora", unlocked_by: "soul_shaper" }],
@@ -103,13 +114,33 @@ describe("Genesis quest", () => {
   });
 
   it("offers first quests and milestones after awakening without sending anything", async () => {
-    vi.mocked(getEntityJourney).mockResolvedValue({ entity_id: "e1", name: "Nova", level: { level: 2, title: "Kindling", xp: 80, level_floor: 50, next_level_at: 120 }, badges: [], mentor_messages: 0, next_milestone: { badge: "first_words", title: "First Words", target: 1, progress: 0 }, unlocked: { palettes: ["aether"], crests: ["orbit"] }, first_quests: [{ id: "say-hello", title: "Say hello", prompt: "Hi Nova!", milestone: "first_words", target: 1, complete: false }], presence: null, certificate: null });
+    vi.mocked(getEntityJourney).mockResolvedValue({
+      entity_id: "e1",
+      name: "Nova",
+      level: { level: 2, title: "Kindling", xp: 120, level_floor: 80, next_level_at: 180 },
+      badges: [],
+      mentor_messages: 3,
+      conversation_sessions: 1,
+      active_days: 2,
+      active_weeks: 1,
+      successful_skill_uses: 2,
+      confirmed_memories: 1,
+      next_milestone: { badge: "skill_explorer", title: "Skill Explorer", metric: "successful_skill_uses", target: 5, progress: 2 },
+      unlocked: { palettes: ["aether"], crests: ["orbit"] },
+      first_quests: [{ id: "say-hello", title: "Say hello", prompt: "Hi Nova!", milestone: "first_words", target: 1, complete: true }],
+      presence: null,
+      certificate: null,
+    });
     const awakened = session();
     awakened.awakening = "I am Nova."; awakened.definition.entity_id = "e1";
     const onMeet = vi.fn();
     render(<GenesisQuest session={awakened} busy={false} stage="awakening" onStage={vi.fn()} change={change} onSave={vi.fn()} onAwaken={vi.fn()} onMeet={onMeet} />);
     expect(await screen.findByText("Say hello")).toBeInTheDocument();
-    expect(screen.getByRole("progressbar", { name: "First Words progress" })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Skill Explorer progress" })).toBeInTheDocument();
+    expect(screen.getByText("2 of 5 skill uses")).toBeInTheDocument();
+    expect(screen.getByText("3 messages")).toBeInTheDocument();
+    expect(screen.getByText("1 session")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /send/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Meet Nova" }));
     expect(onMeet).toHaveBeenCalledOnce();
     await waitFor(() => expect(change).not.toHaveBeenCalled());

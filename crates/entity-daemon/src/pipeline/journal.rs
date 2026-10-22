@@ -100,3 +100,70 @@ async fn record(state: EntityDaemonState, action: EgoActionPayload) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn committed_assistant_action_queues_redacted_outbox_event_per_successful_skill_call() {
+        let state = crate::routes::tests::build_state();
+        let response = entity_core::ChatResponse {
+            reply: "private assistant reply".to_string(),
+            provider: Some("fixture".to_string()),
+            tool_calls_made: vec![
+                entity_core::ToolCallRecord {
+                    skill_id: "com.abigail.calendar".to_string(),
+                    tool_name: "list_events".to_string(),
+                    success: true,
+                },
+                entity_core::ToolCallRecord {
+                    skill_id: "com.abigail.mail".to_string(),
+                    tool_name: "send_message".to_string(),
+                    success: false,
+                },
+                entity_core::ToolCallRecord {
+                    skill_id: "com.abigail.weather".to_string(),
+                    tool_name: "forecast".to_string(),
+                    success: true,
+                },
+            ],
+            tier: None,
+            model_used: None,
+            complexity_score: None,
+            execution_trace: None,
+            session_id: Some("session-1".to_string()),
+        };
+        record(
+            state.clone(),
+            EgoActionPayload {
+                session_id: "session-1".to_string(),
+                status: "success".to_string(),
+                error: None,
+                response: Some(response),
+                user_message: "private mentor prompt".to_string(),
+                superego_verdict: Some("clear".to_string()),
+                superego_findings: vec![],
+            },
+        )
+        .await;
+
+        let records = state.outbox.snapshot().unwrap();
+        let skill_events = records
+            .iter()
+            .filter(|record| record.kind == "skill_used")
+            .collect::<Vec<_>>();
+        assert_eq!(skill_events.len(), 2);
+        assert_eq!(skill_events[0].payload["session_id"], "session-1");
+        assert_eq!(skill_events[0].payload["skill_id"], "com.abigail.calendar");
+        assert_eq!(skill_events[0].payload["tool_name"], "list_events");
+        for event in skill_events {
+            let serialized = event.payload.to_string();
+            assert!(!serialized.contains("private assistant reply"));
+            assert!(!serialized.contains("private mentor prompt"));
+            assert!(event.payload.get("reply").is_none());
+            assert!(event.payload.get("message").is_none());
+            assert!(event.payload.get("content").is_none());
+        }
+    }
+}

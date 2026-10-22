@@ -1031,7 +1031,7 @@ fn queue_job_record(job: JobRecord) -> QueueJobRecord {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use abigail_capabilities::cognitive::{CompletionRequest, CompletionResponse, LlmProvider};
     use abigail_core::{AppConfig, RoutingMode};
@@ -1061,7 +1061,7 @@ mod tests {
         }
     }
 
-    fn build_state() -> EntityDaemonState {
+    pub(crate) fn build_state() -> EntityDaemonState {
         let mut router = IdEgoRouter::new(None, None, None, None, RoutingMode::EgoPrimary);
         router.id = Arc::new(MockProvider);
         router.ego = None;
@@ -1266,6 +1266,44 @@ mod tests {
         .await
         .0;
         assert!(other.data.unwrap().messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn memory_insert_outbox_confirms_only_explicit_non_ephemeral_memory_without_content() {
+        let state = build_state();
+        let ephemeral = memory_insert(
+            State(state.clone()),
+            Json(MemoryInsertRequest {
+                content: "temporary private note".to_string(),
+                weight: "ephemeral".to_string(),
+            }),
+        )
+        .await
+        .0;
+        assert!(ephemeral.ok);
+        assert!(state.outbox.snapshot().unwrap().is_empty());
+
+        let durable = memory_insert(
+            State(state.clone()),
+            Json(MemoryInsertRequest {
+                content: "durable private note".to_string(),
+                weight: "distilled".to_string(),
+            }),
+        )
+        .await
+        .0;
+        assert!(durable.ok);
+        let entry = durable.data.unwrap();
+        let records = state.outbox.snapshot().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].kind, "memory_confirmed");
+        assert_eq!(records[0].payload["memory_id"], entry.id);
+        assert_eq!(records[0].payload["memory_weight"], "distilled");
+        assert!(records[0].payload.get("content").is_none());
+        assert!(!records[0]
+            .payload
+            .to_string()
+            .contains("durable private note"));
     }
 
     #[tokio::test]

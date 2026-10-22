@@ -387,4 +387,36 @@ mod tests {
         assert_eq!(response.assignments.len(), 1);
         assert_eq!(control.assignments("entity-1").assignments.len(), 1);
     }
+
+    #[test]
+    fn outbox_sync_rejects_records_owned_by_another_entity() {
+        let mut control = RuntimeControlPlane::default();
+        let lease = control.issue_session(
+            RuntimeSessionRequest {
+                entity_id: "entity-1".to_string(),
+                runtime_id: Some("runtime-1".to_string()),
+            },
+            None,
+            None,
+        );
+        let result = control.sync_outbox(
+            OutboxSyncRequest {
+                lease_id: lease.lease_id,
+                runtime_id: lease.runtime_id,
+                records: vec![hive_core::EntityOutboxRecord {
+                    record_id: uuid::Uuid::new_v4().to_string(),
+                    entity_id: "entity-2".to_string(),
+                    kind: "skill_used".to_string(),
+                    created_at_utc: "2026-10-22T12:00:00Z".to_string(),
+                    payload: serde_json::json!({
+                        "session_id": "session-1",
+                        "skill_id": "com.abigail.calendar",
+                        "tool_name": "list_events",
+                    }),
+                }],
+            },
+            |_| ("signature".to_string(), "public-key".to_string()),
+        );
+        assert!(result.is_err());
+    }
 }
