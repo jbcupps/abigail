@@ -2,6 +2,8 @@ use hive_core::ExecutionEvent;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::Arc;
 use std::sync::Mutex;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -13,7 +15,12 @@ struct LedgerFile {
 pub struct ExecutionLedger {
     path: PathBuf,
     events: Mutex<Vec<ExecutionEvent>>,
+    #[cfg(test)]
+    test_save: Option<Arc<TestSave>>,
 }
+
+#[cfg(test)]
+type TestSave = dyn Fn(&Path, &[u8]) -> anyhow::Result<()> + Send + Sync;
 
 impl ExecutionLedger {
     pub fn load(entity_dir: impl AsRef<Path>) -> anyhow::Result<Self> {
@@ -29,7 +36,19 @@ impl ExecutionLedger {
         Ok(Self {
             path,
             events: Mutex::new(events),
+            #[cfg(test)]
+            test_save: None,
         })
+    }
+
+    #[cfg(test)]
+    pub fn load_with_saver(
+        entity_dir: impl AsRef<Path>,
+        save: impl Fn(&Path, &[u8]) -> anyhow::Result<()> + Send + Sync + 'static,
+    ) -> anyhow::Result<Self> {
+        let mut ledger = Self::load(entity_dir)?;
+        ledger.test_save = Some(Arc::new(save));
+        Ok(ledger)
     }
 
     pub fn append_outbox_event(
@@ -156,6 +175,10 @@ impl ExecutionLedger {
             events: events.to_vec(),
         })
         .map_err(|e| e.to_string())?;
+        #[cfg(test)]
+        if let Some(save) = &self.test_save {
+            return save(&self.path, &bytes).map_err(|e| e.to_string());
+        }
         abigail_core::secure_fs::write_bytes_atomic(&self.path, &bytes).map_err(|e| e.to_string())
     }
 }

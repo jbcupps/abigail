@@ -607,6 +607,9 @@ pub struct ForgeApprovalJobsResponse {
 // Runtime outbox sync
 // ---------------------------------------------------------------------------
 
+/// Maximum successful tool uses represented by one content-free turn aggregate.
+pub const MAX_SUCCESSFUL_SKILL_COUNT_PER_TURN: u32 = 256;
+
 /// Durable entity-scoped write queued locally while the runtime is active.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityOutboxRecord {

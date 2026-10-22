@@ -29,7 +29,6 @@ const JOURNEY_EVENT_SELECT: &str =
 const PRESENCE_FILE: &str = "presence.json";
 const MAX_PRESENCE_BYTES: usize = 32 * 1024;
 const MAX_EVENT_IDENTIFIER_BYTES: usize = 160;
-const MAX_SUCCESSFUL_SKILL_COUNT_PER_TURN: u32 = 256;
 
 pub struct JourneyStore {
     handle: PersistenceHandle,
@@ -426,7 +425,8 @@ impl JourneyStore {
                         row.tool_name.as_deref(),
                     ) {
                         (Some(count), None, None)
-                            if (1..=MAX_SUCCESSFUL_SKILL_COUNT_PER_TURN).contains(&count) =>
+                            if (1..=hive_core::MAX_SUCCESSFUL_SKILL_COUNT_PER_TURN)
+                                .contains(&count) =>
                         {
                             u64::from(count)
                         }
@@ -498,7 +498,7 @@ fn journey_event(
             match metadata {
                 SkillUsedMetadata::Aggregate(metadata) => {
                     validate_event_identifier(&metadata.session_id, "session ID")?;
-                    if !(1..=MAX_SUCCESSFUL_SKILL_COUNT_PER_TURN)
+                    if !(1..=hive_core::MAX_SUCCESSFUL_SKILL_COUNT_PER_TURN)
                         .contains(&metadata.successful_skill_count)
                     {
                         bail!("Invalid successful skill count");

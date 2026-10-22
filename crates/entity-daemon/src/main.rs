@@ -609,6 +609,13 @@ async fn run() -> anyhow::Result<()> {
         soul_ref,
     };
 
+    if let Err(error) = state.reconcile_durable_activity(state::ActivityReconcileMode::Startup) {
+        tracing::warn!(
+            "Durable Runtime activity reconciliation will retry on heartbeat: {}",
+            error
+        );
+    }
+
     // Spawn the bicameral chat pipeline (Id stage → Ego stage → journal).
     // Fatal on failure: without the pipeline every chat request would hang
     // until the turn timeout, which is worse than refusing to start.
@@ -980,6 +987,17 @@ fn spawn_runtime_supervision(
                         }
                     }
                 }
+            }
+
+            if let Err(error) =
+                state.reconcile_durable_activity(state::ActivityReconcileMode::Heartbeat)
+            {
+                tracing::warn!("Durable Runtime activity reconciliation deferred: {error}");
+                state
+                    .record_hive_sync_error(format!(
+                        "Durable activity reconciliation failed: {error}"
+                    ))
+                    .await;
             }
 
             let outbox_status = match state.outbox.status() {

@@ -23,6 +23,12 @@ pub struct OutboxReservation {
     pub created_at_utc: String,
 }
 
+#[derive(Clone, Debug)]
+pub enum ReservationRecovery {
+    All,
+    StaleBefore(chrono::DateTime<chrono::Utc>),
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct PersistedOutbox {
     #[serde(default)]
@@ -312,11 +318,111 @@ impl RuntimeOutbox {
         Ok(())
     }
 
+    pub fn reconcile_durable_record(
+        &self,
+        record_id: &str,
+        entity_id: &str,
+        kind: &str,
+        created_at_utc: &str,
+        payload: serde_json::Value,
+        recovery: ReservationRecovery,
+    ) -> Result<Option<EntityOutboxRecord>, String> {
+        validate_record_id(record_id)?;
+        chrono::DateTime::parse_from_rfc3339(created_at_utc)
+            .map_err(|_| "Durable activity fact has an invalid timestamp".to_string())?;
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        let reservation = inner
+            .reservations
+            .iter()
+            .find(|reservation| reservation.record_id == record_id)
+            .cloned();
+        if let Some(reservation) = reservation.as_ref() {
+            if reservation.entity_id != entity_id || reservation.kind != kind {
+                return Err(format!(
+                    "Runtime outbox reservation {record_id} conflicts with durable activity"
+                ));
+            }
+        }
+        let recover_reservation = reservation
+            .as_ref()
+            .map(|reservation| reservation_is_recoverable(reservation, &recovery))
+            .transpose()?
+            .unwrap_or(false);
+
+        if inner
+            .acknowledged_record_ids
+            .iter()
+            .any(|acknowledged| acknowledged == record_id)
+        {
+            if recover_reservation {
+                let mut next = inner.clone();
+                next.reservations
+                    .retain(|reservation| reservation.record_id != record_id);
+                self.save_locked(&next).map_err(|e| e.to_string())?;
+                *inner = next;
+            }
+            return Ok(None);
+        }
+
+        if let Some(existing) = inner
+            .records
+            .iter()
+            .find(|record| record.record_id == record_id)
+            .cloned()
+        {
+            if existing.entity_id != entity_id
+                || existing.kind != kind
+                || existing.payload != payload
+            {
+                return Err(format!(
+                    "Runtime outbox record ID {record_id} conflicts with durable activity"
+                ));
+            }
+            if recover_reservation {
+                let mut next = inner.clone();
+                next.reservations
+                    .retain(|reservation| reservation.record_id != record_id);
+                self.save_locked(&next).map_err(|e| e.to_string())?;
+                *inner = next;
+            }
+            return Ok(Some(existing));
+        }
+
+        if reservation.is_some() && !recover_reservation {
+            return Ok(None);
+        }
+        if reservation.is_none()
+            && inner.records.len() + inner.reservations.len() >= self.max_records
+        {
+            return Err(format!(
+                "Runtime outbox backpressure: capacity {} reached; durable activity remains available for recovery.",
+                self.max_records
+            ));
+        }
+
+        let record = EntityOutboxRecord {
+            record_id: record_id.to_string(),
+            entity_id: entity_id.to_string(),
+            kind: kind.to_string(),
+            created_at_utc: created_at_utc.to_string(),
+            payload,
+        };
+        let mut next = inner.clone();
+        next.reservations
+            .retain(|reservation| reservation.record_id != record_id);
+        next.records.push(record.clone());
+        self.save_locked(&next).map_err(|e| e.to_string())?;
+        *inner = next;
+        Ok(Some(record))
+    }
+
+    #[cfg(test)]
     pub fn reservations(&self) -> Result<Vec<OutboxReservation>, String> {
         let inner = self.inner.lock().map_err(|e| e.to_string())?;
         Ok(inner.reservations.clone())
     }
 
+    #[cfg(test)]
     pub fn is_acknowledged(&self, record_id: &str) -> Result<bool, String> {
         let inner = self.inner.lock().map_err(|e| e.to_string())?;
         Ok(inner
@@ -401,6 +507,21 @@ fn validate_record_id(record_id: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err("Runtime outbox record ID must be a canonical UUID".to_string())
+    }
+}
+
+fn reservation_is_recoverable(
+    reservation: &OutboxReservation,
+    recovery: &ReservationRecovery,
+) -> Result<bool, String> {
+    match recovery {
+        ReservationRecovery::All => Ok(true),
+        ReservationRecovery::StaleBefore(cutoff) => {
+            let created_at = chrono::DateTime::parse_from_rfc3339(&reservation.created_at_utc)
+                .map_err(|_| "Runtime outbox reservation has an invalid timestamp".to_string())?
+                .with_timezone(&chrono::Utc);
+            Ok(created_at <= *cutoff)
+        }
     }
 }
 

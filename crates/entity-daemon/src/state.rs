@@ -1,7 +1,7 @@
 //! Entity daemon shared state.
 
 use crate::execution_ledger::ExecutionLedger;
-use crate::outbox::RuntimeOutbox;
+use crate::outbox::{ReservationRecovery, RuntimeOutbox};
 use abigail_core::AppConfig;
 use abigail_memory::{ArchiveExporter, MemoryStore};
 use abigail_queue::JobQueue;
@@ -121,6 +121,13 @@ pub struct EntityDaemonState {
 
 /// Default number of turns between automatic archive exports.
 pub const ARCHIVE_INTERVAL_TURNS: u32 = 50;
+const ACTIVE_RESERVATION_GRACE_SECONDS: i64 = 60;
+
+#[derive(Clone, Copy, Debug)]
+pub enum ActivityReconcileMode {
+    Startup,
+    Heartbeat,
+}
 
 pub(crate) fn deterministic_journey_record_id(
     entity_id: &str,
@@ -176,6 +183,99 @@ impl EntityDaemonState {
                 &self.soul_ref,
             )
             .map(|_| ())
+    }
+
+    pub fn reconcile_durable_activity(&self, mode: ActivityReconcileMode) -> Result<usize, String> {
+        let recovery = match mode {
+            ActivityReconcileMode::Startup => ReservationRecovery::All,
+            ActivityReconcileMode::Heartbeat => ReservationRecovery::StaleBefore(
+                chrono::Utc::now() - chrono::Duration::seconds(ACTIVE_RESERVATION_GRACE_SECONDS),
+            ),
+        };
+        let mut reconciled = 0;
+
+        for turn in self.memory.all_turns().map_err(|error| error.to_string())? {
+            if turn.role != "assistant" || turn.successful_tool_uses.is_empty() {
+                continue;
+            }
+            let successful_skill_count =
+                u32::try_from(turn.successful_tool_uses.len()).map_err(|_| {
+                    "Durable assistant activity exceeds the supported skill count".to_string()
+                })?;
+            if successful_skill_count > hive_core::MAX_SUCCESSFUL_SKILL_COUNT_PER_TURN {
+                return Err(format!(
+                    "Durable assistant activity exceeds the per-turn limit of {}",
+                    hive_core::MAX_SUCCESSFUL_SKILL_COUNT_PER_TURN
+                ));
+            }
+            let record_id =
+                deterministic_journey_record_id(&self.entity_id, "skill_used", &turn.id);
+            reconciled += self.reconcile_activity_fact(
+                &record_id,
+                "skill_used",
+                &turn.created_at.to_rfc3339(),
+                serde_json::json!({
+                    "session_id": turn.session_id,
+                    "successful_skill_count": successful_skill_count,
+                }),
+                recovery.clone(),
+            )?;
+        }
+
+        for memory in self
+            .memory
+            .all_memories()
+            .map_err(|error| error.to_string())?
+        {
+            if !memory.explicitly_confirmed
+                || memory.weight == abigail_memory::MemoryWeight::Ephemeral
+            {
+                continue;
+            }
+            let record_id =
+                deterministic_journey_record_id(&self.entity_id, "memory_confirmed", &memory.id);
+            reconciled += self.reconcile_activity_fact(
+                &record_id,
+                "memory_confirmed",
+                &memory.created_at.to_rfc3339(),
+                serde_json::json!({
+                    "memory_id": memory.id,
+                    "memory_weight": memory.weight.as_str(),
+                }),
+                recovery.clone(),
+            )?;
+        }
+
+        Ok(reconciled)
+    }
+
+    fn reconcile_activity_fact(
+        &self,
+        record_id: &str,
+        kind: &str,
+        created_at_utc: &str,
+        payload: serde_json::Value,
+        recovery: ReservationRecovery,
+    ) -> Result<usize, String> {
+        let Some(record) = self.outbox.reconcile_durable_record(
+            record_id,
+            &self.entity_id,
+            kind,
+            created_at_utc,
+            payload.clone(),
+            recovery,
+        )?
+        else {
+            return Ok(0);
+        };
+        self.execution_ledger.append_outbox_event(
+            &record.record_id,
+            &self.entity_id,
+            &record.kind,
+            &payload,
+            &self.soul_ref,
+        )?;
+        Ok(1)
     }
 
     pub async fn record_hive_sync_success(&self) {
