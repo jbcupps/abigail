@@ -101,13 +101,12 @@ impl ExecutionLedger {
         soul_ref: &str,
     ) -> Result<ExecutionEvent, String> {
         let mut events = self.events.lock().map_err(|e| e.to_string())?;
-        let payload_digest = sha256_hex(&serde_json::to_vec(payload).map_err(|e| e.to_string())?);
+        let payload_digest = execution_payload_digest(payload)?;
         if let Some(existing) = events.iter().find(|event| event.event_id == event_id) {
             if existing.entity_id == entity_id
                 && existing.session_id == session_id
                 && existing.event_kind == event_kind
                 && existing.payload_digest == payload_digest
-                && existing.soul_ref == soul_ref
             {
                 return Ok(existing.clone());
             }
@@ -180,6 +179,12 @@ impl ExecutionLedger {
         }
         abigail_core::secure_fs::write_bytes_atomic(&self.path, &bytes).map_err(|e| e.to_string())
     }
+}
+
+pub(crate) fn execution_payload_digest(payload: &serde_json::Value) -> Result<String, String> {
+    Ok(sha256_hex(
+        &serde_json::to_vec(payload).map_err(|error| error.to_string())?,
+    ))
 }
 
 pub fn verify_chain(events: &[ExecutionEvent]) -> bool {

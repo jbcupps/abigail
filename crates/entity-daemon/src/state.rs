@@ -1,7 +1,9 @@
 //! Entity daemon shared state.
 
 use crate::execution_ledger::ExecutionLedger;
-use crate::outbox::{DurableRecordReconcile, ReservationRecovery, RuntimeOutbox};
+use crate::outbox::{
+    DurableRecordReconcile, OutboxLedgerMetadata, ReservationRecovery, RuntimeOutbox,
+};
 use abigail_core::AppConfig;
 use abigail_memory::{ArchiveExporter, MemoryStore};
 use abigail_queue::JobQueue;
@@ -158,18 +160,15 @@ impl EntityDaemonState {
         kind: &str,
         payload: serde_json::Value,
     ) -> Result<(), String> {
-        let record = self
-            .outbox
-            .enqueue(&self.entity_id, kind, payload.clone())?;
-        self.execution_ledger
-            .append_outbox_event(
-                &record.record_id,
-                &self.entity_id,
-                kind,
-                &payload,
-                &self.soul_ref,
-            )
-            .map(|_| ())
+        let record_id = uuid::Uuid::new_v4().to_string();
+        let record = self.outbox.enqueue_with_ledger_metadata(
+            record_id,
+            &self.entity_id,
+            kind,
+            payload.clone(),
+            &self.soul_ref,
+        )?;
+        self.append_or_repair_execution_event(&record.record_id, kind, &payload)
     }
 
     pub fn commit_outbox_reservation(
@@ -177,16 +176,12 @@ impl EntityDaemonState {
         record_id: &str,
         payload: serde_json::Value,
     ) -> Result<(), String> {
-        let record = self.outbox.commit_reservation(record_id, payload.clone())?;
-        self.execution_ledger
-            .append_outbox_event(
-                &record.record_id,
-                &self.entity_id,
-                &record.kind,
-                &payload,
-                &self.soul_ref,
-            )
-            .map(|_| ())
+        let record = self.outbox.commit_reservation_with_ledger_metadata(
+            record_id,
+            payload.clone(),
+            &self.soul_ref,
+        )?;
+        self.append_or_repair_execution_event(&record.record_id, &record.kind, &payload)
     }
 
     pub fn reconcile_durable_activity(&self, mode: ActivityReconcileMode) -> Result<usize, String> {
@@ -280,25 +275,39 @@ impl EntityDaemonState {
         match disposition {
             DurableRecordReconcile::Deferred => return Ok(0),
             DurableRecordReconcile::Queued(record) => {
-                self.execution_ledger.append_outbox_event(
-                    &record.record_id,
-                    &self.entity_id,
-                    &record.kind,
-                    &payload,
-                    &self.soul_ref,
-                )?;
+                self.append_or_repair_execution_event(&record.record_id, &record.kind, &payload)?;
             }
             DurableRecordReconcile::Acknowledged => {
-                self.execution_ledger.append_outbox_event(
-                    record_id,
-                    &self.entity_id,
-                    kind,
-                    &payload,
-                    &self.soul_ref,
-                )?;
+                self.append_or_repair_execution_event(record_id, kind, &payload)?;
             }
         }
         Ok(1)
+    }
+
+    fn append_or_repair_execution_event(
+        &self,
+        record_id: &str,
+        kind: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(), String> {
+        let historical_metadata = self.outbox.record_ledger_metadata(record_id)?;
+        if let Some(metadata) = historical_metadata.as_ref() {
+            metadata.validate_source(record_id, &self.entity_id, kind, payload)?;
+        }
+        let soul_ref = historical_metadata
+            .as_ref()
+            .map(|metadata| metadata.soul_ref.as_str())
+            .unwrap_or(&self.soul_ref);
+        let event = self.execution_ledger.append_outbox_event(
+            record_id,
+            &self.entity_id,
+            kind,
+            payload,
+            soul_ref,
+        )?;
+        self.outbox.persist_authoritative_record_ledger_metadata(
+            OutboxLedgerMetadata::from_execution_event(&event),
+        )
     }
 
     pub async fn record_hive_sync_success(&self) {

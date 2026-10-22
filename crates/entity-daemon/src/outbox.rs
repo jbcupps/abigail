@@ -14,6 +14,7 @@ pub struct OutboxRecordDraft {
     pub record_id: String,
     pub kind: String,
     pub payload: serde_json::Value,
+    soul_ref: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,6 +30,74 @@ pub struct QuarantinedOutboxReservation {
     pub reservation: OutboxReservation,
     pub quarantined_at_utc: String,
     pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct OutboxLedgerMetadata {
+    pub record_id: String,
+    pub entity_id: String,
+    pub kind: String,
+    pub session_id: Option<String>,
+    pub payload_digest: String,
+    pub soul_ref: String,
+}
+
+impl OutboxLedgerMetadata {
+    fn from_payload(
+        record_id: &str,
+        entity_id: &str,
+        kind: &str,
+        payload: &serde_json::Value,
+        soul_ref: &str,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            record_id: record_id.to_string(),
+            entity_id: entity_id.to_string(),
+            kind: kind.to_string(),
+            session_id: payload
+                .get("session_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            payload_digest: crate::execution_ledger::execution_payload_digest(payload)?,
+            soul_ref: soul_ref.to_string(),
+        })
+    }
+
+    pub(crate) fn from_execution_event(event: &hive_core::ExecutionEvent) -> Self {
+        Self {
+            record_id: event.event_id.clone(),
+            entity_id: event.entity_id.clone(),
+            kind: event.event_kind.clone(),
+            session_id: event.session_id.clone(),
+            payload_digest: event.payload_digest.clone(),
+            soul_ref: event.soul_ref.clone(),
+        }
+    }
+
+    pub(crate) fn validate_source(
+        &self,
+        record_id: &str,
+        entity_id: &str,
+        kind: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(), String> {
+        let expected = Self::from_payload(record_id, entity_id, kind, payload, &self.soul_ref)?;
+        if self.same_source(&expected) {
+            Ok(())
+        } else {
+            Err(format!(
+                "Runtime outbox ledger metadata for record {record_id} conflicts with durable activity"
+            ))
+        }
+    }
+
+    fn same_source(&self, other: &Self) -> bool {
+        self.record_id == other.record_id
+            && self.entity_id == other.entity_id
+            && self.kind == other.kind
+            && self.session_id == other.session_id
+            && self.payload_digest == other.payload_digest
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -54,6 +123,8 @@ struct PersistedOutbox {
     quarantined_reservations: Vec<QuarantinedOutboxReservation>,
     #[serde(default)]
     acknowledged_record_ids: Vec<String>,
+    #[serde(default)]
+    record_ledger_metadata: Vec<OutboxLedgerMetadata>,
     #[serde(default)]
     last_sync_at_utc: Option<String>,
     #[serde(default)]
@@ -124,6 +195,29 @@ impl RuntimeOutbox {
                 record_id,
                 kind: kind.to_string(),
                 payload,
+                soul_ref: None,
+            }],
+        )?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "Runtime outbox did not stage the requested record".to_string())
+    }
+
+    pub(crate) fn enqueue_with_ledger_metadata(
+        &self,
+        record_id: String,
+        entity_id: &str,
+        kind: &str,
+        payload: serde_json::Value,
+        soul_ref: &str,
+    ) -> Result<EntityOutboxRecord, String> {
+        self.enqueue_batch(
+            entity_id,
+            vec![OutboxRecordDraft {
+                record_id,
+                kind: kind.to_string(),
+                payload,
+                soul_ref: Some(soul_ref.to_string()),
             }],
         )?
         .into_iter()
@@ -139,8 +233,22 @@ impl RuntimeOutbox {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
         let mut staged = Vec::with_capacity(drafts.len());
         let mut additions = Vec::new();
+        let mut metadata_additions = Vec::new();
         for draft in drafts {
             validate_record_id(&draft.record_id)?;
+            let ledger_metadata = draft
+                .soul_ref
+                .as_deref()
+                .map(|soul_ref| {
+                    OutboxLedgerMetadata::from_payload(
+                        &draft.record_id,
+                        entity_id,
+                        &draft.kind,
+                        &draft.payload,
+                        soul_ref,
+                    )
+                })
+                .transpose()?;
             if inner
                 .quarantined_reservations
                 .iter()
@@ -187,6 +295,13 @@ impl RuntimeOutbox {
                     ));
                 }
                 staged.push(existing.clone());
+                if let Some(metadata) = ledger_metadata {
+                    stage_record_ledger_metadata(
+                        &inner.record_ledger_metadata,
+                        &mut metadata_additions,
+                        metadata,
+                    )?;
+                }
                 continue;
             }
             let record = EntityOutboxRecord {
@@ -198,6 +313,13 @@ impl RuntimeOutbox {
             };
             staged.push(record.clone());
             additions.push(record);
+            if let Some(metadata) = ledger_metadata {
+                stage_record_ledger_metadata(
+                    &inner.record_ledger_metadata,
+                    &mut metadata_additions,
+                    metadata,
+                )?;
+            }
         }
         if inner.records.len() + inner.reservations.len() + additions.len() > self.max_records {
             return Err(format!(
@@ -205,11 +327,12 @@ impl RuntimeOutbox {
                 self.max_records
             ));
         }
-        if additions.is_empty() {
+        if additions.is_empty() && metadata_additions.is_empty() {
             return Ok(staged);
         }
         let mut next = inner.clone();
         next.records.extend(additions);
+        next.record_ledger_metadata.extend(metadata_additions);
         self.save_locked(&next).map_err(|e| e.to_string())?;
         *inner = next;
         Ok(staged)
@@ -292,6 +415,24 @@ impl RuntimeOutbox {
         record_id: &str,
         payload: serde_json::Value,
     ) -> Result<EntityOutboxRecord, String> {
+        self.commit_reservation_internal(record_id, payload, None)
+    }
+
+    pub(crate) fn commit_reservation_with_ledger_metadata(
+        &self,
+        record_id: &str,
+        payload: serde_json::Value,
+        soul_ref: &str,
+    ) -> Result<EntityOutboxRecord, String> {
+        self.commit_reservation_internal(record_id, payload, Some(soul_ref))
+    }
+
+    fn commit_reservation_internal(
+        &self,
+        record_id: &str,
+        payload: serde_json::Value,
+        soul_ref: Option<&str>,
+    ) -> Result<EntityOutboxRecord, String> {
         validate_record_id(record_id)?;
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
         if inner
@@ -307,9 +448,28 @@ impl RuntimeOutbox {
             .records
             .iter()
             .find(|record| record.record_id == record_id)
+            .cloned()
         {
             if existing.payload == payload {
-                return Ok(existing.clone());
+                if let Some(soul_ref) = soul_ref {
+                    let metadata = OutboxLedgerMetadata::from_payload(
+                        record_id,
+                        &existing.entity_id,
+                        &existing.kind,
+                        &payload,
+                        soul_ref,
+                    )?;
+                    let mut next = inner.clone();
+                    if merge_record_ledger_metadata(
+                        &mut next.record_ledger_metadata,
+                        metadata,
+                        false,
+                    )? {
+                        self.save_locked(&next).map_err(|e| e.to_string())?;
+                        *inner = next;
+                    }
+                }
+                return Ok(existing);
             }
             return Err(format!(
                 "Runtime outbox record ID {record_id} conflicts with different event data"
@@ -321,6 +481,17 @@ impl RuntimeOutbox {
             .find(|reservation| reservation.record_id == record_id)
             .cloned()
             .ok_or_else(|| format!("Runtime outbox reservation {record_id} does not exist"))?;
+        let ledger_metadata = soul_ref
+            .map(|soul_ref| {
+                OutboxLedgerMetadata::from_payload(
+                    record_id,
+                    &reservation.entity_id,
+                    &reservation.kind,
+                    &payload,
+                    soul_ref,
+                )
+            })
+            .transpose()?;
         let record = EntityOutboxRecord {
             record_id: reservation.record_id.clone(),
             entity_id: reservation.entity_id,
@@ -332,6 +503,9 @@ impl RuntimeOutbox {
         next.reservations
             .retain(|reservation| reservation.record_id != record_id);
         next.records.push(record.clone());
+        if let Some(metadata) = ledger_metadata {
+            merge_record_ledger_metadata(&mut next.record_ledger_metadata, metadata, false)?;
+        }
         self.save_locked(&next).map_err(|e| e.to_string())?;
         *inner = next;
         Ok(record)
@@ -519,6 +693,32 @@ impl RuntimeOutbox {
         Ok(quarantined)
     }
 
+    pub(crate) fn record_ledger_metadata(
+        &self,
+        record_id: &str,
+    ) -> Result<Option<OutboxLedgerMetadata>, String> {
+        let inner = self.inner.lock().map_err(|e| e.to_string())?;
+        Ok(inner
+            .record_ledger_metadata
+            .iter()
+            .find(|metadata| metadata.record_id == record_id)
+            .cloned())
+    }
+
+    pub(crate) fn persist_authoritative_record_ledger_metadata(
+        &self,
+        metadata: OutboxLedgerMetadata,
+    ) -> Result<(), String> {
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        let mut next = inner.clone();
+        if !merge_record_ledger_metadata(&mut next.record_ledger_metadata, metadata, true)? {
+            return Ok(());
+        }
+        self.save_locked(&next).map_err(|error| error.to_string())?;
+        *inner = next;
+        Ok(())
+    }
+
     #[cfg(test)]
     pub fn is_acknowledged(&self, record_id: &str) -> Result<bool, String> {
         let inner = self.inner.lock().map_err(|e| e.to_string())?;
@@ -597,6 +797,53 @@ impl RuntimeOutbox {
         }
         abigail_core::secure_fs::write_bytes_atomic(&self.path, &bytes).map_err(Into::into)
     }
+}
+
+fn stage_record_ledger_metadata(
+    existing: &[OutboxLedgerMetadata],
+    additions: &mut Vec<OutboxLedgerMetadata>,
+    candidate: OutboxLedgerMetadata,
+) -> Result<(), String> {
+    if let Some(metadata) = existing
+        .iter()
+        .chain(additions.iter())
+        .find(|metadata| metadata.record_id == candidate.record_id)
+    {
+        if metadata.same_source(&candidate) {
+            return Ok(());
+        }
+        return Err(format!(
+            "Runtime outbox ledger metadata for record {} conflicts with different event data",
+            candidate.record_id
+        ));
+    }
+    additions.push(candidate);
+    Ok(())
+}
+
+fn merge_record_ledger_metadata(
+    metadata: &mut Vec<OutboxLedgerMetadata>,
+    candidate: OutboxLedgerMetadata,
+    candidate_is_authoritative: bool,
+) -> Result<bool, String> {
+    if let Some(existing) = metadata
+        .iter_mut()
+        .find(|existing| existing.record_id == candidate.record_id)
+    {
+        if !existing.same_source(&candidate) {
+            return Err(format!(
+                "Runtime outbox ledger metadata for record {} conflicts with different event data",
+                candidate.record_id
+            ));
+        }
+        if candidate_is_authoritative && existing.soul_ref != candidate.soul_ref {
+            *existing = candidate;
+            return Ok(true);
+        }
+        return Ok(false);
+    }
+    metadata.push(candidate);
+    Ok(true)
 }
 
 fn validate_record_id(record_id: &str) -> Result<(), String> {
