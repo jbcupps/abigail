@@ -156,10 +156,7 @@ impl ExecutionLedger {
             events: events.to_vec(),
         })
         .map_err(|e| e.to_string())?;
-        let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-        std::fs::rename(&tmp, &self.path).map_err(|e| e.to_string())?;
-        Ok(())
+        abigail_core::secure_fs::write_bytes_atomic(&self.path, &bytes).map_err(|e| e.to_string())
     }
 }
 
