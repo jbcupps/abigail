@@ -837,7 +837,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ledger_failure_keeps_one_real_activity_and_reconciliation_repairs_the_ledger() {
+    async fn ledger_failure_then_acknowledgement_repairs_one_event_without_requeue() {
         let (mut state, executions) = build_tool_state(1);
         let outbox_dir = outbox_root("abigail-pipeline-ledger-outbox");
         let ledger_root = outbox_root("abigail-pipeline-ledger");
@@ -858,6 +858,13 @@ mod tests {
         assert_eq!(queued.len(), 1);
         assert!(state.outbox.reservations().unwrap().is_empty());
         assert!(state.execution_ledger.recent(None, 10).is_empty());
+        let record_id = queued[0].record_id.clone();
+        state
+            .outbox
+            .acknowledge(std::slice::from_ref(&record_id))
+            .unwrap();
+        assert!(state.outbox.snapshot().unwrap().is_empty());
+        assert!(state.outbox.is_acknowledged(&record_id).unwrap());
 
         let mut restarted = build_state();
         restarted.memory = state.memory.clone();
@@ -871,10 +878,11 @@ mod tests {
             .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)
             .unwrap();
 
-        assert_eq!(restarted.outbox.snapshot().unwrap().len(), 1);
+        assert!(restarted.outbox.snapshot().unwrap().is_empty());
+        assert!(restarted.outbox.is_acknowledged(&record_id).unwrap());
         let ledger = restarted.execution_ledger.recent(None, 10);
         assert_eq!(ledger.len(), 1);
-        assert_eq!(ledger[0].event_id, queued[0].record_id);
+        assert_eq!(ledger[0].event_id, record_id);
         assert!(crate::execution_ledger::verify_chain(&ledger));
         let _ = std::fs::remove_dir_all(outbox_dir);
         let _ = std::fs::remove_dir_all(ledger_root);

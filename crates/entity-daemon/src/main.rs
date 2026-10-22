@@ -1047,3 +1047,80 @@ fn spawn_runtime_supervision(
         }
     });
 }
+
+#[cfg(test)]
+mod supervision_tests {
+    use super::*;
+    use abigail_memory::{ConversationTurn, SuccessfulToolUse};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingHeartbeatClient {
+        heartbeat_calls: AtomicUsize,
+        sync_calls: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeHeartbeatClient for CountingHeartbeatClient {
+        async fn heartbeat(
+            &self,
+            _request: &hive_core::RuntimeHeartbeatRequest,
+        ) -> Result<hive_core::RuntimeHeartbeatResponse, String> {
+            self.heartbeat_calls.fetch_add(1, Ordering::SeqCst);
+            Err("unexpected Hive heartbeat".to_string())
+        }
+
+        async fn sync_outbox(
+            &self,
+            _request: &hive_core::OutboxSyncRequest,
+        ) -> Result<hive_core::OutboxSyncResponse, String> {
+            self.sync_calls.fetch_add(1, Ordering::SeqCst);
+            Err("unexpected Hive outbox sync".to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn reconciliation_failure_stops_before_hive_heartbeat_or_sync() {
+        let mut state = crate::routes::tests::build_state();
+        let ledger_root = std::env::temp_dir().join(format!(
+            "abigail-heartbeat-ledger-failure-{}",
+            uuid::Uuid::new_v4()
+        ));
+        state.execution_ledger = Arc::new(
+            crate::execution_ledger::ExecutionLedger::load_with_saver(
+                &ledger_root,
+                |_path, _bytes| anyhow::bail!("injected heartbeat ledger save failure"),
+            )
+            .unwrap(),
+        );
+        let assistant = ConversationTurn::new("session-heartbeat", "assistant", "private reply")
+            .with_successful_tool_uses(vec![SuccessfulToolUse {
+                skill_id: "com.abigail.calendar".to_string(),
+                tool_name: "create_event".to_string(),
+            }]);
+        let expected_record_id = crate::state::deterministic_journey_record_id(
+            &state.entity_id,
+            "skill_used",
+            &assistant.id,
+        );
+        state.memory.insert_turn(&assistant).unwrap();
+        let client = CountingHeartbeatClient {
+            heartbeat_calls: AtomicUsize::new(0),
+            sync_calls: AtomicUsize::new(0),
+        };
+
+        let error = run_runtime_outbox_heartbeat(&state, &client)
+            .await
+            .unwrap_err();
+
+        assert!(
+            error.contains("injected heartbeat ledger save failure"),
+            "{error}"
+        );
+        assert_eq!(client.heartbeat_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(client.sync_calls.load(Ordering::SeqCst), 0);
+        let queued = state.outbox.snapshot().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].record_id, expected_record_id);
+        let _ = std::fs::remove_dir_all(ledger_root);
+    }
+}
