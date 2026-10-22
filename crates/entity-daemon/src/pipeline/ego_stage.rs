@@ -174,6 +174,23 @@ async fn respond(
             .await
         };
 
+    let successful_skill_count = result
+        .as_ref()
+        .map(|tool_result| {
+            tool_result
+                .tool_calls_made
+                .iter()
+                .filter(|record| record.success)
+                .count()
+        })
+        .unwrap_or(0);
+    let cancellation_may_follow_tool_activity = result.as_ref().err().is_some_and(|error| {
+        error
+            .to_string()
+            .to_ascii_lowercase()
+            .contains("interrupted by user")
+    });
+
     let mut action = match result {
         Ok(tool_result) => {
             let tier = tool_result.tier().map(|s| s.to_string());
@@ -275,17 +292,6 @@ async fn respond(
         }
     };
 
-    let successful_skill_count = action
-        .response
-        .as_ref()
-        .map(|response| {
-            response
-                .tool_calls_made
-                .iter()
-                .filter(|record| record.success)
-                .count()
-        })
-        .unwrap_or(0);
     let assistant_store_error = if let Some(ref response) = action.response {
         let turn = committed_assistant_turn(&assistant_turn_id, &action.session_id, response);
         state
@@ -313,12 +319,8 @@ async fn respond(
         }
     }
 
-    match (
-        action.status.as_str(),
-        successful_skill_count,
-        activity_record_id.as_deref(),
-    ) {
-        ("success", count, Some(record_id)) if count > 0 => {
+    match (successful_skill_count, activity_record_id.as_deref()) {
+        (count, Some(record_id)) if count > 0 => {
             let payload = serde_json::json!({
                 "session_id": action.session_id,
                 "successful_skill_count": count,
@@ -339,7 +341,14 @@ async fn respond(
                 }
             }
         }
-        (_, _, Some(record_id)) => {
+        (0, Some(record_id)) if cancellation_may_follow_tool_activity => {
+            tracing::warn!(
+                session_id = %action.session_id,
+                activity_record_id = %record_id,
+                "Cancelled tool-capable turn may have completed activity; retaining its reservation for quarantine/manual recovery"
+            );
+        }
+        (_, Some(record_id)) => {
             if let Err(error) = state.outbox.release_reservation(record_id) {
                 tracing::error!(
                     session_id = %action.session_id,

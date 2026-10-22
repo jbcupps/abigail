@@ -722,6 +722,16 @@ impl ToolUseResult {
     }
 }
 
+fn has_successful_tool_call(records: &[ToolCallRecord]) -> bool {
+    records.iter().any(|record| record.success)
+}
+
+fn partial_tool_completion_message() -> String {
+    "One or more requested actions completed, but the final reply is unavailable. \
+     No completed action needs to be repeated."
+        .to_string()
+}
+
 /// Configuration for the tool-use loop's async delegation behavior.
 #[derive(Debug, Clone)]
 pub struct ToolUseConfig {
@@ -791,7 +801,7 @@ pub async fn run_tool_use_loop_with_jobs(
     for round in 0..MAX_TOOL_ROUNDS {
         tracing::debug!("Tool-use loop (with jobs) round {}", round);
 
-        let resp = router
+        let resp = match router
             .route_unified(abigail_router::RoutingRequest {
                 messages: messages.clone(),
                 tools: Some(tools.clone()),
@@ -799,7 +809,21 @@ pub async fn run_tool_use_loop_with_jobs(
                 stream_tx: None,
                 force_id_only: false,
             })
-            .await?;
+            .await
+        {
+            Ok(response) => response,
+            Err(error) if has_successful_tool_call(&all_records) => {
+                tracing::warn!(
+                    "Provider failed after successful tool activity; returning a non-retry partial result: {error}"
+                );
+                return Ok(ToolUseResult {
+                    content: partial_tool_completion_message(),
+                    tool_calls_made: all_records,
+                    execution_trace: last_trace,
+                });
+            }
+            Err(error) => return Err(error),
+        };
         let response = resp.completion;
         last_trace = resp.trace;
 
@@ -869,7 +893,7 @@ pub async fn run_tool_use_loop_with_model_override(
     for round in 0..MAX_TOOL_ROUNDS {
         tracing::debug!("Tool-use loop round {}", round);
 
-        let resp = router
+        let resp = match router
             .route_unified(abigail_router::RoutingRequest {
                 messages: messages.clone(),
                 tools: Some(tools.clone()),
@@ -877,7 +901,21 @@ pub async fn run_tool_use_loop_with_model_override(
                 stream_tx: None,
                 force_id_only: false,
             })
-            .await?;
+            .await
+        {
+            Ok(response) => response,
+            Err(error) if has_successful_tool_call(&all_records) => {
+                tracing::warn!(
+                    "Provider failed after successful tool activity; returning a non-retry partial result: {error}"
+                );
+                return Ok(ToolUseResult {
+                    content: partial_tool_completion_message(),
+                    tool_calls_made: all_records,
+                    execution_trace: last_trace,
+                });
+            }
+            Err(error) => return Err(error),
+        };
         let response = resp.completion;
         last_trace = resp.trace;
 
@@ -942,7 +980,7 @@ pub async fn run_tool_use_loop_with_delegation(
     for round in 0..effective_rounds {
         tracing::debug!("Tool-use loop (delegatable) round {}", round);
 
-        let resp = router
+        let resp = match router
             .route_unified(abigail_router::RoutingRequest {
                 messages: messages.clone(),
                 tools: Some(tools.clone()),
@@ -950,7 +988,21 @@ pub async fn run_tool_use_loop_with_delegation(
                 stream_tx: None,
                 force_id_only: false,
             })
-            .await?;
+            .await
+        {
+            Ok(response) => response,
+            Err(error) if has_successful_tool_call(&all_records) => {
+                tracing::warn!(
+                    "Provider failed after successful tool activity; returning a non-retry partial result: {error}"
+                );
+                return Ok(ToolUseOutcome::Completed(ToolUseResult {
+                    content: partial_tool_completion_message(),
+                    tool_calls_made: all_records,
+                    execution_trace: last_trace,
+                }));
+            }
+            Err(error) => return Err(error),
+        };
         let response = resp.completion;
         last_trace = resp.trace;
 
@@ -1090,7 +1142,7 @@ pub async fn run_tool_use_loop_rounds_only(
     for round in 0..MAX_TOOL_ROUNDS {
         tracing::debug!("Tool-use loop (rounds-only) round {}", round);
 
-        let resp = router
+        let resp = match router
             .route_unified(abigail_router::RoutingRequest {
                 messages: messages.clone(),
                 tools: Some(tools.to_vec()),
@@ -1098,7 +1150,21 @@ pub async fn run_tool_use_loop_rounds_only(
                 stream_tx: None,
                 force_id_only: false,
             })
-            .await?;
+            .await
+        {
+            Ok(response) => response,
+            Err(error) if has_successful_tool_call(&all_records) => {
+                tracing::warn!(
+                    "Provider failed after successful tool activity; returning a non-retry partial result: {error}"
+                );
+                return Ok(IntermediateToolResult {
+                    tool_calls_made: all_records,
+                    final_text: Some(partial_tool_completion_message()),
+                    execution_trace: last_trace,
+                });
+            }
+            Err(error) => return Err(error),
+        };
         let response = resp.completion;
         last_trace = resp.trace;
 
@@ -1165,6 +1231,7 @@ pub async fn stream_chat_pipeline(
 ) -> anyhow::Result<StreamPipelineResult> {
     let mut messages = messages;
     let mut tool_calls_made = Vec::new();
+    let mut last_trace = None;
 
     for round in 0..=MAX_TOOL_ROUNDS {
         // After the execution budget is exhausted, request a final answer
@@ -1190,7 +1257,28 @@ pub async fn stream_chat_pipeline(
             }
         };
         let (stream_resp, ()) = tokio::join!(provider_call, relay);
-        let stream_resp = stream_resp?;
+        let stream_resp = match stream_resp {
+            Ok(response) => response,
+            Err(error) if has_successful_tool_call(&tool_calls_made) => {
+                tracing::warn!(
+                    "Streaming provider failed after successful tool activity; returning a non-retry partial result: {error}"
+                );
+                let content = partial_tool_completion_message();
+                let _ = tx
+                    .send(StreamEvent::Done(CompletionResponse {
+                        content: content.clone(),
+                        tool_calls: None,
+                    }))
+                    .await;
+                return Ok(StreamPipelineResult {
+                    content,
+                    tool_calls_made,
+                    execution_trace: last_trace,
+                });
+            }
+            Err(error) => return Err(error),
+        };
+        last_trace = stream_resp.trace.clone();
         let response = stream_resp.completion;
         let tool_calls = match response.tool_calls.as_ref() {
             Some(calls) if !calls.is_empty() => calls,
