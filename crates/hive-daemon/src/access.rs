@@ -52,13 +52,14 @@ pub fn policy(method: &Method, route: &str) -> Access {
         (
             "GET",
             "/v1/entities/:id"
-            | "/v1/entities/:id/birth"
             | "/v1/entities/:id/provider-config"
             | "/v1/entities/:id/assignments"
             | "/v1/entities/:id/forge-approvals",
         ) => Entity,
         ("POST", "/v1/entities/:id/persistence")
-        | ("GET", "/v1/entities/:id/execution/receipts") => EntityRuntime,
+        | ("GET", "/v1/entities/:id/birth" | "/v1/entities/:id/execution/receipts") => {
+            EntityRuntime
+        }
         ("GET", "/v1/runtime/sessions/:lease_id")
         | ("POST", "/v1/runtime/register" | "/v1/runtime/heartbeat" | "/v1/runtime/outbox/sync") => {
             Runtime
@@ -346,7 +347,7 @@ mod tests {
             ("POST", "/v1/entities/:id/close", Desktop),
             ("POST", "/v1/entities/:id/persistence", EntityRuntime),
             ("GET", "/v1/birth/scenarios", Desktop),
-            ("GET", "/v1/entities/:id/birth", Entity),
+            ("GET", "/v1/entities/:id/birth", EntityRuntime),
             ("POST", "/v1/entities/:id/birth", Desktop),
             ("PATCH", "/v1/entities/:id/config", Desktop),
             ("GET", "/v1/entities/:id/provider-config", Entity),
@@ -489,6 +490,7 @@ mod tests {
 
         for route in [
             "/v1/entities/:id",
+            "/v1/entities/:id/birth",
             "/v1/entities/:id/provider-config",
             "/v1/entities/:id/assignments",
             "/v1/entities/:id/execution/receipts",
@@ -503,6 +505,7 @@ mod tests {
         }
         for (method, route, body) in [
             (Method::GET, "/v1/entities/:other", None),
+            (Method::GET, "/v1/entities/:other/birth", None),
             (Method::GET, "/v1/entities/:other/provider-config", None),
             (Method::GET, "/v1/entities/:other/execution/receipts", None),
             (Method::GET, "/v1/entities", None),

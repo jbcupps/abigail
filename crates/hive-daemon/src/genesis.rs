@@ -1672,6 +1672,110 @@ mod tests {
             "temperament":"curious","identity":identity,"crest":crest,"motion":"calm"}})
     }
 
+    fn hidden_weight_paths(value: &Value) -> Vec<String> {
+        const HIDDEN: [&str; 5] = [
+            "weights",
+            "deontology",
+            "teleology",
+            "areteology",
+            "welfare",
+        ];
+        fn visit(value: &Value, path: &str, found: &mut Vec<String>) {
+            match value {
+                Value::Object(object) => {
+                    for (key, child) in object {
+                        let child_path = format!("{path}.{key}");
+                        if HIDDEN.contains(&key.as_str()) {
+                            found.push(child_path.clone());
+                        }
+                        visit(child, &child_path, found);
+                    }
+                }
+                Value::Array(array) => {
+                    for (index, child) in array.iter().enumerate() {
+                        visit(child, &format!("{path}[{index}]"), found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        visit(value, "$", &mut found);
+        found
+    }
+
+    #[tokio::test]
+    async fn user_facing_production_routes_never_expose_hidden_weights() {
+        let (state, entity_id) = crate::routes::tests::build_state();
+        let Json(created) = create(
+            State(state.clone()),
+            Json(CreateRequest {
+                mode: GenesisMode::Guided,
+                creation_key: None,
+                seed: None,
+            }),
+        )
+        .await;
+        let genesis_id = created.data.as_ref().unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let Json(loaded) = load(State(state.clone()), Path(genesis_id.clone())).await;
+        let action = act(
+            &state,
+            &genesis_id,
+            json!({"action":"save_draft","text":"A private draft"}),
+        )
+        .await
+        .unwrap();
+        let Json(catalog) = quest_catalog().await;
+        let Json(scenarios) = crate::birth::get_scenarios().await;
+        let Json(birth) = crate::birth::perform_birth(
+            State(state.clone()),
+            Path(entity_id.clone()),
+            Json(BirthRiteRequest {
+                path: "quickstart".into(),
+                choices: vec![],
+                purpose: Some("Help the family".into()),
+            }),
+        )
+        .await;
+        assert!(birth.ok, "{:?}", birth.error);
+        let Json(journey) =
+            crate::journey::get_journey(State(state.clone()), Path(entity_id.clone())).await;
+        let Json(presence_put) = crate::journey::put_presence(
+            State(state.clone()),
+            Path(entity_id.clone()),
+            Json(PresenceChoice::default()),
+        )
+        .await;
+        let Json(presence_get) = crate::journey::get_presence(State(state), Path(entity_id)).await;
+
+        let surfaces = [
+            ("Genesis create", serde_json::to_value(created).unwrap()),
+            ("Genesis load", serde_json::to_value(loaded).unwrap()),
+            ("Genesis action", action),
+            ("quest catalog", serde_json::to_value(catalog).unwrap()),
+            ("birth scenarios", serde_json::to_value(scenarios).unwrap()),
+            ("generic birth POST", serde_json::to_value(birth).unwrap()),
+            ("journey", serde_json::to_value(journey).unwrap()),
+            ("Presence PUT", serde_json::to_value(presence_put).unwrap()),
+            ("Presence GET", serde_json::to_value(presence_get).unwrap()),
+        ];
+        let leaks: Vec<_> = surfaces
+            .iter()
+            .filter_map(|(surface, value)| {
+                let paths = hidden_weight_paths(value);
+                (!paths.is_empty()).then(|| format!("{surface}: {}", paths.join(", ")))
+            })
+            .collect();
+        assert!(
+            leaks.is_empty(),
+            "hidden ethical scoring leaked through production routes:\n{}",
+            leaks.join("\n")
+        );
+    }
+
     #[test]
     fn quest_trial_count_matches_the_soul_forge() {
         assert_eq!(

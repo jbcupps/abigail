@@ -29,7 +29,7 @@ export interface QuestCatalog {
   crests: { crest: Crest; unlocked_by: BadgeId | null }[];
 }
 export interface FirstQuest { id: string; title: string; prompt: string; milestone: BadgeId; target: number; complete: boolean }
-export interface CertificateView { archetype: string; epithet: string; sigil: string; weights: Record<string, number>; birth_path: string; issued_at_utc: string; signature_verified: boolean }
+export interface CertificateView { archetype: string; epithet: string; sigil: string; birth_path: string; scoring_version: string; issued_at_utc: string; signature_verified: boolean }
 export interface EntityJourney {
   entity_id: string; name: string; level: BondLevel; badges: BadgeView[]; mentor_messages: number;
   next_milestone: { badge: BadgeId; title: string; target: number; progress: number } | null;

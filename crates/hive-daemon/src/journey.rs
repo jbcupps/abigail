@@ -15,7 +15,7 @@ use axum::{
 };
 use hive_core::genesis::{EntityDefinition, GenesisSession};
 use hive_core::genesis_quest::*;
-use hive_core::{ApiEnvelope, BirthCertificate, EthicWeights};
+use hive_core::{ApiEnvelope, BirthCertificate, BirthCertificateSummary};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::sync::Mutex;
@@ -230,43 +230,12 @@ fn save_presence_bytes(path: &std::path::Path, bytes: &[u8]) -> Result<(), Strin
         .map_err(|error| format!("Could not save the Presence card: {error}"))
 }
 
-#[derive(Serialize)]
-struct CertificateView {
-    archetype: String,
-    epithet: String,
-    sigil: String,
-    weights: EthicWeights,
-    birth_path: String,
-    issued_at_utc: String,
-    signature_verified: bool,
-}
-
-fn certificate(state: &HiveDaemonState, entity_id: &str) -> Option<CertificateView> {
+fn certificate(state: &HiveDaemonState, entity_id: &str) -> Option<BirthCertificateSummary> {
     let config = state.identity_manager.load_agent(entity_id).ok()?;
     let text = std::fs::read_to_string(config.docs_dir.join("birth_certificate.json")).ok()?;
     let cert: BirthCertificate = serde_json::from_str(&text).ok()?;
-    let payload = crate::birth::certificate_payload(
-        &cert.entity_id,
-        &cert.entity_name,
-        &cert.archetype,
-        &cert.soul_hash,
-        &cert.birth_path,
-        &cert.issued_at_utc,
-    );
-    let signature_verified = cert.entity_id == entity_id
-        && state
-            .identity_manager
-            .verify_payload(payload.as_bytes(), &cert.signature, &cert.master_public_key)
-            .is_ok();
-    Some(CertificateView {
-        archetype: cert.archetype,
-        epithet: cert.epithet,
-        sigil: cert.sigil,
-        weights: cert.weights,
-        birth_path: cert.birth_path,
-        issued_at_utc: cert.issued_at_utc,
-        signature_verified,
-    })
+    let signature_verified = crate::birth::verified_certificate(state, &text, entity_id).is_ok();
+    Some(cert.summary(signature_verified))
 }
 
 #[derive(Serialize)]
@@ -288,7 +257,7 @@ struct JourneyView {
     unlocked: Unlocks,
     first_quests: Vec<FirstQuest>,
     presence: Option<PresenceCard>,
-    certificate: Option<CertificateView>,
+    certificate: Option<BirthCertificateSummary>,
 }
 
 /// GET /v1/entities/:id/journey

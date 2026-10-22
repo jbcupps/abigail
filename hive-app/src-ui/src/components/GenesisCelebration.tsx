@@ -26,7 +26,7 @@ export default function GenesisCelebration({ entityId, name, presence, newBadges
       <PresenceCrest palette={card?.identity ?? "aether"} crest={card?.crest ?? "orbit"} motion={card?.motion ?? "calm"} size={112} label={`${name}'s crest`} />
       <div className="genesis-eyebrow">First Light</div>
       <h2 id="genesis-celebration-title">{name} has awakened</h2>
-      {certificate ? <p className="genesis-celebration-soul"><strong>{certificate.archetype}</strong> · {certificate.epithet}<span>{certificate.birth_path === "forge" ? "Forged from your trial answers" : "A balanced soul"} · {certificate.signature_verified ? "Signed by your Hive" : "Signature could not be verified"}</span></p> : <p className="genesis-muted">Reading the birth certificate…</p>}
+      {certificate ? <p className="genesis-celebration-soul"><strong>{certificate.archetype}</strong> · {certificate.epithet}<span>{certificate.birth_path === "forge" ? "Forged from your trial answers" : "A balanced soul"} · {certificate.scoring_version || "Legacy scoring"} · {certificate.signature_verified ? "Signed by your Hive" : "Signature could not be verified"}</span></p> : <p className="genesis-muted">Reading the birth certificate…</p>}
       {newBadges.length > 0 && <ul className="genesis-celebration-badges" aria-label="Badges earned">{newBadges.map((badge) => <li key={badge.badge}>✦ {badge.title} <small>+{badge.xp} XP</small></li>)}</ul>}
       {journey && <p className="genesis-muted">Level {journey.level.level} · {journey.level.title} · {journey.level.xp} XP</p>}
       <div className="genesis-actions"><button ref={meet} type="button" className="genesis-primary" onClick={onMeet}>Meet {name}</button><button type="button" onClick={onClose}>Stay in Genesis</button></div>

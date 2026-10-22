@@ -171,6 +171,9 @@ pub struct EthicWeights {
     pub welfare: f32,
 }
 
+/// The current internal Triangle Ethic scoring contract.
+pub const SCORING_VERSION: &str = "triangle-ethic-v1";
+
 /// A signed birth certificate — the entity's character sheet, vouched for by
 /// the Hive master key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,6 +184,10 @@ pub struct BirthCertificate {
     pub archetype: String,
     /// Flavor line for the archetype.
     pub epithet: String,
+    /// The internal scoring contract used to forge this soul. Legacy
+    /// certificates deserialize to an empty value and retain their v1 signature.
+    #[serde(default)]
+    pub scoring_version: String,
     pub weights: EthicWeights,
     /// Deterministic hash of the forged soul configuration.
     pub soul_hash: String,
@@ -195,10 +202,37 @@ pub struct BirthCertificate {
     pub signature: String,
 }
 
+/// The user-facing part of a birth certificate. Internal scoring weights,
+/// hashes, and signing material remain in the runtime certificate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BirthCertificateSummary {
+    pub archetype: String,
+    pub epithet: String,
+    pub sigil: String,
+    pub birth_path: String,
+    pub scoring_version: String,
+    pub issued_at_utc: String,
+    pub signature_verified: bool,
+}
+
+impl BirthCertificate {
+    pub fn summary(&self, signature_verified: bool) -> BirthCertificateSummary {
+        BirthCertificateSummary {
+            archetype: self.archetype.clone(),
+            epithet: self.epithet.clone(),
+            sigil: self.sigil.clone(),
+            birth_path: self.birth_path.clone(),
+            scoring_version: self.scoring_version.clone(),
+            issued_at_utc: self.issued_at_utc.clone(),
+            signature_verified,
+        }
+    }
+}
+
 /// Response after performing the birth rite.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BirthRiteResponse {
-    pub certificate: BirthCertificate,
+    pub certificate: BirthCertificateSummary,
     /// True when the rite was re-run on an already-born entity (re-tempering).
     pub retempered: bool,
 }
@@ -646,6 +680,44 @@ pub struct OutboxSyncResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn birth_certificate_summary_omits_internal_scoring_material() {
+        let certificate = BirthCertificate {
+            entity_id: "entity-1".into(),
+            entity_name: "Nova".into(),
+            archetype: "The Balanced".into(),
+            epithet: "Ready to become anything.".into(),
+            scoring_version: SCORING_VERSION.into(),
+            weights: EthicWeights {
+                deontology: 0.25,
+                teleology: 0.25,
+                areteology: 0.25,
+                welfare: 0.25,
+            },
+            soul_hash: "hash".into(),
+            sigil: "sigil".into(),
+            birth_path: "quickstart".into(),
+            issued_at_utc: "2026-10-22T00:00:00Z".into(),
+            master_public_key: "public".into(),
+            signature: "signature".into(),
+        };
+        let json = serde_json::to_value(certificate.summary(true)).unwrap();
+        for hidden in [
+            "weights",
+            "deontology",
+            "teleology",
+            "areteology",
+            "welfare",
+            "soul_hash",
+            "master_public_key",
+            "signature",
+        ] {
+            assert!(json.get(hidden).is_none(), "{hidden} leaked: {json}");
+        }
+        assert_eq!(json["scoring_version"], SCORING_VERSION);
+        assert_eq!(json["signature_verified"], true);
+    }
 
     #[test]
     fn update_entity_config_request_serializes_patch_fields() {

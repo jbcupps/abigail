@@ -352,11 +352,6 @@ async fn perform_birth(
     .await
 }
 
-#[tauri::command]
-async fn get_birth_document(entity_id: String) -> Result<hive_core::EntityBirthDocument, String> {
-    hive_get(&format!("/v1/entities/{}/birth", entity_id)).await
-}
-
 /// Open an Entity: ensure its daemon is running, then launch the Entity Runtime
 /// app pointed at it. When that window closes, tell the Hive to stop the daemon.
 #[tauri::command]
@@ -706,8 +701,7 @@ pub fn run() {
             list_assignments,
             approve_forge_job,
             get_birth_scenarios,
-            perform_birth,
-            get_birth_document
+            perform_birth
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Abigail Hive app");
