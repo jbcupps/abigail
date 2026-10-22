@@ -467,6 +467,7 @@ impl RuntimeOutbox {
         Ok(inner.reservations.clone())
     }
 
+    #[cfg(test)]
     pub fn quarantined_reservations(&self) -> Result<Vec<QuarantinedOutboxReservation>, String> {
         let inner = self.inner.lock().map_err(|e| e.to_string())?;
         Ok(inner.quarantined_reservations.clone())
