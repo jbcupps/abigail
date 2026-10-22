@@ -29,6 +29,7 @@ pub enum ReservationRecovery {
     StaleBefore(chrono::DateTime<chrono::Utc>),
 }
 
+#[derive(Debug)]
 pub enum DurableRecordReconcile {
     Queued(EntityOutboxRecord),
     Acknowledged,
