@@ -1,9 +1,9 @@
 //! Journal: persists committed Ego actions and emits lifecycle events.
 //!
 //! Subscribes to `Topic::EgoAction` and handles the bookkeeping that used to
-//! live inline in the chat handlers: archiving the assistant turn to memory,
-//! queueing the outbox record for hive sync, triggering auto-archive, and
-//! publishing chat lifecycle events.
+//! live inline in the chat handlers: triggering auto-archive and publishing
+//! chat lifecycle events. Durable journey events are staged by the Ego producer
+//! before it publishes a successful action.
 
 use super::EgoActionPayload;
 use crate::state::EntityDaemonState;
@@ -54,49 +54,8 @@ pub async fn spawn(state: EntityDaemonState) -> anyhow::Result<SubscriptionHandl
 }
 
 async fn record(state: EntityDaemonState, action: EgoActionPayload) -> Result<(), String> {
-    let mut outbox_errors = 0;
     match (action.status.as_str(), action.response) {
         ("success", Some(response)) => {
-            // The Ego stage persisted this reply before acknowledging the turn.
-
-            if let Err(error) = state.queue_outbox_record(
-                "chat_assistant_turn",
-                serde_json::json!({
-                    "session_id": action.session_id.clone(),
-                    "reply": response.reply.clone(),
-                    "provider": response.provider.clone(),
-                    "model_used": response.model_used.clone(),
-                }),
-            ) {
-                outbox_errors += 1;
-                tracing::error!(
-                    session_id = %action.session_id,
-                    "Committed assistant outbox event could not be queued: {error}"
-                );
-            }
-            for tool in response
-                .tool_calls_made
-                .iter()
-                .filter(|record| record.success)
-            {
-                if let Err(error) = state.queue_outbox_record(
-                    "skill_used",
-                    serde_json::json!({
-                        "session_id": action.session_id.clone(),
-                        "skill_id": tool.skill_id.clone(),
-                        "tool_name": tool.tool_name.clone(),
-                    }),
-                ) {
-                    outbox_errors += 1;
-                    tracing::error!(
-                        session_id = %action.session_id,
-                        skill_id = %tool.skill_id,
-                        tool_name = %tool.tool_name,
-                        "Committed skill-use journey event could not be queued: {error}"
-                    );
-                }
-            }
-
             state.maybe_auto_archive();
 
             crate::routes::publish_chat_lifecycle_event(
@@ -130,13 +89,7 @@ async fn record(state: EntityDaemonState, action: EgoActionPayload) -> Result<()
             );
         }
     }
-    if outbox_errors == 0 {
-        Ok(())
-    } else {
-        Err(format!(
-            "Runtime outbox rejected {outbox_errors} committed event(s)"
-        ))
-    }
+    Ok(())
 }
 
 #[cfg(test)]

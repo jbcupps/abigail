@@ -1,7 +1,7 @@
 //! Entity daemon shared state.
 
 use crate::execution_ledger::ExecutionLedger;
-use crate::outbox::RuntimeOutbox;
+use crate::outbox::{OutboxRecordDraft, RuntimeOutbox};
 use abigail_core::AppConfig;
 use abigail_memory::{ArchiveExporter, MemoryStore};
 use abigail_queue::JobQueue;
@@ -10,6 +10,7 @@ use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
 use abigail_streaming::StreamBroker;
 use entity_core::{ChatMemoryHook, SkillApplyAcknowledgement};
 use hive_core::{ForgeApprovalJob, RuntimeSessionLease, SkillAssignment};
+use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -121,6 +122,25 @@ pub struct EntityDaemonState {
 /// Default number of turns between automatic archive exports.
 pub const ARCHIVE_INTERVAL_TURNS: u32 = 50;
 
+pub(crate) fn deterministic_journey_record_id(
+    entity_id: &str,
+    kind: &str,
+    source_id: &str,
+) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"abigail-runtime-journey-event-v1");
+    for value in [entity_id, kind, source_id] {
+        digest.update((value.len() as u64).to_be_bytes());
+        digest.update(value.as_bytes());
+    }
+    let hash = digest.finalize();
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&hash[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes).to_string()
+}
+
 impl EntityDaemonState {
     pub fn queue_outbox_record(
         &self,
@@ -133,6 +153,33 @@ impl EntityDaemonState {
         self.execution_ledger
             .append_outbox_event(&self.entity_id, kind, &payload, &self.soul_ref)
             .map(|_| ())
+    }
+
+    pub fn queue_outbox_record_with_id(
+        &self,
+        record_id: String,
+        kind: &str,
+        payload: serde_json::Value,
+    ) -> Result<(), String> {
+        self.outbox
+            .enqueue_with_id(record_id, &self.entity_id, kind, payload.clone())
+            .map(|_| ())?;
+        self.execution_ledger
+            .append_outbox_event(&self.entity_id, kind, &payload, &self.soul_ref)
+            .map(|_| ())
+    }
+
+    pub fn queue_outbox_records(&self, drafts: Vec<OutboxRecordDraft>) -> Result<(), String> {
+        let records = self.outbox.enqueue_batch(&self.entity_id, drafts)?;
+        for record in records {
+            self.execution_ledger.append_outbox_event(
+                &self.entity_id,
+                &record.kind,
+                &record.payload,
+                &self.soul_ref,
+            )?;
+        }
+        Ok(())
     }
 
     pub async fn record_hive_sync_success(&self) {

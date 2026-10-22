@@ -7,6 +7,7 @@
 //! outcome to the waiting HTTP handler.
 
 use super::{EgoActionPayload, IdReactionPayload, TurnContext};
+use crate::outbox::OutboxRecordDraft;
 use crate::state::EntityDaemonState;
 use abigail_streaming::{Envelope, SubscriptionHandle, Topic, TopicConfig, BUS_STREAM};
 use entity_core::ChatResponse;
@@ -256,6 +257,22 @@ async fn respond(
         }
     };
 
+    if action.status == "success" {
+        if let Some(ref response) = action.response {
+            if let Err(error) =
+                stage_successful_skill_events(&state, &correlation_id, &action.session_id, response)
+            {
+                tracing::error!(
+                    session_id = %action.session_id,
+                    "Tool activity could not be staged before commit: {error}"
+                );
+                action.status = "error".to_string();
+                action.error = Some(activity_staging_error());
+                action.response = None;
+            }
+        }
+    }
+
     if let Some(ref response) = action.response {
         let turn = committed_assistant_turn(&action.session_id, response);
         if let Err(error) = crate::memory_consumer::persist_turn(state.memory.clone(), turn).await {
@@ -296,6 +313,42 @@ async fn respond(
             correlation_id
         );
     }
+}
+
+fn stage_successful_skill_events(
+    state: &EntityDaemonState,
+    correlation_id: &str,
+    session_id: &str,
+    response: &ChatResponse,
+) -> Result<(), String> {
+    let drafts = response
+        .tool_calls_made
+        .iter()
+        .enumerate()
+        .filter(|(_, record)| record.success)
+        .map(|(index, record)| {
+            let source_id = format!("{correlation_id}:{index}");
+            OutboxRecordDraft {
+                record_id: crate::state::deterministic_journey_record_id(
+                    &state.entity_id,
+                    "skill_used",
+                    &source_id,
+                ),
+                kind: "skill_used".to_string(),
+                payload: serde_json::json!({
+                    "session_id": session_id,
+                    "skill_id": record.skill_id,
+                    "tool_name": record.tool_name,
+                }),
+            }
+        })
+        .collect();
+    state.queue_outbox_records(drafts)
+}
+
+fn activity_staging_error() -> String {
+    "I couldn't safely save this activity, so I haven't completed this turn. Please try again."
+        .to_string()
 }
 
 fn committed_assistant_turn(

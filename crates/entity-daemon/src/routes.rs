@@ -769,20 +769,25 @@ pub async fn memory_insert(
 
     match state.memory.insert_memory(&memory) {
         Ok(()) => {
-            if entry.weight != "ephemeral" {
-                if let Err(error) = state.queue_outbox_record(
+            let journey_error = if entry.weight != "ephemeral" {
+                let record_id = crate::state::deterministic_journey_record_id(
+                    &state.entity_id,
                     "memory_confirmed",
-                    serde_json::json!({
-                        "memory_id": entry.id.clone(),
-                        "memory_weight": entry.weight.clone(),
-                    }),
-                ) {
-                    tracing::error!(
-                        memory_id = %entry.id,
-                        "Explicit memory is durable, but its journey event could not be queued: {error}"
-                    );
-                }
-            }
+                    &entry.id,
+                );
+                state
+                    .queue_outbox_record_with_id(
+                        record_id,
+                        "memory_confirmed",
+                        serde_json::json!({
+                            "memory_id": entry.id.clone(),
+                            "memory_weight": entry.weight.clone(),
+                        }),
+                    )
+                    .err()
+            } else {
+                None
+            };
             if let Some(ref hook) = state.memory_hook {
                 if let Err(e) = hook.on_memory_persisted(
                     &entry.id,
@@ -793,7 +798,18 @@ pub async fn memory_insert(
                     tracing::warn!("Memory hook error: {}", e);
                 }
             }
-            Json(ApiEnvelope::success(entry))
+            if let Some(error) = journey_error {
+                tracing::error!(
+                    memory_id = %entry.id,
+                    "Explicit memory is durable, but its journey event could not be staged: {error}"
+                );
+                Json(ApiEnvelope::error(
+                    "I saved the memory, but couldn't safely save its activity. Please try again."
+                        .to_string(),
+                ))
+            } else {
+                Json(ApiEnvelope::success(entry))
+            }
         }
         Err(e) => Json(ApiEnvelope::error(e.to_string())),
     }

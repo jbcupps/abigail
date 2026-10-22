@@ -8,6 +8,13 @@ use {std::path::Path, std::sync::Arc};
 
 const OUTBOX_FILE_NAME: &str = "runtime_outbox.json";
 
+#[derive(Clone, Debug)]
+pub struct OutboxRecordDraft {
+    pub record_id: String,
+    pub kind: String,
+    pub payload: serde_json::Value,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct PersistedOutbox {
     #[serde(default)]
@@ -66,25 +73,85 @@ impl RuntimeOutbox {
         kind: &str,
         payload: serde_json::Value,
     ) -> Result<EntityOutboxRecord, String> {
+        self.enqueue_with_id(uuid::Uuid::new_v4().to_string(), entity_id, kind, payload)
+    }
+
+    pub fn enqueue_with_id(
+        &self,
+        record_id: String,
+        entity_id: &str,
+        kind: &str,
+        payload: serde_json::Value,
+    ) -> Result<EntityOutboxRecord, String> {
+        self.enqueue_batch(
+            entity_id,
+            vec![OutboxRecordDraft {
+                record_id,
+                kind: kind.to_string(),
+                payload,
+            }],
+        )?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "Runtime outbox did not stage the requested record".to_string())
+    }
+
+    pub fn enqueue_batch(
+        &self,
+        entity_id: &str,
+        drafts: Vec<OutboxRecordDraft>,
+    ) -> Result<Vec<EntityOutboxRecord>, String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
-        if inner.records.len() >= self.max_records {
+        let mut staged = Vec::with_capacity(drafts.len());
+        let mut additions = Vec::new();
+        for draft in drafts {
+            if !uuid::Uuid::parse_str(&draft.record_id)
+                .is_ok_and(|id| id.to_string() == draft.record_id)
+            {
+                return Err("Runtime outbox record ID must be a canonical UUID".to_string());
+            }
+            if let Some(existing) = inner
+                .records
+                .iter()
+                .chain(additions.iter())
+                .find(|record| record.record_id == draft.record_id)
+            {
+                if existing.entity_id != entity_id
+                    || existing.kind != draft.kind
+                    || existing.payload != draft.payload
+                {
+                    return Err(format!(
+                        "Runtime outbox record ID {} conflicts with different event data",
+                        draft.record_id
+                    ));
+                }
+                staged.push(existing.clone());
+                continue;
+            }
+            let record = EntityOutboxRecord {
+                record_id: draft.record_id,
+                entity_id: entity_id.to_string(),
+                kind: draft.kind,
+                created_at_utc: chrono::Utc::now().to_rfc3339(),
+                payload: draft.payload,
+            };
+            staged.push(record.clone());
+            additions.push(record);
+        }
+        if inner.records.len() + additions.len() > self.max_records {
             return Err(format!(
                 "Runtime outbox backpressure: capacity {} reached; retry after Hive acknowledges queued records.",
                 self.max_records
             ));
         }
-        let record = EntityOutboxRecord {
-            record_id: uuid::Uuid::new_v4().to_string(),
-            entity_id: entity_id.to_string(),
-            kind: kind.to_string(),
-            created_at_utc: chrono::Utc::now().to_rfc3339(),
-            payload,
-        };
+        if additions.is_empty() {
+            return Ok(staged);
+        }
         let mut next = inner.clone();
-        next.records.push(record.clone());
+        next.records.extend(additions);
         self.save_locked(&next).map_err(|e| e.to_string())?;
         *inner = next;
-        Ok(record)
+        Ok(staged)
     }
 
     pub fn snapshot(&self) -> Result<Vec<EntityOutboxRecord>, String> {
