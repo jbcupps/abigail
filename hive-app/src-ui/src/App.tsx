@@ -27,6 +27,7 @@ export default function App() {
   const [genesisOpen, setGenesisOpen] = useState(false);
   const [genesisResume, setGenesisResume] = useState<string | undefined>();
   const [genesisLaunch, setGenesisLaunch] = useState(0);
+  const [genesisRetry, setGenesisRetry] = useState(0);
   const [genesisSwitch, setGenesisSwitch] = useState<GenesisLaunchRequest | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
@@ -35,8 +36,13 @@ export default function App() {
   const genesisSwitchTrigger = useRef<HTMLElement | null>(null);
   const mounted = useRef(true);
   const needsProvider = status?.ready_state === "needs_provider";
-  const cardsKey = `${genesisOpen}:${status?.ready_state ?? "unknown"}:${needsProvider}:${status?.entities.map(entity => `${entity.id}:${entity.birth_complete}`).join(",") ?? ""}`;
-  const { portraits, awaiting } = useGenesisEntities(cardsKey);
+  const cardsKey = `${genesisOpen}:${status?.ready_state ?? "unknown"}:${needsProvider}:${status?.entities.map(entity => `${entity.id}:${entity.birth_complete}`).join(",") ?? ""}:retry=${genesisRetry}`;
+  const {
+    portraits,
+    awaiting,
+    loading: genesisEntitiesLoading,
+    error: genesisEntitiesError,
+  } = useGenesisEntities(cardsKey);
   const launchGenesis = useCallback((sessionId?: string) => {
     setGenesisResume(sessionId);
     setGenesisLaunch((launch) => {
@@ -74,6 +80,11 @@ export default function App() {
 
   const handleOpen = useCallback(async (entity: EntityInfo) => {
     if (openingRef.current) return;
+    if (
+      !entity.birth_complete
+      && !awaiting[entity.id]
+      && (genesisEntitiesLoading || Boolean(genesisEntitiesError))
+    ) return;
     // Genesis signs this Entity's approved story at awakening; never generic setup.
     if (awaiting[entity.id]) { openGenesis(awaiting[entity.id]); return; }
     openingRef.current = true;
@@ -90,7 +101,7 @@ export default function App() {
       openingRef.current = false;
       if (mounted.current) setOpeningId(null);
     }
-  }, [awaiting, openGenesis]);
+  }, [awaiting, genesisEntitiesError, genesisEntitiesLoading, openGenesis]);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -222,7 +233,10 @@ export default function App() {
             <button
               type="button"
               className="text-xs text-theme-primary hover:underline"
-              onClick={() => void refreshStatus()}
+              onClick={() => {
+                setGenesisRetry((generation) => generation + 1);
+                void refreshStatus();
+              }}
             >
               Refresh
             </button>
@@ -234,42 +248,66 @@ export default function App() {
             <li>
               <CreateEntityCard onOpen={() => openGenesis()} />
             </li>
-            {familyEntities.map((entity) => (
-              <li
-                key={entity.id}
-                className="flex flex-col rounded-theme-lg border border-theme-border bg-theme-surface p-4"
-              >
-                <GenesisEntityPortrait entityId={entity.id} name={entity.name} portrait={portraits[entity.id]} />
-                <div className="font-medium text-theme-text-bright mt-3">{entity.name}</div>
-                <div className="text-xs text-theme-text-dim mt-1">
-                  {needsProvider && awaiting[entity.id]
-                    ? "Connect a model to continue Genesis"
-                    : awaiting[entity.id]
-                    ? "Being created in Genesis"
-                    : entity.birth_complete
-                      ? "Ready"
-                      : "Setup pending"}
-                </div>
-                {entity.birth_complete && <EntityJourneyChip entityId={entity.id} refreshKey={cardsKey} />}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (needsProvider && awaiting[entity.id]) setWizardOpen(true);
-                    else void handleOpen(entity);
-                  }}
-                  disabled={(needsProvider && !awaiting[entity.id]) || openingId !== null}
-                  className="mt-3 self-start rounded-theme-md bg-theme-primary px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+            {familyEntities.map((entity) => {
+              const awaitingSession = awaiting[entity.id];
+              const linkageUnresolved = !entity.birth_complete
+                && !awaitingSession
+                && (Boolean(genesisEntitiesLoading) || Boolean(genesisEntitiesError));
+              const linkageChecking = linkageUnresolved && Boolean(genesisEntitiesLoading);
+              const linkageFailed = linkageUnresolved
+                && !genesisEntitiesLoading
+                && Boolean(genesisEntitiesError);
+              return (
+                <li
+                  key={entity.id}
+                  className="flex flex-col rounded-theme-lg border border-theme-border bg-theme-surface p-4"
                 >
-                  {openingId === entity.id
-                    ? "Opening…"
-                    : needsProvider && awaiting[entity.id]
-                      ? "Connect a model to continue"
-                      : awaiting[entity.id]
-                        ? `Continue ${entity.name}'s Genesis`
-                        : `Open ${entity.name}`}
-                </button>
-              </li>
-            ))}
+                  <GenesisEntityPortrait entityId={entity.id} name={entity.name} portrait={portraits[entity.id]} />
+                  <div className="font-medium text-theme-text-bright mt-3">{entity.name}</div>
+                  <div className="text-xs text-theme-text-dim mt-1">
+                    {linkageChecking
+                      ? "Checking Genesis linkage…"
+                      : linkageFailed
+                        ? "Genesis linkage could not be checked."
+                        : needsProvider && awaitingSession
+                          ? "Connect a model to continue Genesis"
+                          : awaitingSession
+                            ? "Being created in Genesis"
+                            : entity.birth_complete
+                              ? "Ready"
+                              : "Setup pending"}
+                  </div>
+                  {entity.birth_complete && <EntityJourneyChip entityId={entity.id} refreshKey={cardsKey} />}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (linkageFailed) setGenesisRetry((generation) => generation + 1);
+                      else if (linkageChecking) return;
+                      else if (needsProvider && awaitingSession) setWizardOpen(true);
+                      else void handleOpen(entity);
+                    }}
+                    disabled={
+                      linkageChecking
+                      || (needsProvider && !awaitingSession && !linkageFailed)
+                      || openingId !== null
+                    }
+                    className="mt-3 self-start rounded-theme-md bg-theme-primary px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+                  >
+                    {openingId === entity.id
+                      ? "Opening…"
+                      : linkageChecking
+                        ? "Checking Genesis…"
+                        : linkageFailed
+                          ? "Retry Genesis check"
+                          : needsProvider && awaitingSession
+                            ? "Connect a model to continue"
+                            : awaitingSession
+                              ? `Continue ${entity.name}'s Genesis`
+                              : `Open ${entity.name}`}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
           {openError && <p role="alert" className="mt-3 text-xs text-theme-danger">{openError}</p>}
         </section>
