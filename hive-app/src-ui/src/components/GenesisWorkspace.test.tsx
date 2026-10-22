@@ -25,7 +25,7 @@ beforeEach(() => {
   vi.mocked(createOrResumeGenesis).mockImplementation(async (_seed, creationKey) => ({ ...structuredClone(saved), id: creationKey }));
   vi.mocked(getGenesisSession).mockImplementation(async () => structuredClone(saved));
   vi.mocked(getQuestCatalog).mockResolvedValue({
-    stages: [], badges: [], temperament_cards: [], trials: [], instincts: "",
+    stages: [], badges: [], tiers: [], temperament_cards: [], trials: [], instincts: "",
     palettes: [{ palette: "aether", unlocked_by: null }],
     crests: [{ crest: "orbit", unlocked_by: null }],
   });
@@ -228,7 +228,7 @@ describe("Genesis creation workflow", () => {
     vi.mocked(genesisAction).mockImplementation(async (session, action, args) => {
       const next = await activation(session, action, args);
       if (action !== "activate") return next;
-      saved = { ...next, state: "ready", awakening: "I am Nova.", quest: questFixture({ badges: [{ badge: "first_light", title: "First Light", hint: "Awaken your Entity.", xp: 50, earned_at: "now" }] }) };
+      saved = { ...next, state: "ready", awakening: "I am Nova.", quest: questFixture({ badges: [{ badge: "first_light", title: "First Light", hint: "Awaken your Entity.", xp: 20, requirement: null, unlocks: { palettes: [], crests: [] }, earned_at: "now" }] }) };
       return structuredClone(saved);
     });
     await start();

@@ -11,7 +11,7 @@ vi.mock("../lib/questClient", async (importOriginal) => ({
 }));
 
 const catalog = {
-  stages: [], badges: [], temperament_cards: [], trials: [], instincts: "",
+  stages: [], badges: [], tiers: [], temperament_cards: [], trials: [], instincts: "",
   palettes: [
     { palette: "aether" as const, unlocked_by: null },
     { palette: "aurora" as const, unlocked_by: "soul_shaper" as const },
