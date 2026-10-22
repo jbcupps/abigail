@@ -239,24 +239,29 @@ derive only from durable Runtime facts. Conversation turns reconcile the full
 durable history for mentor messages, distinct sessions, active UTC days and
 active ISO weeks. Committed successful tool calls and explicit non-ephemeral
 memory inserts add content-free fallback facts. Runtime atomically reserves
-outbox capacity before either tool execution or explicit lasting-memory
-insertion. A committed assistant turn queues one aggregate `skill_used` event
+outbox capacity and persists the active `soul_ref` before either tool execution
+or explicit lasting-memory insertion. A committed assistant turn queues one aggregate `skill_used` event
 with only its session ID and successful-use count; a confirmed memory queues
 `memory_confirmed` with only its ID and weight class. If post-side-effect
 staging fails, the successful response is preserved and startup/heartbeat
 reconciliation rebuilds the same deterministic record from the durable fact.
 If a later provider round cannot produce the final reply, the completed tool
 records return as a non-retry partial result and still commit one aggregate;
-superego blocking or assistant-history failure cannot erase that activity.
+superego blocking or assistant-history failure cannot erase that activity. Each
+of those outcomes explicitly tells the mentor that an action completed and to
+verify the result before repeating it.
 Cancellation after possible tool activity retains the reservation for
-quarantine/manual recovery instead of suggesting the action be repeated.
+quarantine/manual recovery and says an action may have completed, so the mentor
+should verify before repeating it.
 Persisted acknowledgements prevent an old fact from being queued again, but do
 not prevent reconciliation from repairing a missing local execution-ledger
 entry. Content-free acknowledged-record metadata preserves the original
 `soul_ref`, kind, session and payload digest, so repair after a soul change
 recreates the historical event without requeue; an existing matching ledger
-event remains authoritative. A reconciliation failure stops that tick before
-Hive heartbeat or sync.
+event remains authoritative. Before each heartbeat, Runtime reconciles every
+queued record and every retained acknowledged metadata row into the ledger,
+including blocked/history-failure facts with no assistant source row. A
+reconciliation failure stops that tick before Hive heartbeat or sync.
 Reservations with no matching durable assistant or memory fact stay active for
 a conservative 24-hour recovery window; after that they move atomically to a
 persisted, non-capacity quarantine for diagnosis without inventing activity.
@@ -348,7 +353,7 @@ passed:
 - `cargo fmt --all -- --check`;
 - strict all-target Clippy for `entity-chat`, `entity-daemon`, `hive-core`,
   `hive-daemon`, `abigail-persistence`, `abigail-app` and `soul-forge`;
-- affected Rust suites for those seven packages: 350 tests passed and 8
+- affected Rust suites for those seven packages: 351 tests passed and 8
   pre-existing daemon cluster tests were ignored;
 - `cd hive-app/src-ui && npm test && npm run build`: production build plus
   92 tests across 18 files;
