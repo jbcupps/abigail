@@ -245,9 +245,18 @@ with only its session ID and successful-use count; a confirmed memory queues
 `memory_confirmed` with only its ID and weight class. If post-side-effect
 staging fails, the successful response is preserved and startup/heartbeat
 reconciliation rebuilds the same deterministic record from the durable fact.
+If a later provider round cannot produce the final reply, the completed tool
+records return as a non-retry partial result and still commit one aggregate;
+superego blocking or assistant-history failure cannot erase that activity.
+Cancellation after possible tool activity retains the reservation for
+quarantine/manual recovery instead of suggesting the action be repeated.
 Persisted acknowledgements prevent an old fact from being queued again, but do
 not prevent reconciliation from repairing a missing local execution-ledger
-entry. A reconciliation failure stops that tick before Hive heartbeat or sync.
+entry. Content-free acknowledged-record metadata preserves the original
+`soul_ref`, kind, session and payload digest, so repair after a soul change
+recreates the historical event without requeue; an existing matching ledger
+event remains authoritative. A reconciliation failure stops that tick before
+Hive heartbeat or sync.
 Reservations with no matching durable assistant or memory fact stay active for
 a conservative 24-hour recovery window; after that they move atomically to a
 persisted, non-capacity quarantine for diagnosis without inventing activity.
@@ -337,9 +346,9 @@ Fresh affected verification on `cursor/genesis-quest-gamification-4871`
 passed:
 
 - `cargo fmt --all -- --check`;
-- strict all-target Clippy for `entity-daemon`, `hive-core`, `hive-daemon`,
-  `abigail-persistence`, `abigail-app` and `soul-forge`;
-- affected Rust suites for those six packages: 299 tests passed and 8
+- strict all-target Clippy for `entity-chat`, `entity-daemon`, `hive-core`,
+  `hive-daemon`, `abigail-persistence`, `abigail-app` and `soul-forge`;
+- affected Rust suites for those seven packages: 350 tests passed and 8
   pre-existing daemon cluster tests were ignored;
 - `cd hive-app/src-ui && npm test && npm run build`: production build plus
   92 tests across 18 files;
@@ -354,10 +363,13 @@ atomically before tool or explicit-memory side effects, assistant metadata is
 durable before one aggregate `skill_used` commit, exact fact retries map to one
 outbox row and one atomic local ledger event, and the journal does not enqueue a
 duplicate. Post-commit failures preserve the successful result and recover from
-content-free durable metadata; acknowledged IDs are never requeued but still
-repair a missing local ledger entry. Reconciliation errors stop the Hive
-heartbeat/sync attempt, and stale unmatched reservations enter non-capacity
-quarantine without creating an event. None adds content to
+content-free durable metadata. Partial provider failure, response blocking and
+history-save failure still preserve completed tool counts; cancellation retains
+the reservation when the current loop boundary cannot prove whether activity
+ran. Acknowledged IDs are never requeued but still repair a missing local
+ledger with their historical soul reference. Reconciliation errors stop the
+Hive heartbeat/sync attempt, and stale unmatched reservations enter
+non-capacity quarantine without creating an event. None adds content to
 `entity_journey_event`.
 
 This is source, build and automated fixture verification only. No installer,
