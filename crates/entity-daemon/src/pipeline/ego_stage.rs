@@ -411,13 +411,17 @@ async fn respond(
     // Deliver the outcome to the waiting handler.
     let outcome = match (action.status.as_str(), action.response) {
         ("success", Some(response)) => Ok(response),
-        _ => Err(super::TurnFailure {
-            message: action
+        _ => {
+            let message = action
                 .error
-                .unwrap_or_else(|| "ego stage failed without detail".to_string()),
-            code: action.error_code,
-            interrupted: action.interrupted,
-        }),
+                .unwrap_or_else(|| "ego stage failed without detail".to_string());
+            let failure = match action.error_code {
+                Some(code) => super::TurnFailure::completion_risk(code, action.interrupted),
+                None if action.interrupted => super::TurnFailure::interrupted(),
+                None => super::TurnFailure::plain(message),
+            };
+            Err(failure)
+        }
     };
     if done.send(outcome).is_err() {
         tracing::debug!(
