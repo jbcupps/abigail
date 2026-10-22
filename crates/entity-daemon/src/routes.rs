@@ -1526,6 +1526,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn explicit_memory_post_commit_failure_returns_success_and_recovers_after_restart() {
         let mut state = build_state();
+        state.soul_ref = "memory-reservation-soul-a".to_string();
         let root = test_scratch_dir("abigail-memory-post-commit");
         let calls = Arc::new(AtomicUsize::new(0));
         let saver_calls = calls.clone();
@@ -1571,8 +1572,13 @@ pub(crate) mod tests {
             state.outbox.reservations().unwrap()[0].record_id,
             expected_id
         );
+        assert_eq!(
+            state.outbox.reservations().unwrap()[0].soul_ref,
+            "memory-reservation-soul-a"
+        );
 
         let mut restarted = build_state();
+        restarted.soul_ref = "memory-current-soul-b".to_string();
         restarted.memory = state.memory.clone();
         restarted.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&root, 4).unwrap());
         restarted
@@ -1585,6 +1591,10 @@ pub(crate) mod tests {
         assert_eq!(recovered[0].payload["memory_weight"], "distilled");
         assert!(recovered[0].payload.get("content").is_none());
         assert!(restarted.outbox.reservations().unwrap().is_empty());
+        let ledger = restarted.execution_ledger.recent(None, 10);
+        assert_eq!(ledger.len(), 1);
+        assert_eq!(ledger[0].event_id, expected_id);
+        assert_eq!(ledger[0].soul_ref, "memory-reservation-soul-a");
 
         restarted
             .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)

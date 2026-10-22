@@ -1410,12 +1410,27 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
             root.join(super::OUTBOX_FILE_NAME),
-            br#"{"records":[],"last_sync_at_utc":null,"last_sync_error":null}"#,
+            br#"{
+                "records": [],
+                "reservations": [{
+                    "record_id": "00000000-0000-4000-8000-000000000001",
+                    "entity_id": "legacy-entity",
+                    "kind": "skill_used",
+                    "created_at_utc": "2026-10-22T12:00:00Z"
+                }],
+                "last_sync_at_utc": null,
+                "last_sync_error": null
+            }"#,
         )
         .unwrap();
 
         let outbox = RuntimeOutbox::load(&root, 1).unwrap();
-        assert!(outbox.reservations().unwrap().is_empty());
+        let reservations = outbox.reservations().unwrap();
+        assert_eq!(reservations.len(), 1);
+        assert!(
+            reservations[0].soul_ref.is_empty(),
+            "legacy reservations must load with a defaulted soul reference"
+        );
         assert!(!outbox
             .is_acknowledged(&uuid::Uuid::new_v4().to_string())
             .unwrap());
