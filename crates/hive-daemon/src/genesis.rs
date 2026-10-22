@@ -10,7 +10,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use hive_core::{genesis::*, ApiEnvelope, BirthRiteRequest};
+use hive_core::{genesis::*, genesis_quest::*, ApiEnvelope, BirthRiteRequest};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
@@ -73,6 +73,7 @@ pub fn router() -> Router<HiveDaemonState> {
         .route("/v1/genesis/sessions/:id/messages", post(message))
         .route("/v1/genesis/sessions/:id/import", post(import))
         .route("/v1/genesis/sessions/:id/export", get(export))
+        .route("/v1/genesis/quest/catalog", get(quest_catalog))
         .route("/v1/genesis/media/capabilities", get(media_capabilities))
         .route("/v1/genesis/media/activity", get(media_activity))
         .route("/v1/genesis/media/credentials", post(media_credentials))
@@ -120,11 +121,132 @@ fn session(state: &HiveDaemonState, id: &str) -> Result<GenesisSession, String> 
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Genesis draft not found".into())
 }
-fn view(session: GenesisSession) -> Value {
+fn signals(state: &HiveDaemonState, session: &GenesisSession) -> QuestSignals {
+    let mentor_messages = session
+        .definition
+        .entity_id
+        .as_deref()
+        .and_then(|id| state.journeys.load(OWNER, id).ok().flatten())
+        .map_or(0, |journey| journey.mentor_messages);
+    QuestSignals {
+        awakened: session.awakening.is_some(),
+        mentor_messages,
+    }
+}
+fn view(state: &HiveDaemonState, session: GenesisSession) -> Value {
+    let signals = signals(state, &session);
+    view_with(session, signals)
+}
+fn view_with(session: GenesisSession, signals: QuestSignals) -> Value {
     let essence = session.essence();
+    let quest = quest_view(&session, signals);
     let mut value = serde_json::to_value(session).unwrap_or_default();
     value["essence"] = json!(essence);
+    value["quest"] = json!(quest);
     value
+}
+/// Records badges that the session's confirmed state now satisfies.
+fn award_session(state: &HiveDaemonState, draft: &mut GenesisSession, now: &str) {
+    let satisfied = satisfied_badges(draft, signals(state, draft));
+    award(&mut draft.quest.earned, &satisfied, now);
+}
+
+/// Cosmetic choice only: display text comes from confirmed canon (or, once
+/// awakened, from the signed-at-birth record) and unlocks come from earned badges.
+fn set_presence(
+    state: &HiveDaemonState,
+    draft: &mut GenesisSession,
+    choice: PresenceChoice,
+) -> Result<(), String> {
+    let signals = signals(state, draft);
+    let mut earned = draft.quest.earned_badges();
+    earned.extend(satisfied_badges(draft, signals));
+    let awakened_entity = draft
+        .definition
+        .entity_id
+        .clone()
+        .filter(|_| draft.awakening.is_some());
+    if let Some(entity_id) = &awakened_entity {
+        if let Ok(Some(journey)) = state.journeys.load(OWNER, entity_id) {
+            earned.extend(journey.earned_badges());
+        }
+    }
+    check_unlocked(choice, &earned)?;
+    let card = match &awakened_entity {
+        Some(entity_id) => PresenceCard::compose(
+            choice,
+            &crate::journey::approved_definition(state, entity_id)
+                .unwrap_or_else(|| draft.definition.clone()),
+        ),
+        None => PresenceCard::compose(choice, &draft.definition),
+    };
+    if let Some(entity_id) = &awakened_entity {
+        crate::journey::save_presence(state, entity_id, &card)?;
+    }
+    draft.quest.presence = Some(card);
+    Ok(())
+}
+
+/// Genesis owns birth for the Entities it allocates: generic setup would sign
+/// a soul without the mentor-approved narrative. Unreadable Genesis state
+/// fails closed.
+pub(crate) fn genesis_hold(
+    state: &HiveDaemonState,
+    entity_id: &str,
+) -> Result<Option<String>, String> {
+    let linked = state
+        .genesis
+        .list(OWNER)
+        .map_err(|_| "Genesis records are unavailable. Try again shortly.".to_string())?
+        .into_iter()
+        .find(|session| session.definition.entity_id.as_deref() == Some(entity_id));
+    let narrative = state
+        .identity_manager
+        .load_agent(entity_id)
+        .is_ok_and(|config| config.docs_dir.join("genesis.json").exists());
+    Ok(match linked {
+        Some(session) if session.awakening.is_none() => Some(format!(
+            "{} is still being created in Genesis. Return to Genesis to awaken them with their approved story.",
+            if session.definition.name.is_empty() { "This Entity" } else { &session.definition.name }
+        )),
+        Some(_) => Some("This Entity was created in Genesis. Apply identity changes from its Genesis record so its approved story stays signed.".into()),
+        None if narrative => Some("This Entity's approved Genesis story is signed into its soul. It cannot be replaced by generic setup.".into()),
+        None => None,
+    })
+}
+
+/// True while a Genesis-allocated Entity has not finished awakening.
+pub(crate) fn awaiting_awakening(state: &HiveDaemonState, entity_id: &str) -> Result<bool, String> {
+    Ok(state
+        .genesis
+        .list(OWNER)
+        .map_err(|_| "Genesis records are unavailable. Try again shortly.".to_string())?
+        .iter()
+        .any(|session| {
+            session.definition.entity_id.as_deref() == Some(entity_id)
+                && session.awakening.is_none()
+        }))
+}
+
+/// Static quest content. Trial weight effects stay hidden so the mentor
+/// chooses on values, as the Soul Forge intends.
+async fn quest_catalog() -> Json<ApiEnvelope<Value>> {
+    let engine = soul_forge::SoulForgeEngine::new();
+    let trials: Vec<Value> = engine
+        .scenarios()
+        .iter()
+        .map(|s| json!({"id": s.id, "title": s.title, "description": s.description,
+            "choices": s.choices.iter().map(|c| json!({"id": c.id, "label": c.label, "description": c.description})).collect::<Vec<_>>()}))
+        .collect();
+    result(Ok(json!({
+        "stages": QuestStage::ALL.iter().map(|s| json!({"stage": s, "title": s.title(), "summary": s.summary(), "optional": s.optional()})).collect::<Vec<_>>(),
+        "badges": badge_views(&[]),
+        "temperament_cards": temperament_cards(),
+        "palettes": Palette::ALL.iter().map(|p| json!({"palette": p, "unlocked_by": p.unlocked_by()})).collect::<Vec<_>>(),
+        "crests": Crest::ALL.iter().map(|c| json!({"crest": c, "unlocked_by": c.unlocked_by()})).collect::<Vec<_>>(),
+        "trials": trials,
+        "instincts": abigail_core::templates::INSTINCTS_MD,
+    })))
 }
 fn checked(state: &HiveDaemonState, id: &str, revision: u64) -> Result<GenesisSession, String> {
     let session = session(state, id)?;
@@ -139,7 +261,12 @@ async fn list(State(state): State<HiveDaemonState>) -> Json<ApiEnvelope<Value>> 
         state
             .genesis
             .list(OWNER)
-            .map(|sessions| json!(sessions.into_iter().map(view).collect::<Vec<_>>()))
+            .map(|sessions| {
+                json!(sessions
+                    .into_iter()
+                    .map(|s| view(&state, s))
+                    .collect::<Vec<_>>())
+            })
             .map_err(|e| e.to_string()),
     )
 }
@@ -161,14 +288,14 @@ async fn create(
         let mut session = GenesisSession::new(id(), OWNER.into(), body.mode, now());
         session.append_message(GenesisMessage { id: id(), role: "assistant".into(), content: "What kind of presence would you like to welcome into your home? Begin with a name, a purpose, or a single intriguing spark.".into(), created_at: now(), input_mode: body.mode })?;
         state.genesis.create(&session).map_err(|e| e.to_string())?;
-        Ok(view(session))
+        Ok(view(&state, session))
     })())
 }
 async fn load(
     State(state): State<HiveDaemonState>,
     Path(id): Path<String>,
 ) -> Json<ApiEnvelope<Value>> {
-    result(session(&state, &id).map(view))
+    result(session(&state, &id).map(|s| view(&state, s)))
 }
 async fn remove(
     State(state): State<HiveDaemonState>,
@@ -237,6 +364,19 @@ enum Action {
     },
     ClearTranscript,
     Activate,
+    /// Turns a temperament stat card into a pending personality proposal.
+    ChooseTemperament {
+        card_id: String,
+    },
+    ChooseTrial {
+        scenario_id: String,
+        choice_id: String,
+    },
+    ClearTrials,
+    AcknowledgeInstincts,
+    SetPresence {
+        presence: PresenceChoice,
+    },
 }
 async fn action(
     State(state): State<HiveDaemonState>,
@@ -250,7 +390,7 @@ async fn action(
         let sync_media_after_save = matches!(&body.action, Action::Undo);
         match body.action {
             Action::Activate => {
-                return activate(&state, draft).await.map(view);
+                return activate(&state, draft).await.map(|s| view(&state, s));
             }
             Action::Update { updates } => {
                 if updates.len() > 13 {
@@ -314,7 +454,74 @@ async fn action(
                 draft.last_error = None;
                 draft.touch(&time);
             }
+            Action::ChooseTemperament { card_id } => {
+                let (card, personality) =
+                    temperament_proposal(&card_id, &draft.definition.personality)?;
+                let value = json!(personality);
+                if draft.definition.field_value(GenesisField::Personality) == value {
+                    return Err(
+                        "This temperament is already part of the confirmed personality.".into(),
+                    );
+                }
+                if draft.proposals.iter().any(|p| {
+                    p.status == ProposalStatus::Pending
+                        && p.field == GenesisField::Personality
+                        && p.value == value
+                }) {
+                    return Err("This temperament card is already waiting for your review.".into());
+                }
+                draft.propose(
+                    GenesisProposal {
+                        id: id_fn(),
+                        field: GenesisField::Personality,
+                        value,
+                        rationale: format!("Temperament card: {}. {}", card.title, card.tagline),
+                        source_ref: None,
+                        status: ProposalStatus::Pending,
+                    },
+                    &time,
+                )?;
+            }
+            Action::ChooseTrial {
+                scenario_id,
+                choice_id,
+            } => {
+                let offered = soul_forge::SoulForgeEngine::new()
+                    .scenarios()
+                    .iter()
+                    .any(|s| s.id == scenario_id && s.choices.iter().any(|c| c.id == choice_id));
+                if !offered {
+                    return Err("Choose one of the offered answers for this trial.".into());
+                }
+                draft.quest.choose_trial(TrialChoice {
+                    scenario_id,
+                    choice_id,
+                })?;
+                draft.touch(&time);
+                if draft.state == GenesisState::Ready {
+                    draft.transition(GenesisState::Review, &time)?;
+                }
+            }
+            Action::ClearTrials => {
+                draft.quest.trial_choices.clear();
+                draft.touch(&time);
+                if draft.state == GenesisState::Ready {
+                    draft.transition(GenesisState::Review, &time)?;
+                }
+            }
+            Action::AcknowledgeInstincts => {
+                draft
+                    .quest
+                    .instincts_acknowledged_at
+                    .get_or_insert_with(|| time.clone());
+                draft.touch(&time);
+            }
+            Action::SetPresence { presence } => {
+                set_presence(&state, &mut draft, presence)?;
+                draft.touch(&time);
+            }
         }
+        award_session(&state, &mut draft, &time);
         state
             .genesis
             .save(&draft, body.expected_revision)
@@ -322,7 +529,7 @@ async fn action(
         if sync_media_after_save {
             media_sync_entity_record(&state, &draft)?;
         }
-        Ok(view(draft))
+        Ok(view(&state, draft))
     }
     .await;
     result(answer)
@@ -383,7 +590,7 @@ async fn message(
         }
         draft.touch(&now());
         state.genesis.save(&draft, saved_revision).map_err(|e| e.to_string())?;
-        Ok(view(draft))
+        Ok(view(&state, draft))
     }.await;
     result(answer)
 }
@@ -422,7 +629,7 @@ async fn import(
                     draft.last_error = Some(error);
                     draft.touch(&now());
                     state.genesis.save(&draft, revision).map_err(|e|e.to_string())?;
-                    let mut value = view(draft);
+                    let mut value = view(&state, draft);
                     value["import_preview"] = json!(preview);
                     return Ok(value);
                 }
@@ -456,7 +663,7 @@ async fn import(
         }
         preview.proposal_ids = draft.proposals.iter().filter(|p| p.source_ref.as_deref() == Some(&preview.source_id)).map(|p|p.id.clone()).collect();
         preview.conflict_ids = draft.conflicts.iter().filter(|c| preview.proposal_ids.contains(&c.proposal_id)).map(|c|c.id.clone()).collect();
-        let mut value = view(draft); value["import_preview"] = json!(preview); Ok(value)
+        let mut value = view(&state, draft); value["import_preview"] = json!(preview); Ok(value)
     }.await)
 }
 async fn export(
@@ -485,13 +692,18 @@ async fn activate(
             .identity_manager
             .create_agent(&draft.definition.name)
             .map_err(|e| e.to_string())?;
-        draft.definition.entity_id = Some(entity_id);
+        draft.definition.entity_id = Some(entity_id.clone());
         draft.touch(&now());
         // Persist the allocated identity before any fallible birth work so retries reuse it.
-        state
-            .genesis
-            .save(&draft, expected)
-            .map_err(|e| e.to_string())?;
+        if let Err(error) = state.genesis.save(&draft, expected) {
+            // Nothing references the new identity yet; leave no orphan Entity behind.
+            if let Err(cleanup) = state.identity_manager.delete_agent(&entity_id) {
+                tracing::warn!(
+                    "Could not remove unsaved Genesis allocation {entity_id}: {cleanup}"
+                );
+            }
+            return Err(error.to_string());
+        }
         expected = draft.revision;
     }
     let entity_id = draft.definition.entity_id.clone().unwrap();
@@ -510,12 +722,24 @@ async fn activate(
     state
         .identity_manager
         .update_agent_name(&entity_id, &draft.definition.name)?;
+    // Answered trials forge the soul; otherwise the balanced quickstart soul.
+    let (path, choices) = if draft.quest.trials_complete() {
+        let choices = draft
+            .quest
+            .trial_choices
+            .iter()
+            .map(|c| (c.scenario_id.clone(), c.choice_id.clone()))
+            .collect();
+        ("forge", choices)
+    } else {
+        ("quickstart", vec![])
+    };
     let response = crate::birth::perform_birth_with_genesis(
         state.clone(),
         entity_id.clone(),
         BirthRiteRequest {
-            path: "quickstart".into(),
-            choices: vec![],
+            path: path.into(),
+            choices,
             purpose: Some(draft.definition.purpose.clone()),
         },
         Some(&draft.definition),
@@ -542,6 +766,12 @@ async fn activate(
     let canonical = serde_json::to_string_pretty(&draft.definition).map_err(|e| e.to_string())?;
     abigail_core::secure_fs::write_string_atomic(&config.docs_dir.join("genesis.json"), &canonical)
         .map_err(|e| e.to_string())?;
+    if let Some(card) = draft.quest.presence.as_ref() {
+        // Recompose so the card shows the approved, now-signed name and purpose.
+        let card = PresenceCard::compose(card.choice(), &draft.definition);
+        crate::journey::save_presence(state, &entity_id, &card)?;
+        draft.quest.presence = Some(card);
+    }
     let introduction = format!(
         "I am {}. You gave me a purpose: {}. {}{}I’m ready to begin our story together.",
         draft.definition.name,
@@ -593,10 +823,15 @@ async fn activate(
         },
         draft.definition.revision
     ));
+    award_session(state, &mut draft, &now());
     state
         .genesis
         .save(&draft, expected)
         .map_err(|e| e.to_string())?;
+    // The journey only mirrors badges already saved above; Genesis stays canon.
+    if let Err(error) = crate::journey::record_awakening(state, &draft) {
+        tracing::warn!("Could not record the journey for {entity_id}: {error}");
+    }
     Ok(draft)
 }
 
@@ -793,7 +1028,7 @@ async fn media_approve(
         }
         media_sync_session(&state, &mut draft)?;
         media_sync_entity_record(&state, &draft)?;
-        Ok(json!({"asset":approved,"session":view(draft)}))
+        Ok(json!({"asset":approved,"session":view(&state, draft)}))
     })())
 }
 async fn media_delete(
@@ -837,7 +1072,7 @@ async fn media_delete(
         draft.definition.revision += 1;
         media_sync_session(&state, &mut draft)?;
         media_sync_entity_record(&state, &draft)?;
-        Ok(view(draft))
+        Ok(view(&state, draft))
     })())
 }
 
@@ -1001,6 +1236,248 @@ mod tests {
         assert_eq!(valid.expected_revision, 7);
     }
 
+    async fn begin(state: &HiveDaemonState) -> String {
+        let Json(created) = create(
+            State(state.clone()),
+            Json(CreateRequest {
+                mode: GenesisMode::Guided,
+            }),
+        )
+        .await;
+        created.data.unwrap()["id"].as_str().unwrap().to_owned()
+    }
+
+    async fn act(state: &HiveDaemonState, id: &str, mut body: Value) -> Result<Value, String> {
+        body["expected_revision"] = json!(session(state, id)?.revision);
+        let request: ActionRequest = serde_json::from_value(body).map_err(|e| e.to_string())?;
+        let Json(answer) = action(State(state.clone()), Path(id.into()), Json(request)).await;
+        answer.data.ok_or_else(|| answer.error.unwrap_or_default())
+    }
+
+    async fn reserve(state: &HiveDaemonState, id: &str) {
+        act(
+            state,
+            id,
+            json!({"action":"update","updates":[
+                {"field":"name","value":"Nova"},
+                {"field":"purpose","value":"Help our family learn about the stars"},
+                {"field":"boundaries","value":["Ask a grown-up before plans change"]}]}),
+        )
+        .await
+        .unwrap();
+    }
+
+    fn presence(identity: &str, crest: &str) -> Value {
+        json!({"action":"set_presence","presence":{
+            "temperament":"curious","identity":identity,"crest":crest,"motion":"calm"}})
+    }
+
+    #[test]
+    fn quest_trial_count_matches_the_soul_forge() {
+        assert_eq!(
+            soul_forge::SoulForgeEngine::new().scenarios().len(),
+            SOUL_FORGE_TRIALS
+        );
+    }
+
+    #[tokio::test]
+    async fn quest_birth_forges_the_soul_and_keeps_presence_out_of_prompts() {
+        let (state, _) = crate::routes::tests::build_state();
+        let id = begin(&state).await;
+        reserve(&state, &id).await;
+
+        let carded = act(
+            &state,
+            &id,
+            json!({"action":"choose_temperament","card_id":"curious-explorer"}),
+        )
+        .await
+        .unwrap();
+        let pending: Vec<_> = carded["proposals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p["status"] == "pending" && p["field"] == "personality")
+            .collect();
+        assert_eq!(pending.len(), 1, "a stat card is only a proposal");
+        assert!(carded["definition"]["personality"]["curiosity"].is_null());
+        assert!(act(
+            &state,
+            &id,
+            json!({"action":"choose_temperament","card_id":"curious-explorer"})
+        )
+        .await
+        .is_err());
+        assert!(act(
+            &state,
+            &id,
+            json!({"action":"choose_trial","scenario_id":"invented","choice_id":"x"})
+        )
+        .await
+        .is_err());
+        for scenario in soul_forge::SoulForgeEngine::new().scenarios() {
+            act(
+                &state,
+                &id,
+                json!({"action":"choose_trial","scenario_id":scenario.id,"choice_id":scenario.choices[0].id}),
+            )
+            .await
+            .unwrap();
+        }
+        // Constellation is earned only after many mentoring conversations.
+        let locked = act(&state, &id, presence("aether", "constellation")).await;
+        assert!(locked.unwrap_err().contains("unlock"));
+        let quest = act(&state, &id, presence("tide", "orbit")).await.unwrap()["quest"].clone();
+        assert_eq!(quest["soul_path"], "forge");
+        assert_eq!(quest["presence"]["name"], "Nova");
+
+        let awakened = act(&state, &id, json!({"action":"activate"}))
+            .await
+            .unwrap();
+        let entity_id = awakened["definition"]["entity_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let config = state.identity_manager.load_agent(&entity_id).unwrap();
+        let certificate: hive_core::BirthCertificate = serde_json::from_str(
+            &std::fs::read_to_string(config.docs_dir.join("birth_certificate.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(certificate.birth_path, "forge");
+        let journey = crate::journey::tests::view(&state, &entity_id);
+        assert_eq!(journey["certificate"]["signature_verified"], true);
+        let earned: Vec<_> = journey["badges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|b| !b["earned_at"].is_null())
+            .map(|b| b["badge"].as_str().unwrap().to_owned())
+            .collect();
+        for badge in ["first_light", "trial_walker", "presence_chosen", "named"] {
+            assert!(earned.iter().any(|b| b == badge), "{badge} in {earned:?}");
+        }
+
+        let presence_path = state
+            .identity_manager
+            .agent_dir(&entity_id)
+            .unwrap()
+            .join("presence.json");
+        assert!(presence_path.exists());
+        assert!(!config.docs_dir.join("presence.json").exists());
+        let prompt =
+            abigail_core::system_prompt::build_system_prompt(&config.docs_dir, &config.agent_name);
+        assert!(!prompt.contains("\"crest\""));
+        assert!(!prompt.contains("tide"));
+
+        // Generic setup may not replace the signed Genesis story.
+        let Json(generic) = crate::birth::perform_birth(
+            State(state.clone()),
+            Path(entity_id.clone()),
+            Json(BirthRiteRequest {
+                path: "quickstart".into(),
+                choices: vec![],
+                purpose: None,
+            }),
+        )
+        .await;
+        assert!(!generic.ok);
+    }
+
+    #[tokio::test]
+    async fn generic_birth_and_open_wait_for_genesis_awakening() {
+        let (state, unrelated) = crate::routes::tests::build_state();
+        let id = begin(&state).await;
+        reserve(&state, &id).await;
+        let (allocated, _) = state.identity_manager.create_agent("Nova").unwrap();
+        let mut draft = session(&state, &id).unwrap();
+        let revision = draft.revision;
+        draft.definition.entity_id = Some(allocated.clone());
+        draft.touch(&now());
+        state.genesis.save(&draft, revision).unwrap();
+
+        let birth = |entity: String| {
+            crate::birth::perform_birth(
+                State(state.clone()),
+                Path(entity),
+                Json(BirthRiteRequest {
+                    path: "quickstart".into(),
+                    choices: vec![],
+                    purpose: None,
+                }),
+            )
+        };
+        let Json(held) = birth(allocated.clone()).await;
+        assert!(held.error.unwrap().contains("Genesis"));
+        assert!(
+            !state
+                .identity_manager
+                .load_agent(&allocated)
+                .unwrap()
+                .birth_complete
+        );
+        let Json(open) =
+            crate::routes::open_entity(State(state.clone()), Path(allocated.clone())).await;
+        assert!(open.error.unwrap().contains("Genesis"));
+        let Json(ordinary) = birth(unrelated).await;
+        assert!(ordinary.ok, "{:?}", ordinary.error);
+    }
+
+    #[tokio::test]
+    async fn activation_leaves_no_orphan_entity_when_the_draft_cannot_be_saved() {
+        let (state, _) = crate::routes::tests::build_state();
+        let before = state.identity_manager.list_agents().unwrap().len();
+        let mut draft = GenesisSession::new(id(), OWNER.into(), GenesisMode::Guided, now());
+        draft
+            .apply_updates(
+                vec![
+                    FieldUpdate {
+                        field: GenesisField::Name,
+                        value: json!("Nova"),
+                        source_ref: None,
+                    },
+                    FieldUpdate {
+                        field: GenesisField::Purpose,
+                        value: json!("Stars"),
+                        source_ref: None,
+                    },
+                ],
+                "edit",
+                &now(),
+            )
+            .unwrap();
+        // Never stored, so saving the allocation fails.
+        assert!(activate(&state, draft).await.is_err());
+        assert_eq!(state.identity_manager.list_agents().unwrap().len(), before);
+    }
+
+    #[tokio::test]
+    async fn quest_actions_are_mentor_only_and_monotonic() {
+        let (state, _) = crate::routes::tests::build_state();
+        let id = begin(&state).await;
+        reserve(&state, &id).await;
+        let acknowledged = act(&state, &id, json!({"action":"acknowledge_instincts"}))
+            .await
+            .unwrap();
+        let first = acknowledged["quest"]["instincts_acknowledged_at"].clone();
+        assert!(!first.is_null());
+        let again = act(&state, &id, json!({"action":"acknowledge_instincts"}))
+            .await
+            .unwrap();
+        assert_eq!(again["quest"]["instincts_acknowledged_at"], first);
+        // Lantern unlocks with InstinctKeeper.
+        act(&state, &id, presence("aether", "lantern"))
+            .await
+            .unwrap();
+        act(&state, &id, json!({"action":"undo"})).await.unwrap();
+        let after = session(&state, &id).unwrap();
+        assert!(after.quest.earned_badges().contains(&Badge::Named));
+        assert!(serde_json::from_value::<ActionRequest>(json!({
+            "action":"set_presence","expected_revision":0,
+            "presence":{"temperament":"gentle","identity":"aether","permissions":{"shell":true}}
+        }))
+        .is_err());
+    }
+
     #[test]
     fn session_view_reports_only_confirmed_essence() {
         let mut draft =
@@ -1018,8 +1495,17 @@ mod tests {
                 &now(),
             )
             .unwrap();
-        assert_eq!(view(draft.clone())["essence"]["identity"], 0);
+        let signals = QuestSignals::default();
+        let before = view_with(draft.clone(), signals);
+        assert_eq!(before["essence"]["identity"], 0);
+        assert_eq!(before["quest"]["stages"][0]["complete"], false);
         draft.review_proposal("p1", true, false, &now()).unwrap();
-        assert_eq!(view(draft)["essence"]["identity"], 50);
+        let after = view_with(draft, signals);
+        assert_eq!(after["essence"]["identity"], 50);
+        assert!(after["quest"]["badges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|b| b["badge"] == "named" && !b["earned_at"].is_null()));
     }
 }

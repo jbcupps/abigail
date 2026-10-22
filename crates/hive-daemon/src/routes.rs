@@ -566,6 +566,15 @@ pub async fn open_entity(
     State(state): State<HiveDaemonState>,
     Path(entity_id): Path<String>,
 ) -> Json<ApiEnvelope<EntityOpenResponse>> {
+    match crate::genesis::awaiting_awakening(&state, &entity_id) {
+        Ok(false) => {}
+        Ok(true) => {
+            return Json(ApiEnvelope::error(
+                "This Entity is still being created. Finish its awakening in Genesis first.",
+            ))
+        }
+        Err(error) => return Json(ApiEnvelope::error(error)),
+    }
     match state.supervisor.ensure_entity_running(&entity_id).await {
         Ok(local_url) => Json(ApiEnvelope::success(EntityOpenResponse {
             entity_id,
@@ -1188,6 +1197,15 @@ pub(crate) mod tests {
                 genesis_media: Arc::new(
                     crate::genesis_media::GenesisMediaService::new(&data_root, hive.clone())
                         .unwrap(),
+                ),
+                journeys: Arc::new(
+                    crate::journey::JourneyStore::new(
+                        abigail_persistence::PersistenceHandle::open_ephemeral(
+                            abigail_persistence::EntityScope::Hive,
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap(),
                 ),
                 control_token: Arc::new("c0".repeat(32)),
                 genesis_control: Arc::new(crate::genesis::GenesisControl::default()),

@@ -95,6 +95,10 @@ pub async fn perform_birth(
     Path(entity_id): Path<String>,
     Json(body): Json<BirthRiteRequest>,
 ) -> Json<ApiEnvelope<BirthRiteResponse>> {
+    match crate::genesis::genesis_hold(&state, &entity_id) {
+        Ok(None) => {}
+        Ok(Some(reason)) | Err(reason) => return Json(ApiEnvelope::error(reason)),
+    }
     perform_birth_with_genesis(state, entity_id, body, None).await
 }
 

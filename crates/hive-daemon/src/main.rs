@@ -13,6 +13,7 @@ mod genesis_http;
 mod genesis_media;
 mod genesis_retention;
 mod genesis_store;
+mod journey;
 mod persistence;
 mod routes;
 mod runtime_registry;
@@ -122,6 +123,7 @@ async fn run() -> anyhow::Result<()> {
             &data_root,
             hive.clone(),
         )?),
+        journeys: Arc::new(journey::JourneyStore::new(_shared_store.clone())?),
         control_token: Arc::new(access::load_or_create_control_token(&data_root)?),
         genesis_control: Arc::new(genesis::GenesisControl::default()),
         identity_manager,

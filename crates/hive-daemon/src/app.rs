@@ -1,7 +1,7 @@
 //! The Hive daemon's HTTP surface.
 
 use crate::state::HiveDaemonState;
-use crate::{access, birth, genesis, persistence, routes};
+use crate::{access, birth, genesis, journey, persistence, routes};
 use axum::http::header;
 use axum::routing::{get, post};
 use axum::Router;
@@ -36,6 +36,13 @@ pub fn router(state: HiveDaemonState) -> Router {
         .route("/v1/entities/:id/open", post(routes::open_entity))
         .route("/v1/entities/:id/close", post(routes::close_entity))
         .route("/v1/entities/:id/persistence", post(persistence::request))
+        .route("/v1/entities/:id/journey", get(journey::get_journey))
+        .route(
+            "/v1/entities/:id/presence",
+            get(journey::get_presence)
+                .put(journey::put_presence)
+                .layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
+        )
         .route("/v1/birth/scenarios", get(birth::get_scenarios))
         .route(
             "/v1/entities/:id/birth",
