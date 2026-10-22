@@ -326,7 +326,7 @@ passed:
 - `cargo fmt --all -- --check`;
 - strict all-target Clippy for `entity-daemon`, `hive-core`, `hive-daemon`,
   `abigail-app` and `soul-forge`;
-- affected Rust suites for those five packages: 269 tests passed and 8
+- affected Rust suites for those five packages: 270 tests passed and 8
   pre-existing daemon cluster tests were ignored;
 - `cd hive-app/src-ui && npm test && npm run build`: production build plus
   92 tests across 18 files;
@@ -338,8 +338,9 @@ weight-rejection assertion in the legacy Tauri frontend. Rust presentation
 commands mention axis keys only in tests that reject leakage; calculation
 remains internal. The journey producer scan confirms that successful
 `skill_used` events are staged atomically by Ego before success publication,
-the journal does not enqueue a duplicate, and explicit memory events contain
-only their allowed IDs and weight class. None adds content to
+exact record retries map to one atomic local ledger event, the journal does not
+enqueue a duplicate, and explicit memory events contain only their allowed IDs
+and weight class. None adds content to
 `entity_journey_event`.
 
 This is source, build and automated fixture verification only. No installer,
