@@ -6,7 +6,9 @@
 
 pub mod job_tools;
 
-use abigail_capabilities::cognitive::{Message, StreamEvent, ToolCall, ToolDefinition};
+use abigail_capabilities::cognitive::{
+    CompletionResponse, Message, StreamEvent, ToolCall, ToolDefinition,
+};
 use abigail_queue::JobQueue;
 use abigail_router::IdEgoRouter;
 use abigail_skills::manifest::SkillId;
