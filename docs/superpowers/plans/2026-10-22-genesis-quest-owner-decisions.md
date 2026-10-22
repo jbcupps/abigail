@@ -222,8 +222,9 @@ git push -u origin cursor/genesis-quest-gamification-4871
 **Interfaces:**
 - `SCORING_VERSION = "triangle-ethic-v1"`
 - `BirthCertificate.scoring_version`
+- `BirthCertificate.payload_version = 3` for new issuance
 - `BirthCertificateSummary` without weights
-- version-1 and version-2 certificate payload/verification helpers
+- injective version-3 issuance plus raw version-1/version-2 compatibility
 
 - [ ] **Step 1: Write failing serialization leak test**
 
@@ -243,17 +244,19 @@ birth POST.
 
 - [ ] **Step 2: Write failing certificate-version tests**
 
-Assert new certificates contain `scoring_version = "triangle-ethic-v1"` and a
-tampered scoring version or hidden weight invalidates the v2 signature. Remove
-the scoring-version field from a fixture and prove its original v1 payload still
-verifies.
+Assert new certificates contain `payload_version = 3` and
+`scoring_version = "triangle-ethic-v1"`. Delimiter/newline injection and any
+tampered displayed field, scoring version, or hidden weight must invalidate the
+v3 signature. Prove original raw v1 and prior scoring-stamped raw v2 fixtures
+still verify.
 
 - [ ] **Step 3: Implement internal/public certificate split**
 
 Keep `BirthCertificate` full for disk/runtime. Add `BirthCertificateSummary`.
-Sign new certificates with a v2 payload containing scoring version and all four
-hidden weights. Select legacy payload verification based on whether the raw
-JSON contained `scoring_version`.
+Sign new certificates with the injective, length-prefixed v3 payload containing
+all displayed fields, scoring version, and all four hidden weights. Select raw
+v1/v2 compatibility based on persisted key presence, and reject unsupported
+explicit payload versions.
 
 - [ ] **Step 4: Gate non-Genesis routes**
 

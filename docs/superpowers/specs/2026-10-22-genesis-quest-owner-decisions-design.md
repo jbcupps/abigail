@@ -102,10 +102,12 @@ artifacts. It gains:
 scoring_version: "triangle-ethic-v1"
 ```
 
-The signature payload becomes version 2 and includes `scoring_version` plus the
-hidden weights, so those values cannot be altered independently. Verification
-continues to accept version-1 certificates that lack `scoring_version` by
-reconstructing their original version-1 payload.
+New certificates carry explicit `payload_version: 3`. Their injective canonical
+payload length-prefixes every field and binds all displayed fields,
+`scoring_version`, and the exact hidden-weight bits. Verification continues to
+accept raw version-1 certificates that lack both version keys and prior raw
+version-2 certificates selected by `scoring_version` without an explicit
+`payload_version`.
 
 Public responses use `BirthCertificateSummary`, containing only:
 

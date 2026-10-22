@@ -525,43 +525,21 @@ const rite = {
   },
 
   renderReveal(certificate, retempered) {
-    const stats = [
-      { label: "Duty · deontology", value: certificate.weights.deontology, warm: false },
-      { label: "Outcomes · teleology", value: certificate.weights.teleology, warm: true },
-      { label: "Virtue · areteology", value: certificate.weights.areteology, warm: false },
-      { label: "Care · welfare", value: certificate.weights.welfare, warm: true },
-    ];
+    const pathLabel = certificate.birth_path === "forge" ? "Forged from the trials" : "Balanced awakening";
+    const scoringLabel = certificate.scoring_version || "Legacy scoring";
+    const signatureLabel = certificate.signature_verified
+      ? "Signed by your Hive"
+      : "Signature could not be verified";
     this.render(`
       <p class="rite-eyebrow">${retempered ? "Soul Re-tempered" : "A Soul Emerges"}</p>
       <h2 class="rite-archetype">${escapeHtml(certificate.archetype)}</h2>
       <p class="rite-epithet">${escapeHtml(certificate.epithet)}</p>
-      <div class="rite-stats">
-        ${stats
-          .map(
-            (stat) => `
-          <div>
-            <div class="rite-stat-label">
-              <span>${stat.label}</span>
-              <span>${Math.round(stat.value * 100)}%</span>
-            </div>
-            <div class="rite-stat-track">
-              <div class="rite-stat-fill${stat.warm ? " warm" : ""}" data-width="${Math.round(stat.value * 100)}"></div>
-            </div>
-          </div>`,
-          )
-          .join("")}
-      </div>
+      <p class="rite-lede">${escapeHtml(pathLabel)} · ${escapeHtml(scoringLabel)} · ${escapeHtml(signatureLabel)}</p>
       <pre class="rite-sigil">${escapeHtml(certificate.sigil.trim())}</pre>
       <div class="rite-actions">
         <button type="button" data-action="certificate">View Birth Certificate</button>
       </div>
     `);
-    // Animate the stat bars in after layout.
-    requestAnimationFrame(() => {
-      for (const fill of this.stage.querySelectorAll(".rite-stat-fill")) {
-        fill.style.width = `${fill.dataset.width}%`;
-      }
-    });
     this.stage.querySelector("[data-action='certificate']").addEventListener("click", () => {
       this.renderCertificate(certificate);
     });
@@ -576,18 +554,17 @@ const rite = {
       <p class="rite-eyebrow">Certificate of Birth</p>
       <div class="rite-certificate">
         <div class="cert-head">Abigail Hive · Signed &amp; Witnessed</div>
-        <div class="cert-name">${escapeHtml(certificate.entity_name)}</div>
+        <div class="cert-name">Birth Certificate</div>
         <div class="cert-arch">${escapeHtml(certificate.archetype)}</div>
+        <p class="rite-epithet">${escapeHtml(certificate.epithet)}</p>
         <dl>
           <dt>Born</dt><dd>${escapeHtml(issuedDisplay)}</dd>
           <dt>Path</dt><dd>${certificate.birth_path === "forge" ? "The Soul Forge" : "Quick Awakening"}</dd>
-          <dt>Soul Hash</dt><dd>${escapeHtml(certificate.soul_hash.slice(0, 24))}…</dd>
-          <dt>Sealed By</dt><dd>${escapeHtml(certificate.master_public_key.slice(0, 24))}…</dd>
-          <dt>Signature</dt><dd>${escapeHtml(certificate.signature.slice(0, 24))}…</dd>
+          <dt>Scoring</dt><dd>${escapeHtml(certificate.scoring_version || "Legacy scoring")}</dd>
+          <dt>Hive Signature</dt><dd>${certificate.signature_verified ? "Verified" : "Could not be verified"}</dd>
         </dl>
       </div>
-      <p class="rite-lede">The certificate lives beside ${escapeHtml(certificate.entity_name)}'s soul
-      documents, sealed by the Hive's master key.</p>
+      <p class="rite-lede">The complete signed certificate stays with this Entity's private runtime identity.</p>
       <div class="rite-actions">
         <button type="button" data-action="enter">Enter the world</button>
       </div>

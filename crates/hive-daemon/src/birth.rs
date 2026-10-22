@@ -56,8 +56,8 @@ pub fn certificate_payload_v1(
     )
 }
 
-/// The current certificate payload. Besides the original identity fields, it
-/// binds the scoring contract and every internal ethical weight.
+/// The prior scoring-stamped v2 payload, retained byte-for-byte for
+/// certificates issued before explicit payload version 3.
 pub fn certificate_payload_v2(certificate: &BirthCertificate) -> String {
     format!(
         "abigail-birth-certificate-v2\nentity_id={}\nentity_name={}\narchetype={}\nepithet={}\nsigil={}\nsoul_hash={}\nbirth_path={}\nissued_at={}\nscoring_version={}\ndeontology_bits={:08x}\nteleology_bits={:08x}\nareteology_bits={:08x}\nwelfare_bits={:08x}",

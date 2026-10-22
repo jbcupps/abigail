@@ -14,11 +14,25 @@ interface ForgeScenarioInfo {
   choices: ForgeChoice[];
 }
 
-interface SoulOutput {
+interface ForgeInvokeOutput {
   archetype: string;
   weights: { deontology: number; teleology: number; areteology: number; welfare: number };
   soul_hash: string;
   sigil: string;
+}
+
+export interface ForgeDisplayOutput {
+  archetype: string;
+  soul_hash: string;
+  sigil: string;
+}
+
+function sanitizeForgeOutput(output: ForgeInvokeOutput): ForgeDisplayOutput {
+  return {
+    archetype: output.archetype,
+    soul_hash: output.soul_hash,
+    sigil: output.sigil,
+  };
 }
 
 interface ToolOutput {
@@ -28,14 +42,14 @@ interface ToolOutput {
 }
 
 interface Props {
-  onComplete: (output: SoulOutput) => void;
+  onComplete: (output: ForgeDisplayOutput) => void;
 }
 
 export default function ForgeScenario({ onComplete }: Props) {
   const [scenarios, setScenarios] = useState<ForgeScenarioInfo[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selections, setSelections] = useState<Record<string, string>>({});
-  const [soulOutput, setSoulOutput] = useState<SoulOutput | null>(null);
+  const [soulOutput, setSoulOutput] = useState<ForgeDisplayOutput | null>(null);
   const [loading, setLoading] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
@@ -69,8 +83,8 @@ export default function ForgeScenario({ onComplete }: Props) {
     try {
       // Send all selections to backend
       const choiceIds = scenarios.map((s) => selections[s.id]).filter(Boolean);
-      const output = await invoke<SoulOutput>("crystallize_forge", { choices: choiceIds });
-      setSoulOutput(output);
+      const output = await invoke<ForgeInvokeOutput>("crystallize_forge", { choices: choiceIds });
+      setSoulOutput(sanitizeForgeOutput(output));
     } catch (e) {
       console.error("Failed to crystallize:", e);
     } finally {
@@ -109,25 +123,6 @@ export default function ForgeScenario({ onComplete }: Props) {
         <div className="bg-theme-bg-elevated rounded-lg p-6 w-full text-center">
           <p className="text-theme-text-dim text-sm mb-2">Archetype</p>
           <h3 className="text-xl font-bold text-theme-info mb-4">{soulOutput.archetype}</h3>
-
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div className="bg-theme-surface rounded p-2">
-              <p className="text-xs text-theme-text-dim">Deontology</p>
-              <p className="text-theme-text-bright font-mono">{(soulOutput.weights.deontology * 100).toFixed(0)}%</p>
-            </div>
-            <div className="bg-theme-surface rounded p-2">
-              <p className="text-xs text-theme-text-dim">Teleology</p>
-              <p className="text-theme-text-bright font-mono">{(soulOutput.weights.teleology * 100).toFixed(0)}%</p>
-            </div>
-            <div className="bg-theme-surface rounded p-2">
-              <p className="text-xs text-theme-text-dim">Areteology</p>
-              <p className="text-theme-text-bright font-mono">{(soulOutput.weights.areteology * 100).toFixed(0)}%</p>
-            </div>
-            <div className="bg-theme-surface rounded p-2">
-              <p className="text-xs text-theme-text-dim">Welfare</p>
-              <p className="text-theme-text-bright font-mono">{(soulOutput.weights.welfare * 100).toFixed(0)}%</p>
-            </div>
-          </div>
 
           <pre className="text-theme-success text-xs font-mono whitespace-pre mb-4">{soulOutput.sigil}</pre>
 

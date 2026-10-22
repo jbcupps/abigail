@@ -5,7 +5,7 @@ import ApiKeyModal from "./ApiKeyModal";
 import SoulCrystallization from "./SoulCrystallization";
 import GenesisPathSelector from "./GenesisPathSelector";
 import GenesisChat from "./GenesisChat";
-import ForgeScenario from "./ForgeScenario";
+import ForgeScenario, { type ForgeDisplayOutput } from "./ForgeScenario";
 import type { CrystallizationIdentityDraft } from "./crystallizationPaths";
 import CrystallizationPathFast from "./CrystallizationPathFast";
 import CrystallizationPathDialog from "./CrystallizationPathDialog";
@@ -426,7 +426,7 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     setStage("SoulPreview");
   };
 
-  const handleForgeComplete = (_output: { archetype: string; weights: Record<string, number>; soul_hash: string; sigil: string }) => {
+  const handleForgeComplete = (_output: ForgeDisplayOutput) => {
     // After Soul Forge, move to Emergence
     setStage("Emergence");
   };
