@@ -180,6 +180,12 @@ those surfaces. The full certificate remains only in local signed/runtime
 artifacts and the matching Entity Runtime's lease-scoped birth document;
 desktop control-token access cannot retrieve it.
 
+The legacy desktop Soul Forge also sanitizes at its Rust command boundary.
+Scenario DTOs contain only IDs, titles, descriptions and weight-free choices;
+the crystallization DTO contains only archetype, soul hash and sigil. Hidden
+weights remain inside `soul-forge` and never enter frontend state or completion
+callbacks.
+
 ### 3. Data-driven mentoring journey
 
 Badge titles, hints, XP, activity requirements, cosmetic unlocks and bond tiers
@@ -312,25 +318,28 @@ Relationship visualization and dedicated voice casting remain later enhancements
 as requested in the specification's staged-innovation section. Relationships and
 voice descriptions are already editable canonical fields.
 
-## Source verification — 2026-10-22
+## Final-review source verification — 2026-10-22
 
-Fresh verification on `cursor/genesis-quest-gamification-4871` passed:
+Fresh affected verification on `cursor/genesis-quest-gamification-4871`
+passed:
 
 - `cargo fmt --all -- --check`;
-- `cargo clippy --workspace --exclude abigail-app -- -D warnings`;
-- `cargo test --workspace --exclude abigail-app`: 1,084 test executions
-  passed and 10 were ignored across 112 Rust test/doc-test result groups;
-- `cd hive-app/src-ui && npm run build && npm test`: production build plus
-  86 tests across 16 files;
-- `cd entity-runtime-app/src-ui && npm run build && npm test`: production
-  build plus 7 tests across 3 files.
+- strict all-target Clippy for `entity-daemon`, `hive-core`, `hive-daemon`,
+  `abigail-app` and `soul-forge`;
+- affected Rust suites for those five packages: 269 tests passed and 8
+  pre-existing daemon cluster tests were ignored;
+- `cd hive-app/src-ui && npm test && npm run build`: production build plus
+  92 tests across 18 files;
+- `cd tauri-app/src-ui && npm test && npm run build`: production build plus
+  54 tests across 14 files.
 
-The ethics-key scan found only internal certificate construction/signing,
-runtime-only soul material and regressions that reject public leakage or assert
-the lease-only boundary; it found no Hive frontend occurrence. The journey
-content-word scan found the serialized whole-journey envelope, input-only
-Runtime outbox payload parsing into closed metadata, counters/comments, and
-privacy test fixtures/assertions. None adds content to
+The ethics-key scan found no occurrence in the tracked Hive reveal and only a
+weight-rejection assertion in the legacy Tauri frontend. Rust presentation
+commands mention axis keys only in tests that reject leakage; calculation
+remains internal. The journey producer scan confirms that successful
+`skill_used` events are staged atomically by Ego before success publication,
+the journal does not enqueue a duplicate, and explicit memory events contain
+only their allowed IDs and weight class. None adds content to
 `entity_journey_event`.
 
 This is source, build and automated fixture verification only. No installer,
