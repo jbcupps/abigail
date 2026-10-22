@@ -237,18 +237,26 @@ async fn respond(
             let findings: Vec<String> = gate.findings().iter().map(|f| f.rule.clone()).collect();
 
             match gate {
-                abigail_superego::GateDecision::Block(_) => EgoActionPayload {
-                    session_id: payload.session_id.clone(),
-                    status: "blocked".to_string(),
-                    error: Some(format!(
-                        "Response withheld by superego: {}",
-                        findings.join(", ")
-                    )),
-                    response: None,
-                    user_message: payload.message.clone(),
-                    superego_verdict: Some("block".to_string()),
-                    superego_findings: findings,
-                },
+                abigail_superego::GateDecision::Block(_) => {
+                    let error = if successful_skill_count > 0 {
+                        format!(
+                            "An action completed, but the response was withheld for safety. \
+                             Verify the result before repeating the action. Safety check: {}",
+                            findings.join(", ")
+                        )
+                    } else {
+                        format!("Response withheld by superego: {}", findings.join(", "))
+                    };
+                    EgoActionPayload {
+                        session_id: payload.session_id.clone(),
+                        status: "blocked".to_string(),
+                        error: Some(error),
+                        response: None,
+                        user_message: payload.message.clone(),
+                        superego_verdict: Some("block".to_string()),
+                        superego_findings: findings,
+                    }
+                }
                 gate => {
                     let response = ChatResponse {
                         reply: tool_result.content,
@@ -280,7 +288,13 @@ async fn respond(
             let user_error = if let Some(error) = reservation_error.as_deref() {
                 activity_reservation_error(error)
             } else if detail.to_lowercase().contains("interrupted by user") {
-                detail
+                if activity_record_id.is_some() {
+                    "An action may have completed before cancellation. \
+                     Verify the result before repeating the action."
+                        .to_string()
+                } else {
+                    detail
+                }
             } else {
                 tracing::warn!("Ego stage: chat turn failed: {}", detail);
                 friendly_turn_error()
@@ -409,7 +423,7 @@ fn activity_reservation_error(error: &str) -> String {
 fn completed_action_unsaved_reply(reply: &str) -> String {
     format!(
         "{reply}\n\nThe action completed, but this reply and its history could not be saved. \
-         No action needs to be repeated."
+         Verify the result before repeating the action."
     )
 }
 

@@ -729,8 +729,8 @@ fn has_successful_tool_call(records: &[ToolCallRecord]) -> bool {
 }
 
 fn partial_tool_completion_message() -> String {
-    "One or more requested actions completed, but the final reply is unavailable. \
-     No completed action needs to be repeated."
+    "An action completed, but the final reply is unavailable. \
+     Verify the result before repeating the action."
         .to_string()
 }
 
