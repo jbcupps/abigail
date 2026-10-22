@@ -185,16 +185,25 @@ mod tests {
     use super::*;
     use crate::state::EntityDaemonState;
     use abigail_capabilities::cognitive::{
-        CompletionRequest, CompletionResponse, LlmProvider, StreamEvent,
+        CompletionRequest, CompletionResponse, LlmProvider, StreamEvent, ToolCall,
     };
     use abigail_core::{AppConfig, RoutingMode};
     use abigail_memory::MemoryStore;
     use abigail_persistence::{EntityScope, PersistenceHandle};
     use abigail_router::IdEgoRouter;
+    use abigail_skills::manifest::{SkillId, SkillManifest};
+    use abigail_skills::skill::{
+        CostEstimate, ExecutionContext, HealthStatus, Skill, SkillConfig, SkillHealth, SkillResult,
+        ToolDescriptor, ToolOutput, ToolParams,
+    };
     use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
     use abigail_streaming::MemoryBroker;
     use async_trait::async_trait;
-    use std::sync::Arc;
+    use std::collections::HashMap;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
 
     struct MockProvider {
         reply: &'static str,
@@ -210,6 +219,129 @@ mod tests {
                 content: self.reply.to_string(),
                 tool_calls: None,
             })
+        }
+    }
+
+    struct ToolProvider {
+        calls: AtomicUsize,
+        tool_calls: usize,
+    }
+
+    #[async_trait]
+    impl LlmProvider for ToolProvider {
+        async fn complete(
+            &self,
+            _request: &CompletionRequest,
+        ) -> anyhow::Result<CompletionResponse> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Ok(CompletionResponse {
+                    content: String::new(),
+                    tool_calls: Some(
+                        (0..self.tool_calls)
+                            .map(|index| ToolCall {
+                                id: format!("call-{index}"),
+                                name: "test.echo::echo".to_string(),
+                                arguments: format!(r#"{{"input":"value-{index}"}}"#),
+                            })
+                            .collect(),
+                    ),
+                });
+            }
+            Ok(CompletionResponse {
+                content: "tool-assisted reply".to_string(),
+                tool_calls: None,
+            })
+        }
+    }
+
+    struct EchoSkill {
+        manifest: SkillManifest,
+    }
+
+    impl EchoSkill {
+        fn new() -> Self {
+            Self {
+                manifest: SkillManifest {
+                    id: SkillId("test.echo".to_string()),
+                    name: "Echo".to_string(),
+                    version: "1.0".to_string(),
+                    description: "Echoes input".to_string(),
+                    license: None,
+                    category: "Test".to_string(),
+                    keywords: vec![],
+                    runtime: "Native".to_string(),
+                    min_abigail_version: "0.1.0".to_string(),
+                    platforms: vec!["All".to_string()],
+                    capabilities: vec![],
+                    permissions: vec![],
+                    secrets: vec![],
+                    config_defaults: HashMap::new(),
+                },
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Skill for EchoSkill {
+        fn manifest(&self) -> &SkillManifest {
+            &self.manifest
+        }
+
+        async fn initialize(&mut self, _config: SkillConfig) -> SkillResult<()> {
+            Ok(())
+        }
+
+        async fn shutdown(&mut self) -> SkillResult<()> {
+            Ok(())
+        }
+
+        fn health(&self) -> SkillHealth {
+            SkillHealth {
+                status: HealthStatus::Healthy,
+                message: None,
+                last_check: chrono::Utc::now(),
+                metrics: HashMap::new(),
+            }
+        }
+
+        fn tools(&self) -> Vec<ToolDescriptor> {
+            vec![ToolDescriptor {
+                name: "echo".to_string(),
+                description: "Echoes input".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {"input": {"type": "string"}},
+                    "required": ["input"]
+                }),
+                returns: serde_json::json!({}),
+                cost_estimate: CostEstimate::default(),
+                required_permissions: vec![],
+                autonomous: true,
+                requires_confirmation: false,
+            }]
+        }
+
+        async fn execute_tool(
+            &self,
+            _tool_name: &str,
+            params: ToolParams,
+            _context: &ExecutionContext,
+        ) -> SkillResult<ToolOutput> {
+            Ok(ToolOutput::success(serde_json::json!({
+                "echoed": params.values.get("input")
+            })))
+        }
+
+        fn capabilities(&self) -> Vec<abigail_skills::manifest::CapabilityDescriptor> {
+            vec![]
+        }
+
+        fn get_capability(&self, _name: &str) -> Option<&dyn std::any::Any> {
+            None
+        }
+
+        fn triggers(&self) -> Vec<abigail_skills::channel::TriggerDescriptor> {
+            vec![]
         }
     }
 
@@ -325,6 +457,45 @@ mod tests {
         }
     }
 
+    fn build_tool_state(tool_calls: usize) -> EntityDaemonState {
+        let state = build_state_with_provider(Arc::new(ToolProvider {
+            calls: AtomicUsize::new(0),
+            tool_calls,
+        }));
+        state
+            .registry
+            .register(SkillId("test.echo".to_string()), Arc::new(EchoSkill::new()))
+            .unwrap();
+        state
+    }
+
+    async fn run_turn(state: &EntityDaemonState, session_id: &str) -> (String, TurnOutcome) {
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        let correlation_id = begin_turn(
+            state,
+            session_id,
+            "use the echo tool",
+            None,
+            TurnContext {
+                session_messages: None,
+                stream_tx: None,
+                cancel: None,
+                done: done_tx,
+            },
+        )
+        .await
+        .expect("begin turn");
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), done_rx)
+            .await
+            .expect("turn should complete before timeout")
+            .expect("ego stage should deliver an outcome");
+        (correlation_id, outcome)
+    }
+
+    fn outbox_root(label: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("{label}-{}", uuid::Uuid::new_v4()))
+    }
+
     #[tokio::test]
     async fn chat_turn_flows_through_id_and_ego_stages() {
         let state = build_state();
@@ -363,6 +534,94 @@ mod tests {
         let health = state.router.current().health_board();
         assert!(!health.is_empty(), "health board should record the call");
         assert_eq!(health[0].state, "healthy");
+    }
+
+    #[tokio::test]
+    async fn outbox_capacity_fails_the_real_tool_turn_before_journal_commit() {
+        let mut state = build_tool_state(2);
+        let root = outbox_root("abigail-pipeline-capacity");
+        let outbox = crate::outbox::RuntimeOutbox::load(&root, 2).unwrap();
+        let existing = outbox
+            .enqueue(
+                &state.entity_id,
+                "memory_confirmed",
+                serde_json::json!({
+                    "memory_id": "already-queued",
+                    "memory_weight": "distilled"
+                }),
+            )
+            .unwrap();
+        state.outbox = Arc::new(outbox);
+        let _handles = spawn(state.clone()).await.expect("pipeline spawn");
+
+        let (_, outcome) = run_turn(&state, "session-capacity").await;
+        let error = outcome.expect_err("outbox backpressure must fail the tool turn");
+        assert!(error.contains("safely save"), "{error}");
+        assert!(
+            state
+                .memory
+                .recent_turns("session-capacity", 10)
+                .unwrap()
+                .iter()
+                .all(|turn| turn.role != "assistant"),
+            "a failed staging attempt must not commit an assistant success"
+        );
+        let queued = state.outbox.snapshot().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].record_id, existing.record_id);
+
+        let restarted = crate::outbox::RuntimeOutbox::load(&root, 2).unwrap();
+        let restarted = restarted.snapshot().unwrap();
+        assert_eq!(restarted.len(), 1);
+        assert_eq!(restarted[0].record_id, existing.record_id);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn outbox_save_failure_fails_the_real_tool_turn_and_preserves_queued_ids() {
+        let mut state = build_tool_state(2);
+        let root = outbox_root("abigail-pipeline-save-failure");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let saver_calls = calls.clone();
+        let outbox = crate::outbox::RuntimeOutbox::load_with_saver(&root, 4, move |path, bytes| {
+            if saver_calls.fetch_add(1, Ordering::SeqCst) == 1 {
+                anyhow::bail!("injected pipeline outbox save failure");
+            }
+            abigail_core::secure_fs::write_bytes_atomic(path, bytes)?;
+            Ok(())
+        })
+        .unwrap();
+        let existing = outbox
+            .enqueue(
+                &state.entity_id,
+                "memory_confirmed",
+                serde_json::json!({
+                    "memory_id": "already-queued",
+                    "memory_weight": "crystallized"
+                }),
+            )
+            .unwrap();
+        state.outbox = Arc::new(outbox);
+        let _handles = spawn(state.clone()).await.expect("pipeline spawn");
+
+        let (_, outcome) = run_turn(&state, "session-save-failure").await;
+        let error = outcome.expect_err("an atomic save failure must fail the tool turn");
+        assert!(error.contains("safely save"), "{error}");
+        assert!(state
+            .memory
+            .recent_turns("session-save-failure", 10)
+            .unwrap()
+            .iter()
+            .all(|turn| turn.role != "assistant"));
+        let queued = state.outbox.snapshot().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].record_id, existing.record_id);
+
+        let restarted = crate::outbox::RuntimeOutbox::load(&root, 4).unwrap();
+        let restarted = restarted.snapshot().unwrap();
+        assert_eq!(restarted.len(), 1);
+        assert_eq!(restarted[0].record_id, existing.record_id);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

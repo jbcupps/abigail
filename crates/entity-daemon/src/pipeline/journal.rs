@@ -144,8 +144,24 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn committed_assistant_action_queues_redacted_outbox_event_per_successful_skill_call() {
+    async fn journal_does_not_requeue_events_staged_before_a_successful_action() {
         let state = crate::routes::tests::build_state();
+        for (skill_id, tool_name) in [
+            ("com.abigail.calendar", "list_events"),
+            ("com.abigail.weather", "forecast"),
+        ] {
+            state
+                .queue_outbox_record(
+                    "skill_used",
+                    serde_json::json!({
+                        "session_id": "session-1",
+                        "skill_id": skill_id,
+                        "tool_name": tool_name,
+                    }),
+                )
+                .unwrap();
+        }
+        let staged = state.outbox.snapshot().unwrap();
         let response = entity_core::ChatResponse {
             reply: "private assistant reply".to_string(),
             provider: Some("fixture".to_string()),
@@ -188,15 +204,12 @@ mod tests {
         .unwrap();
 
         let records = state.outbox.snapshot().unwrap();
-        let skill_events = records
-            .iter()
-            .filter(|record| record.kind == "skill_used")
-            .collect::<Vec<_>>();
-        assert_eq!(skill_events.len(), 2);
-        assert_eq!(skill_events[0].payload["session_id"], "session-1");
-        assert_eq!(skill_events[0].payload["skill_id"], "com.abigail.calendar");
-        assert_eq!(skill_events[0].payload["tool_name"], "list_events");
-        for event in skill_events {
+        assert_eq!(
+            serde_json::to_value(&records).unwrap(),
+            serde_json::to_value(&staged).unwrap(),
+            "the auto-committing journal must not duplicate pre-staged outbox events"
+        );
+        for event in records {
             let serialized = event.payload.to_string();
             assert!(!serialized.contains("private assistant reply"));
             assert!(!serialized.contains("private mentor prompt"));
@@ -204,48 +217,5 @@ mod tests {
             assert!(event.payload.get("message").is_none());
             assert!(event.payload.get("content").is_none());
         }
-    }
-
-    #[tokio::test]
-    async fn committed_action_surfaces_outbox_enqueue_failure() {
-        let mut state = crate::routes::tests::build_state();
-        let blocked_root =
-            std::env::temp_dir().join(format!("abigail-blocked-outbox-{}", uuid::Uuid::new_v4()));
-        std::fs::write(&blocked_root, b"not a directory").unwrap();
-        state.outbox =
-            std::sync::Arc::new(crate::outbox::RuntimeOutbox::load(&blocked_root, 64).unwrap());
-
-        let error = record(
-            state,
-            EgoActionPayload {
-                session_id: "session-1".to_string(),
-                status: "success".to_string(),
-                error: None,
-                response: Some(entity_core::ChatResponse {
-                    reply: "private assistant reply".to_string(),
-                    provider: Some("fixture".to_string()),
-                    tool_calls_made: vec![entity_core::ToolCallRecord {
-                        skill_id: "com.abigail.calendar".to_string(),
-                        tool_name: "list_events".to_string(),
-                        success: true,
-                    }],
-                    tier: None,
-                    model_used: None,
-                    complexity_score: None,
-                    execution_trace: None,
-                    session_id: Some("session-1".to_string()),
-                }),
-                user_message: "private mentor prompt".to_string(),
-                superego_verdict: Some("clear".to_string()),
-                superego_findings: vec![],
-            },
-        )
-        .await
-        .unwrap_err();
-
-        assert!(error.contains("outbox"), "{error}");
-        assert!(!error.contains("private assistant reply"));
-        assert!(!error.contains("private mentor prompt"));
-        let _ = std::fs::remove_file(blocked_root);
     }
 }

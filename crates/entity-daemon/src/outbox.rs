@@ -50,7 +50,7 @@ impl RuntimeOutbox {
     }
 
     #[cfg(test)]
-    fn load_with_saver(
+    pub(crate) fn load_with_saver(
         root_dir: impl AsRef<std::path::Path>,
         max_records: usize,
         save: impl Fn(&Path, &[u8]) -> anyhow::Result<()> + Send + Sync + 'static,
