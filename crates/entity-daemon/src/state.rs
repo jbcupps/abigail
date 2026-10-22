@@ -81,6 +81,8 @@ pub struct EntityDaemonState {
     pub docs_dir: PathBuf,
     /// Surreal-backed memory store for persistent memory across conversations.
     pub memory: Arc<MemoryStore>,
+    /// Durable assistant-turn boundary, injectable for failure-path verification.
+    pub assistant_turn_store: Arc<dyn crate::memory_consumer::AssistantTurnStore>,
     /// Persistent async job queue for delegated sub-agent tasks.
     pub job_queue: Arc<JobQueue>,
     /// Backing stream broker for topic-based event publishing.

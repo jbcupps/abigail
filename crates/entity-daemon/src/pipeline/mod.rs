@@ -448,6 +448,7 @@ mod tests {
             executor,
             docs_dir: docs_dir.clone(),
             memory,
+            assistant_turn_store: Arc::new(crate::memory_consumer::DurableAssistantTurnStore),
             job_queue,
             stream_broker,
             memory_hook: None,

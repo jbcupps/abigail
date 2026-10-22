@@ -587,6 +587,7 @@ async fn run() -> anyhow::Result<()> {
         executor,
         docs_dir,
         memory,
+        assistant_turn_store: Arc::new(memory_consumer::DurableAssistantTurnStore),
         job_queue,
         stream_broker,
         memory_hook: None,

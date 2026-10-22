@@ -275,15 +275,6 @@ async fn respond(
         }
     };
 
-    if let Some(ref response) = action.response {
-        let turn = committed_assistant_turn(&assistant_turn_id, &action.session_id, response);
-        if let Err(error) = crate::memory_consumer::persist_turn(state.memory.clone(), turn).await {
-            action.status = "error".to_string();
-            action.error = Some(format!("Unable to save this conversation: {}", error));
-            action.response = None;
-        }
-    }
-
     let successful_skill_count = action
         .response
         .as_ref()
@@ -295,6 +286,33 @@ async fn respond(
                 .count()
         })
         .unwrap_or(0);
+    let assistant_store_error = if let Some(ref response) = action.response {
+        let turn = committed_assistant_turn(&assistant_turn_id, &action.session_id, response);
+        state
+            .assistant_turn_store
+            .persist(state.memory.clone(), turn)
+            .await
+            .err()
+    } else {
+        None
+    };
+    let assistant_turn_durable = assistant_store_error.is_none() && action.response.is_some();
+    if let Some(error) = assistant_store_error {
+        if successful_skill_count > 0 {
+            tracing::error!(
+                session_id = %action.session_id,
+                "Completed tool response could not be saved to conversation history: {error}"
+            );
+            if let Some(response) = action.response.as_mut() {
+                response.reply = completed_action_unsaved_reply(&response.reply);
+            }
+        } else {
+            action.status = "error".to_string();
+            action.error = Some(format!("Unable to save this conversation: {}", error));
+            action.response = None;
+        }
+    }
+
     match (
         action.status.as_str(),
         successful_skill_count,
@@ -306,11 +324,19 @@ async fn respond(
                 "successful_skill_count": count,
             });
             if let Err(error) = state.commit_outbox_reservation(record_id, payload) {
-                tracing::error!(
-                    session_id = %action.session_id,
-                    activity_record_id = %record_id,
-                    "Successful tool activity will be recovered from its durable assistant turn: {error}"
-                );
+                if assistant_turn_durable {
+                    tracing::error!(
+                        session_id = %action.session_id,
+                        activity_record_id = %record_id,
+                        "Successful tool activity will be recovered from its durable assistant turn: {error}"
+                    );
+                } else {
+                    tracing::error!(
+                        session_id = %action.session_id,
+                        activity_record_id = %record_id,
+                        "Successful tool activity remains reserved for manual recovery because its response and outbox commit could not be saved: {error}"
+                    );
+                }
             }
         }
         (_, _, Some(record_id)) => {
@@ -364,6 +390,13 @@ fn activity_reservation_error(error: &str) -> String {
     } else {
         "I couldn't safely save an activity reservation, so no tools were run.".to_string()
     }
+}
+
+fn completed_action_unsaved_reply(reply: &str) -> String {
+    format!(
+        "{reply}\n\nThe action completed, but this reply and its history could not be saved. \
+         No action needs to be repeated."
+    )
 }
 
 fn committed_assistant_turn(

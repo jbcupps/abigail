@@ -5,11 +5,31 @@
 
 use abigail_memory::{ConversationTurn, MemoryStore};
 use abigail_streaming::{StreamBroker, SubscriptionHandle, Topic, BUS_STREAM};
+use async_trait::async_trait;
 use std::sync::Arc;
 
 const STREAM: &str = BUS_STREAM;
 const TOPIC: &str = Topic::MemoryArchive.as_str();
 const CONSUMER_GROUP: &str = "memory-consumer";
+
+#[async_trait]
+pub trait AssistantTurnStore: Send + Sync {
+    async fn persist(&self, memory: Arc<MemoryStore>, turn: ConversationTurn)
+        -> Result<(), String>;
+}
+
+pub struct DurableAssistantTurnStore;
+
+#[async_trait]
+impl AssistantTurnStore for DurableAssistantTurnStore {
+    async fn persist(
+        &self,
+        memory: Arc<MemoryStore>,
+        turn: ConversationTurn,
+    ) -> Result<(), String> {
+        persist_turn(memory, turn).await
+    }
+}
 
 /// Persist a committed turn before the HTTP/SSE completion event.
 pub async fn persist_turn(
