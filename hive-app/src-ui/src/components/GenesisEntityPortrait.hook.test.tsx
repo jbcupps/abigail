@@ -75,4 +75,37 @@ describe("Genesis Entity card refresh", () => {
       expect(result.current.error).toBeNull();
     });
   });
+
+  it("fails closed from an initial rejection through a consecutive failure and recovers on retry", async () => {
+    mocks.listGenesisSessions
+      .mockRejectedValueOnce(new Error("initial Genesis list failure"))
+      .mockRejectedValueOnce(new Error("consecutive Genesis list failure"))
+      .mockResolvedValueOnce([receiptOnlySession("recovered-session")]);
+
+    const { result, rerender } = renderHook(
+      ({ refreshKey }) => useGenesisEntities(refreshKey),
+      { initialProps: { refreshKey: "initial" } },
+    );
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBe("initial Genesis list failure");
+      expect(result.current.awaiting).toEqual({});
+    });
+
+    rerender({ refreshKey: "retry-1" });
+    await waitFor(() => {
+      expect(mocks.listGenesisSessions).toHaveBeenCalledTimes(2);
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBe("consecutive Genesis list failure");
+      expect(result.current.awaiting).toEqual({});
+    });
+
+    rerender({ refreshKey: "retry-2" });
+    await waitFor(() => {
+      expect(mocks.listGenesisSessions).toHaveBeenCalledTimes(3);
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBeNull();
+      expect(result.current.awaiting).toEqual({ nova: "recovered-session" });
+    });
+  });
 });

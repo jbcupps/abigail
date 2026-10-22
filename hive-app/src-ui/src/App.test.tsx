@@ -26,6 +26,42 @@ const mocks = vi.hoisted(() => ({
   genesisRefreshKeys: [] as unknown[],
 }));
 
+function statusWithUnbornAda(readyState: "ready" | "needs_provider") {
+  return {
+    entity_count: 3,
+    entities: [
+      {
+        id: "hive",
+        name: "Abigail Hive",
+        birth_complete: true,
+        birth_date: null,
+        is_hive: true,
+        immortal: true,
+      },
+      {
+        id: "ada",
+        name: "Ada",
+        birth_complete: false,
+        birth_date: null,
+        is_hive: false,
+        immortal: false,
+      },
+      {
+        id: "grace",
+        name: "Grace",
+        birth_complete: true,
+        birth_date: null,
+        is_hive: false,
+        immortal: false,
+      },
+    ],
+    ready_state: readyState,
+    any_provider_configured: readyState === "ready",
+    setup_complete: readyState === "ready",
+    helper: { running: false, local_url: null },
+  };
+}
+
 vi.mock("./lib/daemonClient", () => ({
   completeEntitySetup: mocks.completeEntitySetup,
   connectLocalModel: mocks.connectLocalModel,
@@ -137,68 +173,99 @@ describe("Abigail Hive app", () => {
     await waitFor(() => expect(screen.getByTestId("genesis-workspace")).toHaveTextContent("2:session-a"));
   });
 
-  it("refreshes a receipt-only card after a list failure and provider connection without generic setup", async () => {
+  it("blocks generic setup while an unborn card's Genesis linkage is still loading", async () => {
+    mocks.genesisEntities = {
+      portraits: {},
+      awaiting: {},
+      loading: true,
+      error: null,
+    };
+    mocks.getStatus.mockResolvedValue(statusWithUnbornAda("ready"));
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /skip/i }));
+    await screen.findByRole("heading", { name: "Abigail Hive" });
+
+    expect(screen.getByText("Checking Genesis linkage…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Checking Genesis…" })).toBeDisabled();
+    expect(mocks.completeEntitySetup).not.toHaveBeenCalled();
+    expect(mocks.openEntity).not.toHaveBeenCalled();
+  });
+
+  it("retries an initial ready-state linkage failure into Continue Genesis without generic setup", async () => {
+    mocks.getStatus.mockResolvedValue(statusWithUnbornAda("ready"));
+    mocks.genesisEntitiesForKey = (refreshKey) =>
+      String(refreshKey).includes("retry=1")
+        ? {
+            portraits: {},
+            awaiting: { ada: "recovered-ready-session" },
+            loading: false,
+            error: null,
+          }
+        : {
+            portraits: {},
+            awaiting: {},
+            loading: false,
+            error: "initial Genesis list failure",
+          };
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /skip/i }));
+    await screen.findByRole("heading", { name: "Abigail Hive" });
+
+    expect(screen.getByText("Genesis linkage could not be checked.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry Genesis check" }));
+    expect(await screen.findByRole("button", { name: "Continue Ada's Genesis" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Continue Ada's Genesis" }));
+    expect(await screen.findByTestId("genesis-workspace")).toHaveTextContent(
+      "1:recovered-ready-session",
+    );
+    expect(mocks.completeEntitySetup).not.toHaveBeenCalled();
+    expect(mocks.openEntity).not.toHaveBeenCalled();
+  });
+
+  it("recovers consecutive linkage failures into the provider gate and Continue Genesis", async () => {
     const failedRefreshSnapshot: MockGenesisEntities = {
       portraits: {},
-      awaiting: { ada: "prior-receipt-session" },
+      awaiting: {},
       loading: false,
-      error: "temporary Genesis list failure",
+      error: "Genesis list failure",
     };
-    const readyRefreshSnapshot: MockGenesisEntities = {
+    const needsProviderSnapshot: MockGenesisEntities = {
+      portraits: {},
+      awaiting: { ada: "provider-gated-session" },
+      loading: false,
+      error: null,
+    };
+    const readySnapshot: MockGenesisEntities = {
       portraits: {},
       awaiting: { ada: "fresh-receipt-session" },
       loading: false,
       error: null,
     };
-    mocks.genesisEntitiesForKey = (refreshKey) =>
-      String(refreshKey).includes("ready")
-        ? readyRefreshSnapshot
-        : failedRefreshSnapshot;
-    const needsProvider = {
-      entity_count: 3,
-      entities: [
-        {
-          id: "hive",
-          name: "Abigail Hive",
-          birth_complete: true,
-          birth_date: null,
-          is_hive: true,
-          immortal: true,
-        },
-        {
-          id: "ada",
-          name: "Ada",
-          birth_complete: false,
-          birth_date: null,
-          is_hive: false,
-          immortal: false,
-        },
-        {
-          id: "grace",
-          name: "Grace",
-          birth_complete: true,
-          birth_date: null,
-          is_hive: false,
-          immortal: false,
-        },
-      ],
-      ready_state: "needs_provider",
-      any_provider_configured: false,
-      setup_complete: false,
-      helper: { running: false, local_url: null },
+    mocks.genesisEntitiesForKey = (refreshKey) => {
+      const key = String(refreshKey);
+      if (key.includes("ready")) return readySnapshot;
+      if (key.includes("retry=2")) return needsProviderSnapshot;
+      return failedRefreshSnapshot;
     };
+    const needsProvider = statusWithUnbornAda("needs_provider");
     mocks.getStatus
       .mockResolvedValueOnce(needsProvider)
-      .mockResolvedValue({
-        ...needsProvider,
-        ready_state: "ready",
-        any_provider_configured: true,
-        setup_complete: true,
-      });
+      .mockResolvedValue(statusWithUnbornAda("ready"));
 
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /skip/i }));
     await screen.findByRole("heading", { name: "Abigail Hive" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry Genesis check" }));
+    await waitFor(() =>
+      expect(
+        mocks.genesisRefreshKeys.some((key) => String(key).includes("retry=1")),
+      ).toBe(true),
+    );
+    expect(screen.getByRole("button", { name: "Retry Genesis check" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry Genesis check" }));
 
     expect(screen.getByText("Connect a model to continue Genesis")).toBeInTheDocument();
     const setupButton = screen.getByRole("button", { name: "Connect a model to continue" });
