@@ -1372,7 +1372,10 @@ mod tests {
         ToolDescriptor, ToolOutput,
     };
     use std::collections::HashMap;
-    use std::sync::Arc;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
 
     // ── Test helpers ─────────────────────────────────────────────────
 
@@ -1484,6 +1487,100 @@ mod tests {
         finish: Option<Arc<tokio::sync::Notify>>,
     }
 
+    struct ToolThenProviderFailure {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for ToolThenProviderFailure {
+        async fn complete(
+            &self,
+            _request: &CompletionRequest,
+        ) -> anyhow::Result<CompletionResponse> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Ok(CompletionResponse {
+                    content: String::new(),
+                    tool_calls: Some(vec![ToolCall {
+                        id: "partial-call-1".into(),
+                        name: "test.echo::echo".into(),
+                        arguments: r#"{"input":"completed"}"#.into(),
+                    }]),
+                });
+            }
+            anyhow::bail!("provider failed after the side effect; please try again")
+        }
+
+        async fn stream(
+            &self,
+            _request: &CompletionRequest,
+            tx: tokio::sync::mpsc::Sender<StreamEvent>,
+        ) -> anyhow::Result<CompletionResponse> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                let response = CompletionResponse {
+                    content: String::new(),
+                    tool_calls: Some(vec![ToolCall {
+                        id: "partial-stream-call-1".into(),
+                        name: "test.echo::echo".into(),
+                        arguments: r#"{"input":"completed"}"#.into(),
+                    }]),
+                };
+                tx.send(StreamEvent::Done(response.clone())).await?;
+                return Ok(response);
+            }
+            anyhow::bail!("stream provider failed after the side effect; please try again")
+        }
+    }
+
+    struct CountingSkill {
+        inner: StubSkill,
+        executions: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl Skill for CountingSkill {
+        fn manifest(&self) -> &SkillManifest {
+            self.inner.manifest()
+        }
+
+        async fn initialize(&mut self, config: SkillConfig) -> SkillResult<()> {
+            self.inner.initialize(config).await
+        }
+
+        async fn shutdown(&mut self) -> SkillResult<()> {
+            self.inner.shutdown().await
+        }
+
+        fn health(&self) -> SkillHealth {
+            self.inner.health()
+        }
+
+        fn tools(&self) -> Vec<ToolDescriptor> {
+            self.inner.tools()
+        }
+
+        async fn execute_tool(
+            &self,
+            tool_name: &str,
+            params: ToolParams,
+            context: &ExecutionContext,
+        ) -> SkillResult<ToolOutput> {
+            self.executions.fetch_add(1, Ordering::SeqCst);
+            self.inner.execute_tool(tool_name, params, context).await
+        }
+
+        fn capabilities(&self) -> Vec<abigail_skills::manifest::CapabilityDescriptor> {
+            self.inner.capabilities()
+        }
+
+        fn get_capability(&self, name: &str) -> Option<&dyn std::any::Any> {
+            self.inner.get_capability(name)
+        }
+
+        fn triggers(&self) -> Vec<TriggerDescriptor> {
+            self.inner.triggers()
+        }
+    }
+
     #[async_trait::async_trait]
     impl LlmProvider for StreamingOnlyProvider {
         async fn complete(&self, _: &CompletionRequest) -> anyhow::Result<CompletionResponse> {
@@ -1538,6 +1635,111 @@ mod tests {
             .unwrap();
         let tools = build_tool_definitions(&registry);
         (SkillExecutor::new(registry), tools)
+    }
+
+    fn counting_test_executor() -> (SkillExecutor, Vec<ToolDefinition>, Arc<AtomicUsize>) {
+        let registry = Arc::new(SkillRegistry::new());
+        let executions = Arc::new(AtomicUsize::new(0));
+        registry
+            .register(
+                SkillId("test.echo".into()),
+                Arc::new(CountingSkill {
+                    inner: StubSkill {
+                        manifest: test_manifest("test.echo"),
+                        tool_descriptors: vec![valid_tool("echo")],
+                    },
+                    executions: executions.clone(),
+                }),
+            )
+            .unwrap();
+        let tools = build_tool_definitions(&registry);
+        (SkillExecutor::new(registry), tools, executions)
+    }
+
+    #[tokio::test]
+    async fn nonstreaming_second_round_failure_returns_completed_partial_without_retry() {
+        let provider = Arc::new(ToolThenProviderFailure {
+            calls: AtomicUsize::new(0),
+        });
+        let mut router = IdEgoRouter::new(
+            None,
+            None,
+            None,
+            None,
+            abigail_core::RoutingMode::EgoPrimary,
+        );
+        router.id = provider;
+        let (executor, tools, executions) = counting_test_executor();
+
+        let result = run_tool_use_loop(
+            &router,
+            &executor,
+            vec![Message::new("user", "perform one action")],
+            tools,
+        )
+        .await
+        .expect("completed side effects require a non-retry partial result");
+
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        assert_eq!(result.tool_calls_made.len(), 1);
+        assert!(result.tool_calls_made[0].success);
+        let content = result.content.to_ascii_lowercase();
+        assert!(content.contains("completed"), "{content}");
+        assert!(content.contains("final reply"), "{content}");
+        assert!(content.contains("unavailable"), "{content}");
+        assert!(!content.contains("try again"), "{content}");
+        assert!(!content.contains("retry"), "{content}");
+    }
+
+    #[tokio::test]
+    async fn streaming_second_round_failure_returns_completed_partial_and_final_done() {
+        let provider = Arc::new(ToolThenProviderFailure {
+            calls: AtomicUsize::new(0),
+        });
+        let mut router = IdEgoRouter::new(
+            None,
+            None,
+            None,
+            None,
+            abigail_core::RoutingMode::EgoPrimary,
+        );
+        router.id = provider;
+        let (executor, tools, executions) = counting_test_executor();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+
+        let result = stream_chat_pipeline(
+            &router,
+            &executor,
+            vec![Message::new("user", "perform one streamed action")],
+            tools,
+            tx,
+            None,
+            None,
+        )
+        .await
+        .expect("completed streamed side effects require a non-retry partial result");
+
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        assert_eq!(result.tool_calls_made.len(), 1);
+        assert!(result.tool_calls_made[0].success);
+        let content = result.content.to_ascii_lowercase();
+        assert!(content.contains("completed"), "{content}");
+        assert!(content.contains("final reply"), "{content}");
+        assert!(content.contains("unavailable"), "{content}");
+        assert!(!content.contains("try again"), "{content}");
+        assert!(!content.contains("retry"), "{content}");
+        let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, StreamEvent::Done(_)))
+                .count(),
+            1
+        );
+        assert!(matches!(
+            events.last(),
+            Some(StreamEvent::Done(response)) if response.content == result.content
+        ));
     }
 
     #[tokio::test]

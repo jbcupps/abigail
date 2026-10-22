@@ -243,6 +243,17 @@ mod tests {
         tool_calls: usize,
     }
 
+    #[derive(Clone, Copy)]
+    enum SecondRoundOutcome {
+        Fail,
+        Reply(&'static str),
+    }
+
+    struct ToolThenOutcomeProvider {
+        calls: AtomicUsize,
+        outcome: SecondRoundOutcome,
+    }
+
     #[async_trait]
     impl LlmProvider for ToolProvider {
         async fn complete(
@@ -267,6 +278,70 @@ mod tests {
                 content: "tool-assisted reply".to_string(),
                 tool_calls: None,
             })
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for ToolThenOutcomeProvider {
+        async fn complete(
+            &self,
+            _request: &CompletionRequest,
+        ) -> anyhow::Result<CompletionResponse> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Ok(CompletionResponse {
+                    content: String::new(),
+                    tool_calls: Some(vec![ToolCall {
+                        id: "partial-call-1".to_string(),
+                        name: "test.echo::echo".to_string(),
+                        arguments: r#"{"input":"completed"}"#.to_string(),
+                    }]),
+                });
+            }
+            match self.outcome {
+                SecondRoundOutcome::Fail => {
+                    anyhow::bail!("provider failed after action; please try again")
+                }
+                SecondRoundOutcome::Reply(reply) => Ok(CompletionResponse {
+                    content: reply.to_string(),
+                    tool_calls: None,
+                }),
+            }
+        }
+    }
+
+    struct ToolThenWaitStreamingProvider {
+        calls: AtomicUsize,
+        second_round_started: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait]
+    impl LlmProvider for ToolThenWaitStreamingProvider {
+        async fn complete(
+            &self,
+            _request: &CompletionRequest,
+        ) -> anyhow::Result<CompletionResponse> {
+            anyhow::bail!("cancellation fixture requires streaming")
+        }
+
+        async fn stream(
+            &self,
+            _request: &CompletionRequest,
+            tx: tokio::sync::mpsc::Sender<StreamEvent>,
+        ) -> anyhow::Result<CompletionResponse> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                let response = CompletionResponse {
+                    content: String::new(),
+                    tool_calls: Some(vec![ToolCall {
+                        id: "cancel-call-1".to_string(),
+                        name: "test.echo::echo".to_string(),
+                        arguments: r#"{"input":"completed"}"#.to_string(),
+                    }]),
+                };
+                tx.send(StreamEvent::Done(response.clone())).await?;
+                return Ok(response);
+            }
+            self.second_round_started.notify_one();
+            std::future::pending::<anyhow::Result<CompletionResponse>>().await
         }
     }
 
@@ -478,10 +553,16 @@ mod tests {
     }
 
     fn build_tool_state(tool_calls: usize) -> (EntityDaemonState, Arc<AtomicUsize>) {
-        let state = build_state_with_provider(Arc::new(ToolProvider {
+        build_tool_state_with_provider(Arc::new(ToolProvider {
             calls: AtomicUsize::new(0),
             tool_calls,
-        }));
+        }))
+    }
+
+    fn build_tool_state_with_provider(
+        provider: Arc<dyn LlmProvider>,
+    ) -> (EntityDaemonState, Arc<AtomicUsize>) {
+        let state = build_state_with_provider(provider);
         let executions = Arc::new(AtomicUsize::new(0));
         state
             .registry
@@ -723,6 +804,112 @@ mod tests {
                 "aggregate activity leaked {forbidden}: {serialized}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn partial_provider_failure_commits_completed_tool_without_retry() {
+        let (state, executions) =
+            build_tool_state_with_provider(Arc::new(ToolThenOutcomeProvider {
+                calls: AtomicUsize::new(0),
+                outcome: SecondRoundOutcome::Fail,
+            }));
+        let _handles = spawn(state.clone()).await.expect("pipeline spawn");
+
+        let (_, outcome) = run_turn(&state, "session-partial-provider").await;
+        let response = outcome.expect("completed tool requires a non-retry partial response");
+
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        assert_eq!(response.tool_calls_made.len(), 1);
+        assert!(response.tool_calls_made[0].success);
+        let reply = response.reply.to_ascii_lowercase();
+        assert!(reply.contains("completed"), "{reply}");
+        assert!(reply.contains("final reply"), "{reply}");
+        assert!(reply.contains("unavailable"), "{reply}");
+        assert!(!reply.contains("try again"), "{reply}");
+        assert!(!reply.contains("retry"), "{reply}");
+        let queued = state.outbox.snapshot().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].payload["successful_skill_count"], 1);
+        assert!(state.outbox.reservations().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn superego_block_after_completed_tool_commits_activity_without_retry() {
+        let (state, executions) =
+            build_tool_state_with_provider(Arc::new(ToolThenOutcomeProvider {
+                calls: AtomicUsize::new(0),
+                outcome: SecondRoundOutcome::Reply(
+                    "secret result: sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789",
+                ),
+            }));
+        let _handles = spawn(state.clone()).await.expect("pipeline spawn");
+
+        let (_, outcome) = run_turn(&state, "session-tool-blocked").await;
+        let error = outcome.expect_err("unsafe final reply must remain blocked");
+
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        assert!(error.contains("withheld"), "{error}");
+        assert!(!error.to_ascii_lowercase().contains("try again"), "{error}");
+        assert!(!error.to_ascii_lowercase().contains("retry"), "{error}");
+        let queued = state.outbox.snapshot().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].payload["session_id"], "session-tool-blocked");
+        assert_eq!(queued[0].payload["successful_skill_count"], 1);
+        assert!(state.outbox.reservations().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cancellation_after_tool_side_effect_retains_reservation_without_retry() {
+        let second_round_started = Arc::new(tokio::sync::Notify::new());
+        let (state, executions) =
+            build_tool_state_with_provider(Arc::new(ToolThenWaitStreamingProvider {
+                calls: AtomicUsize::new(0),
+                second_round_started: second_round_started.clone(),
+            }));
+        let _handles = spawn(state.clone()).await.expect("pipeline spawn");
+        let (stream_tx, _stream_rx) = tokio::sync::mpsc::channel(64);
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        begin_turn(
+            &state,
+            "session-tool-cancel",
+            "perform one action",
+            None,
+            TurnContext {
+                session_messages: None,
+                stream_tx: Some(stream_tx),
+                cancel: Some(cancel.clone()),
+                done: done_tx,
+            },
+        )
+        .await
+        .expect("begin turn");
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            second_round_started.notified(),
+        )
+        .await
+        .expect("the tool side effect must complete before cancellation");
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        cancel.cancel();
+        let error = tokio::time::timeout(std::time::Duration::from_secs(5), done_rx)
+            .await
+            .expect("cancelled turn completes")
+            .expect("ego stage returns an outcome")
+            .expect_err("cancelled turn is not a complete assistant reply");
+
+        assert!(
+            error.to_ascii_lowercase().contains("interrupted"),
+            "{error}"
+        );
+        assert!(!error.to_ascii_lowercase().contains("try again"), "{error}");
+        assert!(!error.to_ascii_lowercase().contains("retry"), "{error}");
+        assert!(state.outbox.snapshot().unwrap().is_empty());
+        assert_eq!(state.outbox.reservations().unwrap().len(), 1);
+        let reopened =
+            crate::outbox::RuntimeOutbox::load(state.docs_dir.join("outbox"), 64).unwrap();
+        assert_eq!(reopened.reservations().unwrap().len(), 1);
     }
 
     #[tokio::test]
