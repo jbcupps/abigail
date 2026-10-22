@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FieldUpdate, GenesisSession } from "../lib/genesisClient";
-import { CRESTS, getEntityJourney, getQuestCatalog, MOTIONS, PALETTES, TEMPERAMENTS, TRAIT_LABELS, type BadgeView, type EntityJourney, type PresenceChoice, type QuestCatalog, type QuestStageId, type QuestView } from "../lib/questClient";
+import { CRESTS, getEntityJourney, getQuestCatalog, MOTIONS, PALETTES, TEMPERAMENTS, TRAIT_LABELS, type BadgeView, type BondTierDefinition, type EntityJourney, type PresenceChoice, type QuestCatalog, type QuestStageId, type QuestView } from "../lib/questClient";
 import PresenceCrest from "./PresenceCrest";
 
 type Change = (action: string, args?: Record<string, unknown>) => Promise<GenesisSession | undefined>;
@@ -34,6 +34,20 @@ export function QuestLevel({ quest }: { quest: QuestView }) {
     <span><strong>Level {level.level} · {level.title}</strong><span>{level.xp} XP{level.next_level_at !== null ? ` · ${level.next_level_at - level.xp} to next` : ""}</span></span>
     <progress max={1} value={progress} aria-label={`Bond level progress, ${level.xp} XP`} />
   </div>;
+}
+
+export function TierPath({ tiers, level }: { tiers: BondTierDefinition[]; level: QuestView["level"] }) {
+  let current = 0;
+  tiers.forEach((tier, index) => { if (tier.floor <= level.xp) current = index; });
+  return <ol className="quest-tier-path" aria-label="Bond tier path">
+    {tiers.map((tier, index) => {
+      const state = index === current ? "Current" : index === current + 1 ? "Next" : null;
+      const label = `${tier.title} · ${tier.floor} XP${state ? ` · ${state}` : ""}`;
+      return <li key={tier.level} className={state ? `is-${state.toLowerCase()}` : ""} aria-label={label} aria-current={state === "Current" ? "step" : undefined}>
+        <strong>{tier.title}</strong><small>{tier.floor} XP{state ? ` · ${state}` : ""}</small>
+      </li>;
+    })}
+  </ol>;
 }
 
 /** Always-visible progress through the seven stages. */
@@ -140,6 +154,7 @@ export default function GenesisQuest({ session, busy, stage, onStage, change, on
         const milestone = journey?.next_milestone;
         const metric = milestoneDefinition?.requirement?.metric ?? milestone?.metric;
         return awakened ? <>
+          <TierPath tiers={catalog.tiers} level={journey?.level ?? quest.level} />
           {journey && <dl className="quest-activity" aria-label="Journey activity">
             <div><dt>Conversation</dt><dd>{activityLabel("mentor_messages", journey.mentor_messages)}</dd></div>
             <div><dt>Returns</dt><dd>{activityLabel("conversation_sessions", journey.conversation_sessions)}</dd></div>

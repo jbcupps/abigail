@@ -52,6 +52,7 @@ struct JourneyRecord {
 
 /// Closed persistence shape constructed only after Runtime metadata validation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 struct JourneyEventRecord {
     record_id: String,
     owner_id: String,

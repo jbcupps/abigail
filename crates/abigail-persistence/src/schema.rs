@@ -8,7 +8,29 @@ DEFINE TABLE IF NOT EXISTS genesis_session SCHEMALESS;
 DEFINE INDEX IF NOT EXISTS idx_genesis_session_owner ON TABLE genesis_session COLUMNS owner_id;
 DEFINE TABLE IF NOT EXISTS entity_journey SCHEMALESS;
 DEFINE INDEX IF NOT EXISTS idx_entity_journey_owner ON TABLE entity_journey COLUMNS owner_id;
-DEFINE TABLE IF NOT EXISTS entity_journey_event SCHEMALESS;
+DEFINE TABLE OVERWRITE entity_journey_event SCHEMAFULL;
+DEFINE FIELD OVERWRITE record_id ON TABLE entity_journey_event TYPE string;
+DEFINE FIELD OVERWRITE owner_id ON TABLE entity_journey_event TYPE string;
+DEFINE FIELD OVERWRITE entity_id ON TABLE entity_journey_event TYPE string;
+DEFINE FIELD OVERWRITE kind ON TABLE entity_journey_event TYPE string;
+DEFINE FIELD OVERWRITE occurred_at ON TABLE entity_journey_event TYPE string;
+DEFINE FIELD OVERWRITE session_id ON TABLE entity_journey_event TYPE option<string>;
+DEFINE FIELD OVERWRITE skill_id ON TABLE entity_journey_event TYPE option<string>;
+DEFINE FIELD OVERWRITE tool_name ON TABLE entity_journey_event TYPE option<string>;
+DEFINE FIELD OVERWRITE memory_id ON TABLE entity_journey_event TYPE option<string>;
+DEFINE FIELD OVERWRITE memory_weight ON TABLE entity_journey_event TYPE option<string>;
+UPDATE entity_journey_event CONTENT {
+    record_id: record_id,
+    owner_id: owner_id,
+    entity_id: entity_id,
+    kind: kind,
+    occurred_at: occurred_at,
+    session_id: session_id,
+    skill_id: skill_id,
+    tool_name: tool_name,
+    memory_id: memory_id,
+    memory_weight: memory_weight
+};
 DEFINE INDEX IF NOT EXISTS idx_entity_journey_event_owner ON TABLE entity_journey_event COLUMNS owner_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_journey_event_entity ON TABLE entity_journey_event COLUMNS owner_id, entity_id;
 DEFINE TABLE IF NOT EXISTS migration_log SCHEMALESS;

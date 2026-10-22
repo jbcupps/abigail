@@ -129,6 +129,11 @@
 .quest-level { flex: 0 1 220px; font-size: 12px; }
 .quest-level > span { display: flex; justify-content: space-between; gap: 8px; color: var(--color-text-dim); }
 .quest-level strong { color: var(--color-text-bright); font-weight: 600; }
+.quest-tier-path { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 6px; padding: 0; list-style: none; }
+.quest-tier-path li { display: grid; gap: 2px; padding: 8px; border: 1px solid var(--color-border-dim); border-radius: var(--radius-md); color: var(--color-text-dim); }
+.quest-tier-path li.is-current { border-color: var(--color-primary-dim); background: var(--color-primary-glow); color: var(--color-text-bright); }
+.quest-tier-path li.is-next { border-color: var(--color-border); color: var(--color-text); }
+.quest-tier-path small { font-size: 11px; }
 .quest-stage-head h3 { margin-top: 4px; }
 .quest-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
 .quest-card { display: flex; flex-direction: column; padding: 12px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-bg-elevated); }
