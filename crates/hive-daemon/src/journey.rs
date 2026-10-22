@@ -1089,6 +1089,37 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn stored_journey_event_decoder_rejects_injected_private_fields() {
+        let base = serde_json::json!({
+            "record_id": uuid::Uuid::new_v4().to_string(),
+            "owner_id": OWNER,
+            "entity_id": uuid::Uuid::new_v4().to_string(),
+            "kind": "skill_used",
+            "occurred_at": "2026-10-22T12:00:00Z",
+            "session_id": "session-1",
+            "skill_id": "com.abigail.calendar",
+            "tool_name": "list_events"
+        });
+        assert!(serde_json::from_value::<JourneyEventRecord>(base.clone()).is_ok());
+        for field in [
+            "payload",
+            "message",
+            "content",
+            "reply",
+            "prompt",
+            "model_output",
+            "arbitrary",
+        ] {
+            let mut injected = base.clone();
+            injected[field] = serde_json::json!("private value");
+            assert!(
+                serde_json::from_value::<JourneyEventRecord>(injected).is_err(),
+                "stored journey decoder accepted forbidden field {field}"
+            );
+        }
+    }
+
+    #[test]
     fn unknown_runtime_event_does_not_create_or_advance_a_journey() {
         let store = store();
         let entity_id = uuid::Uuid::new_v4().to_string();

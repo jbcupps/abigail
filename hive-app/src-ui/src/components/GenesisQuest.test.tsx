@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import GenesisQuest, { QuestRail } from "./GenesisQuest";
 import type { GenesisSession } from "../lib/genesisClient";
@@ -125,7 +125,7 @@ describe("Genesis quest", () => {
       active_weeks: 1,
       successful_skill_uses: 2,
       confirmed_memories: 1,
-      next_milestone: { badge: "skill_explorer", title: "Skill Explorer", metric: "successful_skill_uses", target: 5, progress: 2 },
+      next_milestone: { badge: "getting_acquainted", title: "Getting Acquainted", metric: "mentor_messages", target: 5, progress: 3 },
       unlocked: { palettes: ["aether"], crests: ["orbit"] },
       first_quests: [{ id: "say-hello", title: "Say hello", prompt: "Hi Nova!", milestone: "first_words", target: 1, complete: true }],
       presence: null,
@@ -136,10 +136,19 @@ describe("Genesis quest", () => {
     const onMeet = vi.fn();
     render(<GenesisQuest session={awakened} busy={false} stage="awakening" onStage={vi.fn()} change={change} onSave={vi.fn()} onAwaken={vi.fn()} onMeet={onMeet} />);
     expect(await screen.findByText("Say hello")).toBeInTheDocument();
-    expect(screen.getByRole("progressbar", { name: "Skill Explorer progress" })).toBeInTheDocument();
-    expect(screen.getByText("2 of 5 skill uses")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Getting Acquainted progress" })).toBeInTheDocument();
+    expect(screen.getByText("3 of 5 messages")).toBeInTheDocument();
     expect(screen.getByText("3 messages")).toBeInTheDocument();
     expect(screen.getByText("1 session")).toBeInTheDocument();
+    const tierPath = screen.getByRole("list", { name: "Bond tier path" });
+    expect(within(tierPath).getAllByRole("listitem")).toHaveLength(7);
+    expect(within(tierPath).getByRole("listitem", { name: "Spark · 0 XP" })).toBeInTheDocument();
+    expect(within(tierPath).getByRole("listitem", { name: "Kindling · 80 XP · Current" })).toBeInTheDocument();
+    expect(within(tierPath).getByRole("listitem", { name: "Ember · 180 XP · Next" })).toBeInTheDocument();
+    expect(within(tierPath).getByRole("listitem", { name: "Hearthfire · 350 XP" })).toBeInTheDocument();
+    expect(within(tierPath).getByRole("listitem", { name: "Beacon · 600 XP" })).toBeInTheDocument();
+    expect(within(tierPath).getByRole("listitem", { name: "Constellation · 950 XP" })).toBeInTheDocument();
+    expect(within(tierPath).getByRole("listitem", { name: "Legacy · 1400 XP" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /send/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Meet Nova" }));
     expect(onMeet).toHaveBeenCalledOnce();

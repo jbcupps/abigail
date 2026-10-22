@@ -51,3 +51,112 @@ pub async fn ensure_schema(db: &Surreal<Db>, scope: &EntityScope) -> Result<(), 
     db.query(sql).await?.check()?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::PersistenceHandle;
+
+    fn valid_event(record_id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "record_id": record_id,
+            "owner_id": "local",
+            "entity_id": uuid::Uuid::new_v4().to_string(),
+            "kind": "skill_used",
+            "occurred_at": "2026-10-22T12:00:00Z",
+            "session_id": "session-1",
+            "skill_id": "com.abigail.calendar",
+            "tool_name": "list_events"
+        })
+    }
+
+    fn assert_field_was_rejected_or_removed(
+        handle: &PersistenceHandle,
+        record_id: &str,
+        value: &serde_json::Value,
+        field: &str,
+    ) {
+        let result = handle.upsert("entity_journey_event", record_id, value);
+        if result.is_ok() {
+            let stored = handle
+                .select_record::<serde_json::Value>("entity_journey_event", record_id)
+                .unwrap()
+                .unwrap();
+            assert!(
+                stored.get(field).is_none(),
+                "SCHEMAFULL journey row silently retained forbidden field {field}: {stored}"
+            );
+        }
+    }
+
+    #[test]
+    fn journey_event_schema_allows_only_whitelisted_metadata() {
+        let handle = PersistenceHandle::open_ephemeral(EntityScope::Hive).unwrap();
+        let allowed_id = uuid::Uuid::new_v4().to_string();
+        handle
+            .upsert(
+                "entity_journey_event",
+                &allowed_id,
+                &valid_event(&allowed_id),
+            )
+            .unwrap();
+
+        for field in [
+            "payload",
+            "message",
+            "content",
+            "reply",
+            "prompt",
+            "model_output",
+            "arbitrary",
+        ] {
+            let record_id = uuid::Uuid::new_v4().to_string();
+            let mut injected = valid_event(&record_id);
+            injected[field] = serde_json::json!("private value");
+            assert_field_was_rejected_or_removed(&handle, &record_id, &injected, field);
+        }
+    }
+
+    #[test]
+    fn hive_schema_migrates_legacy_journey_rows_to_the_closed_shape() {
+        let handle = PersistenceHandle::open_ephemeral(EntityScope::Hive).unwrap();
+        handle
+            .execute(
+                "REMOVE TABLE entity_journey_event; DEFINE TABLE entity_journey_event SCHEMALESS;",
+                &[],
+            )
+            .unwrap();
+        let record_id = uuid::Uuid::new_v4().to_string();
+        let mut legacy = valid_event(&record_id);
+        legacy["payload"] = serde_json::json!({"message": "private prompt"});
+        legacy["content"] = serde_json::json!("private memory");
+        legacy["arbitrary"] = serde_json::json!({"reply": "private model output"});
+        handle
+            .upsert("entity_journey_event", &record_id, &legacy)
+            .unwrap();
+
+        handle.execute(HIVE_SCHEMA, &[]).unwrap();
+
+        let migrated = handle
+            .select_record::<serde_json::Value>("entity_journey_event", &record_id)
+            .unwrap()
+            .unwrap();
+        for forbidden in [
+            "payload",
+            "message",
+            "content",
+            "reply",
+            "prompt",
+            "arbitrary",
+        ] {
+            assert!(
+                migrated.get(forbidden).is_none(),
+                "migration retained forbidden field {forbidden}: {migrated}"
+            );
+        }
+        let new_id = uuid::Uuid::new_v4().to_string();
+        let mut injected = valid_event(&new_id);
+        injected["prompt"] = serde_json::json!("private prompt");
+        assert_field_was_rejected_or_removed(&handle, &new_id, &injected, "prompt");
+    }
+}
