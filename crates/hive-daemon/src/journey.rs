@@ -70,6 +70,11 @@ struct JourneyEventRecord {
     memory_weight: Option<String>,
 }
 
+struct PreparedJourneyEvent {
+    event: JourneyEventRecord,
+    needs_write: bool,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SkillUsedMetadata {
@@ -194,6 +199,140 @@ impl JourneyStore {
         entity_id: &str,
         records: &[hive_core::EntityOutboxRecord],
     ) -> Result<EntityJourney> {
+        let recognized = self.persist_runtime_events(owner_id, entity_id, records)?;
+        if recognized {
+            self.reconcile_runtime_event_projection(owner_id, entity_id)
+        } else {
+            Ok(self
+                .load(owner_id, entity_id)?
+                .unwrap_or_else(|| EntityJourney::new(entity_id, owner_id, &now_utc())))
+        }
+    }
+
+    /// Validate every recognized event and every existing record-ID collision
+    /// before the daemon accepts the Runtime batch.
+    pub fn prevalidate_runtime_events(
+        &self,
+        owner_id: &str,
+        entity_id: &str,
+        records: &[hive_core::EntityOutboxRecord],
+    ) -> Result<()> {
+        validate_entity_id(entity_id)?;
+        validate_event_identifier(owner_id, "owner ID")?;
+        let _lock = self
+            .writes
+            .lock()
+            .map_err(|_| anyhow!("Entity journey lock unavailable"))?;
+        self.prepare_runtime_events_unlocked(owner_id, entity_id, records)
+            .map(|_| ())
+    }
+
+    /// Persist only validated metadata rows. A storage error can leave an
+    /// initial subset durable; a retry skips matching rows and completes the
+    /// remainder without double counting.
+    pub fn persist_runtime_events(
+        &self,
+        owner_id: &str,
+        entity_id: &str,
+        records: &[hive_core::EntityOutboxRecord],
+    ) -> Result<bool> {
+        validate_entity_id(entity_id)?;
+        validate_event_identifier(owner_id, "owner ID")?;
+        let _lock = self
+            .writes
+            .lock()
+            .map_err(|_| anyhow!("Entity journey lock unavailable"))?;
+        let prepared = self.prepare_runtime_events_unlocked(owner_id, entity_id, records)?;
+        if prepared.is_empty() {
+            return Ok(false);
+        }
+
+        #[cfg(test)]
+        let mut successful_writes = 0;
+        for prepared_event in prepared
+            .into_iter()
+            .filter(|prepared_event| prepared_event.needs_write)
+        {
+            #[cfg(test)]
+            {
+                let mut faults = self.test_faults.lock().unwrap();
+                if faults.fail_event_write_after == Some(successful_writes) {
+                    faults.fail_event_write_after = None;
+                    bail!("Injected journey event storage failure");
+                }
+            }
+            self.handle.upsert(
+                JOURNEY_EVENT_TABLE,
+                &prepared_event.event.record_id,
+                &prepared_event.event,
+            )?;
+            #[cfg(test)]
+            {
+                successful_writes += 1;
+            }
+        }
+        Ok(true)
+    }
+
+    fn prepare_runtime_events_unlocked(
+        &self,
+        owner_id: &str,
+        entity_id: &str,
+        records: &[hive_core::EntityOutboxRecord],
+    ) -> Result<Vec<PreparedJourneyEvent>> {
+        let existing = self.load(owner_id, entity_id)?;
+        let existed = self.handle.record_exists(JOURNEY_TABLE, entity_id)?;
+        if existed && existing.is_none() {
+            bail!("This Entity journey belongs to another household");
+        }
+
+        let mut indexes = std::collections::HashMap::<String, usize>::new();
+        let mut events = Vec::<JourneyEventRecord>::new();
+        for record in records {
+            if record.entity_id != entity_id {
+                bail!("Runtime outbox record belongs to another Entity");
+            }
+            let Some(event) = journey_event(owner_id, entity_id, record)? else {
+                continue;
+            };
+            if let Some(index) = indexes.get(&event.record_id) {
+                if events[*index] != event {
+                    bail!("Runtime outbox record ID conflicts within this journey batch");
+                }
+                continue;
+            }
+            indexes.insert(event.record_id.clone(), events.len());
+            events.push(event);
+        }
+
+        let mut prepared = Vec::with_capacity(events.len());
+        for event in events {
+            match self
+                .handle
+                .select_record::<JourneyEventRecord>(JOURNEY_EVENT_TABLE, &event.record_id)?
+            {
+                Some(saved) if saved == event => prepared.push(PreparedJourneyEvent {
+                    event,
+                    needs_write: false,
+                }),
+                Some(_) => bail!("Runtime outbox record ID conflicts with a saved journey event"),
+                None => prepared.push(PreparedJourneyEvent {
+                    event,
+                    needs_write: true,
+                }),
+            }
+        }
+        Ok(prepared)
+    }
+
+    /// Rebuild the summary only from durable redacted rows. Callers may retry
+    /// this independently from event persistence, so a summary write failure
+    /// cannot make an already durable Runtime event unacknowledgeable.
+    pub fn reconcile_runtime_event_projection(
+        &self,
+        owner_id: &str,
+        entity_id: &str,
+    ) -> Result<EntityJourney> {
         validate_entity_id(entity_id)?;
         validate_event_identifier(owner_id, "owner ID")?;
         let _lock = self
@@ -207,36 +346,18 @@ impl JourneyStore {
         }
         let mut journey =
             existing.unwrap_or_else(|| EntityJourney::new(entity_id, owner_id, &now_utc()));
-        let mut recognized = false;
-
-        for record in records {
-            if record.entity_id != entity_id {
-                bail!("Runtime outbox record belongs to another Entity");
-            }
-            let Some(event) = journey_event(owner_id, entity_id, record)? else {
-                continue;
-            };
-            recognized = true;
-            match self
-                .handle
-                .select_record::<JourneyEventRecord>(JOURNEY_EVENT_TABLE, &record.record_id)?
-            {
-                Some(saved) if saved == event => {}
-                Some(_) => bail!("Runtime outbox record ID conflicts with a saved journey event"),
-                None => {
-                    self.handle
-                        .upsert(JOURNEY_EVENT_TABLE, &record.record_id, &event)?;
-                }
-            }
-        }
-        if !recognized {
-            return Ok(journey);
-        }
-
         let activity = self.event_activity_unlocked(owner_id, entity_id)?;
         let now = now_utc();
         let changed = journey.observe(&[], activity, &now);
         if changed || !existed {
+            #[cfg(test)]
+            {
+                let mut faults = self.test_faults.lock().unwrap();
+                if faults.fail_projection_writes > 0 {
+                    faults.fail_projection_writes -= 1;
+                    bail!("Injected journey projection storage failure");
+                }
+            }
             journey.validate().map_err(|e| anyhow!(e))?;
             self.save(&journey)?;
         }

@@ -1105,6 +1105,13 @@ pub async fn sync_runtime_outbox(
         _ => return forbidden_runtime(),
     };
     let records = body.records.clone();
+    if let Err(error) =
+        state
+            .journeys
+            .prevalidate_runtime_events(crate::genesis_http::OWNER, &entity_id, &records)
+    {
+        return (StatusCode::OK, Json(ApiEnvelope::error(error.to_string())));
+    }
     let synced = match state.runtime_control.lock() {
         Ok(mut control) => {
             control.sync_outbox(body, |payload| state.identity_manager.sign_payload(payload))
@@ -1112,12 +1119,25 @@ pub async fn sync_runtime_outbox(
         Err(error) => Err(error.to_string()),
     };
     let response = match synced {
-        Ok(response) => match state.journeys.record_runtime_events(
+        Ok(response) => match state.journeys.persist_runtime_events(
             crate::genesis_http::OWNER,
             &entity_id,
             &records,
         ) {
-            Ok(_) => Json(ApiEnvelope::success(response)),
+            Ok(recognized) => {
+                if recognized {
+                    if let Err(error) = state
+                        .journeys
+                        .reconcile_runtime_event_projection(crate::genesis_http::OWNER, &entity_id)
+                    {
+                        tracing::warn!(
+                            entity_id = %entity_id,
+                            "Journey event rows are durable but projection refresh failed: {error}"
+                        );
+                    }
+                }
+                Json(ApiEnvelope::success(response))
+            }
             Err(error) => Json(ApiEnvelope::error(error.to_string())),
         },
         Err(error) => Json(ApiEnvelope::error(error)),
