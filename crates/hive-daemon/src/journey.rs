@@ -24,6 +24,8 @@ use std::sync::Mutex;
 
 const JOURNEY_TABLE: &str = "entity_journey";
 const JOURNEY_EVENT_TABLE: &str = "entity_journey_event";
+const JOURNEY_EVENT_SELECT: &str =
+    "record_id, owner_id, entity_id, kind, occurred_at, session_id, skill_id, tool_name, memory_id, memory_weight";
 const PRESENCE_FILE: &str = "presence.json";
 const MAX_PRESENCE_BYTES: usize = 32 * 1024;
 const MAX_EVENT_IDENTIFIER_BYTES: usize = 160;
@@ -309,19 +311,30 @@ impl JourneyStore {
 
         let mut prepared = Vec::with_capacity(events.len());
         for event in events {
-            match self
-                .handle
-                .select_record::<JourneyEventRecord>(JOURNEY_EVENT_TABLE, &event.record_id)?
-            {
+            let saved = self.handle.query_one::<JourneyEventRecord>(
+                &format!(
+                    "SELECT {JOURNEY_EVENT_SELECT} FROM entity_journey_event WHERE record_id = $record_id LIMIT 1"
+                ),
+                &[QueryBinding::new("record_id", &event.record_id)?],
+            )?;
+            match saved {
                 Some(saved) if saved == event => prepared.push(PreparedJourneyEvent {
                     event,
                     needs_write: false,
                 }),
                 Some(_) => bail!("Runtime outbox record ID conflicts with a saved journey event"),
-                None => prepared.push(PreparedJourneyEvent {
-                    event,
-                    needs_write: true,
-                }),
+                None => {
+                    if self
+                        .handle
+                        .record_exists(JOURNEY_EVENT_TABLE, &event.record_id)?
+                    {
+                        bail!("Runtime outbox record ID conflicts with a saved journey event");
+                    }
+                    prepared.push(PreparedJourneyEvent {
+                        event,
+                        needs_write: true,
+                    });
+                }
             }
         }
         Ok(prepared)
@@ -378,7 +391,9 @@ impl JourneyStore {
 
     fn event_activity_unlocked(&self, owner_id: &str, entity_id: &str) -> Result<JourneyActivity> {
         let rows = self.handle.query_vec::<JourneyEventRecord>(
-            "SELECT * FROM entity_journey_event WHERE owner_id = $owner_id AND entity_id = $entity_id",
+            &format!(
+                "SELECT {JOURNEY_EVENT_SELECT} FROM entity_journey_event WHERE owner_id = $owner_id AND entity_id = $entity_id"
+            ),
             &[
                 QueryBinding::new("owner_id", owner_id)?,
                 QueryBinding::new("entity_id", entity_id)?,
