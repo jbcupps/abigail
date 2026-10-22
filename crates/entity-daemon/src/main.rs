@@ -1147,12 +1147,12 @@ mod supervision_tests {
         state.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
         state.execution_ledger =
             Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
-        let assistant =
-            ConversationTurn::new(format!("session-{label}"), "assistant", "private reply")
-                .with_successful_tool_uses(vec![SuccessfulToolUse {
-                    skill_id: "com.abigail.calendar".to_string(),
-                    tool_name: "create_event".to_string(),
-                }]);
+        let session_id = format!("session-{label}");
+        let assistant = ConversationTurn::new(&session_id, "assistant", "private reply")
+            .with_successful_tool_uses(vec![SuccessfulToolUse {
+                skill_id: "com.abigail.calendar".to_string(),
+                tool_name: "create_event".to_string(),
+            }]);
         let record_id = crate::state::deterministic_journey_record_id(
             &state.entity_id,
             "skill_used",
