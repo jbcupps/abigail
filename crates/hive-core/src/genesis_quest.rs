@@ -1521,11 +1521,12 @@ mod tests {
     #[test]
     fn presence_card_takes_text_only_from_the_definition_and_rejects_authority() {
         let mut s = session();
-        // 90 characters within the definition's 160-byte name limit.
+        // Exactly 80 multibyte characters is valid and still exceeds the
+        // presentation-only Presence excerpt limit.
         set(
             &mut s,
             GenesisField::Name,
-            json!(format!("{}{}", "é".repeat(70), "a".repeat(20))),
+            json!(format!("{}{}", "é".repeat(70), "a".repeat(10))),
         );
         set(
             &mut s,
