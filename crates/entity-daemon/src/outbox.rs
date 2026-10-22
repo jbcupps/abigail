@@ -3,6 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
+#[cfg(test)]
+use {
+    std::path::Path,
+    std::sync::Arc,
+};
 
 const OUTBOX_FILE_NAME: &str = "runtime_outbox.json";
 
@@ -20,7 +25,12 @@ pub struct RuntimeOutbox {
     path: PathBuf,
     max_records: usize,
     inner: Mutex<PersistedOutbox>,
+    #[cfg(test)]
+    test_save: Option<Arc<TestSave>>,
 }
+
+#[cfg(test)]
+type TestSave = dyn Fn(&Path, &[u8]) -> anyhow::Result<()> + Send + Sync;
 
 impl RuntimeOutbox {
     pub fn load(root_dir: impl AsRef<std::path::Path>, max_records: usize) -> anyhow::Result<Self> {
@@ -37,7 +47,20 @@ impl RuntimeOutbox {
             path,
             max_records,
             inner: Mutex::new(inner),
+            #[cfg(test)]
+            test_save: None,
         })
+    }
+
+    #[cfg(test)]
+    fn load_with_saver(
+        root_dir: impl AsRef<std::path::Path>,
+        max_records: usize,
+        save: impl Fn(&Path, &[u8]) -> anyhow::Result<()> + Send + Sync + 'static,
+    ) -> anyhow::Result<Self> {
+        let mut outbox = Self::load(root_dir, max_records)?;
+        outbox.test_save = Some(Arc::new(save));
+        Ok(outbox)
     }
 
     pub fn enqueue(
@@ -111,10 +134,15 @@ impl RuntimeOutbox {
     }
 
     fn save_locked(&self, inner: &PersistedOutbox) -> anyhow::Result<()> {
+        let bytes = serde_json::to_vec_pretty(inner)?;
+        #[cfg(test)]
+        if let Some(save) = &self.test_save {
+            return save(&self.path, &bytes);
+        }
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(&self.path, serde_json::to_string_pretty(inner)?)?;
+        fs::write(&self.path, bytes)?;
         Ok(())
     }
 }
@@ -123,10 +151,42 @@ impl RuntimeOutbox {
 mod tests {
     use super::RuntimeOutbox;
     use hive_core::OutboxSyncResponse;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    fn root(label: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("{label}-{}", uuid::Uuid::new_v4()))
+    }
+
+    fn fail_save_on(
+        failed_call: usize,
+    ) -> impl Fn(&std::path::Path, &[u8]) -> anyhow::Result<()> + Send + Sync {
+        let calls = Arc::new(AtomicUsize::new(0));
+        move |path, bytes| {
+            let call = calls.fetch_add(1, Ordering::SeqCst) + 1;
+            if call == failed_call {
+                anyhow::bail!("injected outbox save failure");
+            }
+            abigail_core::secure_fs::write_bytes_atomic(path, bytes)?;
+            Ok(())
+        }
+    }
+
+    fn assert_records_equal(
+        actual: &[hive_core::EntityOutboxRecord],
+        expected: &[hive_core::EntityOutboxRecord],
+    ) {
+        assert_eq!(
+            serde_json::to_value(actual).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+    }
 
     #[test]
-    fn outbox_round_trips_and_acknowledges() {
-        let root = std::env::temp_dir().join(format!("abigail-outbox-{}", uuid::Uuid::new_v4()));
+    fn normal_acknowledgement_survives_restart() {
+        let root = root("abigail-outbox");
         let outbox = RuntimeOutbox::load(&root, 4).unwrap();
 
         let first = outbox
@@ -153,6 +213,104 @@ mod tests {
         let snapshot = outbox.snapshot().unwrap();
         assert_eq!(snapshot.len(), 1);
         assert_eq!(snapshot[0].record_id, second.record_id);
+        drop(outbox);
+
+        let restarted = RuntimeOutbox::load(&root, 4).unwrap();
+        let restarted_snapshot = restarted.snapshot().unwrap();
+        assert_eq!(restarted_snapshot.len(), 1);
+        assert_eq!(restarted_snapshot[0].record_id, second.record_id);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn capacity_applies_backpressure_without_evicting_unacknowledged_records() {
+        let root = root("abigail-outbox-capacity");
+        let outbox = RuntimeOutbox::load(&root, 2).unwrap();
+        let first = outbox
+            .enqueue("entity-1", "skill_used", serde_json::json!({"index": 1}))
+            .unwrap();
+        let second = outbox
+            .enqueue("entity-1", "skill_used", serde_json::json!({"index": 2}))
+            .unwrap();
+        let before = outbox.snapshot().unwrap();
+
+        let error = outbox
+            .enqueue("entity-1", "skill_used", serde_json::json!({"index": 3}))
+            .unwrap_err();
+        assert!(error.contains("backpressure"), "{error}");
+        assert!(error.contains("capacity 2"), "{error}");
+        assert_records_equal(&outbox.snapshot().unwrap(), &before);
+        assert_eq!(
+            before
+                .iter()
+                .map(|record| record.record_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![first.record_id.as_str(), second.record_id.as_str()]
+        );
+
+        drop(outbox);
+        let restarted = RuntimeOutbox::load(&root, 2).unwrap();
+        assert_records_equal(&restarted.snapshot().unwrap(), &before);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn enqueue_save_failure_keeps_memory_and_disk_at_the_prior_state() {
+        let root = root("abigail-outbox-enqueue-save");
+        let outbox = RuntimeOutbox::load_with_saver(&root, 4, fail_save_on(2)).unwrap();
+        let first = outbox
+            .enqueue("entity-1", "skill_used", serde_json::json!({"index": 1}))
+            .unwrap();
+
+        let error = outbox
+            .enqueue("entity-1", "skill_used", serde_json::json!({"index": 2}))
+            .unwrap_err();
+        assert!(error.contains("injected outbox save failure"), "{error}");
+        assert_records_equal(&outbox.snapshot().unwrap(), std::slice::from_ref(&first));
+
+        let restarted = RuntimeOutbox::load(&root, 4).unwrap();
+        assert_records_equal(&restarted.snapshot().unwrap(), std::slice::from_ref(&first));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn acknowledge_save_failure_keeps_records_unacknowledged_in_memory_and_on_disk() {
+        let root = root("abigail-outbox-ack-save");
+        let outbox = RuntimeOutbox::load_with_saver(&root, 4, fail_save_on(3)).unwrap();
+        let first = outbox
+            .enqueue("entity-1", "skill_used", serde_json::json!({"index": 1}))
+            .unwrap();
+        let second = outbox
+            .enqueue("entity-1", "skill_used", serde_json::json!({"index": 2}))
+            .unwrap();
+        let before = vec![first.clone(), second];
+
+        let error = outbox
+            .acknowledge(std::slice::from_ref(&first.record_id))
+            .unwrap_err();
+        assert!(error.contains("injected outbox save failure"), "{error}");
+        assert_records_equal(&outbox.snapshot().unwrap(), &before);
+
+        let restarted = RuntimeOutbox::load(&root, 4).unwrap();
+        assert_records_equal(&restarted.snapshot().unwrap(), &before);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restart_rejects_a_corrupt_outbox_instead_of_silently_losing_records() {
+        let root = root("abigail-outbox-corrupt");
+        let outbox = RuntimeOutbox::load(&root, 4).unwrap();
+        outbox
+            .enqueue("entity-1", "skill_used", serde_json::json!({"index": 1}))
+            .unwrap();
+        drop(outbox);
+        std::fs::write(root.join(super::OUTBOX_FILE_NAME), b"{not-json").unwrap();
+
+        let error = RuntimeOutbox::load(&root, 4)
+            .err()
+            .expect("corrupt outbox must fail closed");
+        assert!(error.to_string().contains("key must be a string"), "{error}");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
