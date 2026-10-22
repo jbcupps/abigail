@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GenesisCreationSeed, GenesisSession } from "./genesisClient";
 import {
+  createGenesisLaunchService,
   dispatchGenesisLaunch,
   GENESIS_LAUNCH_DRAFT_KEY,
   readGenesisLaunchDraft,
@@ -99,14 +100,31 @@ describe("First Signal launch journal", () => {
   it("stops a stale rendered recovery after another view clears the saved draft", async () => {
     const rendered = { version: 1 as const, creation_key: key, seed };
     localStorage.setItem(GENESIS_LAUNCH_DRAFT_KEY, JSON.stringify(rendered));
-    expect(readGenesisLaunchDraft()).toEqual(rendered);
-    localStorage.removeItem(GENESIS_LAUNCH_DRAFT_KEY);
     const dispatch = vi.fn();
+    const launch = createGenesisLaunchService(dispatch);
+    localStorage.removeItem(GENESIS_LAUNCH_DRAFT_KEY);
 
-    await expect(dispatchGenesisLaunch(seed, key, { expectedDraft: rendered, dispatch })).rejects.toThrow(/saved creation changed/i);
+    await expect(launch(seed)).rejects.toThrow(/saved creation changed/i);
 
     expect(dispatch).not.toHaveBeenCalled();
     expect(localStorage.getItem(GENESIS_LAUNCH_DRAFT_KEY)).toBeNull();
+  });
+
+  it("keeps one generated key and exact retained seed across an ambiguous service retry", async () => {
+    const dispatch = vi.fn()
+      .mockRejectedValueOnce(new TypeError("Network request failed"))
+      .mockImplementationOnce(async (_seed: GenesisCreationSeed, creationKey: string) => session(creationKey));
+    const launch = createGenesisLaunchService(dispatch);
+
+    await expect(launch(seed)).rejects.toThrow("Network request failed");
+    const retained = readGenesisLaunchDraft()!;
+    await expect(launch(retained.seed)).resolves.toEqual(session(retained.creation_key));
+
+    expect(dispatch.mock.calls).toEqual([
+      [retained.seed, retained.creation_key],
+      [retained.seed, retained.creation_key],
+    ]);
+    expect(readGenesisLaunchDraft()).toBeNull();
   });
 
   it.each([

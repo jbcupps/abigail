@@ -77,7 +77,8 @@ describe("Genesis First Signal", () => {
       name: "Nova",
       purpose: "Help our family explore",
       presence: { temperament: "gentle", identity: "aether", crest: "orbit", motion: "calm" },
-    }, expect.stringMatching(/^[0-9a-f-]{36}$/), undefined));
+    }));
+    expect(onBegin.mock.calls[0]).toHaveLength(1);
     expect(JSON.stringify(onBegin.mock.calls[0][0])).not.toMatch(/permission|runtime/i);
   });
 
@@ -91,7 +92,8 @@ describe("Genesis First Signal", () => {
     expect(screen.getByRole("textbox", { name: "Purpose" })).toBeDisabled();
     fireEvent.click(resume);
 
-    await waitFor(() => expect(onBegin).toHaveBeenCalledWith(recoverySeed, recoveryKey, recoveryDraft));
+    await waitFor(() => expect(onBegin).toHaveBeenCalledWith(recoverySeed));
+    expect(onBegin.mock.calls[0]).toHaveLength(1);
   });
 
   it("retains and surfaces an unreadable saved journal", async () => {
@@ -116,15 +118,16 @@ describe("Genesis First Signal", () => {
     expect(getQuestCatalog).not.toHaveBeenCalled();
     fireEvent.click(resume);
 
-    await waitFor(() => expect(onBegin).toHaveBeenCalledWith(recoverySeed, recoveryKey, recoveryDraft));
+    await waitFor(() => expect(onBegin).toHaveBeenCalledWith(recoverySeed));
+    expect(onBegin.mock.calls[0]).toHaveLength(1);
   });
 
   it("freezes to the retained exact draft after an ambiguous failure in the same mount", async () => {
     const onBegin = vi.fn()
-      .mockImplementationOnce(async (submittedSeed: GenesisCreationSeed, creationKey: string) => {
+      .mockImplementationOnce(async (submittedSeed: GenesisCreationSeed) => {
         localStorage.setItem(GENESIS_LAUNCH_DRAFT_KEY, JSON.stringify({
           version: 1,
-          creation_key: creationKey,
+          creation_key: recoveryKey,
           seed: submittedSeed,
         }));
         throw new TypeError("Network request failed");
@@ -144,11 +147,8 @@ describe("Genesis First Signal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Resume First Signal" }));
 
     await waitFor(() => expect(onBegin).toHaveBeenCalledTimes(2));
-    expect(onBegin.mock.calls[1]).toEqual([
-      firstCall[0],
-      firstCall[1],
-      { version: 1, creation_key: firstCall[1], seed: firstCall[0] },
-    ]);
+    expect(firstCall).toEqual([expect.objectContaining({ name: "Nova", purpose: "Keep family stories" })]);
+    expect(onBegin.mock.calls[1]).toEqual([firstCall[0]]);
   });
 
   it("retries Quest catalog loading for a new editable signal", async () => {

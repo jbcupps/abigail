@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { GenesisCreationSeed } from "../lib/genesisClient";
-import { readGenesisLaunchDraft, type GenesisLaunchDraft } from "../lib/genesisLaunchDraft";
+import { readGenesisLaunchDraft } from "../lib/genesisLaunchDraft";
 import {
   CRESTS,
   getQuestCatalog,
@@ -19,33 +19,31 @@ const DEFAULT_PRESENCE: PresenceChoice = {
   motion: "calm",
 };
 
-function initialSignal(): { seed: GenesisCreationSeed; draft: GenesisLaunchDraft | null; creationKey: string; error: string } {
+function initialSignal(): { seed: GenesisCreationSeed; recovering: boolean; error: string } {
   try {
     const draft = readGenesisLaunchDraft();
     return {
       seed: draft?.seed ?? { mode: "quick", name: "", purpose: "", presence: DEFAULT_PRESENCE },
-      draft,
-      creationKey: draft?.creation_key ?? crypto.randomUUID(),
+      recovering: draft !== null,
       error: "",
     };
   } catch (reason) {
     return {
       seed: { mode: "quick", name: "", purpose: "", presence: DEFAULT_PRESENCE },
-      draft: null,
-      creationKey: crypto.randomUUID(),
+      recovering: false,
       error: reason instanceof Error ? reason.message : String(reason),
     };
   }
 }
 
 export default function GenesisFirstSignal({ onBegin }: {
-  onBegin: (seed: GenesisCreationSeed, creationKey: string, expectedDraft?: GenesisLaunchDraft) => Promise<void>;
+  onBegin: (seed: GenesisCreationSeed) => Promise<void>;
 }) {
   const [initial] = useState(initialSignal);
   const [name, setName] = useState(initial.seed.name);
   const [purpose, setPurpose] = useState(initial.seed.purpose);
   const [presence, setPresence] = useState(initial.seed.presence);
-  const [recoveryDraft, setRecoveryDraft] = useState(initial.draft);
+  const [recoverySeed, setRecoverySeed] = useState<GenesisCreationSeed | null>(initial.recovering ? initial.seed : null);
   const [catalog, setCatalog] = useState<QuestCatalog | null>(null);
   const [catalogError, setCatalogError] = useState("");
   const [submitError, setSubmitError] = useState("");
@@ -60,12 +58,12 @@ export default function GenesisFirstSignal({ onBegin }: {
     return () => { mounted = false; };
   }, []);
   useEffect(() => {
-    if (recoveryDraft || initial.error) return;
+    if (recoverySeed || initial.error) return;
     return loadCatalog();
-  }, [initial.error, loadCatalog, recoveryDraft]);
+  }, [initial.error, loadCatalog, recoverySeed]);
 
-  const immutable = Boolean(recoveryDraft || initial.error);
-  const ready = recoveryDraft
+  const immutable = Boolean(recoverySeed || initial.error);
+  const ready = recoverySeed
     ? true
     : Boolean(name.trim() && purpose.trim() && catalog && !initial.error);
   const submit = async (event: FormEvent) => {
@@ -73,21 +71,20 @@ export default function GenesisFirstSignal({ onBegin }: {
     if (!ready || busy) return;
     setBusy(true);
     setSubmitError("");
-    const submittedSeed: GenesisCreationSeed = recoveryDraft?.seed ?? {
+    const submittedSeed: GenesisCreationSeed = recoverySeed ?? {
       mode: "quick",
       name: name.trim(),
       purpose: purpose.trim(),
       presence,
     };
-    const creationKey = recoveryDraft?.creation_key ?? initial.creationKey;
     try {
-      await onBegin(submittedSeed, creationKey, recoveryDraft ?? undefined);
+      await onBegin(submittedSeed);
     } catch (reason) {
       setSubmitError(reason instanceof Error ? reason.message : String(reason));
       try {
         const retained = readGenesisLaunchDraft();
         if (retained) {
-          setRecoveryDraft(retained);
+          setRecoverySeed(retained.seed);
           setName(retained.seed.name);
           setPurpose(retained.seed.purpose);
           setPresence(retained.seed.presence);
@@ -108,7 +105,7 @@ export default function GenesisFirstSignal({ onBegin }: {
       <div className="genesis-eyebrow">First Signal</div>
       <h3>Who is waiting to meet your family?</h3>
       <p>Choose a name, a purpose, and the Presence they will carry into your home. You can shape everything else together in the Genesis Quest.</p>
-      {recoveryDraft && <p className="genesis-notice" role="status">A previous First Signal may already have reached Hive. Resume it exactly to recover safely.</p>}
+      {recoverySeed && <p className="genesis-notice" role="status">A previous First Signal may already have reached Hive. Resume it exactly to recover safely.</p>}
       {initial.error && <p className="genesis-error" role="alert">{initial.error}</p>}
       {catalogError && !immutable && <div className="genesis-error" role="alert">Presence choices could not be loaded: {catalogError}<button type="button" onClick={loadCatalog}>Retry Presence choices</button></div>}
       {submitError && <p className="genesis-error" role="alert">{submitError}</p>}
@@ -131,7 +128,7 @@ export default function GenesisFirstSignal({ onBegin }: {
         return <button type="button" key={crest} aria-pressed={presence.crest === crest} disabled={immutable || busy || locked} onClick={() => setPresence({ ...presence, crest })}><PresenceCrest palette={presence.identity} crest={crest} size={28} />{CRESTS[crest]}{locked && <small>Locked</small>}</button>;
       })}</div></fieldset>
       <fieldset><legend>Motion</legend><div className="quest-swatches">{Object.entries(MOTIONS).map(([value, label]) => <button type="button" key={value} aria-pressed={presence.motion === value} disabled={immutable || busy} onClick={() => setPresence({ ...presence, motion: value as PresenceChoice["motion"] })}>{label}</button>)}</div></fieldset>
-      <button type="submit" className="genesis-primary" disabled={!ready || busy}>{busy ? "Listening for Hive…" : recoveryDraft ? "Resume First Signal" : "Begin Genesis Quest"}</button>
+      <button type="submit" className="genesis-primary" disabled={!ready || busy}>{busy ? "Listening for Hive…" : recoverySeed ? "Resume First Signal" : "Begin Genesis Quest"}</button>
       <p className="genesis-muted">Presence is visual and local. It never grants tools, permissions, or access to connected accounts.</p>
     </section>
   </form>;

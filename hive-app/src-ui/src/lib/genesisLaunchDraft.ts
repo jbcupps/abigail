@@ -158,3 +158,42 @@ export function dispatchGenesisLaunch(
     return created;
   });
 }
+
+export type GenesisLaunchService = (seed: GenesisCreationSeed) => Promise<GenesisSession>;
+
+/**
+ * Captures the journal state shown by one mounted workspace. Callers submit
+ * only reviewed seeds; keys and stale-view checks never cross the component
+ * boundary.
+ */
+export function createGenesisLaunchService(
+  dispatch: Dispatch = createOrResumeGenesis,
+): GenesisLaunchService {
+  let expectedDraft: GenesisLaunchDraft | undefined;
+  let journalError: unknown;
+  try {
+    expectedDraft = readGenesisLaunchDraft() ?? undefined;
+  } catch (error) {
+    journalError = error;
+  }
+  const creationKey = expectedDraft?.creation_key ?? crypto.randomUUID();
+
+  return async (seed) => {
+    if (journalError) throw journalError;
+    try {
+      return await dispatchGenesisLaunch(seed, creationKey, { expectedDraft, dispatch });
+    } catch (error) {
+      if (!expectedDraft) {
+        try {
+          const retained = readGenesisLaunchDraft();
+          if (retained?.creation_key === creationKey && sameSeed(retained.seed, seed)) {
+            expectedDraft = retained;
+          }
+        } catch {
+          // Preserve the original launch failure and the journal bytes.
+        }
+      }
+      throw error;
+    }
+  };
+}

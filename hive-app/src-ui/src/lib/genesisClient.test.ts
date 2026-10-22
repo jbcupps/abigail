@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createOrResumeGenesis, genesisRequest, type GenesisCreationSeed } from "./genesisClient";
-import { dispatchGenesisLaunch, GENESIS_LAUNCH_DRAFT_KEY, type GenesisLaunchDraft } from "./genesisLaunchDraft";
+import { createGenesisLaunchService, GENESIS_LAUNCH_DRAFT_KEY, type GenesisLaunchDraft } from "./genesisLaunchDraft";
 import { resolveHiveConnection } from "./connection";
 vi.mock("./connection", () => ({ resolveHiveConnection: vi.fn() }));
 
@@ -56,8 +56,9 @@ describe("private Genesis requests", () => {
       json: async () => ({ ok: true, data: { id: creationKey, creation_seed: seed } }),
     });
     vi.stubGlobal("fetch", fetcher);
+    const launch = createGenesisLaunchService();
 
-    const created = await dispatchGenesisLaunch(seed, creationKey, { expectedDraft: draft });
+    const created = await launch(seed);
 
     expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
       mode: "quick",

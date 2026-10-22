@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { deleteGenesisSession, displayGenesisValue, essenceFor, exportGenesisMarkdown, GENESIS_MODES, genesisAction, getGenesisSession, importGenesisMarkdown, listGenesisSessions, sendGenesisMessage, type FieldUpdate, type GenesisCreationSeed, type GenesisSession } from "../lib/genesisClient";
-import { dispatchGenesisLaunch, type GenesisLaunchDraft } from "../lib/genesisLaunchDraft";
+import { createGenesisLaunchService } from "../lib/genesisLaunchDraft";
 import { openEntity } from "../lib/entityWindow";
 import GenesisDefinition from "./GenesisDefinition";
 import GenesisFirstSignal from "./GenesisFirstSignal";
@@ -32,6 +32,7 @@ export default function GenesisWorkspace({ onClose, onCreated, resumeId }: { onC
   const [confirmation, setConfirmation] = useState<string | null>(null);
   const [questStage, setQuestStage] = useState<QuestStageId>("reservation");
   const [celebration, setCelebration] = useState<BadgeView[] | null>(null);
+  const [launchGenesis] = useState(() => createGenesisLaunchService());
   const flight = useRef(false);
   const mounted = useRef(true);
   const latest = useRef(session);
@@ -51,11 +52,11 @@ export default function GenesisWorkspace({ onClose, onCreated, resumeId }: { onC
     finally { flight.current = false; if (mounted.current) setBusy(false); }
   };
   const adopt = (next: GenesisSession) => { latest.current = next; if (mounted.current) setSession(next); return next; };
-  const begin = async (seed: GenesisCreationSeed, creationKey: string, expectedDraft?: GenesisLaunchDraft) => {
+  const begin = async (seed: GenesisCreationSeed) => {
     if (flight.current) throw new Error("Another Genesis step is still being saved.");
     flight.current = true; setBusy(true); setError(""); setNotice("");
     try {
-      const next = await dispatchGenesisLaunch(seed, creationKey, { expectedDraft });
+      const next = await launchGenesis(seed);
       adopt(next); setComposer(next.composer_draft || ""); setTab(next.quest ? "quest" : "conversation");
       setQuestStage(next.quest?.current ?? "reservation");
     } finally {
