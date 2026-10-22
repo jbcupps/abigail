@@ -256,10 +256,11 @@ mod tests {
 
     struct EchoSkill {
         manifest: SkillManifest,
+        executions: Arc<AtomicUsize>,
     }
 
     impl EchoSkill {
-        fn new() -> Self {
+        fn new(executions: Arc<AtomicUsize>) -> Self {
             Self {
                 manifest: SkillManifest {
                     id: SkillId("test.echo".to_string()),
@@ -277,6 +278,7 @@ mod tests {
                     secrets: vec![],
                     config_defaults: HashMap::new(),
                 },
+                executions,
             }
         }
     }
@@ -327,6 +329,7 @@ mod tests {
             params: ToolParams,
             _context: &ExecutionContext,
         ) -> SkillResult<ToolOutput> {
+            self.executions.fetch_add(1, Ordering::SeqCst);
             Ok(ToolOutput::success(serde_json::json!({
                 "echoed": params.values.get("input")
             })))
@@ -457,16 +460,20 @@ mod tests {
         }
     }
 
-    fn build_tool_state(tool_calls: usize) -> EntityDaemonState {
+    fn build_tool_state(tool_calls: usize) -> (EntityDaemonState, Arc<AtomicUsize>) {
         let state = build_state_with_provider(Arc::new(ToolProvider {
             calls: AtomicUsize::new(0),
             tool_calls,
         }));
+        let executions = Arc::new(AtomicUsize::new(0));
         state
             .registry
-            .register(SkillId("test.echo".to_string()), Arc::new(EchoSkill::new()))
+            .register(
+                SkillId("test.echo".to_string()),
+                Arc::new(EchoSkill::new(executions.clone())),
+            )
             .unwrap();
-        state
+        (state, executions)
     }
 
     async fn run_turn(state: &EntityDaemonState, session_id: &str) -> (String, TurnOutcome) {
@@ -538,9 +545,9 @@ mod tests {
 
     #[tokio::test]
     async fn outbox_capacity_fails_the_real_tool_turn_before_journal_commit() {
-        let mut state = build_tool_state(2);
+        let (mut state, executions) = build_tool_state(2);
         let root = outbox_root("abigail-pipeline-capacity");
-        let outbox = crate::outbox::RuntimeOutbox::load(&root, 2).unwrap();
+        let outbox = crate::outbox::RuntimeOutbox::load(&root, 1).unwrap();
         let existing = outbox
             .enqueue(
                 &state.entity_id,
@@ -556,7 +563,12 @@ mod tests {
 
         let (_, outcome) = run_turn(&state, "session-capacity").await;
         let error = outcome.expect_err("outbox backpressure must fail the tool turn");
-        assert!(error.contains("safely save"), "{error}");
+        assert!(error.contains("backpressure"), "{error}");
+        assert_eq!(
+            executions.load(Ordering::SeqCst),
+            0,
+            "capacity must be reserved before any tool side effect"
+        );
         assert!(
             state
                 .memory
@@ -569,8 +581,9 @@ mod tests {
         let queued = state.outbox.snapshot().unwrap();
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].record_id, existing.record_id);
+        assert!(state.outbox.reservations().unwrap().is_empty());
 
-        let restarted = crate::outbox::RuntimeOutbox::load(&root, 2).unwrap();
+        let restarted = crate::outbox::RuntimeOutbox::load(&root, 1).unwrap();
         let restarted = restarted.snapshot().unwrap();
         assert_eq!(restarted.len(), 1);
         assert_eq!(restarted[0].record_id, existing.record_id);
@@ -579,7 +592,7 @@ mod tests {
 
     #[tokio::test]
     async fn outbox_save_failure_fails_the_real_tool_turn_and_preserves_queued_ids() {
-        let mut state = build_tool_state(2);
+        let (mut state, executions) = build_tool_state(2);
         let root = outbox_root("abigail-pipeline-save-failure");
         let calls = Arc::new(AtomicUsize::new(0));
         let saver_calls = calls.clone();
@@ -607,6 +620,11 @@ mod tests {
         let (_, outcome) = run_turn(&state, "session-save-failure").await;
         let error = outcome.expect_err("an atomic save failure must fail the tool turn");
         assert!(error.contains("safely save"), "{error}");
+        assert_eq!(
+            executions.load(Ordering::SeqCst),
+            0,
+            "reservation save failure must prevent every tool side effect"
+        );
         assert!(state
             .memory
             .recent_turns("session-save-failure", 10)
@@ -616,12 +634,63 @@ mod tests {
         let queued = state.outbox.snapshot().unwrap();
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].record_id, existing.record_id);
+        assert!(state.outbox.reservations().unwrap().is_empty());
 
         let restarted = crate::outbox::RuntimeOutbox::load(&root, 4).unwrap();
         let restarted = restarted.snapshot().unwrap();
         assert_eq!(restarted.len(), 1);
         assert_eq!(restarted[0].record_id, existing.record_id);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn successful_tool_turn_commits_one_content_free_aggregate_after_the_assistant_fact() {
+        let (state, executions) = build_tool_state(2);
+        let _handles = spawn(state.clone()).await.expect("pipeline spawn");
+
+        let (_, outcome) = run_turn(&state, "session-aggregate").await;
+        let response = outcome.expect("tool turn should succeed");
+        assert_eq!(response.reply, "tool-assisted reply");
+        assert_eq!(executions.load(Ordering::SeqCst), 2);
+
+        let assistant = state
+            .memory
+            .recent_turns("session-aggregate", 10)
+            .unwrap()
+            .into_iter()
+            .find(|turn| turn.role == "assistant")
+            .expect("successful response must be durable before activity commit");
+        assert_eq!(assistant.successful_tool_uses.len(), 2);
+
+        let records = state.outbox.snapshot().unwrap();
+        assert_eq!(records.len(), 1, "one turn produces one aggregate event");
+        assert_eq!(records[0].kind, "skill_used");
+        assert_eq!(records[0].payload["session_id"], "session-aggregate");
+        assert_eq!(records[0].payload["successful_skill_count"], 2);
+        assert_eq!(
+            records[0].record_id,
+            crate::state::deterministic_journey_record_id(
+                &state.entity_id,
+                "skill_used",
+                &assistant.id,
+            )
+        );
+        assert!(state.outbox.reservations().unwrap().is_empty());
+        let serialized = records[0].payload.to_string();
+        for forbidden in [
+            "content",
+            "reply",
+            "message",
+            "arguments",
+            "output",
+            "skill_id",
+            "tool_name",
+        ] {
+            assert!(
+                !serialized.contains(forbidden),
+                "aggregate activity leaked {forbidden}: {serialized}"
+            );
+        }
     }
 
     #[tokio::test]

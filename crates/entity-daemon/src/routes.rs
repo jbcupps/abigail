@@ -1416,17 +1416,19 @@ pub(crate) mod tests {
             "{:?}",
             response.error
         );
-        let saved = state
-            .memory
-            .all_memories()
-            .unwrap()
-            .into_iter()
-            .find(|memory| memory.content == "durable private fallback")
-            .unwrap();
-        assert!(saved.explicitly_confirmed);
+        assert!(
+            state
+                .memory
+                .all_memories()
+                .unwrap()
+                .iter()
+                .all(|memory| memory.content != "durable private fallback"),
+            "reservation save failure must happen before memory insertion"
+        );
         let queued = state.outbox.snapshot().unwrap();
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].record_id, existing.record_id);
+        assert!(state.outbox.reservations().unwrap().is_empty());
         let restarted = crate::outbox::RuntimeOutbox::load(&root, 4).unwrap();
         assert_eq!(
             restarted.snapshot().unwrap()[0].record_id,
@@ -1480,11 +1482,11 @@ pub(crate) mod tests {
             .all_memories()
             .unwrap()
             .iter()
-            .any(|memory| memory.content == "durable capacity fallback"
-                && memory.explicitly_confirmed));
+            .all(|memory| memory.content != "durable capacity fallback"));
         let queued = state.outbox.snapshot().unwrap();
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].record_id, existing.record_id);
+        assert!(state.outbox.reservations().unwrap().is_empty());
         let restarted = crate::outbox::RuntimeOutbox::load(&root, 1).unwrap();
         assert_eq!(
             restarted.snapshot().unwrap()[0].record_id,
