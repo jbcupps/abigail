@@ -253,15 +253,23 @@ verify the result before repeating it.
 Cancellation after possible tool activity retains the reservation for
 quarantine/manual recovery and says an action may have completed, so the mentor
 should verify before repeating it.
+The Entity API carries these outcomes with stable
+`action_completed_verify_before_repeating` or
+`action_may_have_completed_verify_before_repeating` codes. Entity Runtime and
+Hive chat replace any backend detail with fixed plain-language guidance to
+verify the result before repeating the action.
 Persisted acknowledgements prevent an old fact from being queued again, but do
 not prevent reconciliation from repairing a missing local execution-ledger
 entry. Content-free acknowledged-record metadata preserves the original
 `soul_ref`, kind, session and payload digest, so repair after a soul change
 recreates the historical event without requeue; an existing matching ledger
-event remains authoritative. Before each heartbeat, Runtime reconciles every
-queued record and every retained acknowledged metadata row into the ledger,
-including blocked/history-failure facts with no assistant source row. A
-reconciliation failure stops that tick before Hive heartbeat or sync.
+event remains authoritative. Before each heartbeat, Runtime first reconciles
+durable assistant and memory sources, then captures one immutable queued batch.
+It reconciles exactly that batch and every retained acknowledged metadata row
+into the ledger, including blocked/history-failure facts with no assistant
+source row, before calling Hive. Only the captured batch is synced; records
+staged concurrently remain queued for the next heartbeat. A reconciliation
+failure stops that tick before Hive heartbeat or sync.
 Reservations with no matching durable assistant or memory fact stay active for
 a conservative 24-hour recovery window; after that they move atomically to a
 persisted, non-capacity quarantine for diagnosis without inventing activity.
@@ -351,14 +359,19 @@ Fresh affected verification on `cursor/genesis-quest-gamification-4871`
 passed:
 
 - `cargo fmt --all -- --check`;
-- strict all-target Clippy for `entity-chat`, `entity-daemon`, `hive-core`,
-  `hive-daemon`, `abigail-persistence`, `abigail-app` and `soul-forge`;
-- affected Rust suites for those seven packages: 351 tests passed and 8
+- strict all-target Clippy for `entity-core`, `entity-chat`, `entity-daemon`,
+  `hive-core`, `hive-daemon`, `abigail-persistence`, `abigail-app`,
+  `abigail-cli` and `soul-forge`;
+- affected Rust suites for those nine packages: 362 tests passed and 8
   pre-existing daemon cluster tests were ignored;
+- `cd entity-runtime-app/src-ui && npm test && npm run build`: production build
+  plus 10 tests across 3 files;
 - `cd hive-app/src-ui && npm test && npm run build`: production build plus
-  92 tests across 18 files;
+  95 tests across 19 files;
 - `cd tauri-app/src-ui && npm test && npm run build`: production build plus
-  54 tests across 14 files.
+  58 tests across 14 files;
+- `cd tauri-app/src-ui && npm run check:command-contract`: 105 frontend
+  commands aligned with 170 native registrations and 81 harness cases.
 
 The ethics-key scan found no occurrence in the tracked Hive reveal and only a
 weight-rejection assertion in the legacy Tauri frontend. Rust presentation
@@ -373,8 +386,13 @@ history-save failure still preserve completed tool counts; cancellation retains
 the reservation when the current loop boundary cannot prove whether activity
 ran. Acknowledged IDs are never requeued but still repair a missing local
 ledger with their historical soul reference. Reconciliation errors stop the
-Hive heartbeat/sync attempt, and stale unmatched reservations enter
-non-capacity quarantine without creating an event. None adds content to
+Hive heartbeat/sync attempt. The heartbeat's barrier-tested immutable snapshot
+ensures a concurrently staged record is neither synced nor acknowledged until
+the next cycle, and every synced ID already exists exactly once in the ledger.
+Stable completion-risk codes survive nonstreaming, streaming and cancellation
+races; both family chat surfaces render only fixed duplicate-safe copy rather
+than sensitive backend text. Stale unmatched reservations enter non-capacity
+quarantine without creating an event. None adds content to
 `entity_journey_event`.
 
 This is source, build and automated fixture verification only. No installer,
