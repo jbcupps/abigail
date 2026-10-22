@@ -304,6 +304,31 @@ Relationship visualization and dedicated voice casting remain later enhancements
 as requested in the specification's staged-innovation section. Relationships and
 voice descriptions are already editable canonical fields.
 
+## Source verification — 2026-10-22
+
+Fresh verification on `cursor/genesis-quest-gamification-4871` passed:
+
+- `cargo fmt --all -- --check`;
+- `cargo clippy --workspace --exclude abigail-app -- -D warnings`;
+- `cargo test --workspace --exclude abigail-app`: 1,084 test executions
+  passed and 10 were ignored across 112 Rust test/doc-test result groups;
+- `cd hive-app/src-ui && npm run build && npm test`: production build plus
+  86 tests across 16 files;
+- `cd entity-runtime-app/src-ui && npm run build && npm test`: production
+  build plus 7 tests across 3 files.
+
+The ethics-key scan found only internal certificate construction/signing,
+runtime-only soul material and regressions that reject public leakage or assert
+the lease-only boundary; it found no Hive frontend occurrence. The journey
+content-word scan found the serialized whole-journey envelope, input-only
+Runtime outbox payload parsing into closed metadata, counters/comments, and
+privacy test fixtures/assertions. None adds content to
+`entity_journey_event`.
+
+This is source, build and automated fixture verification only. No installer,
+installed WebView, live provider, microphone, paid media or subjective visual
+acceptance was run or claimed for this change.
+
 ## Verification — 2026-10-17
 
 The final backend regression for `hive-core`, `hive-daemon` and `entity-daemon`
