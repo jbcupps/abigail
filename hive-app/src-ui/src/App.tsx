@@ -15,6 +15,7 @@ import { openEntity } from "./lib/entityWindow";
 
 type Phase = "splash" | "loading" | "ready" | "error";
 type Readiness = "pending" | "ok" | "failed";
+type GenesisLaunchRequest = { resumeId?: string };
 
 const READY_CEILING_MS = 20_000;
 
@@ -26,16 +27,34 @@ export default function App() {
   const [genesisOpen, setGenesisOpen] = useState(false);
   const [genesisResume, setGenesisResume] = useState<string | undefined>();
   const [genesisLaunch, setGenesisLaunch] = useState(0);
+  const [genesisSwitch, setGenesisSwitch] = useState<GenesisLaunchRequest | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const openingRef = useRef(false);
+  const activeGenesisLaunch = useRef(0);
   const mounted = useRef(true);
   const cardsKey = `${genesisOpen}:${status?.entities.map(entity => `${entity.id}:${entity.birth_complete}`).join(",") ?? ""}`;
   const { portraits, awaiting } = useGenesisEntities(cardsKey);
-  const openGenesis = useCallback((sessionId?: string) => {
+  const launchGenesis = useCallback((sessionId?: string) => {
     setGenesisResume(sessionId);
-    setGenesisLaunch((launch) => launch + 1);
+    setGenesisLaunch((launch) => {
+      const next = launch + 1;
+      activeGenesisLaunch.current = next;
+      return next;
+    });
     setGenesisOpen(true);
+  }, []);
+  const openGenesis = useCallback((sessionId?: string) => {
+    if (genesisOpen) {
+      setGenesisSwitch({ resumeId: sessionId });
+      return;
+    }
+    launchGenesis(sessionId);
+  }, [genesisOpen, launchGenesis]);
+  const closeGenesis = useCallback((launch: number) => {
+    if (activeGenesisLaunch.current !== launch) return;
+    setGenesisSwitch(null);
+    setGenesisOpen(false);
   }, []);
 
   const handleOpen = useCallback(async (entity: EntityInfo) => {
@@ -174,7 +193,7 @@ export default function App() {
 
         <GenesisNotifications onOpen={() => openGenesis()} />
         <GenesisMediaConnections />
-        {genesisOpen && <GenesisWorkspace key={genesisLaunch} resumeId={genesisResume} onClose={() => setGenesisOpen(false)} onCreated={() => void refreshStatus()} />}
+        {genesisOpen && <GenesisWorkspace key={genesisLaunch} resumeId={genesisResume} onClose={() => closeGenesis(genesisLaunch)} onCreated={() => void refreshStatus()} />}
         <section className={genesisOpen ? "mt-8" : undefined}>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-xs uppercase tracking-wide text-theme-text-dim">
@@ -242,6 +261,22 @@ export default function App() {
 
       {wizardOpen && (
         <ProviderWizard onClose={closeWizard} onComplete={refreshStatus} />
+      )}
+      {genesisSwitch && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="switch-genesis-title">
+          <div className="w-full max-w-md rounded-theme-lg border border-theme-border bg-theme-bg-elevated p-5 shadow-2xl">
+            <h2 id="switch-genesis-title" className="text-lg font-semibold text-theme-text-bright">Switch Genesis workspace?</h2>
+            <p className="mt-2 text-sm text-theme-text-dim">Unsaved words or selections in the current workspace would be left behind. Stay here and use Save and exit first if you want to keep them.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="rounded-theme-md border border-theme-border px-3 py-2 text-sm" autoFocus onClick={() => setGenesisSwitch(null)}>Stay here</button>
+              <button type="button" className="rounded-theme-md bg-theme-primary px-3 py-2 text-sm font-medium text-white" onClick={() => {
+                const request = genesisSwitch;
+                setGenesisSwitch(null);
+                launchGenesis(request.resumeId);
+              }}>Switch workspace</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
