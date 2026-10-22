@@ -3,6 +3,13 @@ import { useRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
+type MockGenesisEntities = {
+  portraits: Record<string, unknown>;
+  awaiting: Record<string, string>;
+  loading?: boolean;
+  error?: string | null;
+};
+
 const mocks = vi.hoisted(() => ({
   completeEntitySetup: vi.fn(),
   connectLocalModel: vi.fn(),
@@ -14,10 +21,9 @@ const mocks = vi.hoisted(() => ({
   genesisWorkspace: vi.fn(),
   genesisMounts: 0,
   genesisClosers: [] as Array<() => void>,
-  genesisEntities: { portraits: {}, awaiting: { ada: "session-a" } } as {
-    portraits: Record<string, unknown>;
-    awaiting: Record<string, string>;
-  },
+  genesisEntities: { portraits: {}, awaiting: { ada: "session-a" } } as MockGenesisEntities,
+  genesisEntitiesForKey: null as ((refreshKey: unknown) => MockGenesisEntities) | null,
+  genesisRefreshKeys: [] as unknown[],
 }));
 
 vi.mock("./lib/daemonClient", () => ({
@@ -50,7 +56,10 @@ vi.mock("./components/GenesisWorkspace", () => ({
 
 vi.mock("./components/GenesisEntityPortrait", () => ({
   default: ({ name }: { name: string }) => <span>{name} portrait</span>,
-  useGenesisEntities: () => mocks.genesisEntities,
+  useGenesisEntities: (refreshKey: unknown) => {
+    mocks.genesisRefreshKeys.push(refreshKey);
+    return mocks.genesisEntitiesForKey?.(refreshKey) ?? mocks.genesisEntities;
+  },
 }));
 
 describe("Abigail Hive app", () => {
@@ -59,6 +68,8 @@ describe("Abigail Hive app", () => {
     mocks.genesisMounts = 0;
     mocks.genesisClosers.length = 0;
     mocks.genesisEntities = { portraits: {}, awaiting: { ada: "session-a" } };
+    mocks.genesisEntitiesForKey = null;
+    mocks.genesisRefreshKeys.length = 0;
     mocks.hiveHealth.mockResolvedValue(true);
     mocks.detectCliProviders.mockResolvedValue([]);
     mocks.connectLocalModel.mockResolvedValue({ model: "family-model" });
@@ -126,11 +137,23 @@ describe("Abigail Hive app", () => {
     await waitFor(() => expect(screen.getByTestId("genesis-workspace")).toHaveTextContent("2:session-a"));
   });
 
-  it("routes a receipt-only Genesis card through model setup, then restores its saved session", async () => {
-    mocks.genesisEntities = {
+  it("refreshes a receipt-only card after a list failure and provider connection without generic setup", async () => {
+    const failedRefreshSnapshot: MockGenesisEntities = {
       portraits: {},
-      awaiting: { ada: "receipt-only-session" },
+      awaiting: { ada: "prior-receipt-session" },
+      loading: false,
+      error: "temporary Genesis list failure",
     };
+    const readyRefreshSnapshot: MockGenesisEntities = {
+      portraits: {},
+      awaiting: { ada: "fresh-receipt-session" },
+      loading: false,
+      error: null,
+    };
+    mocks.genesisEntitiesForKey = (refreshKey) =>
+      String(refreshKey).includes("ready")
+        ? readyRefreshSnapshot
+        : failedRefreshSnapshot;
     const needsProvider = {
       entity_count: 3,
       entities: [
@@ -191,11 +214,14 @@ describe("Abigail Hive app", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Use a local model/ }));
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     await waitFor(() => expect(mocks.connectLocalModel).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(mocks.genesisRefreshKeys.some((key) => String(key).includes("ready"))).toBe(true),
+    );
     await screen.findByRole("button", { name: "Continue Ada's Genesis" });
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Continue Ada's Genesis" }));
-    expect(await screen.findByTestId("genesis-workspace")).toHaveTextContent("1:receipt-only-session");
+    expect(await screen.findByTestId("genesis-workspace")).toHaveTextContent("1:fresh-receipt-session");
     expect(mocks.completeEntitySetup).not.toHaveBeenCalled();
   });
 });
