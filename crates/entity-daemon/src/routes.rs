@@ -774,11 +774,12 @@ pub async fn memory_insert(
         )
     });
     if let Some(record_id) = journey_record_id.as_ref() {
-        if let Err(error) =
-            state
-                .outbox
-                .reserve_slot(record_id.clone(), &state.entity_id, "memory_confirmed")
-        {
+        if let Err(error) = state.outbox.reserve_slot_with_soul_ref(
+            record_id.clone(),
+            &state.entity_id,
+            "memory_confirmed",
+            &state.soul_ref,
+        ) {
             tracing::warn!(
                 memory_id = %entry.id,
                 "Explicit memory was not inserted because activity capacity could not be reserved: {error}"

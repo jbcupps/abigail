@@ -103,7 +103,12 @@ async fn respond(
     let reservation_error = activity_record_id.as_ref().and_then(|record_id| {
         state
             .outbox
-            .reserve_slot(record_id.clone(), &state.entity_id, "skill_used")
+            .reserve_slot_with_soul_ref(
+                record_id.clone(),
+                &state.entity_id,
+                "skill_used",
+                &state.soul_ref,
+            )
             .err()
     });
     // Snapshot the active router for this turn (hot-swap applies on the next).

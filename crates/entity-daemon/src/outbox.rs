@@ -23,6 +23,8 @@ pub struct OutboxReservation {
     pub entity_id: String,
     pub kind: String,
     pub created_at_utc: String,
+    #[serde(default)]
+    pub soul_ref: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -340,11 +342,37 @@ impl RuntimeOutbox {
         Ok(staged)
     }
 
+    #[cfg(test)]
     pub fn reserve_slot(
         &self,
         record_id: String,
         entity_id: &str,
         kind: &str,
+    ) -> Result<OutboxReservation, String> {
+        self.reserve_slot_internal(record_id, entity_id, kind, "")
+    }
+
+    pub(crate) fn reserve_slot_with_soul_ref(
+        &self,
+        record_id: String,
+        entity_id: &str,
+        kind: &str,
+        soul_ref: &str,
+    ) -> Result<OutboxReservation, String> {
+        if soul_ref.is_empty() {
+            return Err(
+                "Runtime outbox reservations require an original soul reference".to_string(),
+            );
+        }
+        self.reserve_slot_internal(record_id, entity_id, kind, soul_ref)
+    }
+
+    fn reserve_slot_internal(
+        &self,
+        record_id: String,
+        entity_id: &str,
+        kind: &str,
+        soul_ref: &str,
     ) -> Result<OutboxReservation, String> {
         validate_record_id(&record_id)?;
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
@@ -404,6 +432,7 @@ impl RuntimeOutbox {
             entity_id: entity_id.to_string(),
             kind: kind.to_string(),
             created_at_utc: chrono::Utc::now().to_rfc3339(),
+            soul_ref: soul_ref.to_string(),
         };
         let mut next = inner.clone();
         next.reservations.push(reservation.clone());
@@ -484,7 +513,12 @@ impl RuntimeOutbox {
             .find(|reservation| reservation.record_id == record_id)
             .cloned()
             .ok_or_else(|| format!("Runtime outbox reservation {record_id} does not exist"))?;
-        let ledger_metadata = soul_ref
+        let authoritative_soul_ref = if reservation.soul_ref.is_empty() {
+            soul_ref
+        } else {
+            Some(reservation.soul_ref.as_str())
+        };
+        let ledger_metadata = authoritative_soul_ref
             .map(|soul_ref| {
                 OutboxLedgerMetadata::from_payload(
                     record_id,
@@ -507,7 +541,7 @@ impl RuntimeOutbox {
             .retain(|reservation| reservation.record_id != record_id);
         next.records.push(record.clone());
         if let Some(metadata) = ledger_metadata {
-            merge_record_ledger_metadata(&mut next.record_ledger_metadata, metadata, false)?;
+            merge_record_ledger_metadata(&mut next.record_ledger_metadata, metadata, true)?;
         }
         self.save_locked(&next).map_err(|e| e.to_string())?;
         *inner = next;
@@ -570,6 +604,19 @@ impl RuntimeOutbox {
             .map(|reservation| reservation_is_recoverable(reservation, &recovery))
             .transpose()?
             .unwrap_or(false);
+        let reservation_metadata = reservation
+            .as_ref()
+            .filter(|reservation| !reservation.soul_ref.is_empty())
+            .map(|reservation| {
+                OutboxLedgerMetadata::from_payload(
+                    record_id,
+                    entity_id,
+                    kind,
+                    &payload,
+                    &reservation.soul_ref,
+                )
+            })
+            .transpose()?;
 
         if inner
             .acknowledged_record_ids
@@ -580,6 +627,9 @@ impl RuntimeOutbox {
                 let mut next = inner.clone();
                 next.reservations
                     .retain(|reservation| reservation.record_id != record_id);
+                if let Some(metadata) = reservation_metadata {
+                    merge_record_ledger_metadata(&mut next.record_ledger_metadata, metadata, true)?;
+                }
                 self.save_locked(&next).map_err(|e| e.to_string())?;
                 *inner = next;
             }
@@ -604,6 +654,9 @@ impl RuntimeOutbox {
                 let mut next = inner.clone();
                 next.reservations
                     .retain(|reservation| reservation.record_id != record_id);
+                if let Some(metadata) = reservation_metadata {
+                    merge_record_ledger_metadata(&mut next.record_ledger_metadata, metadata, true)?;
+                }
                 self.save_locked(&next).map_err(|e| e.to_string())?;
                 *inner = next;
             }
@@ -633,6 +686,9 @@ impl RuntimeOutbox {
         next.reservations
             .retain(|reservation| reservation.record_id != record_id);
         next.records.push(record.clone());
+        if let Some(metadata) = reservation_metadata {
+            merge_record_ledger_metadata(&mut next.record_ledger_metadata, metadata, true)?;
+        }
         self.save_locked(&next).map_err(|e| e.to_string())?;
         *inner = next;
         Ok(DurableRecordReconcile::Queued(record))
