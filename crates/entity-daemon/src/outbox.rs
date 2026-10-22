@@ -84,6 +84,19 @@ impl RuntimeOutbox {
         self.save_locked(&inner).map_err(|e| e.to_string())
     }
 
+    pub fn finish_sync(
+        &self,
+        result: Result<hive_core::OutboxSyncResponse, String>,
+    ) -> Result<(), String> {
+        match result {
+            Ok(response) => self.acknowledge(&response.accepted_record_ids),
+            Err(error) => {
+                self.mark_sync_error(&error)?;
+                Err(error)
+            }
+        }
+    }
+
     pub fn status(&self) -> Result<EntityOutboxStatus, String> {
         let inner = self.inner.lock().map_err(|e| e.to_string())?;
         Ok(EntityOutboxStatus {

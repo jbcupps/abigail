@@ -1003,23 +1003,17 @@ fn spawn_runtime_supervision(
                 Ok(_) => {
                     if let Ok(records) = state.outbox.snapshot() {
                         if !records.is_empty() {
-                            match hive_client
+                            let sync_result = hive_client
                                 .sync_outbox(&hive_core::OutboxSyncRequest {
                                     lease_id: state.session_lease.lease_id.clone(),
                                     runtime_id: state.runtime_id.clone(),
                                     records,
                                 })
                                 .await
-                            {
-                                Ok(response) => {
-                                    let _ = state.outbox.acknowledge(&response.accepted_record_ids);
-                                }
-                                Err(error) => {
-                                    let error = error.to_string();
-                                    let _ = state.outbox.mark_sync_error(&error);
-                                    state.record_hive_sync_error(error).await;
-                                    continue;
-                                }
+                                .map_err(|error| error.to_string());
+                            if let Err(error) = state.outbox.finish_sync(sync_result) {
+                                state.record_hive_sync_error(error).await;
+                                continue;
                             }
                         }
                     }

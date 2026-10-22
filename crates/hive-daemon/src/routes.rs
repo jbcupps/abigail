@@ -1130,9 +1130,11 @@ pub async fn sync_runtime_outbox(
                         .journeys
                         .reconcile_runtime_event_projection(crate::genesis_http::OWNER, &entity_id)
                     {
-                        tracing::warn!(
-                            entity_id = %entity_id,
-                            "Journey event rows are durable but projection refresh failed: {error}"
+                        return (
+                            StatusCode::OK,
+                            Json(ApiEnvelope::error(format!(
+                                "Journey projection refresh failed: {error}"
+                            ))),
                         );
                     }
                 }
