@@ -15,10 +15,22 @@ pub struct OutboxRecordDraft {
     pub payload: serde_json::Value,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutboxReservation {
+    pub record_id: String,
+    pub entity_id: String,
+    pub kind: String,
+    pub created_at_utc: String,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct PersistedOutbox {
     #[serde(default)]
     records: Vec<EntityOutboxRecord>,
+    #[serde(default)]
+    reservations: Vec<OutboxReservation>,
+    #[serde(default)]
+    acknowledged_record_ids: Vec<String>,
     #[serde(default)]
     last_sync_at_utc: Option<String>,
     #[serde(default)]
@@ -105,10 +117,26 @@ impl RuntimeOutbox {
         let mut staged = Vec::with_capacity(drafts.len());
         let mut additions = Vec::new();
         for draft in drafts {
-            if !uuid::Uuid::parse_str(&draft.record_id)
-                .is_ok_and(|id| id.to_string() == draft.record_id)
+            validate_record_id(&draft.record_id)?;
+            if inner
+                .acknowledged_record_ids
+                .iter()
+                .any(|record_id| record_id == &draft.record_id)
             {
-                return Err("Runtime outbox record ID must be a canonical UUID".to_string());
+                return Err(format!(
+                    "Runtime outbox record ID {} was already acknowledged",
+                    draft.record_id
+                ));
+            }
+            if inner
+                .reservations
+                .iter()
+                .any(|reservation| reservation.record_id == draft.record_id)
+            {
+                return Err(format!(
+                    "Runtime outbox record ID {} is reserved; commit its reservation",
+                    draft.record_id
+                ));
             }
             if let Some(existing) = inner
                 .records
@@ -138,7 +166,7 @@ impl RuntimeOutbox {
             staged.push(record.clone());
             additions.push(record);
         }
-        if inner.records.len() + additions.len() > self.max_records {
+        if inner.records.len() + inner.reservations.len() + additions.len() > self.max_records {
             return Err(format!(
                 "Runtime outbox backpressure: capacity {} reached; retry after Hive acknowledges queued records.",
                 self.max_records
@@ -154,6 +182,149 @@ impl RuntimeOutbox {
         Ok(staged)
     }
 
+    pub fn reserve_slot(
+        &self,
+        record_id: String,
+        entity_id: &str,
+        kind: &str,
+    ) -> Result<OutboxReservation, String> {
+        validate_record_id(&record_id)?;
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        if inner
+            .acknowledged_record_ids
+            .iter()
+            .any(|acknowledged| acknowledged == &record_id)
+        {
+            return Err(format!(
+                "Runtime outbox record ID {record_id} was already acknowledged"
+            ));
+        }
+        if let Some(existing) = inner
+            .records
+            .iter()
+            .find(|record| record.record_id == record_id)
+        {
+            if existing.entity_id != entity_id || existing.kind != kind {
+                return Err(format!(
+                    "Runtime outbox record ID {record_id} conflicts with different event data"
+                ));
+            }
+            return Err(format!(
+                "Runtime outbox record ID {record_id} is already queued"
+            ));
+        }
+        if let Some(existing) = inner
+            .reservations
+            .iter()
+            .find(|reservation| reservation.record_id == record_id)
+        {
+            if existing.entity_id != entity_id || existing.kind != kind {
+                return Err(format!(
+                    "Runtime outbox reservation {record_id} conflicts with different event data"
+                ));
+            }
+            return Ok(existing.clone());
+        }
+        if inner.records.len() + inner.reservations.len() >= self.max_records {
+            return Err(format!(
+                "Runtime outbox backpressure: capacity {} reached; retry after Hive acknowledges queued records.",
+                self.max_records
+            ));
+        }
+
+        let reservation = OutboxReservation {
+            record_id,
+            entity_id: entity_id.to_string(),
+            kind: kind.to_string(),
+            created_at_utc: chrono::Utc::now().to_rfc3339(),
+        };
+        let mut next = inner.clone();
+        next.reservations.push(reservation.clone());
+        self.save_locked(&next).map_err(|e| e.to_string())?;
+        *inner = next;
+        Ok(reservation)
+    }
+
+    pub fn commit_reservation(
+        &self,
+        record_id: &str,
+        payload: serde_json::Value,
+    ) -> Result<EntityOutboxRecord, String> {
+        validate_record_id(record_id)?;
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        if inner
+            .acknowledged_record_ids
+            .iter()
+            .any(|acknowledged| acknowledged == record_id)
+        {
+            return Err(format!(
+                "Runtime outbox record ID {record_id} was already acknowledged"
+            ));
+        }
+        if let Some(existing) = inner
+            .records
+            .iter()
+            .find(|record| record.record_id == record_id)
+        {
+            if existing.payload == payload {
+                return Ok(existing.clone());
+            }
+            return Err(format!(
+                "Runtime outbox record ID {record_id} conflicts with different event data"
+            ));
+        }
+        let reservation = inner
+            .reservations
+            .iter()
+            .find(|reservation| reservation.record_id == record_id)
+            .cloned()
+            .ok_or_else(|| format!("Runtime outbox reservation {record_id} does not exist"))?;
+        let record = EntityOutboxRecord {
+            record_id: reservation.record_id.clone(),
+            entity_id: reservation.entity_id,
+            kind: reservation.kind,
+            created_at_utc: chrono::Utc::now().to_rfc3339(),
+            payload,
+        };
+        let mut next = inner.clone();
+        next.reservations
+            .retain(|reservation| reservation.record_id != record_id);
+        next.records.push(record.clone());
+        self.save_locked(&next).map_err(|e| e.to_string())?;
+        *inner = next;
+        Ok(record)
+    }
+
+    pub fn release_reservation(&self, record_id: &str) -> Result<(), String> {
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        if !inner
+            .reservations
+            .iter()
+            .any(|reservation| reservation.record_id == record_id)
+        {
+            return Ok(());
+        }
+        let mut next = inner.clone();
+        next.reservations
+            .retain(|reservation| reservation.record_id != record_id);
+        self.save_locked(&next).map_err(|e| e.to_string())?;
+        *inner = next;
+        Ok(())
+    }
+
+    pub fn reservations(&self) -> Result<Vec<OutboxReservation>, String> {
+        let inner = self.inner.lock().map_err(|e| e.to_string())?;
+        Ok(inner.reservations.clone())
+    }
+
+    pub fn is_acknowledged(&self, record_id: &str) -> Result<bool, String> {
+        let inner = self.inner.lock().map_err(|e| e.to_string())?;
+        Ok(inner
+            .acknowledged_record_ids
+            .iter()
+            .any(|acknowledged| acknowledged == record_id))
+    }
+
     pub fn snapshot(&self) -> Result<Vec<EntityOutboxRecord>, String> {
         let inner = self.inner.lock().map_err(|e| e.to_string())?;
         Ok(inner.records.clone())
@@ -164,6 +335,15 @@ impl RuntimeOutbox {
         let mut next = inner.clone();
         next.records
             .retain(|record| !accepted_record_ids.iter().any(|id| id == &record.record_id));
+        for record_id in accepted_record_ids {
+            if !next
+                .acknowledged_record_ids
+                .iter()
+                .any(|acknowledged| acknowledged == record_id)
+            {
+                next.acknowledged_record_ids.push(record_id.clone());
+            }
+        }
         next.last_sync_at_utc = Some(chrono::Utc::now().to_rfc3339());
         next.last_sync_error = None;
         self.save_locked(&next).map_err(|e| e.to_string())?;
@@ -213,6 +393,14 @@ impl RuntimeOutbox {
             return save(&self.path, &bytes);
         }
         abigail_core::secure_fs::write_bytes_atomic(&self.path, &bytes).map_err(Into::into)
+    }
+}
+
+fn validate_record_id(record_id: &str) -> Result<(), String> {
+    if uuid::Uuid::parse_str(record_id).is_ok_and(|id| id.to_string() == record_id) {
+        Ok(())
+    } else {
+        Err("Runtime outbox record ID must be a canonical UUID".to_string())
     }
 }
 
