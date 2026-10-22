@@ -1,7 +1,7 @@
 //! Entity daemon shared state.
 
 use crate::execution_ledger::ExecutionLedger;
-use crate::outbox::{OutboxRecordDraft, RuntimeOutbox};
+use crate::outbox::RuntimeOutbox;
 use abigail_core::AppConfig;
 use abigail_memory::{ArchiveExporter, MemoryStore};
 use abigail_queue::JobQueue;
@@ -161,38 +161,21 @@ impl EntityDaemonState {
             .map(|_| ())
     }
 
-    pub fn queue_outbox_record_with_id(
+    pub fn commit_outbox_reservation(
         &self,
-        record_id: String,
-        kind: &str,
+        record_id: &str,
         payload: serde_json::Value,
     ) -> Result<(), String> {
-        let record =
-            self.outbox
-                .enqueue_with_id(record_id, &self.entity_id, kind, payload.clone())?;
+        let record = self.outbox.commit_reservation(record_id, payload.clone())?;
         self.execution_ledger
             .append_outbox_event(
                 &record.record_id,
                 &self.entity_id,
-                kind,
+                &record.kind,
                 &payload,
                 &self.soul_ref,
             )
             .map(|_| ())
-    }
-
-    pub fn queue_outbox_records(&self, drafts: Vec<OutboxRecordDraft>) -> Result<(), String> {
-        let records = self.outbox.enqueue_batch(&self.entity_id, drafts)?;
-        for record in records {
-            self.execution_ledger.append_outbox_event(
-                &record.record_id,
-                &self.entity_id,
-                &record.kind,
-                &record.payload,
-                &self.soul_ref,
-            )?;
-        }
-        Ok(())
     }
 
     pub async fn record_hive_sync_success(&self) {

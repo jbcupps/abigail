@@ -766,28 +766,36 @@ pub async fn memory_insert(
         weight: memory.weight.as_str().to_string(),
         created_at: memory.created_at.to_rfc3339(),
     };
+    let journey_record_id = (memory.weight != abigail_memory::MemoryWeight::Ephemeral).then(|| {
+        crate::state::deterministic_journey_record_id(
+            &state.entity_id,
+            "memory_confirmed",
+            &entry.id,
+        )
+    });
+    if let Some(record_id) = journey_record_id.as_ref() {
+        if let Err(error) =
+            state
+                .outbox
+                .reserve_slot(record_id.clone(), &state.entity_id, "memory_confirmed")
+        {
+            tracing::warn!(
+                memory_id = %entry.id,
+                "Explicit memory was not inserted because activity capacity could not be reserved: {error}"
+            );
+            return Json(ApiEnvelope::error(if error.contains("backpressure") {
+                format!(
+                    "Memory activity backpressure prevented this save; no memory was inserted. {error}"
+                )
+            } else {
+                "I couldn't safely save an activity reservation, so no memory was inserted."
+                    .to_string()
+            }));
+        }
+    }
 
     match state.memory.insert_memory(&memory) {
         Ok(()) => {
-            let journey_error = if entry.weight != "ephemeral" {
-                let record_id = crate::state::deterministic_journey_record_id(
-                    &state.entity_id,
-                    "memory_confirmed",
-                    &entry.id,
-                );
-                state
-                    .queue_outbox_record_with_id(
-                        record_id,
-                        "memory_confirmed",
-                        serde_json::json!({
-                            "memory_id": entry.id.clone(),
-                            "memory_weight": entry.weight.clone(),
-                        }),
-                    )
-                    .err()
-            } else {
-                None
-            };
             if let Some(ref hook) = state.memory_hook {
                 if let Err(e) = hook.on_memory_persisted(
                     &entry.id,
@@ -798,20 +806,38 @@ pub async fn memory_insert(
                     tracing::warn!("Memory hook error: {}", e);
                 }
             }
-            if let Some(error) = journey_error {
-                tracing::error!(
-                    memory_id = %entry.id,
-                    "Explicit memory is durable, but its journey event could not be staged: {error}"
-                );
-                Json(ApiEnvelope::error(
-                    "I saved the memory, but couldn't safely save its activity. Please try again."
-                        .to_string(),
-                ))
-            } else {
-                Json(ApiEnvelope::success(entry))
+            if let Some(record_id) = journey_record_id {
+                if let Err(error) = state.commit_outbox_reservation(
+                    &record_id,
+                    serde_json::json!({
+                        "memory_id": entry.id.clone(),
+                        "memory_weight": entry.weight.clone(),
+                    }),
+                ) {
+                    // The memory itself is already durable and explicitly
+                    // marked. Reconciliation will stage this exact fact
+                    // without asking the family to repeat the insertion.
+                    tracing::error!(
+                        memory_id = %entry.id,
+                        activity_record_id = %record_id,
+                        "Explicit memory activity will be recovered from durable metadata: {error}"
+                    );
+                }
             }
+            Json(ApiEnvelope::success(entry))
         }
-        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+        Err(e) => {
+            if let Some(record_id) = journey_record_id {
+                if let Err(release_error) = state.outbox.release_reservation(&record_id) {
+                    tracing::error!(
+                        memory_id = %entry.id,
+                        activity_record_id = %record_id,
+                        "Failed memory reservation could not be released: {release_error}"
+                    );
+                }
+            }
+            Json(ApiEnvelope::error(e.to_string()))
+        }
     }
 }
 
