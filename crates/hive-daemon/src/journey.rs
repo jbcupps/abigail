@@ -186,6 +186,7 @@ impl JourneyStore {
         }
         let mut journey =
             existing.unwrap_or_else(|| EntityJourney::new(entity_id, owner_id, &now_utc()));
+        let mut recognized = false;
 
         for record in records {
             if record.entity_id != entity_id {
@@ -194,6 +195,7 @@ impl JourneyStore {
             let Some(event) = journey_event(owner_id, entity_id, record)? else {
                 continue;
             };
+            recognized = true;
             match self
                 .handle
                 .select_record::<JourneyEventRecord>(JOURNEY_EVENT_TABLE, &record.record_id)?
@@ -205,6 +207,9 @@ impl JourneyStore {
                         .upsert(JOURNEY_EVENT_TABLE, &record.record_id, &event)?;
                 }
             }
+        }
+        if !recognized {
+            return Ok(journey);
         }
 
         let activity = self.event_activity_unlocked(owner_id, entity_id)?;
