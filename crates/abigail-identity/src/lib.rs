@@ -995,33 +995,49 @@ impl IdentityManager {
     /// Archive an agent by moving its directory to Hive backups and
     /// removing it from the active registry.
     pub fn archive_agent(&self, agent_id: &str) -> Result<String, String> {
-        let (agent_name, agent_dir) = {
-            let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
-            let entry = gc
-                .find_agent(agent_id)
-                .ok_or_else(|| format!("Agent {} not registered", agent_id))?
-                .clone();
-            if entry.is_hive {
-                return Err("Abigail Hive is immortal and cannot be archived.".to_string());
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+        self.archive_agent_transaction(
+            agent_id,
+            &timestamp,
+            |source, destination| std::fs::rename(source, destination),
+            |next| next.save(&self.data_root).map_err(|error| error.to_string()),
+        )
+    }
+
+    fn archive_agent_transaction<MoveData, SaveRegistry>(
+        &self,
+        agent_id: &str,
+        timestamp: &str,
+        mut move_data: MoveData,
+        save_registry: SaveRegistry,
+    ) -> Result<String, String>
+    where
+        MoveData: FnMut(&Path, &Path) -> std::io::Result<()>,
+        SaveRegistry: FnOnce(&GlobalConfig) -> Result<(), String>,
+    {
+        let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
+        let entry = gc
+            .find_agent(agent_id)
+            .ok_or_else(|| format!("Agent {} not registered", agent_id))?
+            .clone();
+        if entry.is_hive {
+            return Err("Abigail Hive is immortal and cannot be archived.".to_string());
+        }
+
+        let agent_dir = self.resolve_agent_dir(&entry.directory)?;
+        let metadata = std::fs::symlink_metadata(&agent_dir).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                format!("Agent directory not found: {}", agent_dir.display())
+            } else {
+                format!(
+                    "Failed to inspect agent directory '{}': {error}",
+                    agent_dir.display()
+                )
             }
-
-            let dir = self.resolve_agent_dir(&entry.directory)?;
-
-            gc.remove_agent(agent_id);
-            for receipt in gc
-                .creation_attempts
-                .values_mut()
-                .filter(|receipt| receipt.entity_id == agent_id)
-            {
-                receipt.state = abigail_core::AgentCreationState::Unavailable;
-            }
-            gc.save(&self.data_root).map_err(|e| e.to_string())?;
-            (entry.name, dir)
-        };
-
-        if !agent_dir.exists() {
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(format!(
-                "Agent directory not found: {}",
+                "Agent directory is not a real directory: {}",
                 agent_dir.display()
             ));
         }
@@ -1029,20 +1045,50 @@ impl IdentityManager {
         let backups_dir = self.data_root.join("backups");
         std::fs::create_dir_all(&backups_dir)
             .map_err(|e| format!("Failed to create backups directory: {}", e))?;
-
-        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
         let safe_name =
-            agent_name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
-        let backup_name = format!("{}_{}", timestamp, safe_name);
-        let backup_path = backups_dir.join(backup_name);
+            entry
+                .name
+                .replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
+        let backup_path = backups_dir.join(format!("{timestamp}_{safe_name}"));
+        if backup_path
+            .try_exists()
+            .map_err(|error| format!("Failed to inspect archive destination: {error}"))?
+        {
+            return Err(format!(
+                "Archive destination already exists: {}",
+                backup_path.display()
+            ));
+        }
 
-        std::fs::rename(&agent_dir, &backup_path)
-            .map_err(|e| format!("Failed to archive agent directory: {}", e))?;
+        let mut next = gc.clone();
+        next.remove_agent(agent_id);
+        for receipt in next
+            .creation_attempts
+            .values_mut()
+            .filter(|receipt| receipt.entity_id == agent_id)
+        {
+            receipt.state = abigail_core::AgentCreationState::Unavailable;
+        }
+
+        move_data(&agent_dir, &backup_path)
+            .map_err(|error| format!("Failed to archive agent directory: {error}"))?;
+        if let Err(save_error) = save_registry(&next) {
+            if let Err(rollback_error) = move_data(&backup_path, &agent_dir) {
+                return Err(format!(
+                    "Failed to save archived registry: {save_error}; failed to roll the archive move back: {rollback_error}"
+                ));
+            }
+            return Err(format!(
+                "Failed to save archived registry; archive move was rolled back: {save_error}"
+            ));
+        }
+        *gc = next;
+        drop(gc);
 
         // Best-effort: write backup metadata into the archive
         let metadata = BackupMetadata {
             agent_id: agent_id.to_string(),
-            agent_name: agent_name.clone(),
+            agent_name: entry.name,
             backup_type: "archive".to_string(),
             created_at: chrono::Utc::now().to_rfc3339(),
             source_directory: agent_dir.to_string_lossy().to_string(),
