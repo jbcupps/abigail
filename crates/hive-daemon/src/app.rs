@@ -32,6 +32,10 @@ pub fn router(state: HiveDaemonState) -> Router {
         .route("/v1/status", get(routes::get_status))
         .route("/v1/entities", get(routes::list_entities))
         .route("/v1/entities", post(routes::create_entity))
+        .route(
+            "/v1/entity-creations/:creation_key",
+            get(routes::get_entity_creation),
+        )
         .route("/v1/entities/:id", get(routes::get_entity))
         .route("/v1/entities/:id/open", post(routes::open_entity))
         .route("/v1/entities/:id/close", post(routes::close_entity))

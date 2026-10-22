@@ -74,6 +74,35 @@ impl GenesisStore {
             .writes
             .lock()
             .map_err(|_| anyhow!("Genesis store lock unavailable"))?;
+        self.create_locked(session)
+    }
+
+    pub fn create_or_resume(&self, proposed: &GenesisSession) -> Result<GenesisSession> {
+        let _lock = self
+            .writes
+            .lock()
+            .map_err(|_| anyhow!("Genesis store lock unavailable"))?;
+        let parsed = uuid::Uuid::parse_str(&proposed.id)
+            .map_err(|_| anyhow!("Creation key must be a canonical UUID"))?;
+        if parsed.to_string() != proposed.id {
+            bail!("Creation key must be a canonical UUID");
+        }
+        if proposed.creation_seed.is_none() {
+            bail!("Keyed creation requires reviewed identity input");
+        }
+        if let Some(existing) = self.load(&proposed.owner_id, &proposed.id)? {
+            if existing.creation_seed != proposed.creation_seed {
+                bail!(
+                    "This creation key belongs to different original identity input. Resume the saved draft."
+                );
+            }
+            return Ok(existing);
+        }
+        self.create_locked(proposed)?;
+        Ok(proposed.clone())
+    }
+
+    fn create_locked(&self, session: &GenesisSession) -> Result<()> {
         validate_id(&session.id)?;
         let record = SessionRecord::from_session(session)?;
         if self.handle.record_exists(SESSION_TABLE, &session.id)? {
@@ -206,7 +235,8 @@ fn validate_id(id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hive_core::genesis::{FieldUpdate, GenesisField, GenesisMode};
+    use hive_core::genesis::{FieldUpdate, GenesisCreationSeed, GenesisField, GenesisMode};
+    use hive_core::genesis_quest::PresenceChoice;
     use serde_json::json;
 
     fn store() -> GenesisStore {
@@ -219,6 +249,55 @@ mod tests {
             GenesisMode::Guided,
             "2026-10-17T12:00:00Z".into(),
         )
+    }
+
+    fn keyed(owner: &str) -> GenesisSession {
+        let mut session = GenesisSession::new(
+            uuid::Uuid::new_v4().to_string(),
+            owner.into(),
+            GenesisMode::Quick,
+            "2026-10-17T12:00:00Z".into(),
+        );
+        let seed = GenesisCreationSeed {
+            mode: GenesisMode::Quick,
+            name: "Signal".into(),
+            purpose: "Explore tiny worlds".into(),
+            presence: PresenceChoice::default(),
+        };
+        session.definition.name = seed.name.clone();
+        session.definition.purpose = seed.purpose.clone();
+        session.creation_seed = Some(seed);
+        session
+    }
+
+    #[test]
+    fn keyed_replay_returns_saved_session_and_rejects_changed_seed() {
+        let store = store();
+        let proposed = keyed("owner-a");
+        let mut saved = store.create_or_resume(&proposed).unwrap();
+        saved.definition.identity = "Reviewed identity".into();
+        saved.touch("later");
+        store.save(&saved, 0).unwrap();
+
+        let resumed = store.create_or_resume(&proposed).unwrap();
+        assert_eq!(resumed.definition.identity, "Reviewed identity");
+        assert_eq!(resumed.revision, 1);
+
+        let mut changed = proposed;
+        changed.creation_seed.as_mut().unwrap().purpose = "Different".into();
+        assert!(store.create_or_resume(&changed).is_err());
+        assert_eq!(store.list("owner-a").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn keyed_creation_requires_a_canonical_uuid_and_seed() {
+        let store = store();
+        let mut proposed = keyed("owner-a");
+        proposed.id = "not-a-uuid".into();
+        assert!(store.create_or_resume(&proposed).is_err());
+        proposed.id = uuid::Uuid::new_v4().to_string();
+        proposed.creation_seed = None;
+        assert!(store.create_or_resume(&proposed).is_err());
     }
 
     #[test]

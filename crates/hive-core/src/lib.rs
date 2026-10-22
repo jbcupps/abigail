@@ -62,6 +62,8 @@ pub struct EntityInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateEntityRequest {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_key: Option<String>,
 }
 
 /// Response after creating a new entity.
@@ -69,6 +71,34 @@ pub struct CreateEntityRequest {
 pub struct CreateEntityResponse {
     pub id: String,
     pub directory: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_key: Option<String>,
+}
+
+/// Exact creation-key recovery. An explicit absent result proves API support.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityCreationResponse {
+    pub creation_key: String,
+    #[serde(flatten)]
+    pub status: EntityCreationState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum EntityCreationState {
+    Absent,
+    Reserved {
+        name: String,
+    },
+    Complete {
+        name: String,
+        id: String,
+        directory: String,
+    },
+    Unavailable {
+        name: String,
+        id: String,
+    },
 }
 
 // ---------------------------------------------------------------------------

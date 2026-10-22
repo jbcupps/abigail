@@ -9,14 +9,15 @@ use axum::{
 };
 use hive_core::{
     ApiEnvelope, BestModelResponse, CliDetectResponse, CliProviderDetection, CreateEntityRequest,
-    CreateEntityResponse, CreateForgeApprovalJobRequest, EntityInfo, EntityOpenResponse,
-    ExecutionReceiptsResponse, ForgeApprovalJobsResponse, HelperInfo, HiveDefaultResponse,
-    HiveStatus, LocalProviderRequest, LocalProviderResponse, OutboxSyncRequest, OutboxSyncResponse,
-    ProviderConfig, ProviderModelInfo, ProviderModelsRequest, ProviderModelsResponse,
-    ProviderProfileResponse, RuntimeHeartbeatRequest, RuntimeHeartbeatResponse,
-    RuntimeRegistrationRequest, RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus,
-    SecretListResponse, SecretValueResponse, SetHiveDefaultRequest, SetSkillAssignmentsRequest,
-    SignEntityRequest, SkillAssignmentsResponse, StoreSecretRequest, UpdateEntityConfigRequest,
+    CreateEntityResponse, CreateForgeApprovalJobRequest, EntityCreationResponse,
+    EntityCreationState, EntityInfo, EntityOpenResponse, ExecutionReceiptsResponse,
+    ForgeApprovalJobsResponse, HelperInfo, HiveDefaultResponse, HiveStatus, LocalProviderRequest,
+    LocalProviderResponse, OutboxSyncRequest, OutboxSyncResponse, ProviderConfig,
+    ProviderModelInfo, ProviderModelsRequest, ProviderModelsResponse, ProviderProfileResponse,
+    RuntimeHeartbeatRequest, RuntimeHeartbeatResponse, RuntimeRegistrationRequest,
+    RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus, SecretListResponse,
+    SecretValueResponse, SetHiveDefaultRequest, SetSkillAssignmentsRequest, SignEntityRequest,
+    SkillAssignmentsResponse, StoreSecretRequest, UpdateEntityConfigRequest,
     UpdateEntityConfigResponse,
 };
 
@@ -141,13 +142,92 @@ pub async fn list_entities(
 pub async fn create_entity(
     State(state): State<HiveDaemonState>,
     Json(body): Json<CreateEntityRequest>,
-) -> Json<ApiEnvelope<CreateEntityResponse>> {
-    match state.identity_manager.create_agent(&body.name) {
-        Ok((id, dir)) => Json(ApiEnvelope::success(CreateEntityResponse {
-            id,
-            directory: dir.to_string_lossy().to_string(),
-        })),
-        Err(e) => Json(ApiEnvelope::error(e)),
+) -> (StatusCode, Json<ApiEnvelope<CreateEntityResponse>>) {
+    if let Some(key) = body.creation_key {
+        return match state
+            .identity_manager
+            .create_agent_idempotent(&body.name, &key)
+        {
+            Ok((id, dir)) => (
+                StatusCode::OK,
+                Json(ApiEnvelope::success(CreateEntityResponse {
+                    id,
+                    directory: dir.to_string_lossy().to_string(),
+                    creation_key: Some(key),
+                })),
+            ),
+            Err(error) => (
+                creation_error_status(&error),
+                Json(ApiEnvelope::error(error.to_string())),
+            ),
+        };
+    }
+    (
+        StatusCode::OK,
+        match state.identity_manager.create_agent(&body.name) {
+            Ok((id, dir)) => Json(ApiEnvelope::success(CreateEntityResponse {
+                id,
+                directory: dir.to_string_lossy().to_string(),
+                creation_key: None,
+            })),
+            Err(error) => Json(ApiEnvelope::error(error)),
+        },
+    )
+}
+
+fn creation_error_status(error: &abigail_identity::AgentCreationError) -> StatusCode {
+    use abigail_identity::AgentCreationError;
+    match error {
+        AgentCreationError::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+        AgentCreationError::Conflict(_) => StatusCode::CONFLICT,
+        AgentCreationError::Unavailable(_) => StatusCode::GONE,
+        AgentCreationError::Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+#[cfg(test)]
+#[path = "creation_http_tests.rs"]
+mod creation_http_tests;
+
+// ---------------------------------------------------------------------------
+// GET /v1/entity-creations/:creation_key
+// ---------------------------------------------------------------------------
+
+pub async fn get_entity_creation(
+    State(state): State<HiveDaemonState>,
+    Path(creation_key): Path<String>,
+) -> (StatusCode, Json<ApiEnvelope<EntityCreationResponse>>) {
+    use abigail_identity::AgentCreationStatus;
+    match state.identity_manager.entity_creation_status(&creation_key) {
+        Ok(status) => {
+            let status = match status {
+                AgentCreationStatus::Absent => EntityCreationState::Absent,
+                AgentCreationStatus::Reserved { name } => EntityCreationState::Reserved { name },
+                AgentCreationStatus::Complete {
+                    name,
+                    id,
+                    directory,
+                } => EntityCreationState::Complete {
+                    name,
+                    id,
+                    directory: directory.to_string_lossy().to_string(),
+                },
+                AgentCreationStatus::Unavailable { name, id } => {
+                    EntityCreationState::Unavailable { name, id }
+                }
+            };
+            (
+                StatusCode::OK,
+                Json(ApiEnvelope::success(EntityCreationResponse {
+                    creation_key,
+                    status,
+                })),
+            )
+        }
+        Err(error) => (
+            creation_error_status(&error),
+            Json(ApiEnvelope::error(error.to_string())),
+        ),
     }
 }
 

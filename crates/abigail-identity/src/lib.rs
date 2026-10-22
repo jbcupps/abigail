@@ -13,8 +13,10 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use uuid::Uuid;
 
+mod creation;
 mod hive;
 
+pub use creation::{AgentCreationError, AgentCreationStatus};
 pub use hive::{HiveEntity, HIVE_ENTITY_NAME};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,6 +193,85 @@ impl IdentityManager {
 
     fn shared_memory_db_path(&self) -> PathBuf {
         HiveEntity::memory_db_path(&self.data_root)
+    }
+
+    fn initialize_agent_files(
+        &self,
+        agent_id: &str,
+        name: &str,
+        theme: &str,
+    ) -> Result<PathBuf, String> {
+        let agent_dir = self.identities_dir().join(agent_id);
+        let config_path = agent_dir.join("config.json");
+        if config_path.try_exists().map_err(|e| e.to_string())? {
+            let bytes = std::fs::read(&config_path).map_err(|e| e.to_string())?;
+            let existing: AppConfig = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+            if existing.schema_version > abigail_core::CONFIG_SCHEMA_VERSION
+                || existing.is_hive
+                || existing.data_dir != agent_dir
+                || existing.agent_name.as_deref() != Some(name)
+            {
+                return Err(
+                    "Reserved Entity config does not match the creation attempt.".to_string(),
+                );
+            }
+            return Ok(agent_dir);
+        }
+        std::fs::create_dir_all(&agent_dir).map_err(|e| e.to_string())?;
+        let docs_dir = agent_dir.join("docs");
+        std::fs::create_dir_all(&docs_dir).map_err(|e| e.to_string())?;
+
+        let config = AppConfig {
+            schema_version: abigail_core::CONFIG_SCHEMA_VERSION,
+            data_dir: agent_dir.clone(),
+            models_dir: agent_dir.join("models"),
+            docs_dir: docs_dir.clone(),
+            db_path: self.shared_memory_db_path(),
+            openai_api_key: None,
+            email: None,
+            birth_complete: false,
+            birth_stage: None,
+            external_pubkey_path: None,
+            local_llm_base_url: None,
+            routing_mode: abigail_core::RoutingMode::default(),
+            trinity: None,
+            agent_name: Some(name.to_string()),
+            birth_timestamp: None,
+            is_hive: false,
+            mcp_servers: Default::default(),
+            mcp_trust_policy: Default::default(),
+            approved_skill_ids: Default::default(),
+            trusted_skill_signers: Default::default(),
+            sao_endpoint: None,
+            provider_catalog: Vec::new(),
+            active_provider_preference: None,
+            ego_model: None,
+            email_accounts: Vec::new(),
+            bundled_ollama: true,
+            bundled_model: Some("llama3.2:3b".to_string()),
+            first_model_pull_complete: false,
+            preloaded_skills_version: 0,
+            primary_color: None,
+            avatar_url: None,
+            share_skills_across_identities: false,
+            allow_minor_visual_adaptation: true,
+            allow_avatar_swap: false,
+            memory_disclosure_enabled: true,
+            forge_advanced_mode: false,
+            signed_skill_allowlist: Vec::new(),
+            known_recipients_by_identity: std::collections::HashMap::new(),
+            skill_recovery_budget: 3,
+            last_provider_change_at: None,
+            cli_permission_mode: Default::default(),
+            runtime_mode: Default::default(),
+            hive_daemon_url: "http://127.0.0.1:43141".to_string(),
+            entity_daemon_url: "http://127.0.0.1:43142".to_string(),
+            iggy_connection: None,
+            theme_id: Some(theme.to_string()),
+            autonomy_profile: Default::default(),
+        };
+        config.save(&config_path).map_err(|e| e.to_string())?;
+        Ok(agent_dir)
     }
 
     /// Create a new IdentityManager, loading GlobalConfig and master key from disk.
@@ -415,81 +496,28 @@ impl IdentityManager {
     /// Returns (uuid, agent_dir).
     pub fn create_agent(&self, name: &str) -> Result<(String, PathBuf), String> {
         let uuid = Uuid::new_v4().to_string();
+        let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
         let agent_dir = self.identities_dir().join(&uuid);
-
-        // Create agent directory structure
-        std::fs::create_dir_all(&agent_dir).map_err(|e| e.to_string())?;
-        let docs_dir = agent_dir.join("docs");
-        std::fs::create_dir_all(&docs_dir).map_err(|e| e.to_string())?;
-
-        // Create agent-specific config (no keypair yet — birth will generate it)
-        let config = AppConfig {
-            schema_version: abigail_core::CONFIG_SCHEMA_VERSION,
-            data_dir: agent_dir.clone(),
-            models_dir: agent_dir.join("models"),
-            docs_dir: docs_dir.clone(),
-            db_path: self.shared_memory_db_path(),
-            openai_api_key: None,
-            email: None,
-            birth_complete: false,
-            birth_stage: None,
-            external_pubkey_path: None,
-            local_llm_base_url: None,
-            routing_mode: abigail_core::RoutingMode::default(),
-            trinity: None,
-            agent_name: Some(name.to_string()),
-            birth_timestamp: None,
-            is_hive: false,
-            mcp_servers: Default::default(),
-            mcp_trust_policy: Default::default(),
-            approved_skill_ids: Default::default(),
-            trusted_skill_signers: Default::default(),
-            sao_endpoint: None,
-            provider_catalog: Vec::new(),
-            active_provider_preference: None,
-            ego_model: None,
-            email_accounts: Vec::new(),
-            bundled_ollama: true,
-            bundled_model: Some("llama3.2:3b".to_string()),
-            first_model_pull_complete: false,
-            preloaded_skills_version: 0,
-            primary_color: None,
-            avatar_url: None,
-            share_skills_across_identities: false,
-            allow_minor_visual_adaptation: true,
-            allow_avatar_swap: false,
-            memory_disclosure_enabled: true,
-            forge_advanced_mode: false,
-            signed_skill_allowlist: Vec::new(),
-            known_recipients_by_identity: std::collections::HashMap::new(),
-            skill_recovery_budget: 3,
-            last_provider_change_at: None,
-            cli_permission_mode: Default::default(),
-            runtime_mode: Default::default(),
-            hive_daemon_url: "http://127.0.0.1:43141".to_string(),
-            entity_daemon_url: "http://127.0.0.1:43142".to_string(),
-            iggy_connection: None,
-            theme_id: {
-                let gc = self.global_config.read().map_err(|e| e.to_string())?;
-                Some(gc.default_theme.clone())
-            },
-            autonomy_profile: Default::default(),
-        };
-        let config_path = agent_dir.join("config.json");
-        config.save(&config_path).map_err(|e| e.to_string())?;
-
-        // Register in global config
+        if gc
+            .creation_attempts
+            .values()
+            .any(|attempt| attempt.entity_id == uuid)
+            || agent_dir.try_exists().map_err(|e| e.to_string())?
         {
-            let mut gc = self.global_config.write().map_err(|e| e.to_string())?;
-            gc.register_agent(AgentEntry {
-                id: uuid.clone(),
-                name: name.to_string(),
-                is_hive: false,
-                directory: self.registry_directory_for(&uuid),
-            })
-            .map_err(|e| e.to_string())?;
-            gc.save(&self.data_root).map_err(|e| e.to_string())?;
+            return Err("New Entity directory already exists.".to_string());
         }
+        self.initialize_agent_files(&uuid, name, &gc.default_theme)?;
+        let mut next = gc.clone();
+        next.register_agent(AgentEntry {
+            id: uuid.clone(),
+            name: name.to_string(),
+            is_hive: false,
+            directory: self.registry_directory_for(&uuid),
+        })
+        .map_err(|e| e.to_string())?;
+        next.save(&self.data_root).map_err(|e| e.to_string())?;
+        *gc = next;
+        drop(gc);
 
         // Create per-agent Documents folder
         let _ = self.create_documents_folder(&uuid);

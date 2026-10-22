@@ -414,6 +414,9 @@ pub struct GenesisSession {
     pub id: String,
     pub owner_id: String,
     pub mode: GenesisMode,
+    /// Original reviewed keyed-creation input. Later edits never mutate it.
+    #[serde(default)]
+    pub creation_seed: Option<GenesisCreationSeed>,
     #[serde(default)]
     pub composer_draft: String,
     #[serde(default)]
@@ -446,6 +449,31 @@ pub struct GenesisSession {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GenesisCreationSeed {
+    pub mode: GenesisMode,
+    pub name: String,
+    pub purpose: String,
+    pub presence: crate::genesis_quest::PresenceChoice,
+}
+
+impl GenesisCreationSeed {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.name.is_empty()
+            || self.name.trim() != self.name
+            || self.name.chars().count() > 80
+            || self.name.chars().any(char::is_control)
+        {
+            return Err("Choose a name of 1 to 80 characters without control characters.".into());
+        }
+        if self.purpose.trim().is_empty() {
+            return Err("Review a nonempty purpose before creating this identity.".into());
+        }
+        validate_text(&self.purpose, MAX_FIELD_BYTES)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EssenceProgress {
     pub identity: u8,
     pub personality: u8,
@@ -462,6 +490,7 @@ impl GenesisSession {
             id,
             owner_id: owner_id.clone(),
             mode,
+            creation_seed: None,
             composer_draft: String::new(),
             choices: vec![],
             awakening: None,
@@ -487,6 +516,9 @@ impl GenesisSession {
     pub fn validate(&self) -> Result<(), String> {
         if self.schema_version != GENESIS_SCHEMA_VERSION {
             return Err("Unsupported Genesis session schema".into());
+        }
+        if let Some(seed) = &self.creation_seed {
+            seed.validate()?;
         }
         if self.id.is_empty() || self.owner_id != self.definition.owner_id {
             return Err("Invalid Genesis ownership".into());
@@ -1269,6 +1301,26 @@ fn markdown_value(field: GenesisField, body: &str) -> Result<Value, String> {
 mod tests {
     use super::*;
     const NOW: &str = "2026-10-17T12:00:00Z";
+
+    #[test]
+    fn creation_seed_round_trips_presence_and_legacy_sessions_default_to_none() {
+        let mut seeded = session();
+        seeded.creation_seed = Some(GenesisCreationSeed {
+            mode: GenesisMode::Quick,
+            name: "Signal".into(),
+            purpose: "Help the household notice small wonders".into(),
+            presence: crate::genesis_quest::PresenceChoice::default(),
+        });
+        let value = serde_json::to_value(&seeded).unwrap();
+        let restored: GenesisSession = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(restored.creation_seed, seeded.creation_seed);
+
+        let mut legacy = value;
+        legacy.as_object_mut().unwrap().remove("creation_seed");
+        let restored: GenesisSession = serde_json::from_value(legacy).unwrap();
+        assert!(restored.creation_seed.is_none());
+    }
+
     fn session() -> GenesisSession {
         GenesisSession::new(
             "draft-a".into(),

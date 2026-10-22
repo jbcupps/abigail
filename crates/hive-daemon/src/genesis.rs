@@ -194,12 +194,8 @@ pub(crate) fn genesis_hold(
     state: &HiveDaemonState,
     entity_id: &str,
 ) -> Result<Option<String>, String> {
-    let linked = state
-        .genesis
-        .list(OWNER)
-        .map_err(|_| "Genesis records are unavailable. Try again shortly.".to_string())?
-        .into_iter()
-        .find(|session| session.definition.entity_id.as_deref() == Some(entity_id));
+    let linked = crate::genesis_creation::session_for_entity(state, entity_id)
+        .map_err(|_| "Genesis records are unavailable. Try again shortly.".to_string())?;
     let narrative = state
         .identity_manager
         .load_agent(entity_id)
@@ -217,15 +213,11 @@ pub(crate) fn genesis_hold(
 
 /// True while a Genesis-allocated Entity has not finished awakening.
 pub(crate) fn awaiting_awakening(state: &HiveDaemonState, entity_id: &str) -> Result<bool, String> {
-    Ok(state
-        .genesis
-        .list(OWNER)
-        .map_err(|_| "Genesis records are unavailable. Try again shortly.".to_string())?
-        .iter()
-        .any(|session| {
-            session.definition.entity_id.as_deref() == Some(entity_id)
-                && session.awakening.is_none()
-        }))
+    Ok(
+        crate::genesis_creation::session_for_entity(state, entity_id)
+            .map_err(|_| "Genesis records are unavailable. Try again shortly.".to_string())?
+            .is_some_and(|session| session.awakening.is_none()),
+    )
 }
 
 /// Static quest content. Trial weight effects stay hidden so the mentor
@@ -275,6 +267,8 @@ async fn list(State(state): State<HiveDaemonState>) -> Json<ApiEnvelope<Value>> 
 struct CreateRequest {
     #[serde(default)]
     mode: GenesisMode,
+    creation_key: Option<String>,
+    seed: Option<GenesisCreationSeed>,
 }
 async fn create(
     State(state): State<HiveDaemonState>,
@@ -282,6 +276,53 @@ async fn create(
 ) -> Json<ApiEnvelope<Value>> {
     result((|| {
         let _guard = state.genesis_control.lock("create-session")?;
+        if body.creation_key.is_some() != body.seed.is_some() {
+            return Err("Keyed creation requires its reviewed name, purpose, and Presence.".into());
+        }
+        if let (Some(key), Some(seed)) = (body.creation_key, body.seed) {
+            if !uuid::Uuid::parse_str(&key).is_ok_and(|id| id.to_string() == key) {
+                return Err("Creation key must be a canonical UUID.".into());
+            }
+            seed.validate()?;
+            if seed.mode != body.mode {
+                return Err("Creation mode differs from the original input.".into());
+            }
+            check_unlocked(seed.presence, &[])?;
+            if state
+                .genesis
+                .load(OWNER, &key)
+                .map_err(|e| e.to_string())?
+                .is_none()
+                && state
+                    .identity_manager
+                    .entity_creation_status(&key)
+                    .map_err(|e| e.to_string())?
+                    != abigail_identity::AgentCreationStatus::Absent
+            {
+                return Err("This creation already reserved an Entity but its Genesis record is unavailable. No replacement was created.".into());
+            }
+            let time = now();
+            let mut session = GenesisSession::new(key, OWNER.into(), body.mode, time.clone());
+            session.definition.name = seed.name.clone();
+            session.definition.purpose = seed.purpose.clone();
+            session.quest.presence =
+                Some(PresenceCard::compose(seed.presence, &session.definition));
+            session.creation_seed = Some(seed);
+            // Initial reviewed input and welcome copy are the revision-zero seed.
+            session.messages.push(GenesisMessage {
+                id: id(),
+                role: "assistant".into(),
+                content: "Your chosen name, purpose, and Presence are saved. Awaken now, or explore more of this character together.".into(),
+                created_at: time,
+                input_mode: body.mode,
+            });
+            session.validate()?;
+            return state
+                .genesis
+                .create_or_resume(&session)
+                .map(|session| view(&state, session))
+                .map_err(|e| e.to_string());
+        }
         if state.genesis.list(OWNER).map_err(|e| e.to_string())?.len() >= 100 {
             return Err("Keep at most 100 Genesis records. Export and delete an old draft to begin another.".into());
         }
@@ -313,7 +354,15 @@ pub(crate) fn delete_genesis_record_unlocked(
     id: &str,
 ) -> Result<bool, String> {
     let mut draft = session(state, id)?;
-    let linked_entity = draft.definition.entity_id.clone();
+    let linked_entity =
+        draft
+            .definition
+            .entity_id
+            .clone()
+            .or(crate::genesis_creation::receipt_entity_id(
+                &state.identity_manager,
+                &draft,
+            )?);
     // Session locks are per draft, so serialize cleanup separately when
     // damaged or legacy records happen to share one allocation.
     let _entity_guard = linked_entity
@@ -747,26 +796,17 @@ async fn activate(
     if draft.state == GenesisState::Ready {
         return Ok(draft);
     }
-    let mut expected = draft.revision;
-    if draft.definition.entity_id.is_none() {
-        let (entity_id, _) = state
-            .identity_manager
-            .create_agent(&draft.definition.name)
-            .map_err(|e| e.to_string())?;
-        draft.definition.entity_id = Some(entity_id.clone());
-        draft.touch(&now());
-        // Persist the allocated identity before any fallible birth work so retries reuse it.
-        if let Err(error) = state.genesis.save(&draft, expected) {
-            // Nothing references the new identity yet; leave no orphan Entity behind.
-            if let Err(cleanup) = state.identity_manager.delete_agent(&entity_id) {
-                tracing::warn!(
-                    "Could not remove unsaved Genesis allocation {entity_id}: {cleanup}"
-                );
-            }
-            return Err(error.to_string());
-        }
-        expected = draft.revision;
-    }
+    crate::genesis_creation::ensure_entity_link(
+        &state.identity_manager,
+        &mut draft,
+        |linked, revision| {
+            state
+                .genesis
+                .save(linked, revision)
+                .map_err(|error| error.to_string())
+        },
+    )?;
+    let expected = draft.revision;
     let entity_id = draft.definition.entity_id.clone().unwrap();
     let mut config = state
         .identity_manager
@@ -1302,10 +1342,55 @@ mod tests {
             State(state.clone()),
             Json(CreateRequest {
                 mode: GenesisMode::Guided,
+                creation_key: None,
+                seed: None,
             }),
         )
         .await;
         created.data.unwrap()["id"].as_str().unwrap().to_owned()
+    }
+
+    #[tokio::test]
+    async fn keyed_creation_seeds_canonical_presence_at_revision_zero_and_replays() {
+        let (state, _) = crate::routes::tests::build_state();
+        let key = id();
+        let seed = GenesisCreationSeed {
+            mode: GenesisMode::Quick,
+            name: "Signal".into(),
+            purpose: "Notice small wonders".into(),
+            presence: PresenceChoice::default(),
+        };
+        let Json(created) = create(
+            State(state.clone()),
+            Json(CreateRequest {
+                mode: GenesisMode::Quick,
+                creation_key: Some(key.clone()),
+                seed: Some(seed.clone()),
+            }),
+        )
+        .await;
+        assert!(created.ok, "{:?}", created.error);
+        let stored = session(&state, &key).unwrap();
+        assert_eq!(stored.revision, 0);
+        assert_eq!(stored.definition.name, seed.name);
+        assert_eq!(stored.definition.purpose, seed.purpose);
+        assert_eq!(stored.creation_seed, Some(seed.clone()));
+        assert_eq!(
+            stored.quest.presence.as_ref().unwrap().choice(),
+            seed.presence
+        );
+
+        let Json(replayed) = create(
+            State(state),
+            Json(CreateRequest {
+                mode: GenesisMode::Quick,
+                creation_key: Some(key),
+                seed: Some(seed),
+            }),
+        )
+        .await;
+        assert!(replayed.ok, "{:?}", replayed.error);
+        assert_eq!(replayed.data.unwrap()["revision"], 0);
     }
 
     async fn act(state: &HiveDaemonState, id: &str, mut body: Value) -> Result<Value, String> {
@@ -1520,10 +1605,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn activation_leaves_no_orphan_entity_when_the_draft_cannot_be_saved() {
+    async fn activation_save_failure_keeps_the_durable_receipt_for_recovery() {
         let (state, _) = crate::routes::tests::build_state();
         let before = state.identity_manager.list_agents().unwrap().len();
         let mut draft = GenesisSession::new(id(), OWNER.into(), GenesisMode::Guided, now());
+        let creation_key = draft.id.clone();
         draft
             .apply_updates(
                 vec![
@@ -1544,7 +1630,17 @@ mod tests {
             .unwrap();
         // Never stored, so saving the allocation fails.
         assert!(activate(&state, draft).await.is_err());
-        assert_eq!(state.identity_manager.list_agents().unwrap().len(), before);
+        assert_eq!(
+            state.identity_manager.list_agents().unwrap().len(),
+            before + 1
+        );
+        assert!(matches!(
+            state
+                .identity_manager
+                .entity_creation_status(&creation_key)
+                .unwrap(),
+            abigail_identity::AgentCreationStatus::Complete { .. }
+        ));
     }
 
     #[tokio::test]
@@ -1575,6 +1671,32 @@ mod tests {
             "deleting Genesis must not expose its allocation to generic birth"
         );
         assert!(state.identity_manager.load_agent(&entity_id).is_err());
+    }
+
+    #[tokio::test]
+    async fn deleting_after_interrupted_link_save_removes_entity_but_preserves_receipt() {
+        let (state, _) = crate::routes::tests::build_state();
+        let id = begin(&state).await;
+        reserve(&state, &id).await;
+        let mut draft = session(&state, &id).unwrap();
+        assert!(crate::genesis_creation::ensure_entity_link(
+            &state.identity_manager,
+            &mut draft,
+            |_, _| Err("interrupted link save".into()),
+        )
+        .is_err());
+        let entity_id = match state.identity_manager.entity_creation_status(&id).unwrap() {
+            abigail_identity::AgentCreationStatus::Complete { id, .. } => id,
+            status => panic!("expected completed receipt, got {status:?}"),
+        };
+
+        assert!(delete_genesis_record_unlocked(&state, &id).unwrap());
+        assert!(state.identity_manager.load_agent(&entity_id).is_err());
+        assert!(matches!(
+            state.identity_manager.entity_creation_status(&id).unwrap(),
+            abigail_identity::AgentCreationStatus::Unavailable { id, .. }
+                if id == entity_id
+        ));
     }
 
     #[tokio::test]

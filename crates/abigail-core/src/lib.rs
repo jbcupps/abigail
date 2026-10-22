@@ -33,7 +33,7 @@ pub use config::{
 pub use constitutional::load_preprompt_context;
 pub use document::{CoreDocument, DocumentTier};
 pub use error::{CoreError, Result};
-pub use global_config::{AgentEntry, GlobalConfig};
+pub use global_config::{AgentCreationRecord, AgentCreationState, AgentEntry, GlobalConfig};
 pub use key_detection::redact_secrets;
 pub use keyring::{
     generate_external_keypair, generate_master_key, load_master_key, parse_private_key,

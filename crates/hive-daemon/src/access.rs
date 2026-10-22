@@ -43,7 +43,9 @@ pub fn policy(method: &Method, route: &str) -> Access {
     use Access::*;
     match (method.as_str(), route) {
         ("GET", "/health") | ("POST", contract::ADOPTION_PATH | "/v1/runtime/sessions") => Public,
-        ("GET" | "POST", "/v1/entities") | ("POST", "/v1/secrets") => HiveAdmin,
+        ("GET" | "POST", "/v1/entities")
+        | ("GET", "/v1/entity-creations/:creation_key")
+        | ("POST", "/v1/secrets") => HiveAdmin,
         ("GET", "/v1/secrets/list" | "/v1/secrets/:key" | "/v1/providers/profiles/:name") => {
             Household
         }
@@ -338,6 +340,7 @@ mod tests {
             ("GET", "/v1/status", Desktop),
             ("GET", "/v1/entities", HiveAdmin),
             ("POST", "/v1/entities", HiveAdmin),
+            ("GET", "/v1/entity-creations/:creation_key", HiveAdmin),
             ("GET", "/v1/entities/:id", Entity),
             ("POST", "/v1/entities/:id/open", Desktop),
             ("POST", "/v1/entities/:id/close", Desktop),
@@ -388,6 +391,11 @@ mod tests {
         for (method, route, body) in [
             (Method::GET, "/v1/status", None),
             (Method::GET, "/v1/entities", None),
+            (
+                Method::GET,
+                "/v1/entity-creations/00000000-0000-4000-8000-000000000000",
+                None,
+            ),
             (
                 Method::POST,
                 "/v1/entities",
@@ -499,6 +507,11 @@ mod tests {
             (Method::GET, "/v1/entities/:other/execution/receipts", None),
             (Method::GET, "/v1/entities", None),
             (
+                Method::GET,
+                "/v1/entity-creations/00000000-0000-4000-8000-000000000000",
+                None,
+            ),
+            (
                 Method::POST,
                 "/v1/entities",
                 Some(serde_json::json!({"name": "Spawned"})),
@@ -555,6 +568,15 @@ mod tests {
         assert_eq!(body["ok"], true, "{body}");
         let (status, _) = f
             .send(Method::GET, "/v1/entities", Some(&lease), None)
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = f
+            .send(
+                Method::GET,
+                "/v1/entity-creations/00000000-0000-4000-8000-000000000000",
+                Some(&lease),
+                None,
+            )
             .await;
         assert_eq!(status, StatusCode::OK);
         for (method, route) in [
