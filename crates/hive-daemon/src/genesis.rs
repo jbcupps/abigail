@@ -347,12 +347,11 @@ pub(crate) fn delete_genesis_record_unlocked(
         draft.awakening.is_none() && linked_entity.is_some() && !linked_elsewhere;
     if delete_allocation && registered {
         if let Some(entity_id) = linked_entity.as_deref() {
-            let config_exists = state
-                .identity_manager
-                .agent_dir(entity_id)?
-                .join("config.json")
-                .exists();
-            if config_exists && state.identity_manager.load_agent(entity_id)?.birth_complete {
+            let agent_dir = state.identity_manager.agent_dir(entity_id)?;
+            // A missing directory is the retry state after private files were
+            // removed but registry persistence was interrupted. A present but
+            // damaged directory must fail closed rather than erase evidence.
+            if agent_dir.exists() && state.identity_manager.load_agent(entity_id)?.birth_complete {
                 return Err("This Entity finished birth but not awakening. Retry activation before deleting its Genesis record so signed identity and chat are preserved.".into());
             }
         }
@@ -1635,6 +1634,39 @@ mod tests {
         assert!(error.contains("awakening"), "{error}");
         assert!(state.genesis.load(OWNER, &id).unwrap().is_some());
         assert!(state.identity_manager.load_agent(&entity_id).is_ok());
+    }
+
+    #[tokio::test]
+    async fn damaged_config_cannot_be_mistaken_for_interrupted_cleanup() {
+        let (state, _) = crate::routes::tests::build_state();
+        let id = begin(&state).await;
+        reserve(&state, &id).await;
+        let awakened = act(&state, &id, json!({"action":"activate"}))
+            .await
+            .unwrap();
+        let entity_id = awakened["definition"]["entity_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let mut draft = session(&state, &id).unwrap();
+        let revision = draft.revision;
+        draft.awakening = None;
+        draft.state = GenesisState::Review;
+        draft.definition.status = GenesisState::Review;
+        draft.touch(&now());
+        state.genesis.save(&draft, revision).unwrap();
+        let agent_dir = state.identity_manager.agent_dir(&entity_id).unwrap();
+        std::fs::remove_file(agent_dir.join("config.json")).unwrap();
+
+        assert!(delete_genesis_record_unlocked(&state, &id).is_err());
+        assert!(state.genesis.load(OWNER, &id).unwrap().is_some());
+        assert!(agent_dir.join("docs").exists());
+        assert!(state
+            .identity_manager
+            .list_agents()
+            .unwrap()
+            .iter()
+            .any(|agent| agent.id == entity_id));
     }
 
     #[tokio::test]
