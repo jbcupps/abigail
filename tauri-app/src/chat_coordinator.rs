@@ -218,6 +218,7 @@ impl<'a> ChatCoordinator<'a> {
                             content: pipeline.content,
                             tool_calls_made: pipeline.tool_calls_made,
                             execution_trace: pipeline.execution_trace,
+                            completion_risk: pipeline.completion_risk,
                         },
                     )
                     .await;
@@ -348,6 +349,7 @@ impl<'a> ChatCoordinator<'a> {
             complexity_score,
             execution_trace: pipeline.execution_trace,
             session_id: Some(session_id.to_string()),
+            completion_risk: pipeline.completion_risk,
         }
     }
 
@@ -360,6 +362,7 @@ struct ChatPipelineResult {
     content: String,
     tool_calls_made: Vec<ToolCallRecord>,
     execution_trace: Option<entity_core::ExecutionTrace>,
+    completion_risk: Option<entity_core::CompletionRisk>,
 }
 
 struct ArchiveMetadata {

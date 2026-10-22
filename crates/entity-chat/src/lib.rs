@@ -15,7 +15,7 @@ use abigail_skills::manifest::SkillId;
 use abigail_skills::skill::ToolParams;
 pub use abigail_skills::JobContext;
 use abigail_skills::{SkillExecutor, SkillRegistry};
-use entity_core::{SessionMessage, ToolCallRecord};
+use entity_core::{CompletionRisk, SessionMessage, ToolCallRecord};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -703,6 +703,8 @@ pub struct ToolUseResult {
     /// the text response (captures fallback chain and timing).
     /// All attribution (tier, model, provider, complexity) is derived from this.
     pub execution_trace: Option<entity_core::ExecutionTrace>,
+    /// Present when a tool side effect completed but a later response step did not.
+    pub completion_risk: Option<CompletionRisk>,
 }
 
 impl ToolUseResult {
@@ -822,6 +824,7 @@ pub async fn run_tool_use_loop_with_jobs(
                     content: partial_tool_completion_message(),
                     tool_calls_made: all_records,
                     execution_trace: last_trace,
+                    completion_risk: Some(CompletionRisk::ActionCompletedVerifyBeforeRepeating),
                 });
             }
             Err(error) => return Err(error),
@@ -836,6 +839,7 @@ pub async fn run_tool_use_loop_with_jobs(
                     content: response.content,
                     tool_calls_made: all_records,
                     execution_trace: last_trace,
+                    completion_risk: None,
                 });
             }
         };
@@ -873,6 +877,8 @@ pub async fn run_tool_use_loop_with_jobs(
     );
     Ok(ToolUseResult {
         content: "I attempted several tool calls but hit the maximum number of rounds.".into(),
+        completion_risk: has_successful_tool_call(&all_records)
+            .then_some(CompletionRisk::ActionCompletedVerifyBeforeRepeating),
         tool_calls_made: all_records,
         execution_trace: last_trace,
     })
@@ -914,6 +920,7 @@ pub async fn run_tool_use_loop_with_model_override(
                     content: partial_tool_completion_message(),
                     tool_calls_made: all_records,
                     execution_trace: last_trace,
+                    completion_risk: Some(CompletionRisk::ActionCompletedVerifyBeforeRepeating),
                 });
             }
             Err(error) => return Err(error),
@@ -928,6 +935,7 @@ pub async fn run_tool_use_loop_with_model_override(
                     content: response.content,
                     tool_calls_made: all_records,
                     execution_trace: last_trace,
+                    completion_risk: None,
                 });
             }
         };
@@ -952,6 +960,8 @@ pub async fn run_tool_use_loop_with_model_override(
     );
     Ok(ToolUseResult {
         content: "I attempted several tool calls but hit the maximum number of rounds. Here's what I have so far.".to_string(),
+        completion_risk: has_successful_tool_call(&all_records)
+            .then_some(CompletionRisk::ActionCompletedVerifyBeforeRepeating),
         tool_calls_made: all_records,
         execution_trace: last_trace,
     })
@@ -1001,6 +1011,7 @@ pub async fn run_tool_use_loop_with_delegation(
                     content: partial_tool_completion_message(),
                     tool_calls_made: all_records,
                     execution_trace: last_trace,
+                    completion_risk: Some(CompletionRisk::ActionCompletedVerifyBeforeRepeating),
                 }));
             }
             Err(error) => return Err(error),
@@ -1015,6 +1026,7 @@ pub async fn run_tool_use_loop_with_delegation(
                     content: response.content,
                     tool_calls_made: all_records,
                     execution_trace: last_trace,
+                    completion_risk: None,
                 }));
             }
         };
@@ -1089,6 +1101,7 @@ pub async fn run_tool_use_loop_with_delegation(
                     ),
                     tool_calls_made: all_records,
                     execution_trace: last_trace,
+                    completion_risk: None,
                 },
                 job_id,
             });
@@ -1100,6 +1113,8 @@ pub async fn run_tool_use_loop_with_delegation(
         content: "I attempted several tool calls but hit the maximum number of rounds. \
                   Here's what I have so far."
             .to_string(),
+        completion_risk: has_successful_tool_call(&all_records)
+            .then_some(CompletionRisk::ActionCompletedVerifyBeforeRepeating),
         tool_calls_made: all_records,
         execution_trace: last_trace,
     }))
@@ -1119,6 +1134,7 @@ pub struct IntermediateToolResult {
     pub final_text: Option<String>,
     /// Execution trace from the final LLM call in the tool-use rounds.
     pub execution_trace: Option<entity_core::ExecutionTrace>,
+    pub completion_risk: Option<CompletionRisk>,
 }
 
 /// Run tool-use rounds non-streaming, but stop *before* the final text
@@ -1163,6 +1179,7 @@ pub async fn run_tool_use_loop_rounds_only(
                     tool_calls_made: all_records,
                     final_text: Some(partial_tool_completion_message()),
                     execution_trace: last_trace,
+                    completion_risk: Some(CompletionRisk::ActionCompletedVerifyBeforeRepeating),
                 });
             }
             Err(error) => return Err(error),
@@ -1177,6 +1194,7 @@ pub async fn run_tool_use_loop_rounds_only(
                     tool_calls_made: all_records,
                     final_text: Some(response.content),
                     execution_trace: last_trace,
+                    completion_risk: None,
                 });
             }
         };
@@ -1202,6 +1220,7 @@ pub async fn run_tool_use_loop_rounds_only(
         tool_calls_made: all_records,
         final_text: None,
         execution_trace: last_trace,
+        completion_risk: None,
     })
 }
 
@@ -1216,6 +1235,7 @@ pub struct StreamPipelineResult {
     pub tool_calls_made: Vec<ToolCallRecord>,
     /// Authoritative execution trace for the final streaming LLM call.
     pub execution_trace: Option<entity_core::ExecutionTrace>,
+    pub completion_risk: Option<CompletionRisk>,
 }
 
 /// Stream each provider round, executing any requested tools before continuing
@@ -1276,6 +1296,7 @@ pub async fn stream_chat_pipeline(
                     content,
                     tool_calls_made,
                     execution_trace: last_trace,
+                    completion_risk: Some(CompletionRisk::ActionCompletedVerifyBeforeRepeating),
                 });
             }
             Err(error) => return Err(error),
@@ -1290,6 +1311,7 @@ pub async fn stream_chat_pipeline(
                     content: response.content,
                     tool_calls_made,
                     execution_trace: stream_resp.trace,
+                    completion_risk: None,
                 });
             }
         };
@@ -2463,6 +2485,7 @@ mod tests {
                 success: true,
             }],
             execution_trace: Some(trace),
+            completion_risk: None,
         };
         assert_eq!(result.content, "done");
         assert_eq!(result.tool_calls_made.len(), 1);
@@ -2489,6 +2512,7 @@ mod tests {
             content: "done".into(),
             tool_calls_made: vec![],
             execution_trace: Some(trace),
+            completion_risk: None,
         };
         let trace_ref = result.execution_trace.as_ref().unwrap();
         assert!(!trace_ref.fallback_occurred);
@@ -2504,6 +2528,7 @@ mod tests {
             content: "streamed".into(),
             tool_calls_made: vec![],
             execution_trace: None,
+            completion_risk: None,
         };
         assert!(result.execution_trace.is_none());
     }

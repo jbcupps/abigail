@@ -5,7 +5,9 @@ import {
   type ChatGatewayResponse,
   type ChatGatewaySessionMessage,
   type ChatGatewayStream,
+  ACTION_MAY_HAVE_COMPLETED_MESSAGE,
   INTERRUPTED_BY_USER_MESSAGE,
+  isCompletionRiskCode,
   normalizeChatGatewayError,
   normalizeChatGatewayResponse,
 } from "./chatGateway";
@@ -14,6 +16,8 @@ interface ApiEnvelope<T> {
   ok: boolean;
   data?: T;
   error?: string;
+  error_code?: string;
+  interrupted?: boolean;
 }
 
 interface EntityHttpChatGatewayOptions {
@@ -25,6 +29,7 @@ interface EntityHttpChatGatewayOptions {
   idleTimeoutMs?: number;
   maxReconnectAttempts?: number;
   reconnectBackoffMs?: number;
+  allowNonStreamingFallback?: boolean;
   fetchFn?: typeof fetch;
 }
 
@@ -90,6 +95,14 @@ function parseEnvelope<T>(payload: unknown): T {
     throw new Error("Entity HTTP response missing envelope status");
   }
   if (!envelope.ok) {
+    if (isCompletionRiskCode(envelope.error_code)) {
+      throw {
+        code: envelope.error_code,
+        message: envelope.error ?? "Entity chat request failed",
+        interrupted: envelope.interrupted ?? false,
+        cause: payload,
+      };
+    }
     throw new Error(envelope.error ?? "Entity chat request failed");
   }
   if (typeof envelope.data === "undefined") {
@@ -114,6 +127,7 @@ export class EntityHttpChatGateway implements ChatGateway {
   private readonly maxReconnectAttempts: number;
   private readonly reconnectBackoffMs: number;
   private readonly fetchFn: typeof fetch;
+  private readonly allowNonStreamingFallback: boolean;
 
   constructor(options: EntityHttpChatGatewayOptions = {}) {
     this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
@@ -125,15 +139,21 @@ export class EntityHttpChatGateway implements ChatGateway {
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
     this.reconnectBackoffMs = options.reconnectBackoffMs ?? DEFAULT_RECONNECT_BACKOFF_MS;
     this.fetchFn = options.fetchFn ?? fetch;
+    this.allowNonStreamingFallback = options.allowNonStreamingFallback ?? true;
   }
 
   async send(request: ChatGatewayRequest, callbacks: ChatGatewayCallbacks): Promise<ChatGatewayStream> {
     let terminal = false;
     let disposed = false;
+    let cancelRequested = false;
     let userCanceled = false;
     let activeController: AbortController | null = null;
     let requestTimeoutId: ReturnType<typeof setTimeout> | null = null;
     let idleTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    let resolveTerminal = () => undefined;
+    const terminalResult = new Promise<void>((resolve) => {
+      resolveTerminal = resolve;
+    });
 
     const body = JSON.stringify({
       message: request.message,
@@ -181,6 +201,7 @@ export class EntityHttpChatGateway implements ChatGateway {
       if (terminal || disposed) return;
       terminal = true;
       clearTimers();
+      resolveTerminal();
       callbacks.onDone?.(response);
     };
 
@@ -188,6 +209,7 @@ export class EntityHttpChatGateway implements ChatGateway {
       if (terminal || disposed) return;
       terminal = true;
       clearTimers();
+      resolveTerminal();
       callbacks.onError?.(normalizeChatGatewayError(error));
     };
 
@@ -285,7 +307,17 @@ export class EntityHttpChatGateway implements ChatGateway {
               return;
             }
             if (event.event === "error") {
-              throw new Error(event.data || "Entity SSE error event");
+              try {
+                const error = JSON.parse(event.data);
+                if (error && typeof error === "object") {
+                  finalizeError({ ...error, cause: error });
+                  return;
+                }
+              } catch {
+                // Legacy Entity runtimes sent plain-text SSE errors.
+              }
+              finalizeError(new Error(event.data || "Entity SSE error event"));
+              return;
             }
           }
         }
@@ -297,7 +329,7 @@ export class EntityHttpChatGateway implements ChatGateway {
         }
       }
 
-      if (!terminal && !disposed && !userCanceled) {
+      if (!terminal && !disposed && !userCanceled && !cancelRequested) {
         throw new Error("Entity chat stream ended before a terminal done/error event");
       }
     };
@@ -327,7 +359,7 @@ export class EntityHttpChatGateway implements ChatGateway {
         const data = parseEnvelope<unknown>(payload);
         finalizeDone(normalizeChatGatewayResponse(data));
       } catch (error) {
-        if (userCanceled) return;
+        if (userCanceled || cancelRequested) return;
         if (isAbortError(error)) {
           if (isTimeoutAbort(controller, error)) {
             finalizeError("Entity chat request timeout");
@@ -342,7 +374,7 @@ export class EntityHttpChatGateway implements ChatGateway {
 
     const runStreaming = async (): Promise<void> => {
       for (let attempt = 0; attempt <= this.maxReconnectAttempts; attempt += 1) {
-        if (terminal || disposed || userCanceled) return;
+        if (terminal || disposed || userCanceled || cancelRequested) return;
 
         const controller = new AbortController();
         activeController = controller;
@@ -362,10 +394,10 @@ export class EntityHttpChatGateway implements ChatGateway {
           clearTimers();
           armIdleTimeout(controller);
           await consumeSse(response, controller);
-          if (terminal || disposed || userCanceled) return;
+          if (terminal || disposed || userCanceled || cancelRequested) return;
         } catch (error) {
           clearTimers();
-          if (terminal || disposed || userCanceled) return;
+          if (terminal || disposed || userCanceled || cancelRequested) return;
           if (isAbortError(error)) {
             if (!isTimeoutAbort(controller, error)) {
               return;
@@ -378,23 +410,23 @@ export class EntityHttpChatGateway implements ChatGateway {
             continue;
           }
 
-          await runNonStreamingFallback();
+          if (this.allowNonStreamingFallback) await runNonStreamingFallback();
+          else finalizeError(error);
           return;
         }
       }
     };
 
     void runStreaming().catch((error) => {
-      if (!terminal && !disposed && !userCanceled) {
+      if (!terminal && !disposed && !userCanceled && !cancelRequested) {
         finalizeError(error);
       }
     });
 
     return {
       cancel: async () => {
-        if (terminal || disposed || userCanceled) return;
-        userCanceled = true;
-        activeController?.abort(new DOMException(INTERRUPTED_BY_USER_MESSAGE, "AbortError"));
+        if (terminal || disposed || userCanceled || cancelRequested) return;
+        cancelRequested = true;
         clearTimers();
 
         if (this.cancelPath) {
@@ -407,11 +439,20 @@ export class EntityHttpChatGateway implements ChatGateway {
               body: JSON.stringify({ session_id: request.sessionId }),
             });
           } catch {
-            // Best effort only; local abort already guarantees interruption behavior.
+            // Best effort only; the local completion-risk fallback below is authoritative.
           }
+          if (terminal || disposed) return;
+          await Promise.race([terminalResult, delay(100)]);
+          if (terminal || disposed) return;
         }
 
-        finalizeError(INTERRUPTED_BY_USER_MESSAGE);
+        userCanceled = true;
+        activeController?.abort(new DOMException(INTERRUPTED_BY_USER_MESSAGE, "AbortError"));
+        finalizeError({
+          code: "action_may_have_completed_verify_before_repeating",
+          message: ACTION_MAY_HAVE_COMPLETED_MESSAGE,
+          interrupted: true,
+        });
       },
       dispose: async () => {
         if (disposed) return;

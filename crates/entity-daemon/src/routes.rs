@@ -244,6 +244,19 @@ pub async fn get_execution_events(
 // POST /v1/chat
 // ---------------------------------------------------------------------------
 
+fn chat_error_envelope(error: crate::pipeline::TurnFailure) -> ApiEnvelope<ChatResponse> {
+    match error.code {
+        Some(code) => ApiEnvelope::coded_error(error.message, code.as_str(), error.interrupted),
+        None => ApiEnvelope::error(error.message),
+    }
+}
+
+fn chat_error_sse_data(error: &crate::pipeline::TurnFailure) -> String {
+    serde_json::to_string(error).unwrap_or_else(|_| {
+        r#"{"message":"The reply could not be completed.","interrupted":false}"#.to_string()
+    })
+}
+
 pub async fn chat(
     State(state): State<EntityDaemonState>,
     Json(body): Json<ChatRequest>,
@@ -310,7 +323,7 @@ pub async fn chat(
 
     match tokio::time::timeout(crate::pipeline::CHAT_TURN_TIMEOUT, done_rx).await {
         Ok(Ok(Ok(response))) => Json(ApiEnvelope::success(response)),
-        Ok(Ok(Err(e))) => Json(ApiEnvelope::error(e)),
+        Ok(Ok(Err(error))) => Json(chat_error_envelope(error)),
         Ok(Err(_)) => Json(ApiEnvelope::error(
             "chat pipeline dropped the turn".to_string(),
         )),
@@ -443,9 +456,15 @@ pub async fn chat_stream(
                     )
                     .await;
             }
-            Ok(Ok(Err(e))) => {
+            Ok(Ok(Err(error))) => {
                 fwd_task.abort();
-                let _ = sse_tx.send(Event::default().event("error").data(e)).await;
+                let _ = sse_tx
+                    .send(
+                        Event::default()
+                            .event("error")
+                            .data(chat_error_sse_data(&error)),
+                    )
+                    .await;
             }
             Ok(Err(_)) => {
                 fwd_task.abort();
@@ -1232,8 +1251,7 @@ pub(crate) mod tests {
                 "An action may have completed. Verify the result before repeating it.",
             ),
         ] {
-            let failure =
-                crate::pipeline::TurnFailure::completion_risk(risk, interrupted);
+            let failure = crate::pipeline::TurnFailure::completion_risk(risk, interrupted);
             let envelope = chat_error_envelope(failure.clone());
             assert!(!envelope.ok);
             assert_eq!(envelope.error.as_deref(), Some(expected_message));

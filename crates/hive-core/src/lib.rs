@@ -21,6 +21,10 @@ pub struct ApiEnvelope<T> {
     pub data: Option<T>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interrupted: Option<bool>,
 }
 
 impl<T: Serialize> ApiEnvelope<T> {
@@ -29,6 +33,8 @@ impl<T: Serialize> ApiEnvelope<T> {
             ok: true,
             data: Some(data),
             error: None,
+            error_code: None,
+            interrupted: None,
         }
     }
 
@@ -37,6 +43,22 @@ impl<T: Serialize> ApiEnvelope<T> {
             ok: false,
             data: None,
             error: Some(msg.into()),
+            error_code: None,
+            interrupted: None,
+        }
+    }
+
+    pub fn coded_error(
+        msg: impl Into<String>,
+        error_code: impl Into<String>,
+        interrupted: bool,
+    ) -> Self {
+        Self {
+            ok: false,
+            data: None,
+            error: Some(msg.into()),
+            error_code: Some(error_code.into()),
+            interrupted: Some(interrupted),
         }
     }
 }

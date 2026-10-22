@@ -140,6 +140,7 @@ mod tests {
             complexity_score: None,
             execution_trace: None,
             session_id: Some("session-1".to_string()),
+            completion_risk: None,
         };
         record(
             state.clone(),
@@ -147,6 +148,8 @@ mod tests {
                 session_id: "session-1".to_string(),
                 status: "success".to_string(),
                 error: None,
+                error_code: None,
+                interrupted: false,
                 response: Some(response),
                 user_message: "private mentor prompt".to_string(),
                 superego_verdict: Some("clear".to_string()),

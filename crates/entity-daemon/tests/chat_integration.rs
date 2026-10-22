@@ -143,6 +143,7 @@ async fn chat_handler(
             content: response.completion.content,
             tool_calls_made: Vec::new(),
             execution_trace: response.trace,
+            completion_risk: None,
         })
     } else {
         entity_chat::run_tool_use_loop(&state.router, &state.executor, messages, tools).await
@@ -162,6 +163,7 @@ async fn chat_handler(
                 complexity_score,
                 execution_trace: tool_result.execution_trace,
                 session_id: None,
+                completion_risk: tool_result.completion_risk,
             }))
         }
         Err(e) => axum::Json(ApiEnvelope::error(e.to_string())),

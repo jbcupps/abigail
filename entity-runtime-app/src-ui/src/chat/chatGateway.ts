@@ -53,9 +53,15 @@ export interface ChatGatewayResponse {
   complexity_score?: number;
   execution_trace?: ExecutionTrace;
   session_id?: string;
+  completion_risk?: CompletionRiskCode;
 }
 
+export type CompletionRiskCode =
+  | "action_completed_verify_before_repeating"
+  | "action_may_have_completed_verify_before_repeating";
+
 export type ChatGatewayErrorCode =
+  | CompletionRiskCode
   | "interrupted"
   | "transport"
   | "timeout"
@@ -85,6 +91,27 @@ export interface ChatGateway {
 }
 
 export const INTERRUPTED_BY_USER_MESSAGE = "Interrupted by user";
+export const ACTION_COMPLETED_MESSAGE =
+  "An action completed. Verify the result before repeating it.";
+export const ACTION_MAY_HAVE_COMPLETED_MESSAGE =
+  "An action may have completed. Verify the result before repeating it.";
+
+export function isCompletionRiskCode(value: unknown): value is CompletionRiskCode {
+  return (
+    value === "action_completed_verify_before_repeating" ||
+    value === "action_may_have_completed_verify_before_repeating"
+  );
+}
+
+export function completionRiskMessage(code: unknown): string | undefined {
+  if (code === "action_completed_verify_before_repeating") {
+    return ACTION_COMPLETED_MESSAGE;
+  }
+  if (code === "action_may_have_completed_verify_before_repeating") {
+    return ACTION_MAY_HAVE_COMPLETED_MESSAGE;
+  }
+  return undefined;
+}
 
 export function isInterruptedByUserMessage(message: string): boolean {
   return message.toLowerCase().includes("interrupted by user");
@@ -110,6 +137,9 @@ export function normalizeChatGatewayResponse(payload: unknown): ChatGatewayRespo
           ? (response.execution_trace as ExecutionTrace)
           : undefined,
       session_id: typeof response.session_id === "string" ? response.session_id : undefined,
+      completion_risk: isCompletionRiskCode(response.completion_risk)
+        ? response.completion_risk
+        : undefined,
     };
   }
 
@@ -123,6 +153,17 @@ export function normalizeChatGatewayResponse(payload: unknown): ChatGatewayRespo
 export function normalizeChatGatewayError(error: unknown): ChatGatewayError {
   if (typeof error === "object" && error !== null) {
     const maybeGatewayError = error as Partial<ChatGatewayError>;
+    if (isCompletionRiskCode(maybeGatewayError.code)) {
+      return {
+        code: maybeGatewayError.code,
+        message: completionRiskMessage(maybeGatewayError.code)!,
+        interrupted:
+          typeof maybeGatewayError.interrupted === "boolean"
+            ? maybeGatewayError.interrupted
+            : maybeGatewayError.code === "action_may_have_completed_verify_before_repeating",
+        cause: maybeGatewayError.cause ?? error,
+      };
+    }
     if (
       typeof maybeGatewayError.code === "string" &&
       typeof maybeGatewayError.message === "string" &&
@@ -133,6 +174,28 @@ export function normalizeChatGatewayError(error: unknown): ChatGatewayError {
         message: maybeGatewayError.message,
         interrupted: maybeGatewayError.interrupted,
         cause: maybeGatewayError.cause,
+      };
+    }
+    if (
+      typeof maybeGatewayError.message === "string" &&
+      typeof maybeGatewayError.interrupted === "boolean"
+    ) {
+      if (
+        maybeGatewayError.interrupted ||
+        isInterruptedByUserMessage(maybeGatewayError.message)
+      ) {
+        return {
+          code: "interrupted",
+          message: INTERRUPTED_BY_USER_MESSAGE,
+          interrupted: true,
+          cause: maybeGatewayError.cause ?? error,
+        };
+      }
+      return {
+        code: "unknown",
+        message: maybeGatewayError.message,
+        interrupted: false,
+        cause: maybeGatewayError.cause ?? error,
       };
     }
   }

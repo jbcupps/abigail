@@ -9,7 +9,7 @@
 use super::{EgoActionPayload, IdReactionPayload, TurnContext};
 use crate::state::EntityDaemonState;
 use abigail_streaming::{Envelope, SubscriptionHandle, Topic, TopicConfig, BUS_STREAM};
-use entity_core::ChatResponse;
+use entity_core::{ChatResponse, CompletionRisk};
 
 const CONSUMER_GROUP: &str = "ego-stage";
 
@@ -149,6 +149,7 @@ async fn respond(
                     content: p.content,
                     tool_calls_made: p.tool_calls_made,
                     execution_trace: p.execution_trace,
+                    completion_risk: p.completion_risk,
                 }),
                 _ = cancelled => Err(anyhow::anyhow!("Interrupted by user")),
             }
@@ -166,6 +167,7 @@ async fn respond(
                     content: r.completion.content,
                     tool_calls_made: Vec::new(),
                     execution_trace: r.trace,
+                    completion_risk: None,
                 })
         } else {
             entity_chat::run_tool_use_loop_with_model_override(
@@ -238,19 +240,21 @@ async fn respond(
 
             match gate {
                 abigail_superego::GateDecision::Block(_) => {
-                    let error = if successful_skill_count > 0 {
-                        format!(
-                            "An action completed, but the response was withheld for safety. \
-                             Verify the result before repeating the action. Safety check: {}",
-                            findings.join(", ")
-                        )
+                    let (error, error_code) = if successful_skill_count > 0 {
+                        let risk = CompletionRisk::ActionCompletedVerifyBeforeRepeating;
+                        (risk.public_message().to_string(), Some(risk))
                     } else {
-                        format!("Response withheld by superego: {}", findings.join(", "))
+                        (
+                            format!("Response withheld by superego: {}", findings.join(", ")),
+                            None,
+                        )
                     };
                     EgoActionPayload {
                         session_id: payload.session_id.clone(),
                         status: "blocked".to_string(),
                         error: Some(error),
+                        error_code,
+                        interrupted: false,
                         response: None,
                         user_message: payload.message.clone(),
                         superego_verdict: Some("block".to_string()),
@@ -267,11 +271,14 @@ async fn respond(
                         complexity_score,
                         execution_trace: tool_result.execution_trace,
                         session_id: Some(payload.session_id.clone()),
+                        completion_risk: tool_result.completion_risk,
                     };
                     EgoActionPayload {
                         session_id: payload.session_id.clone(),
                         status: "success".to_string(),
                         error: None,
+                        error_code: None,
+                        interrupted: false,
                         response: Some(response),
                         user_message: payload.message.clone(),
                         superego_verdict: Some(gate.verdict().to_string()),
@@ -285,24 +292,26 @@ async fn respond(
             // Preserve the user-interruption signal verbatim (the client detects
             // it); turn any other failure into a warm, non-technical message so a
             // family member never sees a raw error. The cause stays in the logs.
-            let user_error = if let Some(error) = reservation_error.as_deref() {
-                activity_reservation_error(error)
-            } else if detail.to_lowercase().contains("interrupted by user") {
-                if activity_record_id.is_some() {
-                    "An action may have completed before cancellation. \
-                     Verify the result before repeating the action."
-                        .to_string()
+            let (user_error, error_code, interrupted) =
+                if let Some(error) = reservation_error.as_deref() {
+                    (activity_reservation_error(error), None, false)
+                } else if detail.to_lowercase().contains("interrupted by user") {
+                    if activity_record_id.is_some() {
+                        let risk = CompletionRisk::ActionMayHaveCompletedVerifyBeforeRepeating;
+                        (risk.public_message().to_string(), Some(risk), true)
+                    } else {
+                        ("Interrupted by user".to_string(), None, true)
+                    }
                 } else {
-                    detail
-                }
-            } else {
-                tracing::warn!("Ego stage: chat turn failed: {}", detail);
-                friendly_turn_error()
-            };
+                    tracing::warn!("Ego stage: chat turn failed: {}", detail);
+                    (friendly_turn_error(), None, false)
+                };
             EgoActionPayload {
                 session_id: payload.session_id.clone(),
                 status: "error".to_string(),
                 error: Some(user_error),
+                error_code,
+                interrupted,
                 response: None,
                 user_message: payload.message.clone(),
                 superego_verdict: None,
@@ -330,6 +339,8 @@ async fn respond(
             );
             if let Some(response) = action.response.as_mut() {
                 response.reply = completed_action_unsaved_reply(&response.reply);
+                response.completion_risk =
+                    Some(CompletionRisk::ActionCompletedVerifyBeforeRepeating);
             }
         } else {
             action.status = "error".to_string();
@@ -400,9 +411,13 @@ async fn respond(
     // Deliver the outcome to the waiting handler.
     let outcome = match (action.status.as_str(), action.response) {
         ("success", Some(response)) => Ok(response),
-        _ => Err(action
-            .error
-            .unwrap_or_else(|| "ego stage failed without detail".to_string())),
+        _ => Err(super::TurnFailure {
+            message: action
+                .error
+                .unwrap_or_else(|| "ego stage failed without detail".to_string()),
+            code: action.error_code,
+            interrupted: action.interrupted,
+        }),
     };
     if done.send(outcome).is_err() {
         tracing::debug!(
@@ -488,6 +503,7 @@ mod tests {
             complexity_score: Some(4),
             execution_trace: None,
             session_id: Some("session-1".to_string()),
+            completion_risk: None,
         };
 
         let turn = committed_assistant_turn("assistant-turn-1", "session-1", &response);

@@ -19,9 +19,10 @@ pub mod journal;
 pub mod stream_gate;
 pub mod superego_stage;
 
-use entity_core::{ChatResponse, SessionMessage};
+use entity_core::{ChatResponse, CompletionRisk, SessionMessage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -31,7 +32,59 @@ use tokio_util::sync::CancellationToken;
 pub const CHAT_TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
 /// Outcome delivered back to the waiting HTTP handler.
-pub type TurnOutcome = Result<ChatResponse, String>;
+pub type TurnOutcome = Result<ChatResponse, TurnFailure>;
+
+/// Structured chat failure delivered to the Entity API boundary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TurnFailure {
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<CompletionRisk>,
+    #[serde(default)]
+    pub interrupted: bool,
+}
+
+impl TurnFailure {
+    pub fn plain(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            code: None,
+            interrupted: false,
+        }
+    }
+
+    pub fn interrupted() -> Self {
+        Self {
+            message: "Interrupted by user".to_string(),
+            code: None,
+            interrupted: true,
+        }
+    }
+
+    pub fn completion_risk(code: CompletionRisk, interrupted: bool) -> Self {
+        Self {
+            message: code.public_message().to_string(),
+            code: Some(code),
+            interrupted,
+        }
+    }
+}
+
+impl std::fmt::Display for TurnFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for TurnFailure {}
+
+impl Deref for TurnFailure {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.message
+    }
+}
 
 /// Per-turn runtime context that cannot be serialized onto the bus.
 pub struct TurnContext {
@@ -96,6 +149,10 @@ pub struct EgoActionPayload {
     pub status: String,
     #[serde(default)]
     pub error: Option<String>,
+    #[serde(default)]
+    pub error_code: Option<CompletionRisk>,
+    #[serde(default)]
+    pub interrupted: bool,
     #[serde(default)]
     pub response: Option<ChatResponse>,
     /// The mentor message this action answers (for superego judgment).

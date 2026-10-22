@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EntityHttpChatGateway } from "../chat/EntityHttpChatGateway";
-import type { ChatGatewayStream } from "../chat/chatGateway";
+import {
+  completionRiskMessage,
+  type ChatGatewayError,
+  type ChatGatewayStream,
+} from "../chat/chatGateway";
 import { loadConversation, type ConversationMessage } from "../lib/conversation";
 
 interface ChatPanelProps {
@@ -107,26 +111,34 @@ export default function ChatPanel({ baseUrl, greeting, showHeader = true }: Chat
       setStreaming(false);
       setStopping(false);
     };
-    const fail = (interrupted: boolean) => {
+    const fail = (error?: ChatGatewayError) => {
       if (!isCurrent()) return;
       setMessages((previous) => previous.filter((message) =>
         message.id !== assistantId || message.content !== "",
       ));
-      setNotice(interrupted
-        ? "Reply stopped. You can continue the conversation."
-        : "The reply could not be completed. Check the model connection in Abigail Hive, then try again.");
+      setNotice(
+        completionRiskMessage(error?.code) ??
+          (error?.interrupted
+            ? "Reply stopped. You can continue the conversation."
+            : "The reply could not be completed. Check the model connection in Abigail Hive, then try again."),
+      );
       finish();
     };
     try {
       const stream = await gateway.send({ message: text, sessionId: sessionIdRef.current }, {
         onToken: (token) => setAssistant((current) => current + token),
-        onDone: (response) => { setAssistant((current) => response.reply || current); finish(); },
-        onError: (error) => fail(error.interrupted),
+        onDone: (response) => {
+          setAssistant((current) => response.reply || current);
+          const riskNotice = completionRiskMessage(response.completion_risk);
+          if (riskNotice) setNotice(riskNotice);
+          finish();
+        },
+        onError: (error) => fail(error),
       });
       if (!isCurrent()) { await stream.cancel(); await stream.dispose(); return; }
       streamRef.current = stream;
       if (stopPending.current) await stream.cancel();
-    } catch { fail(false); }
+    } catch { fail(); }
   }, [input, loading, loadError, gateway]);
 
   const stop = useCallback(async () => {
