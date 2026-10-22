@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createGenesisSession, deleteGenesisSession, displayGenesisValue, essenceFor, exportGenesisMarkdown, GENESIS_MODES, genesisAction, getGenesisSession, importGenesisMarkdown, listGenesisSessions, sendGenesisMessage, type FieldUpdate, type GenesisMode, type GenesisSession } from "../lib/genesisClient";
+import { deleteGenesisSession, displayGenesisValue, essenceFor, exportGenesisMarkdown, GENESIS_MODES, genesisAction, getGenesisSession, importGenesisMarkdown, listGenesisSessions, sendGenesisMessage, type FieldUpdate, type GenesisCreationSeed, type GenesisSession } from "../lib/genesisClient";
+import { dispatchGenesisLaunch, readGenesisLaunchDraft } from "../lib/genesisLaunchDraft";
 import { openEntity } from "../lib/entityWindow";
 import GenesisDefinition from "./GenesisDefinition";
+import GenesisFirstSignal from "./GenesisFirstSignal";
 import GenesisStudio from "./GenesisStudio";
 import GenesisVoice from "./GenesisVoice";
 import GenesisChime from "./GenesisChime";
@@ -18,7 +20,6 @@ const SPARKS = ["A compassionate guide for everyday life", "An ancient librarian
 export default function GenesisWorkspace({ onClose, onCreated, resumeId }: { onClose: () => void; onCreated: () => void; resumeId?: string }) {
   const [sessions, setSessions] = useState<GenesisSession[]>([]);
   const [session, setSession] = useState<GenesisSession | null>(null);
-  const [mode, setMode] = useState<GenesisMode>("guided");
   const [composer, setComposer] = useState("");
   const [tab, setTab] = useState<Tab>("conversation");
   const [busy, setBusy] = useState(false);
@@ -50,9 +51,10 @@ export default function GenesisWorkspace({ onClose, onCreated, resumeId }: { onC
     finally { flight.current = false; if (mounted.current) setBusy(false); }
   };
   const adopt = (next: GenesisSession) => { latest.current = next; if (mounted.current) setSession(next); return next; };
-  const start = (startMode: GenesisMode) => operation(async () => {
-    const next = await createGenesisSession(startMode);
-    adopt(next); setComposer(next.composer_draft || ""); setTab(startMode === "markdown" ? "sources" : "conversation");
+  const begin = (seed: GenesisCreationSeed) => operation(async () => {
+    const creationKey = readGenesisLaunchDraft()?.creation_key ?? crypto.randomUUID();
+    const next = await dispatchGenesisLaunch(seed, creationKey);
+    adopt(next); setComposer(next.composer_draft || ""); setTab(next.quest ? "quest" : "conversation");
     setQuestStage(next.quest?.current ?? "reservation");
   });
   const resume = (id: string) => operation(async () => {
@@ -147,8 +149,7 @@ export default function GenesisWorkspace({ onClose, onCreated, resumeId }: { onC
   if (!session) return <section className="genesis genesis-launch" aria-label="Entity Genesis">
     <header className="genesis-header"><div><div className="genesis-eyebrow">Entity Genesis</div><h2>Every presence begins with a spark.</h2><p>Discover someone your family will come to know. Bring an idea, a story, or simply your curiosity.</p></div><button type="button" onClick={onClose}>Back to Hive</button></header>
     {error && <p role="alert" className="genesis-error">{error}</p>}
-    <div className="genesis-mode-grid">{GENESIS_MODES.map((choice) => <button type="button" className={mode === choice.value ? "is-selected" : ""} aria-pressed={mode === choice.value} onClick={() => setMode(choice.value)} key={choice.value}><strong>{choice.label}</strong><span>{choice.detail}</span></button>)}</div>
-    <div className="genesis-actions"><button type="button" className="genesis-primary" disabled={busy || loading} onClick={() => void start(mode)}>{busy ? "Preparing your session…" : "Begin Genesis"}</button><button type="button" disabled={busy || loading} onClick={() => void operation(async () => { const next = await createGenesisSession("quick"); adopt(next); adopt(await sendGenesisMessage(next, "Suggest three distinctive possible Entities for family life. Keep them as proposals for me to choose; do not assume my approval.")); })}>Surprise me</button></div>
+    <GenesisFirstSignal onBegin={async (seed) => { await begin(seed); }} />
     <h3>Return to a creation</h3>
     {loading ? <p role="status">Loading saved creations…</p> : sessions.length === 0 ? <p className="genesis-muted">Your saved sessions will appear here. Every confirmed choice is kept by Hive.</p> : <ul className="genesis-session-list">{sessions.map((item) => <li key={item.id}><div><strong>{item.definition.name || "An unnamed spark"}</strong><span>{item.state.replace(/_/g, " ")} · {new Date(item.updated_at).toLocaleString()}</span></div><button type="button" disabled={busy} onClick={() => void resume(item.id)}>Resume{item.definition.name ? ` ${item.definition.name}` : " creation"}</button><button type="button" disabled={busy} onClick={() => setConfirmation(`session:${item.id}`)}>{item.definition.entity_id ? "Delete Genesis record and media" : "Delete draft"}</button>{confirmation === `session:${item.id}` && <div className="genesis-confirm"><p>Permanently delete this creation session, sources, and generated media? An awakened Entity and its chat history remain available.</p><button type="button" onClick={() => void operation(async () => { await deleteGenesisSession(item.id); setSessions((previous) => previous.filter((draft) => draft.id !== item.id)); setConfirmation(null); })}>Confirm deletion</button><button type="button" onClick={() => setConfirmation(null)}>Keep creation</button></div>}</li>)}</ul>}
   </section>;

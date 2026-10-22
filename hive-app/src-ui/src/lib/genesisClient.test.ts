@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { genesisRequest } from "./genesisClient";
+import { createOrResumeGenesis, genesisRequest, type GenesisCreationSeed } from "./genesisClient";
 import { resolveHiveConnection } from "./connection";
 vi.mock("./connection", () => ({ resolveHiveConnection: vi.fn() }));
 
@@ -17,5 +17,23 @@ describe("private Genesis requests", () => {
   it("preserves safe daemon errors for actionable conflict feedback", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 409, json: async () => ({ ok: false, error: "This creation changed. Reload before saving." }) }));
     await expect(genesisRequest("/sessions/test/actions", {})).rejects.toThrow("Reload before saving");
+  });
+  it("posts only the keyed canonical creation seed", async () => {
+    const seed: GenesisCreationSeed = {
+      mode: "quick",
+      name: "Nova",
+      purpose: "Help our family notice small wonders",
+      presence: { temperament: "gentle", identity: "aether", crest: "orbit", motion: "calm" },
+    };
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, data: { id: "creation-key" } }) });
+    vi.stubGlobal("fetch", fetcher);
+
+    await createOrResumeGenesis(seed, "creation-key");
+
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
+      mode: "quick",
+      creation_key: "creation-key",
+      seed,
+    });
   });
 });

@@ -1,8 +1,14 @@
 import { resolveHiveConnection } from "./connection";
-import type { QuestView } from "./questClient";
+import type { PresenceChoice, QuestView } from "./questClient";
 
 export type GenesisMode = "guided" | "voice" | "markdown" | "hybrid" | "quick" | "deep";
 export type GenesisState = "draft" | "discovering" | "review" | "portrait_pending" | "portrait_approved" | "manifesting" | "ready" | "failed" | "cancelled";
+export interface GenesisCreationSeed {
+  mode: GenesisMode;
+  name: string;
+  purpose: string;
+  presence: PresenceChoice;
+}
 export interface Personality {
   description: string;
   empathy?: number; curiosity?: number; assertiveness?: number; humor?: number;
@@ -64,6 +70,7 @@ export async function genesisRequest<T>(path: string, body?: unknown, method = b
 
 export const listGenesisSessions = () => genesisRequest<GenesisSession[]>("/sessions");
 export const createGenesisSession = (mode: GenesisMode) => genesisRequest<GenesisSession>("/sessions", { mode });
+export const createOrResumeGenesis = (seed: GenesisCreationSeed, creationKey: string) => genesisRequest<GenesisSession>("/sessions", { mode: seed.mode, creation_key: creationKey, seed });
 export const getGenesisSession = (id: string) => genesisRequest<GenesisSession>(`/sessions/${encodeURIComponent(id)}`);
 export const deleteGenesisSession = (id: string) => genesisRequest<unknown>(`/sessions/${encodeURIComponent(id)}`, undefined, "DELETE");
 export const genesisAction = (session: GenesisSession, action: string, args: Record<string, unknown> = {}) => genesisRequest<GenesisSession>(`/sessions/${encodeURIComponent(session.id)}/actions`, { action, expected_revision: session.revision, ...args });

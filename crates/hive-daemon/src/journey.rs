@@ -219,7 +219,14 @@ pub fn save_presence(
     card.validate()?;
     let path = presence_path(state, entity_id)?;
     let bytes = serde_json::to_vec_pretty(card).map_err(|e| e.to_string())?;
-    abigail_core::secure_fs::write_bytes_atomic(&path, &bytes)
+    save_presence_bytes(&path, &bytes)
+}
+
+fn save_presence_bytes(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() > MAX_PRESENCE_BYTES {
+        return Err("The Presence card is too large to save".into());
+    }
+    abigail_core::secure_fs::write_bytes_atomic(path, bytes)
         .map_err(|error| format!("Could not save the Presence card: {error}"))
 }
 
@@ -462,6 +469,26 @@ pub(crate) mod tests {
             Some("The saved Presence card is too large")
         );
         assert_eq!(std::fs::read(path).unwrap(), oversized);
+    }
+
+    #[test]
+    fn presence_write_cap_preserves_an_existing_card() {
+        let directory = std::env::temp_dir().join(format!(
+            "abigail-presence-cap-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join(PRESENCE_FILE);
+        let existing = br#"{"name":"Existing"}"#;
+        std::fs::write(&path, existing).unwrap();
+
+        let oversized = vec![b'x'; MAX_PRESENCE_BYTES + 1];
+        assert_eq!(
+            save_presence_bytes(&path, &oversized).unwrap_err(),
+            "The Presence card is too large to save"
+        );
+        assert_eq!(std::fs::read(path).unwrap(), existing);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     fn store() -> JourneyStore {

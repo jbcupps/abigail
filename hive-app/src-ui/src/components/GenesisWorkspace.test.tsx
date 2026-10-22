@@ -1,11 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import GenesisWorkspace from "./GenesisWorkspace";
-import { createGenesisSession, genesisAction, getGenesisSession, importGenesisMarkdown, listGenesisSessions, sendGenesisMessage, type GenesisSession } from "../lib/genesisClient";
+import { createGenesisSession, createOrResumeGenesis, genesisAction, getGenesisSession, importGenesisMarkdown, listGenesisSessions, sendGenesisMessage, type GenesisSession } from "../lib/genesisClient";
 import { getEntityJourney, getQuestCatalog } from "../lib/questClient";
 import { questFixture } from "../test/questFixture";
 
-vi.mock("../lib/genesisClient", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/genesisClient")>(), createGenesisSession: vi.fn(), genesisAction: vi.fn(), getGenesisSession: vi.fn(), listGenesisSessions: vi.fn(), sendGenesisMessage: vi.fn(), importGenesisMarkdown: vi.fn(), deleteGenesisSession: vi.fn(), exportGenesisMarkdown: vi.fn() }));
+vi.mock("../lib/genesisClient", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/genesisClient")>(), createGenesisSession: vi.fn(), createOrResumeGenesis: vi.fn(), genesisAction: vi.fn(), getGenesisSession: vi.fn(), listGenesisSessions: vi.fn(), sendGenesisMessage: vi.fn(), importGenesisMarkdown: vi.fn(), deleteGenesisSession: vi.fn(), exportGenesisMarkdown: vi.fn() }));
 vi.mock("./GenesisStudio", () => ({ default: ({ onUpdate }: { onUpdate: (updates: unknown[]) => Promise<void> }) => <button type="button" onClick={() => void onUpdate([{ field: "visual_style", value: "Watercolor" }])}>Set studio style</button> }));
 vi.mock("./GenesisVoice", () => ({ default: () => <p>Voice controls</p> }));
 vi.mock("../lib/entityWindow", () => ({ openEntity: vi.fn() }));
@@ -20,7 +20,13 @@ beforeEach(() => {
   };
   vi.mocked(listGenesisSessions).mockResolvedValue([]);
   vi.mocked(createGenesisSession).mockImplementation(async () => structuredClone(saved));
+  vi.mocked(createOrResumeGenesis).mockImplementation(async (_seed, creationKey) => ({ ...structuredClone(saved), id: creationKey }));
   vi.mocked(getGenesisSession).mockImplementation(async () => structuredClone(saved));
+  vi.mocked(getQuestCatalog).mockResolvedValue({
+    stages: [], badges: [], temperament_cards: [], trials: [], instincts: "",
+    palettes: [{ palette: "aether", unlocked_by: null }],
+    crests: [{ crest: "orbit", unlocked_by: null }],
+  });
   vi.mocked(genesisAction).mockImplementation(async (_session, action, args = {}) => {
     saved = structuredClone(saved); saved.revision += 1;
     if (action === "set_mode") saved.mode = args.mode as GenesisSession["mode"];
@@ -34,12 +40,31 @@ afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 async function start(onClose = vi.fn()) {
   render(<GenesisWorkspace onClose={onClose} onCreated={vi.fn()} />);
-  await waitFor(() => expect(screen.getByRole("button", { name: "Begin Genesis" })).toBeEnabled());
-  fireEvent.click(screen.getByRole("button", { name: "Begin Genesis" }));
+  fireEvent.change(await screen.findByRole("textbox", { name: "Name" }), { target: { value: saved.definition.name } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Purpose" }), { target: { value: saved.definition.purpose } });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Begin Genesis Quest" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Begin Genesis Quest" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Discovery" }));
   await screen.findByRole("textbox", { name: "Tell me what you imagine" });
 }
 
 describe("Genesis creation workflow", () => {
+  it("enters the existing Quest after a keyed First Signal succeeds", async () => {
+    saved.quest = questFixture();
+    render(<GenesisWorkspace onClose={vi.fn()} onCreated={vi.fn()} />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Name" }), { target: { value: "Nova" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Purpose" }), { target: { value: "Help our family explore" } });
+    fireEvent.click(screen.getByRole("button", { name: "Begin Genesis Quest" }));
+
+    expect(await screen.findByRole("region", { name: "Genesis quest" })).toBeInTheDocument();
+    expect(createOrResumeGenesis).toHaveBeenCalledWith(expect.objectContaining({
+      mode: "quick",
+      name: "Nova",
+      purpose: "Help our family explore",
+      presence: expect.objectContaining({ temperament: "gentle", identity: "aether", crest: "orbit", motion: "calm" }),
+    }), expect.stringMatching(/^[0-9a-f-]{36}$/));
+  });
+
   it("changes automatic retention only after an explicit save and permits turning it off", async () => {
     await start();
     fireEvent.click(screen.getByText("Creation record retention"));
@@ -118,7 +143,7 @@ describe("Genesis creation workflow", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Tell me what you imagine" }), { target: { value: "Keep this idea" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue discovery" }));
     fireEvent.click(await screen.findByRole("button", { name: "Reload saved session" }));
-    await waitFor(() => expect(getGenesisSession).toHaveBeenCalledWith("creation"));
+    await waitFor(() => expect(getGenesisSession).toHaveBeenCalledWith(vi.mocked(createOrResumeGenesis).mock.calls[0][1]));
     expect(screen.getByRole("textbox", { name: "Tell me what you imagine" })).toHaveValue("Keep this idea");
   });
 
