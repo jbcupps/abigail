@@ -161,11 +161,13 @@ creation share this receipt mechanism, and
 ### 2. Hidden, versioned ethics
 
 New signed birth certificates carry the exact immutable scoring version
-`triangle-ethic-v1`. Their v2 signature payload binds the scoring version,
-identity fields and exact bits of all four hidden ethics weights. Genuine
-version-1 documents with no `scoring_version` key continue to verify against
-the original byte-stable payload; removing the key from v2 or injecting it into
-v1 does not change payload versions.
+`triangle-ethic-v1`. Their explicit v3 signature payload uses canonical
+length-prefixed fields and binds every displayed certificate field, the scoring
+version, and the exact bits of all four hidden ethics weights. Genuine raw v1
+documents with no `scoring_version` key and prior scoring-stamped raw v2
+documents continue to verify against their byte-stable payloads. Explicit v3,
+raw v2, and raw v1 dispatch is unambiguous; removing or injecting version fields
+cannot downgrade or upgrade a signature.
 
 User-facing Genesis, quest, journey, Presence, catalog and generic birth
 responses expose only the weight-free `BirthCertificateSummary`: archetype,

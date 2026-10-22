@@ -173,11 +173,17 @@ pub struct EthicWeights {
 
 /// The current internal Triangle Ethic scoring contract.
 pub const SCORING_VERSION: &str = "triangle-ethic-v1";
+/// The injective canonical payload used for newly signed birth certificates.
+pub const BIRTH_CERTIFICATE_PAYLOAD_VERSION: u8 = 3;
 
 /// A signed birth certificate — the entity's character sheet, vouched for by
 /// the Hive master key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BirthCertificate {
+    /// Signature payload format. Historical v1/v2 certificates omitted this
+    /// field and are dispatched from their raw persisted shape.
+    #[serde(default)]
+    pub payload_version: u8,
     pub entity_id: String,
     pub entity_name: String,
     /// Soul archetype (e.g. "The Guardian").
@@ -684,6 +690,7 @@ mod tests {
     #[test]
     fn birth_certificate_summary_omits_internal_scoring_material() {
         let certificate = BirthCertificate {
+            payload_version: BIRTH_CERTIFICATE_PAYLOAD_VERSION,
             entity_id: "entity-1".into(),
             entity_name: "Nova".into(),
             archetype: "The Balanced".into(),
