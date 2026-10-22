@@ -1521,13 +1521,9 @@ mod tests {
     #[test]
     fn presence_card_takes_text_only_from_the_definition_and_rejects_authority() {
         let mut s = session();
-        // Exactly 80 multibyte characters is valid and still exceeds the
-        // presentation-only Presence excerpt limit.
-        set(
-            &mut s,
-            GenesisField::Name,
-            json!(format!("{}{}", "é".repeat(70), "a".repeat(10))),
-        );
+        // Simulate a legacy persisted definition that predates write-time name
+        // validation so the presentation boundary still proves truncation.
+        s.definition.name = "é".repeat(PRESENCE_NAME_CHARS + 10);
         set(
             &mut s,
             GenesisField::Boundaries,
