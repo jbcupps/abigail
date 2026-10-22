@@ -24,6 +24,30 @@ describe("ForgeScenario public display boundary", () => {
               },
             ],
           },
+          {
+            id: "honesty",
+            title: "A difficult truth",
+            description: "Choose how Nova should handle it.",
+            choices: [
+              {
+                id: "tell-truth",
+                label: "Tell the truth kindly",
+                description: "Be honest and compassionate.",
+              },
+            ],
+          },
+          {
+            id: "autonomy",
+            title: "A new opportunity",
+            description: "Choose how Nova should proceed.",
+            choices: [
+              {
+                id: "ask-first",
+                label: "Ask first",
+                description: "Confirm permission before acting.",
+              },
+            ],
+          },
         ]);
       }
       if (command === "crystallize_forge") {
@@ -42,10 +66,14 @@ describe("ForgeScenario public display boundary", () => {
     render(<ForgeScenario onComplete={onComplete} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /protect the family/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /tell the truth kindly/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^ask first$/i }));
     fireEvent.click(screen.getByRole("button", { name: /forge soul/i }));
     expect(await screen.findByRole("heading", { name: /soul forged/i })).toBeInTheDocument();
     expect(mockInvoke).toHaveBeenCalledWith("crystallize_forge", {
-      choices: ["protect"],
+      choices: ["protect", "tell-truth", "ask-first"],
     });
 
     for (const hiddenAxis of ["Deontology", "Teleology", "Areteology", "Welfare"]) {
