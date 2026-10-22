@@ -11,7 +11,7 @@ use {
 
 const OUTBOX_FILE_NAME: &str = "runtime_outbox.json";
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct PersistedOutbox {
     #[serde(default)]
     records: Vec<EntityOutboxRecord>,
@@ -70,6 +70,12 @@ impl RuntimeOutbox {
         payload: serde_json::Value,
     ) -> Result<EntityOutboxRecord, String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        if inner.records.len() >= self.max_records {
+            return Err(format!(
+                "Runtime outbox backpressure: capacity {} reached; retry after Hive acknowledges queued records.",
+                self.max_records
+            ));
+        }
         let record = EntityOutboxRecord {
             record_id: uuid::Uuid::new_v4().to_string(),
             entity_id: entity_id.to_string(),
@@ -77,12 +83,10 @@ impl RuntimeOutbox {
             created_at_utc: chrono::Utc::now().to_rfc3339(),
             payload,
         };
-        inner.records.push(record.clone());
-        if inner.records.len() > self.max_records {
-            let overflow = inner.records.len() - self.max_records;
-            inner.records.drain(0..overflow);
-        }
-        self.save_locked(&inner).map_err(|e| e.to_string())?;
+        let mut next = inner.clone();
+        next.records.push(record.clone());
+        self.save_locked(&next).map_err(|e| e.to_string())?;
+        *inner = next;
         Ok(record)
     }
 
@@ -93,18 +97,24 @@ impl RuntimeOutbox {
 
     pub fn acknowledge(&self, accepted_record_ids: &[String]) -> Result<(), String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
-        inner
+        let mut next = inner.clone();
+        next
             .records
             .retain(|record| !accepted_record_ids.iter().any(|id| id == &record.record_id));
-        inner.last_sync_at_utc = Some(chrono::Utc::now().to_rfc3339());
-        inner.last_sync_error = None;
-        self.save_locked(&inner).map_err(|e| e.to_string())
+        next.last_sync_at_utc = Some(chrono::Utc::now().to_rfc3339());
+        next.last_sync_error = None;
+        self.save_locked(&next).map_err(|e| e.to_string())?;
+        *inner = next;
+        Ok(())
     }
 
     pub fn mark_sync_error(&self, error: &str) -> Result<(), String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
-        inner.last_sync_error = Some(error.to_string());
-        self.save_locked(&inner).map_err(|e| e.to_string())
+        let mut next = inner.clone();
+        next.last_sync_error = Some(error.to_string());
+        self.save_locked(&next).map_err(|e| e.to_string())?;
+        *inner = next;
+        Ok(())
     }
 
     pub fn finish_sync(
@@ -139,11 +149,7 @@ impl RuntimeOutbox {
         if let Some(save) = &self.test_save {
             return save(&self.path, &bytes);
         }
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(&self.path, bytes)?;
-        Ok(())
+        abigail_core::secure_fs::write_bytes_atomic(&self.path, &bytes).map_err(Into::into)
     }
 }
 
