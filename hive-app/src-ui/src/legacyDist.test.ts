@@ -3,10 +3,7 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error The Hive UI intentionally does not ship Node type declarations.
 import { readFileSync } from "node:fs";
 
-const legacyAppSource = readFileSync(
-  new URL("../../dist/app.js", import.meta.url),
-  "utf8",
-);
+const legacyAppSource = readFileSync("../dist/app.js", "utf8");
 
 describe("tracked legacy Hive reveal", () => {
   it("never renders hidden ethics weights or axis names", () => {
