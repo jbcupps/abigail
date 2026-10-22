@@ -220,7 +220,8 @@ Tests cover:
   slim First Signal dispatch recovery;
 - canonical Presence shape and 32 KiB write/read limits;
 - no public weight or axis keys across all named routes;
-- version-2 certificate signing and version-1 verification compatibility;
+- injective version-3 certificate signing with raw version-1/version-2
+  verification compatibility;
 - creation XP capped at level 2 and every catalog tier/milestone;
 - duplicate outbox sync, owner/Entity mismatch rejection, content-free stored
   events, restart durability, and monotonic projections;
