@@ -355,15 +355,16 @@ voice descriptions are already editable canonical fields.
 
 ## Final-review source verification — 2026-10-22
 
-Fresh affected verification on `cursor/genesis-quest-gamification-4871`
-passed:
+Fresh final-branch verification on
+`cursor/genesis-quest-gamification-4871` passed:
 
 - `cargo fmt --all -- --check`;
+- `cargo clippy --workspace --exclude abigail-app -- -D warnings`;
+- `cargo test --workspace --exclude abigail-app`: 1,137 tests passed and 10
+  pre-existing tests were ignored;
 - strict all-target Clippy for `entity-core`, `entity-chat`, `entity-daemon`,
   `hive-core`, `hive-daemon`, `abigail-persistence`, `abigail-app`,
   `abigail-cli` and `soul-forge`;
-- affected Rust suites for those nine packages: 362 tests passed and 8
-  pre-existing daemon cluster tests were ignored;
 - `cd entity-runtime-app/src-ui && npm test && npm run build`: production build
   plus 10 tests across 3 files;
 - `cd hive-app/src-ui && npm test && npm run build`: production build plus
