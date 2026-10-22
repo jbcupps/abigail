@@ -5,6 +5,15 @@ import PresenceCrest from "./PresenceCrest";
 
 type Change = (action: string, args?: Record<string, unknown>) => Promise<GenesisSession | undefined>;
 
+function presenceChoice(card: QuestView["presence"]): PresenceChoice {
+  return card ? {
+    temperament: card.temperament,
+    identity: card.identity,
+    crest: card.crest,
+    motion: card.motion,
+  } : { temperament: "gentle", identity: "aether", crest: "orbit", motion: "calm" };
+}
+
 export function QuestLevel({ quest }: { quest: QuestView }) {
   const { level } = quest;
   const span = level.next_level_at === null ? 1 : level.next_level_at - level.level_floor;
@@ -47,7 +56,7 @@ export default function GenesisQuest({ session, busy, stage, onStage, change, on
   const [catalogError, setCatalogError] = useState("");
   const [journey, setJourney] = useState<EntityJourney | null>(null);
   const [reservation, setReservation] = useState({ name: definition.name, purpose: definition.purpose });
-  const [presence, setPresence] = useState<PresenceChoice>(quest.presence ?? { temperament: "gentle", identity: "aether", crest: "orbit", motion: "calm" });
+  const [presence, setPresence] = useState<PresenceChoice>(() => presenceChoice(quest.presence));
   const awakened = Boolean(session.awakening && definition.entity_id);
 
   useEffect(() => { void getQuestCatalog().then(setCatalog).catch((error) => setCatalogError(error instanceof Error ? error.message : String(error))); }, []);

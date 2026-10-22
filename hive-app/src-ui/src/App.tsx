@@ -25,13 +25,18 @@ export default function App() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [genesisOpen, setGenesisOpen] = useState(false);
   const [genesisResume, setGenesisResume] = useState<string | undefined>();
+  const [genesisLaunch, setGenesisLaunch] = useState(0);
   const [openError, setOpenError] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const openingRef = useRef(false);
   const mounted = useRef(true);
   const cardsKey = `${genesisOpen}:${status?.entities.map(entity => `${entity.id}:${entity.birth_complete}`).join(",") ?? ""}`;
   const { portraits, awaiting } = useGenesisEntities(cardsKey);
-  const openGenesis = useCallback((sessionId?: string) => { setGenesisResume(sessionId); setGenesisOpen(true); }, []);
+  const openGenesis = useCallback((sessionId?: string) => {
+    setGenesisResume(sessionId);
+    setGenesisLaunch((launch) => launch + 1);
+    setGenesisOpen(true);
+  }, []);
 
   const handleOpen = useCallback(async (entity: EntityInfo) => {
     if (openingRef.current) return;
@@ -169,7 +174,7 @@ export default function App() {
 
         <GenesisNotifications onOpen={() => openGenesis()} />
         <GenesisMediaConnections />
-        {genesisOpen && <GenesisWorkspace resumeId={genesisResume} onClose={() => setGenesisOpen(false)} onCreated={() => void refreshStatus()} />}
+        {genesisOpen && <GenesisWorkspace key={genesisLaunch} resumeId={genesisResume} onClose={() => setGenesisOpen(false)} onCreated={() => void refreshStatus()} />}
         <section className={genesisOpen ? "mt-8" : undefined}>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-xs uppercase tracking-wide text-theme-text-dim">

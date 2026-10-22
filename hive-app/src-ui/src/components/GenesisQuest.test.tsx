@@ -69,6 +69,30 @@ describe("Genesis quest", () => {
     expect(screen.getByText(/never read by the model and grants nothing/)).toBeInTheDocument();
   });
 
+  it("strips display-only card text when updating a saved Presence", async () => {
+    const savedPresence = session(questFixture({
+      presence: {
+        name: "Nova",
+        purpose: "Help us explore",
+        boundaries: "Ask before plans change",
+        temperament: "curious",
+        identity: "tide",
+        crest: "wave",
+        motion: "lively",
+      },
+    }));
+    renderStage("presence", savedPresence);
+    fireEvent.click(await screen.findByRole("button", { name: "Update Presence" }));
+    expect(change).toHaveBeenCalledWith("set_presence", {
+      presence: {
+        temperament: "curious",
+        identity: "tide",
+        crest: "wave",
+        motion: "lively",
+      },
+    });
+  });
+
   it("starts Presence from the temperament card the mentor accepted", async () => {
     const accepted = session();
     accepted.proposals = [{ id: "p1", field: "personality", value: {}, rationale: "Temperament card: Curious Explorer. Asks wonderful questions.", status: "accepted" }];

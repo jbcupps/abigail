@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
@@ -7,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   hiveHealth: vi.fn(),
   openEntity: vi.fn(),
   showAppWindow: vi.fn(),
+  genesisWorkspace: vi.fn(),
+  genesisMounts: 0,
 }));
 
 vi.mock("./lib/daemonClient", () => ({
@@ -22,9 +25,19 @@ vi.mock("./lib/window", () => ({
   showAppWindow: mocks.showAppWindow,
 }));
 
+vi.mock("./components/GenesisWorkspace", () => ({
+  default: (props: { resumeId?: string }) => {
+    mocks.genesisWorkspace(props);
+    const instance = useRef(0);
+    if (instance.current === 0) instance.current = ++mocks.genesisMounts;
+    return <div data-testid="genesis-workspace">{instance.current}:{props.resumeId ?? "new"}</div>;
+  },
+}));
+
 describe("Abigail Hive app", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.genesisMounts = 0;
     mocks.hiveHealth.mockResolvedValue(true);
     mocks.getStatus.mockResolvedValue({
       entity_count: 2,
@@ -66,5 +79,18 @@ describe("Abigail Hive app", () => {
     expect(screen.getByText("Entities (1)")).toBeInTheDocument();
     expect(screen.getByText("Ada")).toBeInTheDocument();
     expect(mocks.showAppWindow).toHaveBeenCalledOnce();
+  });
+
+  it("starts a fresh Genesis workspace for every launch request", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /skip/i }));
+    await screen.findByRole("heading", { name: "Abigail Hive" });
+
+    const launch = screen.getByRole("button", { name: "Create or resume an Entity" });
+    fireEvent.click(launch);
+    expect(await screen.findByTestId("genesis-workspace")).toHaveTextContent("1:new");
+
+    fireEvent.click(launch);
+    await waitFor(() => expect(screen.getByTestId("genesis-workspace")).toHaveTextContent("2:new"));
   });
 });
