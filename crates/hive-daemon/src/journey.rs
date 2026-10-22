@@ -1137,6 +1137,93 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn aggregate_skill_events_project_the_exact_count_and_keep_legacy_compatibility() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let aggregate = outbox_event(
+            &entity_id,
+            "skill_used",
+            serde_json::json!({
+                "session_id": "session-aggregate",
+                "successful_skill_count": 3,
+            }),
+        );
+        let legacy = outbox_event(
+            &entity_id,
+            "skill_used",
+            serde_json::json!({
+                "session_id": "session-legacy",
+                "skill_id": "com.abigail.calendar",
+                "tool_name": "list_events",
+            }),
+        );
+
+        let projected = store
+            .record_runtime_events(OWNER, &entity_id, &[aggregate.clone(), legacy])
+            .unwrap();
+        assert_eq!(projected.successful_skill_uses, 4);
+
+        let duplicate = store
+            .record_runtime_events(OWNER, &entity_id, &[aggregate.clone()])
+            .unwrap();
+        assert_eq!(duplicate.successful_skill_uses, 4);
+
+        let saved = store
+            .handle
+            .select_record::<serde_json::Value>(JOURNEY_EVENT_TABLE, &aggregate.record_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved["successful_skill_count"], 3);
+        assert!(saved.get("skill_id").is_none() || saved["skill_id"].is_null());
+        assert!(saved.get("tool_name").is_none() || saved["tool_name"].is_null());
+        let encoded = saved.to_string();
+        for forbidden in ["message", "reply", "content", "prompt", "payload", "model"] {
+            assert!(
+                !encoded.contains(forbidden),
+                "aggregate journey event leaked forbidden field {forbidden}: {encoded}"
+            );
+        }
+    }
+
+    #[test]
+    fn aggregate_skill_count_is_positive_bounded_and_rejects_private_fields() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        for payload in [
+            serde_json::json!({
+                "session_id": "session-zero",
+                "successful_skill_count": 0,
+            }),
+            serde_json::json!({
+                "session_id": "session-too-large",
+                "successful_skill_count": 257,
+            }),
+            serde_json::json!({
+                "session_id": "session-private",
+                "successful_skill_count": 1,
+                "content": "private tool output",
+            }),
+        ] {
+            let event = outbox_event(&entity_id, "skill_used", payload);
+            assert!(
+                store
+                    .record_runtime_events(OWNER, &entity_id, std::slice::from_ref(&event))
+                    .is_err(),
+                "invalid aggregate metadata was accepted: {}",
+                event.payload
+            );
+            assert!(
+                !store
+                    .handle
+                    .record_exists(JOURNEY_EVENT_TABLE, &event.record_id)
+                    .unwrap(),
+                "invalid aggregate metadata reached durable journey storage"
+            );
+        }
+        assert!(store.load(OWNER, &entity_id).unwrap().is_none());
+    }
+
+    #[test]
     fn stored_journey_event_decoder_rejects_injected_private_fields() {
         let base = serde_json::json!({
             "record_id": uuid::Uuid::new_v4().to_string(),

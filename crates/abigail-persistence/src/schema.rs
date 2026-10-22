@@ -88,7 +88,8 @@ mod tests {
             "occurred_at": "2026-10-22T12:00:00Z",
             "session_id": "session-1",
             "skill_id": "com.abigail.calendar",
-            "tool_name": "list_events"
+            "tool_name": "list_events",
+            "successful_skill_count": 3
         })
     }
 
@@ -178,6 +179,7 @@ mod tests {
             "session_id",
             "skill_id",
             "tool_name",
+            "successful_skill_count",
             "memory_id",
             "memory_weight",
         ] {
