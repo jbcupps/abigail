@@ -1080,6 +1080,11 @@ mod supervision_tests {
         sync_calls: AtomicUsize,
     }
 
+    struct SuccessfulHeartbeatClient {
+        heartbeat_calls: AtomicUsize,
+        sync_calls: AtomicUsize,
+    }
+
     #[async_trait::async_trait]
     impl RuntimeHeartbeatClient for CountingHeartbeatClient {
         async fn heartbeat(
@@ -1097,6 +1102,79 @@ mod supervision_tests {
             self.sync_calls.fetch_add(1, Ordering::SeqCst);
             Err("unexpected Hive outbox sync".to_string())
         }
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeHeartbeatClient for SuccessfulHeartbeatClient {
+        async fn heartbeat(
+            &self,
+            _request: &hive_core::RuntimeHeartbeatRequest,
+        ) -> Result<hive_core::RuntimeHeartbeatResponse, String> {
+            self.heartbeat_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(hive_core::RuntimeHeartbeatResponse {
+                accepted: true,
+                server_time_utc: chrono::Utc::now().to_rfc3339(),
+            })
+        }
+
+        async fn sync_outbox(
+            &self,
+            _request: &hive_core::OutboxSyncRequest,
+        ) -> Result<hive_core::OutboxSyncResponse, String> {
+            self.sync_calls.fetch_add(1, Ordering::SeqCst);
+            Err("an acknowledged record must not be requeued".to_string())
+        }
+    }
+
+    fn stage_acknowledged_tool_activity(
+        label: &str,
+    ) -> (
+        EntityDaemonState,
+        std::path::PathBuf,
+        std::path::PathBuf,
+        String,
+    ) {
+        let mut state = crate::routes::tests::build_state();
+        state.soul_ref = "historical-soul-a".to_string();
+        let outbox_root = std::env::temp_dir().join(format!(
+            "abigail-soul-outbox-{label}-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let ledger_root = std::env::temp_dir().join(format!(
+            "abigail-soul-ledger-{label}-{}",
+            uuid::Uuid::new_v4()
+        ));
+        state.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        state.execution_ledger =
+            Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
+        let assistant =
+            ConversationTurn::new(format!("session-{label}"), "assistant", "private reply")
+                .with_successful_tool_uses(vec![SuccessfulToolUse {
+                    skill_id: "com.abigail.calendar".to_string(),
+                    tool_name: "create_event".to_string(),
+                }]);
+        let record_id = crate::state::deterministic_journey_record_id(
+            &state.entity_id,
+            "skill_used",
+            &assistant.id,
+        );
+        let payload = serde_json::json!({
+            "session_id": assistant.session_id.clone(),
+            "successful_skill_count": 1,
+        });
+        state.memory.insert_turn(&assistant).unwrap();
+        state
+            .outbox
+            .reserve_slot(record_id.clone(), &state.entity_id, "skill_used")
+            .unwrap();
+        state
+            .commit_outbox_reservation(&record_id, payload)
+            .unwrap();
+        state
+            .outbox
+            .acknowledge(std::slice::from_ref(&record_id))
+            .unwrap();
+        (state, outbox_root, ledger_root, record_id)
     }
 
     #[tokio::test]
@@ -1142,6 +1220,73 @@ mod supervision_tests {
         let queued = state.outbox.snapshot().unwrap();
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].record_id, expected_record_id);
+        let _ = std::fs::remove_dir_all(ledger_root);
+    }
+
+    #[tokio::test]
+    async fn acknowledged_activity_repairs_missing_ledger_with_historical_soul_and_heartbeats() {
+        let (state_a, outbox_root, ledger_root, record_id) =
+            stage_acknowledged_tool_activity("repair");
+        let original = state_a.execution_ledger.recent(None, 10);
+        assert_eq!(original.len(), 1);
+        assert_eq!(original[0].soul_ref, "historical-soul-a");
+        std::fs::remove_file(ledger_root.join("execution_ledger.json")).unwrap();
+
+        let mut state_b = crate::routes::tests::build_state();
+        state_b.soul_ref = "current-soul-b".to_string();
+        state_b.memory = state_a.memory.clone();
+        state_b.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        state_b.execution_ledger =
+            Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
+        let client = SuccessfulHeartbeatClient {
+            heartbeat_calls: AtomicUsize::new(0),
+            sync_calls: AtomicUsize::new(0),
+        };
+
+        run_runtime_outbox_heartbeat(&state_b, &client)
+            .await
+            .expect("historical acknowledged activity must repair before heartbeat");
+
+        let repaired = state_b.execution_ledger.recent(None, 10);
+        assert_eq!(repaired.len(), 1);
+        assert_eq!(repaired[0].event_id, record_id);
+        assert_eq!(repaired[0].soul_ref, "historical-soul-a");
+        assert!(crate::execution_ledger::verify_chain(&repaired));
+        assert!(state_b.outbox.snapshot().unwrap().is_empty());
+        assert!(state_b.outbox.is_acknowledged(&record_id).unwrap());
+        assert_eq!(client.heartbeat_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(client.sync_calls.load(Ordering::SeqCst), 0);
+        let _ = std::fs::remove_dir_all(outbox_root);
+        let _ = std::fs::remove_dir_all(ledger_root);
+    }
+
+    #[test]
+    fn reconciliation_keeps_existing_historical_soul_event_authoritative() {
+        let (state_a, outbox_root, ledger_root, record_id) =
+            stage_acknowledged_tool_activity("existing");
+        let original = state_a.execution_ledger.recent(None, 10);
+        assert_eq!(original.len(), 1);
+        assert_eq!(original[0].soul_ref, "historical-soul-a");
+
+        let mut state_b = crate::routes::tests::build_state();
+        state_b.soul_ref = "current-soul-b".to_string();
+        state_b.memory = state_a.memory.clone();
+        state_b.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        state_b.execution_ledger =
+            Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
+
+        state_b
+            .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)
+            .expect("matching historical ledger event must remain authoritative");
+
+        let reconciled = state_b.execution_ledger.recent(None, 10);
+        assert_eq!(reconciled.len(), 1);
+        assert_eq!(reconciled[0].event_id, record_id);
+        assert_eq!(reconciled[0].soul_ref, "historical-soul-a");
+        assert_eq!(reconciled[0].event_hash, original[0].event_hash);
+        assert!(state_b.outbox.snapshot().unwrap().is_empty());
+        assert!(state_b.outbox.is_acknowledged(&record_id).unwrap());
+        let _ = std::fs::remove_dir_all(outbox_root);
         let _ = std::fs::remove_dir_all(ledger_root);
     }
 }
