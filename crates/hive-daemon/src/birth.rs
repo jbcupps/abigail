@@ -508,10 +508,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn new_certificates_stamp_the_triangle_ethic_scoring_version() {
+    async fn new_certificates_stamp_v3_and_the_triangle_ethic_scoring_version() {
         let (_, _, path) = issued_certificate().await;
         let certificate: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(certificate["payload_version"], serde_json::json!(3));
         assert_eq!(
             certificate["scoring_version"],
             serde_json::json!("triangle-ethic-v1")
@@ -519,12 +520,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn certificate_v2_signature_binds_every_summary_field_and_hidden_weight() {
+    async fn certificate_v3_signature_binds_every_field_and_hidden_weight() {
         let (state, entity_id, path) = issued_certificate().await;
         let original: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let mut failures = Vec::new();
         for (label, pointer, replacement) in [
+            ("entity name", "/entity_name", serde_json::json!("Tampered")),
+            ("archetype", "/archetype", serde_json::json!("Tampered")),
             (
                 "scoring version",
                 "/scoring_version",
@@ -532,6 +535,13 @@ mod tests {
             ),
             ("epithet", "/epithet", serde_json::json!("Tampered epithet")),
             ("sigil", "/sigil", serde_json::json!("tampered-sigil")),
+            ("soul hash", "/soul_hash", serde_json::json!("tampered-hash")),
+            ("birth path", "/birth_path", serde_json::json!("forge")),
+            (
+                "issued at",
+                "/issued_at_utc",
+                serde_json::json!("2026-10-22T01:02:03Z"),
+            ),
             ("deontology", "/weights/deontology", serde_json::json!(0.99)),
             ("teleology", "/weights/teleology", serde_json::json!(0.99)),
             ("areteology", "/weights/areteology", serde_json::json!(0.99)),
@@ -555,6 +565,70 @@ mod tests {
         }
 
         assert!(failures.is_empty(), "{}", failures.join("; "));
+    }
+
+    #[test]
+    fn certificate_v3_length_prefixes_delimiter_and_newline_content() {
+        let certificate = BirthCertificate {
+            entity_id: "entity-1".into(),
+            entity_name: "Ada\narchetype=Guardian".into(),
+            archetype: "Sage".into(),
+            epithet: "Line one\nsigil=forged".into(),
+            scoring_version: SCORING_VERSION.into(),
+            weights: EthicWeights {
+                deontology: 0.1,
+                teleology: 0.2,
+                areteology: 0.3,
+                welfare: 0.4,
+            },
+            soul_hash: "hash".into(),
+            sigil: "sigil".into(),
+            birth_path: "forge".into(),
+            issued_at_utc: "2026-10-22T00:00:00Z".into(),
+            master_public_key: String::new(),
+            signature: String::new(),
+        };
+        let mut alternate = certificate.clone();
+        alternate.entity_name = "Ada".into();
+        alternate.archetype = "Guardian\narchetype=Sage".into();
+
+        assert_eq!(
+            certificate_payload_v2(&certificate),
+            certificate_payload_v2(&alternate),
+            "the prior delimiter format demonstrates why a new payload is required"
+        );
+        assert_ne!(
+            certificate_payload_v3(&certificate),
+            certificate_payload_v3(&alternate),
+            "length prefixes must make distinct field tuples injective"
+        );
+    }
+
+    #[tokio::test]
+    async fn prior_scoring_stamped_v2_verifies_but_explicit_v3_injection_does_not() {
+        let (state, entity_id, path) = issued_certificate().await;
+        let mut raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let certificate: BirthCertificate = serde_json::from_value(raw.clone()).unwrap();
+        let (signature, master_public_key) = state
+            .identity_manager
+            .sign_payload(certificate_payload_v2(&certificate).as_bytes());
+        raw.as_object_mut().unwrap().remove("payload_version");
+        raw["signature"] = serde_json::json!(signature);
+        raw["master_public_key"] = serde_json::json!(master_public_key);
+        std::fs::write(&path, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+
+        let Json(prior_v2) =
+            get_birth_document(State(state.clone()), Path(entity_id.clone())).await;
+        assert!(prior_v2.ok, "{:?}", prior_v2.error);
+
+        raw["payload_version"] = serde_json::json!(3);
+        std::fs::write(&path, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+        let Json(injected) = get_birth_document(State(state), Path(entity_id)).await;
+        assert!(
+            !injected.ok,
+            "an explicit payload version must select v3 rather than silently verify as v2"
+        );
     }
 
     #[tokio::test]
