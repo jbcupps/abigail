@@ -915,6 +915,203 @@ mod tests {
         assert!(!allowed.contains('*'), "{allowed}");
     }
 
+    #[tokio::test]
+    async fn real_http_outbox_replay_is_acknowledged_without_duplicate_receipt() {
+        let f = fixture();
+        let lease = f.lease_for(&f.entity_id);
+        let record_id = uuid::Uuid::new_v4().to_string();
+        let request = serde_json::json!({
+            "lease_id": lease.lease_id,
+            "runtime_id": lease.runtime_id,
+            "records": [{
+                "record_id": record_id,
+                "entity_id": f.entity_id,
+                "kind": "skill_used",
+                "created_at_utc": "2026-10-22T12:00:00Z",
+                "payload": {
+                    "session_id": "session-1",
+                    "skill_id": "com.abigail.calendar",
+                    "tool_name": "list_events"
+                }
+            }]
+        });
+
+        for _ in 0..2 {
+            let (status, response) = f
+                .send(
+                    Method::POST,
+                    "/v1/runtime/outbox/sync",
+                    Some(&lease.lease_id),
+                    Some(request.clone()),
+                )
+                .await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(response["ok"], true, "{response}");
+            assert_eq!(
+                response["data"]["accepted_record_ids"],
+                serde_json::json!([record_id])
+            );
+        }
+
+        let (status, response) = f
+            .send(
+                Method::GET,
+                &format!("/v1/entities/{}/execution/receipts", f.entity_id),
+                Some(&lease.lease_id),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response["data"]["receipts"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn real_http_journey_partial_failure_retries_and_acknowledges_once() {
+        let f = fixture();
+        let lease = f.lease_for(&f.entity_id);
+        let skill_id = uuid::Uuid::new_v4().to_string();
+        let memory_id = uuid::Uuid::new_v4().to_string();
+        let request = serde_json::json!({
+            "lease_id": lease.lease_id,
+            "runtime_id": lease.runtime_id,
+            "records": [
+                {
+                    "record_id": skill_id,
+                    "entity_id": f.entity_id,
+                    "kind": "skill_used",
+                    "created_at_utc": "2026-10-22T12:00:00Z",
+                    "payload": {
+                        "session_id": "session-1",
+                        "skill_id": "com.abigail.calendar",
+                        "tool_name": "list_events"
+                    }
+                },
+                {
+                    "record_id": memory_id,
+                    "entity_id": f.entity_id,
+                    "kind": "memory_confirmed",
+                    "created_at_utc": "2026-10-22T12:01:00Z",
+                    "payload": {
+                        "memory_id": "memory-1",
+                        "memory_weight": "distilled"
+                    }
+                }
+            ]
+        });
+        f.state.journeys.fail_event_writes_after(1);
+
+        let (_, failed) = f
+            .send(
+                Method::POST,
+                "/v1/runtime/outbox/sync",
+                Some(&lease.lease_id),
+                Some(request.clone()),
+            )
+            .await;
+        assert_eq!(failed["ok"], false, "{failed}");
+
+        let (_, retried) = f
+            .send(
+                Method::POST,
+                "/v1/runtime/outbox/sync",
+                Some(&lease.lease_id),
+                Some(request),
+            )
+            .await;
+        assert_eq!(retried["ok"], true, "{retried}");
+        assert_eq!(
+            retried["data"]["accepted_record_ids"],
+            serde_json::json!([skill_id, memory_id])
+        );
+        let journey = f
+            .state
+            .journeys
+            .load(crate::genesis_http::OWNER, &f.entity_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(journey.successful_skill_uses, 1);
+        assert_eq!(journey.confirmed_memories, 1);
+        assert_eq!(
+            f.state
+                .runtime_control
+                .lock()
+                .unwrap()
+                .execution_receipts(&f.entity_id, 500)
+                .receipts
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn real_http_acknowledges_durable_events_when_projection_write_fails() {
+        let f = fixture();
+        let lease = f.lease_for(&f.entity_id);
+        let request = serde_json::json!({
+            "lease_id": lease.lease_id,
+            "runtime_id": lease.runtime_id,
+            "records": [{
+                "record_id": uuid::Uuid::new_v4().to_string(),
+                "entity_id": f.entity_id,
+                "kind": "skill_used",
+                "created_at_utc": "2026-10-22T12:00:00Z",
+                "payload": {
+                    "session_id": "session-1",
+                    "skill_id": "com.abigail.calendar",
+                    "tool_name": "list_events"
+                }
+            }]
+        });
+        f.state.journeys.fail_next_projection_write();
+
+        let (_, accepted) = f
+            .send(
+                Method::POST,
+                "/v1/runtime/outbox/sync",
+                Some(&lease.lease_id),
+                Some(request.clone()),
+            )
+            .await;
+        assert_eq!(accepted["ok"], true, "{accepted}");
+        assert!(
+            f.state
+                .journeys
+                .load(crate::genesis_http::OWNER, &f.entity_id)
+                .unwrap()
+                .is_none(),
+            "the injected projection failure must not erase the durable event"
+        );
+
+        let (_, replay) = f
+            .send(
+                Method::POST,
+                "/v1/runtime/outbox/sync",
+                Some(&lease.lease_id),
+                Some(request),
+            )
+            .await;
+        assert_eq!(replay["ok"], true, "{replay}");
+        assert_eq!(
+            f.state
+                .journeys
+                .load(crate::genesis_http::OWNER, &f.entity_id)
+                .unwrap()
+                .unwrap()
+                .successful_skill_uses,
+            1
+        );
+        assert_eq!(
+            f.state
+                .runtime_control
+                .lock()
+                .unwrap()
+                .execution_receipts(&f.entity_id, 500)
+                .receipts
+                .len(),
+            1
+        );
+    }
+
     #[test]
     fn control_token_is_created_once_replaces_damage_and_retires_the_genesis_token() {
         let root =

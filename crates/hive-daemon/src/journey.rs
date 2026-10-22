@@ -31,6 +31,15 @@ const MAX_EVENT_IDENTIFIER_BYTES: usize = 160;
 pub struct JourneyStore {
     handle: PersistenceHandle,
     writes: Mutex<()>,
+    #[cfg(test)]
+    test_faults: Mutex<JourneyTestFaults>,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct JourneyTestFaults {
+    fail_event_write_after: Option<usize>,
+    fail_projection_writes: usize,
 }
 
 /// Serialized as text like Genesis sessions, with ownership cross-checked.
@@ -100,7 +109,19 @@ impl JourneyStore {
         Ok(Self {
             handle,
             writes: Mutex::new(()),
+            #[cfg(test)]
+            test_faults: Mutex::new(JourneyTestFaults::default()),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_event_writes_after(&self, successful_writes: usize) {
+        self.test_faults.lock().unwrap().fail_event_write_after = Some(successful_writes);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_projection_write(&self) {
+        self.test_faults.lock().unwrap().fail_projection_writes += 1;
     }
 
     pub fn load(&self, owner_id: &str, entity_id: &str) -> Result<Option<EntityJourney>> {
@@ -976,6 +997,185 @@ pub(crate) mod tests {
         let journey = reopened.load(OWNER, &entity_id).unwrap().unwrap();
         assert_eq!(journey.successful_skill_uses, 4);
         assert_eq!(journey.confirmed_memories, 4);
+    }
+
+    #[test]
+    fn malformed_later_event_rejects_the_whole_batch_before_writes() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let first = outbox_event(
+            &entity_id,
+            "skill_used",
+            serde_json::json!({
+                "session_id": "session-1",
+                "skill_id": "com.abigail.calendar",
+                "tool_name": "list_events",
+            }),
+        );
+        let malformed = outbox_event(
+            &entity_id,
+            "memory_confirmed",
+            serde_json::json!({
+                "memory_id": "memory-1",
+                "memory_weight": "ephemeral",
+            }),
+        );
+
+        assert!(store
+            .record_runtime_events(OWNER, &entity_id, &[first.clone(), malformed])
+            .is_err());
+        assert!(!store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &first.record_id)
+            .unwrap());
+        assert!(store.load(OWNER, &entity_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn later_saved_id_collision_rejects_the_whole_batch_before_writes() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let saved = outbox_event(
+            &entity_id,
+            "skill_used",
+            serde_json::json!({
+                "session_id": "session-saved",
+                "skill_id": "com.abigail.calendar",
+                "tool_name": "list_events",
+            }),
+        );
+        store
+            .record_runtime_events(OWNER, &entity_id, std::slice::from_ref(&saved))
+            .unwrap();
+
+        let first = outbox_event(
+            &entity_id,
+            "memory_confirmed",
+            serde_json::json!({
+                "memory_id": "memory-new",
+                "memory_weight": "distilled",
+            }),
+        );
+        let mut collision = saved;
+        collision.payload["tool_name"] = serde_json::json!("delete_event");
+
+        assert!(store
+            .record_runtime_events(OWNER, &entity_id, &[first.clone(), collision])
+            .is_err());
+        assert!(!store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &first.record_id)
+            .unwrap());
+        assert_eq!(
+            store.event_activity(OWNER, &entity_id).unwrap(),
+            JourneyActivity {
+                successful_skill_uses: 1,
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn conflicting_ids_inside_one_batch_are_rejected_before_writes() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let first = outbox_event(
+            &entity_id,
+            "skill_used",
+            serde_json::json!({
+                "session_id": "session-1",
+                "skill_id": "com.abigail.calendar",
+                "tool_name": "list_events",
+            }),
+        );
+        let mut collision = first.clone();
+        collision.payload["tool_name"] = serde_json::json!("delete_event");
+
+        assert!(store
+            .record_runtime_events(OWNER, &entity_id, &[first.clone(), collision])
+            .is_err());
+        assert!(!store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &first.record_id)
+            .unwrap());
+    }
+
+    #[test]
+    fn partial_event_storage_failure_retries_missing_rows_without_double_counting() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let skill = outbox_event(
+            &entity_id,
+            "skill_used",
+            serde_json::json!({
+                "session_id": "session-1",
+                "skill_id": "com.abigail.calendar",
+                "tool_name": "list_events",
+            }),
+        );
+        let memory = outbox_event(
+            &entity_id,
+            "memory_confirmed",
+            serde_json::json!({
+                "memory_id": "memory-1",
+                "memory_weight": "distilled",
+            }),
+        );
+        store.fail_event_writes_after(1);
+
+        assert!(store
+            .record_runtime_events(OWNER, &entity_id, &[skill.clone(), memory.clone()])
+            .is_err());
+        assert!(store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &skill.record_id)
+            .unwrap());
+        assert!(!store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &memory.record_id)
+            .unwrap());
+
+        let projection = store
+            .record_runtime_events(OWNER, &entity_id, &[skill, memory])
+            .unwrap();
+        assert_eq!(projection.successful_skill_uses, 1);
+        assert_eq!(projection.confirmed_memories, 1);
+        let rows = store
+            .handle
+            .query_vec::<serde_json::Value>("SELECT * FROM entity_journey_event", &[])
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+    }
+
+    #[test]
+    fn durable_event_rows_self_heal_after_projection_write_failure() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let event = outbox_event(
+            &entity_id,
+            "skill_used",
+            serde_json::json!({
+                "session_id": "session-1",
+                "skill_id": "com.abigail.calendar",
+                "tool_name": "list_events",
+            }),
+        );
+        store.fail_next_projection_write();
+
+        assert!(store
+            .record_runtime_events(OWNER, &entity_id, std::slice::from_ref(&event))
+            .is_err());
+        assert!(store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &event.record_id)
+            .unwrap());
+        assert!(store.load(OWNER, &entity_id).unwrap().is_none());
+
+        let healed = store
+            .record_runtime_events(OWNER, &entity_id, &[event])
+            .unwrap();
+        assert_eq!(healed.successful_skill_uses, 1);
+        assert_eq!(healed.confirmed_memories, 0);
     }
 
     #[test]

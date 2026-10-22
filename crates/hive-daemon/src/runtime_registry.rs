@@ -426,4 +426,105 @@ mod tests {
         );
         assert!(result.is_err());
     }
+
+    #[test]
+    fn outbox_sync_acknowledges_replays_without_duplicate_records_or_receipts() {
+        let mut control = RuntimeControlPlane::default();
+        let lease = control.issue_session(
+            RuntimeSessionRequest {
+                entity_id: "entity-1".to_string(),
+                runtime_id: Some("runtime-1".to_string()),
+            },
+            None,
+            None,
+        );
+        let record = hive_core::EntityOutboxRecord {
+            record_id: uuid::Uuid::new_v4().to_string(),
+            entity_id: "entity-1".to_string(),
+            kind: "skill_used".to_string(),
+            created_at_utc: "2026-10-22T12:00:00Z".to_string(),
+            payload: serde_json::json!({
+                "session_id": "session-1",
+                "skill_id": "com.abigail.calendar",
+                "tool_name": "list_events",
+            }),
+        };
+        let request = || OutboxSyncRequest {
+            lease_id: lease.lease_id.clone(),
+            runtime_id: lease.runtime_id.clone(),
+            records: vec![record.clone()],
+        };
+
+        let first = control
+            .sync_outbox(request(), |_| {
+                ("signature".to_string(), "public-key".to_string())
+            })
+            .unwrap();
+        let replay = control
+            .sync_outbox(request(), |_| {
+                ("signature".to_string(), "public-key".to_string())
+            })
+            .unwrap();
+
+        assert_eq!(first.accepted_record_ids, vec![record.record_id.clone()]);
+        assert_eq!(replay.accepted_record_ids, vec![record.record_id.clone()]);
+        assert_eq!(first.execution_receipts.len(), 1);
+        assert!(
+            replay.execution_receipts.is_empty(),
+            "an accepted replay must not mint a duplicate receipt"
+        );
+        assert_eq!(control.synced_outbox["entity-1"].len(), 1);
+        assert_eq!(
+            control.execution_receipts("entity-1", 500).receipts.len(),
+            1
+        );
+    }
+
+    #[test]
+    fn outbox_sync_prevalidates_record_id_collisions_before_mutating_state() {
+        let mut control = RuntimeControlPlane::default();
+        let lease = control.issue_session(
+            RuntimeSessionRequest {
+                entity_id: "entity-1".to_string(),
+                runtime_id: Some("runtime-1".to_string()),
+            },
+            None,
+            None,
+        );
+        let record_id = uuid::Uuid::new_v4().to_string();
+        let record = |tool_name: &str| hive_core::EntityOutboxRecord {
+            record_id: record_id.clone(),
+            entity_id: "entity-1".to_string(),
+            kind: "skill_used".to_string(),
+            created_at_utc: "2026-10-22T12:00:00Z".to_string(),
+            payload: serde_json::json!({
+                "session_id": "session-1",
+                "skill_id": "com.abigail.calendar",
+                "tool_name": tool_name,
+            }),
+        };
+        let request = |records| OutboxSyncRequest {
+            lease_id: lease.lease_id.clone(),
+            runtime_id: lease.runtime_id.clone(),
+            records,
+        };
+
+        control
+            .sync_outbox(request(vec![record("list_events")]), |_| {
+                ("signature".to_string(), "public-key".to_string())
+            })
+            .unwrap();
+        let error = control
+            .sync_outbox(request(vec![record("delete_event")]), |_| {
+                ("signature".to_string(), "public-key".to_string())
+            })
+            .unwrap_err();
+
+        assert!(error.contains("conflicts"), "{error}");
+        assert_eq!(control.synced_outbox["entity-1"].len(), 1);
+        assert_eq!(
+            control.execution_receipts("entity-1", 500).receipts.len(),
+            1
+        );
+    }
 }
