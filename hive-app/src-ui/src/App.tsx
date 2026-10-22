@@ -34,7 +34,8 @@ export default function App() {
   const activeGenesisLaunch = useRef(0);
   const genesisSwitchTrigger = useRef<HTMLElement | null>(null);
   const mounted = useRef(true);
-  const cardsKey = `${genesisOpen}:${status?.entities.map(entity => `${entity.id}:${entity.birth_complete}`).join(",") ?? ""}`;
+  const needsProvider = status?.ready_state === "needs_provider";
+  const cardsKey = `${genesisOpen}:${status?.ready_state ?? "unknown"}:${needsProvider}:${status?.entities.map(entity => `${entity.id}:${entity.birth_complete}`).join(",") ?? ""}`;
   const { portraits, awaiting } = useGenesisEntities(cardsKey);
   const launchGenesis = useCallback((sessionId?: string) => {
     setGenesisResume(sessionId);
@@ -168,7 +169,6 @@ export default function App() {
   const entities = status?.entities ?? [];
   const familyEntities = entities.filter((entity) => !entity.is_hive);
   const helperUrl = status?.helper?.running ? (status.helper.local_url ?? null) : null;
-  const needsProvider = status?.ready_state === "needs_provider";
 
   return (
     <>
