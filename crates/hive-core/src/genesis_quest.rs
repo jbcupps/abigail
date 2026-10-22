@@ -767,9 +767,16 @@ impl JourneyActivity {
 /// Facts the Genesis record cannot know by itself, supplied by Hive.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct QuestSignals {
+    /// Hive confirmed that this awakening has an effective receipt-backed
+    /// Entity link. Canonical links are also checked directly on the session.
     pub awakened: bool,
     /// Messages the mentor sent this Entity after awakening.
     pub mentor_messages: u64,
+}
+
+fn confirmed_awakening(session: &GenesisSession, signals: QuestSignals) -> bool {
+    session.awakening.is_some()
+        && (session.definition.entity_id.is_some() || signals.awakened)
 }
 
 /// Badges whose conditions hold now, from confirmed state only. Pending
@@ -777,7 +784,7 @@ pub struct QuestSignals {
 pub fn satisfied_badges(session: &GenesisSession, signals: QuestSignals) -> Vec<Badge> {
     let d = &session.definition;
     let q = &session.quest;
-    let awakened = signals.awakened || session.awakening.is_some();
+    let awakened = confirmed_awakening(session, signals);
     let conditions = [
         (Badge::FirstSpark, true),
         (Badge::Named, !d.name.trim().is_empty()),
@@ -974,7 +981,7 @@ pub struct QuestView {
 pub fn quest_view(session: &GenesisSession, signals: QuestSignals) -> QuestView {
     let d = &session.definition;
     let q = &session.quest;
-    let awakened = signals.awakened || session.awakening.is_some();
+    let awakened = confirmed_awakening(session, signals);
     let mut earned = q.earned.clone();
     award(
         &mut earned,

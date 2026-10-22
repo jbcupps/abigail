@@ -121,22 +121,12 @@ fn session(state: &HiveDaemonState, id: &str) -> Result<GenesisSession, String> 
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Genesis draft not found".into())
 }
-fn signals(state: &HiveDaemonState, session: &GenesisSession) -> QuestSignals {
-    let mentor_messages = session
-        .definition
-        .entity_id
-        .as_deref()
-        .and_then(|id| state.journeys.load(OWNER, id).ok().flatten())
-        .map_or(0, |journey| journey.mentor_messages);
-    QuestSignals {
-        awakened: session.awakening.is_some(),
-        mentor_messages,
-    }
-}
-fn view(state: &HiveDaemonState, session: GenesisSession) -> Value {
-    let signals = signals(state, &session);
-    let effective_entity_id = session.definition.entity_id.clone().or_else(|| {
-        match crate::genesis_creation::receipt_entity_id(&state.identity_manager, &session) {
+fn effective_entity_id(
+    state: &HiveDaemonState,
+    session: &GenesisSession,
+) -> Option<String> {
+    session.definition.entity_id.clone().or_else(|| {
+        match crate::genesis_creation::receipt_entity_id(&state.identity_manager, session) {
             Ok(entity_id) => entity_id,
             Err(error) => {
                 tracing::warn!(
@@ -146,7 +136,28 @@ fn view(state: &HiveDaemonState, session: GenesisSession) -> Value {
                 None
             }
         }
-    });
+    })
+}
+fn signals_for_entity(
+    state: &HiveDaemonState,
+    session: &GenesisSession,
+    effective_entity_id: Option<&str>,
+) -> QuestSignals {
+    let mentor_messages = effective_entity_id
+        .and_then(|id| state.journeys.load(OWNER, id).ok().flatten())
+        .map_or(0, |journey| journey.mentor_messages);
+    QuestSignals {
+        awakened: session.awakening.is_some() && effective_entity_id.is_some(),
+        mentor_messages,
+    }
+}
+fn signals(state: &HiveDaemonState, session: &GenesisSession) -> QuestSignals {
+    let entity_id = effective_entity_id(state, session);
+    signals_for_entity(state, session, entity_id.as_deref())
+}
+fn view(state: &HiveDaemonState, session: GenesisSession) -> Value {
+    let effective_entity_id = effective_entity_id(state, &session);
+    let signals = signals_for_entity(state, &session, effective_entity_id.as_deref());
     let mut value = view_with(session, signals);
     value["effective_entity_id"] = json!(effective_entity_id);
     value
