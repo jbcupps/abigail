@@ -5061,6 +5061,7 @@ dependencies = [
  "clap",
  "daemon-client",
  "daemon-test-harness",
+ "ed25519-dalek",
  "hive-core",
  "reqwest 0.13.4",
  "serde",

@@ -331,6 +331,189 @@ mod tests {
         }
     }
 
+    fn hidden_weight_paths(value: &serde_json::Value) -> Vec<String> {
+        const HIDDEN: [&str; 5] = [
+            "weights",
+            "deontology",
+            "teleology",
+            "areteology",
+            "welfare",
+        ];
+        fn visit(value: &serde_json::Value, path: &str, found: &mut Vec<String>) {
+            match value {
+                serde_json::Value::Object(object) => {
+                    for (key, child) in object {
+                        let child_path = format!("{path}.{key}");
+                        if HIDDEN.contains(&key.as_str()) {
+                            found.push(child_path.clone());
+                        }
+                        visit(child, &child_path, found);
+                    }
+                }
+                serde_json::Value::Array(array) => {
+                    for (index, child) in array.iter().enumerate() {
+                        visit(child, &format!("{path}[{index}]"), found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        visit(value, "$", &mut found);
+        found
+    }
+
+    #[tokio::test]
+    async fn router_user_surfaces_hide_weights_and_full_birth_requires_matching_runtime() {
+        let f = fixture();
+        let desktop = f.desktop();
+        let mut surfaces = Vec::new();
+
+        let (status, created) = f
+            .send(
+                Method::POST,
+                "/v1/genesis/sessions",
+                Some(&desktop),
+                Some(serde_json::json!({})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(created["ok"], true, "{created}");
+        let genesis_id = created["data"]["id"].as_str().unwrap();
+        let revision = created["data"]["revision"].as_u64().unwrap();
+        surfaces.push(("Genesis create", created.clone()));
+
+        let (status, loaded) = f
+            .send(
+                Method::GET,
+                &format!("/v1/genesis/sessions/{genesis_id}"),
+                Some(&desktop),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(loaded["ok"], true, "{loaded}");
+        surfaces.push(("Genesis load", loaded));
+
+        let (status, action) = f
+            .send(
+                Method::POST,
+                &format!("/v1/genesis/sessions/{genesis_id}/actions"),
+                Some(&desktop),
+                Some(serde_json::json!({
+                    "action": "save_draft",
+                    "expected_revision": revision,
+                    "text": "A private draft"
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(action["ok"], true, "{action}");
+        surfaces.push(("Genesis action", action));
+
+        let (status, catalog) = f
+            .send(
+                Method::GET,
+                "/v1/genesis/quest/catalog",
+                Some(&desktop),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(catalog["ok"], true, "{catalog}");
+        surfaces.push(("quest catalog", catalog));
+
+        let (status, scenarios) = f
+            .send(Method::GET, "/v1/birth/scenarios", Some(&desktop), None)
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(scenarios["ok"], true, "{scenarios}");
+        surfaces.push(("birth scenarios", scenarios));
+
+        let birth_path = format!("/v1/entities/{}/birth", f.entity_id);
+        let (status, birth) = f
+            .send(
+                Method::POST,
+                &birth_path,
+                Some(&desktop),
+                Some(serde_json::json!({
+                    "path": "quickstart",
+                    "choices": [],
+                    "purpose": "Help the family"
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(birth["ok"], true, "{birth}");
+        surfaces.push(("generic birth POST", birth));
+
+        let (status, journey) = f
+            .send(
+                Method::GET,
+                &format!("/v1/entities/{}/journey", f.entity_id),
+                Some(&desktop),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(journey["ok"], true, "{journey}");
+        surfaces.push(("journey", journey));
+
+        let presence_path = format!("/v1/entities/{}/presence", f.entity_id);
+        let (status, presence_put) = f
+            .send(
+                Method::PUT,
+                &presence_path,
+                Some(&desktop),
+                Some(serde_json::json!({
+                    "temperament": "gentle",
+                    "identity": "aether",
+                    "crest": "orbit",
+                    "motion": "still"
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(presence_put["ok"], true, "{presence_put}");
+        surfaces.push(("Presence PUT", presence_put));
+        let (status, presence_get) = f
+            .send(Method::GET, &presence_path, Some(&desktop), None)
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(presence_get["ok"], true, "{presence_get}");
+        surfaces.push(("Presence GET", presence_get));
+
+        let leaks: Vec<_> = surfaces
+            .iter()
+            .filter_map(|(surface, value)| {
+                let paths = hidden_weight_paths(value);
+                (!paths.is_empty()).then(|| format!("{surface}: {}", paths.join(", ")))
+            })
+            .collect();
+        assert!(
+            leaks.is_empty(),
+            "hidden ethical scoring leaked through HTTP routes:\n{}",
+            leaks.join("\n")
+        );
+
+        let (status, denied) = f.send(Method::GET, &birth_path, Some(&desktop), None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(denied["ok"], false);
+
+        let runtime = f.lease_for(&f.entity_id).lease_id;
+        let (status, full) = f.send(Method::GET, &birth_path, Some(&runtime), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(full["ok"], true, "{full}");
+        let certificate = &full["data"]["certificate"];
+        assert_eq!(certificate["scoring_version"], hive_core::SCORING_VERSION);
+        for axis in ["deontology", "teleology", "areteology", "welfare"] {
+            assert!(
+                certificate["weights"][axis].is_number(),
+                "runtime certificate lacks {axis}: {certificate}"
+            );
+        }
+    }
+
     #[test]
     fn every_route_has_the_intended_access() {
         use Access::*;

@@ -60,10 +60,12 @@ pub fn certificate_payload_v1(
 /// binds the scoring contract and every internal ethical weight.
 pub fn certificate_payload_v2(certificate: &BirthCertificate) -> String {
     format!(
-        "abigail-birth-certificate-v2\nentity_id={}\nentity_name={}\narchetype={}\nsoul_hash={}\nbirth_path={}\nissued_at={}\nscoring_version={}\ndeontology_bits={:08x}\nteleology_bits={:08x}\nareteology_bits={:08x}\nwelfare_bits={:08x}",
+        "abigail-birth-certificate-v2\nentity_id={}\nentity_name={}\narchetype={}\nepithet={}\nsigil={}\nsoul_hash={}\nbirth_path={}\nissued_at={}\nscoring_version={}\ndeontology_bits={:08x}\nteleology_bits={:08x}\nareteology_bits={:08x}\nwelfare_bits={:08x}",
         certificate.entity_id,
         certificate.entity_name,
         certificate.archetype,
+        certificate.epithet,
+        certificate.sigil,
         certificate.soul_hash,
         certificate.birth_path,
         certificate.issued_at_utc,
@@ -466,6 +468,23 @@ pub async fn get_birth_document(
 mod tests {
     use super::*;
 
+    const HISTORICAL_V1_PAYLOAD: &str = "abigail-birth-certificate-v1\nentity_id=e1\nentity_name=Adam\narchetype=The Guardian\nsoul_hash=abc\nbirth_path=forge\nissued_at=2026-06-10T00:00:00Z";
+    const HISTORICAL_V1_PUBLIC_KEY: &str =
+        "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8";
+    const HISTORICAL_V1_SIGNATURE: &str = "66db10c6ad1768350f6c81f9d7af8154f129183c5fc7e331dc47a2d8ebcc3fffcf3c4bc1ce365404459f4a87bf28283291df2a250c1eea7a10965526e67b5b07";
+
+    fn fixed_hex<const N: usize>(hex: &str) -> [u8; N] {
+        let bytes: Vec<u8> = hex
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|pair| {
+                let text = std::str::from_utf8(pair).unwrap();
+                u8::from_str_radix(text, 16).unwrap()
+            })
+            .collect();
+        bytes.try_into().ok().unwrap()
+    }
+
     async fn issued_certificate() -> (HiveDaemonState, String, std::path::PathBuf) {
         let (state, entity_id) = crate::routes::tests::build_state();
         let Json(response) = perform_birth(
@@ -500,60 +519,94 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn certificate_v2_signature_binds_scoring_version_and_hidden_weights() {
+    async fn certificate_v2_signature_binds_every_summary_field_and_hidden_weight() {
         let (state, entity_id, path) = issued_certificate().await;
         let original: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let mut failures = Vec::new();
-
-        let mut changed_version = original.clone();
-        changed_version["scoring_version"] = serde_json::json!("triangle-ethic-v2");
-        std::fs::write(&path, serde_json::to_vec_pretty(&changed_version).unwrap()).unwrap();
-        let Json(version_result) =
-            get_birth_document(State(state.clone()), Path(entity_id.clone())).await;
-        if version_result.ok {
-            failures.push("tampered scoring version verified");
-        }
-
-        let mut changed_weights = original;
-        changed_weights["weights"]["deontology"] = serde_json::json!(0.99);
-        std::fs::write(&path, serde_json::to_vec_pretty(&changed_weights).unwrap()).unwrap();
-        let Json(weight_result) = get_birth_document(State(state), Path(entity_id)).await;
-        if weight_result.ok {
-            failures.push("tampered hidden weight verified");
+        for (label, pointer, replacement) in [
+            (
+                "scoring version",
+                "/scoring_version",
+                serde_json::json!("triangle-ethic-v2"),
+            ),
+            ("epithet", "/epithet", serde_json::json!("Tampered epithet")),
+            ("sigil", "/sigil", serde_json::json!("tampered-sigil")),
+            ("deontology", "/weights/deontology", serde_json::json!(0.99)),
+            ("teleology", "/weights/teleology", serde_json::json!(0.99)),
+            ("areteology", "/weights/areteology", serde_json::json!(0.99)),
+            ("welfare", "/weights/welfare", serde_json::json!(0.99)),
+        ] {
+            let mut tampered = original.clone();
+            *tampered.pointer_mut(pointer).unwrap() = replacement;
+            std::fs::write(&path, serde_json::to_vec_pretty(&tampered).unwrap()).unwrap();
+            let Json(full) =
+                get_birth_document(State(state.clone()), Path(entity_id.clone())).await;
+            if full.ok {
+                failures.push(format!("tampered {label} verified in full document"));
+            }
+            let Json(journey) =
+                crate::journey::get_journey(State(state.clone()), Path(entity_id.clone())).await;
+            if journey.data.unwrap()["certificate"]["signature_verified"]
+                != serde_json::json!(false)
+            {
+                failures.push(format!("tampered {label} appeared verified in journey"));
+            }
         }
 
         assert!(failures.is_empty(), "{}", failures.join("; "));
     }
 
     #[tokio::test]
-    async fn certificate_without_scoring_version_verifies_the_original_v1_payload() {
+    async fn certificate_v2_cannot_downgrade_when_scoring_version_is_removed() {
+        let (state, entity_id, path) = issued_certificate().await;
+        let mut raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        raw.as_object_mut().unwrap().remove("scoring_version");
+        std::fs::write(&path, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+
+        let Json(result) = get_birth_document(State(state), Path(entity_id)).await;
+        assert!(!result.ok, "a v2 signature must not downgrade to v1");
+    }
+
+    #[tokio::test]
+    async fn historical_v1_certificate_rejects_injected_scoring_version() {
         let (state, entity_id, path) = issued_certificate().await;
         let mut raw: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let certificate: BirthCertificate = serde_json::from_value(raw.clone()).unwrap();
-        let payload = certificate_payload_v1(
-            &certificate.entity_id,
-            &certificate.entity_name,
-            &certificate.archetype,
-            &certificate.soul_hash,
-            &certificate.birth_path,
-            &certificate.issued_at_utc,
+        let historical_payload = format!(
+            "abigail-birth-certificate-v1\nentity_id={}\nentity_name={}\narchetype={}\nsoul_hash={}\nbirth_path={}\nissued_at={}",
+            certificate.entity_id,
+            certificate.entity_name,
+            certificate.archetype,
+            certificate.soul_hash,
+            certificate.birth_path,
+            certificate.issued_at_utc,
         );
-        let (signature, master_public_key) =
-            state.identity_manager.sign_payload(payload.as_bytes());
+        let (signature, master_public_key) = state
+            .identity_manager
+            .sign_payload(historical_payload.as_bytes());
         raw.as_object_mut().unwrap().remove("scoring_version");
         raw["signature"] = serde_json::json!(signature);
         raw["master_public_key"] = serde_json::json!(master_public_key);
         std::fs::write(&path, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
 
-        let Json(result) = get_birth_document(State(state), Path(entity_id)).await;
-        assert!(result.ok, "{:?}", result.error);
+        let Json(legacy) = get_birth_document(State(state.clone()), Path(entity_id.clone())).await;
+        assert!(legacy.ok, "{:?}", legacy.error);
+
+        raw["scoring_version"] = serde_json::json!(SCORING_VERSION);
+        std::fs::write(&path, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+        let Json(injected) = get_birth_document(State(state), Path(entity_id)).await;
+        assert!(
+            !injected.ok,
+            "injecting scoring_version must not upgrade a v1 signature"
+        );
     }
 
     #[test]
-    fn certificate_v1_payload_is_stable() {
-        let a = certificate_payload_v1(
+    fn certificate_v1_payload_matches_fixed_historical_signature_fixture() {
+        let payload = certificate_payload_v1(
             "e1",
             "Adam",
             "The Guardian",
@@ -561,17 +614,15 @@ mod tests {
             "forge",
             "2026-06-10T00:00:00Z",
         );
-        let b = certificate_payload_v1(
-            "e1",
-            "Adam",
-            "The Guardian",
-            "abc",
-            "forge",
-            "2026-06-10T00:00:00Z",
-        );
-        assert_eq!(a, b);
-        assert!(a.starts_with("abigail-birth-certificate-v1\n"));
-        assert!(a.contains("archetype=The Guardian"));
+        assert_eq!(payload, HISTORICAL_V1_PAYLOAD);
+
+        use ed25519_dalek::Verifier as _;
+        let public_key =
+            ed25519_dalek::VerifyingKey::from_bytes(&fixed_hex(HISTORICAL_V1_PUBLIC_KEY)).unwrap();
+        let signature = ed25519_dalek::Signature::from_bytes(&fixed_hex(HISTORICAL_V1_SIGNATURE));
+        public_key
+            .verify(HISTORICAL_V1_PAYLOAD.as_bytes(), &signature)
+            .unwrap();
     }
 
     #[test]
