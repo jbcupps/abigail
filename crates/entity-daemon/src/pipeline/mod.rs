@@ -987,12 +987,12 @@ mod tests {
     async fn reservation_soul_survives_commit_failure_and_retemper_recovery() {
         let (mut state_a, executions) = build_tool_state(1);
         state_a.soul_ref = "reservation-soul-a".to_string();
-        let outbox_root = outbox_root("abigail-pipeline-reservation-soul");
+        let outbox_dir = outbox_root("abigail-pipeline-reservation-soul");
         let ledger_root = outbox_root("abigail-pipeline-reservation-soul-ledger");
         let calls = Arc::new(AtomicUsize::new(0));
         let saver_calls = calls.clone();
         state_a.outbox = Arc::new(
-            crate::outbox::RuntimeOutbox::load_with_saver(&outbox_root, 4, move |path, bytes| {
+            crate::outbox::RuntimeOutbox::load_with_saver(&outbox_dir, 4, move |path, bytes| {
                 let call = saver_calls.fetch_add(1, Ordering::SeqCst) + 1;
                 if call == 2 {
                     anyhow::bail!("injected reservation commit failure");
@@ -1018,7 +1018,7 @@ mod tests {
         let mut state_b = build_state();
         state_b.soul_ref = "retempered-soul-b".to_string();
         state_b.memory = state_a.memory.clone();
-        state_b.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        state_b.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_dir, 4).unwrap());
         state_b.execution_ledger =
             Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
         state_b
@@ -1032,15 +1032,14 @@ mod tests {
         assert_eq!(ledger.len(), 1);
         assert_eq!(ledger[0].event_id, expected_id);
         assert_eq!(ledger[0].soul_ref, "reservation-soul-a");
-        let persisted: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(outbox_root.join("runtime_outbox.json")).unwrap(),
-        )
-        .unwrap();
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(outbox_dir.join("runtime_outbox.json")).unwrap())
+                .unwrap();
         assert_eq!(
             persisted["record_ledger_metadata"][0]["soul_ref"],
             "reservation-soul-a"
         );
-        let _ = std::fs::remove_dir_all(outbox_root);
+        let _ = std::fs::remove_dir_all(outbox_dir);
         let _ = std::fs::remove_dir_all(ledger_root);
     }
 
