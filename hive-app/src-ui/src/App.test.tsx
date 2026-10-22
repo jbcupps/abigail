@@ -194,20 +194,20 @@ describe("Abigail Hive app", () => {
 
   it("retries an initial ready-state linkage failure into Continue Genesis without generic setup", async () => {
     mocks.getStatus.mockResolvedValue(statusWithUnbornAda("ready"));
+    const recovered: MockGenesisEntities = {
+      portraits: {},
+      awaiting: { ada: "recovered-ready-session" },
+      loading: false,
+      error: null,
+    };
+    const failed: MockGenesisEntities = {
+      portraits: {},
+      awaiting: {},
+      loading: false,
+      error: "initial Genesis list failure",
+    };
     mocks.genesisEntitiesForKey = (refreshKey) =>
-      String(refreshKey).includes("retry=1")
-        ? {
-            portraits: {},
-            awaiting: { ada: "recovered-ready-session" },
-            loading: false,
-            error: null,
-          }
-        : {
-            portraits: {},
-            awaiting: {},
-            loading: false,
-            error: "initial Genesis list failure",
-          };
+      String(refreshKey).includes("retry=1") ? recovered : failed;
 
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /skip/i }));
