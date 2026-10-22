@@ -11,6 +11,7 @@ use abigail_streaming::StreamBroker;
 use entity_core::{ChatMemoryHook, SkillApplyAcknowledgement};
 use hive_core::{ForgeApprovalJob, RuntimeSessionLease, SkillAssignment};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -124,6 +125,7 @@ pub struct EntityDaemonState {
 /// Default number of turns between automatic archive exports.
 pub const ARCHIVE_INTERVAL_TURNS: u32 = 50;
 const ACTIVE_RESERVATION_GRACE_SECONDS: i64 = 60;
+const UNMATCHED_RESERVATION_QUARANTINE_HOURS: i64 = 24;
 
 #[derive(Clone, Copy, Debug)]
 pub enum ActivityReconcileMode {
@@ -195,6 +197,7 @@ impl EntityDaemonState {
             ),
         };
         let mut reconciled = 0;
+        let mut durable_record_ids = HashSet::new();
 
         for turn in self.memory.all_turns().map_err(|error| error.to_string())? {
             if turn.role != "assistant" || turn.successful_tool_uses.is_empty() {
@@ -212,6 +215,7 @@ impl EntityDaemonState {
             }
             let record_id =
                 deterministic_journey_record_id(&self.entity_id, "skill_used", &turn.id);
+            durable_record_ids.insert(record_id.clone());
             reconciled += self.reconcile_activity_fact(
                 &record_id,
                 "skill_used",
@@ -236,6 +240,7 @@ impl EntityDaemonState {
             }
             let record_id =
                 deterministic_journey_record_id(&self.entity_id, "memory_confirmed", &memory.id);
+            durable_record_ids.insert(record_id.clone());
             reconciled += self.reconcile_activity_fact(
                 &record_id,
                 "memory_confirmed",
@@ -247,6 +252,11 @@ impl EntityDaemonState {
                 recovery.clone(),
             )?;
         }
+
+        self.outbox.quarantine_stale_unmatched_reservations(
+            &durable_record_ids,
+            chrono::Utc::now() - chrono::Duration::hours(UNMATCHED_RESERVATION_QUARANTINE_HOURS),
+        )?;
 
         Ok(reconciled)
     }

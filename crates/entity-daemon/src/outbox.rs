@@ -1,5 +1,6 @@
 use entity_core::{EntityOutboxRecord, EntityOutboxStatus};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -23,6 +24,13 @@ pub struct OutboxReservation {
     pub created_at_utc: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuarantinedOutboxReservation {
+    pub reservation: OutboxReservation,
+    pub quarantined_at_utc: String,
+    pub reason: String,
+}
+
 #[derive(Clone, Debug)]
 pub enum ReservationRecovery {
     All,
@@ -42,6 +50,8 @@ struct PersistedOutbox {
     records: Vec<EntityOutboxRecord>,
     #[serde(default)]
     reservations: Vec<OutboxReservation>,
+    #[serde(default)]
+    quarantined_reservations: Vec<QuarantinedOutboxReservation>,
     #[serde(default)]
     acknowledged_record_ids: Vec<String>,
     #[serde(default)]
@@ -132,6 +142,16 @@ impl RuntimeOutbox {
         for draft in drafts {
             validate_record_id(&draft.record_id)?;
             if inner
+                .quarantined_reservations
+                .iter()
+                .any(|quarantined| quarantined.reservation.record_id == draft.record_id)
+            {
+                return Err(format!(
+                    "Runtime outbox record ID {} is quarantined for manual recovery",
+                    draft.record_id
+                ));
+            }
+            if inner
                 .acknowledged_record_ids
                 .iter()
                 .any(|record_id| record_id == &draft.record_id)
@@ -203,6 +223,15 @@ impl RuntimeOutbox {
     ) -> Result<OutboxReservation, String> {
         validate_record_id(&record_id)?;
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        if inner
+            .quarantined_reservations
+            .iter()
+            .any(|quarantined| quarantined.reservation.record_id == record_id)
+        {
+            return Err(format!(
+                "Runtime outbox record ID {record_id} is quarantined for manual recovery"
+            ));
+        }
         if inner
             .acknowledged_record_ids
             .iter()
@@ -338,6 +367,15 @@ impl RuntimeOutbox {
         chrono::DateTime::parse_from_rfc3339(created_at_utc)
             .map_err(|_| "Durable activity fact has an invalid timestamp".to_string())?;
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        if inner
+            .quarantined_reservations
+            .iter()
+            .any(|quarantined| quarantined.reservation.record_id == record_id)
+        {
+            return Err(format!(
+                "Runtime outbox record ID {record_id} is quarantined for manual recovery"
+            ));
+        }
         let reservation = inner
             .reservations
             .iter()
@@ -427,6 +465,57 @@ impl RuntimeOutbox {
     pub fn reservations(&self) -> Result<Vec<OutboxReservation>, String> {
         let inner = self.inner.lock().map_err(|e| e.to_string())?;
         Ok(inner.reservations.clone())
+    }
+
+    pub fn quarantined_reservations(&self) -> Result<Vec<QuarantinedOutboxReservation>, String> {
+        let inner = self.inner.lock().map_err(|e| e.to_string())?;
+        Ok(inner.quarantined_reservations.clone())
+    }
+
+    pub fn quarantine_stale_unmatched_reservations(
+        &self,
+        durable_record_ids: &HashSet<String>,
+        stale_before: chrono::DateTime<chrono::Utc>,
+    ) -> Result<usize, String> {
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        let mut stale = Vec::new();
+        for reservation in &inner.reservations {
+            if durable_record_ids.contains(&reservation.record_id) {
+                continue;
+            }
+            let created_at = chrono::DateTime::parse_from_rfc3339(&reservation.created_at_utc)
+                .map_err(|_| "Runtime outbox reservation has an invalid timestamp".to_string())?
+                .with_timezone(&chrono::Utc);
+            if created_at <= stale_before {
+                stale.push(reservation.clone());
+            }
+        }
+        if stale.is_empty() {
+            return Ok(0);
+        }
+
+        let stale_ids = stale
+            .iter()
+            .map(|reservation| reservation.record_id.clone())
+            .collect::<HashSet<_>>();
+        let quarantined = stale.len();
+        let quarantined_at_utc = chrono::Utc::now().to_rfc3339();
+        let mut next = inner.clone();
+        next.reservations
+            .retain(|reservation| !stale_ids.contains(reservation.record_id.as_str()));
+        next.quarantined_reservations
+            .extend(stale.into_iter().map(|reservation| {
+                QuarantinedOutboxReservation {
+                reservation,
+                quarantined_at_utc: quarantined_at_utc.clone(),
+                reason:
+                    "No matching durable fact was found after the reservation recovery threshold"
+                        .to_string(),
+            }
+            }));
+        self.save_locked(&next).map_err(|e| e.to_string())?;
+        *inner = next;
+        Ok(quarantined)
     }
 
     #[cfg(test)]
