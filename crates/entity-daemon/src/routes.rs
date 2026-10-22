@@ -1522,6 +1522,76 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn explicit_memory_post_commit_failure_returns_success_and_recovers_after_restart() {
+        let mut state = build_state();
+        let root = test_scratch_dir("abigail-memory-post-commit");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let saver_calls = calls.clone();
+        state.outbox = Arc::new(
+            crate::outbox::RuntimeOutbox::load_with_saver(&root, 4, move |path, bytes| {
+                let call = saver_calls.fetch_add(1, Ordering::SeqCst) + 1;
+                if call == 2 {
+                    anyhow::bail!("injected memory activity commit failure");
+                }
+                abigail_core::secure_fs::write_bytes_atomic(path, bytes)?;
+                Ok(())
+            })
+            .unwrap(),
+        );
+
+        let response = memory_insert(
+            State(state.clone()),
+            Json(MemoryInsertRequest {
+                content: "durable recovered memory".to_string(),
+                weight: "distilled".to_string(),
+            }),
+        )
+        .await
+        .0;
+
+        assert!(
+            response.ok,
+            "a durable memory must remain a successful operation: {:?}",
+            response.error
+        );
+        assert!(response.error.is_none());
+        let entry = response.data.unwrap();
+        assert!(state
+            .memory
+            .all_memories()
+            .unwrap()
+            .iter()
+            .any(|memory| memory.id == entry.id && memory.explicitly_confirmed));
+        assert!(state.outbox.snapshot().unwrap().is_empty());
+        let expected_id =
+            expected_journey_record_id(&state.entity_id, "memory_confirmed", &entry.id);
+        assert_eq!(
+            state.outbox.reservations().unwrap()[0].record_id,
+            expected_id
+        );
+
+        let mut restarted = build_state();
+        restarted.memory = state.memory.clone();
+        restarted.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&root, 4).unwrap());
+        restarted
+            .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)
+            .unwrap();
+        let recovered = restarted.outbox.snapshot().unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].record_id, expected_id);
+        assert_eq!(recovered[0].payload["memory_id"], entry.id);
+        assert_eq!(recovered[0].payload["memory_weight"], "distilled");
+        assert!(recovered[0].payload.get("content").is_none());
+        assert!(restarted.outbox.reservations().unwrap().is_empty());
+
+        restarted
+            .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)
+            .unwrap();
+        assert_eq!(restarted.outbox.snapshot().unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn submit_and_get_job_status() {
         let state = build_state();
         let submit = SubmitJobRequest {

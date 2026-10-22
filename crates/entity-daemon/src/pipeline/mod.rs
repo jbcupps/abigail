@@ -694,6 +694,142 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn post_side_effect_commit_failure_returns_success_and_recovers_after_restart() {
+        let (mut state, executions) = build_tool_state(2);
+        let root = outbox_root("abigail-pipeline-post-commit");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let saver_calls = calls.clone();
+        state.outbox = Arc::new(
+            crate::outbox::RuntimeOutbox::load_with_saver(&root, 4, move |path, bytes| {
+                let call = saver_calls.fetch_add(1, Ordering::SeqCst) + 1;
+                if call == 2 {
+                    anyhow::bail!("injected post-side-effect outbox failure");
+                }
+                abigail_core::secure_fs::write_bytes_atomic(path, bytes)?;
+                Ok(())
+            })
+            .unwrap(),
+        );
+        let _handles = spawn(state.clone()).await.expect("pipeline spawn");
+
+        let (_, outcome) = run_turn(&state, "session-recovery").await;
+        let response = outcome.expect("completed tools must keep their successful response");
+        assert_eq!(response.reply, "tool-assisted reply");
+        assert!(!response.reply.to_ascii_lowercase().contains("retry"));
+        assert_eq!(executions.load(Ordering::SeqCst), 2);
+        assert!(state.outbox.snapshot().unwrap().is_empty());
+        assert_eq!(state.outbox.reservations().unwrap().len(), 1);
+
+        let assistant = state
+            .memory
+            .recent_turns("session-recovery", 10)
+            .unwrap()
+            .into_iter()
+            .find(|turn| turn.role == "assistant")
+            .expect("assistant recovery fact must be durable");
+        let expected_id = crate::state::deterministic_journey_record_id(
+            &state.entity_id,
+            "skill_used",
+            &assistant.id,
+        );
+        assert_eq!(
+            state.outbox.reservations().unwrap()[0].record_id,
+            expected_id
+        );
+
+        let mut restarted = build_state();
+        restarted.memory = state.memory.clone();
+        restarted.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&root, 4).unwrap());
+        restarted
+            .reconcile_durable_activity(crate::state::ActivityReconcileMode::Heartbeat)
+            .unwrap();
+        assert!(
+            restarted.outbox.snapshot().unwrap().is_empty(),
+            "heartbeat must not race a fresh active reservation"
+        );
+        assert_eq!(restarted.outbox.reservations().unwrap().len(), 1);
+
+        restarted
+            .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)
+            .unwrap();
+        let recovered = restarted.outbox.snapshot().unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].record_id, expected_id);
+        assert_eq!(recovered[0].payload["successful_skill_count"], 2);
+        assert!(restarted.outbox.reservations().unwrap().is_empty());
+        restarted
+            .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)
+            .unwrap();
+        assert_eq!(restarted.outbox.snapshot().unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn ledger_failure_keeps_one_real_activity_and_reconciliation_repairs_the_ledger() {
+        let (mut state, executions) = build_tool_state(1);
+        let outbox_root = outbox_root("abigail-pipeline-ledger-outbox");
+        let ledger_root = outbox_root("abigail-pipeline-ledger");
+        state.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        state.execution_ledger = Arc::new(
+            crate::execution_ledger::ExecutionLedger::load_with_saver(
+                &ledger_root,
+                |_path, _bytes| anyhow::bail!("injected execution ledger save failure"),
+            )
+            .unwrap(),
+        );
+        let _handles = spawn(state.clone()).await.expect("pipeline spawn");
+
+        let (_, outcome) = run_turn(&state, "session-ledger").await;
+        outcome.expect("ledger failure must not invite repetition of a completed tool");
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        let queued = state.outbox.snapshot().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert!(state.outbox.reservations().unwrap().is_empty());
+        assert!(state.execution_ledger.recent(None, 10).is_empty());
+
+        let mut restarted = build_state();
+        restarted.memory = state.memory.clone();
+        restarted.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        restarted.execution_ledger =
+            Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
+        restarted
+            .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)
+            .unwrap();
+        restarted
+            .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)
+            .unwrap();
+
+        assert_eq!(restarted.outbox.snapshot().unwrap().len(), 1);
+        let ledger = restarted.execution_ledger.recent(None, 10);
+        assert_eq!(ledger.len(), 1);
+        assert_eq!(ledger[0].event_id, queued[0].record_id);
+        assert!(crate::execution_ledger::verify_chain(&ledger));
+        let _ = std::fs::remove_dir_all(outbox_root);
+        let _ = std::fs::remove_dir_all(ledger_root);
+    }
+
+    #[tokio::test]
+    async fn acknowledged_durable_tool_fact_is_not_requeued_by_reconciliation() {
+        let (state, _) = build_tool_state(1);
+        let _handles = spawn(state.clone()).await.expect("pipeline spawn");
+        let (_, outcome) = run_turn(&state, "session-acknowledged").await;
+        outcome.expect("tool turn should succeed");
+        let record_id = state.outbox.snapshot().unwrap()[0].record_id.clone();
+        state
+            .outbox
+            .acknowledge(std::slice::from_ref(&record_id))
+            .unwrap();
+
+        state
+            .reconcile_durable_activity(crate::state::ActivityReconcileMode::Startup)
+            .unwrap();
+
+        assert!(state.outbox.snapshot().unwrap().is_empty());
+        assert!(state.outbox.is_acknowledged(&record_id).unwrap());
+        assert!(state.outbox.reservations().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn governance_provider_refresh_hot_swaps_router() {
         let state = build_state();
         let _handles = spawn(state.clone()).await.expect("pipeline spawn");
