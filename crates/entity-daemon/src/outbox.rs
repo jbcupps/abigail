@@ -406,7 +406,7 @@ fn validate_record_id(record_id: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::RuntimeOutbox;
+    use super::{ReservationRecovery, RuntimeOutbox};
     use hive_core::OutboxSyncResponse;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -791,6 +791,82 @@ mod tests {
         assert!(!outbox
             .is_acknowledged(&uuid::Uuid::new_v4().to_string())
             .unwrap());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn durable_reconciliation_waits_for_active_reservations_then_replaces_them_atomically() {
+        let root = root("abigail-outbox-reconcile-active");
+        let record_id = uuid::Uuid::new_v4().to_string();
+        let outbox = RuntimeOutbox::load(&root, 1).unwrap();
+        outbox
+            .reserve_slot(record_id.clone(), "entity-1", "skill_used")
+            .unwrap();
+        let payload = serde_json::json!({
+            "session_id": "session-1",
+            "successful_skill_count": 2,
+        });
+
+        let active = outbox
+            .reconcile_durable_record(
+                &record_id,
+                "entity-1",
+                "skill_used",
+                "2026-10-22T12:00:00Z",
+                payload.clone(),
+                ReservationRecovery::StaleBefore(chrono::Utc::now() - chrono::Duration::minutes(1)),
+            )
+            .unwrap();
+        assert!(active.is_none());
+        assert!(outbox.snapshot().unwrap().is_empty());
+        assert_eq!(outbox.reservations().unwrap().len(), 1);
+
+        let recovered = outbox
+            .reconcile_durable_record(
+                &record_id,
+                "entity-1",
+                "skill_used",
+                "2026-10-22T12:00:00Z",
+                payload,
+                ReservationRecovery::All,
+            )
+            .unwrap()
+            .expect("startup reconciliation should recover the durable fact");
+        assert_eq!(recovered.record_id, record_id);
+        assert!(outbox.reservations().unwrap().is_empty());
+        assert_eq!(outbox.snapshot().unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reconciliation_save_failure_keeps_the_reservation_in_memory_and_on_disk() {
+        let root = root("abigail-outbox-reconcile-save");
+        let record_id = uuid::Uuid::new_v4().to_string();
+        let outbox = RuntimeOutbox::load_with_saver(&root, 1, fail_save_on(2)).unwrap();
+        outbox
+            .reserve_slot(record_id.clone(), "entity-1", "memory_confirmed")
+            .unwrap();
+
+        let error = outbox
+            .reconcile_durable_record(
+                &record_id,
+                "entity-1",
+                "memory_confirmed",
+                "2026-10-22T12:00:00Z",
+                serde_json::json!({
+                    "memory_id": "memory-1",
+                    "memory_weight": "distilled",
+                }),
+                ReservationRecovery::All,
+            )
+            .unwrap_err();
+        assert!(error.contains("injected outbox save failure"), "{error}");
+        assert!(outbox.snapshot().unwrap().is_empty());
+        assert_eq!(outbox.reservations().unwrap()[0].record_id, record_id);
+
+        let restarted = RuntimeOutbox::load(&root, 1).unwrap();
+        assert!(restarted.snapshot().unwrap().is_empty());
+        assert_eq!(restarted.reservations().unwrap()[0].record_id, record_id);
         let _ = std::fs::remove_dir_all(root);
     }
 }
