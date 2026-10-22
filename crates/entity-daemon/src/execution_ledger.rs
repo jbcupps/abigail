@@ -62,13 +62,28 @@ impl ExecutionLedger {
             .get("session_id")
             .and_then(|value| value.as_str())
             .map(|value| value.to_string());
-        self.append_event_with_id(
+        let payload_digest = execution_payload_digest(payload)?;
+        self.append_event_digest_with_id(
             record_id.to_string(),
             entity_id,
             session_id,
             kind,
-            payload,
+            payload_digest,
             soul_ref,
+        )
+    }
+
+    pub(crate) fn append_outbox_metadata(
+        &self,
+        metadata: &crate::outbox::OutboxLedgerMetadata,
+    ) -> Result<ExecutionEvent, String> {
+        self.append_event_digest_with_id(
+            metadata.record_id.clone(),
+            &metadata.entity_id,
+            metadata.session_id.clone(),
+            &metadata.kind,
+            metadata.payload_digest.clone(),
+            &metadata.soul_ref,
         )
     }
 
@@ -100,8 +115,26 @@ impl ExecutionLedger {
         payload: &serde_json::Value,
         soul_ref: &str,
     ) -> Result<ExecutionEvent, String> {
+        self.append_event_digest_with_id(
+            event_id,
+            entity_id,
+            session_id,
+            event_kind,
+            execution_payload_digest(payload)?,
+            soul_ref,
+        )
+    }
+
+    fn append_event_digest_with_id(
+        &self,
+        event_id: String,
+        entity_id: &str,
+        session_id: Option<String>,
+        event_kind: &str,
+        payload_digest: String,
+        soul_ref: &str,
+    ) -> Result<ExecutionEvent, String> {
         let mut events = self.events.lock().map_err(|e| e.to_string())?;
-        let payload_digest = execution_payload_digest(payload)?;
         if let Some(existing) = events.iter().find(|event| event.event_id == event_id) {
             if existing.entity_id == entity_id
                 && existing.session_id == session_id

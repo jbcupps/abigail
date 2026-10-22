@@ -191,7 +191,7 @@ impl EntityDaemonState {
                 chrono::Utc::now() - chrono::Duration::seconds(ACTIVE_RESERVATION_GRACE_SECONDS),
             ),
         };
-        let mut reconciled = 0;
+        let mut reconciled = self.reconcile_outbox_execution_ledger()?;
         let mut durable_record_ids = HashSet::new();
 
         for turn in self.memory.all_turns().map_err(|error| error.to_string())? {
@@ -254,6 +254,23 @@ impl EntityDaemonState {
         )?;
 
         Ok(reconciled)
+    }
+
+    fn reconcile_outbox_execution_ledger(&self) -> Result<usize, String> {
+        let metadata = self.outbox.ledger_reconciliation_metadata(&self.soul_ref)?;
+        for record in &metadata {
+            if record.entity_id != self.entity_id {
+                return Err(format!(
+                    "Runtime outbox ledger metadata for record {} belongs to a different Entity",
+                    record.record_id
+                ));
+            }
+            let event = self.execution_ledger.append_outbox_metadata(record)?;
+            self.outbox.persist_authoritative_record_ledger_metadata(
+                OutboxLedgerMetadata::from_execution_event(&event),
+            )?;
+        }
+        Ok(metadata.len())
     }
 
     fn reconcile_activity_fact(

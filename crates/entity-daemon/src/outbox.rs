@@ -764,6 +764,94 @@ impl RuntimeOutbox {
             .cloned())
     }
 
+    pub(crate) fn ledger_reconciliation_metadata(
+        &self,
+        legacy_soul_ref: &str,
+    ) -> Result<Vec<OutboxLedgerMetadata>, String> {
+        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
+        let mut next = inner.clone();
+        let mut metadata_to_reconcile = Vec::new();
+        let mut seen = HashSet::new();
+
+        for record in &inner.records {
+            let existing = next
+                .record_ledger_metadata
+                .iter()
+                .find(|metadata| metadata.record_id == record.record_id)
+                .cloned();
+            let metadata = match existing {
+                Some(metadata) => {
+                    metadata.validate_source(
+                        &record.record_id,
+                        &record.entity_id,
+                        &record.kind,
+                        &record.payload,
+                    )?;
+                    if metadata.soul_ref.is_empty() {
+                        let repaired = OutboxLedgerMetadata::from_payload(
+                            &record.record_id,
+                            &record.entity_id,
+                            &record.kind,
+                            &record.payload,
+                            legacy_soul_ref,
+                        )?;
+                        merge_record_ledger_metadata(
+                            &mut next.record_ledger_metadata,
+                            repaired.clone(),
+                            true,
+                        )?;
+                        repaired
+                    } else {
+                        metadata
+                    }
+                }
+                None => {
+                    let recovered = OutboxLedgerMetadata::from_payload(
+                        &record.record_id,
+                        &record.entity_id,
+                        &record.kind,
+                        &record.payload,
+                        legacy_soul_ref,
+                    )?;
+                    merge_record_ledger_metadata(
+                        &mut next.record_ledger_metadata,
+                        recovered.clone(),
+                        false,
+                    )?;
+                    recovered
+                }
+            };
+            seen.insert(metadata.record_id.clone());
+            metadata_to_reconcile.push(metadata);
+        }
+
+        for record_id in &inner.acknowledged_record_ids {
+            if seen.contains(record_id) {
+                continue;
+            }
+            if let Some(metadata) = next
+                .record_ledger_metadata
+                .iter()
+                .find(|metadata| metadata.record_id == *record_id)
+                .cloned()
+            {
+                if metadata.soul_ref.is_empty() {
+                    return Err(format!(
+                        "Acknowledged Runtime outbox record {record_id} is missing its original soul reference"
+                    ));
+                }
+                seen.insert(record_id.clone());
+                metadata_to_reconcile.push(metadata);
+            }
+        }
+
+        if next.record_ledger_metadata != inner.record_ledger_metadata {
+            self.save_locked(&next).map_err(|error| error.to_string())?;
+            *inner = next;
+        }
+        Ok(metadata_to_reconcile)
+    }
+
     pub(crate) fn persist_authoritative_record_ledger_metadata(
         &self,
         metadata: OutboxLedgerMetadata,
