@@ -34,6 +34,7 @@ impl ExecutionLedger {
 
     pub fn append_outbox_event(
         &self,
+        record_id: &str,
         entity_id: &str,
         kind: &str,
         payload: &serde_json::Value,
@@ -43,7 +44,14 @@ impl ExecutionLedger {
             .get("session_id")
             .and_then(|value| value.as_str())
             .map(|value| value.to_string());
-        self.append_event(entity_id, session_id, kind, payload, soul_ref)
+        self.append_event_with_id(
+            record_id.to_string(),
+            entity_id,
+            session_id,
+            kind,
+            payload,
+            soul_ref,
+        )
     }
 
     pub fn append_event(
@@ -54,11 +62,43 @@ impl ExecutionLedger {
         payload: &serde_json::Value,
         soul_ref: &str,
     ) -> Result<ExecutionEvent, String> {
+        self.append_event_with_id(
+            uuid::Uuid::new_v4().to_string(),
+            entity_id,
+            session_id,
+            event_kind,
+            payload,
+            soul_ref,
+        )
+    }
+
+    fn append_event_with_id(
+        &self,
+        event_id: String,
+        entity_id: &str,
+        session_id: Option<String>,
+        event_kind: &str,
+        payload: &serde_json::Value,
+        soul_ref: &str,
+    ) -> Result<ExecutionEvent, String> {
         let mut events = self.events.lock().map_err(|e| e.to_string())?;
+        let payload_digest = sha256_hex(&serde_json::to_vec(payload).map_err(|e| e.to_string())?);
+        if let Some(existing) = events.iter().find(|event| event.event_id == event_id) {
+            if existing.entity_id == entity_id
+                && existing.session_id == session_id
+                && existing.event_kind == event_kind
+                && existing.payload_digest == payload_digest
+                && existing.soul_ref == soul_ref
+            {
+                return Ok(existing.clone());
+            }
+            return Err(format!(
+                "Execution event ID {event_id} conflicts with different event data"
+            ));
+        }
+
         let previous_hash = events.last().map(|event| event.event_hash.clone());
         let created_at_utc = chrono::Utc::now().to_rfc3339();
-        let payload_digest = sha256_hex(&serde_json::to_vec(payload).map_err(|e| e.to_string())?);
-        let event_id = uuid::Uuid::new_v4().to_string();
         let event_hash = event_hash(EventHashInput {
             event_id: &event_id,
             entity_id,
@@ -81,8 +121,10 @@ impl ExecutionLedger {
             created_at_utc,
             soul_ref: soul_ref.to_string(),
         };
-        events.push(event.clone());
-        self.persist(&events)?;
+        let mut next = events.clone();
+        next.push(event.clone());
+        self.persist(&next)?;
+        *events = next;
         Ok(event)
     }
 

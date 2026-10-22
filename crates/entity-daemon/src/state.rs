@@ -147,11 +147,17 @@ impl EntityDaemonState {
         kind: &str,
         payload: serde_json::Value,
     ) -> Result<(), String> {
-        self.outbox
-            .enqueue(&self.entity_id, kind, payload.clone())
-            .map(|_| ())?;
+        let record = self
+            .outbox
+            .enqueue(&self.entity_id, kind, payload.clone())?;
         self.execution_ledger
-            .append_outbox_event(&self.entity_id, kind, &payload, &self.soul_ref)
+            .append_outbox_event(
+                &record.record_id,
+                &self.entity_id,
+                kind,
+                &payload,
+                &self.soul_ref,
+            )
             .map(|_| ())
     }
 
@@ -161,11 +167,17 @@ impl EntityDaemonState {
         kind: &str,
         payload: serde_json::Value,
     ) -> Result<(), String> {
-        self.outbox
-            .enqueue_with_id(record_id, &self.entity_id, kind, payload.clone())
-            .map(|_| ())?;
+        let record =
+            self.outbox
+                .enqueue_with_id(record_id, &self.entity_id, kind, payload.clone())?;
         self.execution_ledger
-            .append_outbox_event(&self.entity_id, kind, &payload, &self.soul_ref)
+            .append_outbox_event(
+                &record.record_id,
+                &self.entity_id,
+                kind,
+                &payload,
+                &self.soul_ref,
+            )
             .map(|_| ())
     }
 
@@ -173,6 +185,7 @@ impl EntityDaemonState {
         let records = self.outbox.enqueue_batch(&self.entity_id, drafts)?;
         for record in records {
             self.execution_ledger.append_outbox_event(
+                &record.record_id,
                 &self.entity_id,
                 &record.kind,
                 &record.payload,
