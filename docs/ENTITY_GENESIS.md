@@ -238,18 +238,26 @@ Genesis awakening/link; generic birth does not award it. Long-term activity badg
 derive only from durable Runtime facts. Conversation turns reconcile the full
 durable history for mentor messages, distinct sessions, active UTC days and
 active ISO weeks. Committed successful tool calls and explicit non-ephemeral
-memory inserts add content-free fallback facts and queue `skill_used` or
-`memory_confirmed` outbox events.
+memory inserts add content-free fallback facts. Runtime atomically reserves
+outbox capacity before either tool execution or explicit lasting-memory
+insertion. A committed assistant turn queues one aggregate `skill_used` event
+with only its session ID and successful-use count; a confirmed memory queues
+`memory_confirmed` with only its ID and weight class. If post-side-effect
+staging fails, the successful response is preserved and startup/heartbeat
+reconciliation rebuilds the same deterministic record from the durable fact.
+Persisted acknowledgements prevent an old fact from being queued again.
 
 Hive validates lease owner and Entity IDs before storing recognized events in
 the closed, schematized `entity_journey_event` table, keyed idempotently by
 Runtime `record_id`. Its complete allowlist is `record_id`, `owner_id`,
 `entity_id`, `kind`, `occurred_at`, and optional `session_id`, `skill_id`,
-`tool_name`, `memory_id`, `memory_weight`. It never stores arbitrary Runtime
-payloads, messages, replies, prompts, model output, tool arguments/results or
-memory content. Unknown event kinds remain valid ordinary outbox records but
-do not create or advance a journey. Projection merges durable Entity facts and
-event counts by per-counter maximum.
+`tool_name`, `successful_skill_count`, `memory_id`, `memory_weight`. New skill
+events use the bounded positive aggregate count; `skill_id` and `tool_name`
+remain only for already-issued per-tool records. It never stores arbitrary
+Runtime payloads, messages, replies, prompts, model output, tool
+arguments/results or memory content. Unknown event kinds remain valid ordinary
+outbox records but do not create or advance a journey. Projection merges
+durable Entity facts and event counts by per-counter maximum.
 
 Quest progress is saved in the defaulted Genesis `quest` field. Each Entity's
 durable counters and badges live in Hive-owned `entity_journey`, so they outlive
@@ -325,8 +333,8 @@ passed:
 
 - `cargo fmt --all -- --check`;
 - strict all-target Clippy for `entity-daemon`, `hive-core`, `hive-daemon`,
-  `abigail-app` and `soul-forge`;
-- affected Rust suites for those five packages: 270 tests passed and 8
+  `abigail-persistence`, `abigail-app` and `soul-forge`;
+- affected Rust suites for those six packages: 291 tests passed and 8
   pre-existing daemon cluster tests were ignored;
 - `cd hive-app/src-ui && npm test && npm run build`: production build plus
   92 tests across 18 files;
@@ -336,12 +344,13 @@ passed:
 The ethics-key scan found no occurrence in the tracked Hive reveal and only a
 weight-rejection assertion in the legacy Tauri frontend. Rust presentation
 commands mention axis keys only in tests that reject leakage; calculation
-remains internal. The journey producer scan confirms that successful
-`skill_used` events are staged atomically by Ego before success publication,
-exact record retries map to one atomic local ledger event, the journal does not
-enqueue a duplicate, and explicit memory events contain only their allowed IDs
-and weight class. None adds content to
-`entity_journey_event`.
+remains internal. The journey producer scan confirms that capacity is reserved
+atomically before tool or explicit-memory side effects, assistant metadata is
+durable before one aggregate `skill_used` commit, exact fact retries map to one
+outbox row and one atomic local ledger event, and the journal does not enqueue a
+duplicate. Post-commit failures preserve the successful result and recover from
+content-free durable metadata; acknowledged IDs are never requeued. None adds
+content to `entity_journey_event`.
 
 This is source, build and automated fixture verification only. No installer,
 installed WebView, live provider, microphone, paid media or subjective visual

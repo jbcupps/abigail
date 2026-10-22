@@ -373,17 +373,24 @@ Add table and owner/entity indexes. Persist only:
 
 ```text
 record_id, owner_id, entity_id, kind, occurred_at,
-session_id?, skill_id?, tool_name?, memory_id?, memory_weight?
+session_id?, skill_id?, tool_name?, successful_skill_count?,
+memory_id?, memory_weight?
 ```
 
 Only `skill_used` and `memory_confirmed` are tracked. Use the outbox record ID as
-the table record ID and serialize writes under JourneyStore's lock.
+the table record ID and serialize writes under JourneyStore's lock. New skill
+events use `session_id` plus a bounded positive aggregate count; retain
+`skill_id` and `tool_name` only to verify historical per-tool rows.
 
 - [ ] **Step 5: Emit real Runtime events**
 
-After a successful committed chat response, enqueue one `skill_used` record per
-successful tool call. After an explicit non-ephemeral memory insert, enqueue
-`memory_confirmed`. Never include message/reply/memory content.
+Reserve one durable outbox slot before entering a tool-capable turn, persist the
+assistant fact before committing one aggregate `skill_used` record, and release
+the reservation when no successful action commits. Reserve before an explicit
+non-ephemeral memory insert, then commit `memory_confirmed`. Post-side-effect
+commit failures keep the successful response and recover from durable,
+content-free assistant or memory metadata. Never include message/reply/memory
+content.
 
 - [ ] **Step 6: Reconcile durable conversations**
 

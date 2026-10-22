@@ -169,15 +169,22 @@ summaries so old activity does not disappear.
 
 Successful skill calls and confirmed memories are Runtime events:
 
-- the journal queues one `skill_used` outbox record for each successful tool
-  call, containing only session ID, skill ID, and tool name;
-- a successful explicit non-ephemeral memory insert queues
-  `memory_confirmed`, containing only memory ID, weight tier, and timestamp.
+- before a tool-capable turn, Runtime durably reserves one outbox slot; after
+  the assistant turn is durable it commits one `skill_used` aggregate containing
+  only session ID and a bounded positive successful-use count;
+- before an explicit non-ephemeral memory insert, Runtime durably reserves one
+  slot, then commits `memory_confirmed` with only memory ID and weight tier;
+- post-side-effect commit failure does not ask the user to repeat completed
+  work. Startup and heartbeat reconciliation derive the same deterministic
+  record from assistant-tool metadata or explicit-memory metadata, while
+  persisted acknowledgements prevent requeue.
 
 Hive stores only validated, redacted event summaries in `entity_journey_event`,
 keyed by Runtime outbox `record_id`. Duplicate sync is idempotent. The table
 contains no arbitrary payload and no message, reply, prompt, or memory content.
 Owner and Entity IDs are cross-checked against the authenticated Runtime lease.
+Historical per-tool `skill_id`/`tool_name` rows remain projection-compatible;
+new records use `successful_skill_count`.
 
 Journey projection merges durable conversation summaries and redacted event
 counts, then awards milestones monotonically. Suggested first quests remain
@@ -209,6 +216,9 @@ local; the gate applies when returning through an allocated Entity card.
   not affect progression.
 - Journey projection failure prevents acknowledging a tracked progression event
   so Runtime can retry the same record ID.
+- Capacity or reservation persistence failure prevents tool execution and
+  lasting-memory insertion. A failure after a durable side effect preserves the
+  successful operation and leaves its reservation for deterministic recovery.
 
 ## Testing
 
