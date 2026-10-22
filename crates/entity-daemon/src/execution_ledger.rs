@@ -106,6 +106,7 @@ impl ExecutionLedger {
         )
     }
 
+    #[cfg(test)]
     fn append_event_with_id(
         &self,
         event_id: String,
