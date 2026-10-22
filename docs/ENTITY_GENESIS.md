@@ -245,7 +245,12 @@ with only its session ID and successful-use count; a confirmed memory queues
 `memory_confirmed` with only its ID and weight class. If post-side-effect
 staging fails, the successful response is preserved and startup/heartbeat
 reconciliation rebuilds the same deterministic record from the durable fact.
-Persisted acknowledgements prevent an old fact from being queued again.
+Persisted acknowledgements prevent an old fact from being queued again, but do
+not prevent reconciliation from repairing a missing local execution-ledger
+entry. A reconciliation failure stops that tick before Hive heartbeat or sync.
+Reservations with no matching durable assistant or memory fact stay active for
+a conservative 24-hour recovery window; after that they move atomically to a
+persisted, non-capacity quarantine for diagnosis without inventing activity.
 
 Hive validates lease owner and Entity IDs before storing recognized events in
 the closed, schematized `entity_journey_event` table, keyed idempotently by
@@ -334,7 +339,7 @@ passed:
 - `cargo fmt --all -- --check`;
 - strict all-target Clippy for `entity-daemon`, `hive-core`, `hive-daemon`,
   `abigail-persistence`, `abigail-app` and `soul-forge`;
-- affected Rust suites for those six packages: 291 tests passed and 8
+- affected Rust suites for those six packages: 299 tests passed and 8
   pre-existing daemon cluster tests were ignored;
 - `cd hive-app/src-ui && npm test && npm run build`: production build plus
   92 tests across 18 files;
@@ -349,8 +354,11 @@ atomically before tool or explicit-memory side effects, assistant metadata is
 durable before one aggregate `skill_used` commit, exact fact retries map to one
 outbox row and one atomic local ledger event, and the journal does not enqueue a
 duplicate. Post-commit failures preserve the successful result and recover from
-content-free durable metadata; acknowledged IDs are never requeued. None adds
-content to `entity_journey_event`.
+content-free durable metadata; acknowledged IDs are never requeued but still
+repair a missing local ledger entry. Reconciliation errors stop the Hive
+heartbeat/sync attempt, and stale unmatched reservations enter non-capacity
+quarantine without creating an event. None adds content to
+`entity_journey_event`.
 
 This is source, build and automated fixture verification only. No installer,
 installed WebView, live provider, microphone, paid media or subjective visual
