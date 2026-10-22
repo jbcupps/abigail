@@ -109,8 +109,11 @@ stopped so its next launch loads the new signed identity.
 Genesis owns birth for the Entities it allocates. Until awakening, Hive refuses
 generic setup (`POST /v1/entities/:id/birth`) and opening for that Entity, and the
 Entity card routes back to its Genesis record. Afterwards generic birth still
-refuses to replace the signed Genesis story. If saving the draft fails right after
-an Entity identity is allocated, the allocation is removed so no orphan remains.
+refuses to replace the signed Genesis story. If saving `definition.entity_id`
+is interrupted after allocation, the durable creation receipt retains the same
+Entity UUID. Session views derive a presentation-only effective link from that
+receipt so the card still routes to Genesis; an exact retry saves the canonical
+link without allocating a replacement.
 
 ## Genesis Quest and owner decisions
 
@@ -207,7 +210,7 @@ The exact badge curve is:
 | Keeper of Instincts | Read the constitutional instincts | 10 |
 | A Face for the Hearth | Choose Presence | 10 |
 | Curator | Review an imported Markdown document | 10 |
-| First Light | Awaken the Entity | 20 |
+| First Light | Confirm Genesis awakening and its Entity link | 20 |
 | First Words | 1 mentor message | 15 |
 | Getting Acquainted | 5 mentor messages | 25 |
 | Kindred | 25 mentor messages | 40 |
@@ -224,7 +227,8 @@ The exact badge curve is:
 | Living Archive | 15 confirmed lasting memories | 180 |
 
 Creation badges are monotonic and derive from confirmed Genesis state, never
-pending proposals. Long-term activity badges and their monotonic counters
+pending proposals. In particular, First Light comes only from a confirmed
+Genesis awakening/link; generic birth does not award it. Long-term activity badges and their monotonic counters
 derive only from durable Runtime facts. Conversation turns reconcile the full
 durable history for mentor messages, distinct sessions, active UTC days and
 active ISO weeks. Committed successful tool calls and explicit non-ephemeral

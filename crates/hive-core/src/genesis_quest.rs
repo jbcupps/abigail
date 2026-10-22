@@ -1291,8 +1291,7 @@ impl EntityJourney {
         observe_max!(active_weeks);
         observe_max!(successful_skill_uses);
         observe_max!(confirmed_memories);
-        let mut satisfied = vec![Badge::FirstLight];
-        satisfied.extend(activity_badges(self.activity()));
+        let satisfied = activity_badges(self.activity());
         changed |= !award(&mut self.earned, &satisfied, now).is_empty();
         if changed {
             self.updated_at = now.into();
@@ -1600,10 +1599,16 @@ mod tests {
     #[test]
     fn journey_is_monotonic_and_awards_mentoring_milestones() {
         let mut journey = EntityJourney::new("entity", LOCAL_OWNER_ID, NOW);
-        let creation = vec![EarnedBadge {
-            badge: Badge::Named,
-            earned_at: "earlier".into(),
-        }];
+        let creation = vec![
+            EarnedBadge {
+                badge: Badge::Named,
+                earned_at: "earlier".into(),
+            },
+            EarnedBadge {
+                badge: Badge::FirstLight,
+                earned_at: "earlier".into(),
+            },
+        ];
         assert!(journey.observe(&creation, JourneyActivity::default(), NOW));
         assert_eq!(
             journey.earned_badges(),
