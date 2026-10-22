@@ -5,6 +5,18 @@ import PresenceCrest from "./PresenceCrest";
 
 type Change = (action: string, args?: Record<string, unknown>) => Promise<GenesisSession | undefined>;
 
+function activityLabel(metric: NonNullable<EntityJourney["next_milestone"]>["metric"], count: number) {
+  const labels = {
+    mentor_messages: ["message", "messages"],
+    conversation_sessions: ["session", "sessions"],
+    active_days: ["active day", "active days"],
+    active_weeks: ["active week", "active weeks"],
+    successful_skill_uses: ["skill use", "skill uses"],
+    confirmed_memories: ["confirmed memory", "confirmed memories"],
+  } as const;
+  return `${count} ${labels[metric][count === 1 ? 0 : 1]}`;
+}
+
 function presenceChoice(card: QuestView["presence"]): PresenceChoice {
   return card ? {
     temperament: card.temperament,
@@ -123,12 +135,24 @@ export default function GenesisQuest({ session, busy, stage, onStage, change, on
         <ul className="quest-checklist">{quest.stages.slice(0, 5).map((item) => <li key={item.stage} className={item.complete ? "is-complete" : ""}>{item.title} · {item.complete ? "complete" : item.optional ? "optional" : item.detail}</li>)}</ul>
         {awakened ? <button type="button" className="genesis-primary" disabled={busy} onClick={onMeet}>Meet {definition.name}</button> : <button type="button" className="genesis-primary" disabled={busy || !quest.stages[0].complete} onClick={onAwaken}>Awaken {definition.name || "Entity"}</button>}
       </>;
-      case "awakening": return awakened ? <>
-        {journey?.next_milestone && <div className="quest-milestone"><span>{journey.next_milestone.title}</span><progress max={journey.next_milestone.target} value={journey.next_milestone.progress} aria-label={`${journey.next_milestone.title} progress`} /><small>{journey.next_milestone.progress} of {journey.next_milestone.target} messages</small></div>}
-        <ol className="quest-first">{(journey?.first_quests ?? []).map((item) => <li key={item.id} className={item.complete ? "is-complete" : ""}><strong>{item.title}</strong><p>“{item.prompt}”</p><small>{item.complete ? "Complete" : `Unlocks ${catalog.badges.find((badge) => badge.badge === item.milestone)?.title ?? "a badge"}`}</small></li>)}</ol>
-        <button type="button" className="genesis-primary" disabled={busy} onClick={onMeet}>Meet {definition.name}</button>
-        <p className="genesis-muted">Nothing is sent for you. Copy a prompt, or say whatever feels right.</p>
-      </> : <p>Awaken {definition.name || "your Entity"} to begin their first quests.</p>;
+      case "awakening": {
+        const milestoneDefinition = journey?.next_milestone ? catalog.badges.find((badge) => badge.badge === journey.next_milestone?.badge) : undefined;
+        const milestone = journey?.next_milestone;
+        const metric = milestoneDefinition?.requirement?.metric ?? milestone?.metric;
+        return awakened ? <>
+          {journey && <dl className="quest-activity" aria-label="Journey activity">
+            <div><dt>Conversation</dt><dd>{activityLabel("mentor_messages", journey.mentor_messages)}</dd></div>
+            <div><dt>Returns</dt><dd>{activityLabel("conversation_sessions", journey.conversation_sessions)}</dd></div>
+            <div><dt>Rhythm</dt><dd>{activityLabel("active_days", journey.active_days)} · {activityLabel("active_weeks", journey.active_weeks)}</dd></div>
+            <div><dt>Skills</dt><dd>{activityLabel("successful_skill_uses", journey.successful_skill_uses)}</dd></div>
+            <div><dt>Memory</dt><dd>{activityLabel("confirmed_memories", journey.confirmed_memories)}</dd></div>
+          </dl>}
+          {milestone && metric && <div className="quest-milestone"><span>{milestoneDefinition?.title ?? milestone.title}</span><progress max={milestone.target} value={milestone.progress} aria-label={`${milestoneDefinition?.title ?? milestone.title} progress`} /><small>{milestone.progress} of {activityLabel(metric, milestone.target)}</small></div>}
+          <ol className="quest-first">{(journey?.first_quests ?? []).map((item) => <li key={item.id} className={item.complete ? "is-complete" : ""}><strong>{item.title}</strong><p>“{item.prompt}”</p><small>{item.complete ? "Complete" : `Unlocks ${catalog.badges.find((badge) => badge.badge === item.milestone)?.title ?? "a badge"}`}</small></li>)}</ol>
+          <button type="button" className="genesis-primary" disabled={busy} onClick={onMeet}>Meet {definition.name}</button>
+          <p className="genesis-muted">Nothing is sent for you. Copy a prompt, or say whatever feels right.</p>
+        </> : <p>Awaken {definition.name || "your Entity"} to begin their first quests.</p>;
+      }
     }
   };
 

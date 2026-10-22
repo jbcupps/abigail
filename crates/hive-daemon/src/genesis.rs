@@ -232,7 +232,8 @@ async fn quest_catalog() -> Json<ApiEnvelope<Value>> {
         .collect();
     result(Ok(json!({
         "stages": QuestStage::ALL.iter().map(|s| json!({"stage": s, "title": s.title(), "summary": s.summary(), "optional": s.optional()})).collect::<Vec<_>>(),
-        "badges": badge_views(&[]),
+        "badges": BADGE_DEFINITIONS,
+        "tiers": BOND_TIER_DEFINITIONS,
         "temperament_cards": temperament_cards(),
         "palettes": Palette::ALL.iter().map(|p| json!({"palette": p, "unlocked_by": p.unlocked_by()})).collect::<Vec<_>>(),
         "crests": Crest::ALL.iter().map(|c| json!({"crest": c, "unlocked_by": c.unlocked_by()})).collect::<Vec<_>>(),

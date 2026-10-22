@@ -203,6 +203,13 @@ impl RuntimeControlPlane {
                 request.runtime_id, request.lease_id
             ));
         }
+        if request
+            .records
+            .iter()
+            .any(|record| record.entity_id != session.lease.entity_id)
+        {
+            return Err("Runtime outbox contains a record for another Entity".to_string());
+        }
 
         let accepted_record_ids = request
             .records

@@ -16,5 +16,7 @@ export default function EntityJourneyChip({ entityId, refreshKey }: { entityId: 
     {journey.presence && <PresenceCrest palette={journey.presence.identity} crest={journey.presence.crest} size={20} />}
     <span>Level {journey.level.level} · {journey.level.title}</span>
     <span aria-label={`${earned} badges earned`}>✦ {earned}</span>
+    <span aria-label="Journey activity">{journey.mentor_messages} messages · {journey.conversation_sessions} sessions · {journey.successful_skill_uses} skills · {journey.confirmed_memories} memories</span>
+    {journey.next_milestone && <span title={`${journey.next_milestone.progress} of ${journey.next_milestone.target}`}>Next · {journey.next_milestone.title}</span>}
   </div>;
 }

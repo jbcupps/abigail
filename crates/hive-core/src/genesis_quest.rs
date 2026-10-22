@@ -92,10 +92,21 @@ pub enum Badge {
     FirstWords,
     GettingAcquainted,
     Kindred,
+    HearthRegular,
+    TrustedCompanion,
+    ReturningCompanion,
+    SeasonedCompanion,
+    SteadyRhythm,
+    HearthSeason,
+    ConstellationKeeper,
+    SkillExplorer,
+    SkillWeaver,
+    MemoryKeeper,
+    LivingArchive,
 }
 
 impl Badge {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 24] = [
         Self::FirstSpark,
         Self::Named,
         Self::Purposeful,
@@ -109,67 +120,302 @@ impl Badge {
         Self::FirstWords,
         Self::GettingAcquainted,
         Self::Kindred,
+        Self::HearthRegular,
+        Self::TrustedCompanion,
+        Self::ReturningCompanion,
+        Self::SeasonedCompanion,
+        Self::SteadyRhythm,
+        Self::HearthSeason,
+        Self::ConstellationKeeper,
+        Self::SkillExplorer,
+        Self::SkillWeaver,
+        Self::MemoryKeeper,
+        Self::LivingArchive,
     ];
 
+    pub fn definition(self) -> &'static BadgeDefinition {
+        BADGE_DEFINITIONS
+            .iter()
+            .find(|definition| definition.badge == self)
+            .expect("every badge has one canonical definition")
+    }
+
     pub fn title(self) -> &'static str {
-        match self {
-            Self::FirstSpark => "First Spark",
-            Self::Named => "A Name Is Given",
-            Self::Purposeful => "A Reason to Be",
-            Self::SoulShaper => "Soul Shaper",
-            Self::Storyteller => "Storyteller",
-            Self::TrialWalker => "Trial Walker",
-            Self::InstinctKeeper => "Keeper of Instincts",
-            Self::PresenceChosen => "A Face for the Hearth",
-            Self::Curator => "Curator",
-            Self::FirstLight => "First Light",
-            Self::FirstWords => "First Words",
-            Self::GettingAcquainted => "Getting Acquainted",
-            Self::Kindred => "Kindred",
-        }
+        self.definition().title
     }
 
     pub fn hint(self) -> &'static str {
-        match self {
-            Self::FirstSpark => "Begin a Genesis creation.",
-            Self::Named => "Confirm a name.",
-            Self::Purposeful => "Confirm a purpose.",
-            Self::SoulShaper => "Confirm who they are plus values or three traits.",
-            Self::Storyteller => "Confirm lore and a created memory.",
-            Self::TrialWalker => "Answer all three Soul Forge trials.",
-            Self::InstinctKeeper => "Read the constitutional instincts.",
-            Self::PresenceChosen => "Choose a Presence card.",
-            Self::Curator => "Review an imported Markdown document.",
-            Self::FirstLight => "Awaken your Entity.",
-            Self::FirstWords => "Send your first message after awakening.",
-            Self::GettingAcquainted => "Share five messages together.",
-            Self::Kindred => "Share twenty-five messages together.",
-        }
+        self.definition().hint
     }
 
     pub fn xp(self) -> u32 {
-        match self {
-            Self::FirstSpark => 10,
-            Self::Named | Self::Purposeful | Self::InstinctKeeper | Self::PresenceChosen => 20,
-            Self::Curator => 15,
-            Self::Storyteller => 25,
-            Self::SoulShaper | Self::FirstWords => 30,
-            Self::TrialWalker | Self::GettingAcquainted => 40,
-            Self::FirstLight => 50,
-            Self::Kindred => 60,
-        }
+        self.definition().xp
     }
 
-    /// Mentoring milestones are earned after awakening from real conversation.
+    /// Compatibility helper for the three copy-only first quests.
     pub fn mentoring_target(self) -> Option<u64> {
-        match self {
-            Self::FirstWords => Some(1),
-            Self::GettingAcquainted => Some(5),
-            Self::Kindred => Some(25),
-            _ => None,
-        }
+        self.definition()
+            .requirement
+            .filter(|requirement| requirement.metric == JourneyMetric::MentorMessages)
+            .map(|requirement| requirement.target)
     }
 }
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum JourneyMetric {
+    MentorMessages,
+    ConversationSessions,
+    ActiveDays,
+    ActiveWeeks,
+    SuccessfulSkillUses,
+    ConfirmedMemories,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct ActivityRequirement {
+    pub metric: JourneyMetric,
+    pub target: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct BadgeUnlocks {
+    pub palettes: &'static [Palette],
+    pub crests: &'static [Crest],
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct BadgeDefinition {
+    pub badge: Badge,
+    pub title: &'static str,
+    pub hint: &'static str,
+    pub xp: u32,
+    pub requirement: Option<ActivityRequirement>,
+    pub unlocks: BadgeUnlocks,
+}
+
+const fn requirement(metric: JourneyMetric, target: u64) -> Option<ActivityRequirement> {
+    Some(ActivityRequirement { metric, target })
+}
+
+const NO_UNLOCKS: BadgeUnlocks = BadgeUnlocks {
+    palettes: &[],
+    crests: &[],
+};
+
+/// The only source of badge copy, XP, requirements, and cosmetic unlocks.
+pub const BADGE_DEFINITIONS: [BadgeDefinition; 24] = [
+    BadgeDefinition {
+        badge: Badge::FirstSpark,
+        title: "First Spark",
+        hint: "Begin a Genesis creation.",
+        xp: 5,
+        requirement: None,
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::Named,
+        title: "A Name Is Given",
+        hint: "Confirm a name.",
+        xp: 10,
+        requirement: None,
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::Purposeful,
+        title: "A Reason to Be",
+        hint: "Confirm a purpose.",
+        xp: 10,
+        requirement: None,
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::SoulShaper,
+        title: "Soul Shaper",
+        hint: "Confirm who they are plus values or three traits.",
+        xp: 15,
+        requirement: None,
+        unlocks: BadgeUnlocks {
+            palettes: &[Palette::Aurora],
+            crests: &[],
+        },
+    },
+    BadgeDefinition {
+        badge: Badge::Storyteller,
+        title: "Storyteller",
+        hint: "Confirm lore and a created memory.",
+        xp: 15,
+        requirement: None,
+        unlocks: BadgeUnlocks {
+            palettes: &[Palette::Starlight],
+            crests: &[],
+        },
+    },
+    BadgeDefinition {
+        badge: Badge::TrialWalker,
+        title: "Trial Walker",
+        hint: "Answer all three Soul Forge trials.",
+        xp: 15,
+        requirement: None,
+        unlocks: BadgeUnlocks {
+            palettes: &[],
+            crests: &[Crest::Compass],
+        },
+    },
+    BadgeDefinition {
+        badge: Badge::InstinctKeeper,
+        title: "Keeper of Instincts",
+        hint: "Read the constitutional instincts.",
+        xp: 10,
+        requirement: None,
+        unlocks: BadgeUnlocks {
+            palettes: &[],
+            crests: &[Crest::Lantern],
+        },
+    },
+    BadgeDefinition {
+        badge: Badge::PresenceChosen,
+        title: "A Face for the Hearth",
+        hint: "Choose a Presence card.",
+        xp: 10,
+        requirement: None,
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::Curator,
+        title: "Curator",
+        hint: "Review an imported Markdown document.",
+        xp: 10,
+        requirement: None,
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::FirstLight,
+        title: "First Light",
+        hint: "Awaken your Entity.",
+        xp: 20,
+        requirement: None,
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::FirstWords,
+        title: "First Words",
+        hint: "Send your first message after awakening.",
+        xp: 15,
+        requirement: requirement(JourneyMetric::MentorMessages, 1),
+        unlocks: BadgeUnlocks {
+            palettes: &[Palette::Hearth],
+            crests: &[],
+        },
+    },
+    BadgeDefinition {
+        badge: Badge::GettingAcquainted,
+        title: "Getting Acquainted",
+        hint: "Share five messages together.",
+        xp: 25,
+        requirement: requirement(JourneyMetric::MentorMessages, 5),
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::Kindred,
+        title: "Kindred",
+        hint: "Share twenty-five messages together.",
+        xp: 40,
+        requirement: requirement(JourneyMetric::MentorMessages, 25),
+        unlocks: BadgeUnlocks {
+            palettes: &[],
+            crests: &[Crest::Constellation],
+        },
+    },
+    BadgeDefinition {
+        badge: Badge::HearthRegular,
+        title: "Hearth Regular",
+        hint: "Share one hundred messages together.",
+        xp: 80,
+        requirement: requirement(JourneyMetric::MentorMessages, 100),
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::TrustedCompanion,
+        title: "Trusted Companion",
+        hint: "Share five hundred messages together.",
+        xp: 180,
+        requirement: requirement(JourneyMetric::MentorMessages, 500),
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::ReturningCompanion,
+        title: "Returning Companion",
+        hint: "Talk together across five conversations.",
+        xp: 50,
+        requirement: requirement(JourneyMetric::ConversationSessions, 5),
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::SeasonedCompanion,
+        title: "Seasoned Companion",
+        hint: "Talk together across twenty-five conversations.",
+        xp: 120,
+        requirement: requirement(JourneyMetric::ConversationSessions, 25),
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::SteadyRhythm,
+        title: "Steady Rhythm",
+        hint: "Spend time together on seven different days.",
+        xp: 80,
+        requirement: requirement(JourneyMetric::ActiveDays, 7),
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::HearthSeason,
+        title: "Hearth Season",
+        hint: "Spend time together across four different weeks.",
+        xp: 120,
+        requirement: requirement(JourneyMetric::ActiveWeeks, 4),
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::ConstellationKeeper,
+        title: "Constellation Keeper",
+        hint: "Spend time together across twelve different weeks.",
+        xp: 220,
+        requirement: requirement(JourneyMetric::ActiveWeeks, 12),
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::SkillExplorer,
+        title: "Skill Explorer",
+        hint: "Complete five successful skill uses together.",
+        xp: 80,
+        requirement: requirement(JourneyMetric::SuccessfulSkillUses, 5),
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::SkillWeaver,
+        title: "Skill Weaver",
+        hint: "Complete twenty-five successful skill uses together.",
+        xp: 160,
+        requirement: requirement(JourneyMetric::SuccessfulSkillUses, 25),
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::MemoryKeeper,
+        title: "Memory Keeper",
+        hint: "Confirm three lasting memories.",
+        xp: 80,
+        requirement: requirement(JourneyMetric::ConfirmedMemories, 3),
+        unlocks: NO_UNLOCKS,
+    },
+    BadgeDefinition {
+        badge: Badge::LivingArchive,
+        title: "Living Archive",
+        hint: "Confirm fifteen lasting memories.",
+        xp: 180,
+        requirement: requirement(JourneyMetric::ConfirmedMemories, 15),
+        unlocks: NO_UNLOCKS,
+    },
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -220,12 +466,10 @@ impl Palette {
         Self::Hearth,
     ];
     pub fn unlocked_by(self) -> Option<Badge> {
-        match self {
-            Self::Aurora => Some(Badge::SoulShaper),
-            Self::Starlight => Some(Badge::Storyteller),
-            Self::Hearth => Some(Badge::FirstWords),
-            _ => None,
-        }
+        BADGE_DEFINITIONS
+            .iter()
+            .find(|definition| definition.unlocks.palettes.contains(&self))
+            .map(|definition| definition.badge)
     }
 }
 
@@ -251,12 +495,10 @@ impl Crest {
         Self::Constellation,
     ];
     pub fn unlocked_by(self) -> Option<Badge> {
-        match self {
-            Self::Lantern => Some(Badge::InstinctKeeper),
-            Self::Compass => Some(Badge::TrialWalker),
-            Self::Constellation => Some(Badge::Kindred),
-            _ => None,
-        }
+        BADGE_DEFINITIONS
+            .iter()
+            .find(|definition| definition.unlocks.crests.contains(&self))
+            .map(|definition| definition.badge)
     }
 }
 
@@ -496,6 +738,32 @@ fn soul_shaped(d: &EntityDefinition) -> bool {
         && (trait_count(&d.personality) >= 3 || !d.values.is_empty())
 }
 
+/// Monotonic facts reconciled from durable conversation history and validated
+/// Runtime journey events.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct JourneyActivity {
+    pub mentor_messages: u64,
+    pub conversation_sessions: u64,
+    pub active_days: u64,
+    pub active_weeks: u64,
+    pub successful_skill_uses: u64,
+    pub confirmed_memories: u64,
+}
+
+impl JourneyActivity {
+    pub fn metric(self, metric: JourneyMetric) -> u64 {
+        match metric {
+            JourneyMetric::MentorMessages => self.mentor_messages,
+            JourneyMetric::ConversationSessions => self.conversation_sessions,
+            JourneyMetric::ActiveDays => self.active_days,
+            JourneyMetric::ActiveWeeks => self.active_weeks,
+            JourneyMetric::SuccessfulSkillUses => self.successful_skill_uses,
+            JourneyMetric::ConfirmedMemories => self.confirmed_memories,
+        }
+    }
+}
+
 /// Facts the Genesis record cannot know by itself, supplied by Hive.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct QuestSignals {
@@ -536,12 +804,20 @@ pub fn satisfied_badges(session: &GenesisSession, signals: QuestSignals) -> Vec<
 }
 
 pub fn mentoring_badges(mentor_messages: u64) -> Vec<Badge> {
-    Badge::ALL
-        .into_iter()
-        .filter(|badge| {
-            badge
-                .mentoring_target()
-                .is_some_and(|t| mentor_messages >= t)
+    activity_badges(JourneyActivity {
+        mentor_messages,
+        ..Default::default()
+    })
+}
+
+pub fn activity_badges(activity: JourneyActivity) -> Vec<Badge> {
+    BADGE_DEFINITIONS
+        .iter()
+        .filter_map(|definition| {
+            definition
+                .requirement
+                .filter(|requirement| activity.metric(requirement.metric) >= requirement.target)
+                .map(|_| definition.badge)
         })
         .collect()
 }
@@ -555,12 +831,49 @@ pub struct BondLevel {
     pub next_level_at: Option<u32>,
 }
 
-const LEVELS: [(u32, &str); 5] = [
-    (0, "Spark"),
-    (50, "Kindling"),
-    (120, "Ember"),
-    (220, "Hearthfire"),
-    (330, "Beacon"),
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct BondTierDefinition {
+    pub level: u8,
+    pub title: &'static str,
+    pub floor: u32,
+}
+
+pub const BOND_TIER_DEFINITIONS: [BondTierDefinition; 7] = [
+    BondTierDefinition {
+        level: 1,
+        title: "Spark",
+        floor: 0,
+    },
+    BondTierDefinition {
+        level: 2,
+        title: "Kindling",
+        floor: 80,
+    },
+    BondTierDefinition {
+        level: 3,
+        title: "Ember",
+        floor: 180,
+    },
+    BondTierDefinition {
+        level: 4,
+        title: "Hearthfire",
+        floor: 350,
+    },
+    BondTierDefinition {
+        level: 5,
+        title: "Beacon",
+        floor: 600,
+    },
+    BondTierDefinition {
+        level: 6,
+        title: "Constellation",
+        floor: 950,
+    },
+    BondTierDefinition {
+        level: 7,
+        title: "Legacy",
+        floor: 1400,
+    },
 ];
 
 pub fn xp_for(earned: &[Badge]) -> u32 {
@@ -568,16 +881,17 @@ pub fn xp_for(earned: &[Badge]) -> u32 {
 }
 
 pub fn bond_level(xp: u32) -> BondLevel {
-    let index = LEVELS
+    let index = BOND_TIER_DEFINITIONS
         .iter()
-        .rposition(|(floor, _)| xp >= *floor)
+        .rposition(|tier| xp >= tier.floor)
         .unwrap_or(0);
+    let tier = BOND_TIER_DEFINITIONS[index];
     BondLevel {
-        level: index as u8 + 1,
-        title: LEVELS[index].1,
+        level: tier.level,
+        title: tier.title,
         xp,
-        level_floor: LEVELS[index].0,
-        next_level_at: LEVELS.get(index + 1).map(|(floor, _)| *floor),
+        level_floor: tier.floor,
+        next_level_at: BOND_TIER_DEFINITIONS.get(index + 1).map(|next| next.floor),
     }
 }
 
@@ -587,20 +901,24 @@ pub struct BadgeView {
     pub title: &'static str,
     pub hint: &'static str,
     pub xp: u32,
+    pub requirement: Option<ActivityRequirement>,
+    pub unlocks: BadgeUnlocks,
     pub earned_at: Option<String>,
 }
 
 pub fn badge_views(earned: &[EarnedBadge]) -> Vec<BadgeView> {
-    Badge::ALL
-        .into_iter()
-        .map(|badge| BadgeView {
-            badge,
-            title: badge.title(),
-            hint: badge.hint(),
-            xp: badge.xp(),
+    BADGE_DEFINITIONS
+        .iter()
+        .map(|definition| BadgeView {
+            badge: definition.badge,
+            title: definition.title,
+            hint: definition.hint,
+            xp: definition.xp,
+            requirement: definition.requirement,
+            unlocks: definition.unlocks,
             earned_at: earned
                 .iter()
-                .find(|e| e.badge == badge)
+                .find(|e| e.badge == definition.badge)
                 .map(|e| e.earned_at.clone()),
         })
         .collect()
@@ -890,6 +1208,16 @@ pub struct EntityJourney {
     /// Highest observed count; never decreases if history is later cleared.
     #[serde(default)]
     pub mentor_messages: u64,
+    #[serde(default)]
+    pub conversation_sessions: u64,
+    #[serde(default)]
+    pub active_days: u64,
+    #[serde(default)]
+    pub active_weeks: u64,
+    #[serde(default)]
+    pub successful_skill_uses: u64,
+    #[serde(default)]
+    pub confirmed_memories: u64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -903,6 +1231,11 @@ impl EntityJourney {
             genesis_session_id: None,
             earned: vec![],
             mentor_messages: 0,
+            conversation_sessions: 0,
+            active_days: 0,
+            active_weeks: 0,
+            successful_skill_uses: 0,
+            confirmed_memories: 0,
             created_at: now.into(),
             updated_at: now.into(),
         }
@@ -918,9 +1251,25 @@ impl EntityJourney {
         validate_earned(&self.earned)
     }
 
-    /// Merges creation badges and the latest mentoring count. Returns whether
+    pub fn activity(&self) -> JourneyActivity {
+        JourneyActivity {
+            mentor_messages: self.mentor_messages,
+            conversation_sessions: self.conversation_sessions,
+            active_days: self.active_days,
+            active_weeks: self.active_weeks,
+            successful_skill_uses: self.successful_skill_uses,
+            confirmed_memories: self.confirmed_memories,
+        }
+    }
+
+    /// Merges creation badges and the latest durable activity. Returns whether
     /// anything changed so callers only write when needed.
-    pub fn observe(&mut self, creation: &[EarnedBadge], mentor_messages: u64, now: &str) -> bool {
+    pub fn observe(
+        &mut self,
+        creation: &[EarnedBadge],
+        activity: JourneyActivity,
+        now: &str,
+    ) -> bool {
         let mut changed = false;
         for item in creation {
             if !self.earned.iter().any(|e| e.badge == item.badge) {
@@ -928,12 +1277,22 @@ impl EntityJourney {
                 changed = true;
             }
         }
-        if mentor_messages > self.mentor_messages {
-            self.mentor_messages = mentor_messages;
-            changed = true;
+        macro_rules! observe_max {
+            ($field:ident) => {
+                if activity.$field > self.$field {
+                    self.$field = activity.$field;
+                    changed = true;
+                }
+            };
         }
+        observe_max!(mentor_messages);
+        observe_max!(conversation_sessions);
+        observe_max!(active_days);
+        observe_max!(active_weeks);
+        observe_max!(successful_skill_uses);
+        observe_max!(confirmed_memories);
         let mut satisfied = vec![Badge::FirstLight];
-        satisfied.extend(mentoring_badges(self.mentor_messages));
+        satisfied.extend(activity_badges(self.activity()));
         changed |= !award(&mut self.earned, &satisfied, now).is_empty();
         if changed {
             self.updated_at = now.into();

@@ -2,14 +2,18 @@ import { resolveHiveConnection } from "./connection";
 import { genesisRequest } from "./genesisClient";
 
 export type QuestStageId = "reservation" | "soul" | "ethics" | "instincts" | "presence" | "birth" | "awakening";
-export type BadgeId = "first_spark" | "named" | "purposeful" | "soul_shaper" | "storyteller" | "trial_walker" | "instinct_keeper" | "presence_chosen" | "curator" | "first_light" | "first_words" | "getting_acquainted" | "kindred";
+export type BadgeId = "first_spark" | "named" | "purposeful" | "soul_shaper" | "storyteller" | "trial_walker" | "instinct_keeper" | "presence_chosen" | "curator" | "first_light" | "first_words" | "getting_acquainted" | "kindred" | "hearth_regular" | "trusted_companion" | "returning_companion" | "seasoned_companion" | "steady_rhythm" | "hearth_season" | "constellation_keeper" | "skill_explorer" | "skill_weaver" | "memory_keeper" | "living_archive";
+export type JourneyMetric = "mentor_messages" | "conversation_sessions" | "active_days" | "active_weeks" | "successful_skill_uses" | "confirmed_memories";
 export type Temperament = "gentle" | "curious" | "direct" | "playful" | "steady";
 export type Palette = "aether" | "ember" | "lumen" | "tide" | "aurora" | "starlight" | "hearth";
 export type Crest = "orbit" | "bloom" | "wave" | "lantern" | "compass" | "constellation";
 export type Motion = "calm" | "lively" | "still";
 
 export interface BondLevel { level: number; title: string; xp: number; level_floor: number; next_level_at: number | null }
-export interface BadgeView { badge: BadgeId; title: string; hint: string; xp: number; earned_at: string | null }
+export interface ActivityRequirement { metric: JourneyMetric; target: number }
+export interface BadgeDefinition { badge: BadgeId; title: string; hint: string; xp: number; requirement: ActivityRequirement | null; unlocks: { palettes: Palette[]; crests: Crest[] } }
+export interface BadgeView extends BadgeDefinition { earned_at: string | null }
+export interface BondTierDefinition { level: number; title: string; floor: number }
 export interface Unlocks { palettes: Palette[]; crests: Crest[] }
 export interface PresenceChoice { temperament: Temperament; identity: Palette; crest: Crest; motion: Motion }
 export interface PresenceCard extends PresenceChoice { name: string; purpose: string; boundaries: string }
@@ -24,7 +28,7 @@ export interface TemperamentCard { id: string; title: string; temperament: Tempe
 export interface Trial { id: string; title: string; description: string; choices: { id: string; label: string; description: string }[] }
 export interface QuestCatalog {
   stages: { stage: QuestStageId; title: string; summary: string; optional: boolean }[];
-  badges: BadgeView[]; temperament_cards: TemperamentCard[]; trials: Trial[]; instincts: string;
+  badges: BadgeDefinition[]; tiers: BondTierDefinition[]; temperament_cards: TemperamentCard[]; trials: Trial[]; instincts: string;
   palettes: { palette: Palette; unlocked_by: BadgeId | null }[];
   crests: { crest: Crest; unlocked_by: BadgeId | null }[];
 }
@@ -32,7 +36,8 @@ export interface FirstQuest { id: string; title: string; prompt: string; milesto
 export interface CertificateView { archetype: string; epithet: string; sigil: string; birth_path: string; scoring_version: string; issued_at_utc: string; signature_verified: boolean }
 export interface EntityJourney {
   entity_id: string; name: string; level: BondLevel; badges: BadgeView[]; mentor_messages: number;
-  next_milestone: { badge: BadgeId; title: string; target: number; progress: number } | null;
+  conversation_sessions: number; active_days: number; active_weeks: number; successful_skill_uses: number; confirmed_memories: number;
+  next_milestone: { badge: BadgeId; title: string; metric: JourneyMetric; target: number; progress: number } | null;
   unlocked: Unlocks; first_quests: FirstQuest[]; presence: PresenceCard | null; certificate: CertificateView | null;
 }
 

@@ -65,6 +65,20 @@ async fn record(state: EntityDaemonState, action: EgoActionPayload) {
                     "model_used": response.model_used.clone(),
                 }),
             );
+            for tool in response
+                .tool_calls_made
+                .iter()
+                .filter(|record| record.success)
+            {
+                let _ = state.queue_outbox_record(
+                    "skill_used",
+                    serde_json::json!({
+                        "session_id": action.session_id.clone(),
+                        "skill_id": tool.skill_id.clone(),
+                        "tool_name": tool.tool_name.clone(),
+                    }),
+                );
+            }
 
             state.maybe_auto_archive();
 

@@ -220,7 +220,7 @@ describe("Genesis creation workflow", () => {
 
   it("offers Meet only after awakening and celebrates the first awakening", async () => {
     vi.mocked(getEntityJourney).mockRejectedValue(new Error("offline"));
-    vi.mocked(getQuestCatalog).mockResolvedValue({ stages: [], badges: [], temperament_cards: [], trials: [], palettes: [], crests: [], instincts: "" });
+    vi.mocked(getQuestCatalog).mockResolvedValue({ stages: [], badges: [], tiers: [], temperament_cards: [], trials: [], palettes: [], crests: [], instincts: "" });
     saved.definition.entity_id = "allocated";
     saved.state = "review";
     saved.quest = questFixture();

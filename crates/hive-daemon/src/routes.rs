@@ -1097,17 +1097,30 @@ pub async fn sync_runtime_outbox(
     Extension(principal): Extension<Principal>,
     Json(body): Json<OutboxSyncRequest>,
 ) -> (StatusCode, Json<ApiEnvelope<OutboxSyncResponse>>) {
-    if !presents_lease(&principal, &body.lease_id) {
-        return forbidden_runtime();
-    }
-    let response = match state.runtime_control.lock() {
-        Ok(mut control) => match control
-            .sync_outbox(body, |payload| state.identity_manager.sign_payload(payload))
-        {
-            Ok(response) => Json(ApiEnvelope::success(response)),
-            Err(e) => Json(ApiEnvelope::error(e)),
+    let entity_id = match &principal {
+        Principal::Runtime {
+            lease_id,
+            entity_id,
+        } if lease_id == &body.lease_id => entity_id.clone(),
+        _ => return forbidden_runtime(),
+    };
+    let records = body.records.clone();
+    let synced = match state.runtime_control.lock() {
+        Ok(mut control) => {
+            control.sync_outbox(body, |payload| state.identity_manager.sign_payload(payload))
+        }
+        Err(error) => Err(error.to_string()),
+    };
+    let response = match synced {
+        Ok(response) => match state.journeys.record_runtime_events(
+            crate::genesis_http::OWNER,
+            &entity_id,
+            &records,
+        ) {
+            Ok(_) => Json(ApiEnvelope::success(response)),
+            Err(error) => Json(ApiEnvelope::error(error.to_string())),
         },
-        Err(e) => Json(ApiEnvelope::error(e.to_string())),
+        Err(error) => Json(ApiEnvelope::error(error)),
     };
     (StatusCode::OK, response)
 }

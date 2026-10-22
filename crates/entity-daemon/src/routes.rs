@@ -764,15 +764,15 @@ pub async fn memory_insert(
 
     match state.memory.insert_memory(&memory) {
         Ok(()) => {
-            let _ = state.queue_outbox_record(
-                "memory_insert",
-                serde_json::json!({
-                    "id": entry.id.clone(),
-                    "content": entry.content.clone(),
-                    "weight": entry.weight.clone(),
-                    "created_at": entry.created_at.clone(),
-                }),
-            );
+            if entry.weight != "ephemeral" {
+                let _ = state.queue_outbox_record(
+                    "memory_confirmed",
+                    serde_json::json!({
+                        "memory_id": entry.id.clone(),
+                        "memory_weight": entry.weight.clone(),
+                    }),
+                );
+            }
             if let Some(ref hook) = state.memory_hook {
                 if let Err(e) = hook.on_memory_persisted(
                     &entry.id,

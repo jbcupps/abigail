@@ -7,22 +7,26 @@
 //! `docs/` folder that runtimes read for their system prompt.
 
 use crate::{genesis_http::OWNER, state::HiveDaemonState};
-use abigail_persistence::{EntityScope, PersistenceHandle};
+use abigail_persistence::{EntityScope, PersistenceHandle, QueryBinding};
 use anyhow::{anyhow, bail, Context, Result};
 use axum::{
     extract::{Path, State},
     Json,
 };
+use chrono::Datelike;
 use hive_core::genesis::{EntityDefinition, GenesisSession};
 use hive_core::genesis_quest::*;
 use hive_core::{ApiEnvelope, BirthCertificate, BirthCertificateSummary};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::io::Read;
 use std::sync::Mutex;
 
 const JOURNEY_TABLE: &str = "entity_journey";
+const JOURNEY_EVENT_TABLE: &str = "entity_journey_event";
 const PRESENCE_FILE: &str = "presence.json";
 const MAX_PRESENCE_BYTES: usize = 32 * 1024;
+const MAX_EVENT_IDENTIFIER_BYTES: usize = 160;
 
 pub struct JourneyStore {
     handle: PersistenceHandle,
@@ -37,6 +41,41 @@ struct JourneyRecord {
     payload: String,
 }
 
+/// Closed persistence shape constructed only after Runtime metadata validation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct JourneyEventRecord {
+    record_id: String,
+    owner_id: String,
+    entity_id: String,
+    kind: String,
+    occurred_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skill_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    memory_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    memory_weight: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SkillUsedMetadata {
+    session_id: String,
+    skill_id: String,
+    tool_name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MemoryConfirmedMetadata {
+    memory_id: String,
+    memory_weight: String,
+}
+
 impl JourneyStore {
     pub fn new(handle: PersistenceHandle) -> Result<Self> {
         if handle.scope() != &EntityScope::Hive {
@@ -48,6 +87,14 @@ impl JourneyStore {
             &serde_json::json!({
                 "schema_version": JOURNEY_SCHEMA_VERSION,
                 "description": "Owner-scoped Entity journeys: earned badges and mentoring milestones"
+            }),
+        )?;
+        handle.upsert(
+            "migration_log",
+            "entity_journey_event_v1",
+            &serde_json::json!({
+                "schema_version": 1,
+                "description": "Owner-scoped redacted journey activity metadata"
             }),
         )?;
         Ok(Self {
@@ -76,6 +123,19 @@ impl JourneyStore {
         Ok(Some(journey))
     }
 
+    fn save(&self, journey: &EntityJourney) -> Result<()> {
+        self.handle.upsert(
+            JOURNEY_TABLE,
+            &journey.entity_id,
+            &JourneyRecord {
+                entity_id: journey.entity_id.clone(),
+                owner_id: journey.owner_id.clone(),
+                payload: serde_json::to_string(journey)?,
+            },
+        )?;
+        Ok(())
+    }
+
     /// Loads (or starts) a journey, applies `change`, and writes only when it
     /// reports a change. Serialized so concurrent awards cannot lose a badge.
     pub fn update<F>(
@@ -100,23 +160,171 @@ impl JourneyStore {
         let mut journey = existing.unwrap_or_else(|| EntityJourney::new(entity_id, owner_id, now));
         if change(&mut journey) || !existed {
             journey.validate().map_err(|e| anyhow!(e))?;
-            self.handle.upsert(
-                JOURNEY_TABLE,
-                entity_id,
-                &JourneyRecord {
-                    entity_id: entity_id.into(),
-                    owner_id: owner_id.into(),
-                    payload: serde_json::to_string(&journey)?,
-                },
-            )?;
+            self.save(&journey)?;
         }
         Ok(journey)
+    }
+
+    /// Persist recognized metadata-only Runtime events. The outbox record ID
+    /// is the durable table key, so a retried sync cannot increment twice.
+    pub fn record_runtime_events(
+        &self,
+        owner_id: &str,
+        entity_id: &str,
+        records: &[hive_core::EntityOutboxRecord],
+    ) -> Result<EntityJourney> {
+        validate_entity_id(entity_id)?;
+        validate_event_identifier(owner_id, "owner ID")?;
+        let _lock = self
+            .writes
+            .lock()
+            .map_err(|_| anyhow!("Entity journey lock unavailable"))?;
+        let existing = self.load(owner_id, entity_id)?;
+        let existed = self.handle.record_exists(JOURNEY_TABLE, entity_id)?;
+        if existed && existing.is_none() {
+            bail!("This Entity journey belongs to another household");
+        }
+        let mut journey =
+            existing.unwrap_or_else(|| EntityJourney::new(entity_id, owner_id, &now_utc()));
+
+        for record in records {
+            if record.entity_id != entity_id {
+                bail!("Runtime outbox record belongs to another Entity");
+            }
+            let Some(event) = journey_event(owner_id, entity_id, record)? else {
+                continue;
+            };
+            match self
+                .handle
+                .select_record::<JourneyEventRecord>(JOURNEY_EVENT_TABLE, &record.record_id)?
+            {
+                Some(saved) if saved == event => {}
+                Some(_) => bail!("Runtime outbox record ID conflicts with a saved journey event"),
+                None => {
+                    self.handle
+                        .upsert(JOURNEY_EVENT_TABLE, &record.record_id, &event)?;
+                }
+            }
+        }
+
+        let activity = self.event_activity_unlocked(owner_id, entity_id)?;
+        let now = now_utc();
+        let changed = journey.observe(&[], activity, &now);
+        if changed || !existed {
+            journey.validate().map_err(|e| anyhow!(e))?;
+            self.save(&journey)?;
+        }
+        Ok(journey)
+    }
+
+    pub fn event_activity(&self, owner_id: &str, entity_id: &str) -> Result<JourneyActivity> {
+        validate_entity_id(entity_id)?;
+        validate_event_identifier(owner_id, "owner ID")?;
+        let _lock = self
+            .writes
+            .lock()
+            .map_err(|_| anyhow!("Entity journey lock unavailable"))?;
+        self.event_activity_unlocked(owner_id, entity_id)
+    }
+
+    fn event_activity_unlocked(&self, owner_id: &str, entity_id: &str) -> Result<JourneyActivity> {
+        let rows = self.handle.query_vec::<JourneyEventRecord>(
+            "SELECT * FROM entity_journey_event WHERE owner_id = $owner_id AND entity_id = $entity_id",
+            &[
+                QueryBinding::new("owner_id", owner_id)?,
+                QueryBinding::new("entity_id", entity_id)?,
+            ],
+        )?;
+        let mut activity = JourneyActivity::default();
+        for row in rows {
+            if row.owner_id != owner_id || row.entity_id != entity_id {
+                bail!("Saved journey event ownership does not match its scope");
+            }
+            match row.kind.as_str() {
+                "skill_used" => activity.successful_skill_uses += 1,
+                "memory_confirmed" => activity.confirmed_memories += 1,
+                _ => bail!("Saved journey event has an unsupported kind"),
+            }
+        }
+        Ok(activity)
     }
 }
 
 fn validate_entity_id(id: &str) -> Result<()> {
     uuid::Uuid::parse_str(id).map_err(|_| anyhow!("Invalid Entity ID"))?;
     Ok(())
+}
+
+fn validate_event_identifier(value: &str, label: &str) -> Result<()> {
+    if value.is_empty()
+        || value.len() > MAX_EVENT_IDENTIFIER_BYTES
+        || !value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':'))
+    {
+        bail!("Invalid {label}");
+    }
+    Ok(())
+}
+
+fn journey_event(
+    owner_id: &str,
+    entity_id: &str,
+    record: &hive_core::EntityOutboxRecord,
+) -> Result<Option<JourneyEventRecord>> {
+    if !matches!(record.kind.as_str(), "skill_used" | "memory_confirmed") {
+        return Ok(None);
+    }
+    uuid::Uuid::parse_str(&record.record_id)
+        .map_err(|_| anyhow!("Invalid Runtime outbox record ID"))?;
+    if record.created_at_utc.len() > 64
+        || chrono::DateTime::parse_from_rfc3339(&record.created_at_utc).is_err()
+    {
+        bail!("Invalid Runtime outbox timestamp");
+    }
+    let mut event = JourneyEventRecord {
+        record_id: record.record_id.clone(),
+        owner_id: owner_id.to_string(),
+        entity_id: entity_id.to_string(),
+        kind: record.kind.clone(),
+        occurred_at: record.created_at_utc.clone(),
+        session_id: None,
+        skill_id: None,
+        tool_name: None,
+        memory_id: None,
+        memory_weight: None,
+    };
+    match record.kind.as_str() {
+        "skill_used" => {
+            let metadata: SkillUsedMetadata = serde_json::from_value(record.payload.clone())
+                .context("Invalid skill journey metadata")?;
+            validate_event_identifier(&metadata.session_id, "session ID")?;
+            validate_event_identifier(&metadata.skill_id, "skill ID")?;
+            validate_event_identifier(&metadata.tool_name, "tool name")?;
+            event.session_id = Some(metadata.session_id);
+            event.skill_id = Some(metadata.skill_id);
+            event.tool_name = Some(metadata.tool_name);
+        }
+        "memory_confirmed" => {
+            let metadata: MemoryConfirmedMetadata = serde_json::from_value(record.payload.clone())
+                .context("Invalid memory journey metadata")?;
+            validate_event_identifier(&metadata.memory_id, "memory ID")?;
+            if !matches!(
+                metadata.memory_weight.as_str(),
+                "distilled" | "crystallized"
+            ) {
+                bail!("Invalid confirmed memory weight");
+            }
+            event.memory_id = Some(metadata.memory_id);
+            event.memory_weight = Some(metadata.memory_weight);
+        }
+        _ => unreachable!("unknown kinds return before metadata parsing"),
+    }
+    Ok(Some(event))
+}
+
+fn now_utc() -> String {
+    chrono::Utc::now().to_rfc3339()
 }
 
 /// Called after a successful Genesis awakening: copy creation badges into the
@@ -131,31 +339,49 @@ pub fn record_awakening(state: &HiveDaemonState, session: &GenesisSession) -> Re
         .update(OWNER, entity_id, &now, |journey| {
             let linked = journey.genesis_session_id.as_deref() != Some(&session.id);
             journey.genesis_session_id = Some(session.id.clone());
-            journey.observe(&session.quest.earned, 0, &now) || linked
+            journey.observe(&session.quest.earned, JourneyActivity::default(), &now) || linked
         })
         .map(|_| ())
         .map_err(|e| e.to_string())
 }
 
-/// Recent turns scanned for milestones: far above the highest target, and the
-/// journey keeps the highest count ever observed.
-const MILESTONE_WINDOW: usize = 500;
-
-/// Messages the mentor has sent this Entity. Hive owns the embedded store, so
-/// this reads the Entity's own scoped conversation turns, never another's.
-fn mentor_messages(state: &HiveDaemonState, entity_id: &str) -> Result<u64, String> {
+/// Full durable conversation facts for this Entity. Only identifiers and UTC
+/// calendar buckets leave this function; conversation text is never copied.
+fn conversation_activity(
+    state: &HiveDaemonState,
+    entity_id: &str,
+) -> Result<JourneyActivity, String> {
     let config = state.identity_manager.load_agent(entity_id)?;
     if !config.birth_complete {
-        return Ok(0);
+        return Ok(JourneyActivity::default());
     }
     let memory =
         abigail_memory::MemoryStore::open_with_config(&config).map_err(|e| e.to_string())?;
-    Ok(memory
-        .recent_turns_all_sessions(MILESTONE_WINDOW)
-        .map_err(|e| e.to_string())?
-        .iter()
-        .filter(|turn| turn.role == "user")
-        .count() as u64)
+    let turns = memory.all_turns().map_err(|e| e.to_string())?;
+    Ok(summarize_conversations(&turns))
+}
+
+fn summarize_conversations(turns: &[abigail_memory::ConversationTurn]) -> JourneyActivity {
+    let mut turn_ids = HashSet::new();
+    let mut sessions = HashSet::new();
+    let mut days = HashSet::new();
+    let mut weeks = HashSet::new();
+    for turn in turns.iter().filter(|turn| turn.role == "user") {
+        if !turn_ids.insert(turn.id.as_str()) {
+            continue;
+        }
+        sessions.insert(turn.session_id.as_str());
+        days.insert(turn.created_at.date_naive());
+        let week = turn.created_at.iso_week();
+        weeks.insert((week.year(), week.week()));
+    }
+    JourneyActivity {
+        mentor_messages: turn_ids.len() as u64,
+        conversation_sessions: sessions.len() as u64,
+        active_days: days.len() as u64,
+        active_weeks: weeks.len() as u64,
+        ..Default::default()
+    }
 }
 
 fn registered_name(state: &HiveDaemonState, entity_id: &str) -> Result<String, String> {
@@ -242,6 +468,7 @@ fn certificate(state: &HiveDaemonState, entity_id: &str) -> Option<BirthCertific
 struct Milestone {
     badge: Badge,
     title: &'static str,
+    metric: JourneyMetric,
     target: u64,
     progress: u64,
 }
@@ -253,6 +480,11 @@ struct JourneyView {
     level: BondLevel,
     badges: Vec<BadgeView>,
     mentor_messages: u64,
+    conversation_sessions: u64,
+    active_days: u64,
+    active_weeks: u64,
+    successful_skill_uses: u64,
+    confirmed_memories: u64,
     next_milestone: Option<Milestone>,
     unlocked: Unlocks,
     first_quests: Vec<FirstQuest>,
@@ -275,7 +507,13 @@ fn journey_view(state: &HiveDaemonState, entity_id: &str) -> Result<serde_json::
     validate_entity_id(entity_id).map_err(|e| e.to_string())?;
     let name = registered_name(state, entity_id)?;
     let born = state.identity_manager.load_agent(entity_id)?.birth_complete;
-    let messages = mentor_messages(state, entity_id)?;
+    let mut activity = conversation_activity(state, entity_id)?;
+    let event_activity = state
+        .journeys
+        .event_activity(OWNER, entity_id)
+        .map_err(|e| e.to_string())?;
+    activity.successful_skill_uses = event_activity.successful_skill_uses;
+    activity.confirmed_memories = event_activity.confirmed_memories;
     let now = chrono::Utc::now().to_rfc3339();
     let journey = if born {
         // Self-heals a journey whose awakening record could not be written.
@@ -300,7 +538,7 @@ fn journey_view(state: &HiveDaemonState, entity_id: &str) -> Result<serde_json::
                 if let Some(session) = &linked {
                     journey.genesis_session_id = Some(session.id.clone());
                 }
-                journey.observe(&creation, messages, &now) || relink
+                journey.observe(&creation, activity, &now) || relink
             })
             .map_err(|e| e.to_string())?
     } else {
@@ -312,13 +550,16 @@ fn journey_view(state: &HiveDaemonState, entity_id: &str) -> Result<serde_json::
     };
     let earned = journey.earned_badges();
     let presence = load_presence(state, entity_id)?;
-    let next_milestone = Badge::ALL.into_iter().find_map(|badge| {
-        let target = badge.mentoring_target()?;
-        (journey.mentor_messages < target).then_some(Milestone {
-            badge,
-            title: badge.title(),
-            target,
-            progress: journey.mentor_messages,
+    let journey_activity = journey.activity();
+    let next_milestone = BADGE_DEFINITIONS.iter().find_map(|definition| {
+        let requirement = definition.requirement?;
+        let progress = journey_activity.metric(requirement.metric);
+        (progress < requirement.target).then_some(Milestone {
+            badge: definition.badge,
+            title: definition.title,
+            metric: requirement.metric,
+            target: requirement.target,
+            progress,
         })
     });
     let view = JourneyView {
@@ -332,6 +573,11 @@ fn journey_view(state: &HiveDaemonState, entity_id: &str) -> Result<serde_json::
         level: bond_level(xp_for(&earned)),
         badges: badge_views(&journey.earned),
         mentor_messages: journey.mentor_messages,
+        conversation_sessions: journey.conversation_sessions,
+        active_days: journey.active_days,
+        active_weeks: journey.active_weeks,
+        successful_skill_uses: journey.successful_skill_uses,
+        confirmed_memories: journey.confirmed_memories,
         next_milestone,
         unlocked: unlocks(&earned),
         presence,
