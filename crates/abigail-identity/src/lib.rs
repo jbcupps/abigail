@@ -1693,6 +1693,119 @@ mod tests {
         let _ = std::fs::remove_dir_all(manager.data_root());
     }
 
+    fn assert_registered_with_complete_receipt(
+        manager: &IdentityManager,
+        agent_id: &str,
+        creation_key: &str,
+    ) {
+        let memory = manager.global_config.read().unwrap();
+        assert!(memory.find_agent(agent_id).is_some());
+        assert_eq!(
+            memory.creation_attempts[creation_key].state,
+            abigail_core::AgentCreationState::Complete
+        );
+        drop(memory);
+        let disk = GlobalConfig::load(manager.data_root()).unwrap();
+        assert!(disk.find_agent(agent_id).is_some());
+        assert_eq!(
+            disk.creation_attempts[creation_key].state,
+            abigail_core::AgentCreationState::Complete
+        );
+    }
+
+    #[test]
+    fn archive_missing_source_keeps_registry_and_receipt_unchanged() {
+        let manager = test_manager();
+        let creation_key = Uuid::new_v4().to_string();
+        let (agent_id, agent_dir) = manager
+            .create_agent_idempotent("Missing archive source", &creation_key)
+            .unwrap();
+        std::fs::remove_dir_all(agent_dir).unwrap();
+
+        assert!(manager.archive_agent(&agent_id).is_err());
+        assert_registered_with_complete_receipt(&manager, &agent_id, &creation_key);
+        let _ = std::fs::remove_dir_all(manager.data_root());
+    }
+
+    #[test]
+    fn archive_destination_collision_keeps_source_registry_and_receipt() {
+        let manager = test_manager();
+        let creation_key = Uuid::new_v4().to_string();
+        let (agent_id, agent_dir) = manager
+            .create_agent_idempotent("Collision", &creation_key)
+            .unwrap();
+        let timestamp = "20261022_010203";
+        let destination = manager
+            .data_root()
+            .join("backups")
+            .join(format!("{timestamp}_Collision"));
+        std::fs::create_dir_all(&destination).unwrap();
+        std::fs::write(destination.join("existing"), b"do not replace").unwrap();
+
+        let result = manager.archive_agent_transaction(
+            &agent_id,
+            timestamp,
+            |source, destination| std::fs::rename(source, destination),
+            |next| next.save(manager.data_root()).map_err(|error| error.to_string()),
+        );
+        assert!(result.is_err());
+        assert!(agent_dir.is_dir());
+        assert!(destination.join("existing").is_file());
+        assert_registered_with_complete_receipt(&manager, &agent_id, &creation_key);
+        let _ = std::fs::remove_dir_all(manager.data_root());
+    }
+
+    #[test]
+    fn archive_rename_failure_keeps_registry_and_receipt_unchanged() {
+        let manager = test_manager();
+        let creation_key = Uuid::new_v4().to_string();
+        let (agent_id, agent_dir) = manager
+            .create_agent_idempotent("Rename failure", &creation_key)
+            .unwrap();
+        let result = manager.archive_agent_transaction(
+            &agent_id,
+            "20261022_010204",
+            |_, _| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "injected rename failure",
+                ))
+            },
+            |_| panic!("registry save must not run after rename failure"),
+        );
+
+        assert!(result.is_err());
+        assert!(agent_dir.is_dir());
+        assert_registered_with_complete_receipt(&manager, &agent_id, &creation_key);
+        let _ = std::fs::remove_dir_all(manager.data_root());
+    }
+
+    #[test]
+    fn archive_config_save_failure_rolls_move_back_before_releasing_registry_guard() {
+        let manager = test_manager();
+        let creation_key = Uuid::new_v4().to_string();
+        let (agent_id, agent_dir) = manager
+            .create_agent_idempotent("Save rollback", &creation_key)
+            .unwrap();
+        let timestamp = "20261022_010205";
+        let destination = manager
+            .data_root()
+            .join("backups")
+            .join(format!("{timestamp}_Save_rollback"));
+        let result = manager.archive_agent_transaction(
+            &agent_id,
+            timestamp,
+            |source, destination| std::fs::rename(source, destination),
+            |_| Err("injected config-save failure".into()),
+        );
+
+        assert!(result.is_err());
+        assert!(agent_dir.is_dir(), "the source move must be rolled back");
+        assert!(!destination.exists(), "rollback must remove the archive path");
+        assert_registered_with_complete_receipt(&manager, &agent_id, &creation_key);
+        let _ = std::fs::remove_dir_all(manager.data_root());
+    }
+
     #[test]
     fn bootstrap_creates_immortal_hive_entity() {
         let tmp = std::env::temp_dir().join(format!("abigail_identity_hive_{}", Uuid::new_v4()));
