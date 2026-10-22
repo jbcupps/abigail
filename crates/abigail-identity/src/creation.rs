@@ -145,11 +145,7 @@ impl IdentityManager {
                 "This creation key belongs to a different Entity name.".into(),
             ));
         }
-        if record
-            .request_fingerprint
-            .as_deref()
-            .is_some_and(|stored| Some(stored) != fingerprint)
-        {
+        if record.request_fingerprint.as_deref() != fingerprint {
             return Err(AgentCreationError::Conflict(
                 "This creation key belongs to different original creation input.".into(),
             ));
@@ -294,6 +290,18 @@ impl IdentityManager {
         if record.state == AgentCreationState::Unavailable {
             return Ok(());
         }
+        if record.state != AgentCreationState::Reserved {
+            return Err(AgentCreationError::Storage(
+                "Only an unfinished Entity creation reservation can be abandoned.".into(),
+            ));
+        }
+        if !Uuid::parse_str(&record.entity_id)
+            .is_ok_and(|uuid| uuid.to_string() == record.entity_id)
+        {
+            return Err(AgentCreationError::Storage(
+                "Creation reservation contains an invalid entity ID.".into(),
+            ));
+        }
         if config.find_agent(&record.entity_id).is_some() {
             return Err(AgentCreationError::Storage(
                 "A registered Entity must be deleted before retiring its creation receipt.".into(),
@@ -324,7 +332,7 @@ impl IdentityManager {
 #[cfg(test)]
 mod tests {
     use crate::{AgentCreationError, AgentCreationStatus, IdentityManager};
-    use abigail_core::global_config::AgentCreationState;
+    use abigail_core::global_config::{AgentCreationRecord, AgentCreationState};
     use abigail_core::GlobalConfig;
     use ed25519_dalek::SigningKey;
     use std::collections::HashSet;
@@ -474,6 +482,84 @@ mod tests {
             manager.reserve_agent_creation("Signal", &key, Some("seed-b")),
             Err(AgentCreationError::Conflict(_))
         ));
+    }
+
+    #[test]
+    fn none_and_some_fingerprints_conflict_exactly() {
+        let root = TestRoot::new();
+        let key = Uuid::new_v4().to_string();
+        let manager = root.manager();
+        manager
+            .reserve_agent_creation("Legacy", &key, None)
+            .unwrap();
+        assert!(matches!(
+            manager.reserve_agent_creation("Legacy", &key, Some("sha256:new-protocol")),
+            Err(AgentCreationError::Conflict(_))
+        ));
+        assert!(
+            manager.global_config.read().unwrap().creation_attempts[&key]
+                .request_fingerprint
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn abandon_refuses_complete_damaged_receipt_and_preserves_all_files() {
+        let root = TestRoot::new();
+        let key = Uuid::new_v4().to_string();
+        let manager = root.manager();
+        let (entity_id, directory) = manager
+            .create_agent_idempotent("Possibly born", &key)
+            .unwrap();
+        let sentinel = directory.join("docs").join("keep-me");
+        std::fs::write(&sentinel, b"irreplaceable").unwrap();
+        {
+            let mut config = manager.global_config.write().unwrap();
+            config.remove_agent(&entity_id);
+            config.save(&root.0).unwrap();
+        }
+
+        assert!(matches!(
+            manager.entity_creation_status(&key).unwrap(),
+            AgentCreationStatus::Unavailable { .. }
+        ));
+        assert!(manager.abandon_agent_creation(&key).is_err());
+        assert_eq!(std::fs::read(&sentinel).unwrap(), b"irreplaceable");
+        assert_eq!(
+            GlobalConfig::load(&root.0).unwrap().creation_attempts[&key].state,
+            AgentCreationState::Complete
+        );
+    }
+
+    #[test]
+    fn abandon_rejects_malformed_stored_uuid_before_path_resolution() {
+        let root = TestRoot::new();
+        let key = Uuid::new_v4().to_string();
+        let manager = root.manager();
+        std::fs::create_dir_all(manager.identities_dir()).unwrap();
+        let outside = root.0.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("keep-me"), b"safe").unwrap();
+        {
+            let mut config = manager.global_config.write().unwrap();
+            config.creation_attempts.insert(
+                key.clone(),
+                AgentCreationRecord {
+                    name: "Malformed".into(),
+                    entity_id: "../outside".into(),
+                    request_fingerprint: None,
+                    state: AgentCreationState::Reserved,
+                },
+            );
+            config.save(&root.0).unwrap();
+        }
+
+        assert!(manager.abandon_agent_creation(&key).is_err());
+        assert_eq!(std::fs::read(outside.join("keep-me")).unwrap(), b"safe");
+        assert_eq!(
+            GlobalConfig::load(&root.0).unwrap().creation_attempts[&key].state,
+            AgentCreationState::Reserved
+        );
     }
 
     #[test]

@@ -348,27 +348,33 @@ pub(crate) fn delete_genesis_record_unlocked(
     id: &str,
 ) -> Result<bool, String> {
     let mut draft = session(state, id)?;
-    let retire_key = if draft.awakening.is_none() {
-        draft.creation_seed.clone()
-    } else {
-        None
-    };
-    if let Some(seed) = &retire_key {
-        let status = state
+    let creation_status = if draft.awakening.is_none()
+        && uuid::Uuid::parse_str(&draft.id).is_ok_and(|id| id.to_string() == draft.id)
+    {
+        let mut status = state
             .identity_manager
             .entity_creation_status(&draft.id)
             .map_err(|error| error.to_string())?;
-        if !matches!(
-            status,
-            abigail_identity::AgentCreationStatus::Unavailable { .. }
-        ) {
-            let fingerprint = seed.fingerprint()?;
-            state
-                .identity_manager
-                .reserve_agent_creation(&seed.name, &draft.id, Some(&fingerprint))
-                .map_err(|error| error.to_string())?;
+        if let Some(seed) = &draft.creation_seed {
+            if !matches!(
+                status,
+                abigail_identity::AgentCreationStatus::Unavailable { .. }
+            ) {
+                let fingerprint = seed.fingerprint()?;
+                status = state
+                    .identity_manager
+                    .reserve_agent_creation(&seed.name, &draft.id, Some(&fingerprint))
+                    .map_err(|error| error.to_string())?;
+            }
         }
-    }
+        Some(status)
+    } else {
+        None
+    };
+    let abandon_reserved_receipt = matches!(
+        creation_status,
+        Some(abigail_identity::AgentCreationStatus::Reserved { .. })
+    );
     let linked_entity =
         draft
             .definition
@@ -445,7 +451,7 @@ pub(crate) fn delete_genesis_record_unlocked(
             }
         }
     }
-    if retire_key.is_some() {
+    if abandon_reserved_receipt {
         state
             .identity_manager
             .abandon_agent_creation(&draft.id)
@@ -1596,6 +1602,46 @@ mod tests {
             abigail_core::GlobalConfig::load(root)
                 .unwrap()
                 .creation_attempts[&key]
+                .state,
+            abigail_core::AgentCreationState::Unavailable
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_unkeyed_session_abandons_reserved_receipt_and_partial_path() {
+        let (state, _) = crate::routes::tests::build_state();
+        let id = begin(&state).await;
+        reserve(&state, &id).await;
+        state
+            .identity_manager
+            .reserve_agent_creation("Nova", &id, None)
+            .unwrap();
+        let receipt = state
+            .identity_manager
+            .global_config()
+            .read()
+            .unwrap()
+            .creation_attempts[&id]
+            .clone();
+        let partial = state
+            .identity_manager
+            .identities_dir()
+            .join(&receipt.entity_id);
+        std::fs::create_dir_all(partial.join("config.json")).unwrap();
+        std::fs::write(partial.join("partial"), b"unfinished").unwrap();
+        assert!(state
+            .identity_manager
+            .create_agent_idempotent("Nova", &id)
+            .is_err());
+        assert!(session(&state, &id).unwrap().creation_seed.is_none());
+
+        assert!(delete_genesis_record_unlocked(&state, &id).unwrap());
+        assert!(!partial.exists());
+        assert!(state.genesis.load(OWNER, &id).unwrap().is_none());
+        assert_eq!(
+            abigail_core::GlobalConfig::load(state.identity_manager.data_root())
+                .unwrap()
+                .creation_attempts[&id]
                 .state,
             abigail_core::AgentCreationState::Unavailable
         );
