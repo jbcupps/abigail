@@ -1044,14 +1044,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn real_http_acknowledges_durable_events_when_projection_write_fails() {
+    async fn real_http_projection_failure_retries_the_exact_record_without_duplicates() {
         let f = fixture();
         let lease = f.lease_for(&f.entity_id);
+        let record_id = uuid::Uuid::new_v4().to_string();
         let request = serde_json::json!({
             "lease_id": lease.lease_id,
             "runtime_id": lease.runtime_id,
             "records": [{
-                "record_id": uuid::Uuid::new_v4().to_string(),
+                "record_id": record_id,
                 "entity_id": f.entity_id,
                 "kind": "skill_used",
                 "created_at_utc": "2026-10-22T12:00:00Z",
@@ -1064,7 +1065,7 @@ mod tests {
         });
         f.state.journeys.fail_next_projection_write();
 
-        let (_, accepted) = f
+        let (_, failed) = f
             .send(
                 Method::POST,
                 "/v1/runtime/outbox/sync",
@@ -1072,7 +1073,7 @@ mod tests {
                 Some(request.clone()),
             )
             .await;
-        assert_eq!(accepted["ok"], true, "{accepted}");
+        assert_eq!(failed["ok"], false, "{failed}");
         assert!(
             f.state
                 .journeys
@@ -1080,6 +1081,17 @@ mod tests {
                 .unwrap()
                 .is_none(),
             "the injected projection failure must not erase the durable event"
+        );
+        assert_eq!(
+            f.state
+                .runtime_control
+                .lock()
+                .unwrap()
+                .execution_receipts(&f.entity_id, 500)
+                .receipts
+                .len(),
+            1,
+            "the prior control-plane mutation must remain deduplicated for retry"
         );
 
         let (_, replay) = f
@@ -1092,6 +1104,15 @@ mod tests {
             .await;
         assert_eq!(replay["ok"], true, "{replay}");
         assert_eq!(
+            replay["data"]["accepted_record_ids"],
+            serde_json::json!([record_id])
+        );
+        assert_eq!(
+            replay["data"]["execution_receipts"],
+            serde_json::json!([]),
+            "an exact replay must not mint a second receipt"
+        );
+        assert_eq!(
             f.state
                 .journeys
                 .load(crate::genesis_http::OWNER, &f.entity_id)
@@ -1099,6 +1120,15 @@ mod tests {
                 .unwrap()
                 .successful_skill_uses,
             1
+        );
+        assert_eq!(
+            f.state
+                .journeys
+                .event_activity(crate::genesis_http::OWNER, &f.entity_id)
+                .unwrap()
+                .successful_skill_uses,
+            1,
+            "the exact retry must not duplicate the durable event row"
         );
         assert_eq!(
             f.state

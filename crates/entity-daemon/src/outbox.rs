@@ -109,6 +109,7 @@ impl RuntimeOutbox {
 #[cfg(test)]
 mod tests {
     use super::RuntimeOutbox;
+    use hive_core::OutboxSyncResponse;
 
     #[test]
     fn outbox_round_trips_and_acknowledges() {
@@ -139,5 +140,44 @@ mod tests {
         let snapshot = outbox.snapshot().unwrap();
         assert_eq!(snapshot.len(), 1);
         assert_eq!(snapshot[0].record_id, second.record_id);
+    }
+
+    #[test]
+    fn failed_sync_retains_exact_records_until_a_successful_acknowledgement() {
+        let root =
+            std::env::temp_dir().join(format!("abigail-outbox-retry-{}", uuid::Uuid::new_v4()));
+        let outbox = RuntimeOutbox::load(&root, 4).unwrap();
+        let record = outbox
+            .enqueue(
+                "entity-1",
+                "skill_used",
+                serde_json::json!({
+                    "session_id": "session-1",
+                    "skill_id": "com.abigail.calendar",
+                    "tool_name": "list_events"
+                }),
+            )
+            .unwrap();
+
+        assert!(outbox
+            .finish_sync(Err("Hive error: journey projection failed".to_string()))
+            .is_err());
+        let failed_status = outbox.status().unwrap();
+        assert_eq!(failed_status.queued_records, 1);
+        assert_eq!(
+            outbox.snapshot().unwrap()[0].record_id,
+            record.record_id,
+            "an error envelope must retain the exact record ID for retry"
+        );
+
+        outbox
+            .finish_sync(Ok(OutboxSyncResponse {
+                accepted_record_ids: vec![record.record_id],
+                pending_records: 0,
+                server_time_utc: "2026-10-22T12:00:01Z".into(),
+                execution_receipts: vec![],
+            }))
+            .unwrap();
+        assert_eq!(outbox.status().unwrap().queued_records, 0);
     }
 }
