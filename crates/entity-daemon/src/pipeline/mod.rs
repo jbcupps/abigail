@@ -784,9 +784,9 @@ mod tests {
     #[tokio::test]
     async fn assistant_store_failure_preserves_completed_tool_activity_without_retry() {
         let (mut state, executions) = build_tool_state(1);
-        let outbox_root = outbox_root("abigail-pipeline-assistant-store");
+        let outbox_dir = outbox_root("abigail-pipeline-assistant-store");
         let ledger_root = outbox_root("abigail-pipeline-assistant-ledger");
-        state.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        state.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_dir, 4).unwrap());
         state.execution_ledger =
             Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
         let store_attempts = Arc::new(AtomicUsize::new(0));
@@ -823,7 +823,7 @@ mod tests {
 
         let mut restarted = build_state();
         restarted.memory = state.memory.clone();
-        restarted.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_root, 4).unwrap());
+        restarted.outbox = Arc::new(crate::outbox::RuntimeOutbox::load(&outbox_dir, 4).unwrap());
         restarted.execution_ledger =
             Arc::new(crate::execution_ledger::ExecutionLedger::load(&ledger_root).unwrap());
         restarted
@@ -832,7 +832,7 @@ mod tests {
         assert_eq!(restarted.outbox.snapshot().unwrap().len(), 1);
         assert_eq!(restarted.execution_ledger.recent(None, 10).len(), 1);
         assert!(restarted.outbox.reservations().unwrap().is_empty());
-        let _ = std::fs::remove_dir_all(outbox_root);
+        let _ = std::fs::remove_dir_all(outbox_dir);
         let _ = std::fs::remove_dir_all(ledger_root);
     }
 
