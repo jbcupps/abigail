@@ -4,10 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 #[cfg(test)]
-use {
-    std::path::Path,
-    std::sync::Arc,
-};
+use {std::path::Path, std::sync::Arc};
 
 const OUTBOX_FILE_NAME: &str = "runtime_outbox.json";
 
@@ -98,8 +95,7 @@ impl RuntimeOutbox {
     pub fn acknowledge(&self, accepted_record_ids: &[String]) -> Result<(), String> {
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
         let mut next = inner.clone();
-        next
-            .records
+        next.records
             .retain(|record| !accepted_record_ids.iter().any(|id| id == &record.record_id));
         next.last_sync_at_utc = Some(chrono::Utc::now().to_rfc3339());
         next.last_sync_error = None;
@@ -315,7 +311,10 @@ mod tests {
         let error = RuntimeOutbox::load(&root, 4)
             .err()
             .expect("corrupt outbox must fail closed");
-        assert!(error.to_string().contains("key must be a string"), "{error}");
+        assert!(
+            error.to_string().contains("key must be a string"),
+            "{error}"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

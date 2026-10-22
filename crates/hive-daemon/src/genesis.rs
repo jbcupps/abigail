@@ -121,12 +121,9 @@ fn session(state: &HiveDaemonState, id: &str) -> Result<GenesisSession, String> 
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Genesis draft not found".into())
 }
-fn effective_entity_id(
-    state: &HiveDaemonState,
-    session: &GenesisSession,
-) -> Option<String> {
-    session.definition.entity_id.clone().or_else(|| {
-        match crate::genesis_creation::receipt_entity_id(&state.identity_manager, session) {
+fn effective_entity_id(state: &HiveDaemonState, session: &GenesisSession) -> Option<String> {
+    session.definition.entity_id.clone().or_else(
+        || match crate::genesis_creation::receipt_entity_id(&state.identity_manager, session) {
             Ok(entity_id) => entity_id,
             Err(error) => {
                 tracing::warn!(
@@ -135,8 +132,8 @@ fn effective_entity_id(
                 );
                 None
             }
-        }
-    })
+        },
+    )
 }
 fn signals_for_entity(
     state: &HiveDaemonState,

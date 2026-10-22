@@ -775,8 +775,7 @@ pub struct QuestSignals {
 }
 
 fn confirmed_awakening(session: &GenesisSession, signals: QuestSignals) -> bool {
-    session.awakening.is_some()
-        && (session.definition.entity_id.is_some() || signals.awakened)
+    session.awakening.is_some() && (session.definition.entity_id.is_some() || signals.awakened)
 }
 
 /// Badges whose conditions hold now, from confirmed state only. Pending
