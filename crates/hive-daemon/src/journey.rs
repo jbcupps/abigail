@@ -19,7 +19,7 @@ use hive_core::genesis_quest::*;
 use hive_core::{ApiEnvelope, BirthCertificate, BirthCertificateSummary};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::sync::Mutex;
 
@@ -57,7 +57,9 @@ struct JourneyTestFaults {
     fail_projection_writes: usize,
     fail_compaction_snapshot_writes: usize,
     fail_compaction_after_snapshot: usize,
+    fail_compaction_deletes_after: Option<usize>,
     auto_compaction_threshold: Option<usize>,
+    auto_compaction_cutoff: Option<String>,
     fail_legacy_migration_after_presence: bool,
     pause_legacy_migration_after_preflight: Option<LegacyPreflightPause>,
 }
@@ -121,6 +123,17 @@ pub struct JourneyEventCompactionRecord {
     compacted_events: Vec<CompactedJourneyEvent>,
     created_at: String,
     updated_at: String,
+}
+
+struct CompactedEventBinding {
+    owner_id: String,
+    entity_id: String,
+    digest: String,
+}
+
+struct JourneyEventCompactionIndex {
+    snapshots: HashMap<String, JourneyEventCompactionRecord>,
+    events: HashMap<String, CompactedEventBinding>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -278,10 +291,17 @@ impl JourneyStore {
     }
 
     #[cfg(test)]
-    pub(crate) fn set_auto_compaction_cutoff_for_test(&self, _cutoff: &str) {}
+    pub(crate) fn set_auto_compaction_cutoff_for_test(&self, cutoff: &str) {
+        self.test_faults.lock().unwrap().auto_compaction_cutoff = Some(cutoff.to_string());
+    }
 
     #[cfg(test)]
-    pub(crate) fn fail_compaction_deletes_after(&self, _successful_deletes: usize) {}
+    pub(crate) fn fail_compaction_deletes_after(&self, successful_deletes: usize) {
+        self.test_faults
+            .lock()
+            .unwrap()
+            .fail_compaction_deletes_after = Some(successful_deletes);
+    }
 
     #[cfg(test)]
     pub(crate) fn fail_next_legacy_migration_after_presence(&self) {
@@ -337,33 +357,65 @@ impl JourneyStore {
         Ok(())
     }
 
+    fn load_event_compactions(&self) -> Result<JourneyEventCompactionIndex> {
+        let values = self
+            .handle
+            .query_vec::<serde_json::Value>("SELECT * FROM entity_journey_event_compaction", &[])?;
+        let mut snapshots = HashMap::with_capacity(values.len());
+        let mut events = HashMap::new();
+        for mut value in values {
+            let object = value
+                .as_object_mut()
+                .ok_or_else(|| anyhow!("Invalid journey event compaction snapshot"))?;
+            let storage_id = object
+                .remove("id")
+                .and_then(|id| id.as_str().map(str::to_owned))
+                .ok_or_else(|| anyhow!("Journey event compaction storage ID is invalid"))?;
+            let snapshot: JourneyEventCompactionRecord = serde_json::from_value(value)
+                .context("Invalid journey event compaction snapshot")?;
+            validate_event_compaction(&snapshot)?;
+            if storage_id != snapshot.entity_id {
+                bail!("Journey event compaction ID does not match its storage record");
+            }
+            for entry in &snapshot.compacted_events {
+                if events
+                    .insert(
+                        entry.record_id.clone(),
+                        CompactedEventBinding {
+                            owner_id: snapshot.owner_id.clone(),
+                            entity_id: snapshot.entity_id.clone(),
+                            digest: entry.digest.clone(),
+                        },
+                    )
+                    .is_some()
+                {
+                    bail!("Compacted journey event ID has multiple saved bindings");
+                }
+            }
+            if snapshots
+                .insert(snapshot.entity_id.clone(), snapshot)
+                .is_some()
+            {
+                bail!("Entity has multiple journey event compaction snapshots");
+            }
+        }
+        Ok(JourneyEventCompactionIndex { snapshots, events })
+    }
+
     fn load_event_compaction(
         &self,
         owner_id: &str,
         entity_id: &str,
     ) -> Result<Option<JourneyEventCompactionRecord>> {
-        let Some(mut value) = self
-            .handle
-            .select_record::<serde_json::Value>(JOURNEY_EVENT_COMPACTION_TABLE, entity_id)?
-        else {
-            return Ok(None);
-        };
-        let object = value
-            .as_object_mut()
-            .ok_or_else(|| anyhow!("Invalid journey event compaction snapshot"))?;
-        let saved_id = object
-            .remove("id")
-            .and_then(|id| id.as_str().map(str::to_owned));
-        if saved_id.as_deref().is_some_and(|id| id != entity_id) {
-            bail!("Journey event compaction ID does not match its record");
-        }
-        let snapshot: JourneyEventCompactionRecord =
-            serde_json::from_value(value).context("Invalid journey event compaction snapshot")?;
-        validate_event_compaction(&snapshot)?;
-        if snapshot.owner_id != owner_id || snapshot.entity_id != entity_id {
+        let mut compactions = self.load_event_compactions()?;
+        let snapshot = compactions.snapshots.remove(entity_id);
+        if snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.owner_id != owner_id)
+        {
             bail!("Journey event compaction belongs to another household or Entity");
         }
-        Ok(Some(snapshot))
+        Ok(snapshot)
     }
 
     fn save_event_compaction(&self, snapshot: &JourneyEventCompactionRecord) -> Result<()> {
@@ -523,7 +575,14 @@ impl JourneyStore {
         if existed && existing.is_none() {
             bail!("This Entity journey belongs to another household");
         }
-        let compaction = self.load_event_compaction(owner_id, entity_id)?;
+        let compactions = self.load_event_compactions()?;
+        if compactions
+            .snapshots
+            .get(entity_id)
+            .is_some_and(|snapshot| snapshot.owner_id != owner_id)
+        {
+            bail!("Journey event compaction belongs to another household or Entity");
+        }
 
         let mut indexes = std::collections::HashMap::<String, usize>::new();
         let mut events = Vec::<JourneyEventRecord>::new();
@@ -544,19 +603,23 @@ impl JourneyStore {
             events.push(event);
         }
 
+        let mut exact_compacted_retries = HashSet::new();
+        for event in &events {
+            if let Some(binding) = compactions.events.get(&event.record_id) {
+                let digest = journey_event_digest(event)?;
+                if binding.owner_id != owner_id
+                    || binding.entity_id != entity_id
+                    || binding.digest != digest
+                {
+                    bail!("Runtime outbox record ID conflicts with a compacted journey event");
+                }
+                exact_compacted_retries.insert(event.record_id.clone());
+            }
+        }
+
         let mut prepared = Vec::with_capacity(events.len());
         for event in events {
-            let event_digest = journey_event_digest(&event)?;
-            let compacted_digest = compaction.as_ref().and_then(|snapshot| {
-                snapshot
-                    .compacted_events
-                    .iter()
-                    .find(|entry| entry.record_id == event.record_id)
-                    .map(|entry| entry.digest.as_str())
-            });
-            if compacted_digest.is_some_and(|digest| digest != event_digest) {
-                bail!("Runtime outbox record ID conflicts with a compacted journey event");
-            }
+            let exact_compacted_retry = exact_compacted_retries.contains(event.record_id.as_str());
             let saved = self.handle.query_one::<JourneyEventRecord>(
                 &format!(
                     "SELECT {JOURNEY_EVENT_SELECT} FROM entity_journey_event WHERE record_id = $record_id LIMIT 1"
@@ -578,7 +641,7 @@ impl JourneyStore {
                     }
                     prepared.push(PreparedJourneyEvent {
                         event,
-                        needs_write: compacted_digest.is_none(),
+                        needs_write: !exact_compacted_retry,
                     });
                 }
             }
@@ -650,6 +713,43 @@ impl JourneyStore {
         self.compact_runtime_events_unlocked(owner_id, entity_id, older_than_utc)
     }
 
+    fn load_scoped_event_rows(
+        &self,
+        owner_id: &str,
+        entity_id: &str,
+    ) -> Result<Vec<JourneyEventRecord>> {
+        let values = self.handle.query_vec::<serde_json::Value>(
+            &format!(
+                "SELECT id, {JOURNEY_EVENT_SELECT} FROM entity_journey_event WHERE owner_id = $owner_id AND entity_id = $entity_id"
+            ),
+            &[
+                QueryBinding::new("owner_id", owner_id)?,
+                QueryBinding::new("entity_id", entity_id)?,
+            ],
+        )?;
+        values
+            .into_iter()
+            .map(|mut value| {
+                let object = value
+                    .as_object_mut()
+                    .ok_or_else(|| anyhow!("Invalid saved journey event row"))?;
+                let storage_id = object
+                    .remove("id")
+                    .and_then(|id| id.as_str().map(str::to_owned))
+                    .ok_or_else(|| anyhow!("Saved journey event storage ID is invalid"))?;
+                let event: JourneyEventRecord =
+                    serde_json::from_value(value).context("Invalid saved journey event row")?;
+                if storage_id != event.record_id {
+                    bail!("Saved journey event ID does not match its storage record");
+                }
+                if event.owner_id != owner_id || event.entity_id != entity_id {
+                    bail!("Saved journey event ownership does not match its scope");
+                }
+                Ok(event)
+            })
+            .collect()
+    }
+
     fn compact_runtime_events_unlocked(
         &self,
         owner_id: &str,
@@ -663,21 +763,17 @@ impl JourneyStore {
         if existed && existing.is_none() {
             bail!("This Entity journey belongs to another household");
         }
-        let saved_snapshot = self.load_event_compaction(owner_id, entity_id)?;
-        let rows = self.handle.query_vec::<JourneyEventRecord>(
-            &format!(
-                "SELECT {JOURNEY_EVENT_SELECT} FROM entity_journey_event WHERE owner_id = $owner_id AND entity_id = $entity_id"
-            ),
-            &[
-                QueryBinding::new("owner_id", owner_id)?,
-                QueryBinding::new("entity_id", entity_id)?,
-            ],
-        )?;
+        let mut compactions = self.load_event_compactions()?;
+        let saved_snapshot = compactions.snapshots.remove(entity_id);
+        if saved_snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.owner_id != owner_id)
+        {
+            bail!("Journey event compaction belongs to another household or Entity");
+        }
+        let rows = self.load_scoped_event_rows(owner_id, entity_id)?;
         let mut candidates = Vec::new();
         for row in rows {
-            if row.owner_id != owner_id || row.entity_id != entity_id {
-                bail!("Saved journey event ownership does not match its scope");
-            }
             let occurred_at = chrono::DateTime::parse_from_rfc3339(&row.occurred_at)
                 .context("Saved journey event timestamp is invalid")?;
             if occurred_at < cutoff {
@@ -698,18 +794,13 @@ impl JourneyStore {
             created_at: now.clone(),
             updated_at: now.clone(),
         });
-        let mut compacted = snapshot
-            .compacted_events
-            .iter()
-            .map(|entry| (entry.record_id.clone(), entry.digest.clone()))
-            .collect::<std::collections::HashMap<_, _>>();
-        if compacted.len() != snapshot.compacted_events.len() {
-            bail!("Journey event compaction contains duplicate record IDs");
-        }
         for row in &candidates {
             let digest = journey_event_digest(row)?;
-            match compacted.get(&row.record_id) {
-                Some(saved) if saved == &digest => {}
+            match compactions.events.get(&row.record_id) {
+                Some(binding)
+                    if binding.owner_id == owner_id
+                        && binding.entity_id == entity_id
+                        && binding.digest == digest => {}
                 Some(_) => bail!("Saved journey row conflicts with its compaction snapshot"),
                 None => {
                     let (skill_uses, confirmed_memories) = event_contribution(row)?;
@@ -717,7 +808,14 @@ impl JourneyStore {
                         checked_activity_add(snapshot.successful_skill_uses, skill_uses)?;
                     snapshot.confirmed_memories =
                         checked_activity_add(snapshot.confirmed_memories, confirmed_memories)?;
-                    compacted.insert(row.record_id.clone(), digest.clone());
+                    compactions.events.insert(
+                        row.record_id.clone(),
+                        CompactedEventBinding {
+                            owner_id: owner_id.to_string(),
+                            entity_id: entity_id.to_string(),
+                            digest: digest.clone(),
+                        },
+                    );
                     snapshot.compacted_events.push(CompactedJourneyEvent {
                         record_id: row.record_id.clone(),
                         digest,
@@ -749,7 +847,17 @@ impl JourneyStore {
                 bail!("Injected journey compaction interruption after snapshot");
             }
         }
-        for row in &candidates {
+        for (successful_deletes, row) in candidates.iter().enumerate() {
+            #[cfg(not(test))]
+            let _ = successful_deletes;
+            #[cfg(test)]
+            {
+                let mut faults = self.test_faults.lock().unwrap();
+                if faults.fail_compaction_deletes_after == Some(successful_deletes) {
+                    faults.fail_compaction_deletes_after = None;
+                    bail!("Injected journey compaction deletion failure");
+                }
+            }
             self.handle
                 .delete_record(JOURNEY_EVENT_TABLE, &row.record_id)?;
         }
@@ -771,11 +879,8 @@ impl JourneyStore {
         if self.event_row_count_unlocked(owner_id, entity_id)?
             > self.automatic_compaction_threshold()
         {
-            self.compact_runtime_events_unlocked(
-                owner_id,
-                entity_id,
-                &current_utc_quarter_start(),
-            )?;
+            let cutoff = self.automatic_compaction_cutoff();
+            self.compact_runtime_events_unlocked(owner_id, entity_id, &cutoff)?;
         }
         Ok(())
     }
@@ -786,6 +891,20 @@ impl JourneyStore {
             return threshold;
         }
         AUTOMATIC_COMPACTION_ROW_THRESHOLD
+    }
+
+    fn automatic_compaction_cutoff(&self) -> String {
+        #[cfg(test)]
+        if let Some(cutoff) = self
+            .test_faults
+            .lock()
+            .unwrap()
+            .auto_compaction_cutoff
+            .clone()
+        {
+            return cutoff;
+        }
+        current_utc_quarter_start()
     }
 
     pub fn event_activity(&self, owner_id: &str, entity_id: &str) -> Result<JourneyActivity> {
@@ -892,12 +1011,55 @@ fn event_contribution(event: &JourneyEventRecord) -> Result<(u64, u64)> {
 
 fn journey_event_digest(event: &JourneyEventRecord) -> Result<String> {
     event_contribution(event)?;
-    let canonical =
-        serde_json::to_vec(event).context("Could not encode canonical journey event")?;
-    Ok(digest_parts(
-        b"abigail.journey.closed-event.v1\0",
-        &[&canonical],
-    ))
+    let canonical = encode_canonical_journey_event(event)?;
+    let mut hasher = Sha256::new();
+    hasher.update(b"abigail.journey.closed-event.digest.v1\0");
+    hasher.update(canonical);
+    Ok(Sha256::finalize(hasher)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+fn encode_canonical_journey_event(event: &JourneyEventRecord) -> Result<Vec<u8>> {
+    let mut encoded = Vec::new();
+    append_canonical_string(&mut encoded, &event.record_id)?;
+    append_canonical_string(&mut encoded, &event.owner_id)?;
+    append_canonical_string(&mut encoded, &event.entity_id)?;
+    append_canonical_string(&mut encoded, &event.kind)?;
+    append_canonical_string(&mut encoded, &event.occurred_at)?;
+    append_canonical_optional_string(&mut encoded, event.session_id.as_deref())?;
+    append_canonical_optional_string(&mut encoded, event.skill_id.as_deref())?;
+    append_canonical_optional_string(&mut encoded, event.tool_name.as_deref())?;
+    match event.successful_skill_count {
+        Some(count) => {
+            encoded.push(1);
+            encoded.extend_from_slice(&count.to_be_bytes());
+        }
+        None => encoded.push(0),
+    }
+    append_canonical_optional_string(&mut encoded, event.memory_id.as_deref())?;
+    append_canonical_optional_string(&mut encoded, event.memory_weight.as_deref())?;
+    Ok(encoded)
+}
+
+fn append_canonical_string(encoded: &mut Vec<u8>, value: &str) -> Result<()> {
+    let length =
+        u64::try_from(value.len()).map_err(|_| anyhow!("Journey event field is too large"))?;
+    encoded.extend_from_slice(&length.to_be_bytes());
+    encoded.extend_from_slice(value.as_bytes());
+    Ok(())
+}
+
+fn append_canonical_optional_string(encoded: &mut Vec<u8>, value: Option<&str>) -> Result<()> {
+    match value {
+        Some(value) => {
+            encoded.push(1);
+            append_canonical_string(encoded, value)?;
+        }
+        None => encoded.push(0),
+    }
+    Ok(())
 }
 
 fn checked_activity_add(current: u64, increment: u64) -> Result<u64> {
@@ -3181,6 +3343,38 @@ pub(crate) mod tests {
         assert!(store
             .handle
             .record_exists(JOURNEY_EVENT_TABLE, &event.record_id)
+            .unwrap());
+    }
+
+    #[test]
+    fn compaction_event_storage_key_mismatch_fails_before_deletion() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let event = outbox_event_at(
+            &entity_id,
+            "skill_used",
+            "2026-09-30T23:59:59Z",
+            serde_json::json!({
+                "session_id": "session-event-key-mismatch",
+                "successful_skill_count": 1,
+            }),
+        );
+        let wrong_storage_key = uuid::Uuid::new_v4().to_string();
+        store
+            .handle
+            .upsert(
+                JOURNEY_EVENT_TABLE,
+                &wrong_storage_key,
+                &journey_event(OWNER, &entity_id, &event).unwrap().unwrap(),
+            )
+            .unwrap();
+
+        assert!(store
+            .compact_runtime_events(OWNER, &entity_id, "2026-10-01T00:00:00Z")
+            .is_err());
+        assert!(store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &wrong_storage_key)
             .unwrap());
     }
 

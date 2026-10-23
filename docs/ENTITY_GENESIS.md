@@ -324,11 +324,14 @@ When an Entity has more than 1,024 redacted journey event rows, Hive
 conservatively compacts only rows older than the start of the current UTC
 calendar quarter. One owner-scoped, schema-full snapshot retains the projected
 skill/memory totals plus each exact Runtime record ID and a canonical digest of
-its closed metadata. It never retains the event payload, identifiers from that
+its closed metadata. The digest uses a versioned, domain-separated encoder with
+fixed field order and explicit length/option markers rather than serialized
+Rust layout. It never retains the event payload, identifiers from that
 payload, prose, model/tool results, memory content, or Soul Forge scoring data.
 Hive saves the snapshot before deleting represented rows and deduplicates any
 rows left by interruption. Exact retries remain acknowledged, while reuse of a
-compacted ID with different closed metadata fails closed. A compaction failure
+compacted ID by any other Entity or household, or with different closed
+metadata, fails closed. A compaction failure
 after the projection is durable emits only fixed redacted guidance, does not
 turn acknowledged activity into a failed retry, and is retried by later
 reconciliation.
