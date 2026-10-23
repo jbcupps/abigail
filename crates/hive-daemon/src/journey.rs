@@ -278,6 +278,12 @@ impl JourneyStore {
     }
 
     #[cfg(test)]
+    pub(crate) fn set_auto_compaction_cutoff_for_test(&self, _cutoff: &str) {}
+
+    #[cfg(test)]
+    pub(crate) fn fail_compaction_deletes_after(&self, _successful_deletes: usize) {}
+
+    #[cfg(test)]
     pub(crate) fn fail_next_legacy_migration_after_presence(&self) {
         self.test_faults
             .lock()
