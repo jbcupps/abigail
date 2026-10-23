@@ -18,6 +18,7 @@ vi.mock("../lib/legacyFirstSignal", async (importOriginal) => ({
 
 const catalog = {
   stages: [], badges: [], tiers: [], temperament_cards: [], trials: [], instincts: "",
+  long_arc_quests: [],
   palettes: [
     { palette: "aether" as const, unlocked_by: null },
     { palette: "aurora" as const, unlocked_by: "soul_shaper" as const },
