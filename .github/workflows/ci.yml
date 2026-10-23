@@ -59,6 +59,9 @@ jobs:
       - name: Verify Windows runtime dependency gates
         run: node --test scripts/tests/test_windows_runtime.mjs
 
+      - name: Verify Windows split-stack launcher contract
+        run: node --test scripts/tests/test_launch_split_stack_contract.mjs
+
       - name: Verify unsigned stabilization lane
         run: node scripts/check_unsigned_stabilization.mjs
 

@@ -58,6 +58,65 @@ function Invoke-CargoOrThrow {
     }
 }
 
+function Start-ProcessWithEnvironmentOverlay {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)][hashtable]$EnvironmentOverlay,
+        [switch]$PassThru
+    )
+
+    $environmentSnapshot = @{}
+    foreach ($name in $EnvironmentOverlay.Keys) {
+        $environmentPath = "Env:$name"
+        $wasPresent = Test-Path -LiteralPath $environmentPath
+        $environmentSnapshot[$name] = [PSCustomObject]@{
+            WasPresent = $wasPresent
+            Value = if ($wasPresent) {
+                [Environment]::GetEnvironmentVariable(
+                    $name,
+                    [EnvironmentVariableTarget]::Process
+                )
+            } else {
+                $null
+            }
+        }
+    }
+
+    try {
+        foreach ($name in $EnvironmentOverlay.Keys) {
+            [Environment]::SetEnvironmentVariable(
+                $name,
+                [string]$EnvironmentOverlay[$name],
+                [EnvironmentVariableTarget]::Process
+            )
+        }
+
+        $startParameters = @{
+            FilePath = $FilePath
+            WorkingDirectory = $WorkingDirectory
+        }
+        if ($PassThru) {
+            $startParameters["PassThru"] = $true
+        }
+        Start-Process @startParameters
+    } finally {
+        foreach ($name in $environmentSnapshot.Keys) {
+            $previous = $environmentSnapshot[$name]
+            $environmentPath = "Env:$name"
+            if ($previous.WasPresent) {
+                [Environment]::SetEnvironmentVariable(
+                    $name,
+                    $previous.Value,
+                    [EnvironmentVariableTarget]::Process
+                )
+            } else {
+                Remove-Item -LiteralPath $environmentPath -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
 function Build-Frontend {
     param(
         [Parameter(Mandatory = $true)][string]$AppDir,
@@ -191,9 +250,9 @@ $mode = "desktop"
 
 if ($desktopBuildSucceeded -and -not $SkipDesktopApps) {
     Write-Host "Launching Abigail Hive desktop shell..."
-    $hiveAppProc = Start-Process -FilePath $hiveAppExe `
+    $hiveAppProc = Start-ProcessWithEnvironmentOverlay -FilePath $hiveAppExe `
         -WorkingDirectory (Join-Path $workspaceRoot "hive-app") `
-        -Environment @{
+        -EnvironmentOverlay @{
             ABIGAIL_HIVE_URL = $hiveUrl
             ABIGAIL_DATA_DIR = $dataRoot
             CARGO_TARGET_DIR = $targetDir
@@ -201,9 +260,9 @@ if ($desktopBuildSucceeded -and -not $SkipDesktopApps) {
         -PassThru
 
     Write-Host "Launching Abigail Entity Runtime desktop shell..."
-    $runtimeAppProc = Start-Process -FilePath $runtimeAppExe `
+    $runtimeAppProc = Start-ProcessWithEnvironmentOverlay -FilePath $runtimeAppExe `
         -WorkingDirectory (Join-Path $workspaceRoot "entity-runtime-app") `
-        -Environment @{
+        -EnvironmentOverlay @{
             ABIGAIL_ENTITY_URL = $runtimeUrl
             CARGO_TARGET_DIR = $targetDir
         } `
