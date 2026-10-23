@@ -84,7 +84,7 @@ for provider availability, local access controls, and verification limits.
 ## Split Stack Local Dev
 
 - Use `pwsh ./scripts/dev/launch_split_stack.ps1` to build and launch the Hive daemon, Entity Runtime daemon, and the split desktop shells from one command.
-- The launcher also supports Windows PowerShell 5.1 (`powershell -File .\scripts\dev\launch_split_stack.ps1`); each desktop shell receives its required environment only while it starts, and the launcher's prior environment is restored afterward.
+- The launcher also supports Windows PowerShell 5.1 (`powershell -File .\scripts\dev\launch_split_stack.ps1`); only variables supplied in each desktop shell's temporary overlay are restored after that shell starts. Other launcher changes, including its earlier `CARGO_TARGET_DIR` assignment, remain active for the rest of the launcher process.
 - Use `pwsh ./scripts/stage_split_installer_resources.ps1` when validating the Windows installer payload locally; it stages the internal split binaries that the family installer bundles behind the single Abigail app icon.
 - Those scripts standardize `CARGO_TARGET_DIR` to `%LOCALAPPDATA%\Abigail\cargo-target` on Windows so allow-listing can target one stable developer build path instead of repo-local `target\...`.
 - If Windows policy still blocks desktop-shell builds, run `pwsh ./scripts/diagnose_windows_build_policy.ps1` for a JSON diagnostic summary and use `pwsh ./scripts/dev/launch_split_stack.ps1` to fall back to the browser harness automatically.

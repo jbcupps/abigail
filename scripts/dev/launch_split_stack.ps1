@@ -12,6 +12,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "start_process_with_environment_overlay.ps1")
+
 function Get-WorkspaceRoot {
     return (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 }
@@ -55,65 +57,6 @@ function Invoke-CargoOrThrow {
     & $script:cargo @Arguments
     if ($LASTEXITCODE -ne 0) {
         throw $FailureMessage
-    }
-}
-
-function Start-ProcessWithEnvironmentOverlay {
-    param(
-        [Parameter(Mandatory = $true)][string]$FilePath,
-        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
-        [Parameter(Mandatory = $true)][hashtable]$EnvironmentOverlay,
-        [switch]$PassThru
-    )
-
-    $environmentSnapshot = @{}
-    foreach ($name in $EnvironmentOverlay.Keys) {
-        $environmentPath = "Env:$name"
-        $wasPresent = Test-Path -LiteralPath $environmentPath
-        $environmentSnapshot[$name] = [PSCustomObject]@{
-            WasPresent = $wasPresent
-            Value = if ($wasPresent) {
-                [Environment]::GetEnvironmentVariable(
-                    $name,
-                    [EnvironmentVariableTarget]::Process
-                )
-            } else {
-                $null
-            }
-        }
-    }
-
-    try {
-        foreach ($name in $EnvironmentOverlay.Keys) {
-            [Environment]::SetEnvironmentVariable(
-                $name,
-                [string]$EnvironmentOverlay[$name],
-                [EnvironmentVariableTarget]::Process
-            )
-        }
-
-        $startParameters = @{
-            FilePath = $FilePath
-            WorkingDirectory = $WorkingDirectory
-        }
-        if ($PassThru) {
-            $startParameters["PassThru"] = $true
-        }
-        Start-Process @startParameters
-    } finally {
-        foreach ($name in $environmentSnapshot.Keys) {
-            $previous = $environmentSnapshot[$name]
-            $environmentPath = "Env:$name"
-            if ($previous.WasPresent) {
-                [Environment]::SetEnvironmentVariable(
-                    $name,
-                    $previous.Value,
-                    [EnvironmentVariableTarget]::Process
-                )
-            } else {
-                Remove-Item -LiteralPath $environmentPath -ErrorAction SilentlyContinue
-            }
-        }
     }
 }
 

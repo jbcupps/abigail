@@ -1,25 +1,17 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const launcher = readFileSync(resolve(root, 'scripts/dev/launch_split_stack.ps1'), 'utf8');
-const workflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8');
-
-function balancedBlock(source, declaration) {
-  const match = declaration.exec(source);
-  assert.ok(match, `missing ${declaration}`);
-  const open = source.indexOf('{', match.index);
-  assert.notEqual(open, -1, `missing block for ${declaration}`);
-  let depth = 0;
-  for (let index = open; index < source.length; index++) {
-    if (source[index] === '{') depth++;
-    if (source[index] === '}' && --depth === 0) return source.slice(open + 1, index);
-  }
-  assert.fail(`unterminated block for ${declaration}`);
-}
+const read = (path) => readFileSync(resolve(root, path), 'utf8');
+const readIfPresent = (path) => existsSync(resolve(root, path)) ? read(path) : '';
+const launcher = read('scripts/dev/launch_split_stack.ps1');
+const helper = readIfPresent('scripts/dev/start_process_with_environment_overlay.ps1');
+const behavioralTest = readIfPresent('scripts/tests/test_launch_split_stack_environment.ps1');
+const workflow = read('.github/workflows/ci.yml');
+const readme = read('README.md');
 
 function between(source, start, end) {
   const from = source.indexOf(start);
@@ -29,48 +21,15 @@ function between(source, start, end) {
   return source.slice(from, to);
 }
 
-test('PowerShell 5.1 launcher overlays child environments and restores exact parent state', () => {
-  const helper = balancedBlock(
+test('launcher dot-sources the isolated PowerShell 5.1 overlay helper', () => {
+  assert.match(
     launcher,
-    /function\s+Start-ProcessWithEnvironmentOverlay\s*/i,
+    /^\.\s+\(Join-Path\s+\$PSScriptRoot\s+"start_process_with_environment_overlay\.ps1"\)$/m,
   );
+  assert.doesNotMatch(launcher, /function\s+Start-ProcessWithEnvironmentOverlay\b/i);
+  assert.match(helper, /function\s+Start-ProcessWithEnvironmentOverlay\b/i);
   assert.match(helper, /\[hashtable\]\s*\$EnvironmentOverlay\b/i);
-
-  const snapshot = helper.search(/\b(?:Test-Path|Get-Item)\b[\s\S]*?Env:/i);
-  const value = helper.search(/\[Environment\]::GetEnvironmentVariable\s*\(/i);
-  const overlay = helper.search(/\[Environment\]::SetEnvironmentVariable\s*\(/i);
-  assert.ok(snapshot >= 0, 'helper records whether each process variable was present');
-  assert.ok(value >= 0, 'helper records each prior process variable value');
-  assert.ok(snapshot < overlay && value < overlay, 'helper snapshots state before applying the overlay');
-
-  const tryBlock = balancedBlock(helper, /\btry\s*/i);
-  const finallyBlock = balancedBlock(helper, /\bfinally\s*/i);
-  assert.match(tryBlock, /\bStart-Process\b/i, 'spawn occurs inside try so finally runs on failure');
-  assert.match(finallyBlock, /\bWasPresent\b/i, 'restore distinguishes present and absent variables');
-  assert.match(
-    finallyBlock,
-    /\[Environment\]::SetEnvironmentVariable\s*\(/i,
-    'previously present values are restored',
-  );
-  assert.match(
-    finallyBlock,
-    /\$environmentPath\s*=\s*"Env:\$name"/i,
-    'restore addresses the process environment provider',
-  );
-  assert.match(
-    finallyBlock,
-    /\bRemove-Item\b[^\r\n]*-LiteralPath\s+\$environmentPath\b/i,
-    'previously absent variables are removed instead of being left empty',
-  );
   assert.doesNotMatch(helper, /\bWrite-(?:Host|Verbose|Debug|Information|Warning|Output)\b/i);
-
-  for (const statement of launcher.matchAll(/\bStart-Process\b[\s\S]*?(?=\r?\n(?!\s*[`-])|$)/gi)) {
-    assert.doesNotMatch(
-      statement[0],
-      /(?:^|\s)-Environment(?:\s|$)/i,
-      'Start-Process -Environment is unavailable in Windows PowerShell 5.1',
-    );
-  }
 });
 
 test('both desktop shells use the overlay helper with their required variables', () => {
@@ -90,9 +49,32 @@ test('both desktop shells use the overlay helper with their required variables',
   assert.match(runtimeLaunch, /\bCARGO_TARGET_DIR\s*=\s*\$targetDir\b/i);
 });
 
-test('CI runs the split-stack launcher contract', () => {
+test('Windows PowerShell behavior test owns syntax and exact restoration coverage', () => {
+  assert.match(
+    behavioralTest,
+    /\[Management\.Automation\.Language\.Parser\]::ParseFile\s*\(/i,
+  );
+  assert.match(behavioralTest, /Get-ProcessEnvironmentVariableExact\b/);
+  assert.match(behavioralTest, /PRESENT_NONEMPTY/);
+  assert.match(behavioralTest, /PRESENT_EMPTY/);
+  assert.match(behavioralTest, /ABSENT/);
+  assert.match(behavioralTest, /does-not-exist\.exe/);
+  assert.match(behavioralTest, /^\.\s+\$helperPath$/m);
+  assert.doesNotMatch(behavioralTest, /^\.\s+.*launch_split_stack\.ps1/m);
+});
+
+test('CI runs both static wiring and Windows PowerShell 5.1 behavior contracts', () => {
   assert.match(
     workflow,
     /\bnode\s+--test\s+scripts\/tests\/test_launch_split_stack_contract\.mjs\b/,
   );
+  assert.match(
+    workflow,
+    /\bpowershell\.exe\s+-NoProfile\s+-File\s+\.\\scripts\\tests\\test_launch_split_stack_environment\.ps1\b/i,
+  );
+});
+
+test('README limits restoration claims to the temporary overlay', () => {
+  assert.match(readme, /only (?:the )?variables (?:supplied|set) in each desktop shell['’]s .*overlay are restored/i);
+  assert.doesNotMatch(readme, /launcher['’]s prior environment is restored/i);
 });

@@ -62,6 +62,10 @@ jobs:
       - name: Verify Windows split-stack launcher contract
         run: node --test scripts/tests/test_launch_split_stack_contract.mjs
 
+      - name: Verify Windows PowerShell 5.1 split-stack environment behavior
+        shell: cmd
+        run: powershell.exe -NoProfile -File .\scripts\tests\test_launch_split_stack_environment.ps1
+
       - name: Verify unsigned stabilization lane
         run: node scripts/check_unsigned_stabilization.mjs
 
