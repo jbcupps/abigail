@@ -2,8 +2,18 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { GenesisCreationSeed } from "../lib/genesisClient";
 import { readGenesisLaunchDraft } from "../lib/genesisLaunchDraft";
 import {
+  clearLegacyFirstSignalJournal,
+  readLegacyFirstSignalJournal,
+  resolveLegacyCandidates,
+  type LegacyCandidate,
+  type LegacyFirstSignalJournal,
+  type LegacyMigrationRequest,
+  type LegacyMigrationResult,
+} from "../lib/legacyFirstSignal";
+import {
   CRESTS,
   getQuestCatalog,
+  migrateLegacyFirstSignal,
   MOTIONS,
   PALETTES,
   TEMPERAMENTS,
@@ -19,21 +29,95 @@ const DEFAULT_PRESENCE: PresenceChoice = {
   motion: "calm",
 };
 
-function initialSignal(): { seed: GenesisCreationSeed; recovering: boolean; error: string } {
+function legacySeed(journal: LegacyFirstSignalJournal): GenesisCreationSeed {
+  return {
+    mode: "quick",
+    name: journal.profile.name,
+    purpose: journal.profile.purpose,
+    presence: {
+      temperament: journal.profile.temperament,
+      identity: journal.profile.identity,
+      crest: "orbit",
+      motion: "calm",
+    },
+  };
+}
+
+function initialSignal(): {
+  seed: GenesisCreationSeed;
+  recovering: boolean;
+  legacy: LegacyFirstSignalJournal | null;
+  error: string;
+} {
+  let legacy: LegacyFirstSignalJournal | null = null;
+  let error = "";
+  try {
+    legacy = readLegacyFirstSignalJournal();
+  } catch (reason) {
+    error = reason instanceof Error ? reason.message : String(reason);
+  }
   try {
     const draft = readGenesisLaunchDraft();
     return {
-      seed: draft?.seed ?? { mode: "quick", name: "", purpose: "", presence: DEFAULT_PRESENCE },
+      seed: draft?.seed
+        ?? (legacy
+          ? legacySeed(legacy)
+          : { mode: "quick", name: "", purpose: "", presence: DEFAULT_PRESENCE }),
       recovering: draft !== null,
-      error: "",
+      legacy,
+      error,
     };
   } catch (reason) {
     return {
-      seed: { mode: "quick", name: "", purpose: "", presence: DEFAULT_PRESENCE },
+      seed: legacy
+        ? legacySeed(legacy)
+        : { mode: "quick", name: "", purpose: "", presence: DEFAULT_PRESENCE },
       recovering: false,
+      legacy,
       error: reason instanceof Error ? reason.message : String(reason),
     };
   }
+}
+
+function legacyRequest(journal: LegacyFirstSignalJournal): LegacyMigrationRequest {
+  return {
+    attempt_key: journal.attempt.attemptId,
+    original_name: journal.attempt.name,
+    purpose: journal.profile.purpose,
+    boundaries: journal.profile.boundaries,
+    presence: {
+      temperament: journal.profile.temperament,
+      identity: journal.profile.identity,
+      crest: "orbit",
+      motion: "calm",
+    },
+  };
+}
+
+function isMatchingMigration(
+  result: LegacyMigrationResult,
+  entityId: string,
+  request: LegacyMigrationRequest,
+): boolean {
+  const expectedBadges: LegacyMigrationResult["badges"] = [
+    "first_spark",
+    "named",
+    ...(request.purpose.trim() ? ["purposeful" as const] : []),
+    "presence_chosen",
+  ];
+  return result.entity_id === entityId
+    && result.presence.name === request.original_name
+    && result.presence.purpose === request.purpose
+    && result.presence.boundaries === request.boundaries
+    && result.presence.temperament === request.presence.temperament
+    && result.presence.identity === request.presence.identity
+    && result.presence.crest === "orbit"
+    && result.presence.motion === "calm"
+    && Array.isArray(result.badges)
+    && result.badges.length === expectedBadges.length
+    && result.badges.every((badge, index) => badge === expectedBadges[index])
+    && typeof result.migrated_at === "string"
+    && result.migrated_at.length > 0;
 }
 
 export default function GenesisFirstSignal({ onBegin }: {
@@ -44,6 +128,11 @@ export default function GenesisFirstSignal({ onBegin }: {
   const [purpose, setPurpose] = useState(initial.seed.purpose);
   const [presence, setPresence] = useState(initial.seed.presence);
   const [recoverySeed, setRecoverySeed] = useState<GenesisCreationSeed | null>(initial.recovering ? initial.seed : null);
+  const [legacy, setLegacy] = useState(initial.legacy);
+  const [legacyCandidates, setLegacyCandidates] = useState<LegacyCandidate[] | null>(null);
+  const [legacySelection, setLegacySelection] = useState<LegacyCandidate | null>(null);
+  const [legacyError, setLegacyError] = useState("");
+  const [legacySuccess, setLegacySuccess] = useState("");
   const [catalog, setCatalog] = useState<QuestCatalog | null>(null);
   const [catalogError, setCatalogError] = useState("");
   const [submitError, setSubmitError] = useState("");
@@ -58,14 +147,14 @@ export default function GenesisFirstSignal({ onBegin }: {
     return () => { mounted = false; };
   }, []);
   useEffect(() => {
-    if (recoverySeed || initial.error) return;
+    if (recoverySeed || legacy || initial.error) return;
     return loadCatalog();
-  }, [initial.error, loadCatalog, recoverySeed]);
+  }, [initial.error, legacy, loadCatalog, recoverySeed]);
 
-  const immutable = Boolean(recoverySeed || initial.error);
-  const ready = recoverySeed
+  const immutable = Boolean(recoverySeed || legacy || initial.error);
+  const ready = !legacy && (recoverySeed
     ? true
-    : Boolean(name.trim() && purpose.trim() && catalog && !initial.error);
+    : Boolean(name.trim() && purpose.trim() && catalog && !initial.error));
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!ready || busy) return;
@@ -97,6 +186,51 @@ export default function GenesisFirstSignal({ onBegin }: {
       setBusy(false);
     }
   };
+
+  const checkLegacy = async () => {
+    if (!legacy || busy) return;
+    setBusy(true);
+    setLegacyError("");
+    setLegacyCandidates(null);
+    setLegacySelection(null);
+    try {
+      setLegacyCandidates(await resolveLegacyCandidates(legacy));
+    } catch (reason) {
+      setLegacyError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const migrateLegacy = async () => {
+    if (!legacy || !legacySelection || busy) return;
+    setBusy(true);
+    setLegacyError("");
+    try {
+      const request = legacyRequest(legacy);
+      const migrated = await migrateLegacyFirstSignal(legacySelection.id, request);
+      if (!isMatchingMigration(migrated, legacySelection.id, request)) {
+        throw new Error(
+          "Hive did not return the selected Entity's canonical legacy migration result. The retained brief was not cleared.",
+        );
+      }
+      clearLegacyFirstSignalJournal(legacy);
+      setLegacy(null);
+      setLegacyCandidates(null);
+      setLegacySelection(null);
+      setName("");
+      setPurpose("");
+      setPresence(DEFAULT_PRESENCE);
+      setLegacySuccess(
+        `${migrated.presence.name}'s old First Signal was migrated into canonical Presence and journey progress.`,
+      );
+    } catch (reason) {
+      setLegacyError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const paletteChoices = catalog?.palettes ?? (immutable ? [{ palette: presence.identity, unlocked_by: null }] : []);
   const crestChoices = catalog?.crests ?? (immutable ? [{ crest: presence.crest, unlocked_by: null }] : []);
 
@@ -105,6 +239,52 @@ export default function GenesisFirstSignal({ onBegin }: {
       <div className="genesis-eyebrow">First Signal</div>
       <h3>Who is waiting to meet your family?</h3>
       <p>Choose a name, a purpose, and the Presence they will carry into your home. You can shape everything else together in the Genesis Quest.</p>
+      {legacy && <section className="genesis-notice" aria-label="Legacy First Signal recovery">
+        <h4>Recover a retained First Signal</h4>
+        <p>This older brief is kept unchanged until you choose an existing Entity and Hive confirms a canonical migration. Abigail will not create or retry an Entity from it.</p>
+        <dl>
+          <div><dt>Name</dt><dd>{legacy.profile.name}</dd></div>
+          <div><dt>Original registered name</dt><dd>{legacy.attempt.name}</dd></div>
+          <div><dt>Purpose</dt><dd>{legacy.profile.purpose || "None"}</dd></div>
+          <div><dt>Boundaries</dt><dd>{legacy.profile.boundaries || "None"}</dd></div>
+          <div><dt>Presence</dt><dd>{TEMPERAMENTS[legacy.profile.temperament]} · {PALETTES[legacy.profile.identity].label} · Orbit · Calm</dd></div>
+        </dl>
+        {legacy.attempt.creationKey
+          ? <p>Check the exact old creation key. Only its completed receipt can be offered; reserved, absent, and unavailable outcomes are never retried.</p>
+          : <p>This request had no replay-safe key. A matching name is only a candidate, never proof that this request created the Entity.</p>}
+        <button type="button" disabled={busy} onClick={() => void checkLegacy()}>
+          {busy && legacyCandidates === null ? "Checking Hive…" : "Check retained First Signal"}
+        </button>
+        {legacyCandidates && legacyCandidates.length === 0 && <p role="status">No eligible existing Entity was found. The old brief remains retained.</p>}
+        {legacyCandidates?.map((candidate) => <div key={candidate.id}>
+          <p>
+            {candidate.name} <small>{candidate.id}</small>{" "}
+            {candidate.resolution === "completed_receipt"
+              ? "Exact completed receipt"
+              : "Exact-name post-baseline candidate"}
+          </p>
+          <button
+            type="button"
+            disabled={busy}
+            aria-label={legacyCandidates.length === 1 ? `Review ${candidate.name}` : `Review ${candidate.name} (${candidate.id})`}
+            onClick={() => {
+              setLegacySelection(candidate);
+              setLegacyError("");
+            }}
+          >
+            Review {candidate.name}
+          </button>
+        </div>)}
+        {legacySelection && <div>
+          <p>{`Selected existing Entity: ${legacySelection.name} (${legacySelection.id}).`}</p>
+          <p>Review the retained brief above. Migration writes its cosmetic Presence and applicable presentation badges only; it does not change tools, models, permissions, or memories.</p>
+          <button type="button" disabled={busy} onClick={() => void migrateLegacy()}>
+            {busy ? "Migrating retained brief…" : "Migrate this brief"}
+          </button>
+        </div>}
+        {legacyError && <p className="genesis-error" role="alert">{legacyError}</p>}
+      </section>}
+      {legacySuccess && <p className="genesis-notice" role="status">{legacySuccess}</p>}
       {recoverySeed && <p className="genesis-notice" role="status">A previous First Signal may already have reached Hive. Resume it exactly to recover safely.</p>}
       {initial.error && <p className="genesis-error" role="alert">{initial.error}</p>}
       {catalogError && !immutable && <div className="genesis-error" role="alert">Presence choices could not be loaded: {catalogError}<button type="button" onClick={loadCatalog}>Retry Presence choices</button></div>}

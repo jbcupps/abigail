@@ -64,6 +64,7 @@ pub fn policy(method: &Method, route: &str) -> Access {
         | ("POST", "/v1/runtime/register" | "/v1/runtime/heartbeat" | "/v1/runtime/outbox/sync") => {
             Runtime
         }
+        ("POST", "/v1/entities/:id/journey/legacy-first-signal") => Desktop,
         _ => Desktop,
     }
 }
@@ -540,6 +541,11 @@ mod tests {
             ("GET", "/v1/entities/:id/forge-approvals", Entity),
             ("POST", "/v1/entities/:id/forge-approvals", Desktop),
             ("GET", "/v1/entities/:id/journey", Desktop),
+            (
+                "POST",
+                "/v1/entities/:id/journey/legacy-first-signal",
+                Desktop,
+            ),
             ("GET", "/v1/entities/:id/presence", Desktop),
             ("PUT", "/v1/entities/:id/presence", Desktop),
             ("GET", "/v1/genesis/quest/catalog", Desktop),
@@ -716,6 +722,22 @@ mod tests {
             (Method::GET, "/v1/status", None),
             (Method::GET, "/v1/genesis/sessions", None),
             (Method::GET, "/v1/entities/:id/journey", None),
+            (
+                Method::POST,
+                "/v1/entities/:id/journey/legacy-first-signal",
+                Some(serde_json::json!({
+                    "attempt_key": "opaque-old-attempt",
+                    "original_name": "Route Test",
+                    "purpose": "Help the family",
+                    "boundaries": "Ask first",
+                    "presence": {
+                        "temperament": "gentle",
+                        "identity": "aether",
+                        "crest": "orbit",
+                        "motion": "calm"
+                    }
+                })),
+            ),
             (Method::GET, "/v1/entities/:id/presence", None),
             (
                 Method::PUT,

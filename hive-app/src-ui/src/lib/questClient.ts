@@ -1,5 +1,9 @@
 import { resolveHiveConnection } from "./connection";
 import { genesisRequest } from "./genesisClient";
+import type {
+  LegacyMigrationRequest,
+  LegacyMigrationResult,
+} from "./legacyFirstSignal";
 
 export type QuestStageId = "reservation" | "soul" | "ethics" | "instincts" | "presence" | "birth" | "awakening";
 export type BadgeId = "first_spark" | "named" | "purposeful" | "soul_shaper" | "storyteller" | "trial_walker" | "instinct_keeper" | "presence_chosen" | "curator" | "first_light" | "first_words" | "getting_acquainted" | "kindred" | "hearth_regular" | "trusted_companion" | "returning_companion" | "seasoned_companion" | "steady_rhythm" | "hearth_season" | "constellation_keeper" | "skill_explorer" | "skill_weaver" | "memory_keeper" | "living_archive";
@@ -62,6 +66,14 @@ export function getQuestCatalog(): Promise<QuestCatalog> {
 }
 export const getEntityJourney = (entityId: string) => entityRequest<EntityJourney>(`${encodeURIComponent(entityId)}/journey`);
 export const setEntityPresence = (entityId: string, choice: PresenceChoice) => entityRequest<PresenceCard>(`${encodeURIComponent(entityId)}/presence`, choice);
+export const migrateLegacyFirstSignal = (
+  entityId: string,
+  request: LegacyMigrationRequest,
+) => entityRequest<LegacyMigrationResult>(
+  `${encodeURIComponent(entityId)}/journey/legacy-first-signal`,
+  request,
+  "POST",
+);
 
 export const PALETTES: Record<Palette, { label: string; colors: [string, string] }> = {
   aether: { label: "Aether", colors: ["#8f7cf7", "#58c4dc"] },

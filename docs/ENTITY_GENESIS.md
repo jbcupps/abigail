@@ -161,6 +161,30 @@ creation share this receipt mechanism, and
 `GET /v1/entity-creations/:creation_key` reports `absent`, `reserved`,
 `complete` or `unavailable` under Hive's control-token policy.
 
+Older standalone First Signal journals have one explicit migration path. Hive
+strictly decodes the historical session-storage v1 and local-storage v2 records
+without changing them. Malformed or conflicting bytes stay in place and block a
+new launch. A keyed record can offer only its exact completed creation receipt;
+an unkeyed record can offer only registered, non-Hive, exact-name Entities added
+after its captured baseline. Names remain suggestions, so the mentor must review
+and select an existing Entity before any write. Recovery never creates or retries
+an Entity.
+
+`POST /v1/entities/:id/journey/legacy-first-signal` is desktop-only. It verifies
+the selected Entity and original registered name, maps the old closed
+temperament/palette choices to canonical Presence with the `orbit` crest and
+`calm` motion, and adds only the applicable `FirstSpark`, `Named`, `Purposeful`
+and `PresenceChosen` badges. A matching historical five-field `presence.json`
+may be upgraded; a different or later canonical Presence is never overwritten.
+The schema-full `genesis_legacy_migration` ledger stores only owner ID, Entity
+ID, a closed-request digest, state and timestamps under a hashed attempt record
+ID. Pending imports converge after interruption, completed replays preserve
+their original result and timestamps, and a key cannot bind another Entity or
+request. No profile prose, conversation content, model material, memory content
+or Soul Forge scoring is stored in that ledger. Browser bytes clear only after
+the canonical response; v1 session records receive an exact resolution marker
+first so an older duplicated tab cannot resurrect them.
+
 ### 2. Hidden, versioned ethics
 
 New signed birth certificates carry the exact immutable scoring version
@@ -301,13 +325,12 @@ Hive state and restores `Continue <name>'s Genesis`. Local First Signal
 creation remains available; already-born Runtime cards retain their existing
 provider-required gate.
 
-### Deferred standalone recovery slices
+### Retired standalone surfaces
 
-The old standalone First Signal application was not imported. Deferred work is
-limited to migration/recovery of its old browser journals, candidate matching
-for unkeyed legacy direct-creation requests, and its animated Presence builder
-and separate Presence home. These are not compatibility promises for the
-current Hive-first flow.
+The old standalone First Signal application was not imported. Its two browser
+journals are accepted only through the narrow migration path above. Its animated
+Presence builder and separate Presence home remain retired and are not
+compatibility promises for the current Hive-first flow.
 
 ## Local authorization and retention
 

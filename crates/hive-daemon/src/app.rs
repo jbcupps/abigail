@@ -42,6 +42,11 @@ pub fn router(state: HiveDaemonState) -> Router {
         .route("/v1/entities/:id/persistence", post(persistence::request))
         .route("/v1/entities/:id/journey", get(journey::get_journey))
         .route(
+            "/v1/entities/:id/journey/legacy-first-signal",
+            post(journey::post_legacy_first_signal)
+                .layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
+        )
+        .route(
             "/v1/entities/:id/presence",
             get(journey::get_presence)
                 .put(journey::put_presence)

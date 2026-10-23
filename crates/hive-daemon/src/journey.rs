@@ -18,12 +18,14 @@ use hive_core::genesis::{EntityDefinition, GenesisSession};
 use hive_core::genesis_quest::*;
 use hive_core::{ApiEnvelope, BirthCertificate, BirthCertificateSummary};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::io::Read;
 use std::sync::Mutex;
 
 const JOURNEY_TABLE: &str = "entity_journey";
 const JOURNEY_EVENT_TABLE: &str = "entity_journey_event";
+const LEGACY_MIGRATION_TABLE: &str = "genesis_legacy_migration";
 const JOURNEY_EVENT_SELECT: &str =
     "record_id, owner_id, entity_id, kind, occurred_at, session_id, skill_id, tool_name, successful_skill_count, memory_id, memory_weight";
 const PRESENCE_FILE: &str = "presence.json";
@@ -33,6 +35,7 @@ const MAX_EVENT_IDENTIFIER_BYTES: usize = 160;
 pub struct JourneyStore {
     handle: PersistenceHandle,
     writes: Mutex<()>,
+    legacy_migrations: Mutex<()>,
     #[cfg(test)]
     test_faults: Mutex<JourneyTestFaults>,
 }
@@ -42,6 +45,7 @@ pub struct JourneyStore {
 struct JourneyTestFaults {
     fail_event_write_after: Option<usize>,
     fail_projection_writes: usize,
+    fail_legacy_migration_after_presence: bool,
 }
 
 /// Serialized as text like Genesis sessions, with ownership cross-checked.
@@ -78,6 +82,53 @@ struct JourneyEventRecord {
 struct PreparedJourneyEvent {
     event: JourneyEventRecord,
     needs_write: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum LegacyMigrationState {
+    Pending,
+    Complete,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct LegacyMigrationRecord {
+    owner_id: String,
+    entity_id: String,
+    request_digest: String,
+    state: LegacyMigrationState,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LegacyFirstSignalMigrationRequest {
+    pub attempt_key: String,
+    pub original_name: String,
+    pub purpose: String,
+    pub boundaries: String,
+    pub presence: PresenceChoice,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LegacyFirstSignalMigrationResult {
+    pub entity_id: String,
+    pub presence: PresenceCard,
+    pub badges: Vec<Badge>,
+    pub migrated_at: String,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct LegacyPresenceCard {
+    name: String,
+    purpose: String,
+    temperament: Temperament,
+    boundaries: String,
+    identity: Palette,
 }
 
 #[derive(Deserialize)]
@@ -130,9 +181,18 @@ impl JourneyStore {
                 "description": "Owner-scoped redacted journey activity metadata"
             }),
         )?;
+        handle.upsert(
+            "migration_log",
+            "genesis_legacy_first_signal_v1",
+            &serde_json::json!({
+                "schema_version": 1,
+                "description": "Replay-safe binding for legacy First Signal migration"
+            }),
+        )?;
         Ok(Self {
             handle,
             writes: Mutex::new(()),
+            legacy_migrations: Mutex::new(()),
             #[cfg(test)]
             test_faults: Mutex::new(JourneyTestFaults::default()),
         })
@@ -146,6 +206,14 @@ impl JourneyStore {
     #[cfg(test)]
     pub(crate) fn fail_next_projection_write(&self) {
         self.test_faults.lock().unwrap().fail_projection_writes += 1;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_legacy_migration_after_presence(&self) {
+        self.test_faults
+            .lock()
+            .unwrap()
+            .fail_legacy_migration_after_presence = true;
     }
 
     pub fn load(&self, owner_id: &str, entity_id: &str) -> Result<Option<EntityJourney>> {
@@ -179,6 +247,27 @@ impl JourneyStore {
             },
         )?;
         Ok(())
+    }
+
+    fn load_legacy_migration(&self, record_id: &str) -> Result<Option<LegacyMigrationRecord>> {
+        let Some(mut value) = self
+            .handle
+            .select_record::<serde_json::Value>(LEGACY_MIGRATION_TABLE, record_id)?
+        else {
+            return Ok(None);
+        };
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| anyhow!("Invalid legacy migration ledger row"))?;
+        let saved_id = object
+            .remove("id")
+            .and_then(|id| id.as_str().map(str::to_owned));
+        if saved_id.as_deref().is_some_and(|id| id != record_id) {
+            bail!("Legacy migration ledger ID does not match its record");
+        }
+        serde_json::from_value(value)
+            .context("Invalid legacy migration ledger row")
+            .map(Some)
     }
 
     /// Loads (or starts) a journey, applies `change`, and writes only when it
@@ -711,6 +800,273 @@ fn save_presence_bytes(path: &std::path::Path, bytes: &[u8]) -> Result<(), Strin
         .map_err(|error| format!("Could not save the Presence card: {error}"))
 }
 
+impl LegacyFirstSignalMigrationRequest {
+    fn validate(&self) -> Result<(), String> {
+        if self.attempt_key.is_empty()
+            || self.attempt_key != self.attempt_key.trim()
+            || self.attempt_key.len() > 512
+            || self.attempt_key.chars().any(char::is_control)
+        {
+            return Err("The legacy First Signal attempt key is invalid".into());
+        }
+        if self.original_name.trim().is_empty()
+            || self.original_name != self.original_name.trim()
+            || self.original_name.chars().count() > PRESENCE_NAME_CHARS
+            || self.original_name.chars().any(char::is_control)
+        {
+            return Err("The legacy First Signal registered name is invalid".into());
+        }
+        for text in [&self.purpose, &self.boundaries] {
+            if text.chars().count() > PRESENCE_TEXT_CHARS
+                || text
+                    .chars()
+                    .any(|ch| ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'))
+            {
+                return Err("The legacy First Signal brief is invalid".into());
+            }
+        }
+        if !matches!(
+            self.presence.temperament,
+            Temperament::Gentle | Temperament::Direct | Temperament::Curious
+        ) || !matches!(
+            self.presence.identity,
+            Palette::Aether | Palette::Ember | Palette::Lumen
+        ) || self.presence.crest != Crest::Orbit
+            || self.presence.motion != Motion::Calm
+        {
+            return Err("The legacy First Signal Presence is invalid".into());
+        }
+        Ok(())
+    }
+}
+
+fn digest_parts(domain: &[u8], parts: &[&[u8]]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(domain);
+    for part in parts {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part);
+    }
+    Sha256::finalize(hasher)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn legacy_migration_record_id(owner_id: &str, attempt_key: &str) -> String {
+    digest_parts(
+        b"abigail.genesis.legacy-first-signal.record.v1\0",
+        &[owner_id.as_bytes(), attempt_key.as_bytes()],
+    )
+}
+
+fn legacy_migration_request_digest(
+    request: &LegacyFirstSignalMigrationRequest,
+) -> Result<String, String> {
+    let bytes = serde_json::to_vec(request).map_err(|error| error.to_string())?;
+    Ok(digest_parts(
+        b"abigail.genesis.legacy-first-signal.request.v1\0",
+        &[&bytes],
+    ))
+}
+
+fn legacy_badges(request: &LegacyFirstSignalMigrationRequest) -> Vec<Badge> {
+    let mut badges = vec![Badge::FirstSpark, Badge::Named];
+    if !request.purpose.trim().is_empty() {
+        badges.push(Badge::Purposeful);
+    }
+    badges.push(Badge::PresenceChosen);
+    badges
+}
+
+fn legacy_presence(request: &LegacyFirstSignalMigrationRequest) -> PresenceCard {
+    let mut definition = EntityDefinition::new(OWNER.into(), String::new());
+    definition.name = request.original_name.clone();
+    definition.purpose = request.purpose.clone();
+    if !request.boundaries.is_empty() {
+        definition.boundaries = vec![request.boundaries.clone()];
+    }
+    PresenceCard::compose(request.presence, &definition)
+}
+
+fn read_bounded_presence(path: &std::path::Path) -> Result<Option<Vec<u8>>, String> {
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("Could not read the Presence card: {error}")),
+    };
+    let mut bytes = Vec::new();
+    file.take((MAX_PRESENCE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("Could not read the Presence card: {error}"))?;
+    if bytes.len() > MAX_PRESENCE_BYTES {
+        return Err("The saved Presence card is too large".into());
+    }
+    Ok(Some(bytes))
+}
+
+fn ensure_legacy_presence(
+    state: &HiveDaemonState,
+    entity_id: &str,
+    request: &LegacyFirstSignalMigrationRequest,
+    expected: &PresenceCard,
+) -> Result<(), String> {
+    let path = presence_path(state, entity_id)?;
+    let Some(bytes) = read_bounded_presence(&path)? else {
+        return save_presence(state, entity_id, expected);
+    };
+    let raw: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("The saved Presence card is invalid: {error}"))?;
+    let is_old_five_field = raw.as_object().is_some_and(|object| {
+        object.len() == 5
+            && ["name", "purpose", "temperament", "boundaries", "identity"]
+                .iter()
+                .all(|key| object.contains_key(*key))
+    });
+    if is_old_five_field {
+        let old: LegacyPresenceCard = serde_json::from_value(raw)
+            .map_err(|error| format!("The saved legacy Presence card is invalid: {error}"))?;
+        let reviewed = LegacyPresenceCard {
+            name: request.original_name.clone(),
+            purpose: request.purpose.clone(),
+            temperament: request.presence.temperament,
+            boundaries: request.boundaries.clone(),
+            identity: request.presence.identity,
+        };
+        if old != reviewed {
+            return Err(
+                "The saved legacy Presence differs from the reviewed First Signal brief".into(),
+            );
+        }
+        return save_presence(state, entity_id, expected);
+    }
+
+    let current: PresenceCard = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("The saved Presence card is invalid: {error}"))?;
+    current.validate()?;
+    if &current != expected {
+        return Err(
+            "This Entity already has a different canonical Presence; it was not overwritten".into(),
+        );
+    }
+    Ok(())
+}
+
+fn legacy_migration_result(
+    entity_id: &str,
+    request: &LegacyFirstSignalMigrationRequest,
+    migrated_at: &str,
+) -> LegacyFirstSignalMigrationResult {
+    LegacyFirstSignalMigrationResult {
+        entity_id: entity_id.into(),
+        presence: legacy_presence(request),
+        badges: legacy_badges(request),
+        migrated_at: migrated_at.into(),
+    }
+}
+
+fn migrate_legacy_first_signal(
+    state: &HiveDaemonState,
+    entity_id: &str,
+    request: &LegacyFirstSignalMigrationRequest,
+) -> Result<LegacyFirstSignalMigrationResult, String> {
+    request.validate()?;
+    validate_entity_id(entity_id).map_err(|error| error.to_string())?;
+    let registered = registered_name(state, entity_id)?;
+    if registered != request.original_name {
+        return Err(
+            "The selected Entity does not match the legacy First Signal registered name".into(),
+        );
+    }
+    let expected = legacy_presence(request);
+    expected.validate()?;
+    let record_id = legacy_migration_record_id(OWNER, &request.attempt_key);
+    let request_digest = legacy_migration_request_digest(request)?;
+    let _lock = state
+        .journeys
+        .legacy_migrations
+        .lock()
+        .map_err(|_| "Legacy First Signal migration lock unavailable".to_string())?;
+
+    let saved = state
+        .journeys
+        .load_legacy_migration(&record_id)
+        .map_err(|error| error.to_string())?;
+    let mut ledger = match saved {
+        Some(saved) => {
+            if saved.owner_id != OWNER
+                || saved.entity_id != entity_id
+                || saved.request_digest != request_digest
+            {
+                return Err(
+                    "This legacy First Signal attempt is already bound to a different migration"
+                        .into(),
+                );
+            }
+            if saved.state == LegacyMigrationState::Complete {
+                return Ok(legacy_migration_result(
+                    entity_id,
+                    request,
+                    &saved.updated_at,
+                ));
+            }
+            saved
+        }
+        None => {
+            let now = now_utc();
+            let pending = LegacyMigrationRecord {
+                owner_id: OWNER.into(),
+                entity_id: entity_id.into(),
+                request_digest,
+                state: LegacyMigrationState::Pending,
+                created_at: now.clone(),
+                updated_at: now,
+            };
+            state
+                .journeys
+                .handle
+                .upsert(LEGACY_MIGRATION_TABLE, &record_id, &pending)
+                .map_err(|error| error.to_string())?;
+            pending
+        }
+    };
+
+    ensure_legacy_presence(state, entity_id, request, &expected)?;
+    #[cfg(test)]
+    {
+        let mut faults = state.journeys.test_faults.lock().unwrap();
+        if faults.fail_legacy_migration_after_presence {
+            faults.fail_legacy_migration_after_presence = false;
+            return Err("Injected legacy First Signal response loss".into());
+        }
+    }
+
+    let badges = legacy_badges(request);
+    state
+        .journeys
+        .update(OWNER, entity_id, &ledger.created_at, |journey| {
+            let changed = !award(&mut journey.earned, &badges, &ledger.created_at).is_empty();
+            if changed {
+                journey.updated_at = ledger.created_at.clone();
+            }
+            changed
+        })
+        .map_err(|error| error.to_string())?;
+
+    ledger.state = LegacyMigrationState::Complete;
+    ledger.updated_at = now_utc();
+    state
+        .journeys
+        .handle
+        .upsert(LEGACY_MIGRATION_TABLE, &record_id, &ledger)
+        .map_err(|error| error.to_string())?;
+    Ok(legacy_migration_result(
+        entity_id,
+        request,
+        &ledger.updated_at,
+    ))
+}
+
 fn certificate(state: &HiveDaemonState, entity_id: &str) -> Option<BirthCertificateSummary> {
     let config = state.identity_manager.load_agent(entity_id).ok()?;
     let text = std::fs::read_to_string(config.docs_dir.join("birth_certificate.json")).ok()?;
@@ -840,6 +1196,23 @@ fn journey_view(state: &HiveDaemonState, entity_id: &str) -> Result<serde_json::
     serde_json::to_value(view).map_err(|e| e.to_string())
 }
 
+/// POST /v1/entities/:id/journey/legacy-first-signal
+///
+/// Imports only a reviewed brief into an existing Entity. It never allocates,
+/// retries, or otherwise creates an Entity.
+pub async fn post_legacy_first_signal(
+    State(state): State<HiveDaemonState>,
+    Path(entity_id): Path<String>,
+    Json(request): Json<LegacyFirstSignalMigrationRequest>,
+) -> Json<ApiEnvelope<LegacyFirstSignalMigrationResult>> {
+    Json(
+        match migrate_legacy_first_signal(&state, &entity_id, &request) {
+            Ok(result) => ApiEnvelope::success(result),
+            Err(error) => ApiEnvelope::error(error),
+        },
+    )
+}
+
 /// GET /v1/entities/:id/presence
 pub async fn get_presence(
     State(state): State<HiveDaemonState>,
@@ -887,6 +1260,388 @@ pub(crate) mod tests {
 
     pub(crate) fn view(state: &HiveDaemonState, entity_id: &str) -> serde_json::Value {
         journey_view(state, entity_id).unwrap()
+    }
+
+    fn legacy_request() -> LegacyFirstSignalMigrationRequest {
+        LegacyFirstSignalMigrationRequest {
+            attempt_key: "opaque-old-attempt".into(),
+            original_name: "Route Test".into(),
+            purpose: "Help our family notice small wonders.".into(),
+            boundaries: "Ask before changing shared plans.".into(),
+            presence: PresenceChoice {
+                temperament: Temperament::Curious,
+                identity: Palette::Ember,
+                crest: Crest::Orbit,
+                motion: Motion::Calm,
+            },
+        }
+    }
+
+    async fn import_legacy(
+        state: &HiveDaemonState,
+        entity_id: &str,
+        request: LegacyFirstSignalMigrationRequest,
+    ) -> hive_core::ApiEnvelope<LegacyFirstSignalMigrationResult> {
+        let Json(response) = post_legacy_first_signal(
+            State(state.clone()),
+            Path(entity_id.to_string()),
+            Json(request),
+        )
+        .await;
+        response
+    }
+
+    fn forbidden_public_keys(value: &serde_json::Value) -> Vec<String> {
+        const FORBIDDEN: [&str; 16] = [
+            "weights",
+            "deontology",
+            "teleology",
+            "areteology",
+            "welfare",
+            "message",
+            "reply",
+            "content",
+            "prompt",
+            "model",
+            "model_output",
+            "memory",
+            "memory_content",
+            "tool_argument",
+            "tool_result",
+            "payload",
+        ];
+        fn visit(value: &serde_json::Value, path: &str, found: &mut Vec<String>) {
+            match value {
+                serde_json::Value::Object(object) => {
+                    for (key, child) in object {
+                        let child_path = format!("{path}.{key}");
+                        if FORBIDDEN.contains(&key.as_str()) {
+                            found.push(child_path.clone());
+                        }
+                        visit(child, &child_path, found);
+                    }
+                }
+                serde_json::Value::Array(array) => {
+                    for (index, child) in array.iter().enumerate() {
+                        visit(child, &format!("{path}[{index}]"), found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        visit(value, "$", &mut found);
+        found
+    }
+
+    #[tokio::test]
+    async fn legacy_first_signal_first_import_creates_canonical_presence_badges_and_closed_ledger()
+    {
+        let (state, entity_id) = crate::routes::tests::build_state();
+        let request = legacy_request();
+
+        let response = import_legacy(&state, &entity_id, request.clone()).await;
+
+        assert!(response.ok, "{:?}", response.error);
+        let result = response.data.unwrap();
+        assert_eq!(result.entity_id, entity_id);
+        assert_eq!(
+            result.presence,
+            PresenceCard {
+                name: "Route Test".into(),
+                purpose: request.purpose.clone(),
+                temperament: Temperament::Curious,
+                boundaries: request.boundaries.clone(),
+                identity: Palette::Ember,
+                crest: Crest::Orbit,
+                motion: Motion::Calm,
+            }
+        );
+        assert_eq!(
+            result.badges,
+            vec![
+                Badge::FirstSpark,
+                Badge::Named,
+                Badge::Purposeful,
+                Badge::PresenceChosen,
+            ]
+        );
+        assert_eq!(
+            load_presence(&state, &entity_id).unwrap(),
+            Some(result.presence.clone())
+        );
+        let journey = state.journeys.load(OWNER, &entity_id).unwrap().unwrap();
+        for badge in &result.badges {
+            assert!(journey.earned_badges().contains(badge));
+        }
+        let record_id = legacy_migration_record_id(OWNER, &request.attempt_key);
+        let ledger = state
+            .journeys
+            .handle
+            .select_record::<serde_json::Value>(LEGACY_MIGRATION_TABLE, &record_id)
+            .unwrap()
+            .unwrap();
+        let keys = ledger
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            keys.into_iter().collect::<std::collections::BTreeSet<_>>(),
+            [
+                "created_at",
+                "entity_id",
+                "id",
+                "owner_id",
+                "request_digest",
+                "state",
+                "updated_at",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+        );
+        let encoded = ledger.to_string();
+        assert!(!encoded.contains(&request.attempt_key));
+        assert!(!encoded.contains(&request.original_name));
+        assert!(!encoded.contains(&request.purpose));
+        assert!(!encoded.contains(&request.boundaries));
+    }
+
+    #[tokio::test]
+    async fn legacy_first_signal_exact_replay_returns_same_result_without_timestamp_changes() {
+        let (state, entity_id) = crate::routes::tests::build_state();
+        let request = legacy_request();
+        let first = import_legacy(&state, &entity_id, request.clone())
+            .await
+            .data
+            .unwrap();
+        let record_id = legacy_migration_record_id(OWNER, &request.attempt_key);
+        let first_ledger = state
+            .journeys
+            .load_legacy_migration(&record_id)
+            .unwrap()
+            .unwrap();
+        let first_journey = state.journeys.load(OWNER, &entity_id).unwrap().unwrap();
+        let first_presence = std::fs::read(presence_path(&state, &entity_id).unwrap()).unwrap();
+
+        let replay = import_legacy(&state, &entity_id, request)
+            .await
+            .data
+            .unwrap();
+
+        assert_eq!(replay, first);
+        assert_eq!(
+            state
+                .journeys
+                .load_legacy_migration(&record_id)
+                .unwrap()
+                .unwrap(),
+            first_ledger
+        );
+        assert_eq!(
+            state.journeys.load(OWNER, &entity_id).unwrap().unwrap(),
+            first_journey
+        );
+        assert_eq!(
+            std::fs::read(presence_path(&state, &entity_id).unwrap()).unwrap(),
+            first_presence
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_first_signal_response_loss_replay_completes_a_partial_import() {
+        let (state, entity_id) = crate::routes::tests::build_state();
+        let request = legacy_request();
+        state.journeys.fail_next_legacy_migration_after_presence();
+
+        let interrupted = import_legacy(&state, &entity_id, request.clone()).await;
+
+        assert!(!interrupted.ok);
+        assert_eq!(
+            load_presence(&state, &entity_id).unwrap().unwrap().purpose,
+            request.purpose
+        );
+        assert!(state.journeys.load(OWNER, &entity_id).unwrap().is_none());
+        let record_id = legacy_migration_record_id(OWNER, &request.attempt_key);
+        assert_eq!(
+            state
+                .journeys
+                .load_legacy_migration(&record_id)
+                .unwrap()
+                .unwrap()
+                .state,
+            LegacyMigrationState::Pending
+        );
+
+        let replay = import_legacy(&state, &entity_id, request).await;
+
+        assert!(replay.ok, "{:?}", replay.error);
+        assert!(state.journeys.load(OWNER, &entity_id).unwrap().is_some());
+        assert_eq!(
+            state
+                .journeys
+                .load_legacy_migration(&record_id)
+                .unwrap()
+                .unwrap()
+                .state,
+            LegacyMigrationState::Complete
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_first_signal_attempt_cannot_bind_another_entity_or_request_digest() {
+        let (state, entity_id) = crate::routes::tests::build_state();
+        let request = legacy_request();
+        assert!(import_legacy(&state, &entity_id, request.clone()).await.ok);
+
+        let (other_id, _) = state
+            .identity_manager
+            .create_agent("Route Test")
+            .expect("create same-name recovery candidate");
+        let other = import_legacy(&state, &other_id, request.clone()).await;
+        assert!(!other.ok, "one attempt was rebound to another Entity");
+        assert!(load_presence(&state, &other_id).unwrap().is_none());
+
+        let mut changed = request;
+        changed.purpose.push_str(" Changed");
+        let changed = import_legacy(&state, &entity_id, changed).await;
+        assert!(
+            !changed.ok,
+            "one attempt accepted a different import digest"
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_first_signal_replaces_only_a_matching_old_five_field_presence() {
+        let (state, entity_id) = crate::routes::tests::build_state();
+        let request = legacy_request();
+        let path = presence_path(&state, &entity_id).unwrap();
+        let matching = serde_json::json!({
+            "name": request.original_name,
+            "purpose": request.purpose,
+            "temperament": request.presence.temperament,
+            "boundaries": request.boundaries,
+            "identity": request.presence.identity,
+        });
+        std::fs::write(&path, serde_json::to_vec_pretty(&matching).unwrap()).unwrap();
+
+        assert!(import_legacy(&state, &entity_id, request.clone()).await.ok);
+        let canonical: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(canonical["crest"], "orbit");
+        assert_eq!(canonical["motion"], "calm");
+
+        let (other_state, other_id) = crate::routes::tests::build_state();
+        let other_path = presence_path(&other_state, &other_id).unwrap();
+        let conflicting = serde_json::json!({
+            "name": request.original_name,
+            "purpose": "A different saved purpose",
+            "temperament": request.presence.temperament,
+            "boundaries": request.boundaries,
+            "identity": request.presence.identity,
+        });
+        let conflicting_bytes = serde_json::to_vec_pretty(&conflicting).unwrap();
+        std::fs::write(&other_path, &conflicting_bytes).unwrap();
+
+        let rejected = import_legacy(&other_state, &other_id, request).await;
+        assert!(!rejected.ok);
+        assert_eq!(std::fs::read(other_path).unwrap(), conflicting_bytes);
+    }
+
+    #[tokio::test]
+    async fn legacy_first_signal_completed_replay_never_overwrites_a_later_canonical_edit() {
+        let (state, entity_id) = crate::routes::tests::build_state();
+        let request = legacy_request();
+        let first = import_legacy(&state, &entity_id, request.clone())
+            .await
+            .data
+            .unwrap();
+        let mut edited = first.presence.clone();
+        edited.motion = Motion::Lively;
+        save_presence(&state, &entity_id, &edited).unwrap();
+
+        let replay = import_legacy(&state, &entity_id, request)
+            .await
+            .data
+            .unwrap();
+
+        assert_eq!(replay, first);
+        assert_eq!(load_presence(&state, &entity_id).unwrap(), Some(edited));
+    }
+
+    #[tokio::test]
+    async fn legacy_first_signal_serialized_request_and_response_are_scoring_and_event_free() {
+        let (state, entity_id) = crate::routes::tests::build_state();
+        let request = legacy_request();
+        let request_json = serde_json::to_value(&request).unwrap();
+        assert!(
+            forbidden_public_keys(&request_json).is_empty(),
+            "{request_json}"
+        );
+        for forbidden in [
+            "weights",
+            "deontology",
+            "teleology",
+            "areteology",
+            "welfare",
+            "message",
+            "reply",
+            "content",
+            "prompt",
+            "model_output",
+            "memory",
+            "payload",
+        ] {
+            let mut injected = request_json.clone();
+            injected[forbidden] = serde_json::json!("private");
+            assert!(
+                serde_json::from_value::<LegacyFirstSignalMigrationRequest>(injected).is_err(),
+                "migration request accepted forbidden key {forbidden}"
+            );
+        }
+
+        let response = import_legacy(&state, &entity_id, request)
+            .await
+            .data
+            .unwrap();
+        let response_json = serde_json::to_value(response).unwrap();
+        assert!(
+            forbidden_public_keys(&response_json).is_empty(),
+            "{response_json}"
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_first_signal_import_adds_only_its_applicable_presentation_badges() {
+        let (state, entity_id) = crate::routes::tests::build_state();
+        state
+            .journeys
+            .update(OWNER, &entity_id, "before", |journey| {
+                journey.mentor_messages = 5;
+                true
+            })
+            .unwrap();
+
+        let response = import_legacy(&state, &entity_id, legacy_request()).await;
+
+        assert!(response.ok, "{:?}", response.error);
+        let earned = state
+            .journeys
+            .load(OWNER, &entity_id)
+            .unwrap()
+            .unwrap()
+            .earned_badges();
+        assert_eq!(
+            earned,
+            vec![
+                Badge::FirstSpark,
+                Badge::Named,
+                Badge::Purposeful,
+                Badge::PresenceChosen,
+            ]
+        );
     }
 
     #[tokio::test]

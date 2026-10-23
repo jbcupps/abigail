@@ -8,6 +8,23 @@ DEFINE TABLE IF NOT EXISTS genesis_session SCHEMALESS;
 DEFINE INDEX IF NOT EXISTS idx_genesis_session_owner ON TABLE genesis_session COLUMNS owner_id;
 DEFINE TABLE IF NOT EXISTS entity_journey SCHEMALESS;
 DEFINE INDEX IF NOT EXISTS idx_entity_journey_owner ON TABLE entity_journey COLUMNS owner_id;
+DEFINE TABLE OVERWRITE genesis_legacy_migration SCHEMAFULL;
+DEFINE FIELD OVERWRITE owner_id ON TABLE genesis_legacy_migration TYPE string;
+DEFINE FIELD OVERWRITE entity_id ON TABLE genesis_legacy_migration TYPE string;
+DEFINE FIELD OVERWRITE request_digest ON TABLE genesis_legacy_migration TYPE string;
+DEFINE FIELD OVERWRITE state ON TABLE genesis_legacy_migration TYPE string;
+DEFINE FIELD OVERWRITE created_at ON TABLE genesis_legacy_migration TYPE string;
+DEFINE FIELD OVERWRITE updated_at ON TABLE genesis_legacy_migration TYPE string;
+UPDATE genesis_legacy_migration CONTENT {
+    owner_id: owner_id,
+    entity_id: entity_id,
+    request_digest: request_digest,
+    state: state,
+    created_at: created_at,
+    updated_at: updated_at
+};
+DEFINE INDEX IF NOT EXISTS idx_genesis_legacy_migration_owner ON TABLE genesis_legacy_migration COLUMNS owner_id;
+DEFINE INDEX IF NOT EXISTS idx_genesis_legacy_migration_entity ON TABLE genesis_legacy_migration COLUMNS owner_id, entity_id;
 DEFINE TABLE OVERWRITE entity_journey_event SCHEMAFULL;
 DEFINE FIELD OVERWRITE record_id ON TABLE entity_journey_event TYPE string;
 DEFINE FIELD OVERWRITE owner_id ON TABLE entity_journey_event TYPE string;
@@ -209,5 +226,63 @@ mod tests {
         let mut injected = valid_event(&new_id);
         injected["prompt"] = serde_json::json!("private prompt");
         assert_field_was_rejected_or_removed(&handle, &new_id, &injected, "prompt");
+    }
+
+    #[test]
+    fn journey_legacy_migration_schema_keeps_only_binding_state_and_timestamps() {
+        let handle = PersistenceHandle::open_ephemeral(EntityScope::Hive).unwrap();
+        let record = serde_json::json!({
+            "owner_id": "local",
+            "entity_id": uuid::Uuid::new_v4().to_string(),
+            "request_digest": "ab".repeat(32),
+            "state": "pending",
+            "created_at": "2026-10-23T00:00:00Z",
+            "updated_at": "2026-10-23T00:00:00Z",
+        });
+        let id = "cd".repeat(32);
+        handle
+            .upsert("genesis_legacy_migration", &id, &record)
+            .unwrap();
+        let mut stored = handle
+            .select_record::<serde_json::Value>("genesis_legacy_migration", &id)
+            .unwrap()
+            .unwrap();
+        stored.as_object_mut().unwrap().remove("id");
+        assert_eq!(stored, record);
+
+        for field in [
+            "attempt_key",
+            "name",
+            "purpose",
+            "boundaries",
+            "presence",
+            "weights",
+            "deontology",
+            "teleology",
+            "areteology",
+            "welfare",
+            "message",
+            "reply",
+            "content",
+            "prompt",
+            "model_output",
+            "memory",
+            "payload",
+        ] {
+            let next_id = uuid::Uuid::new_v4().simple().to_string();
+            let mut injected = record.clone();
+            injected[field] = serde_json::json!("private value");
+            let result = handle.upsert("genesis_legacy_migration", &next_id, &injected);
+            if result.is_ok() {
+                let saved = handle
+                    .select_record::<serde_json::Value>("genesis_legacy_migration", &next_id)
+                    .unwrap()
+                    .unwrap();
+                assert!(
+                    saved.get(field).is_none(),
+                    "SCHEMAFULL legacy migration row retained forbidden field {field}: {saved}"
+                );
+            }
+        }
     }
 }
