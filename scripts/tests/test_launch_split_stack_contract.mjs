@@ -12,6 +12,8 @@ const helper = readIfPresent('scripts/dev/start_process_with_environment_overlay
 const behavioralTest = readIfPresent('scripts/tests/test_launch_split_stack_environment.ps1');
 const workflow = read('.github/workflows/ci.yml');
 const readme = read('README.md');
+const design = read('docs/superpowers/specs/2026-10-23-genesis-quest-continuation-design.md');
+const plan = read('docs/superpowers/plans/2026-10-23-genesis-quest-continuation.md');
 
 function between(source, start, end) {
   const from = source.indexOf(start);
@@ -29,6 +31,12 @@ test('launcher dot-sources the isolated PowerShell 5.1 overlay helper', () => {
   assert.doesNotMatch(launcher, /function\s+Start-ProcessWithEnvironmentOverlay\b/i);
   assert.match(helper, /function\s+Start-ProcessWithEnvironmentOverlay\b/i);
   assert.match(helper, /\[hashtable\]\s*\$EnvironmentOverlay\b/i);
+  assert.match(helper, /System\.Diagnostics\.ProcessStartInfo/i);
+  assert.match(helper, /\.UseShellExecute\s*=\s*\$false/i);
+  assert.match(helper, /\.EnvironmentVariables\s*\[/i);
+  assert.match(helper, /\[System\.Diagnostics\.Process\]::Start\s*\(/i);
+  assert.doesNotMatch(helper, /\b(?:Add-Type|DllImport|SetEnvironmentVariable|GetEnvironmentVariable)\b/i);
+  assert.doesNotMatch(helper, /\b(?:ArgumentList|Wait|PassThru)\b/i);
   assert.doesNotMatch(helper, /\bWrite-(?:Host|Verbose|Debug|Information|Warning|Output)\b/i);
 });
 
@@ -49,18 +57,19 @@ test('both desktop shells use the overlay helper with their required variables',
   assert.match(runtimeLaunch, /\bCARGO_TARGET_DIR\s*=\s*\$targetDir\b/i);
 });
 
-test('Windows PowerShell behavior test owns syntax and exact restoration coverage', () => {
+test('Windows PowerShell behavior test owns syntax and child-environment coverage', () => {
   assert.match(
     behavioralTest,
     /\[Management\.Automation\.Language\.Parser\]::ParseFile\s*\(/i,
   );
-  assert.match(behavioralTest, /Get-ProcessEnvironmentVariableExact\b/);
-  assert.match(behavioralTest, /PRESENT_NONEMPTY/);
-  assert.match(behavioralTest, /PRESENT_EMPTY/);
+  assert.match(behavioralTest, /\.cmd\b/i);
+  assert.match(behavioralTest, /\.WaitForExit\s*\(/i);
+  assert.match(behavioralTest, /PRESENT/);
   assert.match(behavioralTest, /ABSENT/);
   assert.match(behavioralTest, /does-not-exist\.exe/);
   assert.match(behavioralTest, /^\.\s+\$helperPath$/m);
   assert.doesNotMatch(behavioralTest, /^\.\s+.*launch_split_stack\.ps1/m);
+  assert.doesNotMatch(behavioralTest, /Get-ProcessEnvironmentVariableExact\b/);
 });
 
 test('CI runs both static wiring and Windows PowerShell 5.1 behavior contracts', () => {
@@ -74,7 +83,16 @@ test('CI runs both static wiring and Windows PowerShell 5.1 behavior contracts',
   );
 });
 
-test('README limits restoration claims to the temporary overlay', () => {
-  assert.match(readme, /only (?:the )?variables (?:supplied|set) in each desktop shell['’]s .*overlay are restored/i);
-  assert.doesNotMatch(readme, /launcher['’]s prior environment is restored/i);
+test('documentation specifies a child-only ProcessStartInfo environment', () => {
+  for (const [path, content] of [
+    ['README.md', readme],
+    ['continuation design', design],
+    ['Task 7 plan', plan],
+  ]) {
+    assert.match(content, /ProcessStartInfo/i, `${path} names the child process mechanism`);
+    assert.match(content, /(?:does not|never) (?:change|mutate|modify).*parent process environment/i,
+      `${path} preserves the parent by construction`);
+    assert.doesNotMatch(content, /temporar(?:y|ily) (?:set|overlay).*process environment/i,
+      `${path} does not describe the retired parent-overlay design`);
+  }
 });

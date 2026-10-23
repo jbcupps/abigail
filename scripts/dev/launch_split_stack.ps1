@@ -199,8 +199,7 @@ if ($desktopBuildSucceeded -and -not $SkipDesktopApps) {
             ABIGAIL_HIVE_URL = $hiveUrl
             ABIGAIL_DATA_DIR = $dataRoot
             CARGO_TARGET_DIR = $targetDir
-        } `
-        -PassThru
+        }
 
     Write-Host "Launching Abigail Entity Runtime desktop shell..."
     $runtimeAppProc = Start-ProcessWithEnvironmentOverlay -FilePath $runtimeAppExe `
@@ -208,8 +207,7 @@ if ($desktopBuildSucceeded -and -not $SkipDesktopApps) {
         -EnvironmentOverlay @{
             ABIGAIL_ENTITY_URL = $runtimeUrl
             CARGO_TARGET_DIR = $targetDir
-        } `
-        -PassThru
+        }
 } elseif (-not $NoBrowserFallback) {
     $mode = "browser_fallback"
     Write-Warning "Desktop shells are unavailable on this machine right now; starting the browser harness instead."

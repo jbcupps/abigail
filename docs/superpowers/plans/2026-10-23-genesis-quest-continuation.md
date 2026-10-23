@@ -339,26 +339,35 @@ git commit -m "feat(journey): add seasonal and family quests"
 
 **Files:**
 - Create: `scripts/tests/test_launch_split_stack_contract.mjs`
+- Create: `scripts/tests/test_launch_split_stack_environment.ps1`
+- Create: `scripts/dev/start_process_with_environment_overlay.ps1`
 - Modify: `scripts/dev/launch_split_stack.ps1`
 - Modify: `.github/workflows/ci.yml`
 - Modify: `README.md`
 
-- [ ] **Step 1: Write a failing static contract test**
+- [ ] **Step 1: Write failing wiring and Windows PowerShell 5.1 contracts**
 
-Assert the script does not use `Start-Process -Environment`, defines a compatible
-environment-overlay helper, restores absent and present variables, and supplies
-Hive/Runtime child variables.
+Keep the Node contract focused on helper wiring, required Hive/Runtime child
+variables, documentation, and CI execution. The Windows PowerShell contract
+parses launcher/helper syntax with the PowerShell AST, rejects
+`Start-Process`/`start`/`saps` environment parameters and splats, starts a
+synthetic child, and verifies its overlay without changing parent values.
 
 - [ ] **Step 2: Implement the PowerShell 5.1-safe helper**
 
-Temporarily set process environment values, spawn the child, and restore exact
-previous presence/value in `finally`.
+Build a fresh `System.Diagnostics.ProcessStartInfo`, set
+`UseShellExecute = $false`, and apply only required nonempty values through its
+child environment before calling `System.Diagnostics.Process.Start`. The helper
+does not change the parent process environment, so present nonempty, present
+empty, and absent parent variables remain exact by construction on success and
+failure. Do not use P/Invoke, `Add-Type`, parent writes, restore logic, or value
+logging.
 
 - [ ] **Step 3: Add the contract to CI and commit**
 
 ```bash
 node --test scripts/tests/test_launch_split_stack_contract.mjs
-git add scripts/dev/launch_split_stack.ps1 scripts/tests/test_launch_split_stack_contract.mjs .github/workflows/ci.yml README.md
+git add scripts/dev/launch_split_stack.ps1 scripts/dev/start_process_with_environment_overlay.ps1 scripts/tests/test_launch_split_stack_contract.mjs scripts/tests/test_launch_split_stack_environment.ps1 .github/workflows/ci.yml README.md docs/superpowers
 git commit -m "fix(windows): launch split desktop apps on PowerShell 5"
 ```
 

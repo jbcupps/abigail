@@ -164,10 +164,13 @@ sent automatically. Catalog and route leak tests cover the new shapes.
 ## Windows split-stack correction
 
 `Start-Process -Environment` is unavailable in Windows PowerShell 5.1. The
-launcher will use a compatibility helper that temporarily overlays the current
-process environment while spawning each desktop child, then restores the exact
-prior values. A static contract test prevents reintroduction of the unsupported
-parameter and verifies both desktop apps receive their required variables.
+launcher uses a compatibility helper that builds a fresh `ProcessStartInfo`
+for each desktop child, disables shell execution, and writes required nonempty
+values only to that child's environment. It does not change the parent process environment, so present, empty, and absent parent values remain exact by
+construction even when process creation fails. A Windows PowerShell 5.1
+behavioral contract parses the launcher and helper with the PowerShell AST,
+rejects unsupported or unverifiable `Start-Process` forms, and verifies both
+desktop apps retain their required child variables.
 
 ## Verification
 
