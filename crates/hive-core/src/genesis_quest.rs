@@ -1844,6 +1844,57 @@ mod tests {
     }
 
     #[test]
+    fn long_arc_catalog_is_exact_copy_only_and_scoring_free() {
+        assert_eq!(
+            LONG_ARC_QUEST_DEFINITIONS
+                .iter()
+                .map(|definition| (
+                    definition.id,
+                    definition.scope,
+                    definition.metric,
+                    definition.target,
+                    definition.minimum_entities,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "seasonal_shared_stories",
+                    LongArcQuestScope::Entity,
+                    JourneyMetric::MentorMessages,
+                    12,
+                    1,
+                ),
+                (
+                    "family_constellation",
+                    LongArcQuestScope::Family,
+                    JourneyMetric::MentorMessages,
+                    30,
+                    2,
+                ),
+            ]
+        );
+
+        let encoded = serde_json::to_value(LONG_ARC_QUEST_DEFINITIONS).unwrap();
+        let text = encoded.to_string();
+        for forbidden in [
+            "weights",
+            "deontology",
+            "teleology",
+            "areteology",
+            "welfare",
+            "prompt",
+            "message_content",
+            "model_output",
+            "action",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "long-arc catalog leaked forbidden material: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
     fn older_journeys_default_every_activity_counter() {
         let mut value =
             serde_json::to_value(EntityJourney::new("entity", LOCAL_OWNER_ID, NOW)).unwrap();

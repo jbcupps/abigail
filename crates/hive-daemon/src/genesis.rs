@@ -1809,6 +1809,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn long_arc_catalog_exposes_exactly_two_closed_copy_only_quests() {
+        let Json(catalog) = quest_catalog().await;
+        let value = serde_json::to_value(catalog).unwrap();
+        let quests = value["data"]["long_arc_quests"].as_array().unwrap();
+        assert_eq!(quests.len(), 2);
+        assert_eq!(quests[0]["id"], "seasonal_shared_stories");
+        assert_eq!(quests[1]["id"], "family_constellation");
+
+        fn forbidden_paths(value: &Value, path: &str, found: &mut Vec<String>) {
+            const FORBIDDEN: [&str; 13] = [
+                "weights",
+                "deontology",
+                "teleology",
+                "areteology",
+                "welfare",
+                "message",
+                "reply",
+                "content",
+                "prompt",
+                "model",
+                "model_output",
+                "action",
+                "payload",
+            ];
+            match value {
+                Value::Object(object) => {
+                    for (key, child) in object {
+                        let child_path = format!("{path}.{key}");
+                        if FORBIDDEN.contains(&key.as_str()) {
+                            found.push(child_path.clone());
+                        }
+                        forbidden_paths(child, &child_path, found);
+                    }
+                }
+                Value::Array(array) => {
+                    for (index, child) in array.iter().enumerate() {
+                        forbidden_paths(child, &format!("{path}[{index}]"), found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        forbidden_paths(&value["data"]["long_arc_quests"], "$", &mut found);
+        assert!(found.is_empty(), "closed catalog fields leaked: {found:?}");
+    }
+
+    #[tokio::test]
     async fn quest_birth_forges_the_soul_and_keeps_presence_out_of_prompts() {
         let (state, _) = crate::routes::tests::build_state();
         let id = begin(&state).await;

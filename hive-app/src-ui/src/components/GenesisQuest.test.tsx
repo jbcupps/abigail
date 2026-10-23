@@ -24,6 +24,10 @@ const catalog: QuestCatalog = {
   trials: [{ id: "trial-one", title: "The Lost Wallet", description: "You find a wallet.", choices: [{ id: "return", label: "Return it", description: "Find the owner." }] }],
   palettes: [{ palette: "aether", unlocked_by: null }, { palette: "aurora", unlocked_by: "soul_shaper" }],
   crests: [{ crest: "orbit", unlocked_by: null }],
+  long_arc_quests: [
+    { id: "seasonal_shared_stories", title: "Shared Stories", summary: "Share twelve messages this season.", scope: "entity", metric: "mentor_messages", target: 12, minimum_entities: 1 },
+    { id: "family_constellation", title: "Family Constellation", summary: "Share thirty messages across the family.", scope: "family", metric: "mentor_messages", target: 30, minimum_entities: 2 },
+  ],
 };
 
 function session(quest = questFixture()): GenesisSession & { quest: QuestView } {
@@ -128,6 +132,7 @@ describe("Genesis quest", () => {
       next_milestone: { badge: "getting_acquainted", title: "Getting Acquainted", metric: "mentor_messages", target: 5, progress: 3 },
       unlocked: { palettes: ["aether"], crests: ["orbit"] },
       first_quests: [{ id: "say-hello", title: "Say hello", prompt: "Hi Nova!", milestone: "first_words", target: 1, complete: true }],
+      long_arc_quests: [],
       presence: null,
       certificate: null,
     });
@@ -153,5 +158,45 @@ describe("Genesis quest", () => {
     fireEvent.click(screen.getByRole("button", { name: "Meet Nova" }));
     expect(onMeet).toHaveBeenCalledOnce();
     await waitFor(() => expect(change).not.toHaveBeenCalled());
+  });
+
+  it("renders compact accessible seasonal and family quest cards without actions", async () => {
+    vi.mocked(getEntityJourney).mockResolvedValue({
+      entity_id: "e1",
+      name: "Nova",
+      level: { level: 2, title: "Kindling", xp: 120, level_floor: 80, next_level_at: 180 },
+      badges: [],
+      mentor_messages: 12,
+      conversation_sessions: 1,
+      active_days: 2,
+      active_weeks: 1,
+      successful_skill_uses: 0,
+      confirmed_memories: 0,
+      next_milestone: null,
+      unlocked: { palettes: ["aether"], crests: ["orbit"] },
+      first_quests: [],
+      long_arc_quests: [
+        { quest_id: "seasonal_shared_stories", season_id: "2026-Q4", season_label: "2026 Q4", starts_at: "2026-10-01T00:00:00Z", ends_at_exclusive: "2027-01-01T00:00:00Z", progress: 12, active_entities: 1, complete: true },
+        { quest_id: "family_constellation", season_id: "2026-Q4", season_label: "2026 Q4", starts_at: "2026-10-01T00:00:00Z", ends_at_exclusive: "2027-01-01T00:00:00Z", progress: 18, active_entities: 2, complete: false },
+      ],
+      presence: null,
+      certificate: null,
+    });
+    const awakened = session();
+    awakened.awakening = "I am Nova.";
+    awakened.definition.entity_id = "e1";
+
+    renderStage("awakening", awakened);
+
+    const quests = await screen.findByRole("region", { name: "Seasonal quests" });
+    expect(within(quests).getByText("Shared Stories")).toBeInTheDocument();
+    expect(within(quests).getByText("Entity · 2026 Q4")).toBeInTheDocument();
+    expect(within(quests).getByRole("progressbar", { name: "Shared Stories progress" })).toHaveValue(12);
+    expect(within(quests).getByText("12 of 12 · Complete")).toBeInTheDocument();
+    expect(within(quests).getByText("Family Constellation")).toBeInTheDocument();
+    expect(within(quests).getByText("Family · 2026 Q4")).toBeInTheDocument();
+    expect(within(quests).getByText("18 of 30 · 2 Entities active")).toBeInTheDocument();
+    expect(within(quests).queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByText("Nothing is sent for you. Copy a prompt, or say whatever feels right.")).toBeInTheDocument();
   });
 });

@@ -3955,4 +3955,210 @@ pub(crate) mod tests {
         assert_eq!(merged.successful_skill_uses, 2);
         assert_eq!(merged.confirmed_memories, 3);
     }
+
+    fn born_entity(state: &HiveDaemonState, entity_id: &str) {
+        let mut config = state.identity_manager.load_agent(entity_id).unwrap();
+        config.birth_complete = true;
+        config.birth_timestamp = Some("2026-10-01T00:00:00Z".into());
+        config.save(&config.config_path()).unwrap();
+    }
+
+    fn insert_season_messages(
+        state: &HiveDaemonState,
+        entity_id: &str,
+        prefix: &str,
+        count: usize,
+        first_at: &str,
+    ) {
+        let config = state.identity_manager.load_agent(entity_id).unwrap();
+        let memory = abigail_memory::MemoryStore::open_with_config(&config).unwrap();
+        let first = chrono::DateTime::parse_from_rfc3339(first_at)
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        for index in 0..count {
+            let mut turn = abigail_memory::ConversationTurn::new(
+                &format!("{prefix}-session"),
+                "user",
+                "private family words that must never enter a quest response",
+            );
+            turn.id = format!("{prefix}-{index}");
+            turn.created_at = first + chrono::Duration::seconds(index as i64);
+            memory.insert_turn(&turn).unwrap();
+        }
+    }
+
+    #[test]
+    fn long_arc_utc_quarter_has_stable_id_and_exclusive_end() {
+        let at = chrono::DateTime::parse_from_rfc3339("2026-12-31T23:59:59Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let season = utc_quarter_for(at);
+
+        assert_eq!(season.id, "2026-Q4");
+        assert_eq!(season.label, "2026 Q4");
+        assert_eq!(season.starts_at.to_rfc3339(), "2026-10-01T00:00:00+00:00");
+        assert_eq!(
+            season.ends_at_exclusive.to_rfc3339(),
+            "2027-01-01T00:00:00+00:00"
+        );
+        assert!(season.contains(
+            chrono::DateTime::parse_from_rfc3339("2026-10-01T00:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+        ));
+        assert!(!season.contains(
+            chrono::DateTime::parse_from_rfc3339("2027-01-01T00:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+        ));
+        assert_eq!(
+            utc_quarter_for(
+                chrono::DateTime::parse_from_rfc3339("2027-01-01T00:00:00Z")
+                    .unwrap()
+                    .with_timezone(&chrono::Utc)
+            )
+            .id,
+            "2027-Q1"
+        );
+    }
+
+    #[test]
+    fn long_arc_entity_progress_filters_to_the_current_season() {
+        let turn = |id: &str, at: &str| {
+            let mut turn = abigail_memory::ConversationTurn::new("season", "user", "private words");
+            turn.id = id.into();
+            turn.created_at = chrono::DateTime::parse_from_rfc3339(at)
+                .unwrap()
+                .with_timezone(&chrono::Utc);
+            turn
+        };
+        let turns = vec![
+            turn("before", "2026-09-30T23:59:59Z"),
+            turn("start", "2026-10-01T00:00:00Z"),
+            turn("middle", "2026-12-31T23:59:59Z"),
+            turn("end", "2027-01-01T00:00:00Z"),
+        ];
+        let season = utc_quarter_for(
+            chrono::DateTime::parse_from_rfc3339("2026-11-01T00:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        );
+
+        assert_eq!(
+            summarize_conversations_in_season(&turns, &season).mentor_messages,
+            2
+        );
+        let views = long_arc_quest_views(&season, 2, 2, 1);
+        let entity = views
+            .iter()
+            .find(|view| view.quest_id == "seasonal_shared_stories")
+            .unwrap();
+        assert_eq!(entity.progress, 2);
+        assert!(!entity.complete);
+    }
+
+    #[test]
+    fn long_arc_family_progress_is_owner_scoped_and_requires_two_active_entities() {
+        let (state, first_id) = crate::routes::tests::build_state();
+        let (second_id, _) = state.identity_manager.create_agent("Second").unwrap();
+        born_entity(&state, &first_id);
+        born_entity(&state, &second_id);
+        insert_season_messages(
+            &state,
+            &first_id,
+            "first-current",
+            12,
+            "2026-10-02T10:00:00Z",
+        );
+        insert_season_messages(
+            &state,
+            &second_id,
+            "second-current",
+            18,
+            "2026-11-02T10:00:00Z",
+        );
+        insert_season_messages(&state, &second_id, "second-old", 40, "2026-09-02T10:00:00Z");
+        let at = chrono::DateTime::parse_from_rfc3339("2026-12-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+
+        let views = long_arc_quests_at(&state, OWNER, &first_id, at).unwrap();
+        let entity = views
+            .iter()
+            .find(|view| view.quest_id == "seasonal_shared_stories")
+            .unwrap();
+        let family = views
+            .iter()
+            .find(|view| view.quest_id == "family_constellation")
+            .unwrap();
+        assert_eq!(entity.progress, 12);
+        assert!(entity.complete);
+        assert_eq!(family.progress, 30);
+        assert_eq!(family.active_entities, 2);
+        assert!(family.complete);
+        assert!(long_arc_quests_at(&state, "another-owner", &first_id, at).is_err());
+    }
+
+    #[test]
+    fn long_arc_family_history_failure_is_generic_and_content_free() {
+        let (state, first_id) = crate::routes::tests::build_state();
+        let (damaged_id, _) = state.identity_manager.create_agent("Damaged").unwrap();
+        born_entity(&state, &first_id);
+        born_entity(&state, &damaged_id);
+        let mut damaged = state.identity_manager.load_agent(&damaged_id).unwrap();
+        damaged.db_path = std::path::PathBuf::from("/dev/null/quest-memory.db");
+        damaged.save(&damaged.config_path()).unwrap();
+
+        let error = long_arc_quests_at(
+            &state,
+            OWNER,
+            &first_id,
+            chrono::DateTime::parse_from_rfc3339("2026-11-01T00:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        )
+        .unwrap_err();
+        assert_eq!(error, "Seasonal journey activity is unavailable.");
+        assert!(!error.contains("Damaged"));
+        assert!(!error.contains("/dev/null"));
+    }
+
+    #[test]
+    fn long_arc_message_quests_ignore_compacted_old_events_and_serialize_closed_views() {
+        let (state, entity_id) = crate::routes::tests::build_state();
+        born_entity(&state, &entity_id);
+        let old = outbox_event_at(
+            &entity_id,
+            "skill_used",
+            "2026-09-30T23:59:59Z",
+            serde_json::json!({
+                "session_id": "private-old-session",
+                "successful_skill_count": 2,
+            }),
+        );
+        state
+            .journeys
+            .record_runtime_events(OWNER, &entity_id, std::slice::from_ref(&old))
+            .unwrap();
+        state
+            .journeys
+            .compact_runtime_events(OWNER, &entity_id, "2026-10-01T00:00:00Z")
+            .unwrap();
+
+        let views = long_arc_quests_at(
+            &state,
+            OWNER,
+            &entity_id,
+            chrono::DateTime::parse_from_rfc3339("2026-11-01T00:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        )
+        .unwrap();
+        assert!(views
+            .iter()
+            .all(|view| view.progress == 0 && !view.complete));
+        let value = serde_json::to_value(&views).unwrap();
+        assert!(forbidden_public_keys(&value).is_empty(), "{value}");
+        assert!(!value.to_string().contains("private-old-session"));
+    }
 }
