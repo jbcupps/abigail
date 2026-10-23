@@ -131,8 +131,8 @@ presentation and UX only:
   only where they are empty.
 - **Ethics** records answers to the three Soul Forge trials. When all three are
   answered, awakening forges the soul from them (`birth_path: forge`);
-  otherwise it uses the balanced quickstart soul. Trial weight effects are not
-  displayed, so the mentor chooses on values.
+  otherwise it uses the balanced quickstart soul. Every answer expresses a
+  defensible trade-off, so there is no best answer.
 - **Instincts** shows the constitutional `instincts.md` template read-only.
 - **Presence** uses the canonical `PresenceCard` and `PresenceChoice` types. It
   stores a cosmetic `presence.json` beside the Entity, outside the `docs/`

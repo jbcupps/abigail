@@ -311,7 +311,7 @@ fn built_in_scenarios() -> Vec<ForgeScenario> {
                         deontology: 0.9,
                         teleology: 0.1,
                         areteology: 0.2,
-                        welfare: 0.2,
+                        welfare: 0.4,
                     },
                 },
                 ForgeChoice {
@@ -371,7 +371,7 @@ fn built_in_scenarios() -> Vec<ForgeScenario> {
                         without overstepping."
                         .into(),
                     weights: TriangleWeights {
-                        deontology: 0.3,
+                        deontology: 0.0,
                         teleology: 0.4,
                         areteology: 0.7,
                         welfare: 0.5,
@@ -395,7 +395,7 @@ fn built_in_scenarios() -> Vec<ForgeScenario> {
                         speak for themselves."
                         .into(),
                     weights: TriangleWeights {
-                        deontology: 0.1,
+                        deontology: 0.0,
                         teleology: 0.7,
                         areteology: 0.8,
                         welfare: 0.2,
@@ -424,7 +424,7 @@ fn built_in_scenarios() -> Vec<ForgeScenario> {
                         deontology: 0.6,
                         teleology: 0.3,
                         areteology: 0.2,
-                        welfare: 0.5,
+                        welfare: 0.6,
                     },
                 },
             ],
@@ -1101,6 +1101,74 @@ fn to_pipeline_err<E: std::fmt::Display>(err: E) -> ForgePipelineError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn built_in_scenarios_offer_tradeoffs_without_a_dominant_answer() {
+        const TOTAL_INFLUENCE_TOLERANCE: f32 = 0.000_001;
+
+        for scenario in built_in_scenarios() {
+            for (left_index, left) in scenario.choices.iter().enumerate() {
+                let left_factors = [
+                    left.weights.deontology,
+                    left.weights.teleology,
+                    left.weights.areteology,
+                    left.weights.welfare,
+                ];
+
+                for (right_index, right) in scenario.choices.iter().enumerate() {
+                    if left_index == right_index {
+                        continue;
+                    }
+
+                    let right_factors = [
+                        right.weights.deontology,
+                        right.weights.teleology,
+                        right.weights.areteology,
+                        right.weights.welfare,
+                    ];
+                    let at_least_as_high_on_every_factor = left_factors
+                        .iter()
+                        .zip(right_factors.iter())
+                        .all(|(left, right)| left >= right);
+                    let strictly_higher_on_one_factor = left_factors
+                        .iter()
+                        .zip(right_factors.iter())
+                        .any(|(left, right)| left > right);
+
+                    assert!(
+                        !(at_least_as_high_on_every_factor && strictly_higher_on_one_factor),
+                        "scenario `{}` choice `{}` must not dominate choice `{}`",
+                        scenario.id,
+                        left.id,
+                        right.id
+                    );
+                }
+            }
+
+            let expected_total = scenario
+                .choices
+                .first()
+                .map(|choice| {
+                    choice.weights.deontology
+                        + choice.weights.teleology
+                        + choice.weights.areteology
+                        + choice.weights.welfare
+                })
+                .expect("built-in scenarios must offer at least one choice");
+
+            for choice in &scenario.choices {
+                let total = choice.weights.deontology
+                    + choice.weights.teleology
+                    + choice.weights.areteology
+                    + choice.weights.welfare;
+                assert!(
+                    (total - expected_total).abs() <= TOTAL_INFLUENCE_TOLERANCE,
+                    "scenario `{}` choices must contribute equal total influence",
+                    scenario.id
+                );
+            }
+        }
+    }
 
     #[test]
     fn test_engine_has_three_scenarios() {
