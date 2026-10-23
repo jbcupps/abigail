@@ -165,6 +165,59 @@ describe("Genesis First Signal", () => {
     expect(onBegin.mock.calls[0]).toHaveLength(1);
   });
 
+  it("blocks a current draft while malformed legacy bytes remain retained", async () => {
+    localStorage.setItem(GENESIS_LAUNCH_DRAFT_KEY, JSON.stringify(recoveryDraft));
+    sessionStorage.setItem(legacyKey, "{broken");
+    const onBegin = vi.fn(async () => undefined);
+
+    render(<GenesisFirstSignal onBegin={onBegin} />);
+
+    const recoveryError = screen.getByRole("region", {
+      name: "Legacy First Signal recovery error",
+    });
+    expect(within(recoveryError).getByRole("alert")).toHaveTextContent(/retained.*recovery/i);
+    const resume = screen.getByRole("button", { name: "Resume First Signal" });
+    expect(resume).toBeDisabled();
+    fireEvent.click(resume);
+    expect(onBegin).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(legacyKey)).toBe("{broken");
+    expect(localStorage.getItem(GENESIS_LAUNCH_DRAFT_KEY))
+      .toBe(JSON.stringify(recoveryDraft));
+  });
+
+  it("blocks a current draft while conflicting legacy bytes remain retained", async () => {
+    const creationKey = "22222222-2222-4222-8222-222222222222";
+    const localLegacy = JSON.stringify({
+      version: 2,
+      revision: 1,
+      profile: legacyProfile,
+      attempt: {
+        attemptId: creationKey,
+        creationKey,
+        hiveUrl: "http://127.0.0.1:43141",
+        name: "Sol",
+        baselineIds: [],
+      },
+    });
+    const sessionLegacy = JSON.stringify(legacyJournal);
+    localStorage.setItem(GENESIS_LAUNCH_DRAFT_KEY, JSON.stringify(recoveryDraft));
+    localStorage.setItem("abigail.first-signal.creation.v2", localLegacy);
+    sessionStorage.setItem(legacyKey, sessionLegacy);
+    const onBegin = vi.fn(async () => undefined);
+
+    render(<GenesisFirstSignal onBegin={onBegin} />);
+
+    expect(screen.getByRole("region", {
+      name: "Legacy First Signal recovery error",
+    })).toHaveTextContent(/different legacy First Signal/i);
+    const resume = screen.getByRole("button", { name: "Resume First Signal" });
+    expect(resume).toBeDisabled();
+    fireEvent.click(resume);
+    expect(onBegin).not.toHaveBeenCalled();
+    expect(localStorage.getItem("abigail.first-signal.creation.v2")).toBe(localLegacy);
+    expect(sessionStorage.getItem(legacyKey)).toBe(sessionLegacy);
+  });
+
   it("freezes to the retained exact draft after an ambiguous failure in the same mount", async () => {
     const onBegin = vi.fn()
       .mockImplementationOnce(async (submittedSeed: GenesisCreationSeed) => {
@@ -248,6 +301,89 @@ describe("Genesis First Signal", () => {
     expect(sessionStorage.getItem(legacyKey)).toBeNull();
     expect(localStorage.getItem(legacyResolvedKey)).toBe(JSON.stringify(legacyAttempt));
     expect(await screen.findByText(/migrated into canonical Presence and journey progress/i)).toBeInTheDocument();
+  });
+
+  it("accepts Hive's canonical normalization of reviewed legacy text", async () => {
+    const legacyWithControls = {
+      ...legacyJournal,
+      profile: {
+        ...legacyProfile,
+        purpose: "  Plan\r\nour\t family garden.  ",
+        boundaries: "\tAsk before.\r\nConfirm\t changes.\t",
+      },
+    };
+    sessionStorage.setItem(legacyKey, JSON.stringify(legacyWithControls));
+    vi.mocked(resolveLegacyCandidates).mockResolvedValue([{
+      id: "candidate",
+      name: "Sol",
+      resolution: "name_candidate",
+    }]);
+    vi.mocked(migrateLegacyFirstSignal).mockResolvedValue({
+      entity_id: "candidate",
+      presence: {
+        name: "Sol",
+        purpose: "Plan\nour family garden.",
+        boundaries: "Ask before.\nConfirm changes.",
+        temperament: "curious",
+        identity: "ember",
+        crest: "orbit",
+        motion: "calm",
+      },
+      badges: ["first_spark", "named", "purposeful", "presence_chosen"],
+      migrated_at: "2026-10-23T00:00:00Z",
+    });
+
+    render(<GenesisFirstSignal onBegin={vi.fn()} />);
+    const recovery = screen.getByRole("region", { name: "Legacy First Signal recovery" });
+    fireEvent.click(within(recovery).getByRole("button", { name: "Check retained First Signal" }));
+    fireEvent.click(await within(recovery).findByRole("button", { name: "Review Sol" }));
+    fireEvent.click(within(recovery).getByRole("button", { name: "Migrate this brief" }));
+
+    expect(await screen.findByText(/migrated into canonical Presence/i)).toBeInTheDocument();
+    expect(sessionStorage.getItem(legacyKey)).toBeNull();
+  });
+
+  it("mirrors Rust purpose trimming when validating applicable badges", async () => {
+    const legacyWithRustSignificantPurpose = {
+      ...legacyJournal,
+      profile: {
+        ...legacyProfile,
+        purpose: "\uFEFF",
+        boundaries: "",
+      },
+    };
+    sessionStorage.setItem(
+      legacyKey,
+      JSON.stringify(legacyWithRustSignificantPurpose),
+    );
+    vi.mocked(resolveLegacyCandidates).mockResolvedValue([{
+      id: "candidate",
+      name: "Sol",
+      resolution: "name_candidate",
+    }]);
+    vi.mocked(migrateLegacyFirstSignal).mockResolvedValue({
+      entity_id: "candidate",
+      presence: {
+        name: "Sol",
+        purpose: "\uFEFF",
+        boundaries: "",
+        temperament: "curious",
+        identity: "ember",
+        crest: "orbit",
+        motion: "calm",
+      },
+      badges: ["first_spark", "named", "purposeful", "presence_chosen"],
+      migrated_at: "2026-10-23T00:00:00Z",
+    });
+
+    render(<GenesisFirstSignal onBegin={vi.fn()} />);
+    const recovery = screen.getByRole("region", { name: "Legacy First Signal recovery" });
+    fireEvent.click(within(recovery).getByRole("button", { name: "Check retained First Signal" }));
+    fireEvent.click(await within(recovery).findByRole("button", { name: "Review Sol" }));
+    fireEvent.click(within(recovery).getByRole("button", { name: "Migrate this brief" }));
+
+    expect(await screen.findByText(/migrated into canonical Presence/i)).toBeInTheDocument();
+    expect(sessionStorage.getItem(legacyKey)).toBeNull();
   });
 
   it("retains a legacy journal when migration fails and identifies a keyed completed receipt", async () => {

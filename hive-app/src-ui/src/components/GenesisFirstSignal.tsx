@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { GenesisCreationSeed } from "../lib/genesisClient";
 import { readGenesisLaunchDraft } from "../lib/genesisLaunchDraft";
 import {
+  canonicalLegacyPresenceText,
   clearLegacyFirstSignalJournal,
   readLegacyFirstSignalJournal,
   resolveLegacyCandidates,
@@ -102,13 +103,15 @@ function isMatchingMigration(
   const expectedBadges: LegacyMigrationResult["badges"] = [
     "first_spark",
     "named",
-    ...(request.purpose.trim() ? ["purposeful" as const] : []),
+    ...(canonicalLegacyPresenceText(request.purpose)
+      ? ["purposeful" as const]
+      : []),
     "presence_chosen",
   ];
   return result.entity_id === entityId
     && result.presence.name === request.original_name
-    && result.presence.purpose === request.purpose
-    && result.presence.boundaries === request.boundaries
+    && result.presence.purpose === canonicalLegacyPresenceText(request.purpose)
+    && result.presence.boundaries === canonicalLegacyPresenceText(request.boundaries)
     && result.presence.temperament === request.presence.temperament
     && result.presence.identity === request.presence.identity
     && result.presence.crest === "orbit"
@@ -152,9 +155,9 @@ export default function GenesisFirstSignal({ onBegin }: {
   }, [initial.error, legacy, loadCatalog, recoverySeed]);
 
   const immutable = Boolean(recoverySeed || legacy || initial.error);
-  const ready = !legacy && (recoverySeed
+  const ready = !legacy && !initial.error && (recoverySeed
     ? true
-    : Boolean(name.trim() && purpose.trim() && catalog && !initial.error));
+    : Boolean(name.trim() && purpose.trim() && catalog));
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!ready || busy) return;
@@ -214,7 +217,7 @@ export default function GenesisFirstSignal({ onBegin }: {
           "Hive did not return the selected Entity's canonical legacy migration result. The retained brief was not cleared.",
         );
       }
-      clearLegacyFirstSignalJournal(legacy);
+      await clearLegacyFirstSignalJournal(legacy);
       setLegacy(null);
       setLegacyCandidates(null);
       setLegacySelection(null);
@@ -285,8 +288,11 @@ export default function GenesisFirstSignal({ onBegin }: {
         {legacyError && <p className="genesis-error" role="alert">{legacyError}</p>}
       </section>}
       {legacySuccess && <p className="genesis-notice" role="status">{legacySuccess}</p>}
-      {recoverySeed && <p className="genesis-notice" role="status">A previous First Signal may already have reached Hive. Resume it exactly to recover safely.</p>}
-      {initial.error && <p className="genesis-error" role="alert">{initial.error}</p>}
+      {recoverySeed && !initial.error && <p className="genesis-notice" role="status">A previous First Signal may already have reached Hive. Resume it exactly to recover safely.</p>}
+      {initial.error && <section className="genesis-notice" aria-label="Legacy First Signal recovery error">
+        <h4>Retained First Signal needs recovery</h4>
+        <p className="genesis-error" role="alert">{initial.error} Launch and resume actions are paused until these retained bytes are recovered.</p>
+      </section>}
       {catalogError && !immutable && <div className="genesis-error" role="alert">Presence choices could not be loaded: {catalogError}<button type="button" onClick={loadCatalog}>Retry Presence choices</button></div>}
       {submitError && <p className="genesis-error" role="alert">{submitError}</p>}
       <label>Name<input aria-label="Name" value={name} maxLength={80} disabled={immutable || busy} onChange={(event) => setName(event.target.value)} autoComplete="off" /></label>

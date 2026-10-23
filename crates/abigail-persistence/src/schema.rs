@@ -12,7 +12,8 @@ DEFINE TABLE OVERWRITE genesis_legacy_migration SCHEMAFULL;
 DEFINE FIELD OVERWRITE owner_id ON TABLE genesis_legacy_migration TYPE string;
 DEFINE FIELD OVERWRITE entity_id ON TABLE genesis_legacy_migration TYPE string;
 DEFINE FIELD OVERWRITE request_digest ON TABLE genesis_legacy_migration TYPE string;
-DEFINE FIELD OVERWRITE state ON TABLE genesis_legacy_migration TYPE string;
+DEFINE FIELD OVERWRITE state ON TABLE genesis_legacy_migration TYPE string
+    ASSERT $value = 'pending' OR $value = 'complete';
 DEFINE FIELD OVERWRITE created_at ON TABLE genesis_legacy_migration TYPE string;
 DEFINE FIELD OVERWRITE updated_at ON TABLE genesis_legacy_migration TYPE string;
 UPDATE genesis_legacy_migration CONTENT {
@@ -249,6 +250,19 @@ mod tests {
             .unwrap();
         stored.as_object_mut().unwrap().remove("id");
         assert_eq!(stored, record);
+
+        let mut invalid_state = record.clone();
+        invalid_state["state"] = serde_json::json!("damaged");
+        assert!(
+            handle
+                .upsert(
+                    "genesis_legacy_migration",
+                    &uuid::Uuid::new_v4().simple().to_string(),
+                    &invalid_state,
+                )
+                .is_err(),
+            "legacy migration persistence accepted an unknown state"
+        );
 
         for field in [
             "attempt_key",

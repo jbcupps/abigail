@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  canonicalLegacyPresenceText,
   clearLegacyFirstSignalJournal,
   readLegacyFirstSignalJournal,
   resolveLegacyCandidates,
@@ -82,6 +83,12 @@ afterEach(() => {
 });
 
 describe("legacy First Signal journal decoding", () => {
+  it("mirrors Rust excerpt trimming rather than JavaScript FEFF trimming", () => {
+    expect(canonicalLegacyPresenceText("\uFEFFSignal\uFEFF"))
+      .toBe("\uFEFFSignal\uFEFF");
+    expect(canonicalLegacyPresenceText("\u0085Signal\u0085")).toBe("Signal");
+  });
+
   it("decodes the exact historical v1 session record without mutating storage", () => {
     const raw = JSON.stringify(v1());
     sessionStorage.setItem(V1_KEY, raw);
@@ -117,6 +124,64 @@ describe("legacy First Signal journal decoding", () => {
       entityId: ENTITY_ID,
       records: [{ storage: "local", key: V2_KEY, raw }],
     });
+  });
+
+  it("accepts maximum astral migration text and attempt-key bytes", () => {
+    const astral = "😀";
+    const raw = JSON.stringify(v1({
+      profile: {
+        ...profile,
+        purpose: astral.repeat(2000),
+        boundaries: astral.repeat(2000),
+      },
+      attempt: {
+        ...unkeyedAttempt,
+        attemptId: astral.repeat(128),
+      },
+    }));
+    sessionStorage.setItem(V1_KEY, raw);
+
+    expect(readLegacyFirstSignalJournal()).toMatchObject({
+      version: 1,
+      profile: {
+        purpose: astral.repeat(2000),
+        boundaries: astral.repeat(2000),
+      },
+      attempt: { attemptId: astral.repeat(128) },
+    });
+    expect(sessionStorage.getItem(V1_KEY)).toBe(raw);
+  });
+
+  it("mirrors Rust trimming for a FEFF-delimited attempt key", () => {
+    const attemptId = "\uFEFFold-attempt\uFEFF";
+    const raw = JSON.stringify(v1({
+      attempt: { ...unkeyedAttempt, attemptId },
+    }));
+    sessionStorage.setItem(V1_KEY, raw);
+
+    expect(readLegacyFirstSignalJournal()).toMatchObject({
+      attempt: { attemptId },
+    });
+    expect(sessionStorage.getItem(V1_KEY)).toBe(raw);
+  });
+
+  it.each([
+    [
+      "an attempt key over 512 UTF-8 bytes",
+      v1({ attempt: { ...unkeyedAttempt, attemptId: "😀".repeat(129) } }),
+      /attempt key.*retained/i,
+    ],
+    [
+      "a disallowed text control",
+      v1({ profile: { ...profile, purpose: "Plan\u0000private" } }),
+      /brief.*retained/i,
+    ],
+  ])("retains and explains %s", (_label, value, message) => {
+    const raw = JSON.stringify(value);
+    sessionStorage.setItem(V1_KEY, raw);
+
+    expect(() => readLegacyFirstSignalJournal()).toThrow(message);
+    expect(sessionStorage.getItem(V1_KEY)).toBe(raw);
   });
 
   it.each([
@@ -286,7 +351,7 @@ describe("legacy migration client and exact cleanup", () => {
     );
   });
 
-  it("writes the exact resolution marker before removing a matching v1 record", () => {
+  it("writes the exact resolution marker before removing a matching v1 record", async () => {
     const record = v1();
     sessionStorage.setItem(V1_KEY, JSON.stringify(record));
     const journal = readLegacyFirstSignalJournal()!;
@@ -302,7 +367,7 @@ describe("legacy migration client and exact cleanup", () => {
       return Reflect.apply(originalRemoveItem, this, [key]);
     });
 
-    clearLegacyFirstSignalJournal(journal);
+    await clearLegacyFirstSignalJournal(journal);
 
     const marker = `${RESOLVED_PREFIX}${encodeURIComponent(unkeyedAttempt.attemptId)}`;
     expect(localStorage.getItem(marker)).toBe(JSON.stringify(unkeyedAttempt));
@@ -312,14 +377,68 @@ describe("legacy migration client and exact cleanup", () => {
     remove.mockRestore();
   });
 
-  it("does not clear bytes that changed after the journal was reviewed", () => {
+  it("marks a migrated v1 journal copied under the local v2 key", async () => {
+    const raw = JSON.stringify(v1({ revision: 1 }));
+    localStorage.setItem(V2_KEY, raw);
+    const journal = readLegacyFirstSignalJournal()!;
+
+    await clearLegacyFirstSignalJournal(journal);
+
+    const marker = `${RESOLVED_PREFIX}${encodeURIComponent(unkeyedAttempt.attemptId)}`;
+    expect(localStorage.getItem(marker)).toBe(JSON.stringify(unkeyedAttempt));
+    expect(localStorage.getItem(V2_KEY)).toBeNull();
+  });
+
+  it("is idempotent when another tab already removed the exact records", async () => {
+    const raw = JSON.stringify(v1());
+    sessionStorage.setItem(V1_KEY, raw);
+    const journal = readLegacyFirstSignalJournal()!;
+
+    await clearLegacyFirstSignalJournal(journal);
+    await expect(clearLegacyFirstSignalJournal(journal)).resolves.toBeUndefined();
+
+    expect(sessionStorage.getItem(V1_KEY)).toBeNull();
+    expect(localStorage.getItem(
+      `${RESOLVED_PREFIX}${encodeURIComponent(unkeyedAttempt.attemptId)}`,
+    )).toBe(JSON.stringify(unkeyedAttempt));
+  });
+
+  it("uses the historical creation Web Lock to serialize clear operations", async () => {
+    const raw = JSON.stringify(v1());
+    sessionStorage.setItem(V1_KEY, raw);
+    const journal = readLegacyFirstSignalJournal()!;
+    const previous = Object.getOwnPropertyDescriptor(navigator, "locks");
+    const request = vi.fn(async (_name: string, work: () => Promise<void>) => work());
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: { request },
+    });
+
+    try {
+      await Promise.all([
+        clearLegacyFirstSignalJournal(journal),
+        clearLegacyFirstSignalJournal(journal),
+      ]);
+    } finally {
+      if (previous) Object.defineProperty(navigator, "locks", previous);
+      else Reflect.deleteProperty(navigator, "locks");
+    }
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledWith(
+      "abigail:first-signal:creation",
+      expect.any(Function),
+    );
+  });
+
+  it("does not clear bytes that changed after the journal was reviewed", async () => {
     const original = JSON.stringify(v2());
     localStorage.setItem(V2_KEY, original);
     const journal = readLegacyFirstSignalJournal() as LegacyFirstSignalJournal;
     const changed = JSON.stringify(v2({ revision: 5 }));
     localStorage.setItem(V2_KEY, changed);
 
-    expect(() => clearLegacyFirstSignalJournal(journal)).toThrow(/changed/i);
+    await expect(clearLegacyFirstSignalJournal(journal)).rejects.toThrow(/changed/i);
     expect(localStorage.getItem(V2_KEY)).toBe(changed);
   });
 });

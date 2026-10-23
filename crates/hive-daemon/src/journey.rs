@@ -31,11 +31,19 @@ const JOURNEY_EVENT_SELECT: &str =
 const PRESENCE_FILE: &str = "presence.json";
 const MAX_PRESENCE_BYTES: usize = 32 * 1024;
 const MAX_EVENT_IDENTIFIER_BYTES: usize = 160;
+const MAX_LEGACY_ATTEMPT_KEY_BYTES: usize = 512;
+const MAX_JSON_UTF8_BYTES_PER_CHAR: usize = 4;
+const MAX_JSON_ESCAPED_ATTEMPT_KEY_BYTES: usize = MAX_LEGACY_ATTEMPT_KEY_BYTES * 2;
+const LEGACY_MIGRATION_JSON_OVERHEAD_BYTES: usize = 2 * 1024;
+pub const MAX_LEGACY_MIGRATION_BODY_BYTES: usize = MAX_JSON_ESCAPED_ATTEMPT_KEY_BYTES
+    + MAX_JSON_UTF8_BYTES_PER_CHAR * (PRESENCE_NAME_CHARS + 2 * PRESENCE_TEXT_CHARS)
+    + LEGACY_MIGRATION_JSON_OVERHEAD_BYTES;
 
 pub struct JourneyStore {
     handle: PersistenceHandle,
     writes: Mutex<()>,
     legacy_migrations: Mutex<()>,
+    presence_writes: Mutex<()>,
     #[cfg(test)]
     test_faults: Mutex<JourneyTestFaults>,
 }
@@ -46,6 +54,13 @@ struct JourneyTestFaults {
     fail_event_write_after: Option<usize>,
     fail_projection_writes: usize,
     fail_legacy_migration_after_presence: bool,
+    pause_legacy_migration_after_preflight: Option<LegacyPreflightPause>,
+}
+
+#[cfg(test)]
+struct LegacyPreflightPause {
+    entered: std::sync::mpsc::Sender<()>,
+    resume: std::sync::mpsc::Receiver<()>,
 }
 
 /// Serialized as text like Genesis sessions, with ownership cross-checked.
@@ -193,6 +208,7 @@ impl JourneyStore {
             handle,
             writes: Mutex::new(()),
             legacy_migrations: Mutex::new(()),
+            presence_writes: Mutex::new(()),
             #[cfg(test)]
             test_faults: Mutex::new(JourneyTestFaults::default()),
         })
@@ -214,6 +230,19 @@ impl JourneyStore {
             .lock()
             .unwrap()
             .fail_legacy_migration_after_presence = true;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pause_next_legacy_migration_after_preflight(
+        &self,
+        entered: std::sync::mpsc::Sender<()>,
+        resume: std::sync::mpsc::Receiver<()>,
+    ) {
+        self.test_faults
+            .lock()
+            .unwrap()
+            .pause_legacy_migration_after_preflight =
+            Some(LegacyPreflightPause { entered, resume });
     }
 
     pub fn load(&self, owner_id: &str, entity_id: &str) -> Result<Option<EntityJourney>> {
@@ -268,6 +297,12 @@ impl JourneyStore {
         serde_json::from_value(value)
             .context("Invalid legacy migration ledger row")
             .map(Some)
+    }
+
+    fn save_legacy_migration(&self, record_id: &str, record: &LegacyMigrationRecord) -> Result<()> {
+        self.handle
+            .upsert(LEGACY_MIGRATION_TABLE, record_id, record)?;
+        Ok(())
     }
 
     /// Loads (or starts) a journey, applies `change`, and writes only when it
@@ -787,6 +822,19 @@ pub fn save_presence(
     card: &PresenceCard,
 ) -> Result<(), String> {
     card.validate()?;
+    let _lock = state
+        .journeys
+        .presence_writes
+        .lock()
+        .map_err(|_| "Presence write lock unavailable".to_string())?;
+    save_presence_unlocked(state, entity_id, card)
+}
+
+fn save_presence_unlocked(
+    state: &HiveDaemonState,
+    entity_id: &str,
+    card: &PresenceCard,
+) -> Result<(), String> {
     let path = presence_path(state, entity_id)?;
     let bytes = serde_json::to_vec_pretty(card).map_err(|e| e.to_string())?;
     save_presence_bytes(&path, &bytes)
@@ -804,7 +852,7 @@ impl LegacyFirstSignalMigrationRequest {
     fn validate(&self) -> Result<(), String> {
         if self.attempt_key.is_empty()
             || self.attempt_key != self.attempt_key.trim()
-            || self.attempt_key.len() > 512
+            || self.attempt_key.len() > MAX_LEGACY_ATTEMPT_KEY_BYTES
             || self.attempt_key.chars().any(char::is_control)
         {
             return Err("The legacy First Signal attempt key is invalid".into());
@@ -905,15 +953,22 @@ fn read_bounded_presence(path: &std::path::Path) -> Result<Option<Vec<u8>>, Stri
     Ok(Some(bytes))
 }
 
-fn ensure_legacy_presence(
+#[derive(Clone, Copy)]
+enum LegacyPresenceAction {
+    Keep,
+    Write,
+}
+
+fn preflight_legacy_presence(
     state: &HiveDaemonState,
     entity_id: &str,
     request: &LegacyFirstSignalMigrationRequest,
     expected: &PresenceCard,
-) -> Result<(), String> {
+    preserve_canonical: bool,
+) -> Result<LegacyPresenceAction, String> {
     let path = presence_path(state, entity_id)?;
     let Some(bytes) = read_bounded_presence(&path)? else {
-        return save_presence(state, entity_id, expected);
+        return Ok(LegacyPresenceAction::Write);
     };
     let raw: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|error| format!("The saved Presence card is invalid: {error}"))?;
@@ -938,16 +993,28 @@ fn ensure_legacy_presence(
                 "The saved legacy Presence differs from the reviewed First Signal brief".into(),
             );
         }
-        return save_presence(state, entity_id, expected);
+        return Ok(LegacyPresenceAction::Write);
     }
 
     let current: PresenceCard = serde_json::from_slice(&bytes)
         .map_err(|error| format!("The saved Presence card is invalid: {error}"))?;
     current.validate()?;
-    if &current != expected {
+    if &current != expected && !preserve_canonical {
         return Err(
             "This Entity already has a different canonical Presence; it was not overwritten".into(),
         );
+    }
+    Ok(LegacyPresenceAction::Keep)
+}
+
+fn apply_legacy_presence(
+    state: &HiveDaemonState,
+    entity_id: &str,
+    expected: &PresenceCard,
+    action: LegacyPresenceAction,
+) -> Result<(), String> {
+    if matches!(action, LegacyPresenceAction::Write) {
+        save_presence_unlocked(state, entity_id, expected)?;
     }
     Ok(())
 }
@@ -992,26 +1059,54 @@ fn migrate_legacy_first_signal(
         .journeys
         .load_legacy_migration(&record_id)
         .map_err(|error| error.to_string())?;
-    let mut ledger = match saved {
-        Some(saved) => {
-            if saved.owner_id != OWNER
-                || saved.entity_id != entity_id
-                || saved.request_digest != request_digest
-            {
-                return Err(
-                    "This legacy First Signal attempt is already bound to a different migration"
-                        .into(),
-                );
-            }
-            if saved.state == LegacyMigrationState::Complete {
-                return Ok(legacy_migration_result(
-                    entity_id,
-                    request,
-                    &saved.updated_at,
-                ));
-            }
-            saved
+    if let Some(saved) = &saved {
+        if saved.owner_id != OWNER
+            || saved.entity_id != entity_id
+            || saved.request_digest != request_digest
+        {
+            return Err(
+                "This legacy First Signal attempt is already bound to a different migration".into(),
+            );
         }
+        if saved.state == LegacyMigrationState::Complete {
+            return Ok(legacy_migration_result(
+                entity_id,
+                request,
+                &saved.updated_at,
+            ));
+        }
+    }
+
+    let presence_lock = state
+        .journeys
+        .presence_writes
+        .lock()
+        .map_err(|_| "Presence write lock unavailable".to_string())?;
+    let presence_action =
+        preflight_legacy_presence(state, entity_id, request, &expected, saved.is_some())?;
+    #[cfg(test)]
+    {
+        let pause = state
+            .journeys
+            .test_faults
+            .lock()
+            .unwrap()
+            .pause_legacy_migration_after_preflight
+            .take();
+        if let Some(pause) = pause {
+            pause
+                .entered
+                .send(())
+                .map_err(|_| "Could not pause legacy Presence preflight".to_string())?;
+            pause
+                .resume
+                .recv()
+                .map_err(|_| "Legacy Presence preflight pause was abandoned".to_string())?;
+        }
+    }
+
+    let mut ledger = match saved {
+        Some(saved) => saved,
         None => {
             let now = now_utc();
             let pending = LegacyMigrationRecord {
@@ -1024,14 +1119,14 @@ fn migrate_legacy_first_signal(
             };
             state
                 .journeys
-                .handle
-                .upsert(LEGACY_MIGRATION_TABLE, &record_id, &pending)
+                .save_legacy_migration(&record_id, &pending)
                 .map_err(|error| error.to_string())?;
             pending
         }
     };
 
-    ensure_legacy_presence(state, entity_id, request, &expected)?;
+    apply_legacy_presence(state, entity_id, &expected, presence_action)?;
+    drop(presence_lock);
     #[cfg(test)]
     {
         let mut faults = state.journeys.test_faults.lock().unwrap();
@@ -1057,8 +1152,7 @@ fn migrate_legacy_first_signal(
     ledger.updated_at = now_utc();
     state
         .journeys
-        .handle
-        .upsert(LEGACY_MIGRATION_TABLE, &record_id, &ledger)
+        .save_legacy_migration(&record_id, &ledger)
         .map_err(|error| error.to_string())?;
     Ok(legacy_migration_result(
         entity_id,
@@ -1491,6 +1585,113 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn legacy_first_signal_presence_conflict_does_not_bind_the_attempt() {
+        let (state, entity_id) = crate::routes::tests::build_state();
+        let request = legacy_request();
+        let mut conflicting = legacy_presence(&request);
+        conflicting.motion = Motion::Lively;
+        save_presence(&state, &entity_id, &conflicting).unwrap();
+
+        let rejected = import_legacy(&state, &entity_id, request.clone()).await;
+
+        assert!(!rejected.ok);
+        let record_id = legacy_migration_record_id(OWNER, &request.attempt_key);
+        assert!(
+            !state
+                .journeys
+                .handle
+                .record_exists(LEGACY_MIGRATION_TABLE, &record_id)
+                .unwrap(),
+            "a deterministic Presence conflict permanently bound the attempt"
+        );
+        assert_eq!(
+            load_presence(&state, &entity_id).unwrap(),
+            Some(conflicting)
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_first_signal_pending_replay_preserves_a_later_presence_edit_and_completes() {
+        let (state, entity_id) = crate::routes::tests::build_state();
+        let request = legacy_request();
+        state.journeys.fail_next_legacy_migration_after_presence();
+        assert!(!import_legacy(&state, &entity_id, request.clone()).await.ok);
+
+        let mut edited = load_presence(&state, &entity_id).unwrap().unwrap();
+        edited.motion = Motion::Lively;
+        save_presence(&state, &entity_id, &edited).unwrap();
+
+        let replay = import_legacy(&state, &entity_id, request.clone()).await;
+
+        assert!(replay.ok, "{:?}", replay.error);
+        assert_eq!(load_presence(&state, &entity_id).unwrap(), Some(edited));
+        let record_id = legacy_migration_record_id(OWNER, &request.attempt_key);
+        assert_eq!(
+            state
+                .journeys
+                .load_legacy_migration(&record_id)
+                .unwrap()
+                .unwrap()
+                .state,
+            LegacyMigrationState::Complete
+        );
+    }
+
+    #[test]
+    fn legacy_first_signal_presence_preflight_serializes_an_ordinary_presence_write() {
+        let (state, entity_id) = crate::routes::tests::build_state();
+        let request = legacy_request();
+        let mut edited = legacy_presence(&request);
+        edited.motion = Motion::Lively;
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        state
+            .journeys
+            .pause_next_legacy_migration_after_preflight(entered_tx, resume_rx);
+
+        let migration_state = state.clone();
+        let migration_entity = entity_id.clone();
+        let migration_request = request.clone();
+        let migration = std::thread::spawn(move || {
+            migrate_legacy_first_signal(&migration_state, &migration_entity, &migration_request)
+        });
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("migration never reached Presence preflight");
+
+        let put_state = state.clone();
+        let put_entity = entity_id.clone();
+        let (put_started_tx, put_started_rx) = std::sync::mpsc::channel();
+        let (put_done_tx, put_done_rx) = std::sync::mpsc::channel();
+        let put = std::thread::spawn(move || {
+            put_started_tx.send(()).unwrap();
+            let result = save_presence(&put_state, &put_entity, &edited);
+            put_done_tx.send(result).unwrap();
+        });
+        put_started_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("ordinary Presence write never started");
+        assert!(
+            put_done_rx
+                .recv_timeout(std::time::Duration::from_millis(100))
+                .is_err(),
+            "ordinary Presence write interleaved with migration preflight"
+        );
+
+        resume_tx.send(()).unwrap();
+        assert!(migration.join().unwrap().is_ok());
+        put_done_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("ordinary Presence write stayed blocked")
+            .unwrap();
+        put.join().unwrap();
+        assert_eq!(
+            load_presence(&state, &entity_id).unwrap().unwrap().motion,
+            Motion::Lively
+        );
+    }
+
+    #[tokio::test]
     async fn legacy_first_signal_attempt_cannot_bind_another_entity_or_request_digest() {
         let (state, entity_id) = crate::routes::tests::build_state();
         let request = legacy_request();
@@ -1641,6 +1842,49 @@ pub(crate) mod tests {
                 Badge::Purposeful,
                 Badge::PresenceChosen,
             ]
+        );
+    }
+
+    #[test]
+    fn legacy_first_signal_rejects_a_damaged_saved_ledger_state() {
+        let (state, entity_id) = crate::routes::tests::build_state();
+        let request = legacy_request();
+        let record_id = legacy_migration_record_id(OWNER, &request.attempt_key);
+        state
+            .journeys
+            .handle
+            .execute(
+                "REMOVE TABLE genesis_legacy_migration; DEFINE TABLE genesis_legacy_migration SCHEMALESS;",
+                &[],
+            )
+            .unwrap();
+        state
+            .journeys
+            .handle
+            .upsert(
+                LEGACY_MIGRATION_TABLE,
+                &record_id,
+                &serde_json::json!({
+                    "owner_id": OWNER,
+                    "entity_id": entity_id,
+                    "request_digest": legacy_migration_request_digest(&request).unwrap(),
+                    "state": "damaged",
+                    "created_at": "2026-10-23T00:00:00Z",
+                    "updated_at": "2026-10-23T00:00:00Z",
+                }),
+            )
+            .unwrap();
+
+        let error = state
+            .journeys
+            .load_legacy_migration(&record_id)
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("Invalid legacy migration ledger row"),
+            "{error:#}"
         );
     }
 

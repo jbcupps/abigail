@@ -180,10 +180,13 @@ The schema-full `genesis_legacy_migration` ledger stores only owner ID, Entity
 ID, a closed-request digest, state and timestamps under a hashed attempt record
 ID. Pending imports converge after interruption, completed replays preserve
 their original result and timestamps, and a key cannot bind another Entity or
-request. No profile prose, conversation content, model material, memory content
-or Soul Forge scoring is stored in that ledger. Browser bytes clear only after
-the canonical response; v1 session records receive an exact resolution marker
-first so an older duplicated tab cannot resurrect them.
+request. Presence is checked before a new ledger binding; an already-pending
+replay preserves any later canonical Presence edit while finishing its badge and
+ledger writes. No profile prose, conversation content, model material, memory
+content or Soul Forge scoring is stored in that ledger. Browser bytes clear only
+after the canonical response; every v1 journal receives an exact resolution
+marker first, including a v1 copy under the local v2 key, so an older duplicated
+tab cannot resurrect it.
 
 ### 2. Hidden, versioned ethics
 

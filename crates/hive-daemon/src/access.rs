@@ -666,6 +666,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn legacy_migration_route_accepts_the_maximum_valid_utf8_request() {
+        let f = fixture();
+        let desktop = f.desktop();
+        let body = serde_json::json!({
+            "attempt_key": "😀".repeat(128),
+            "original_name": "Route Test",
+            "purpose": "😀".repeat(hive_core::genesis_quest::PRESENCE_TEXT_CHARS),
+            "boundaries": "🧭".repeat(hive_core::genesis_quest::PRESENCE_TEXT_CHARS),
+            "presence": {
+                "temperament": "gentle",
+                "identity": "aether",
+                "crest": "orbit",
+                "motion": "calm"
+            }
+        });
+        assert!(
+            body.to_string().len() > 16 * 1024,
+            "fixture no longer exercises the former body limit"
+        );
+
+        let (status, response) = f
+            .send(
+                Method::POST,
+                &format!("/v1/entities/{}/journey/legacy-first-signal", f.entity_id),
+                Some(&desktop),
+                Some(body),
+            )
+            .await;
+
+        assert_eq!(status, StatusCode::OK, "{response}");
+        assert_eq!(response["ok"], true, "{response}");
+        assert_eq!(
+            response["data"]["presence"]["purpose"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count(),
+            hive_core::genesis_quest::PRESENCE_TEXT_CHARS
+        );
+    }
+
+    #[tokio::test]
     async fn family_entity_lease_reaches_only_its_own_runtime_routes() {
         let f = fixture();
         let (other_id, _) = f.state.identity_manager.create_agent("Other").unwrap();
