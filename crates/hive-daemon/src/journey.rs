@@ -444,20 +444,8 @@ impl JourneyStore {
             .query_vec::<serde_json::Value>("SELECT * FROM entity_journey_event_compaction", &[])?;
         let mut snapshots = HashMap::with_capacity(values.len());
         let mut events = HashMap::new();
-        for mut value in values {
-            let object = value
-                .as_object_mut()
-                .ok_or_else(|| anyhow!("Invalid journey event compaction snapshot"))?;
-            let storage_id = object
-                .remove("id")
-                .and_then(|id| id.as_str().map(str::to_owned))
-                .ok_or_else(|| anyhow!("Journey event compaction storage ID is invalid"))?;
-            let snapshot: JourneyEventCompactionRecord = serde_json::from_value(value)
-                .context("Invalid journey event compaction snapshot")?;
-            validate_event_compaction(&snapshot)?;
-            if storage_id != snapshot.entity_id {
-                bail!("Journey event compaction ID does not match its storage record");
-            }
+        for value in values {
+            let (_storage_id, snapshot) = parse_event_compaction_storage_value(value)?;
             for entry in &snapshot.compacted_events {
                 if events
                     .insert(
@@ -488,15 +476,22 @@ impl JourneyStore {
         owner_id: &str,
         entity_id: &str,
     ) -> Result<Option<JourneyEventCompactionRecord>> {
-        let mut compactions = self.load_event_compactions()?;
-        let snapshot = compactions.snapshots.remove(entity_id);
-        if snapshot
-            .as_ref()
-            .is_some_and(|snapshot| snapshot.owner_id != owner_id)
-        {
+        validate_entity_id(entity_id)?;
+        validate_event_identifier(owner_id, "owner ID")?;
+        let Some(value) = self
+            .handle
+            .select_record::<serde_json::Value>(JOURNEY_EVENT_COMPACTION_TABLE, entity_id)?
+        else {
+            return Ok(None);
+        };
+        let (storage_id, snapshot) = parse_event_compaction_storage_value(value)?;
+        if storage_id != entity_id {
+            bail!("Journey event compaction ID does not match its storage record");
+        }
+        if snapshot.owner_id != owner_id {
             bail!("Journey event compaction belongs to another household or Entity");
         }
-        Ok(snapshot)
+        Ok(Some(snapshot))
     }
 
     fn save_event_compaction(&self, snapshot: &JourneyEventCompactionRecord) -> Result<()> {
@@ -656,14 +651,8 @@ impl JourneyStore {
         if existed && existing.is_none() {
             bail!("This Entity journey belongs to another household");
         }
+        let _ = self.load_event_compaction(owner_id, entity_id)?;
         let compactions = self.load_event_compactions()?;
-        if compactions
-            .snapshots
-            .get(entity_id)
-            .is_some_and(|snapshot| snapshot.owner_id != owner_id)
-        {
-            bail!("Journey event compaction belongs to another household or Entity");
-        }
 
         let mut indexes = std::collections::HashMap::<String, usize>::new();
         let mut events = Vec::<JourneyEventRecord>::new();
@@ -1151,6 +1140,25 @@ fn checked_activity_add(current: u64, increment: u64) -> Result<u64> {
         bail!("Saved journey activity count exceeds the persistence limit");
     }
     Ok(total)
+}
+
+fn parse_event_compaction_storage_value(
+    mut value: serde_json::Value,
+) -> Result<(String, JourneyEventCompactionRecord)> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("Invalid journey event compaction snapshot"))?;
+    let storage_id = object
+        .remove("id")
+        .and_then(|id| id.as_str().map(str::to_owned))
+        .ok_or_else(|| anyhow!("Journey event compaction storage ID is invalid"))?;
+    let snapshot: JourneyEventCompactionRecord =
+        serde_json::from_value(value).context("Invalid journey event compaction snapshot")?;
+    validate_event_compaction(&snapshot)?;
+    if storage_id != snapshot.entity_id {
+        bail!("Journey event compaction ID does not match its storage record");
+    }
+    Ok((storage_id, snapshot))
 }
 
 fn validate_event_compaction(snapshot: &JourneyEventCompactionRecord) -> Result<()> {
@@ -3522,6 +3530,116 @@ pub(crate) mod tests {
         assert!(!store
             .handle
             .record_exists(JOURNEY_EVENT_TABLE, &memory.record_id)
+            .unwrap());
+    }
+
+    #[test]
+    fn compaction_corrupt_sibling_snapshot_does_not_break_entity_activity_or_journey() {
+        let store = store();
+        let entity_a = uuid::Uuid::new_v4().to_string();
+        let entity_b = uuid::Uuid::new_v4().to_string();
+        let event = outbox_event_at(
+            &entity_a,
+            "skill_used",
+            "2026-09-30T23:59:59Z",
+            serde_json::json!({
+                "session_id": "session-a",
+                "successful_skill_count": 2,
+            }),
+        );
+        store
+            .record_runtime_events(OWNER, &entity_a, std::slice::from_ref(&event))
+            .unwrap();
+        let corrupt = JourneyEventCompactionRecord {
+            owner_id: OWNER.into(),
+            entity_id: entity_b.clone(),
+            successful_skill_uses: 0,
+            confirmed_memories: 0,
+            compacted_events: vec![CompactedJourneyEvent {
+                record_id: uuid::Uuid::new_v4().to_string(),
+                digest: "not-a-digest".into(),
+            }],
+            created_at: "2026-10-01T00:00:00Z".into(),
+            updated_at: "2026-10-01T00:00:00Z".into(),
+        };
+        store
+            .handle
+            .upsert(JOURNEY_EVENT_COMPACTION_TABLE, &entity_b, &corrupt)
+            .unwrap();
+
+        assert_eq!(
+            store.event_activity(OWNER, &entity_a).unwrap(),
+            JourneyActivity {
+                successful_skill_uses: 2,
+                ..Default::default()
+            }
+        );
+        assert!(store.event_activity(OWNER, &entity_b).is_err());
+        assert!(
+            store
+                .prevalidate_runtime_events(OWNER, &entity_a, std::slice::from_ref(&event))
+                .is_err(),
+            "global compaction index must stay fail-closed when a sibling snapshot is corrupt"
+        );
+    }
+
+    #[test]
+    fn automatic_compaction_defers_when_sibling_snapshot_is_corrupt() {
+        let store = store();
+        let entity_a = uuid::Uuid::new_v4().to_string();
+        let entity_b = uuid::Uuid::new_v4().to_string();
+        let old = outbox_event_at(
+            &entity_a,
+            "skill_used",
+            "2026-09-30T23:59:59Z",
+            serde_json::json!({
+                "session_id": "session-old",
+                "successful_skill_count": 2,
+            }),
+        );
+        let current = outbox_event_at(
+            &entity_a,
+            "memory_confirmed",
+            "2026-10-01T00:00:00Z",
+            serde_json::json!({
+                "memory_id": "memory-current",
+                "memory_weight": "distilled",
+            }),
+        );
+        store
+            .persist_runtime_events(OWNER, &entity_a, &[old.clone(), current.clone()])
+            .unwrap();
+        let corrupt = JourneyEventCompactionRecord {
+            owner_id: OWNER.into(),
+            entity_id: entity_b.clone(),
+            successful_skill_uses: 0,
+            confirmed_memories: 0,
+            compacted_events: vec![CompactedJourneyEvent {
+                record_id: uuid::Uuid::new_v4().to_string(),
+                digest: "not-a-digest".into(),
+            }],
+            created_at: "2026-10-01T00:00:00Z".into(),
+            updated_at: "2026-10-01T00:00:00Z".into(),
+        };
+        store
+            .handle
+            .upsert(JOURNEY_EVENT_COMPACTION_TABLE, &entity_b, &corrupt)
+            .unwrap();
+        store.set_auto_compaction_threshold_for_test(1);
+        store.set_auto_compaction_cutoff_for_test("2026-10-01T00:00:00Z");
+
+        let projected = store
+            .reconcile_runtime_event_projection(OWNER, &entity_a)
+            .unwrap();
+        assert_eq!(projected.successful_skill_uses, 2);
+        assert_eq!(projected.confirmed_memories, 1);
+        assert!(store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &old.record_id)
+            .unwrap());
+        assert!(!store
+            .handle
+            .record_exists(JOURNEY_EVENT_COMPACTION_TABLE, &entity_a)
             .unwrap());
     }
 

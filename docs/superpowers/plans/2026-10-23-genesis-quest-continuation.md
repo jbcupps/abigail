@@ -316,9 +316,10 @@ content-free/weight-free serialization.
 
 - [ ] **Step 2: Implement current-season activity summaries**
 
-Filter durable conversation timestamps and un-compacted redacted event
-timestamps to the current quarter. Aggregate family counts only over registered
-non-Hive Entities owned by the current household.
+Filter durable mentor-turn metadata timestamps to the current quarter. Seasonal
+quests must not read conversation content or redacted journey event timestamps.
+Aggregate family counts only over registered non-Hive Entities owned by the
+current household.
 
 - [ ] **Step 3: Render long-arc quest cards**
 

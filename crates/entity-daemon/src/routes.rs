@@ -178,7 +178,7 @@ pub async fn get_presence(
         .with_lease(&state.session_lease.lease_id);
     Json(match client.get_presence(&state.entity_id).await {
         Ok(presence) => ApiEnvelope::success(presence),
-        Err(error) => ApiEnvelope::error(format!("Presence is unavailable: {error}")),
+        Err(_) => ApiEnvelope::error("Presence is unavailable.".to_string()),
     })
 }
 
@@ -1448,6 +1448,52 @@ pub(crate) mod tests {
         ] {
             assert!(!body.to_string().contains(forbidden), "{body}");
         }
+    }
+
+    #[tokio::test]
+    async fn presence_route_returns_a_fixed_proxy_error_without_upstream_details() {
+        async fn hive_presence_failure() -> StatusCode {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+
+        let hive = Router::new().route("/v1/entities/:id/presence", get(hive_presence_failure));
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let hive_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, hive).await.unwrap();
+        });
+
+        let mut state = build_state();
+        state.hive_url = hive_url;
+        let runtime = Router::new()
+            .route("/v1/presence", get(get_presence))
+            .with_state(state);
+        let response = runtime
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/presence")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        server.abort();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["ok"], false);
+        assert_eq!(body["error"], "Presence is unavailable.");
+        let serialized = body.to_string();
+        assert!(!serialized.contains("http://"));
+        assert!(!serialized.contains("INTERNAL_SERVER_ERROR"));
     }
 
     #[test]

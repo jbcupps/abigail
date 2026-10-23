@@ -449,6 +449,29 @@ mod tests {
         assert_eq!(birth["ok"], true, "{birth}");
         surfaces.push(("generic birth POST", birth));
 
+        let (status, legacy_migration) = f
+            .send(
+                Method::POST,
+                &format!("/v1/entities/{}/journey/legacy-first-signal", f.entity_id),
+                Some(&desktop),
+                Some(serde_json::json!({
+                    "attempt_key": "opaque-old-attempt",
+                    "original_name": "Route Test",
+                    "purpose": "Help our family notice small wonders.",
+                    "boundaries": "Ask before changing shared plans.",
+                    "presence": {
+                        "temperament": "curious",
+                        "identity": "ember",
+                        "crest": "orbit",
+                        "motion": "calm"
+                    }
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(legacy_migration["ok"], true, "{legacy_migration}");
+        surfaces.push(("legacy First Signal migration POST", legacy_migration));
+
         let (status, journey) = f
             .send(
                 Method::GET,

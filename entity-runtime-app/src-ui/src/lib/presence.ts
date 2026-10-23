@@ -51,6 +51,15 @@ const TEMPERAMENT_VALUES = new Set<string>(Object.keys(TEMPERAMENTS));
 const PALETTE_VALUES = new Set<string>(Object.keys(PALETTES));
 const CREST_VALUES = new Set<string>(Object.keys(CRESTS));
 const MOTION_VALUES = new Set<string>(Object.keys(MOTIONS));
+const PRESENCE_CARD_KEYS = new Set<string>([
+  "name",
+  "purpose",
+  "temperament",
+  "boundaries",
+  "identity",
+  "crest",
+  "motion",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -59,6 +68,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function parsePresence(value: unknown): PresenceCard {
   if (
     !isRecord(value)
+    || Object.keys(value).length !== PRESENCE_CARD_KEYS.size
+    || Object.keys(value).some((key) => !PRESENCE_CARD_KEYS.has(key))
     || typeof value.name !== "string"
     || typeof value.purpose !== "string"
     || typeof value.boundaries !== "string"

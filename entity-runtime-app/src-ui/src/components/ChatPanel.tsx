@@ -88,6 +88,10 @@ export default function ChatPanel({ baseUrl, greeting, showHeader = true }: Chat
   }, [baseUrl, loadAttempt]);
 
   useEffect(() => {
+    if (!showHeader) {
+      setPresence(null);
+      return undefined;
+    }
     let current = true;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5_000);
@@ -103,7 +107,12 @@ export default function ChatPanel({ baseUrl, greeting, showHeader = true }: Chat
       controller.abort();
       clearTimeout(timer);
     };
-  }, [baseUrl, loadAttempt]);
+  }, [baseUrl, loadAttempt, showHeader]);
+
+  const displayName = presence?.name ?? name;
+  const headerTitle = presence
+    ? `${presence.name} — ${presence.purpose}`
+    : name;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -187,11 +196,16 @@ export default function ChatPanel({ baseUrl, greeting, showHeader = true }: Chat
                 crest={presence.crest}
                 motion={presence.motion}
                 size={42}
-                label={`${name}'s Presence crest`}
+                label={`${displayName}'s Presence crest`}
               />
             ) : null}
             <div className="min-w-0">
-              <h1 className="truncate text-lg font-semibold text-theme-text-bright">{name}</h1>
+              <h1
+                className="truncate text-lg font-semibold text-theme-text-bright"
+                title={headerTitle}
+              >
+                {displayName}
+              </h1>
               {presence ? (
                 <p className="truncate text-xs text-theme-text-dim">
                   {TEMPERAMENTS[presence.temperament]} · {PALETTES[presence.identity].label} · {CRESTS[presence.crest]} · {MOTIONS[presence.motion]}

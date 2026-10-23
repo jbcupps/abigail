@@ -127,6 +127,7 @@ foreach ($forbidden in @(
 $suffix = [Guid]::NewGuid().ToString("N").ToUpperInvariant()
 $presentName = "ABIGAIL_TEST_CHILD_ENV_PRESENT_$suffix"
 $absentName = "ABIGAIL_TEST_CHILD_ENV_ABSENT_$suffix"
+$inheritName = "ABIGAIL_TEST_CHILD_ENV_INHERIT_$suffix"
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("abigail-child-env-" + $suffix)
 New-Item -ItemType Directory -Path $tempRoot | Out-Null
 $childProcess = $null
@@ -145,18 +146,24 @@ try {
     [Environment]::SetEnvironmentVariable(
         $absentName, $null, [EnvironmentVariableTarget]::Process
     )
+    [Environment]::SetEnvironmentVariable(
+        $inheritName, "synthetic-parent-inherit", [EnvironmentVariableTarget]::Process
+    )
     Assert-ParentUnchanged $presentName $absentName
 
     $outputPath = Join-Path $tempRoot "child.txt"
+    $escapedOutputPath = $outputPath.Replace("'", "''")
     $childScript = @"
 Set-StrictMode -Version Latest
 `$ErrorActionPreference = 'Stop'
-`$outputPath = '$outputPath'
+`$outputPath = '$escapedOutputPath'
 `$present = [Environment]::GetEnvironmentVariable('$presentName', 'Process')
 `$absent = [Environment]::GetEnvironmentVariable('$absentName', 'Process')
+`$inherited = [Environment]::GetEnvironmentVariable('$inheritName', 'Process')
 Set-Content -LiteralPath `$outputPath -Encoding ASCII -Value @(
     "present=`$present"
     "absent=`$absent"
+    "inherited=`$inherited"
 )
 "@
     $encodedCommand = [Convert]::ToBase64String(
@@ -181,6 +188,7 @@ Set-Content -LiteralPath `$outputPath -Encoding ASCII -Value @(
     $childLines = @(Get-Content $outputPath)
     Assert-True ($childLines -contains "present=synthetic-child-present") "Present overlay missing."
     Assert-True ($childLines -contains "absent=synthetic-child-absent") "Absent overlay missing."
+    Assert-True ($childLines -contains "inherited=synthetic-parent-inherit") "Parent-only inherit missing."
     Assert-ParentUnchanged $presentName $absentName
     Stop-ChildProcessIfNeeded $childProcess
     $childProcess = $null
@@ -227,6 +235,9 @@ Set-Content -LiteralPath `$outputPath -Encoding ASCII -Value @(
     )
     [Environment]::SetEnvironmentVariable(
         $absentName, $null, [EnvironmentVariableTarget]::Process
+    )
+    [Environment]::SetEnvironmentVariable(
+        $inheritName, $null, [EnvironmentVariableTarget]::Process
     )
     if (Test-Path $tempRoot) { Remove-Item $tempRoot -Recurse -Force }
 }

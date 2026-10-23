@@ -1114,6 +1114,14 @@ mod tests {
                     left.weights.areteology,
                     left.weights.welfare,
                 ];
+                for factor in left_factors {
+                    assert!(
+                        factor.is_finite() && factor >= 0.0,
+                        "scenario `{}` choice `{}` has invalid internal calibration",
+                        scenario.id,
+                        left.id
+                    );
+                }
 
                 for (right_index, right) in scenario.choices.iter().enumerate() {
                     if left_index == right_index {
@@ -1126,6 +1134,14 @@ mod tests {
                         right.weights.areteology,
                         right.weights.welfare,
                     ];
+                    for factor in right_factors {
+                        assert!(
+                            factor.is_finite() && factor >= 0.0,
+                            "scenario `{}` choice `{}` has invalid internal calibration",
+                            scenario.id,
+                            right.id
+                        );
+                    }
                     let at_least_as_high_on_every_factor = left_factors
                         .iter()
                         .zip(right_factors.iter())

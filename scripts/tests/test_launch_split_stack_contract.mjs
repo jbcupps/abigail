@@ -72,6 +72,8 @@ test('Windows PowerShell behavior test owns syntax and child-environment coverag
   assert.match(behavioralTest, /Start-ProcessWithEnvironmentOverlay[\s\S]*?-Arguments\s+\$argumentString/i);
   assert.match(behavioralTest, /PRESENT/);
   assert.match(behavioralTest, /ABSENT/);
+  assert.match(behavioralTest, /INHERIT/);
+  assert.match(behavioralTest, /\.Replace\("'", "''"\)/);
   assert.match(behavioralTest, /does-not-exist\.exe/);
   assert.match(behavioralTest, /^\.\s+\$helperPath$/m);
   assert.doesNotMatch(behavioralTest, /^\.\s+.*launch_split_stack\.ps1/m);

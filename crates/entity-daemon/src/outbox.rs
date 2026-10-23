@@ -10,6 +10,32 @@ use {std::path::Path, std::sync::Arc};
 const OUTBOX_FILE_NAME: &str = "runtime_outbox.json";
 const JOURNEY_QUARANTINE_REASON: &str =
     "No matching durable fact was found after the reservation recovery threshold";
+const QUARANTINE_DIAGNOSTIC_LIMIT: usize = 500;
+pub(crate) const QUARANTINE_DIAGNOSTICS_UNAVAILABLE: &str =
+    "Quarantine diagnostics are unavailable.";
+
+fn validate_quarantine_diagnostic_projection(
+    record_id: &str,
+    kind: &str,
+    quarantined_at_utc: &str,
+) -> Result<(), String> {
+    uuid::Uuid::parse_str(record_id).map_err(|_| QUARANTINE_DIAGNOSTICS_UNAVAILABLE.to_string())?;
+    if kind.is_empty()
+        || kind.len() > 64
+        || !kind
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte == b'_')
+    {
+        return Err(QUARANTINE_DIAGNOSTICS_UNAVAILABLE.to_string());
+    }
+    match kind {
+        "skill_used" | "memory_confirmed" => {}
+        _ => return Err(QUARANTINE_DIAGNOSTICS_UNAVAILABLE.to_string()),
+    }
+    chrono::DateTime::parse_from_rfc3339(quarantined_at_utc)
+        .map_err(|_| QUARANTINE_DIAGNOSTICS_UNAVAILABLE.to_string())?;
+    Ok(())
+}
 
 #[derive(Clone, Debug)]
 pub struct OutboxRecordDraft {
@@ -710,21 +736,28 @@ impl RuntimeOutbox {
 
     pub fn quarantine_diagnostics(&self) -> Result<Vec<JourneyQuarantineDiagnostic>, String> {
         let inner = self.inner.lock().map_err(|e| e.to_string())?;
-        let mut diagnostics = inner
-            .quarantined_reservations
-            .iter()
-            .map(|quarantined| JourneyQuarantineDiagnostic {
+        let mut diagnostics = Vec::with_capacity(inner.quarantined_reservations.len());
+        for quarantined in &inner.quarantined_reservations {
+            validate_quarantine_diagnostic_projection(
+                &quarantined.reservation.record_id,
+                &quarantined.reservation.kind,
+                &quarantined.quarantined_at_utc,
+            )?;
+            diagnostics.push(JourneyQuarantineDiagnostic {
                 record_id: quarantined.reservation.record_id.clone(),
                 kind: quarantined.reservation.kind.clone(),
                 quarantined_at_utc: quarantined.quarantined_at_utc.clone(),
                 reason: JOURNEY_QUARANTINE_REASON.to_string(),
-            })
-            .collect::<Vec<_>>();
+            });
+        }
         diagnostics.sort_by(|left, right| {
             left.quarantined_at_utc
                 .cmp(&right.quarantined_at_utc)
                 .then_with(|| left.record_id.cmp(&right.record_id))
         });
+        if diagnostics.len() > QUARANTINE_DIAGNOSTIC_LIMIT {
+            diagnostics = diagnostics.split_off(diagnostics.len() - QUARANTINE_DIAGNOSTIC_LIMIT);
+        }
         Ok(diagnostics)
     }
 
@@ -1207,6 +1240,77 @@ mod tests {
             assert_eq!(row["reason"], REASON);
         }
         assert_no_private_quarantine_keys(&serialized);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn quarantine_diagnostic_projection_rejects_tampered_private_rows_without_echoing_text() {
+        let root = root("abigail-outbox-quarantine-tampered");
+        let outbox = RuntimeOutbox::load(&root, 1).unwrap();
+        outbox
+            .reserve_slot_with_soul_ref(
+                "00000000-0000-4000-8000-000000000099".to_string(),
+                "private-entity-id",
+                "skill_used",
+                "private-soul-ref",
+            )
+            .unwrap();
+        outbox
+            .quarantine_stale_unmatched_reservations(
+                &HashSet::new(),
+                chrono::Utc::now() + chrono::Duration::hours(1),
+            )
+            .unwrap();
+        drop(outbox);
+
+        let path = root.join(super::OUTBOX_FILE_NAME);
+        let mut persisted: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        persisted["quarantined_reservations"][0]["reservation"]["kind"] =
+            serde_json::json!("secret-prompt-leak");
+        std::fs::write(&path, serde_json::to_vec_pretty(&persisted).unwrap()).unwrap();
+
+        let outbox = RuntimeOutbox::load(&root, 1).unwrap();
+        let error = outbox.quarantine_diagnostics().unwrap_err();
+        assert_eq!(error, super::QUARANTINE_DIAGNOSTICS_UNAVAILABLE);
+        assert!(!error.contains("secret"));
+        assert!(!error.contains("prompt"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn quarantine_diagnostic_projection_returns_only_the_most_recent_five_hundred_rows() {
+        let root = root("abigail-outbox-quarantine-cap");
+        let outbox = RuntimeOutbox::load(&root, 501).unwrap();
+        for index in 0..501 {
+            let record_id = format!("{:08x}-0000-4000-8000-000000000001", index);
+            outbox
+                .reserve_slot_with_soul_ref(
+                    record_id,
+                    "private-entity-id",
+                    "skill_used",
+                    "private-soul-ref",
+                )
+                .unwrap();
+        }
+        outbox
+            .quarantine_stale_unmatched_reservations(
+                &HashSet::new(),
+                chrono::Utc::now() + chrono::Duration::hours(1),
+            )
+            .unwrap();
+        assert_eq!(outbox.status().unwrap().quarantined_records, 501);
+
+        let diagnostics = outbox.quarantine_diagnostics().unwrap();
+        assert_eq!(diagnostics.len(), super::QUARANTINE_DIAGNOSTIC_LIMIT);
+        assert_eq!(
+            diagnostics.first().unwrap().record_id,
+            "00000001-0000-4000-8000-000000000001"
+        );
+        assert_eq!(
+            diagnostics.last().unwrap().record_id,
+            "000001f4-0000-4000-8000-000000000001"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

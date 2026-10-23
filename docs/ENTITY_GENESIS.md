@@ -303,8 +303,9 @@ persisted, non-capacity quarantine for diagnosis without inventing activity.
 `GET /v1/outbox/quarantine` exposes only a read-only, deterministic diagnostic
 projection. Each row contains exactly `record_id`, `kind`,
 `quarantined_at_utc`, and a fixed backend `reason`; rows are sorted by
-quarantine time and record ID. The outbox status reports only the quarantine
-count. Full reservations remain private in the persisted Runtime outbox, so the
+quarantine time and record ID. The response includes at most the 500 most recent
+rows while the outbox status count remains the full total. Full reservations
+remain private in the persisted Runtime outbox, so the
 diagnostic surfaces never disclose Entity or session identifiers, soul
 references, payload digests, activity content, or Soul Forge scoring material.
 

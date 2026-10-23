@@ -24,10 +24,16 @@ function useReducedMotion(): boolean {
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return undefined;
     const query = window.matchMedia(REDUCED_MOTION_QUERY);
-    const update = (event: MediaQueryListEvent) => setReduced(event.matches);
+    const update = (event: MediaQueryListEvent | MediaQueryList) => {
+      setReduced(event.matches);
+    };
     setReduced(query.matches);
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
+    if (typeof query.addEventListener === "function") {
+      query.addEventListener("change", update);
+      return () => query.removeEventListener("change", update);
+    }
+    query.addListener(update);
+    return () => query.removeListener(update);
   }, []);
 
   return reduced;

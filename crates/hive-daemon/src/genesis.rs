@@ -1768,13 +1768,33 @@ mod tests {
         assert!(birth.ok, "{:?}", birth.error);
         let Json(journey) =
             crate::journey::get_journey(State(state.clone()), Path(entity_id.clone())).await;
+        let legacy_request = crate::journey::LegacyFirstSignalMigrationRequest {
+            attempt_key: "opaque-old-attempt".into(),
+            original_name: "Route Test".into(),
+            purpose: "Help our family notice small wonders.".into(),
+            boundaries: "Ask before changing shared plans.".into(),
+            presence: hive_core::genesis_quest::PresenceChoice {
+                temperament: hive_core::genesis_quest::Temperament::Curious,
+                identity: hive_core::genesis_quest::Palette::Ember,
+                crest: hive_core::genesis_quest::Crest::Orbit,
+                motion: hive_core::genesis_quest::Motion::Calm,
+            },
+        };
+        let Json(legacy_migration) = crate::journey::post_legacy_first_signal(
+            State(state.clone()),
+            Path(entity_id.clone()),
+            Json(legacy_request),
+        )
+        .await;
+        assert_eq!(legacy_migration.ok, true, "{:?}", legacy_migration.error);
         let Json(presence_put) = crate::journey::put_presence(
             State(state.clone()),
             Path(entity_id.clone()),
             Json(PresenceChoice::default()),
         )
         .await;
-        let Json(presence_get) = crate::journey::get_presence(State(state), Path(entity_id)).await;
+        let Json(presence_get) =
+            crate::journey::get_presence(State(state.clone()), Path(entity_id.clone())).await;
 
         let surfaces = [
             ("Genesis create", serde_json::to_value(created).unwrap()),
@@ -1786,6 +1806,10 @@ mod tests {
             ("journey", serde_json::to_value(journey).unwrap()),
             ("Presence PUT", serde_json::to_value(presence_put).unwrap()),
             ("Presence GET", serde_json::to_value(presence_get).unwrap()),
+            (
+                "legacy First Signal migration POST",
+                serde_json::to_value(legacy_migration).unwrap(),
+            ),
         ];
         let leaks: Vec<_> = surfaces
             .iter()

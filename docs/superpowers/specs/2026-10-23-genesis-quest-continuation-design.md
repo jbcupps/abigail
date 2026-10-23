@@ -153,8 +153,9 @@ The long arc adds a small canonical quest catalog separate from badges:
   least two Entities.
 
 The current season is a UTC calendar quarter with a stable ID and explicit start
-and end timestamps. Progress is derived from durable conversation timestamps and
-redacted journey events within that window. Family aggregation remains scoped to
+and end timestamps. Progress is derived from durable mentor-turn metadata timestamps within that
+window. Seasonal quests do not read conversation content or redacted journey
+event timestamps. Family aggregation remains scoped to
 the local owner and reports only counts.
 
 Journey responses include quest definitions and progress views. The Hive Quest

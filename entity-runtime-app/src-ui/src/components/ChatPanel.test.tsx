@@ -44,6 +44,22 @@ describe("Durable Entity conversations", () => {
     expect(requests.some((url) => url.includes("/v1/entities/"))).toBe(false);
   });
 
+  it("does not fetch Presence when the header is hidden", async () => {
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      requests.push(url);
+      if (url.endsWith("/v1/status")) return json({ entity_id: "ada", name: "Ada" });
+      if (url.includes("/history")) {
+        return json({ session_id: "entity-ada", messages: [] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    render(<ChatPanel baseUrl={base} showHeader={false} />);
+    expect(await screen.findByText("Hi, I'm Ada. What can I help you with today?")).toBeInTheDocument();
+    await waitFor(() => expect(requests.some((url) => url.endsWith("/v1/presence"))).toBe(false));
+  });
+
   it.each(["missing", "unavailable"] as const)(
     "restores conversation when Presence is %s",
     async (presenceState) => {
