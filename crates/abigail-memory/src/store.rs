@@ -95,6 +95,14 @@ pub struct ConversationTurn {
     pub created_at: chrono::DateTime<Utc>,
 }
 
+/// Content-free turn facts for bounded activity calculations.
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct ConversationTurnMetadata {
+    pub id: String,
+    pub role: String,
+    pub created_at: chrono::DateTime<Utc>,
+}
+
 impl ConversationTurn {
     pub fn new(session_id: &str, role: &str, content: &str) -> Self {
         Self {
@@ -488,6 +496,35 @@ impl MemoryStore {
             .collect()
     }
 
+    /// Reads only fields needed for seasonal activity. Conversation content,
+    /// provider details, tool metadata, and session identifiers are never
+    /// selected or materialized.
+    pub fn turn_metadata_between(
+        &self,
+        starts_at: chrono::DateTime<Utc>,
+        ends_at_exclusive: chrono::DateTime<Utc>,
+    ) -> Result<Vec<ConversationTurnMetadata>> {
+        if ends_at_exclusive <= starts_at {
+            return Err(StoreError::InvalidData(
+                "turn metadata range must have an exclusive end after its start".into(),
+            ));
+        }
+        let bindings = [
+            binding("starts_at", &starts_at.to_rfc3339())?,
+            binding("ends_at_exclusive", &ends_at_exclusive.to_rfc3339())?,
+        ];
+        self.persistence
+            .query_vec::<TurnMetadataDoc>(
+                "SELECT id, role, created_at FROM conversation_turn \
+                 WHERE created_at >= $starts_at AND created_at < $ends_at_exclusive \
+                 ORDER BY created_at ASC",
+                &bindings,
+            )?
+            .into_iter()
+            .map(TryFrom::try_from)
+            .collect()
+    }
+
     pub fn all_memories(&self) -> Result<Vec<Memory>> {
         self.persistence
             .query_vec::<MemoryDoc>("SELECT * FROM memory_entry ORDER BY created_at ASC", &[])?
@@ -815,6 +852,26 @@ impl TryFrom<TurnDoc> for ConversationTurn {
             complexity_score: value.complexity_score,
             token_estimate: value.token_estimate,
             successful_tool_uses: value.successful_tool_uses,
+            created_at: parse_timestamp(&value.created_at)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TurnMetadataDoc {
+    id: String,
+    role: String,
+    created_at: String,
+}
+
+impl TryFrom<TurnMetadataDoc> for ConversationTurnMetadata {
+    type Error = StoreError;
+
+    fn try_from(value: TurnMetadataDoc) -> Result<Self> {
+        Ok(Self {
+            id: value.id,
+            role: value.role,
             created_at: parse_timestamp(&value.created_at)?,
         })
     }

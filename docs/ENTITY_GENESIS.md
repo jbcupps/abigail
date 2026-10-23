@@ -348,18 +348,34 @@ distinct active, born, non-Hive Entities in the local owner scope. A season is
 a UTC calendar quarter identified as `YYYY-QN`; responses include RFC3339 UTC
 `starts_at` and `ends_at_exclusive` bounds. A message exactly at the start
 counts, while one exactly at the exclusive end belongs to the next season.
-Progress is recalculated from distinct durable user turns in that window, so it
-resets with the quarter. Compacted old skill or memory events never advance
-these message quests.
+Progress is recalculated from distinct durable user-turn IDs in that window, so
+it resets with the quarter. Seasonal reads use a strict metadata-only query
+that selects only turn ID, role and timestamp; conversation text, session IDs,
+provider/model fields and tool metadata are not selected. Compacted old skill
+or memory events never advance these message quests.
 
 Family calculation iterates only the registered Entities in the current local
-owner scope and excludes Abigail Hive and unawakened Entities. An inaccessible
-active Entity history fails the calculation with fixed content-free guidance
-rather than returning a partial total or a storage error. Catalog and journey
-shapes contain only canonical copy, season bounds, counts and completion; they
-contain no conversation text, model material or Soul Forge scoring data. Hive
-renders the two compact cards after awakening, with no quest action or
-automatic send.
+owner scope and excludes Abigail Hive and valid unawakened Entities. Hive
+reloads every non-Hive config before including or excluding it, so a malformed
+config cannot masquerade as an unborn Entity. If any sibling config or active
+history is unavailable, the requested Entity quest remains available while the
+family view returns `available: false`, zero partial progress and no error,
+path, name or content. Hive renders that state without a progress bar.
+
+Successful household summaries are cached for at most five seconds per owner
+and exact season ID/start/exclusive-end key. The cache lock is also the
+single-flight lock, so concurrent Entity-card requests share one household
+metadata scan. Failures are never cached, and a quarter rollover naturally uses
+a different key. Message progress can therefore lag newly written activity by
+up to five seconds; reopening or refreshing after that bound recomputes it.
+Journey computation runs on a blocking worker rather than an Axum async worker.
+
+Catalog and journey shapes contain only canonical copy, season bounds, counts,
+availability and completion; they contain no conversation text, model material
+or Soul Forge scoring data. Hive renders the two compact cards after awakening,
+with no quest action or automatic send. Reaching 30 family messages with only
+one contributing Entity explicitly asks for a second Entity instead of
+claiming completion.
 
 ### 4. Model setup gate
 

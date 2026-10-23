@@ -74,20 +74,25 @@ export function BadgeShelf({ badges }: { badges: BadgeView[] }) {
 }
 
 function LongArcQuests({ definitions, views }: { definitions: LongArcQuestDefinition[]; views: LongArcQuestView[] }) {
-  if (views.length === 0) return null;
+  const safeDefinitions = definitions ?? [];
+  const safeViews = views ?? [];
+  if (safeViews.length === 0) return null;
   return <section className="quest-long-arc" aria-label="Seasonal quests">
     <h4>Seasonal quests</h4>
-    <div>{views.map((view) => {
-      const definition = definitions.find((candidate) => candidate.id === view.quest_id);
+    <div>{safeViews.map((view) => {
+      const definition = safeDefinitions.find((candidate) => candidate.id === view.quest_id);
       if (!definition) return null;
       const scope = definition.scope === "entity" ? "Entity" : "Family";
       const familyDetail = `${view.active_entities} ${view.active_entities === 1 ? "Entity" : "Entities"} active`;
-      return <article key={view.quest_id} aria-label={`${definition.title}${view.complete ? ", complete" : ""}`}>
-        <header><strong>{definition.title}</strong><span>{view.complete ? "Complete" : "In progress"}</span></header>
+      const needsSecondEntity = definition.scope === "family" && view.progress >= definition.target && view.active_entities < definition.minimum_entities;
+      return <article key={view.quest_id} aria-label={definition.title}>
+        <header><strong>{definition.title}</strong><span>{!view.available ? "Unavailable" : view.complete ? "Complete" : "In progress"}</span></header>
         <small>{scope} · {view.season_label}</small>
         <p>{definition.summary}</p>
-        <progress max={definition.target} value={Math.min(view.progress, definition.target)} aria-label={`${definition.title} progress`} />
-        <small>{view.progress} of {definition.target}{view.complete ? " · Complete" : definition.scope === "family" ? ` · ${familyDetail}` : ""}</small>
+        {view.available ? <>
+          <progress max={definition.target} value={Math.min(view.progress, definition.target)} aria-label={`${definition.title} progress`} />
+          <small>{view.progress} of {definition.target}{needsSecondEntity ? " · A second Entity is needed" : !view.complete && definition.scope === "family" ? ` · ${familyDetail}` : ""}</small>
+        </> : <small role="status">Progress unavailable. Try again shortly.</small>}
       </article>;
     })}</div>
   </section>;
@@ -183,7 +188,7 @@ export default function GenesisQuest({ session, busy, stage, onStage, change, on
             <div><dt>Memory</dt><dd>{activityLabel("confirmed_memories", journey.confirmed_memories)}</dd></div>
           </dl>}
           {milestone && metric && <div className="quest-milestone"><span>{milestoneDefinition?.title ?? milestone.title}</span><progress max={milestone.target} value={milestone.progress} aria-label={`${milestoneDefinition?.title ?? milestone.title} progress`} /><small>{milestone.progress} of {activityLabel(metric, milestone.target)}</small></div>}
-          {journey && <LongArcQuests definitions={catalog.long_arc_quests} views={journey.long_arc_quests} />}
+          {journey && <LongArcQuests definitions={catalog.long_arc_quests ?? []} views={journey.long_arc_quests ?? []} />}
           <ol className="quest-first">{(journey?.first_quests ?? []).map((item) => <li key={item.id} className={item.complete ? "is-complete" : ""}><strong>{item.title}</strong><p>“{item.prompt}”</p><small>{item.complete ? "Complete" : `Unlocks ${catalog.badges.find((badge) => badge.badge === item.milestone)?.title ?? "a badge"}`}</small></li>)}</ol>
           <button type="button" className="genesis-primary" disabled={busy} onClick={onMeet}>Meet {definition.name}</button>
           <p className="genesis-muted">Nothing is sent for you. Copy a prompt, or say whatever feels right.</p>

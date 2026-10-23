@@ -22,6 +22,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 const JOURNEY_TABLE: &str = "entity_journey";
 const JOURNEY_EVENT_TABLE: &str = "entity_journey_event";
@@ -37,6 +38,7 @@ const MAX_LEGACY_ATTEMPT_KEY_BYTES: usize = 512;
 const MAX_JSON_UTF8_BYTES_PER_CHAR: usize = 4;
 const MAX_JSON_ESCAPED_ATTEMPT_KEY_BYTES: usize = MAX_LEGACY_ATTEMPT_KEY_BYTES * 2;
 const LEGACY_MIGRATION_JSON_OVERHEAD_BYTES: usize = 2 * 1024;
+const HOUSEHOLD_SEASON_CACHE_TTL: Duration = Duration::from_secs(5);
 pub const MAX_LEGACY_MIGRATION_BODY_BYTES: usize = MAX_JSON_ESCAPED_ATTEMPT_KEY_BYTES
     + MAX_JSON_UTF8_BYTES_PER_CHAR * (PRESENCE_NAME_CHARS + 2 * PRESENCE_TEXT_CHARS)
     + LEGACY_MIGRATION_JSON_OVERHEAD_BYTES;
@@ -46,6 +48,8 @@ pub struct JourneyStore {
     writes: Mutex<()>,
     legacy_migrations: Mutex<()>,
     presence_writes: Mutex<()>,
+    /// Also serves as the single-flight lock for one household-season scan.
+    household_season_cache: Mutex<Option<HouseholdSeasonCacheEntry>>,
     #[cfg(test)]
     test_faults: Mutex<JourneyTestFaults>,
 }
@@ -62,6 +66,8 @@ struct JourneyTestFaults {
     auto_compaction_cutoff: Option<String>,
     fail_legacy_migration_after_presence: bool,
     pause_legacy_migration_after_preflight: Option<LegacyPreflightPause>,
+    household_cache_ttl: Option<Duration>,
+    household_scan_count: usize,
 }
 
 #[cfg(test)]
@@ -134,6 +140,26 @@ struct CompactedEventBinding {
 struct JourneyEventCompactionIndex {
     snapshots: HashMap<String, JourneyEventCompactionRecord>,
     events: HashMap<String, CompactedEventBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HouseholdSeasonCacheKey {
+    owner_id: String,
+    season_id: String,
+    starts_at: String,
+    ends_at_exclusive: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HouseholdSeasonSummary {
+    mentor_messages: u64,
+    active_entities: u64,
+}
+
+struct HouseholdSeasonCacheEntry {
+    key: HouseholdSeasonCacheKey,
+    summary: HouseholdSeasonSummary,
+    stored_at: Instant,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -254,6 +280,7 @@ impl JourneyStore {
             writes: Mutex::new(()),
             legacy_migrations: Mutex::new(()),
             presence_writes: Mutex::new(()),
+            household_season_cache: Mutex::new(None),
             #[cfg(test)]
             test_faults: Mutex::new(JourneyTestFaults::default()),
         })
@@ -322,6 +349,60 @@ impl JourneyStore {
             .unwrap()
             .pause_legacy_migration_after_preflight =
             Some(LegacyPreflightPause { entered, resume });
+    }
+
+    fn household_cache_ttl(&self) -> Duration {
+        #[cfg(test)]
+        if let Some(ttl) = self.test_faults.lock().unwrap().household_cache_ttl {
+            return ttl;
+        }
+        HOUSEHOLD_SEASON_CACHE_TTL
+    }
+
+    fn cached_household_season<F>(
+        &self,
+        key: HouseholdSeasonCacheKey,
+        scan: F,
+    ) -> Result<HouseholdSeasonSummary, String>
+    where
+        F: FnOnce() -> Result<HouseholdSeasonSummary, String>,
+    {
+        let ttl = self.household_cache_ttl();
+        let mut cache = self
+            .household_season_cache
+            .lock()
+            .map_err(|_| "Seasonal journey activity is unavailable.".to_string())?;
+        if let Some(entry) = cache.as_ref() {
+            if entry.key == key && entry.stored_at.elapsed() < ttl {
+                return Ok(entry.summary);
+            }
+        }
+        #[cfg(test)]
+        {
+            self.test_faults.lock().unwrap().household_scan_count += 1;
+        }
+        let summary = scan()?;
+        *cache = Some(HouseholdSeasonCacheEntry {
+            key,
+            summary,
+            stored_at: Instant::now(),
+        });
+        Ok(summary)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_household_cache_ttl_for_test(&self, ttl: Duration) {
+        self.test_faults.lock().unwrap().household_cache_ttl = Some(ttl);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn clear_household_cache_for_test(&self) {
+        *self.household_season_cache.lock().unwrap() = None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn household_scan_count_for_test(&self) -> usize {
+        self.test_faults.lock().unwrap().household_scan_count
     }
 
     pub fn load(&self, owner_id: &str, entity_id: &str) -> Result<Option<EntityJourney>> {
@@ -1207,6 +1288,7 @@ struct UtcQuarter {
 }
 
 impl UtcQuarter {
+    #[cfg(test)]
     fn contains(&self, timestamp: DateTime<Utc>) -> bool {
         timestamp >= self.starts_at && timestamp < self.ends_at_exclusive
     }
@@ -1304,13 +1386,6 @@ fn summarize_conversations(turns: &[abigail_memory::ConversationTurn]) -> Journe
     summarize_conversation_turns(turns.iter())
 }
 
-fn summarize_conversations_in_season(
-    turns: &[abigail_memory::ConversationTurn],
-    season: &UtcQuarter,
-) -> JourneyActivity {
-    summarize_conversation_turns(turns.iter().filter(|turn| season.contains(turn.created_at)))
-}
-
 fn summarize_conversation_turns<'a>(
     turns: impl IntoIterator<Item = &'a abigail_memory::ConversationTurn>,
 ) -> JourneyActivity {
@@ -1336,6 +1411,15 @@ fn summarize_conversation_turns<'a>(
     }
 }
 
+fn summarize_seasonal_messages(turns: &[abigail_memory::ConversationTurnMetadata]) -> u64 {
+    turns
+        .iter()
+        .filter(|turn| turn.role == "user")
+        .map(|turn| turn.id.as_str())
+        .collect::<HashSet<_>>()
+        .len() as u64
+}
+
 fn seasonal_conversation_activity(
     state: &HiveDaemonState,
     entity_id: &str,
@@ -1344,25 +1428,33 @@ fn seasonal_conversation_activity(
     let config = state.identity_manager.load_agent(entity_id)?;
     let memory = abigail_memory::MemoryStore::open_with_config(&config)
         .map_err(|error| error.to_string())?;
-    let turns = memory.all_turns().map_err(|error| error.to_string())?;
-    Ok(summarize_conversations_in_season(&turns, season))
+    let turns = memory
+        .turn_metadata_between(season.starts_at, season.ends_at_exclusive)
+        .map_err(|error| error.to_string())?;
+    Ok(JourneyActivity {
+        mentor_messages: summarize_seasonal_messages(&turns),
+        ..Default::default()
+    })
 }
 
 fn long_arc_quest_views(
     season: &UtcQuarter,
     entity_messages: u64,
-    family_messages: u64,
-    family_active_entities: u64,
+    family: Option<HouseholdSeasonSummary>,
 ) -> Vec<LongArcQuestView> {
     LONG_ARC_QUEST_DEFINITIONS
         .iter()
         .map(|definition| {
-            let (progress, active_entities) = match definition.scope {
-                LongArcQuestScope::Entity => (entity_messages, u64::from(entity_messages > 0)),
-                LongArcQuestScope::Family => (family_messages, family_active_entities),
+            let (progress, active_entities, available) = match definition.scope {
+                LongArcQuestScope::Entity => {
+                    (entity_messages, u64::from(entity_messages > 0), true)
+                }
+                LongArcQuestScope::Family => family.map_or((0, 0, false), |summary| {
+                    (summary.mentor_messages, summary.active_entities, true)
+                }),
             };
             LongArcQuestView {
-                quest_id: definition.id,
+                quest_id: definition.id.into(),
                 season_id: season.id.clone(),
                 season_label: season.label.clone(),
                 starts_at: season
@@ -1373,11 +1465,77 @@ fn long_arc_quest_views(
                     .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
                 progress,
                 active_entities,
-                complete: progress >= definition.target
+                complete: available
+                    && progress >= definition.target
                     && active_entities >= definition.minimum_entities,
+                available,
             }
         })
         .collect()
+}
+
+fn household_season_cache_key(owner_id: &str, season: &UtcQuarter) -> HouseholdSeasonCacheKey {
+    HouseholdSeasonCacheKey {
+        owner_id: owner_id.into(),
+        season_id: season.id.clone(),
+        starts_at: season
+            .starts_at
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        ends_at_exclusive: season
+            .ends_at_exclusive
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    }
+}
+
+fn scan_household_season(
+    state: &HiveDaemonState,
+    owner_id: &str,
+    season: &UtcQuarter,
+) -> Result<HouseholdSeasonSummary, String> {
+    if owner_id != OWNER {
+        return Err("Seasonal journey activity is unavailable.".into());
+    }
+    let entities = state
+        .identity_manager
+        .list_agents()
+        .map_err(|_| "Seasonal journey activity is unavailable.".to_string())?;
+    let mut summary = HouseholdSeasonSummary {
+        mentor_messages: 0,
+        active_entities: 0,
+    };
+    for entity in entities.into_iter().filter(|entity| !entity.is_hive) {
+        // list_agents intentionally tolerates damaged configs for the card
+        // list. Reload each non-Hive config so damage cannot masquerade as a
+        // valid unborn Entity and produce a partial household total.
+        let config = state
+            .identity_manager
+            .load_agent(&entity.id)
+            .map_err(|_| "Seasonal journey activity is unavailable.".to_string())?;
+        if !config.birth_complete {
+            continue;
+        }
+        let activity = seasonal_conversation_activity(state, &entity.id, season)
+            .map_err(|_| "Seasonal journey activity is unavailable.".to_string())?;
+        summary.mentor_messages = summary
+            .mentor_messages
+            .checked_add(activity.mentor_messages)
+            .ok_or_else(|| "Seasonal journey activity is unavailable.".to_string())?;
+        if activity.mentor_messages > 0 {
+            summary.active_entities += 1;
+        }
+    }
+    Ok(summary)
+}
+
+fn household_season_summary(
+    state: &HiveDaemonState,
+    owner_id: &str,
+    season: &UtcQuarter,
+) -> Result<HouseholdSeasonSummary, String> {
+    let key = household_season_cache_key(owner_id, season);
+    state
+        .journeys
+        .cached_household_season(key, || scan_household_season(state, owner_id, season))
 }
 
 fn long_arc_quests_at(
@@ -1392,35 +1550,11 @@ fn long_arc_quests_at(
     registered_name(state, entity_id)
         .map_err(|_| "Seasonal journey activity is unavailable.".to_string())?;
     let season = utc_quarter_for(now);
-    let active_entities = state
-        .identity_manager
-        .list_agents()
+    let entity_messages = seasonal_conversation_activity(state, entity_id, &season)
         .map_err(|_| "Seasonal journey activity is unavailable.".to_string())?
-        .into_iter()
-        .filter(|agent| !agent.is_hive && agent.birth_complete);
-
-    let mut entity_messages = 0_u64;
-    let mut family_messages = 0_u64;
-    let mut family_active_entities = 0_u64;
-    for entity in active_entities {
-        let activity = seasonal_conversation_activity(state, &entity.id, &season)
-            .map_err(|_| "Seasonal journey activity is unavailable.".to_string())?;
-        if entity.id == entity_id {
-            entity_messages = activity.mentor_messages;
-        }
-        family_messages = family_messages
-            .checked_add(activity.mentor_messages)
-            .ok_or_else(|| "Seasonal journey activity is unavailable.".to_string())?;
-        if activity.mentor_messages > 0 {
-            family_active_entities += 1;
-        }
-    }
-    Ok(long_arc_quest_views(
-        &season,
-        entity_messages,
-        family_messages,
-        family_active_entities,
-    ))
+        .mentor_messages;
+    let family = household_season_summary(state, owner_id, &season).ok();
+    Ok(long_arc_quest_views(&season, entity_messages, family))
 }
 
 fn merge_activity_sources(
@@ -1883,9 +2017,14 @@ pub async fn get_journey(
     State(state): State<HiveDaemonState>,
     Path(entity_id): Path<String>,
 ) -> Json<ApiEnvelope<serde_json::Value>> {
-    Json(match journey_view(&state, &entity_id) {
-        Ok(view) => ApiEnvelope::success(view),
-        Err(error) => ApiEnvelope::error(error),
+    let computed = tokio::task::spawn_blocking(move || journey_view(&state, &entity_id)).await;
+    Json(match computed {
+        Ok(Ok(view)) => ApiEnvelope::success(view),
+        Ok(Err(error)) => ApiEnvelope::error(error),
+        Err(error) => {
+            tracing::warn!("Entity journey worker stopped before completing: {error}");
+            ApiEnvelope::error("Entity journey is unavailable. Try again shortly.")
+        }
     })
 }
 
@@ -4195,7 +4334,12 @@ pub(crate) mod tests {
                 .with_timezone(&chrono::Utc),
         );
 
-        assert_eq!(summarize_seasonal_messages(&turns), 2);
+        let season_turns = turns
+            .iter()
+            .filter(|turn| season.contains(turn.created_at))
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(summarize_seasonal_messages(&season_turns), 2);
         let views = long_arc_quest_views(
             &season,
             2,

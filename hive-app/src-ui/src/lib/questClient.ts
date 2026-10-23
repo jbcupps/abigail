@@ -39,7 +39,7 @@ export interface LongArcQuestDefinition {
 export interface LongArcQuestView {
   quest_id: LongArcQuestId; season_id: string; season_label: string;
   starts_at: string; ends_at_exclusive: string; progress: number;
-  active_entities: number; complete: boolean;
+  active_entities: number; complete: boolean; available: boolean;
 }
 export interface QuestCatalog {
   stages: { stage: QuestStageId; title: string; summary: string; optional: boolean }[];

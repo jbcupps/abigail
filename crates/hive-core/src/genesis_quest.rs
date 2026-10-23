@@ -213,9 +213,10 @@ pub const LONG_ARC_QUEST_DEFINITIONS: [LongArcQuestDefinition; 2] = [
 
 /// Content-free progress for one canonical long-arc quest in one UTC quarter.
 /// `ends_at_exclusive` makes the season boundary explicit to every client.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct LongArcQuestView {
-    pub quest_id: &'static str,
+    pub quest_id: String,
     pub season_id: String,
     pub season_label: String,
     pub starts_at: String,
@@ -223,6 +224,7 @@ pub struct LongArcQuestView {
     pub progress: u64,
     pub active_entities: u64,
     pub complete: bool,
+    pub available: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -1947,7 +1949,7 @@ mod tests {
         }
 
         let unavailable = serde_json::to_value(LongArcQuestView {
-            quest_id: "family_constellation",
+            quest_id: "family_constellation".into(),
             season_id: "2026-Q4".into(),
             season_label: "2026 Q4".into(),
             starts_at: "2026-10-01T00:00:00Z".into(),
