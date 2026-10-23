@@ -44,4 +44,22 @@ describe("Embedded application stylesheet", () => {
     expect(declaration("h1", "font-size")).toBe("inherit");
     expect(declaration("h1", "font-weight")).toBe("inherit");
   });
+
+  it("animates Presence choices but disables the crest under reduced motion", () => {
+    expect(declaration(".presence-crest.is-calm .presence-crest-glyph", "animation"))
+      .toContain("presence-breathe");
+    expect(declaration(".presence-crest.is-lively .presence-crest-glyph", "animation"))
+      .toContain("presence-turn");
+
+    let reducedMotionDefense = false;
+    stylesheet.walkAtRules("media", (media) => {
+      if (media.params !== "(prefers-reduced-motion: reduce)") return;
+      media.walkRules(".presence-crest .presence-crest-glyph", (rule) => {
+        rule.walkDecls("animation", (item) => {
+          reducedMotionDefense ||= item.value === "none" && item.important;
+        });
+      });
+    });
+    expect(reducedMotionDefense).toBe(true);
+  });
 });
