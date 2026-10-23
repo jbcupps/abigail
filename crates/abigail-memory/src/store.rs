@@ -510,8 +510,8 @@ impl MemoryStore {
             ));
         }
         let bindings = [
-            binding("starts_at", &starts_at.to_rfc3339())?,
-            binding("ends_at_exclusive", &ends_at_exclusive.to_rfc3339())?,
+            binding("starts_at", starts_at.to_rfc3339())?,
+            binding("ends_at_exclusive", ends_at_exclusive.to_rfc3339())?,
         ];
         self.persistence
             .query_vec::<TurnMetadataDoc>(
