@@ -166,6 +166,23 @@ pub async fn get_status(State(state): State<EntityDaemonState>) -> Json<ApiEnvel
 }
 
 // ---------------------------------------------------------------------------
+// GET /v1/presence
+// ---------------------------------------------------------------------------
+
+/// Proxies only this daemon's canonical Presence. The browser never chooses an
+/// Entity identifier and never receives the Hive runtime lease.
+pub async fn get_presence(
+    State(state): State<EntityDaemonState>,
+) -> Json<ApiEnvelope<Option<hive_core::genesis_quest::PresenceCard>>> {
+    let client = crate::hive_client::HiveClient::new(&state.hive_url)
+        .with_lease(&state.session_lease.lease_id);
+    Json(match client.get_presence(&state.entity_id).await {
+        Ok(presence) => ApiEnvelope::success(presence),
+        Err(error) => ApiEnvelope::error(format!("Presence is unavailable: {error}")),
+    })
+}
+
+// ---------------------------------------------------------------------------
 // GET /v1/session/status
 // ---------------------------------------------------------------------------
 

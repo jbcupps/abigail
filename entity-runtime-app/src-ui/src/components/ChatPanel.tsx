@@ -6,6 +6,15 @@ import {
   type ChatGatewayStream,
 } from "../chat/chatGateway";
 import { loadConversation, type ConversationMessage } from "../lib/conversation";
+import {
+  CRESTS,
+  getRuntimePresence,
+  MOTIONS,
+  PALETTES,
+  TEMPERAMENTS,
+  type PresenceCard,
+} from "../lib/presence";
+import PresenceCrest from "./PresenceCrest";
 
 interface ChatPanelProps {
   baseUrl: string;
@@ -17,6 +26,7 @@ interface Message extends ConversationMessage { id: string }
 export default function ChatPanel({ baseUrl, greeting, showHeader = true }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [name, setName] = useState("Your Entity");
+  const [presence, setPresence] = useState<PresenceCard | null>(null);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -74,6 +84,24 @@ export default function ChatPanel({ baseUrl, greeting, showHeader = true }: Chat
       const stream = streamRef.current;
       streamRef.current = null;
       if (stream) void stream.cancel().finally(() => stream.dispose());
+    };
+  }, [baseUrl, loadAttempt]);
+
+  useEffect(() => {
+    let current = true;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    setPresence(null);
+    void getRuntimePresence(baseUrl, controller.signal)
+      .then((card) => {
+        if (current) setPresence(card);
+      })
+      .catch(() => undefined)
+      .finally(() => clearTimeout(timer));
+    return () => {
+      current = false;
+      controller.abort();
+      clearTimeout(timer);
     };
   }, [baseUrl, loadAttempt]);
 
@@ -151,9 +179,27 @@ export default function ChatPanel({ baseUrl, greeting, showHeader = true }: Chat
   return (
     <div className="theme-modern flex h-full flex-col bg-theme-bg text-theme-text font-primary">
       {showHeader && (
-        <header className="border-b border-theme-border bg-theme-bg-elevated px-6 py-4">
-          <h1 className="text-lg font-semibold text-theme-text-bright">{name}</h1>
-          <p className="text-xs text-theme-text-dim">Memory stays on this computer. Manage models in Abigail Hive.</p>
+        <header className="border-b border-theme-border bg-theme-bg-elevated px-6 py-3">
+          <div className="flex items-center gap-3">
+            {presence ? (
+              <PresenceCrest
+                palette={presence.identity}
+                crest={presence.crest}
+                motion={presence.motion}
+                size={42}
+                label={`${name}'s Presence crest`}
+              />
+            ) : null}
+            <div className="min-w-0">
+              <h1 className="truncate text-lg font-semibold text-theme-text-bright">{name}</h1>
+              {presence ? (
+                <p className="truncate text-xs text-theme-text-dim">
+                  {TEMPERAMENTS[presence.temperament]} · {PALETTES[presence.identity].label} · {CRESTS[presence.crest]} · {MOTIONS[presence.motion]}
+                </p>
+              ) : null}
+              <p className="truncate text-xs text-theme-text-dim">Memory stays on this computer. Manage models in Abigail Hive.</p>
+            </div>
+          </div>
         </header>
       )}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6" role="log" aria-label="Conversation" aria-busy={loading || streaming}>

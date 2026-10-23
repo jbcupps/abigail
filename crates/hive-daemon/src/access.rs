@@ -54,7 +54,8 @@ pub fn policy(method: &Method, route: &str) -> Access {
             "/v1/entities/:id"
             | "/v1/entities/:id/provider-config"
             | "/v1/entities/:id/assignments"
-            | "/v1/entities/:id/forge-approvals",
+            | "/v1/entities/:id/forge-approvals"
+            | "/v1/entities/:id/presence",
         ) => Entity,
         ("POST", "/v1/entities/:id/persistence")
         | ("GET", "/v1/entities/:id/birth" | "/v1/entities/:id/execution/receipts") => {
@@ -826,7 +827,7 @@ mod tests {
 
         let (status, own) = f.send(Method::GET, &own_path, Some(&lease), None).await;
         assert_eq!(status, StatusCode::OK, "{own}");
-        assert_eq!(own["data"]["name"], "Test Agent");
+        assert_eq!(own["data"]["name"], "Route Test");
         assert_eq!(own["data"]["crest"], "orbit");
 
         let (status, denied) = f.send(Method::GET, &other_path, Some(&lease), None).await;

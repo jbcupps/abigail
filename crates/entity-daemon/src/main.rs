@@ -854,6 +854,7 @@ async fn run() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(routes::health))
         .route("/v1/status", get(routes::get_status))
+        .route("/v1/presence", get(routes::get_presence))
         .route("/v1/session/status", get(routes::get_session_status))
         .route("/v1/outbox/status", get(routes::get_outbox_status))
         .route("/v1/outbox/quarantine", get(routes::get_outbox_quarantine))
