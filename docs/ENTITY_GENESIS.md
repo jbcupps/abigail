@@ -300,6 +300,13 @@ failure stops that tick before Hive heartbeat or sync.
 Reservations with no matching durable assistant or memory fact stay active for
 a conservative 24-hour recovery window; after that they move atomically to a
 persisted, non-capacity quarantine for diagnosis without inventing activity.
+`GET /v1/outbox/quarantine` exposes only a read-only, deterministic diagnostic
+projection. Each row contains exactly `record_id`, `kind`,
+`quarantined_at_utc`, and a fixed backend `reason`; rows are sorted by
+quarantine time and record ID. The outbox status reports only the quarantine
+count. Full reservations remain private in the persisted Runtime outbox, so the
+diagnostic surfaces never disclose Entity or session identifiers, soul
+references, payload digests, activity content, or Soul Forge scoring material.
 
 Hive validates lease owner and Entity IDs before storing recognized events in
 the closed, schematized `entity_journey_event` table, keyed idempotently by

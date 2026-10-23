@@ -856,6 +856,7 @@ async fn run() -> anyhow::Result<()> {
         .route("/v1/status", get(routes::get_status))
         .route("/v1/session/status", get(routes::get_session_status))
         .route("/v1/outbox/status", get(routes::get_outbox_status))
+        .route("/v1/outbox/quarantine", get(routes::get_outbox_quarantine))
         .route("/v1/execution/events", get(routes::get_execution_events))
         .route("/v1/chat", post(routes::chat))
         .route("/v1/chat/history", get(routes::chat_history))

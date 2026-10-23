@@ -1,4 +1,4 @@
-use entity_core::{EntityOutboxRecord, EntityOutboxStatus};
+use entity_core::{EntityOutboxRecord, EntityOutboxStatus, JourneyQuarantineDiagnostic};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -8,6 +8,8 @@ use std::sync::Mutex;
 use {std::path::Path, std::sync::Arc};
 
 const OUTBOX_FILE_NAME: &str = "runtime_outbox.json";
+const JOURNEY_QUARANTINE_REASON: &str =
+    "No matching durable fact was found after the reservation recovery threshold";
 
 #[derive(Clone, Debug)]
 pub struct OutboxRecordDraft {
@@ -706,6 +708,26 @@ impl RuntimeOutbox {
         Ok(inner.quarantined_reservations.clone())
     }
 
+    pub fn quarantine_diagnostics(&self) -> Result<Vec<JourneyQuarantineDiagnostic>, String> {
+        let inner = self.inner.lock().map_err(|e| e.to_string())?;
+        let mut diagnostics = inner
+            .quarantined_reservations
+            .iter()
+            .map(|quarantined| JourneyQuarantineDiagnostic {
+                record_id: quarantined.reservation.record_id.clone(),
+                kind: quarantined.reservation.kind.clone(),
+                quarantined_at_utc: quarantined.quarantined_at_utc.clone(),
+                reason: JOURNEY_QUARANTINE_REASON.to_string(),
+            })
+            .collect::<Vec<_>>();
+        diagnostics.sort_by(|left, right| {
+            left.quarantined_at_utc
+                .cmp(&right.quarantined_at_utc)
+                .then_with(|| left.record_id.cmp(&right.record_id))
+        });
+        Ok(diagnostics)
+    }
+
     pub fn quarantine_stale_unmatched_reservations(
         &self,
         durable_record_ids: &HashSet<String>,
@@ -738,15 +760,15 @@ impl RuntimeOutbox {
         next.reservations
             .retain(|reservation| !stale_ids.contains(reservation.record_id.as_str()));
         next.quarantined_reservations
-            .extend(stale.into_iter().map(|reservation| {
-                QuarantinedOutboxReservation {
-                reservation,
-                quarantined_at_utc: quarantined_at_utc.clone(),
-                reason:
-                    "No matching durable fact was found after the reservation recovery threshold"
-                        .to_string(),
-            }
-            }));
+            .extend(
+                stale
+                    .into_iter()
+                    .map(|reservation| QuarantinedOutboxReservation {
+                        reservation,
+                        quarantined_at_utc: quarantined_at_utc.clone(),
+                        reason: JOURNEY_QUARANTINE_REASON.to_string(),
+                    }),
+            );
         self.save_locked(&next).map_err(|e| e.to_string())?;
         *inner = next;
         Ok(quarantined)
@@ -927,6 +949,7 @@ impl RuntimeOutbox {
         let inner = self.inner.lock().map_err(|e| e.to_string())?;
         Ok(EntityOutboxStatus {
             queued_records: inner.records.len(),
+            quarantined_records: inner.quarantined_reservations.len(),
             oldest_record_at_utc: inner
                 .records
                 .first()
@@ -1067,6 +1090,124 @@ mod tests {
         reservation["created_at_utc"] =
             serde_json::Value::String((chrono::Utc::now() - age).to_rfc3339());
         std::fs::write(path, serde_json::to_vec_pretty(&document).unwrap()).unwrap();
+    }
+
+    fn assert_no_private_quarantine_keys(value: &serde_json::Value) {
+        const FORBIDDEN: &[&str] = &[
+            "reservation",
+            "entity_id",
+            "session_id",
+            "soul_ref",
+            "payload_digest",
+            "payload",
+            "message",
+            "reply",
+            "content",
+            "prompt",
+            "model_output",
+            "weights",
+            "deontology",
+            "teleology",
+            "areteology",
+            "welfare",
+        ];
+
+        match value {
+            serde_json::Value::Object(object) => {
+                for (key, nested) in object {
+                    assert!(
+                        !FORBIDDEN.contains(&key.as_str()),
+                        "quarantine diagnostic leaked private key {key}: {value}"
+                    );
+                    assert_no_private_quarantine_keys(nested);
+                }
+            }
+            serde_json::Value::Array(values) => {
+                for nested in values {
+                    assert_no_private_quarantine_keys(nested);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn quarantine_diagnostic_serialization_is_fixed_redacted_and_deterministic() {
+        const REASON: &str =
+            "No matching durable fact was found after the reservation recovery threshold";
+        let root = root("abigail-outbox-quarantine-diagnostic");
+        let earlier_first = "00000000-0000-4000-8000-000000000001";
+        let earlier_second = "00000000-0000-4000-8000-000000000002";
+        let later = "00000000-0000-4000-8000-000000000003";
+        let outbox = RuntimeOutbox::load(&root, 3).unwrap();
+        for record_id in [later, earlier_second, earlier_first] {
+            outbox
+                .reserve_slot_with_soul_ref(
+                    record_id.to_string(),
+                    "private-entity-id",
+                    "skill_used",
+                    "private-soul-ref",
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            outbox
+                .quarantine_stale_unmatched_reservations(
+                    &HashSet::new(),
+                    chrono::Utc::now() + chrono::Duration::hours(1),
+                )
+                .unwrap(),
+            3
+        );
+        assert_eq!(outbox.status().unwrap().quarantined_records, 3);
+        drop(outbox);
+
+        let path = root.join(super::OUTBOX_FILE_NAME);
+        let mut persisted: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        for row in persisted["quarantined_reservations"]
+            .as_array_mut()
+            .unwrap()
+        {
+            let record_id = row["reservation"]["record_id"].as_str().unwrap();
+            row["quarantined_at_utc"] = serde_json::json!(if record_id == later {
+                "2026-10-23T00:00:02Z"
+            } else {
+                "2026-10-23T00:00:01Z"
+            });
+            row["reason"] =
+                serde_json::json!("private prompt, model output, payload, and scoring material");
+        }
+        std::fs::write(&path, serde_json::to_vec_pretty(&persisted).unwrap()).unwrap();
+
+        let outbox = RuntimeOutbox::load(&root, 3).unwrap();
+        let serialized = serde_json::to_value(outbox.quarantine_diagnostics().unwrap()).unwrap();
+        let rows = serialized.as_array().unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows.iter()
+                .map(|row| row["record_id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec![earlier_first, earlier_second, later]
+        );
+        for row in rows {
+            assert_eq!(
+                row.as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<std::collections::BTreeSet<_>>(),
+                std::collections::BTreeSet::from([
+                    "kind",
+                    "quarantined_at_utc",
+                    "reason",
+                    "record_id",
+                ])
+            );
+            assert_eq!(row["reason"], REASON);
+        }
+        assert_no_private_quarantine_keys(&serialized);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

@@ -9,10 +9,10 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::Json;
 use entity_core::{
     ApiEnvelope, CancelChatStreamResponse, CancelJobResponse, ChatHistoryResponse, ChatRequest,
-    ChatResponse, EntityOutboxStatus, EntityStatus, JobStatusResponse, ListJobsResponse,
-    MemoryEntry, MemoryInsertRequest, MemorySearchRequest, MemoryStats, QueueJobRecord,
-    RuntimeSessionStatusResponse, SessionMessage, SkillApplyAcknowledgementList, SkillInfo,
-    SubmitJobRequest, SubmitJobResponse, ToolExecRequest, ToolExecResponse, ToolInfo,
+    ChatResponse, EntityOutboxStatus, EntityStatus, JobStatusResponse, JourneyQuarantineDiagnostic,
+    ListJobsResponse, MemoryEntry, MemoryInsertRequest, MemorySearchRequest, MemoryStats,
+    QueueJobRecord, RuntimeSessionStatusResponse, SessionMessage, SkillApplyAcknowledgementList,
+    SkillInfo, SubmitJobRequest, SubmitJobResponse, ToolExecRequest, ToolExecResponse, ToolInfo,
     TopicResultsResponse,
 };
 use futures_util::{Stream, StreamExt};
@@ -210,6 +210,19 @@ pub async fn get_outbox_status(
 ) -> Json<ApiEnvelope<EntityOutboxStatus>> {
     match state.outbox.status() {
         Ok(status) => Json(ApiEnvelope::success(status)),
+        Err(error) => Json(ApiEnvelope::error(error)),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GET /v1/outbox/quarantine
+// ---------------------------------------------------------------------------
+
+pub async fn get_outbox_quarantine(
+    State(state): State<EntityDaemonState>,
+) -> Json<ApiEnvelope<Vec<JourneyQuarantineDiagnostic>>> {
+    match state.outbox.quarantine_diagnostics() {
+        Ok(diagnostics) => Json(ApiEnvelope::success(diagnostics)),
         Err(error) => Json(ApiEnvelope::error(error)),
     }
 }
@@ -1113,14 +1126,19 @@ pub(crate) mod tests {
     use abigail_skills::{InstructionRegistry, SkillExecutor, SkillRegistry};
     use abigail_streaming::{MemoryBroker, TopicConfig};
     use async_trait::async_trait;
+    use axum::body::Body;
     use axum::extract::{Path, Query, State};
+    use axum::http::Request;
+    use axum::routing::get;
     use axum::Json;
+    use axum::Router;
     use sha2::{Digest, Sha256};
     use std::path::PathBuf;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     };
+    use tower::ServiceExt;
 
     struct MockProvider;
 
@@ -1235,6 +1253,109 @@ pub(crate) mod tests {
         bytes[6] = (bytes[6] & 0x0f) | 0x50;
         bytes[8] = (bytes[8] & 0x3f) | 0x80;
         uuid::Uuid::from_bytes(bytes).to_string()
+    }
+
+    fn assert_quarantine_route_has_no_private_keys(value: &serde_json::Value) {
+        const FORBIDDEN: &[&str] = &[
+            "reservation",
+            "entity_id",
+            "session_id",
+            "soul_ref",
+            "payload_digest",
+            "payload",
+            "message",
+            "reply",
+            "content",
+            "prompt",
+            "model_output",
+            "weights",
+            "deontology",
+            "teleology",
+            "areteology",
+            "welfare",
+        ];
+
+        match value {
+            serde_json::Value::Object(object) => {
+                for (key, nested) in object {
+                    assert!(
+                        !FORBIDDEN.contains(&key.as_str()),
+                        "quarantine route leaked private key {key}: {value}"
+                    );
+                    assert_quarantine_route_has_no_private_keys(nested);
+                }
+            }
+            serde_json::Value::Array(values) => {
+                for nested in values {
+                    assert_quarantine_route_has_no_private_keys(nested);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[tokio::test]
+    async fn quarantine_diagnostic_route_returns_only_the_redacted_projection() {
+        let state = build_state();
+        let record_id = "00000000-0000-4000-8000-000000000001";
+        state
+            .outbox
+            .reserve_slot_with_soul_ref(
+                record_id.to_string(),
+                "private-entity-id",
+                "skill_used",
+                "private-soul-ref",
+            )
+            .unwrap();
+        state
+            .outbox
+            .quarantine_stale_unmatched_reservations(
+                &std::collections::HashSet::new(),
+                chrono::Utc::now() + chrono::Duration::hours(1),
+            )
+            .unwrap();
+
+        let app = Router::new()
+            .route("/v1/outbox/quarantine", get(get_outbox_quarantine))
+            .with_state(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/outbox/quarantine")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["ok"], true);
+        let rows = body["data"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0]
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>(),
+            std::collections::BTreeSet::from(
+                ["kind", "quarantined_at_utc", "reason", "record_id",]
+            )
+        );
+        assert_eq!(rows[0]["record_id"], record_id);
+        assert_eq!(rows[0]["kind"], "skill_used");
+        assert_eq!(
+            rows[0]["reason"],
+            "No matching durable fact was found after the reservation recovery threshold"
+        );
+        assert_quarantine_route_has_no_private_keys(&body);
     }
 
     #[test]
