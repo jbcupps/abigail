@@ -2535,6 +2535,7 @@ pub(crate) mod tests {
                 .as_object()
                 .unwrap()
                 .keys()
+                .map(String::as_str)
                 .collect::<std::collections::BTreeSet<_>>(),
             [
                 "compacted_events",
@@ -2546,7 +2547,7 @@ pub(crate) mod tests {
                 "successful_skill_uses",
                 "updated_at",
             ]
-            .iter()
+            .into_iter()
             .collect()
         );
         for event in snapshot["compacted_events"].as_array().unwrap() {
@@ -2555,8 +2556,9 @@ pub(crate) mod tests {
                     .as_object()
                     .unwrap()
                     .keys()
+                    .map(String::as_str)
                     .collect::<std::collections::BTreeSet<_>>(),
-                ["digest", "record_id"].iter().collect()
+                ["digest", "record_id"].into_iter().collect()
             );
         }
         assert_compaction_snapshot_has_no_recursive_leaks(&snapshot);
