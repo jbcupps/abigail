@@ -166,6 +166,12 @@
 .quest-checklist li.is-complete, .quest-first li.is-complete { color: var(--color-text); }
 .quest-first strong { color: var(--color-text-bright); }
 .quest-milestone { display: grid; gap: 4px; margin: 12px 0; font-size: 14px; }
+.quest-long-arc > div { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.quest-long-arc article { padding: 12px; border: 1px solid var(--color-border-dim); border-radius: var(--radius-md); background: var(--color-surface-dim); }
+.quest-long-arc article header { display: flex; justify-content: space-between; gap: 8px; }
+.quest-long-arc article header strong { color: var(--color-text-bright); }
+.quest-long-arc article header span { color: var(--color-primary-dim); font-size: 11px; }
+.quest-long-arc article p { color: var(--color-text-dim); font-size: 12px; }
 .quest-nav { border-top: 1px solid var(--color-border-dim); padding-top: 12px; }
 .quest-badges ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; padding: 0; list-style: none; }
 .quest-badges li { display: flex; gap: 8px; align-items: flex-start; padding: 8px; border-radius: var(--radius-md); border: 1px solid var(--color-border-dim); opacity: .6; }

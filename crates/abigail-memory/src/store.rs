@@ -95,6 +95,14 @@ pub struct ConversationTurn {
     pub created_at: chrono::DateTime<Utc>,
 }
 
+/// Content-free turn facts for bounded activity calculations.
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct ConversationTurnMetadata {
+    pub id: String,
+    pub role: String,
+    pub created_at: chrono::DateTime<Utc>,
+}
+
 impl ConversationTurn {
     pub fn new(session_id: &str, role: &str, content: &str) -> Self {
         Self {
@@ -488,6 +496,35 @@ impl MemoryStore {
             .collect()
     }
 
+    /// Reads only fields needed for seasonal activity. Conversation content,
+    /// provider details, tool metadata, and session identifiers are never
+    /// selected or materialized.
+    pub fn turn_metadata_between(
+        &self,
+        starts_at: chrono::DateTime<Utc>,
+        ends_at_exclusive: chrono::DateTime<Utc>,
+    ) -> Result<Vec<ConversationTurnMetadata>> {
+        if ends_at_exclusive <= starts_at {
+            return Err(StoreError::InvalidData(
+                "turn metadata range must have an exclusive end after its start".into(),
+            ));
+        }
+        let bindings = [
+            binding("starts_at", starts_at.to_rfc3339())?,
+            binding("ends_at_exclusive", ends_at_exclusive.to_rfc3339())?,
+        ];
+        self.persistence
+            .query_vec::<TurnMetadataDoc>(
+                "SELECT id, role, created_at FROM conversation_turn \
+                 WHERE created_at >= $starts_at AND created_at < $ends_at_exclusive \
+                 ORDER BY created_at ASC",
+                &bindings,
+            )?
+            .into_iter()
+            .map(TryFrom::try_from)
+            .collect()
+    }
+
     pub fn all_memories(&self) -> Result<Vec<Memory>> {
         self.persistence
             .query_vec::<MemoryDoc>("SELECT * FROM memory_entry ORDER BY created_at ASC", &[])?
@@ -820,6 +857,26 @@ impl TryFrom<TurnDoc> for ConversationTurn {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TurnMetadataDoc {
+    id: String,
+    role: String,
+    created_at: String,
+}
+
+impl TryFrom<TurnMetadataDoc> for ConversationTurnMetadata {
+    type Error = StoreError;
+
+    fn try_from(value: TurnMetadataDoc) -> Result<Self> {
+        Ok(Self {
+            id: value.id,
+            role: value.role,
+            created_at: parse_timestamp(&value.created_at)?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BirthDoc {
     id: String,
@@ -1064,6 +1121,76 @@ mod tests {
 
         let saved_memory = store.all_memories().unwrap().pop().unwrap();
         assert!(saved_memory.explicitly_confirmed);
+    }
+
+    #[test]
+    fn seasonal_turn_metadata_query_is_content_free_bounded_and_strict() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        for (id, role, content, at) in [
+            (
+                "before",
+                "user",
+                "private phrase before the season",
+                "2026-09-30T23:59:59Z",
+            ),
+            (
+                "current",
+                "user",
+                "private phrase inside the season",
+                "2026-10-01T00:00:00Z",
+            ),
+            (
+                "assistant",
+                "assistant",
+                "private model reply inside the season",
+                "2026-12-31T23:59:59Z",
+            ),
+            (
+                "next",
+                "user",
+                "private phrase after the season",
+                "2027-01-01T00:00:00Z",
+            ),
+        ] {
+            let mut turn = ConversationTurn::new("seasonal", role, content);
+            turn.id = id.into();
+            turn.created_at = parse_timestamp(at).unwrap();
+            store.insert_turn(&turn).unwrap();
+        }
+
+        let metadata = store
+            .turn_metadata_between(
+                parse_timestamp("2026-10-01T00:00:00Z").unwrap(),
+                parse_timestamp("2027-01-01T00:00:00Z").unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            metadata
+                .iter()
+                .map(|turn| turn.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["current", "assistant"]
+        );
+        let encoded = serde_json::to_string(&metadata).unwrap();
+        assert!(!encoded.contains("content"));
+        assert!(!encoded.contains("private phrase"));
+        assert!(!encoded.contains("private model reply"));
+
+        assert!(
+            serde_json::from_value::<TurnMetadataDoc>(serde_json::json!({
+                "id": "injected",
+                "role": "user",
+                "created_at": "2026-10-01T00:00:00Z",
+                "content": "must be rejected"
+            }))
+            .is_err()
+        );
+        assert!(ConversationTurnMetadata::try_from(TurnMetadataDoc {
+            id: "bad-time".into(),
+            role: "user".into(),
+            created_at: "not-rfc3339".into(),
+        })
+        .is_err());
     }
 
     #[test]

@@ -257,6 +257,7 @@ async fn quest_catalog() -> Json<ApiEnvelope<Value>> {
         "badges": BADGE_DEFINITIONS,
         "tiers": BOND_TIER_DEFINITIONS,
         "temperament_cards": temperament_cards(),
+        "long_arc_quests": LONG_ARC_QUEST_DEFINITIONS,
         "palettes": Palette::ALL.iter().map(|p| json!({"palette": p, "unlocked_by": p.unlocked_by()})).collect::<Vec<_>>(),
         "crests": Crest::ALL.iter().map(|c| json!({"crest": c, "unlocked_by": c.unlocked_by()})).collect::<Vec<_>>(),
         "trials": trials,
@@ -1767,13 +1768,33 @@ mod tests {
         assert!(birth.ok, "{:?}", birth.error);
         let Json(journey) =
             crate::journey::get_journey(State(state.clone()), Path(entity_id.clone())).await;
+        let legacy_request = crate::journey::LegacyFirstSignalMigrationRequest {
+            attempt_key: "opaque-old-attempt".into(),
+            original_name: "Route Test".into(),
+            purpose: "Help our family notice small wonders.".into(),
+            boundaries: "Ask before changing shared plans.".into(),
+            presence: hive_core::genesis_quest::PresenceChoice {
+                temperament: hive_core::genesis_quest::Temperament::Curious,
+                identity: hive_core::genesis_quest::Palette::Ember,
+                crest: hive_core::genesis_quest::Crest::Orbit,
+                motion: hive_core::genesis_quest::Motion::Calm,
+            },
+        };
+        let Json(legacy_migration) = crate::journey::post_legacy_first_signal(
+            State(state.clone()),
+            Path(entity_id.clone()),
+            Json(legacy_request),
+        )
+        .await;
+        assert_eq!(legacy_migration.ok, true, "{:?}", legacy_migration.error);
         let Json(presence_put) = crate::journey::put_presence(
             State(state.clone()),
             Path(entity_id.clone()),
             Json(PresenceChoice::default()),
         )
         .await;
-        let Json(presence_get) = crate::journey::get_presence(State(state), Path(entity_id)).await;
+        let Json(presence_get) =
+            crate::journey::get_presence(State(state.clone()), Path(entity_id.clone())).await;
 
         let surfaces = [
             ("Genesis create", serde_json::to_value(created).unwrap()),
@@ -1785,6 +1806,10 @@ mod tests {
             ("journey", serde_json::to_value(journey).unwrap()),
             ("Presence PUT", serde_json::to_value(presence_put).unwrap()),
             ("Presence GET", serde_json::to_value(presence_get).unwrap()),
+            (
+                "legacy First Signal migration POST",
+                serde_json::to_value(legacy_migration).unwrap(),
+            ),
         ];
         let leaks: Vec<_> = surfaces
             .iter()
@@ -1806,6 +1831,54 @@ mod tests {
             soul_forge::SoulForgeEngine::new().scenarios().len(),
             SOUL_FORGE_TRIALS
         );
+    }
+
+    #[tokio::test]
+    async fn long_arc_catalog_exposes_exactly_two_closed_copy_only_quests() {
+        let Json(catalog) = quest_catalog().await;
+        let value = serde_json::to_value(catalog).unwrap();
+        let quests = value["data"]["long_arc_quests"].as_array().unwrap();
+        assert_eq!(quests.len(), 2);
+        assert_eq!(quests[0]["id"], "seasonal_shared_stories");
+        assert_eq!(quests[1]["id"], "family_constellation");
+
+        fn forbidden_paths(value: &Value, path: &str, found: &mut Vec<String>) {
+            const FORBIDDEN: [&str; 13] = [
+                "weights",
+                "deontology",
+                "teleology",
+                "areteology",
+                "welfare",
+                "message",
+                "reply",
+                "content",
+                "prompt",
+                "model",
+                "model_output",
+                "action",
+                "payload",
+            ];
+            match value {
+                Value::Object(object) => {
+                    for (key, child) in object {
+                        let child_path = format!("{path}.{key}");
+                        if FORBIDDEN.contains(&key.as_str()) {
+                            found.push(child_path.clone());
+                        }
+                        forbidden_paths(child, &child_path, found);
+                    }
+                }
+                Value::Array(array) => {
+                    for (index, child) in array.iter().enumerate() {
+                        forbidden_paths(child, &format!("{path}[{index}]"), found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        forbidden_paths(&value["data"]["long_arc_quests"], "$", &mut found);
+        assert!(found.is_empty(), "closed catalog fields leaked: {found:?}");
     }
 
     #[tokio::test]

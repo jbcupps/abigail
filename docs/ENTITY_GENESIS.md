@@ -131,8 +131,8 @@ presentation and UX only:
   only where they are empty.
 - **Ethics** records answers to the three Soul Forge trials. When all three are
   answered, awakening forges the soul from them (`birth_path: forge`);
-  otherwise it uses the balanced quickstart soul. Trial weight effects are not
-  displayed, so the mentor chooses on values.
+  otherwise it uses the balanced quickstart soul. Every answer expresses a
+  defensible trade-off, so there is no best answer.
 - **Instincts** shows the constitutional `instincts.md` template read-only.
 - **Presence** uses the canonical `PresenceCard` and `PresenceChoice` types. It
   stores a cosmetic `presence.json` beside the Entity, outside the `docs/`
@@ -160,6 +160,33 @@ atomic. Deleting or losing the receipt's Entity makes the key terminally
 creation share this receipt mechanism, and
 `GET /v1/entity-creations/:creation_key` reports `absent`, `reserved`,
 `complete` or `unavailable` under Hive's control-token policy.
+
+Older standalone First Signal journals have one explicit migration path. Hive
+strictly decodes the historical session-storage v1 and local-storage v2 records
+without changing them. Malformed or conflicting bytes stay in place and block a
+new launch. A keyed record can offer only its exact completed creation receipt;
+an unkeyed record can offer only registered, non-Hive, exact-name Entities added
+after its captured baseline. Names remain suggestions, so the mentor must review
+and select an existing Entity before any write. Recovery never creates or retries
+an Entity.
+
+`POST /v1/entities/:id/journey/legacy-first-signal` is desktop-only. It verifies
+the selected Entity and original registered name, maps the old closed
+temperament/palette choices to canonical Presence with the `orbit` crest and
+`calm` motion, and adds only the applicable `FirstSpark`, `Named`, `Purposeful`
+and `PresenceChosen` badges. A matching historical five-field `presence.json`
+may be upgraded; a different or later canonical Presence is never overwritten.
+The schema-full `genesis_legacy_migration` ledger stores only owner ID, Entity
+ID, a closed-request digest, state and timestamps under a hashed attempt record
+ID. Pending imports converge after interruption, completed replays preserve
+their original result and timestamps, and a key cannot bind another Entity or
+request. Presence is checked before a new ledger binding; an already-pending
+replay preserves any later canonical Presence edit while finishing its badge and
+ledger writes. No profile prose, conversation content, model material, memory
+content or Soul Forge scoring is stored in that ledger. Browser bytes clear only
+after the canonical response; every v1 journal receives an exact resolution
+marker first, including a v1 copy under the local v2 key, so an older duplicated
+tab cannot resurrect it.
 
 ### 2. Hidden, versioned ethics
 
@@ -273,6 +300,14 @@ failure stops that tick before Hive heartbeat or sync.
 Reservations with no matching durable assistant or memory fact stay active for
 a conservative 24-hour recovery window; after that they move atomically to a
 persisted, non-capacity quarantine for diagnosis without inventing activity.
+`GET /v1/outbox/quarantine` exposes only a read-only, deterministic diagnostic
+projection. Each row contains exactly `record_id`, `kind`,
+`quarantined_at_utc`, and a fixed backend `reason`; rows are sorted by
+quarantine time and record ID. The response includes at most the 500 most recent
+rows while the outbox status count remains the full total. Full reservations
+remain private in the persisted Runtime outbox, so the
+diagnostic surfaces never disclose Entity or session identifiers, soul
+references, payload digests, activity content, or Soul Forge scoring material.
 
 Hive validates lease owner and Entity IDs before storing recognized events in
 the closed, schematized `entity_journey_event` table, keyed idempotently by
@@ -286,10 +321,62 @@ arguments/results or memory content. Unknown event kinds remain valid ordinary
 outbox records but do not create or advance a journey. Projection merges
 durable Entity facts and event counts by per-counter maximum.
 
+When an Entity has more than 1,024 redacted journey event rows, Hive
+conservatively compacts only rows older than the start of the current UTC
+calendar quarter. One owner-scoped, schema-full snapshot retains the projected
+skill/memory totals plus each exact Runtime record ID and a canonical digest of
+its closed metadata. The digest uses a versioned, domain-separated encoder with
+fixed field order and explicit length/option markers rather than serialized
+Rust layout. It never retains the event payload, identifiers from that
+payload, prose, model/tool results, memory content, or Soul Forge scoring data.
+Hive saves the snapshot before deleting represented rows and deduplicates any
+rows left by interruption. Exact retries remain acknowledged, while reuse of a
+compacted ID by any other Entity or household, or with different closed
+metadata, fails closed. A compaction failure
+after the projection is durable emits only fixed redacted guidance, does not
+turn acknowledged activity into a failed retry, and is retried by later
+reconciliation.
+
 Quest progress is saved in the defaulted Genesis `quest` field. Each Entity's
 durable counters and badges live in Hive-owned `entity_journey`, so they outlive
 an expired Genesis record. Suggested first quests remain copy only: no quest
 sends a message or executes a skill automatically.
+
+The long-arc catalog is intentionally limited to two copy-only quests:
+`seasonal_shared_stories` tracks 12 mentor messages with the current Entity,
+and `family_constellation` tracks 30 mentor messages across at least two
+distinct active, born, non-Hive Entities in the local owner scope. A season is
+a UTC calendar quarter identified as `YYYY-QN`; responses include RFC3339 UTC
+`starts_at` and `ends_at_exclusive` bounds. A message exactly at the start
+counts, while one exactly at the exclusive end belongs to the next season.
+Progress is recalculated from distinct durable user-turn IDs in that window, so
+it resets with the quarter. Seasonal reads use a strict metadata-only query
+that selects only turn ID, role and timestamp; conversation text, session IDs,
+provider/model fields and tool metadata are not selected. Compacted old skill
+or memory events never advance these message quests.
+
+Family calculation iterates only the registered Entities in the current local
+owner scope and excludes Abigail Hive and valid unawakened Entities. Hive
+reloads every non-Hive config before including or excluding it, so a malformed
+config cannot masquerade as an unborn Entity. If any sibling config or active
+history is unavailable, the requested Entity quest remains available while the
+family view returns `available: false`, zero partial progress and no error,
+path, name or content. Hive renders that state without a progress bar.
+
+Successful household summaries are cached for at most five seconds per owner
+and exact season ID/start/exclusive-end key. The cache lock is also the
+single-flight lock, so concurrent Entity-card requests share one household
+metadata scan. Failures are never cached, and a quarter rollover naturally uses
+a different key. Message progress can therefore lag newly written activity by
+up to five seconds; reopening or refreshing after that bound recomputes it.
+Journey computation runs on a blocking worker rather than an Axum async worker.
+
+Catalog and journey shapes contain only canonical copy, season bounds, counts,
+availability and completion; they contain no conversation text, model material
+or Soul Forge scoring data. Hive renders the two compact cards after awakening,
+with no quest action or automatic send. Reaching 30 family messages with only
+one contributing Entity explicitly asks for a second Entity instead of
+claiming completion.
 
 ### 4. Model setup gate
 
@@ -301,13 +388,12 @@ Hive state and restores `Continue <name>'s Genesis`. Local First Signal
 creation remains available; already-born Runtime cards retain their existing
 provider-required gate.
 
-### Deferred standalone recovery slices
+### Retired standalone surfaces
 
-The old standalone First Signal application was not imported. Deferred work is
-limited to migration/recovery of its old browser journals, candidate matching
-for unkeyed legacy direct-creation requests, and its animated Presence builder
-and separate Presence home. These are not compatibility promises for the
-current Hive-first flow.
+The old standalone First Signal application was not imported. Its two browser
+journals are accepted only through the narrow migration path above. Its animated
+Presence builder and separate Presence home remain retired and are not
+compatibility promises for the current Hive-first flow.
 
 ## Local authorization and retention
 
