@@ -628,6 +628,7 @@ impl JourneyStore {
     /// Replace eligible old redacted rows with a durable, collision-safe
     /// snapshot. The snapshot is always saved before any represented row is
     /// deleted, so replay can safely finish interrupted deletion.
+    #[allow(dead_code)] // Explicit maintenance/replay interface; automatic calls use the lock-held helper.
     pub fn compact_runtime_events(
         &self,
         owner_id: &str,
@@ -2562,7 +2563,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn compacted_projection_is_equivalent_to_full_event_rows() {
+    fn compaction_projection_is_equivalent_to_full_event_rows() {
         let store = store();
         let entity_id = uuid::Uuid::new_v4().to_string();
         let events = [
@@ -2624,7 +2625,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn durable_snapshot_dedupes_rows_left_by_interruption_and_replay_finishes_deletion() {
+    fn compaction_snapshot_dedupes_interrupted_rows_and_replay_finishes_deletion() {
         let store = store();
         let entity_id = uuid::Uuid::new_v4().to_string();
         let event = outbox_event_at(
@@ -2680,7 +2681,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn compacted_event_exact_retry_is_idempotent() {
+    fn compaction_preserves_exact_retry_idempotency() {
         let store = store();
         let entity_id = uuid::Uuid::new_v4().to_string();
         let event = outbox_event_at(
@@ -2710,7 +2711,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn compacted_event_rejects_conflicting_record_id_reuse() {
+    fn compaction_rejects_conflicting_record_id_reuse() {
         let store = store();
         let entity_id = uuid::Uuid::new_v4().to_string();
         let event = outbox_event_at(
