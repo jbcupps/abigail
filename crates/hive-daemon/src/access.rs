@@ -546,7 +546,7 @@ mod tests {
                 "/v1/entities/:id/journey/legacy-first-signal",
                 Desktop,
             ),
-            ("GET", "/v1/entities/:id/presence", Desktop),
+            ("GET", "/v1/entities/:id/presence", Entity),
             ("PUT", "/v1/entities/:id/presence", Desktop),
             ("GET", "/v1/genesis/quest/catalog", Desktop),
             ("POST", "/v1/secrets", HiveAdmin),
@@ -724,6 +724,7 @@ mod tests {
             "/v1/entities/:id/birth",
             "/v1/entities/:id/provider-config",
             "/v1/entities/:id/assignments",
+            "/v1/entities/:id/presence",
             "/v1/entities/:id/execution/receipts",
             "/v1/runtime/sessions/:lease_id",
             "/v1/secrets/list",
@@ -780,7 +781,6 @@ mod tests {
                     }
                 })),
             ),
-            (Method::GET, "/v1/entities/:id/presence", None),
             (
                 Method::PUT,
                 "/v1/entities/:id/presence",
@@ -799,6 +799,70 @@ mod tests {
             assert_eq!(status, StatusCode::FORBIDDEN, "{method} {route}");
             assert_eq!(body["ok"], false);
         }
+    }
+
+    #[tokio::test]
+    async fn runtime_lease_reads_only_its_own_presence_while_desktop_keeps_write_access() {
+        let f = fixture();
+        let (other_id, _) = f.state.identity_manager.create_agent("Other").unwrap();
+        let desktop = f.desktop();
+        let lease = f.lease_for(&f.entity_id).lease_id;
+        let own_path = format!("/v1/entities/{}/presence", f.entity_id);
+        let other_path = format!("/v1/entities/{other_id}/presence");
+        let choice = serde_json::json!({
+            "temperament": "gentle",
+            "identity": "aether",
+            "crest": "orbit",
+            "motion": "calm"
+        });
+
+        for path in [&own_path, &other_path] {
+            let (status, response) = f
+                .send(Method::PUT, path, Some(&desktop), Some(choice.clone()))
+                .await;
+            assert_eq!(status, StatusCode::OK, "{response}");
+            assert_eq!(response["ok"], true, "{response}");
+        }
+
+        let (status, own) = f.send(Method::GET, &own_path, Some(&lease), None).await;
+        assert_eq!(status, StatusCode::OK, "{own}");
+        assert_eq!(own["data"]["name"], "Test Agent");
+        assert_eq!(own["data"]["crest"], "orbit");
+
+        let (status, denied) = f.send(Method::GET, &other_path, Some(&lease), None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+        assert_eq!(denied["ok"], false);
+
+        let (status, denied) = f
+            .send(
+                Method::PUT,
+                &own_path,
+                Some(&lease),
+                Some(serde_json::json!({
+                    "temperament": "gentle",
+                    "identity": "aether",
+                    "crest": "orbit",
+                    "motion": "still"
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+
+        let (status, written) = f
+            .send(
+                Method::PUT,
+                &own_path,
+                Some(&desktop),
+                Some(serde_json::json!({
+                    "temperament": "gentle",
+                    "identity": "aether",
+                    "crest": "orbit",
+                    "motion": "still"
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{written}");
+        assert_eq!(written["data"]["motion"], "still");
     }
 
     #[tokio::test]

@@ -1358,6 +1358,81 @@ pub(crate) mod tests {
         assert_quarantine_route_has_no_private_keys(&body);
     }
 
+    #[tokio::test]
+    async fn presence_route_proxies_the_runtime_entity_with_its_lease() {
+        async fn hive_presence(
+            Path(entity_id): Path<String>,
+            headers: HeaderMap,
+        ) -> Json<hive_core::ApiEnvelope<Option<hive_core::genesis_quest::PresenceCard>>> {
+            assert_eq!(entity_id, "test-entity");
+            assert_eq!(
+                headers
+                    .get(axum::http::header::AUTHORIZATION)
+                    .and_then(|value| value.to_str().ok()),
+                Some("Bearer lease-test")
+            );
+            Json(hive_core::ApiEnvelope::success(Some(
+                hive_core::genesis_quest::PresenceCard {
+                    name: "Test Entity".to_string(),
+                    purpose: "Bring calm clarity".to_string(),
+                    temperament: hive_core::genesis_quest::Temperament::Playful,
+                    boundaries: "Ask before acting".to_string(),
+                    identity: hive_core::genesis_quest::Palette::Aurora,
+                    crest: hive_core::genesis_quest::Crest::Constellation,
+                    motion: hive_core::genesis_quest::Motion::Lively,
+                },
+            )))
+        }
+
+        let hive = Router::new().route("/v1/entities/:id/presence", get(hive_presence));
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let hive_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, hive).await.unwrap();
+        });
+
+        let mut state = build_state();
+        state.hive_url = hive_url;
+        let runtime = Router::new()
+            .route("/v1/presence", get(get_presence))
+            .with_state(state);
+        let response = runtime
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/presence")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        server.abort();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["ok"], true, "{body}");
+        assert_eq!(body["data"]["name"], "Test Entity");
+        assert_eq!(body["data"]["identity"], "aurora");
+        assert_eq!(body["data"]["crest"], "constellation");
+        assert_eq!(body["data"]["motion"], "lively");
+        for forbidden in [
+            "weights",
+            "deontology",
+            "teleology",
+            "areteology",
+            "welfare",
+        ] {
+            assert!(!body.to_string().contains(forbidden), "{body}");
+        }
+    }
+
     #[test]
     fn completion_risk_errors_have_stable_http_and_sse_codes() {
         for (risk, interrupted, expected_message) in [
