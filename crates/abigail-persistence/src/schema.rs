@@ -113,6 +113,21 @@ mod tests {
         })
     }
 
+    fn valid_compaction(entity_id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "owner_id": "local",
+            "entity_id": entity_id,
+            "successful_skill_uses": 3,
+            "confirmed_memories": 1,
+            "compacted_events": [{
+                "record_id": uuid::Uuid::new_v4().to_string(),
+                "digest": "ab".repeat(32),
+            }],
+            "created_at": "2026-10-23T00:00:00Z",
+            "updated_at": "2026-10-23T00:00:00Z",
+        })
+    }
+
     fn assert_field_was_rejected_or_removed(
         handle: &PersistenceHandle,
         record_id: &str,
@@ -227,6 +242,65 @@ mod tests {
         let mut injected = valid_event(&new_id);
         injected["prompt"] = serde_json::json!("private prompt");
         assert_field_was_rejected_or_removed(&handle, &new_id, &injected, "prompt");
+    }
+
+    #[test]
+    fn journey_compaction_schema_recursively_rejects_content_and_scoring_fields() {
+        let handle = PersistenceHandle::open_ephemeral(EntityScope::Hive).unwrap();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let expected = valid_compaction(&entity_id);
+        handle
+            .upsert("entity_journey_event_compaction", &entity_id, &expected)
+            .unwrap();
+        let mut stored = handle
+            .select_record::<serde_json::Value>("entity_journey_event_compaction", &entity_id)
+            .unwrap()
+            .unwrap();
+        stored.as_object_mut().unwrap().remove("id");
+        assert_eq!(stored, expected);
+
+        for field in [
+            "message",
+            "reply",
+            "prompt",
+            "content",
+            "payload",
+            "prose",
+            "model",
+            "model_output",
+            "tool_result",
+            "memory_content",
+            "weights",
+            "deontology",
+            "teleology",
+            "areteology",
+            "welfare",
+            "virtue",
+        ] {
+            let next_entity = uuid::Uuid::new_v4().to_string();
+            let mut injected = valid_compaction(&next_entity);
+            injected[field] = serde_json::json!("private or scoring value");
+            injected["compacted_events"][0][field] =
+                serde_json::json!({"nested": "private or scoring value"});
+            let result = handle.upsert("entity_journey_event_compaction", &next_entity, &injected);
+            if result.is_ok() {
+                let saved = handle
+                    .select_record::<serde_json::Value>(
+                        "entity_journey_event_compaction",
+                        &next_entity,
+                    )
+                    .unwrap()
+                    .unwrap();
+                assert!(
+                    saved.get(field).is_none(),
+                    "SCHEMAFULL journey compaction row retained forbidden field {field}: {saved}"
+                );
+                assert!(
+                    saved["compacted_events"][0].get(field).is_none(),
+                    "SCHEMAFULL journey compaction entry retained forbidden field {field}: {saved}"
+                );
+            }
+        }
     }
 
     #[test]

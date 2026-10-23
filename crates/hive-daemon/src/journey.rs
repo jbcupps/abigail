@@ -2121,6 +2121,447 @@ pub(crate) mod tests {
         }
     }
 
+    fn outbox_event_at(
+        entity_id: &str,
+        kind: &str,
+        occurred_at: &str,
+        payload: serde_json::Value,
+    ) -> hive_core::EntityOutboxRecord {
+        let mut event = outbox_event(entity_id, kind, payload);
+        event.created_at_utc = occurred_at.to_string();
+        event
+    }
+
+    fn compaction_snapshot(store: &JourneyStore, entity_id: &str) -> serde_json::Value {
+        store
+            .handle
+            .select_record::<serde_json::Value>(JOURNEY_EVENT_COMPACTION_TABLE, entity_id)
+            .unwrap()
+            .unwrap()
+    }
+
+    fn assert_compaction_snapshot_has_no_recursive_leaks(value: &serde_json::Value) {
+        fn scan(value: &serde_json::Value) {
+            match value {
+                serde_json::Value::Object(object) => {
+                    for (key, child) in object {
+                        assert!(
+                            !matches!(
+                                key.as_str(),
+                                "message"
+                                    | "reply"
+                                    | "prompt"
+                                    | "content"
+                                    | "payload"
+                                    | "prose"
+                                    | "model"
+                                    | "model_output"
+                                    | "tool_result"
+                                    | "tool_results"
+                                    | "memory_content"
+                                    | "weights"
+                                    | "deontology"
+                                    | "teleology"
+                                    | "areteology"
+                                    | "welfare"
+                                    | "virtue"
+                            ),
+                            "compaction snapshot leaked forbidden field {key}: {value}"
+                        );
+                        scan(child);
+                    }
+                }
+                serde_json::Value::Array(values) => {
+                    for child in values {
+                        scan(child);
+                    }
+                }
+                serde_json::Value::String(text) => {
+                    assert!(
+                        !text.contains("private-activity-prose"),
+                        "compaction snapshot leaked private activity prose: {value}"
+                    );
+                }
+                _ => {}
+            }
+        }
+        scan(value);
+    }
+
+    #[test]
+    fn compacted_projection_is_equivalent_to_full_event_rows() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let events = [
+            outbox_event_at(
+                &entity_id,
+                "skill_used",
+                "2026-09-30T23:59:58Z",
+                serde_json::json!({
+                    "session_id": "session-old",
+                    "successful_skill_count": 3,
+                }),
+            ),
+            outbox_event_at(
+                &entity_id,
+                "memory_confirmed",
+                "2026-09-30T23:59:59Z",
+                serde_json::json!({
+                    "memory_id": "memory-old",
+                    "memory_weight": "distilled",
+                }),
+            ),
+            outbox_event_at(
+                &entity_id,
+                "skill_used",
+                "2026-10-01T00:00:00Z",
+                serde_json::json!({
+                    "session_id": "session-current",
+                    "successful_skill_count": 2,
+                }),
+            ),
+        ];
+        store
+            .record_runtime_events(OWNER, &entity_id, &events)
+            .unwrap();
+        let before = store.event_activity(OWNER, &entity_id).unwrap();
+
+        assert_eq!(
+            store
+                .compact_runtime_events(OWNER, &entity_id, "2026-10-01T00:00:00Z")
+                .unwrap(),
+            2
+        );
+
+        assert_eq!(store.event_activity(OWNER, &entity_id).unwrap(), before);
+        let rows = store
+            .handle
+            .query_vec::<JourneyEventRecord>(
+                &format!(
+                    "SELECT {JOURNEY_EVENT_SELECT} FROM entity_journey_event WHERE owner_id = $owner_id AND entity_id = $entity_id"
+                ),
+                &[
+                    QueryBinding::new("owner_id", OWNER).unwrap(),
+                    QueryBinding::new("entity_id", &entity_id).unwrap(),
+                ],
+            )
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].record_id, events[2].record_id);
+    }
+
+    #[test]
+    fn durable_snapshot_dedupes_rows_left_by_interruption_and_replay_finishes_deletion() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let event = outbox_event_at(
+            &entity_id,
+            "skill_used",
+            "2026-09-30T23:59:59Z",
+            serde_json::json!({
+                "session_id": "session-old",
+                "successful_skill_count": 2,
+            }),
+        );
+        store
+            .record_runtime_events(OWNER, &entity_id, std::slice::from_ref(&event))
+            .unwrap();
+        store.fail_next_compaction_after_snapshot();
+
+        assert!(store
+            .compact_runtime_events(OWNER, &entity_id, "2026-10-01T00:00:00Z")
+            .is_err());
+        assert!(store
+            .handle
+            .record_exists(JOURNEY_EVENT_COMPACTION_TABLE, &entity_id)
+            .unwrap());
+        assert!(store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &event.record_id)
+            .unwrap());
+        assert_eq!(
+            store.event_activity(OWNER, &entity_id).unwrap(),
+            JourneyActivity {
+                successful_skill_uses: 2,
+                ..Default::default()
+            }
+        );
+
+        assert_eq!(
+            store
+                .compact_runtime_events(OWNER, &entity_id, "2026-10-01T00:00:00Z")
+                .unwrap(),
+            1
+        );
+        assert!(!store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &event.record_id)
+            .unwrap());
+        assert_eq!(
+            store.event_activity(OWNER, &entity_id).unwrap(),
+            JourneyActivity {
+                successful_skill_uses: 2,
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn compacted_event_exact_retry_is_idempotent() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let event = outbox_event_at(
+            &entity_id,
+            "memory_confirmed",
+            "2026-09-30T23:59:59Z",
+            serde_json::json!({
+                "memory_id": "memory-old",
+                "memory_weight": "crystallized",
+            }),
+        );
+        store
+            .record_runtime_events(OWNER, &entity_id, std::slice::from_ref(&event))
+            .unwrap();
+        store
+            .compact_runtime_events(OWNER, &entity_id, "2026-10-01T00:00:00Z")
+            .unwrap();
+
+        let retried = store
+            .record_runtime_events(OWNER, &entity_id, std::slice::from_ref(&event))
+            .unwrap();
+        assert_eq!(retried.confirmed_memories, 1);
+        assert!(!store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &event.record_id)
+            .unwrap());
+    }
+
+    #[test]
+    fn compacted_event_rejects_conflicting_record_id_reuse() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let event = outbox_event_at(
+            &entity_id,
+            "skill_used",
+            "2026-09-30T23:59:59Z",
+            serde_json::json!({
+                "session_id": "session-old",
+                "successful_skill_count": 2,
+            }),
+        );
+        store
+            .record_runtime_events(OWNER, &entity_id, std::slice::from_ref(&event))
+            .unwrap();
+        store
+            .compact_runtime_events(OWNER, &entity_id, "2026-10-01T00:00:00Z")
+            .unwrap();
+        let mut conflict = event.clone();
+        conflict.payload["successful_skill_count"] = serde_json::json!(3);
+
+        assert!(store
+            .record_runtime_events(OWNER, &entity_id, &[conflict])
+            .is_err());
+        assert_eq!(
+            store.event_activity(OWNER, &entity_id).unwrap(),
+            JourneyActivity {
+                successful_skill_uses: 2,
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn compaction_is_owner_and_entity_scoped() {
+        let store = store();
+        let first_entity = uuid::Uuid::new_v4().to_string();
+        let second_entity = uuid::Uuid::new_v4().to_string();
+        let first = outbox_event_at(
+            &first_entity,
+            "skill_used",
+            "2026-09-30T23:59:59Z",
+            serde_json::json!({
+                "session_id": "session-first",
+                "successful_skill_count": 2,
+            }),
+        );
+        let second = outbox_event_at(
+            &second_entity,
+            "memory_confirmed",
+            "2026-09-30T23:59:59Z",
+            serde_json::json!({
+                "memory_id": "memory-second",
+                "memory_weight": "distilled",
+            }),
+        );
+        store
+            .record_runtime_events(OWNER, &first_entity, &[first])
+            .unwrap();
+        store
+            .record_runtime_events(OWNER, &second_entity, std::slice::from_ref(&second))
+            .unwrap();
+
+        store
+            .compact_runtime_events(OWNER, &first_entity, "2026-10-01T00:00:00Z")
+            .unwrap();
+
+        assert!(store
+            .compact_runtime_events("another-household", &first_entity, "2026-10-01T00:00:00Z")
+            .is_err());
+        assert!(store
+            .event_activity("another-household", &first_entity)
+            .is_err());
+        assert!(store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &second.record_id)
+            .unwrap());
+        assert!(!store
+            .handle
+            .record_exists(JOURNEY_EVENT_COMPACTION_TABLE, &second_entity)
+            .unwrap());
+    }
+
+    #[test]
+    fn automatic_compaction_retains_current_utc_quarter_rows() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let quarter_start = current_utc_quarter_start();
+        let quarter_start_time = chrono::DateTime::parse_from_rfc3339(&quarter_start).unwrap();
+        let old_time = (quarter_start_time - chrono::Duration::seconds(1)).to_rfc3339();
+        let current_time = quarter_start_time.to_rfc3339();
+        let old = outbox_event_at(
+            &entity_id,
+            "skill_used",
+            &old_time,
+            serde_json::json!({
+                "session_id": "session-old",
+                "successful_skill_count": 2,
+            }),
+        );
+        let current = outbox_event_at(
+            &entity_id,
+            "memory_confirmed",
+            &current_time,
+            serde_json::json!({
+                "memory_id": "memory-current",
+                "memory_weight": "distilled",
+            }),
+        );
+        store
+            .persist_runtime_events(OWNER, &entity_id, &[old.clone(), current.clone()])
+            .unwrap();
+        store.set_auto_compaction_threshold_for_test(1);
+
+        let projected = store
+            .reconcile_runtime_event_projection(OWNER, &entity_id)
+            .unwrap();
+
+        assert_eq!(projected.successful_skill_uses, 2);
+        assert_eq!(projected.confirmed_memories, 1);
+        assert!(!store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &old.record_id)
+            .unwrap());
+        assert!(store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &current.record_id)
+            .unwrap());
+    }
+
+    #[test]
+    fn compaction_failure_after_durable_projection_does_not_fail_activity_acknowledgement() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let quarter_start = current_utc_quarter_start();
+        let old_time = (chrono::DateTime::parse_from_rfc3339(&quarter_start).unwrap()
+            - chrono::Duration::seconds(1))
+        .to_rfc3339();
+        let event = outbox_event_at(
+            &entity_id,
+            "skill_used",
+            &old_time,
+            serde_json::json!({
+                "session_id": "session-old",
+                "successful_skill_count": 2,
+            }),
+        );
+        store.set_auto_compaction_threshold_for_test(0);
+        store.fail_next_compaction_snapshot_write();
+
+        let acknowledged = store
+            .record_runtime_events(OWNER, &entity_id, std::slice::from_ref(&event))
+            .unwrap();
+
+        assert_eq!(acknowledged.successful_skill_uses, 2);
+        assert!(store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &event.record_id)
+            .unwrap());
+        assert_eq!(
+            store
+                .reconcile_runtime_event_projection(OWNER, &entity_id)
+                .unwrap()
+                .successful_skill_uses,
+            2
+        );
+        assert!(!store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &event.record_id)
+            .unwrap());
+    }
+
+    #[test]
+    fn compaction_snapshot_recursively_excludes_content_and_scoring_material() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let event = outbox_event_at(
+            &entity_id,
+            "skill_used",
+            "2026-09-30T23:59:59Z",
+            serde_json::json!({
+                "session_id": "private-activity-prose-is-not-stored",
+                "successful_skill_count": 2,
+            }),
+        );
+        store
+            .record_runtime_events(OWNER, &entity_id, &[event])
+            .unwrap();
+        store
+            .compact_runtime_events(OWNER, &entity_id, "2026-10-01T00:00:00Z")
+            .unwrap();
+
+        let snapshot = compaction_snapshot(&store, &entity_id);
+        assert_eq!(
+            snapshot
+                .as_object()
+                .unwrap()
+                .keys()
+                .collect::<std::collections::BTreeSet<_>>(),
+            [
+                "compacted_events",
+                "confirmed_memories",
+                "created_at",
+                "entity_id",
+                "id",
+                "owner_id",
+                "successful_skill_uses",
+                "updated_at",
+            ]
+            .iter()
+            .collect()
+        );
+        for event in snapshot["compacted_events"].as_array().unwrap() {
+            assert_eq!(
+                event
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .collect::<std::collections::BTreeSet<_>>(),
+                ["digest", "record_id"].iter().collect()
+            );
+        }
+        assert_compaction_snapshot_has_no_recursive_leaks(&snapshot);
+    }
+
     #[test]
     fn runtime_events_are_idempotent_owner_scoped_and_redacted() {
         let store = store();
