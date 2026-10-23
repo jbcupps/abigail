@@ -173,6 +173,59 @@ pub enum JourneyMetric {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LongArcQuestScope {
+    Entity,
+    Family,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct LongArcQuestDefinition {
+    pub id: &'static str,
+    pub title: &'static str,
+    pub summary: &'static str,
+    pub scope: LongArcQuestScope,
+    pub metric: JourneyMetric,
+    pub target: u64,
+    pub minimum_entities: u64,
+}
+
+pub const LONG_ARC_QUEST_DEFINITIONS: [LongArcQuestDefinition; 2] = [
+    LongArcQuestDefinition {
+        id: "seasonal_shared_stories",
+        title: "Shared Stories",
+        summary: "Share twelve mentor messages with this Entity this season.",
+        scope: LongArcQuestScope::Entity,
+        metric: JourneyMetric::MentorMessages,
+        target: 12,
+        minimum_entities: 1,
+    },
+    LongArcQuestDefinition {
+        id: "family_constellation",
+        title: "Family Constellation",
+        summary: "Share thirty mentor messages across at least two family Entities this season.",
+        scope: LongArcQuestScope::Family,
+        metric: JourneyMetric::MentorMessages,
+        target: 30,
+        minimum_entities: 2,
+    },
+];
+
+/// Content-free progress for one canonical long-arc quest in one UTC quarter.
+/// `ends_at_exclusive` makes the season boundary explicit to every client.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct LongArcQuestView {
+    pub quest_id: &'static str,
+    pub season_id: String,
+    pub season_label: String,
+    pub starts_at: String,
+    pub ends_at_exclusive: String,
+    pub progress: u64,
+    pub active_entities: u64,
+    pub complete: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 pub struct ActivityRequirement {
     pub metric: JourneyMetric,
     pub target: u64,

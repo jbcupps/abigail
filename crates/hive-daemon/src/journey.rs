@@ -13,7 +13,7 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use chrono::Datelike;
+use chrono::{DateTime, Datelike, TimeZone, Utc};
 use hive_core::genesis::{EntityDefinition, GenesisSession};
 use hive_core::genesis_quest::*;
 use hive_core::{ApiEnvelope, BirthCertificate, BirthCertificateSummary};
@@ -1198,10 +1198,48 @@ fn now_utc() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
+#[derive(Debug, Clone)]
+struct UtcQuarter {
+    id: String,
+    label: String,
+    starts_at: DateTime<Utc>,
+    ends_at_exclusive: DateTime<Utc>,
+}
+
+impl UtcQuarter {
+    fn contains(&self, timestamp: DateTime<Utc>) -> bool {
+        timestamp >= self.starts_at && timestamp < self.ends_at_exclusive
+    }
+}
+
+fn utc_quarter_for(now: DateTime<Utc>) -> UtcQuarter {
+    let quarter = ((now.month() - 1) / 3) + 1;
+    let first_month = (quarter - 1) * 3 + 1;
+    let starts_at = Utc
+        .with_ymd_and_hms(now.year(), first_month, 1, 0, 0, 0)
+        .single()
+        .expect("a UTC calendar quarter always has a valid first day");
+    let (end_year, end_month) = if quarter == 4 {
+        (now.year() + 1, 1)
+    } else {
+        (now.year(), first_month + 3)
+    };
+    let ends_at_exclusive = Utc
+        .with_ymd_and_hms(end_year, end_month, 1, 0, 0, 0)
+        .single()
+        .expect("a UTC calendar quarter always has a valid exclusive end");
+    UtcQuarter {
+        id: format!("{}-Q{quarter}", now.year()),
+        label: format!("{} Q{quarter}", now.year()),
+        starts_at,
+        ends_at_exclusive,
+    }
+}
+
 fn current_utc_quarter_start() -> String {
-    let now = chrono::Utc::now();
-    let first_month = ((now.month() - 1) / 3) * 3 + 1;
-    format!("{:04}-{first_month:02}-01T00:00:00Z", now.year())
+    utc_quarter_for(Utc::now())
+        .starts_at
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
 /// Called after a successful Genesis awakening: copy creation badges into the
@@ -1263,11 +1301,24 @@ fn durable_entity_activity(
 }
 
 fn summarize_conversations(turns: &[abigail_memory::ConversationTurn]) -> JourneyActivity {
+    summarize_conversation_turns(turns.iter())
+}
+
+fn summarize_conversations_in_season(
+    turns: &[abigail_memory::ConversationTurn],
+    season: &UtcQuarter,
+) -> JourneyActivity {
+    summarize_conversation_turns(turns.iter().filter(|turn| season.contains(turn.created_at)))
+}
+
+fn summarize_conversation_turns<'a>(
+    turns: impl IntoIterator<Item = &'a abigail_memory::ConversationTurn>,
+) -> JourneyActivity {
     let mut turn_ids = HashSet::new();
     let mut sessions = HashSet::new();
     let mut days = HashSet::new();
     let mut weeks = HashSet::new();
-    for turn in turns.iter().filter(|turn| turn.role == "user") {
+    for turn in turns.into_iter().filter(|turn| turn.role == "user") {
         if !turn_ids.insert(turn.id.as_str()) {
             continue;
         }
@@ -1283,6 +1334,93 @@ fn summarize_conversations(turns: &[abigail_memory::ConversationTurn]) -> Journe
         active_weeks: weeks.len() as u64,
         ..Default::default()
     }
+}
+
+fn seasonal_conversation_activity(
+    state: &HiveDaemonState,
+    entity_id: &str,
+    season: &UtcQuarter,
+) -> Result<JourneyActivity, String> {
+    let config = state.identity_manager.load_agent(entity_id)?;
+    let memory = abigail_memory::MemoryStore::open_with_config(&config)
+        .map_err(|error| error.to_string())?;
+    let turns = memory.all_turns().map_err(|error| error.to_string())?;
+    Ok(summarize_conversations_in_season(&turns, season))
+}
+
+fn long_arc_quest_views(
+    season: &UtcQuarter,
+    entity_messages: u64,
+    family_messages: u64,
+    family_active_entities: u64,
+) -> Vec<LongArcQuestView> {
+    LONG_ARC_QUEST_DEFINITIONS
+        .iter()
+        .map(|definition| {
+            let (progress, active_entities) = match definition.scope {
+                LongArcQuestScope::Entity => (entity_messages, u64::from(entity_messages > 0)),
+                LongArcQuestScope::Family => (family_messages, family_active_entities),
+            };
+            LongArcQuestView {
+                quest_id: definition.id,
+                season_id: season.id.clone(),
+                season_label: season.label.clone(),
+                starts_at: season
+                    .starts_at
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                ends_at_exclusive: season
+                    .ends_at_exclusive
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                progress,
+                active_entities,
+                complete: progress >= definition.target
+                    && active_entities >= definition.minimum_entities,
+            }
+        })
+        .collect()
+}
+
+fn long_arc_quests_at(
+    state: &HiveDaemonState,
+    owner_id: &str,
+    entity_id: &str,
+    now: DateTime<Utc>,
+) -> Result<Vec<LongArcQuestView>, String> {
+    if owner_id != OWNER {
+        return Err("Seasonal journey activity is unavailable.".into());
+    }
+    registered_name(state, entity_id)
+        .map_err(|_| "Seasonal journey activity is unavailable.".to_string())?;
+    let season = utc_quarter_for(now);
+    let active_entities = state
+        .identity_manager
+        .list_agents()
+        .map_err(|_| "Seasonal journey activity is unavailable.".to_string())?
+        .into_iter()
+        .filter(|agent| !agent.is_hive && agent.birth_complete);
+
+    let mut entity_messages = 0_u64;
+    let mut family_messages = 0_u64;
+    let mut family_active_entities = 0_u64;
+    for entity in active_entities {
+        let activity = seasonal_conversation_activity(state, &entity.id, &season)
+            .map_err(|_| "Seasonal journey activity is unavailable.".to_string())?;
+        if entity.id == entity_id {
+            entity_messages = activity.mentor_messages;
+        }
+        family_messages = family_messages
+            .checked_add(activity.mentor_messages)
+            .ok_or_else(|| "Seasonal journey activity is unavailable.".to_string())?;
+        if activity.mentor_messages > 0 {
+            family_active_entities += 1;
+        }
+    }
+    Ok(long_arc_quest_views(
+        &season,
+        entity_messages,
+        family_messages,
+        family_active_entities,
+    ))
 }
 
 fn merge_activity_sources(
@@ -1735,6 +1873,7 @@ struct JourneyView {
     next_milestone: Option<Milestone>,
     unlocked: Unlocks,
     first_quests: Vec<FirstQuest>,
+    long_arc_quests: Vec<LongArcQuestView>,
     presence: Option<PresenceCard>,
     certificate: Option<BirthCertificateSummary>,
 }
@@ -1810,6 +1949,7 @@ fn journey_view(state: &HiveDaemonState, entity_id: &str) -> Result<serde_json::
     });
     let view = JourneyView {
         entity_id: entity_id.into(),
+        long_arc_quests: long_arc_quests_at(state, OWNER, entity_id, Utc::now())?,
         first_quests: first_quests(
             &name,
             presence.as_ref().map(|card| card.temperament),
@@ -3956,11 +4096,18 @@ pub(crate) mod tests {
         assert_eq!(merged.confirmed_memories, 3);
     }
 
-    fn born_entity(state: &HiveDaemonState, entity_id: &str) {
-        let mut config = state.identity_manager.load_agent(entity_id).unwrap();
-        config.birth_complete = true;
-        config.birth_timestamp = Some("2026-10-01T00:00:00Z".into());
-        config.save(&config.config_path()).unwrap();
+    async fn born_entity(state: &HiveDaemonState, entity_id: &str) {
+        let Json(response) = crate::birth::perform_birth(
+            State(state.clone()),
+            Path(entity_id.to_string()),
+            Json(hive_core::BirthRiteRequest {
+                path: "quickstart".into(),
+                choices: Vec::new(),
+                purpose: Some("Seasonal quest fixture".into()),
+            }),
+        )
+        .await;
+        assert!(response.ok, "{:?}", response.error);
     }
 
     fn insert_season_messages(
@@ -4053,16 +4200,30 @@ pub(crate) mod tests {
             .iter()
             .find(|view| view.quest_id == "seasonal_shared_stories")
             .unwrap();
+        assert_eq!(entity.season_id, "2026-Q4");
+        assert_eq!(entity.starts_at, "2026-10-01T00:00:00Z");
+        assert_eq!(entity.ends_at_exclusive, "2027-01-01T00:00:00Z");
         assert_eq!(entity.progress, 2);
         assert!(!entity.complete);
+
+        let next_season = utc_quarter_for(
+            chrono::DateTime::parse_from_rfc3339("2027-01-01T00:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        );
+        assert_eq!(
+            summarize_conversations_in_season(&turns, &next_season).mentor_messages,
+            1,
+            "a new UTC quarter must reset message progress"
+        );
     }
 
-    #[test]
-    fn long_arc_family_progress_is_owner_scoped_and_requires_two_active_entities() {
+    #[tokio::test]
+    async fn long_arc_family_progress_is_owner_scoped_and_requires_two_active_entities() {
         let (state, first_id) = crate::routes::tests::build_state();
         let (second_id, _) = state.identity_manager.create_agent("Second").unwrap();
-        born_entity(&state, &first_id);
-        born_entity(&state, &second_id);
+        born_entity(&state, &first_id).await;
+        born_entity(&state, &second_id).await;
         insert_season_messages(
             &state,
             &first_id,
@@ -4099,12 +4260,12 @@ pub(crate) mod tests {
         assert!(long_arc_quests_at(&state, "another-owner", &first_id, at).is_err());
     }
 
-    #[test]
-    fn long_arc_family_history_failure_is_generic_and_content_free() {
+    #[tokio::test]
+    async fn long_arc_family_history_failure_is_generic_and_content_free() {
         let (state, first_id) = crate::routes::tests::build_state();
         let (damaged_id, _) = state.identity_manager.create_agent("Damaged").unwrap();
-        born_entity(&state, &first_id);
-        born_entity(&state, &damaged_id);
+        born_entity(&state, &first_id).await;
+        born_entity(&state, &damaged_id).await;
         let mut damaged = state.identity_manager.load_agent(&damaged_id).unwrap();
         damaged.db_path = std::path::PathBuf::from("/dev/null/quest-memory.db");
         damaged.save(&damaged.config_path()).unwrap();
@@ -4123,10 +4284,10 @@ pub(crate) mod tests {
         assert!(!error.contains("/dev/null"));
     }
 
-    #[test]
-    fn long_arc_message_quests_ignore_compacted_old_events_and_serialize_closed_views() {
+    #[tokio::test]
+    async fn long_arc_message_quests_ignore_compacted_old_events_and_serialize_closed_views() {
         let (state, entity_id) = crate::routes::tests::build_state();
-        born_entity(&state, &entity_id);
+        born_entity(&state, &entity_id).await;
         let old = outbox_event_at(
             &entity_id,
             "skill_used",

@@ -341,6 +341,26 @@ durable counters and badges live in Hive-owned `entity_journey`, so they outlive
 an expired Genesis record. Suggested first quests remain copy only: no quest
 sends a message or executes a skill automatically.
 
+The long-arc catalog is intentionally limited to two copy-only quests:
+`seasonal_shared_stories` tracks 12 mentor messages with the current Entity,
+and `family_constellation` tracks 30 mentor messages across at least two
+distinct active, born, non-Hive Entities in the local owner scope. A season is
+a UTC calendar quarter identified as `YYYY-QN`; responses include RFC3339 UTC
+`starts_at` and `ends_at_exclusive` bounds. A message exactly at the start
+counts, while one exactly at the exclusive end belongs to the next season.
+Progress is recalculated from distinct durable user turns in that window, so it
+resets with the quarter. Compacted old skill or memory events never advance
+these message quests.
+
+Family calculation iterates only the registered Entities in the current local
+owner scope and excludes Abigail Hive and unawakened Entities. An inaccessible
+active Entity history fails the calculation with fixed content-free guidance
+rather than returning a partial total or a storage error. Catalog and journey
+shapes contain only canonical copy, season bounds, counts and completion; they
+contain no conversation text, model material or Soul Forge scoring data. Hive
+renders the two compact cards after awakening, with no quest action or
+automatic send.
+
 ### 4. Model setup gate
 
 An Entity card linked to unfinished Genesis while Hive reports
