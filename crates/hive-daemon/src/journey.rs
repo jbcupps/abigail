@@ -2711,6 +2711,108 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn compaction_globally_rejects_cross_entity_id_reuse_without_breaking_original_retry() {
+        let store = store();
+        let first_entity = uuid::Uuid::new_v4().to_string();
+        let second_entity = uuid::Uuid::new_v4().to_string();
+        let first = outbox_event_at(
+            &first_entity,
+            "skill_used",
+            "2026-09-30T23:59:59Z",
+            serde_json::json!({
+                "session_id": "session-first",
+                "successful_skill_count": 2,
+            }),
+        );
+        store
+            .record_runtime_events(OWNER, &first_entity, std::slice::from_ref(&first))
+            .unwrap();
+        store
+            .compact_runtime_events(OWNER, &first_entity, "2026-10-01T00:00:00Z")
+            .unwrap();
+
+        let mut reused = first.clone();
+        reused.entity_id = second_entity.clone();
+        assert!(
+            store
+                .record_runtime_events(OWNER, &second_entity, &[reused])
+                .is_err(),
+            "another Entity reused an ID retained by a compaction snapshot"
+        );
+        assert!(!store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &first.record_id)
+            .unwrap());
+
+        let exact_retry = store
+            .record_runtime_events(OWNER, &first_entity, &[first])
+            .unwrap();
+        assert_eq!(exact_retry.successful_skill_uses, 2);
+    }
+
+    #[test]
+    fn compaction_duplicate_ids_across_corrupted_snapshots_fail_closed_globally() {
+        let store = store();
+        let first_entity = uuid::Uuid::new_v4().to_string();
+        let second_entity = uuid::Uuid::new_v4().to_string();
+        let event = outbox_event_at(
+            &first_entity,
+            "memory_confirmed",
+            "2026-09-30T23:59:59Z",
+            serde_json::json!({
+                "memory_id": "memory-first",
+                "memory_weight": "distilled",
+            }),
+        );
+        store
+            .record_runtime_events(OWNER, &first_entity, std::slice::from_ref(&event))
+            .unwrap();
+        store
+            .compact_runtime_events(OWNER, &first_entity, "2026-10-01T00:00:00Z")
+            .unwrap();
+        let mut duplicate = compaction_snapshot(&store, &first_entity);
+        duplicate.as_object_mut().unwrap().remove("id");
+        duplicate["entity_id"] = serde_json::json!(second_entity);
+        store
+            .handle
+            .upsert(
+                JOURNEY_EVENT_COMPACTION_TABLE,
+                duplicate["entity_id"].as_str().unwrap(),
+                &duplicate,
+            )
+            .unwrap();
+
+        assert!(
+            store
+                .prevalidate_runtime_events(OWNER, &first_entity, std::slice::from_ref(&event))
+                .is_err(),
+            "duplicate global compacted ID binding was accepted"
+        );
+    }
+
+    #[test]
+    fn compaction_digest_has_fixed_versioned_known_answer() {
+        let event = JourneyEventRecord {
+            record_id: "00000000-0000-4000-8000-000000000001".into(),
+            owner_id: "local".into(),
+            entity_id: "00000000-0000-4000-8000-000000000002".into(),
+            kind: "skill_used".into(),
+            occurred_at: "2026-09-30T23:59:59Z".into(),
+            session_id: Some("session-known".into()),
+            skill_id: None,
+            tool_name: None,
+            successful_skill_count: Some(2),
+            memory_id: None,
+            memory_weight: None,
+        };
+
+        assert_eq!(
+            journey_event_digest(&event).unwrap(),
+            "81799908e3576baa2e6b7088d550652a1069d005164b242a7e0666d928d35cb0"
+        );
+    }
+
+    #[test]
     fn compaction_rejects_conflicting_record_id_reuse() {
         let store = store();
         let entity_id = uuid::Uuid::new_v4().to_string();
@@ -2798,14 +2900,10 @@ pub(crate) mod tests {
     fn automatic_compaction_retains_current_utc_quarter_rows() {
         let store = store();
         let entity_id = uuid::Uuid::new_v4().to_string();
-        let quarter_start = current_utc_quarter_start();
-        let quarter_start_time = chrono::DateTime::parse_from_rfc3339(&quarter_start).unwrap();
-        let old_time = (quarter_start_time - chrono::Duration::seconds(1)).to_rfc3339();
-        let current_time = quarter_start_time.to_rfc3339();
         let old = outbox_event_at(
             &entity_id,
             "skill_used",
-            &old_time,
+            "2026-09-30T23:59:59Z",
             serde_json::json!({
                 "session_id": "session-old",
                 "successful_skill_count": 2,
@@ -2814,7 +2912,7 @@ pub(crate) mod tests {
         let current = outbox_event_at(
             &entity_id,
             "memory_confirmed",
-            &current_time,
+            "2026-10-01T00:00:00Z",
             serde_json::json!({
                 "memory_id": "memory-current",
                 "memory_weight": "distilled",
@@ -2824,6 +2922,7 @@ pub(crate) mod tests {
             .persist_runtime_events(OWNER, &entity_id, &[old.clone(), current.clone()])
             .unwrap();
         store.set_auto_compaction_threshold_for_test(1);
+        store.set_auto_compaction_cutoff_for_test("2026-10-01T00:00:00Z");
 
         let projected = store
             .reconcile_runtime_event_projection(OWNER, &entity_id)
@@ -2842,23 +2941,53 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn compaction_failure_after_durable_projection_does_not_fail_activity_acknowledgement() {
+    fn automatic_compaction_requires_strictly_more_rows_than_threshold() {
         let store = store();
         let entity_id = uuid::Uuid::new_v4().to_string();
-        let quarter_start = current_utc_quarter_start();
-        let old_time = (chrono::DateTime::parse_from_rfc3339(&quarter_start).unwrap()
-            - chrono::Duration::seconds(1))
-        .to_rfc3339();
         let event = outbox_event_at(
             &entity_id,
             "skill_used",
-            &old_time,
+            "2026-09-30T23:59:59Z",
+            serde_json::json!({
+                "session_id": "session-at-threshold",
+                "successful_skill_count": 2,
+            }),
+        );
+        store
+            .persist_runtime_events(OWNER, &entity_id, std::slice::from_ref(&event))
+            .unwrap();
+        store.set_auto_compaction_threshold_for_test(1);
+        store.set_auto_compaction_cutoff_for_test("2026-10-01T00:00:00Z");
+
+        store
+            .reconcile_runtime_event_projection(OWNER, &entity_id)
+            .unwrap();
+
+        assert!(store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &event.record_id)
+            .unwrap());
+        assert!(!store
+            .handle
+            .record_exists(JOURNEY_EVENT_COMPACTION_TABLE, &entity_id)
+            .unwrap());
+    }
+
+    #[test]
+    fn compaction_failure_after_durable_projection_does_not_fail_activity_acknowledgement() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let event = outbox_event_at(
+            &entity_id,
+            "skill_used",
+            "2026-09-30T23:59:59Z",
             serde_json::json!({
                 "session_id": "session-old",
                 "successful_skill_count": 2,
             }),
         );
         store.set_auto_compaction_threshold_for_test(0);
+        store.set_auto_compaction_cutoff_for_test("2026-10-01T00:00:00Z");
         store.fail_next_compaction_snapshot_write();
 
         let acknowledged = store
@@ -2878,6 +3007,172 @@ pub(crate) mod tests {
             2
         );
         assert!(!store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &event.record_id)
+            .unwrap());
+    }
+
+    #[test]
+    fn compaction_partial_deletion_replays_through_public_record_and_reconcile_path() {
+        let store = store();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let skill = outbox_event_at(
+            &entity_id,
+            "skill_used",
+            "2026-09-30T23:59:58Z",
+            serde_json::json!({
+                "session_id": "session-partial",
+                "successful_skill_count": 2,
+            }),
+        );
+        let memory = outbox_event_at(
+            &entity_id,
+            "memory_confirmed",
+            "2026-09-30T23:59:59Z",
+            serde_json::json!({
+                "memory_id": "memory-partial",
+                "memory_weight": "distilled",
+            }),
+        );
+        store
+            .record_runtime_events(OWNER, &entity_id, &[skill.clone(), memory.clone()])
+            .unwrap();
+        store.fail_compaction_deletes_after(1);
+
+        assert!(store
+            .compact_runtime_events(OWNER, &entity_id, "2026-10-01T00:00:00Z")
+            .is_err());
+        let remaining = [&skill, &memory]
+            .into_iter()
+            .filter(|event| {
+                store
+                    .handle
+                    .record_exists(JOURNEY_EVENT_TABLE, &event.record_id)
+                    .unwrap()
+            })
+            .count();
+        assert_eq!(remaining, 1);
+        assert_eq!(
+            store.event_activity(OWNER, &entity_id).unwrap(),
+            JourneyActivity {
+                successful_skill_uses: 2,
+                confirmed_memories: 1,
+                ..Default::default()
+            }
+        );
+
+        store.set_auto_compaction_threshold_for_test(0);
+        store.set_auto_compaction_cutoff_for_test("2026-10-01T00:00:00Z");
+        let replayed = store
+            .record_runtime_events(OWNER, &entity_id, &[skill.clone(), memory.clone()])
+            .unwrap();
+        assert_eq!(replayed.successful_skill_uses, 2);
+        assert_eq!(replayed.confirmed_memories, 1);
+        assert!(!store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &skill.record_id)
+            .unwrap());
+        assert!(!store
+            .handle
+            .record_exists(JOURNEY_EVENT_TABLE, &memory.record_id)
+            .unwrap());
+    }
+
+    #[test]
+    fn compaction_snapshot_validation_rejects_wrong_owner_corruption_and_limits() {
+        let store = store();
+        let wrong_owner_entity = uuid::Uuid::new_v4().to_string();
+        let wrong_owner = JourneyEventCompactionRecord {
+            owner_id: "another-household".into(),
+            entity_id: wrong_owner_entity.clone(),
+            successful_skill_uses: 0,
+            confirmed_memories: 0,
+            compacted_events: Vec::new(),
+            created_at: "2026-10-01T00:00:00Z".into(),
+            updated_at: "2026-10-01T00:00:00Z".into(),
+        };
+        store
+            .handle
+            .upsert(
+                JOURNEY_EVENT_COMPACTION_TABLE,
+                &wrong_owner_entity,
+                &wrong_owner,
+            )
+            .unwrap();
+        assert!(store.event_activity(OWNER, &wrong_owner_entity).is_err());
+
+        let corrupt_entity = uuid::Uuid::new_v4().to_string();
+        let corrupt = JourneyEventCompactionRecord {
+            owner_id: OWNER.into(),
+            entity_id: corrupt_entity.clone(),
+            successful_skill_uses: 0,
+            confirmed_memories: 0,
+            compacted_events: vec![CompactedJourneyEvent {
+                record_id: uuid::Uuid::new_v4().to_string(),
+                digest: "not-a-digest".into(),
+            }],
+            created_at: "2026-10-01T00:00:00Z".into(),
+            updated_at: "2026-10-01T00:00:00Z".into(),
+        };
+        store
+            .handle
+            .upsert(JOURNEY_EVENT_COMPACTION_TABLE, &corrupt_entity, &corrupt)
+            .unwrap();
+        assert!(store.event_activity(OWNER, &corrupt_entity).is_err());
+
+        let over_limit = JourneyEventCompactionRecord {
+            owner_id: OWNER.into(),
+            entity_id: uuid::Uuid::new_v4().to_string(),
+            successful_skill_uses: i64::MAX as u64 + 1,
+            confirmed_memories: 0,
+            compacted_events: Vec::new(),
+            created_at: "2026-10-01T00:00:00Z".into(),
+            updated_at: "2026-10-01T00:00:00Z".into(),
+        };
+        assert!(validate_event_compaction(&over_limit).is_err());
+        assert!(checked_activity_add(i64::MAX as u64, 1).is_err());
+    }
+
+    #[test]
+    fn compaction_snapshot_storage_key_mismatch_fails_before_deletion() {
+        let store = store();
+        let storage_key = uuid::Uuid::new_v4().to_string();
+        let claimed_entity = uuid::Uuid::new_v4().to_string();
+        let corrupt = JourneyEventCompactionRecord {
+            owner_id: OWNER.into(),
+            entity_id: claimed_entity,
+            successful_skill_uses: 0,
+            confirmed_memories: 0,
+            compacted_events: Vec::new(),
+            created_at: "2026-10-01T00:00:00Z".into(),
+            updated_at: "2026-10-01T00:00:00Z".into(),
+        };
+        store
+            .handle
+            .upsert(JOURNEY_EVENT_COMPACTION_TABLE, &storage_key, &corrupt)
+            .unwrap();
+        let event = outbox_event_at(
+            &storage_key,
+            "skill_used",
+            "2026-09-30T23:59:59Z",
+            serde_json::json!({
+                "session_id": "session-key-mismatch",
+                "successful_skill_count": 1,
+            }),
+        );
+        store
+            .handle
+            .upsert(
+                JOURNEY_EVENT_TABLE,
+                &event.record_id,
+                &journey_event(OWNER, &storage_key, &event).unwrap().unwrap(),
+            )
+            .unwrap();
+
+        assert!(store
+            .compact_runtime_events(OWNER, &storage_key, "2026-10-01T00:00:00Z")
+            .is_err());
+        assert!(store
             .handle
             .record_exists(JOURNEY_EVENT_TABLE, &event.record_id)
             .unwrap());
