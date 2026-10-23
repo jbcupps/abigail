@@ -1067,6 +1067,76 @@ mod tests {
     }
 
     #[test]
+    fn seasonal_turn_metadata_query_is_content_free_bounded_and_strict() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        for (id, role, content, at) in [
+            (
+                "before",
+                "user",
+                "private phrase before the season",
+                "2026-09-30T23:59:59Z",
+            ),
+            (
+                "current",
+                "user",
+                "private phrase inside the season",
+                "2026-10-01T00:00:00Z",
+            ),
+            (
+                "assistant",
+                "assistant",
+                "private model reply inside the season",
+                "2026-12-31T23:59:59Z",
+            ),
+            (
+                "next",
+                "user",
+                "private phrase after the season",
+                "2027-01-01T00:00:00Z",
+            ),
+        ] {
+            let mut turn = ConversationTurn::new("seasonal", role, content);
+            turn.id = id.into();
+            turn.created_at = parse_timestamp(at).unwrap();
+            store.insert_turn(&turn).unwrap();
+        }
+
+        let metadata = store
+            .turn_metadata_between(
+                parse_timestamp("2026-10-01T00:00:00Z").unwrap(),
+                parse_timestamp("2027-01-01T00:00:00Z").unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            metadata
+                .iter()
+                .map(|turn| turn.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["current", "assistant"]
+        );
+        let encoded = serde_json::to_string(&metadata).unwrap();
+        assert!(!encoded.contains("content"));
+        assert!(!encoded.contains("private phrase"));
+        assert!(!encoded.contains("private model reply"));
+
+        assert!(
+            serde_json::from_value::<TurnMetadataDoc>(serde_json::json!({
+                "id": "injected",
+                "role": "user",
+                "created_at": "2026-10-01T00:00:00Z",
+                "content": "must be rejected"
+            }))
+            .is_err()
+        );
+        assert!(ConversationTurnMetadata::try_from(TurnMetadataDoc {
+            id: "bad-time".into(),
+            role: "user".into(),
+            created_at: "not-rfc3339".into(),
+        })
+        .is_err());
+    }
+
+    #[test]
     fn recent_turns_restore_chronology_for_default_numbers_and_stable_timestamp_ties() {
         let store = MemoryStore::open_in_memory().unwrap();
         let mut user = ConversationTurn::new("history", "user", "Remember pasta");

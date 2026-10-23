@@ -25,6 +25,7 @@ export function longArcQuestFixture(overrides: Partial<LongArcQuestView> = {}): 
     progress: 0,
     active_entities: 0,
     complete: false,
+    available: true,
     ...overrides,
   };
 }

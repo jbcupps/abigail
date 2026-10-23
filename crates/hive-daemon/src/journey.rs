@@ -4134,6 +4134,10 @@ pub(crate) mod tests {
         }
     }
 
+    fn long_arc_view<'a>(views: &'a [LongArcQuestView], quest_id: &str) -> &'a LongArcQuestView {
+        views.iter().find(|view| view.quest_id == quest_id).unwrap()
+    }
+
     #[test]
     fn long_arc_utc_quarter_has_stable_id_and_exclusive_end() {
         let at = chrono::DateTime::parse_from_rfc3339("2026-12-31T23:59:59Z")
@@ -4171,19 +4175,19 @@ pub(crate) mod tests {
 
     #[test]
     fn long_arc_entity_progress_filters_to_the_current_season() {
-        let turn = |id: &str, at: &str| {
-            let mut turn = abigail_memory::ConversationTurn::new("season", "user", "private words");
-            turn.id = id.into();
-            turn.created_at = chrono::DateTime::parse_from_rfc3339(at)
+        let turn = |id: &str, role: &str, at: &str| abigail_memory::ConversationTurnMetadata {
+            id: id.into(),
+            role: role.into(),
+            created_at: chrono::DateTime::parse_from_rfc3339(at)
                 .unwrap()
-                .with_timezone(&chrono::Utc);
-            turn
+                .with_timezone(&chrono::Utc),
         };
         let turns = vec![
-            turn("before", "2026-09-30T23:59:59Z"),
-            turn("start", "2026-10-01T00:00:00Z"),
-            turn("middle", "2026-12-31T23:59:59Z"),
-            turn("end", "2027-01-01T00:00:00Z"),
+            turn("before", "user", "2026-09-30T23:59:59Z"),
+            turn("start", "user", "2026-10-01T00:00:00Z"),
+            turn("middle", "user", "2026-12-31T23:59:59Z"),
+            turn("assistant", "assistant", "2026-12-31T23:59:59Z"),
+            turn("end", "user", "2027-01-01T00:00:00Z"),
         ];
         let season = utc_quarter_for(
             chrono::DateTime::parse_from_rfc3339("2026-11-01T00:00:00Z")
@@ -4191,19 +4195,21 @@ pub(crate) mod tests {
                 .with_timezone(&chrono::Utc),
         );
 
-        assert_eq!(
-            summarize_conversations_in_season(&turns, &season).mentor_messages,
-            2
+        assert_eq!(summarize_seasonal_messages(&turns), 2);
+        let views = long_arc_quest_views(
+            &season,
+            2,
+            Some(HouseholdSeasonSummary {
+                mentor_messages: 2,
+                active_entities: 1,
+            }),
         );
-        let views = long_arc_quest_views(&season, 2, 2, 1);
-        let entity = views
-            .iter()
-            .find(|view| view.quest_id == "seasonal_shared_stories")
-            .unwrap();
+        let entity = long_arc_view(&views, "seasonal_shared_stories");
         assert_eq!(entity.season_id, "2026-Q4");
         assert_eq!(entity.starts_at, "2026-10-01T00:00:00Z");
         assert_eq!(entity.ends_at_exclusive, "2027-01-01T00:00:00Z");
         assert_eq!(entity.progress, 2);
+        assert!(entity.available);
         assert!(!entity.complete);
 
         let next_season = utc_quarter_for(
@@ -4211,8 +4217,13 @@ pub(crate) mod tests {
                 .unwrap()
                 .with_timezone(&chrono::Utc),
         );
+        let next_turns = turns
+            .iter()
+            .filter(|turn| next_season.contains(turn.created_at))
+            .cloned()
+            .collect::<Vec<_>>();
         assert_eq!(
-            summarize_conversations_in_season(&turns, &next_season).mentor_messages,
+            summarize_seasonal_messages(&next_turns),
             1,
             "a new UTC quarter must reset message progress"
         );
@@ -4244,33 +4255,121 @@ pub(crate) mod tests {
             .with_timezone(&chrono::Utc);
 
         let views = long_arc_quests_at(&state, OWNER, &first_id, at).unwrap();
-        let entity = views
-            .iter()
-            .find(|view| view.quest_id == "seasonal_shared_stories")
-            .unwrap();
-        let family = views
-            .iter()
-            .find(|view| view.quest_id == "family_constellation")
-            .unwrap();
+        let entity = long_arc_view(&views, "seasonal_shared_stories");
+        let family = long_arc_view(&views, "family_constellation");
         assert_eq!(entity.progress, 12);
+        assert!(entity.available);
         assert!(entity.complete);
         assert_eq!(family.progress, 30);
         assert_eq!(family.active_entities, 2);
+        assert!(family.available);
         assert!(family.complete);
         assert!(long_arc_quests_at(&state, "another-owner", &first_id, at).is_err());
     }
 
     #[tokio::test]
-    async fn long_arc_family_history_failure_is_generic_and_content_free() {
+    async fn long_arc_handler_keeps_entity_progress_when_sibling_history_is_inaccessible() {
         let (state, first_id) = crate::routes::tests::build_state();
         let (damaged_id, _) = state.identity_manager.create_agent("Damaged").unwrap();
         born_entity(&state, &first_id).await;
         born_entity(&state, &damaged_id).await;
+        insert_season_messages(
+            &state,
+            &first_id,
+            "requested-current",
+            12,
+            "2026-10-02T10:00:00Z",
+        );
         let mut damaged = state.identity_manager.load_agent(&damaged_id).unwrap();
         damaged.db_path = std::path::PathBuf::from("/dev/null/quest-memory.db");
         damaged.save(&damaged.config_path()).unwrap();
 
-        let error = long_arc_quests_at(
+        let Json(response) = get_journey(State(state), Path(first_id)).await;
+        assert!(response.ok, "{:?}", response.error);
+        let value = response.data.unwrap();
+        let views: Vec<LongArcQuestView> =
+            serde_json::from_value(value["long_arc_quests"].clone()).unwrap();
+        assert_eq!(views.len(), 2);
+        let entity = long_arc_view(&views, "seasonal_shared_stories");
+        let family = long_arc_view(&views, "family_constellation");
+        assert!(entity.available);
+        assert_eq!(entity.progress, 12);
+        assert!(entity.complete);
+        assert!(!family.available);
+        assert_eq!(family.progress, 0);
+        assert!(!family.complete);
+        assert!(value["long_arc_quests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|view| view.get("error").is_none()));
+        assert!(forbidden_public_keys(&value["long_arc_quests"]).is_empty());
+        let encoded = value["long_arc_quests"].to_string();
+        assert!(!encoded.contains("Damaged"));
+        assert!(!encoded.contains("/dev/null"));
+        assert!(!encoded.contains("private family words"));
+    }
+
+    #[tokio::test]
+    async fn long_arc_malformed_sibling_is_unavailable_not_unborn_or_partial() {
+        let (state, first_id) = crate::routes::tests::build_state();
+        let (damaged_id, _) = state.identity_manager.create_agent("Malformed").unwrap();
+        born_entity(&state, &first_id).await;
+        born_entity(&state, &damaged_id).await;
+        insert_season_messages(&state, &first_id, "first-only", 30, "2026-10-02T10:00:00Z");
+        let config_path = state
+            .identity_manager
+            .agent_dir(&damaged_id)
+            .unwrap()
+            .join("config.json");
+        std::fs::write(&config_path, b"{malformed private config").unwrap();
+        state
+            .journeys
+            .set_household_cache_ttl_for_test(std::time::Duration::from_secs(60));
+
+        let at = chrono::DateTime::parse_from_rfc3339("2026-11-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        for _ in 0..2 {
+            let views = long_arc_quests_at(&state, OWNER, &first_id, at).unwrap();
+            assert_eq!(
+                long_arc_view(&views, "seasonal_shared_stories").progress,
+                30
+            );
+            let family = long_arc_view(&views, "family_constellation");
+            assert!(!family.available);
+            assert_eq!(family.progress, 0, "partial family total leaked");
+        }
+        assert_eq!(
+            state.journeys.household_scan_count_for_test(),
+            2,
+            "failed household scans must never be cached"
+        );
+    }
+
+    #[tokio::test]
+    async fn long_arc_family_excludes_hive_and_valid_unborn_entities() {
+        let (state, first_id) = crate::routes::tests::build_state();
+        let (unborn_id, _) = state.identity_manager.create_agent("Unborn").unwrap();
+        let hive_id = state.identity_manager.hive_agent_id().unwrap();
+        born_entity(&state, &first_id).await;
+        insert_season_messages(
+            &state,
+            &first_id,
+            "first-thirty",
+            30,
+            "2026-10-02T10:00:00Z",
+        );
+        insert_season_messages(
+            &state,
+            &unborn_id,
+            "unborn-thirty",
+            30,
+            "2026-10-02T11:00:00Z",
+        );
+        insert_season_messages(&state, &hive_id, "hive-thirty", 30, "2026-10-02T12:00:00Z");
+
+        let views = long_arc_quests_at(
             &state,
             OWNER,
             &first_id,
@@ -4278,10 +4377,61 @@ pub(crate) mod tests {
                 .unwrap()
                 .with_timezone(&chrono::Utc),
         )
-        .unwrap_err();
-        assert_eq!(error, "Seasonal journey activity is unavailable.");
-        assert!(!error.contains("Damaged"));
-        assert!(!error.contains("/dev/null"));
+        .unwrap();
+        let family = long_arc_view(&views, "family_constellation");
+        assert!(family.available);
+        assert_eq!(family.progress, 30);
+        assert_eq!(family.active_entities, 1);
+        assert!(
+            !family.complete,
+            "one Entity cannot satisfy the two-Entity requirement"
+        );
+    }
+
+    #[tokio::test]
+    async fn long_arc_household_cache_reuses_expires_clears_and_rolls_seasons() {
+        let (state, first_id) = crate::routes::tests::build_state();
+        let (second_id, _) = state.identity_manager.create_agent("Second").unwrap();
+        born_entity(&state, &first_id).await;
+        born_entity(&state, &second_id).await;
+        state
+            .journeys
+            .set_household_cache_ttl_for_test(std::time::Duration::from_secs(60));
+        state.journeys.clear_household_cache_for_test();
+        let q4 = chrono::DateTime::parse_from_rfc3339("2026-11-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+
+        long_arc_quests_at(&state, OWNER, &first_id, q4).unwrap();
+        long_arc_quests_at(&state, OWNER, &second_id, q4).unwrap();
+        assert_eq!(state.journeys.household_scan_count_for_test(), 1);
+
+        state.journeys.clear_household_cache_for_test();
+        long_arc_quests_at(&state, OWNER, &first_id, q4).unwrap();
+        assert_eq!(state.journeys.household_scan_count_for_test(), 2);
+
+        state
+            .journeys
+            .set_household_cache_ttl_for_test(std::time::Duration::ZERO);
+        state.journeys.clear_household_cache_for_test();
+        long_arc_quests_at(&state, OWNER, &first_id, q4).unwrap();
+        long_arc_quests_at(&state, OWNER, &second_id, q4).unwrap();
+        assert_eq!(state.journeys.household_scan_count_for_test(), 4);
+
+        state
+            .journeys
+            .set_household_cache_ttl_for_test(std::time::Duration::from_secs(60));
+        state.journeys.clear_household_cache_for_test();
+        long_arc_quests_at(&state, OWNER, &first_id, q4).unwrap();
+        let q1 = chrono::DateTime::parse_from_rfc3339("2027-01-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        long_arc_quests_at(&state, OWNER, &first_id, q1).unwrap();
+        assert_eq!(
+            state.journeys.household_scan_count_for_test(),
+            6,
+            "season bounds and ID must be part of the cache key"
+        );
     }
 
     #[tokio::test]
@@ -4317,7 +4467,7 @@ pub(crate) mod tests {
         .unwrap();
         assert!(views
             .iter()
-            .all(|view| view.progress == 0 && !view.complete));
+            .all(|view| view.available && view.progress == 0 && !view.complete));
         let value = serde_json::to_value(&views).unwrap();
         assert!(forbidden_public_keys(&value).is_empty(), "{value}");
         assert!(!value.to_string().contains("private-old-session"));

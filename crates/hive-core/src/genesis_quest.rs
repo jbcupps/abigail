@@ -1945,6 +1945,21 @@ mod tests {
                 "long-arc catalog leaked forbidden material: {forbidden}"
             );
         }
+
+        let unavailable = serde_json::to_value(LongArcQuestView {
+            quest_id: "family_constellation",
+            season_id: "2026-Q4".into(),
+            season_label: "2026 Q4".into(),
+            starts_at: "2026-10-01T00:00:00Z".into(),
+            ends_at_exclusive: "2027-01-01T00:00:00Z".into(),
+            progress: 0,
+            active_entities: 0,
+            complete: false,
+            available: false,
+        })
+        .unwrap();
+        assert_eq!(unavailable["available"], false);
+        assert!(unavailable.get("error").is_none());
     }
 
     #[test]

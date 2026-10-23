@@ -176,8 +176,8 @@ describe("Genesis quest", () => {
       unlocked: { palettes: ["aether"], crests: ["orbit"] },
       first_quests: [],
       long_arc_quests: [
-        { quest_id: "seasonal_shared_stories", season_id: "2026-Q4", season_label: "2026 Q4", starts_at: "2026-10-01T00:00:00Z", ends_at_exclusive: "2027-01-01T00:00:00Z", progress: 12, active_entities: 1, complete: true },
-        { quest_id: "family_constellation", season_id: "2026-Q4", season_label: "2026 Q4", starts_at: "2026-10-01T00:00:00Z", ends_at_exclusive: "2027-01-01T00:00:00Z", progress: 18, active_entities: 2, complete: false },
+        { quest_id: "seasonal_shared_stories", season_id: "2026-Q4", season_label: "2026 Q4", starts_at: "2026-10-01T00:00:00Z", ends_at_exclusive: "2027-01-01T00:00:00Z", progress: 12, active_entities: 1, complete: true, available: true },
+        { quest_id: "family_constellation", season_id: "2026-Q4", season_label: "2026 Q4", starts_at: "2026-10-01T00:00:00Z", ends_at_exclusive: "2027-01-01T00:00:00Z", progress: 18, active_entities: 2, complete: false, available: true },
       ],
       presence: null,
       certificate: null,
@@ -189,14 +189,64 @@ describe("Genesis quest", () => {
     renderStage("awakening", awakened);
 
     const quests = await screen.findByRole("region", { name: "Seasonal quests" });
-    expect(within(quests).getByText("Shared Stories")).toBeInTheDocument();
-    expect(within(quests).getByText("Entity · 2026 Q4")).toBeInTheDocument();
-    expect(within(quests).getByRole("progressbar", { name: "Shared Stories progress" })).toHaveValue(12);
-    expect(within(quests).getByText("12 of 12 · Complete")).toBeInTheDocument();
+    const sharedStories = within(quests).getByRole("article", { name: "Shared Stories" });
+    expect(within(sharedStories).getByText("Entity · 2026 Q4")).toBeInTheDocument();
+    expect(within(sharedStories).getByRole("progressbar", { name: "Shared Stories progress" })).toHaveValue(12);
+    expect(within(sharedStories).getByText("12 of 12")).toBeInTheDocument();
+    expect(within(sharedStories).getAllByText("Complete")).toHaveLength(1);
     expect(within(quests).getByText("Family Constellation")).toBeInTheDocument();
     expect(within(quests).getByText("Family · 2026 Q4")).toBeInTheDocument();
     expect(within(quests).getByText("18 of 30 · 2 Entities active")).toBeInTheDocument();
     expect(within(quests).queryByRole("button")).not.toBeInTheDocument();
     expect(screen.getByText("Nothing is sent for you. Copy a prompt, or say whatever feels right.")).toBeInTheDocument();
+  });
+
+  it("explains that a second Entity is needed when the family target has one contributor", async () => {
+    vi.mocked(getEntityJourney).mockResolvedValue({
+      entity_id: "e1", name: "Nova",
+      level: { level: 1, title: "Spark", xp: 0, level_floor: 0, next_level_at: 80 },
+      badges: [], mentor_messages: 30, conversation_sessions: 1, active_days: 1, active_weeks: 1,
+      successful_skill_uses: 0, confirmed_memories: 0, next_milestone: null,
+      unlocked: { palettes: ["aether"], crests: ["orbit"] }, first_quests: [],
+      long_arc_quests: [
+        { quest_id: "seasonal_shared_stories", season_id: "2026-Q4", season_label: "2026 Q4", starts_at: "2026-10-01T00:00:00Z", ends_at_exclusive: "2027-01-01T00:00:00Z", progress: 30, active_entities: 1, complete: true, available: true },
+        { quest_id: "family_constellation", season_id: "2026-Q4", season_label: "2026 Q4", starts_at: "2026-10-01T00:00:00Z", ends_at_exclusive: "2027-01-01T00:00:00Z", progress: 30, active_entities: 1, complete: false, available: true },
+      ],
+      presence: null, certificate: null,
+    });
+    const awakened = session();
+    awakened.awakening = "I am Nova.";
+    awakened.definition.entity_id = "e1";
+
+    renderStage("awakening", awakened);
+
+    const family = await screen.findByRole("article", { name: "Family Constellation" });
+    expect(within(family).getByText("30 of 30 · A second Entity is needed")).toBeInTheDocument();
+    expect(within(family).queryByText("Complete")).not.toBeInTheDocument();
+  });
+
+  it("shows unavailable family progress without a misleading progress bar", async () => {
+    vi.mocked(getEntityJourney).mockResolvedValue({
+      entity_id: "e1", name: "Nova",
+      level: { level: 1, title: "Spark", xp: 0, level_floor: 0, next_level_at: 80 },
+      badges: [], mentor_messages: 12, conversation_sessions: 1, active_days: 1, active_weeks: 1,
+      successful_skill_uses: 0, confirmed_memories: 0, next_milestone: null,
+      unlocked: { palettes: ["aether"], crests: ["orbit"] }, first_quests: [],
+      long_arc_quests: [
+        { quest_id: "seasonal_shared_stories", season_id: "2026-Q4", season_label: "2026 Q4", starts_at: "2026-10-01T00:00:00Z", ends_at_exclusive: "2027-01-01T00:00:00Z", progress: 12, active_entities: 1, complete: true, available: true },
+        { quest_id: "family_constellation", season_id: "2026-Q4", season_label: "2026 Q4", starts_at: "2026-10-01T00:00:00Z", ends_at_exclusive: "2027-01-01T00:00:00Z", progress: 0, active_entities: 0, complete: false, available: false },
+      ],
+      presence: null, certificate: null,
+    });
+    const awakened = session();
+    awakened.awakening = "I am Nova.";
+    awakened.definition.entity_id = "e1";
+
+    renderStage("awakening", awakened);
+
+    const family = await screen.findByRole("article", { name: "Family Constellation" });
+    expect(within(family).getByText("Progress unavailable. Try again shortly.")).toBeInTheDocument();
+    expect(within(family).queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(within(family).queryByText(/0 of 30/)).not.toBeInTheDocument();
   });
 });
