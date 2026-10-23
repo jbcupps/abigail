@@ -35,9 +35,12 @@ test('launcher dot-sources the isolated PowerShell 5.1 overlay helper', () => {
   assert.match(helper, /\.UseShellExecute\s*=\s*\$false/i);
   assert.match(helper, /\.EnvironmentVariables\s*\[/i);
   assert.match(helper, /\[System\.Diagnostics\.Process\]::Start\s*\(/i);
+  assert.match(helper, /\[string\]\s*\$Arguments\b/i);
+  assert.match(helper, /\$startInfo\.Arguments\s*=/i);
   assert.doesNotMatch(helper, /\b(?:Add-Type|DllImport|SetEnvironmentVariable|GetEnvironmentVariable)\b/i);
   assert.doesNotMatch(helper, /\b(?:ArgumentList|Wait|PassThru)\b/i);
   assert.doesNotMatch(helper, /\bWrite-(?:Host|Verbose|Debug|Information|Warning|Output)\b/i);
+  assert.doesNotMatch(launcher, /Start-ProcessWithEnvironmentOverlay[\s\S]*?-Arguments\b/i);
 });
 
 test('both desktop shells use the overlay helper with their required variables', () => {
@@ -62,13 +65,18 @@ test('Windows PowerShell behavior test owns syntax and child-environment coverag
     behavioralTest,
     /\[Management\.Automation\.Language\.Parser\]::ParseFile\s*\(/i,
   );
-  assert.match(behavioralTest, /\.cmd\b/i);
-  assert.match(behavioralTest, /\.WaitForExit\s*\(/i);
+  assert.match(behavioralTest, /-EncodedCommand\b/i);
+  assert.match(behavioralTest, /WaitForExit\s*\(\s*\$childWaitTimeoutMs\s*\)/i);
+  assert.match(behavioralTest, /\.Kill\s*\(/i);
+  assert.match(behavioralTest, /\.Dispose\s*\(/i);
+  assert.match(behavioralTest, /Start-ProcessWithEnvironmentOverlay[\s\S]*?-Arguments\s+\$argumentString/i);
   assert.match(behavioralTest, /PRESENT/);
   assert.match(behavioralTest, /ABSENT/);
   assert.match(behavioralTest, /does-not-exist\.exe/);
   assert.match(behavioralTest, /^\.\s+\$helperPath$/m);
   assert.doesNotMatch(behavioralTest, /^\.\s+.*launch_split_stack\.ps1/m);
+  assert.doesNotMatch(behavioralTest, /\bNODE_OPTIONS\b/);
+  assert.doesNotMatch(behavioralTest, /run-child\.js/);
   assert.doesNotMatch(behavioralTest, /Get-ProcessEnvironmentVariableExact\b/);
 });
 

@@ -6,6 +6,8 @@ $helperPath = Join-Path $repoRoot "scripts\dev\start_process_with_environment_ov
 $launcherPath = Join-Path $repoRoot "scripts\dev\launch_split_stack.ps1"
 . $helperPath
 
+$childWaitTimeoutMs = 15000
+
 function Assert-True {
     param([bool]$Condition, [string]$Message)
     if (-not $Condition) { throw $Message }
@@ -47,13 +49,24 @@ function Assert-SafeProcessCommands {
 }
 
 function Assert-ContractRejects {
-    param([string]$Path)
+    param(
+        [string]$Path,
+        [string]$ExpectedMessageSubstring
+    )
+
+    $message = $null
     try {
         Assert-SafeProcessCommands -Path $Path | Out-Null
+        throw "AST contract accepted a forbidden process launch."
     } catch {
-        return
+        $message = $_.Exception.Message
+        if ($message -eq "AST contract accepted a forbidden process launch.") {
+            throw
+        }
     }
-    throw "AST contract accepted a forbidden process launch."
+    Assert-True (
+        $message -and $message.Contains($ExpectedMessageSubstring)
+    ) "Contract rejection mismatch: $message"
 }
 
 function Assert-ParentUnchanged {
@@ -66,6 +79,21 @@ function Assert-ParentUnchanged {
     )
     Assert-True ($present -ceq "synthetic-parent") "Parent present value changed."
     Assert-True ($null -eq $absent) "Parent absent variable was created."
+}
+
+function Stop-ChildProcessIfNeeded {
+    param([Diagnostics.Process]$Process)
+
+    if ($null -eq $Process) { return }
+    try {
+        if (-not $Process.HasExited) {
+            $Process.Kill()
+            $Process.WaitForExit(5000) | Out-Null
+        }
+    } catch {
+    } finally {
+        $Process.Dispose()
+    }
 }
 
 Assert-True (
@@ -99,17 +127,17 @@ foreach ($forbidden in @(
 $suffix = [Guid]::NewGuid().ToString("N").ToUpperInvariant()
 $presentName = "ABIGAIL_TEST_CHILD_ENV_PRESENT_$suffix"
 $absentName = "ABIGAIL_TEST_CHILD_ENV_ABSENT_$suffix"
-$scriptName = "ABIGAIL_TEST_CHILD_SCRIPT_$suffix"
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("abigail-child-env-" + $suffix)
 New-Item -ItemType Directory -Path $tempRoot | Out-Null
+$childProcess = $null
 
 try {
     $directFixture = Join-Path $tempRoot "direct.ps1"
     $splatFixture = Join-Path $tempRoot "splat.ps1"
     Set-Content $directFixture "saps -Env @{ VALUE = 'synthetic' }"
     Set-Content $splatFixture '$p = @{ FilePath = "synthetic.exe" }; start @p'
-    Assert-ContractRejects $directFixture
-    Assert-ContractRejects $splatFixture
+    Assert-ContractRejects $directFixture "forbidden environment parameter in direct.ps1"
+    Assert-ContractRejects $splatFixture "unverifiable splat in splat.ps1"
 
     [Environment]::SetEnvironmentVariable(
         $presentName, "synthetic-parent", [EnvironmentVariableTarget]::Process
@@ -120,33 +148,42 @@ try {
     Assert-ParentUnchanged $presentName $absentName
 
     $outputPath = Join-Path $tempRoot "child.txt"
-    $cmdPath = Join-Path $tempRoot "record-environment.cmd"
-    Set-Content -Encoding ASCII $cmdPath @"
-@echo off
-> "$outputPath" echo present=%$presentName%
->> "$outputPath" echo absent=%$absentName%
+    $childScript = @"
+Set-StrictMode -Version Latest
+`$ErrorActionPreference = 'Stop'
+`$outputPath = '$outputPath'
+`$present = [Environment]::GetEnvironmentVariable('$presentName', 'Process')
+`$absent = [Environment]::GetEnvironmentVariable('$absentName', 'Process')
+Set-Content -LiteralPath `$outputPath -Encoding ASCII -Value @(
+    "present=`$present"
+    "absent=`$absent"
+)
 "@
-    $loaderPath = Join-Path $tempRoot "run-child.js"
-    Set-Content -Encoding ASCII $loaderPath @"
-const { spawnSync } = require('node:child_process');
-const result = spawnSync(process.env.$scriptName, [], { shell: true, stdio: 'inherit' });
-process.exit(result.status === null ? 1 : result.status);
-"@
+    $encodedCommand = [Convert]::ToBase64String(
+        [System.Text.Encoding]::Unicode.GetBytes($childScript)
+    )
+    $powershellExe = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
+    $argumentString = "-NoProfile -NonInteractive -EncodedCommand $encodedCommand"
 
     $overlay = @{}
     $overlay[$presentName] = "synthetic-child-present"
     $overlay[$absentName] = "synthetic-child-absent"
-    $overlay[$scriptName] = $cmdPath
-    $overlay["NODE_OPTIONS"] = "--require=`"$loaderPath`""
-    $node = (Get-Command node).Source
-    $process = Start-ProcessWithEnvironmentOverlay $node $tempRoot $overlay
-    Assert-True ($process -is [Diagnostics.Process]) "Helper returned no Process."
-    $process.WaitForExit()
-    Assert-True ($process.ExitCode -eq 0) "Synthetic child failed."
+    $childProcess = Start-ProcessWithEnvironmentOverlay `
+        -FilePath $powershellExe `
+        -WorkingDirectory $tempRoot `
+        -EnvironmentOverlay $overlay `
+        -Arguments $argumentString
+    Assert-True ($childProcess -is [Diagnostics.Process]) "Helper returned no Process."
+    if (-not $childProcess.WaitForExit($childWaitTimeoutMs)) {
+        throw "Synthetic child did not exit within 15 seconds."
+    }
+    Assert-True ($childProcess.ExitCode -eq 0) "Synthetic child failed."
     $childLines = @(Get-Content $outputPath)
     Assert-True ($childLines -contains "present=synthetic-child-present") "Present overlay missing."
     Assert-True ($childLines -contains "absent=synthetic-child-absent") "Absent overlay missing."
     Assert-ParentUnchanged $presentName $absentName
+    Stop-ChildProcessIfNeeded $childProcess
+    $childProcess = $null
 
     $missing = Join-Path $tempRoot "does-not-exist.exe"
     try {
@@ -184,6 +221,7 @@ process.exit(result.status === null ? 1 : result.status);
         Assert-True ($message -ceq $invalidCase.Message) "Invalid overlay was not rejected before spawn."
     }
 } finally {
+    Stop-ChildProcessIfNeeded $childProcess
     [Environment]::SetEnvironmentVariable(
         $presentName, $null, [EnvironmentVariableTarget]::Process
     )

@@ -12,7 +12,8 @@ function Start-ProcessWithEnvironmentOverlay {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
         [Parameter(Mandatory = $true)][string]$WorkingDirectory,
-        [Parameter(Mandatory = $true)][hashtable]$EnvironmentOverlay
+        [Parameter(Mandatory = $true)][hashtable]$EnvironmentOverlay,
+        [string]$Arguments
     )
 
     $normalizedOverlay = @{}
@@ -40,6 +41,9 @@ function Start-ProcessWithEnvironmentOverlay {
     $startInfo.FileName = $FilePath
     $startInfo.WorkingDirectory = $WorkingDirectory
     $startInfo.UseShellExecute = $false
+    if (-not [string]::IsNullOrEmpty($Arguments)) {
+        $startInfo.Arguments = $Arguments
+    }
     foreach ($name in @($normalizedOverlay.Keys | Sort-Object)) {
         $startInfo.EnvironmentVariables[$name] = $normalizedOverlay[$name]
     }
