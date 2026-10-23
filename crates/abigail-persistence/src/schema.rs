@@ -53,6 +53,29 @@ UPDATE entity_journey_event CONTENT {
 };
 DEFINE INDEX IF NOT EXISTS idx_entity_journey_event_owner ON TABLE entity_journey_event COLUMNS owner_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_journey_event_entity ON TABLE entity_journey_event COLUMNS owner_id, entity_id;
+DEFINE TABLE OVERWRITE entity_journey_event_compaction SCHEMAFULL;
+DEFINE FIELD OVERWRITE owner_id ON TABLE entity_journey_event_compaction TYPE string;
+DEFINE FIELD OVERWRITE entity_id ON TABLE entity_journey_event_compaction TYPE string;
+DEFINE FIELD OVERWRITE successful_skill_uses ON TABLE entity_journey_event_compaction TYPE int
+    ASSERT $value >= 0;
+DEFINE FIELD OVERWRITE confirmed_memories ON TABLE entity_journey_event_compaction TYPE int
+    ASSERT $value >= 0;
+DEFINE FIELD OVERWRITE compacted_events ON TABLE entity_journey_event_compaction TYPE array<object>;
+DEFINE FIELD OVERWRITE compacted_events.*.record_id ON TABLE entity_journey_event_compaction TYPE string;
+DEFINE FIELD OVERWRITE compacted_events.*.digest ON TABLE entity_journey_event_compaction TYPE string;
+DEFINE FIELD OVERWRITE created_at ON TABLE entity_journey_event_compaction TYPE string;
+DEFINE FIELD OVERWRITE updated_at ON TABLE entity_journey_event_compaction TYPE string;
+UPDATE entity_journey_event_compaction CONTENT {
+    owner_id: owner_id,
+    entity_id: entity_id,
+    successful_skill_uses: successful_skill_uses,
+    confirmed_memories: confirmed_memories,
+    compacted_events: compacted_events,
+    created_at: created_at,
+    updated_at: updated_at
+};
+DEFINE INDEX IF NOT EXISTS idx_entity_journey_event_compaction_owner ON TABLE entity_journey_event_compaction COLUMNS owner_id;
+DEFINE INDEX IF NOT EXISTS idx_entity_journey_event_compaction_entity ON TABLE entity_journey_event_compaction COLUMNS owner_id, entity_id UNIQUE;
 DEFINE TABLE IF NOT EXISTS migration_log SCHEMALESS;
 DEFINE TABLE IF NOT EXISTS job_record SCHEMALESS;
 DEFINE TABLE IF NOT EXISTS reflection_run SCHEMALESS;

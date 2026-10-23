@@ -320,6 +320,19 @@ arguments/results or memory content. Unknown event kinds remain valid ordinary
 outbox records but do not create or advance a journey. Projection merges
 durable Entity facts and event counts by per-counter maximum.
 
+When an Entity has more than 1,024 redacted journey event rows, Hive
+conservatively compacts only rows older than the start of the current UTC
+calendar quarter. One owner-scoped, schema-full snapshot retains the projected
+skill/memory totals plus each exact Runtime record ID and a canonical digest of
+its closed metadata. It never retains the event payload, identifiers from that
+payload, prose, model/tool results, memory content, or Soul Forge scoring data.
+Hive saves the snapshot before deleting represented rows and deduplicates any
+rows left by interruption. Exact retries remain acknowledged, while reuse of a
+compacted ID with different closed metadata fails closed. A compaction failure
+after the projection is durable emits only fixed redacted guidance, does not
+turn acknowledged activity into a failed retry, and is retried by later
+reconciliation.
+
 Quest progress is saved in the defaulted Genesis `quest` field. Each Entity's
 durable counters and badges live in Hive-owned `entity_journey`, so they outlive
 an expired Genesis record. Suggested first quests remain copy only: no quest
