@@ -81,7 +81,7 @@ reqwest = { version = "0.13", features = ["json", "stream"] }
 abigail-auth = { path = "crates/abigail-auth" }
 axum = "0.7"
 clap = { version = "4", features = ["derive"] }
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.7", features = ["cors"] }
 hive-core = { path = "crates/hive-core" }
 entity-core = { path = "crates/entity-core" }
 entity-chat = { path = "crates/entity-chat" }
