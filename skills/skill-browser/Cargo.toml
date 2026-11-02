@@ -15,7 +15,8 @@ tokio.workspace = true
 tracing.workspace = true
 base64.workspace = true
 sha2.workspace = true
-playwright-rs = "=0.15.0"
+# Keep exact pin; 0.20.1 clears vulnerable zip ^8 (RUSTSEC-2026-0367/0368/0369).
+playwright-rs = "=0.20.1"
 
 [dev-dependencies]
 tempfile = "3"
