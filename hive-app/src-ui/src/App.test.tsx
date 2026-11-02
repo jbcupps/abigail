@@ -98,6 +98,19 @@ vi.mock("./components/GenesisEntityPortrait", () => ({
   },
 }));
 
+vi.mock("./lib/questClient", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./lib/questClient")>();
+  const { entityJourneyFixture, questCatalogFixture } = await import("./test/questFixture");
+  return {
+    ...actual,
+    getQuestCatalog: vi.fn(async () => questCatalogFixture()),
+    getEntityJourney: vi.fn(async (entityId: string) => entityJourneyFixture({
+      entity_id: entityId,
+      name: entityId === "ada" ? "Ada" : "Nova",
+    })),
+  };
+});
+
 describe("Abigail Hive app", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -149,6 +162,19 @@ describe("Abigail Hive app", () => {
     expect(screen.getByText("Entities (1)")).toBeInTheDocument();
     expect(screen.getByText("Ada")).toBeInTheDocument();
     expect(mocks.showAppWindow).toHaveBeenCalledOnce();
+  });
+
+  it("opens the post-creation Journey panel from a born Entity chip", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /skip/i }));
+    await screen.findByRole("heading", { name: "Abigail Hive" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open Ada's Journey" }));
+    expect(await screen.findByRole("dialog", { name: "Ada's Journey" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Seasonal quests" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /send/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Ada's Journey" })).not.toBeInTheDocument());
   });
 
   it("confirms workspace switches and ignores a superseded workspace close", async () => {

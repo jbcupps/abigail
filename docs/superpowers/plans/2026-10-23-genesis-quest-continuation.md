@@ -40,7 +40,7 @@
 - Produces: `migrateLegacyFirstSignal(entityId, request): Promise<LegacyMigrationResult>`
 - Produces: `POST /v1/entities/:id/journey/legacy-first-signal`
 
-- [ ] **Step 1: Write strict frontend decoder tests**
+- [x] **Step 1: Write strict frontend decoder tests**
 
 Cover the exact historical v1 session-storage and v2 local-storage shapes,
 malformed-byte retention, conflicting-record retention, keyed receipt lookup,
@@ -55,7 +55,7 @@ npx vitest run src/lib/legacyFirstSignal.test.ts
 
 Expected: FAIL because `legacyFirstSignal.ts` does not exist.
 
-- [ ] **Step 2: Implement the read-only decoder and candidate resolver**
+- [x] **Step 2: Implement the read-only decoder and candidate resolver**
 
 Use the historical keys and closed profile:
 
@@ -73,7 +73,7 @@ Map it to canonical Presence with `crest: "orbit"` and `motion: "calm"`.
 Never POST creation. Keyed attempts may only resolve a `complete` receipt;
 unkeyed attempts return exact-name, non-Hive, post-baseline candidates.
 
-- [ ] **Step 3: Write failing Hive migration tests**
+- [x] **Step 3: Write failing Hive migration tests**
 
 In `journey.rs`, test:
 
@@ -94,21 +94,21 @@ cargo test -p hive-daemon journey::tests::legacy_first_signal
 
 Expected: FAIL because the migration API and ledger do not exist.
 
-- [ ] **Step 4: Implement the migration ledger and route**
+- [x] **Step 4: Implement the migration ledger and route**
 
 Add a schema-full `genesis_legacy_migration` table containing only owner,
 Entity, request digest, state, and timestamps. Compose Presence server-side,
 award applicable badges monotonically, and mark complete only after both
 canonical writes succeed. Hash the opaque old attempt into the record ID.
 
-- [ ] **Step 5: Add the explicit recovery panel**
+- [x] **Step 5: Add the explicit recovery panel**
 
 `GenesisFirstSignal` must show the retained old brief, explain candidate
 ambiguity, offer Check/Review/Migrate actions, and block a new launch while
 unresolved. Clear only the exact old journal after a successful canonical
 response; write a resolution marker before removing v1 session storage.
 
-- [ ] **Step 6: Run focused migration suites**
+- [x] **Step 6: Run focused migration suites**
 
 ```bash
 cargo test -p abigail-persistence journey
@@ -118,7 +118,7 @@ cd hive-app/src-ui && npx vitest run src/lib/legacyFirstSignal.test.ts src/compo
 
 Expected: all pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/abigail-persistence/src/schema.rs crates/hive-daemon/src hive-app/src-ui/src docs/ENTITY_GENESIS.md
@@ -139,7 +139,7 @@ git commit -m "feat(genesis): migrate legacy First Signal journeys"
 - Produces: `RuntimeOutbox::quarantine_diagnostics()`
 - Produces: `GET /v1/outbox/quarantine`
 
-- [ ] **Step 1: Write failing serialization and route tests**
+- [x] **Step 1: Write failing serialization and route tests**
 
 Assert the exact keys are `record_id`, `kind`, `quarantined_at_utc`, and
 `reason`. Recursively reject `weights`, scoring axes, `message`, `reply`,
@@ -154,13 +154,13 @@ cargo test -p entity-daemon quarantine_diagnostic
 
 Expected: FAIL because the projection is absent.
 
-- [ ] **Step 2: Implement the narrow projection and endpoint**
+- [x] **Step 2: Implement the narrow projection and endpoint**
 
 Map persisted quarantine rows into the public DTO while retaining the full
 reservation only inside `RuntimeOutbox`. Keep the reason fixed and sort by
 quarantine timestamp and record ID for deterministic diagnostics.
 
-- [ ] **Step 3: Run focused tests and commit**
+- [x] **Step 3: Run focused tests and commit**
 
 ```bash
 cargo test -p entity-core -p entity-daemon quarantine
@@ -177,7 +177,7 @@ git commit -m "feat(runtime): add redacted journey quarantine diagnostics"
 **Interfaces:**
 - Produces test-only audit of built-in scenarios; no public scoring API.
 
-- [ ] **Step 1: Add the failing balance audit**
+- [x] **Step 1: Add the failing balance audit**
 
 For every scenario and ordered pair of choices, assert neither choice is at
 least as high on every internal factor and strictly higher on one. Also assert
@@ -191,12 +191,12 @@ cargo test -p soul-forge built_in_scenarios_offer_tradeoffs_without_a_dominant_a
 
 Expected: FAIL on unequal influence totals.
 
-- [ ] **Step 2: Rebalance internal values minimally**
+- [x] **Step 2: Rebalance internal values minimally**
 
 Adjust only built-in internal calibration values. Do not modify any presentation
 DTO, label, description, log, or response.
 
-- [ ] **Step 3: Document the no-best-answer principle and commit**
+- [x] **Step 3: Document the no-best-answer principle and commit**
 
 ```bash
 cargo test -p soul-forge
@@ -223,25 +223,25 @@ git commit -m "fix(ethics): keep every Soul Forge trial answer viable"
 - Produces: `getRuntimePresence(baseUrl, signal)`
 - Produces: `PresenceCrest`
 
-- [ ] **Step 1: Write failing access and UI tests**
+- [x] **Step 1: Write failing access and UI tests**
 
 Assert a Runtime lease reads only its own Presence, desktop writes remain
 unchanged, the header renders the canonical crest, missing Presence is harmless,
 and `matchMedia("(prefers-reduced-motion: reduce)")` changes animated motion to
 `still`.
 
-- [ ] **Step 2: Add the Entity-scoped proxy**
+- [x] **Step 2: Add the Entity-scoped proxy**
 
 Allow `GET /v1/entities/:id/presence` under `Access::Entity`, add a typed
 lease-authenticated Hive client call, and expose it from Entity daemon without
 accepting an Entity ID from the browser.
 
-- [ ] **Step 3: Add the compact header crest**
+- [x] **Step 3: Add the compact header crest**
 
 Render the canonical SVG beside the Entity name. Keep every visual state
 text-redundant and listen for live reduced-motion preference changes.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 cargo test -p hive-daemon access
@@ -262,26 +262,26 @@ git commit -m "feat(runtime): carry canonical Presence into Entity chat"
 - Produces: `JourneyEventCompactionRecord`
 - Produces: `JourneyStore::compact_runtime_events`
 
-- [ ] **Step 1: Write failing compaction safety tests**
+- [x] **Step 1: Write failing compaction safety tests**
 
 Cover projection equivalence, snapshot-before-delete interruption, replay,
 collision detection, owner isolation, season-boundary retention, and recursive
 content/scoring leak rejection.
 
-- [ ] **Step 2: Implement compact snapshots**
+- [x] **Step 2: Implement compact snapshots**
 
 Store counters plus exact record-ID/digest pairs in one schema-full,
 owner-scoped record per Entity. Write/merge the snapshot before deleting covered
 rows. Load the snapshot during event prevalidation and projection.
 
-- [ ] **Step 3: Add conservative automatic triggering**
+- [x] **Step 3: Add conservative automatic triggering**
 
 After successful projection, compact only when the row threshold is exceeded
 and only rows older than the current UTC quarter start. A compaction failure
 must not fail outbox acknowledgement after the projection is durable; report it
 as a redacted warning and retry on a later reconciliation.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 cargo test -p abigail-persistence journey
@@ -308,25 +308,25 @@ git commit -m "feat(journey): compact old redacted activity events"
 - Produces: `LongArcQuestView`
 - Adds: `long_arc_quests` to catalog/journey views.
 
-- [ ] **Step 1: Write failing core and daemon tests**
+- [x] **Step 1: Write failing core and daemon tests**
 
 Assert stable UTC-quarter boundaries, Entity seasonal progress, owner-scoped
 family aggregation across at least two Entities, reset at a new season, and
 content-free/weight-free serialization.
 
-- [ ] **Step 2: Implement current-season activity summaries**
+- [x] **Step 2: Implement current-season activity summaries**
 
 Filter durable mentor-turn metadata timestamps to the current quarter. Seasonal
 quests must not read conversation content or redacted journey event timestamps.
 Aggregate family counts only over registered non-Hive Entities owned by the
 current household.
 
-- [ ] **Step 3: Render long-arc quest cards**
+- [x] **Step 3: Render long-arc quest cards**
 
 Show title, scope, season label, progress, and completion after awakening.
 Include the existing no-auto-send copy and no action button.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 cargo test -p hive-core genesis_quest
@@ -346,7 +346,7 @@ git commit -m "feat(journey): add seasonal and family quests"
 - Modify: `.github/workflows/ci.yml`
 - Modify: `README.md`
 
-- [ ] **Step 1: Write failing wiring and Windows PowerShell 5.1 contracts**
+- [x] **Step 1: Write failing wiring and Windows PowerShell 5.1 contracts**
 
 Keep the Node contract focused on helper wiring, required Hive/Runtime child
 variables, documentation, and CI execution. The Windows PowerShell contract
@@ -354,7 +354,7 @@ parses launcher/helper syntax with the PowerShell AST, rejects
 `Start-Process`/`start`/`saps` environment parameters and splats, starts a
 synthetic child, and verifies its overlay without changing parent values.
 
-- [ ] **Step 2: Implement the PowerShell 5.1-safe helper**
+- [x] **Step 2: Implement the PowerShell 5.1-safe helper**
 
 Build a fresh `System.Diagnostics.ProcessStartInfo`, set
 `UseShellExecute = $false`, and apply only required nonempty values through its
@@ -364,7 +364,7 @@ empty, and absent parent variables remain exact by construction on success and
 failure. Do not use P/Invoke, `Add-Type`, parent writes, restore logic, or value
 logging.
 
-- [ ] **Step 3: Add the contract to CI and commit**
+- [x] **Step 3: Add the contract to CI and commit**
 
 ```bash
 node --test scripts/tests/test_launch_split_stack_contract.mjs
@@ -378,20 +378,20 @@ git commit -m "fix(windows): launch split desktop apps on PowerShell 5"
 - Modify if needed: `docs/ENTITY_GENESIS.md`
 - Modify if needed: draft pull-request description.
 
-- [ ] **Step 1: Format and lint**
+- [x] **Step 1: Format and lint**
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --exclude abigail-app -- -D warnings
 ```
 
-- [ ] **Step 2: Run the full Rust suite**
+- [x] **Step 2: Run the full Rust suite**
 
 ```bash
 cargo test --workspace --exclude abigail-app
 ```
 
-- [ ] **Step 3: Run every UI suite and production build**
+- [x] **Step 3: Run every UI suite and production build**
 
 ```bash
 cd hive-app/src-ui && npm test && npm run build
@@ -399,7 +399,7 @@ cd ../../entity-runtime-app/src-ui && npm test && npm run build
 cd ../../tauri-app/src-ui && npm test && npm run build && npm run check:command-contract
 ```
 
-- [ ] **Step 4: Run Windows and leak contracts**
+- [x] **Step 4: Run Windows and leak contracts**
 
 ```bash
 node --test scripts/tests/test_launch_split_stack_contract.mjs
@@ -407,7 +407,7 @@ cargo test -p hive-daemon user_facing_production_routes_never_expose_hidden_weig
 cargo test -p hive-daemon router_user_surfaces_hide_weights_and_full_birth_requires_matching_runtime
 ```
 
-- [ ] **Step 5: Review, commit any verification-only docs, push, and update the draft PR**
+- [x] **Step 5: Review, commit any verification-only docs, push, and update the draft PR**
 
 ```bash
 git status --short

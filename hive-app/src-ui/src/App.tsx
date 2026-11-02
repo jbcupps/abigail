@@ -7,6 +7,7 @@ import GenesisNotifications from "./components/GenesisNotifications";
 import GenesisMediaConnections from "./components/GenesisMediaConnections";
 import GenesisEntityPortrait, { useGenesisEntities } from "./components/GenesisEntityPortrait";
 import EntityJourneyChip from "./components/EntityJourneyChip";
+import EntityJourneyPanel from "./components/EntityJourneyPanel";
 import ProviderWizard from "./components/ProviderWizard";
 import ChatPanel from "./components/ChatPanel";
 import { completeEntitySetup, hiveHealth, getStatus, type EntityInfo, type HiveStatus } from "./lib/daemonClient";
@@ -31,6 +32,7 @@ export default function App() {
   const [genesisSwitch, setGenesisSwitch] = useState<GenesisLaunchRequest | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
+  const [journeyEntity, setJourneyEntity] = useState<{ id: string; name: string } | null>(null);
   const openingRef = useRef(false);
   const activeGenesisLaunch = useRef(0);
   const genesisSwitchTrigger = useRef<HTMLElement | null>(null);
@@ -277,7 +279,13 @@ export default function App() {
                               ? "Ready"
                               : "Setup pending"}
                   </div>
-                  {entity.birth_complete && <EntityJourneyChip entityId={entity.id} refreshKey={cardsKey} />}
+                  {entity.birth_complete && (
+                    <EntityJourneyChip
+                      entityId={entity.id}
+                      refreshKey={cardsKey}
+                      onOpen={() => setJourneyEntity({ id: entity.id, name: entity.name })}
+                    />
+                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -330,6 +338,13 @@ export default function App() {
 
       {wizardOpen && (
         <ProviderWizard onClose={closeWizard} onComplete={refreshStatus} />
+      )}
+      {journeyEntity && (
+        <EntityJourneyPanel
+          entityId={journeyEntity.id}
+          entityName={journeyEntity.name}
+          onClose={() => setJourneyEntity(null)}
+        />
       )}
       </div>
       {genesisSwitch && (

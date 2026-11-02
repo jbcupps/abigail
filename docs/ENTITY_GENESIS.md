@@ -378,6 +378,14 @@ with no quest action or automatic send. Reaching 30 family messages with only
 one contributing Entity explicitly asks for a second Entity instead of
 claiming completion.
 
+After awakening, the same mentoring arc remains available outside Genesis. A
+born Entity card shows a compact Journey chip (bond level, badge count, durable
+activity and next milestone). Opening it reveals the full post-creation Journey
+panel: bond tier path, activity counters, next milestone, seasonal/family
+quests, suggested first-quest copy and the badge shelf. The panel is
+presentation-only—no send buttons, no skill execution and no Soul Forge scoring
+fields. Presence cosmetics remain display-only.
+
 ### 4. Model setup gate
 
 An Entity card linked to unfinished Genesis while Hive reports
@@ -438,6 +446,15 @@ Genesis Quest.
 Relationship visualization and dedicated voice casting remain later enhancements,
 as requested in the specification's staged-innovation section. Relationships and
 voice descriptions are already editable canonical fields.
+
+Engineering follow-ups that remain after the 2026-10-23 continuation slices:
+
+- Split `crates/hive-daemon/src/journey.rs` by migration, compaction and season
+  responsibility before adding another major journey subsystem.
+- Run the committed Windows PowerShell 5.1 launcher behavioral gate in Windows CI
+  and complete installed WebView/desktop acceptance before promotion.
+- Segment compacted ID/digest history only if measured household scale justifies
+  it.
 
 ## Final-review source verification — 2026-10-22
 
