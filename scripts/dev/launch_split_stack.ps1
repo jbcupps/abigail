@@ -12,6 +12,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "start_process_with_environment_overlay.ps1")
+
 function Get-WorkspaceRoot {
     return (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 }
@@ -191,23 +193,21 @@ $mode = "desktop"
 
 if ($desktopBuildSucceeded -and -not $SkipDesktopApps) {
     Write-Host "Launching Abigail Hive desktop shell..."
-    $hiveAppProc = Start-Process -FilePath $hiveAppExe `
+    $hiveAppProc = Start-ProcessWithEnvironmentOverlay -FilePath $hiveAppExe `
         -WorkingDirectory (Join-Path $workspaceRoot "hive-app") `
-        -Environment @{
+        -EnvironmentOverlay @{
             ABIGAIL_HIVE_URL = $hiveUrl
             ABIGAIL_DATA_DIR = $dataRoot
             CARGO_TARGET_DIR = $targetDir
-        } `
-        -PassThru
+        }
 
     Write-Host "Launching Abigail Entity Runtime desktop shell..."
-    $runtimeAppProc = Start-Process -FilePath $runtimeAppExe `
+    $runtimeAppProc = Start-ProcessWithEnvironmentOverlay -FilePath $runtimeAppExe `
         -WorkingDirectory (Join-Path $workspaceRoot "entity-runtime-app") `
-        -Environment @{
+        -EnvironmentOverlay @{
             ABIGAIL_ENTITY_URL = $runtimeUrl
             CARGO_TARGET_DIR = $targetDir
-        } `
-        -PassThru
+        }
 } elseif (-not $NoBrowserFallback) {
     $mode = "browser_fallback"
     Write-Warning "Desktop shells are unavailable on this machine right now; starting the browser harness instead."

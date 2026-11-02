@@ -1,5 +1,9 @@
 import { resolveHiveConnection } from "./connection";
 import { genesisRequest } from "./genesisClient";
+import type {
+  LegacyMigrationRequest,
+  LegacyMigrationResult,
+} from "./legacyFirstSignal";
 
 export type QuestStageId = "reservation" | "soul" | "ethics" | "instincts" | "presence" | "birth" | "awakening";
 export type BadgeId = "first_spark" | "named" | "purposeful" | "soul_shaper" | "storyteller" | "trial_walker" | "instinct_keeper" | "presence_chosen" | "curator" | "first_light" | "first_words" | "getting_acquainted" | "kindred" | "hearth_regular" | "trusted_companion" | "returning_companion" | "seasoned_companion" | "steady_rhythm" | "hearth_season" | "constellation_keeper" | "skill_explorer" | "skill_weaver" | "memory_keeper" | "living_archive";
@@ -26,11 +30,23 @@ export interface QuestView {
 }
 export interface TemperamentCard { id: string; title: string; temperament: Temperament; tagline: string; description: string; communication_style: string; stats: Record<string, number> }
 export interface Trial { id: string; title: string; description: string; choices: { id: string; label: string; description: string }[] }
+export type LongArcQuestId = "seasonal_shared_stories" | "family_constellation";
+export type LongArcQuestScope = "entity" | "family";
+export interface LongArcQuestDefinition {
+  id: LongArcQuestId; title: string; summary: string; scope: LongArcQuestScope;
+  metric: "mentor_messages"; target: number; minimum_entities: number;
+}
+export interface LongArcQuestView {
+  quest_id: LongArcQuestId; season_id: string; season_label: string;
+  starts_at: string; ends_at_exclusive: string; progress: number;
+  active_entities: number; complete: boolean; available: boolean;
+}
 export interface QuestCatalog {
   stages: { stage: QuestStageId; title: string; summary: string; optional: boolean }[];
   badges: BadgeDefinition[]; tiers: BondTierDefinition[]; temperament_cards: TemperamentCard[]; trials: Trial[]; instincts: string;
   palettes: { palette: Palette; unlocked_by: BadgeId | null }[];
   crests: { crest: Crest; unlocked_by: BadgeId | null }[];
+  long_arc_quests: LongArcQuestDefinition[];
 }
 export interface FirstQuest { id: string; title: string; prompt: string; milestone: BadgeId; target: number; complete: boolean }
 export interface CertificateView { archetype: string; epithet: string; sigil: string; birth_path: string; scoring_version: string; issued_at_utc: string; signature_verified: boolean }
@@ -38,7 +54,8 @@ export interface EntityJourney {
   entity_id: string; name: string; level: BondLevel; badges: BadgeView[]; mentor_messages: number;
   conversation_sessions: number; active_days: number; active_weeks: number; successful_skill_uses: number; confirmed_memories: number;
   next_milestone: { badge: BadgeId; title: string; metric: JourneyMetric; target: number; progress: number } | null;
-  unlocked: Unlocks; first_quests: FirstQuest[]; presence: PresenceCard | null; certificate: CertificateView | null;
+  unlocked: Unlocks; first_quests: FirstQuest[]; long_arc_quests: LongArcQuestView[];
+  presence: PresenceCard | null; certificate: CertificateView | null;
 }
 
 async function entityRequest<T>(path: string, body?: unknown, method = body === undefined ? "GET" : "PUT"): Promise<T> {
@@ -62,6 +79,14 @@ export function getQuestCatalog(): Promise<QuestCatalog> {
 }
 export const getEntityJourney = (entityId: string) => entityRequest<EntityJourney>(`${encodeURIComponent(entityId)}/journey`);
 export const setEntityPresence = (entityId: string, choice: PresenceChoice) => entityRequest<PresenceCard>(`${encodeURIComponent(entityId)}/presence`, choice);
+export const migrateLegacyFirstSignal = (
+  entityId: string,
+  request: LegacyMigrationRequest,
+) => entityRequest<LegacyMigrationResult>(
+  `${encodeURIComponent(entityId)}/journey/legacy-first-signal`,
+  request,
+  "POST",
+);
 
 export const PALETTES: Record<Palette, { label: string; colors: [string, string] }> = {
   aether: { label: "Aether", colors: ["#8f7cf7", "#58c4dc"] },

@@ -3,10 +3,11 @@
 use abigail_skills::{HiveAgentInfo, HiveOperations};
 use async_trait::async_trait;
 use hive_core::{
-    ApiEnvelope, CreateEntityResponse, EntityInfo, ForgeApprovalJobsResponse, OutboxSyncRequest,
-    OutboxSyncResponse, ProviderConfig, RuntimeHeartbeatRequest, RuntimeHeartbeatResponse,
-    RuntimeRegistrationRequest, RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus,
-    SecretListResponse, SecretValueResponse, SkillAssignmentsResponse,
+    genesis_quest::PresenceCard, ApiEnvelope, CreateEntityResponse, EntityInfo,
+    ForgeApprovalJobsResponse, OutboxSyncRequest, OutboxSyncResponse, ProviderConfig,
+    RuntimeHeartbeatRequest, RuntimeHeartbeatResponse, RuntimeRegistrationRequest,
+    RuntimeSessionLease, RuntimeSessionRequest, RuntimeSessionStatus, SecretListResponse,
+    SecretValueResponse, SkillAssignmentsResponse,
 };
 
 /// HTTP client for fetching data from the Hive daemon.
@@ -133,6 +134,21 @@ impl HiveClient {
         if resp.ok {
             resp.data
                 .ok_or_else(|| anyhow::anyhow!("Empty data in entity response"))
+        } else {
+            Err(anyhow::anyhow!(
+                "Hive error: {}",
+                resp.error.unwrap_or_default()
+            ))
+        }
+    }
+
+    /// Fetch the canonical, cosmetic Presence for this leased Entity.
+    pub async fn get_presence(&self, entity_id: &str) -> anyhow::Result<Option<PresenceCard>> {
+        let url = format!("{}/v1/entities/{}/presence", self.base_url, entity_id);
+        let resp: ApiEnvelope<Option<PresenceCard>> = self.get(&url).send().await?.json().await?;
+        if resp.ok {
+            // A successful `null` is the canonical "Presence not chosen" state.
+            Ok(resp.data.flatten())
         } else {
             Err(anyhow::anyhow!(
                 "Hive error: {}",

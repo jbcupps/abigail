@@ -1,21 +1,15 @@
 import { useEffect, useState } from "react";
 import type { FieldUpdate, GenesisSession } from "../lib/genesisClient";
-import { CRESTS, getEntityJourney, getQuestCatalog, MOTIONS, PALETTES, TEMPERAMENTS, TRAIT_LABELS, type BadgeView, type BondTierDefinition, type EntityJourney, type PresenceChoice, type QuestCatalog, type QuestStageId, type QuestView } from "../lib/questClient";
+import { CRESTS, getEntityJourney, getQuestCatalog, MOTIONS, PALETTES, TEMPERAMENTS, TRAIT_LABELS, type PresenceChoice, type QuestCatalog, type QuestStageId, type QuestView } from "../lib/questClient";
 import PresenceCrest from "./PresenceCrest";
+import {
+  BadgeShelf,
+  JourneyProgressBody,
+  QuestLevel,
+  TierPath,
+} from "./JourneyViews";
 
 type Change = (action: string, args?: Record<string, unknown>) => Promise<GenesisSession | undefined>;
-
-function activityLabel(metric: NonNullable<EntityJourney["next_milestone"]>["metric"], count: number) {
-  const labels = {
-    mentor_messages: ["message", "messages"],
-    conversation_sessions: ["session", "sessions"],
-    active_days: ["active day", "active days"],
-    active_weeks: ["active week", "active weeks"],
-    successful_skill_uses: ["skill use", "skill uses"],
-    confirmed_memories: ["confirmed memory", "confirmed memories"],
-  } as const;
-  return `${count} ${labels[metric][count === 1 ? 0 : 1]}`;
-}
 
 function presenceChoice(card: QuestView["presence"]): PresenceChoice {
   return card ? {
@@ -26,30 +20,6 @@ function presenceChoice(card: QuestView["presence"]): PresenceChoice {
   } : { temperament: "gentle", identity: "aether", crest: "orbit", motion: "calm" };
 }
 
-export function QuestLevel({ quest }: { quest: QuestView }) {
-  const { level } = quest;
-  const span = level.next_level_at === null ? 1 : level.next_level_at - level.level_floor;
-  const progress = level.next_level_at === null ? 1 : (level.xp - level.level_floor) / span;
-  return <div className="quest-level">
-    <span><strong>Level {level.level} · {level.title}</strong><span>{level.xp} XP{level.next_level_at !== null ? ` · ${level.next_level_at - level.xp} to next` : ""}</span></span>
-    <progress max={1} value={progress} aria-label={`Bond level progress, ${level.xp} XP`} />
-  </div>;
-}
-
-export function TierPath({ tiers, level }: { tiers: BondTierDefinition[]; level: QuestView["level"] }) {
-  let current = 0;
-  tiers.forEach((tier, index) => { if (tier.floor <= level.xp) current = index; });
-  return <ol className="quest-tier-path" aria-label="Bond tier path">
-    {tiers.map((tier, index) => {
-      const state = index === current ? "Current" : index === current + 1 ? "Next" : null;
-      const label = `${tier.title} · ${tier.floor} XP${state ? ` · ${state}` : ""}`;
-      return <li key={tier.level} className={state ? `is-${state.toLowerCase()}` : ""} aria-label={label} aria-current={state === "Current" ? "step" : undefined}>
-        <strong>{tier.title}</strong><small>{tier.floor} XP{state ? ` · ${state}` : ""}</small>
-      </li>;
-    })}
-  </ol>;
-}
-
 /** Always-visible progress through the seven stages. */
 export function QuestRail({ quest, onSelect }: { quest: QuestView; onSelect: (stage: QuestStageId) => void }) {
   return <nav className="quest-rail" aria-label={`Genesis quest, ${quest.completed} of ${quest.stages.length} stages complete`}>
@@ -58,20 +28,11 @@ export function QuestRail({ quest, onSelect }: { quest: QuestView; onSelect: (st
         <span className="quest-node" aria-hidden="true" /><span>{stage.title}</span><small>{stage.complete ? "Complete" : stage.optional ? "Optional" : stage.detail}</small>
       </button>
     </li>)}</ol>
-    <QuestLevel quest={quest} />
+    <QuestLevel level={quest.level} />
   </nav>;
 }
 
-export function BadgeShelf({ badges }: { badges: BadgeView[] }) {
-  const earned = badges.filter((badge) => badge.earned_at).length;
-  return <section className="quest-badges" aria-label="Badges">
-    <h4>Badges · {earned} of {badges.length}</h4>
-    <ul>{badges.map((badge) => <li key={badge.badge} className={badge.earned_at ? "is-earned" : ""} title={badge.hint}>
-      <span className="quest-badge-mark" aria-hidden="true">{badge.earned_at ? "✦" : "·"}</span>
-      <span><strong>{badge.title}</strong><small>{badge.earned_at ? `Earned · ${badge.xp} XP` : badge.hint}</small></span>
-    </li>)}</ul>
-  </section>;
-}
+export { BadgeShelf, TierPath, QuestLevel };
 
 export default function GenesisQuest({ session, busy, stage, onStage, change, onSave, onAwaken, onMeet }: {
   session: GenesisSession & { quest: QuestView }; busy: boolean; stage: QuestStageId; onStage: (stage: QuestStageId) => void;
@@ -80,7 +41,7 @@ export default function GenesisQuest({ session, busy, stage, onStage, change, on
   const { quest, definition } = session;
   const [catalog, setCatalog] = useState<QuestCatalog | null>(null);
   const [catalogError, setCatalogError] = useState("");
-  const [journey, setJourney] = useState<EntityJourney | null>(null);
+  const [journey, setJourney] = useState<Awaited<ReturnType<typeof getEntityJourney>> | null>(null);
   const [reservation, setReservation] = useState({ name: definition.name, purpose: definition.purpose });
   const [presence, setPresence] = useState<PresenceChoice>(() => presenceChoice(quest.presence));
   const awakened = Boolean(session.awakening && definition.entity_id);
@@ -150,23 +111,20 @@ export default function GenesisQuest({ session, busy, stage, onStage, change, on
         {awakened ? <button type="button" className="genesis-primary" disabled={busy} onClick={onMeet}>Meet {definition.name}</button> : <button type="button" className="genesis-primary" disabled={busy || !quest.stages[0].complete} onClick={onAwaken}>Awaken {definition.name || "Entity"}</button>}
       </>;
       case "awakening": {
-        const milestoneDefinition = journey?.next_milestone ? catalog.badges.find((badge) => badge.badge === journey.next_milestone?.badge) : undefined;
-        const milestone = journey?.next_milestone;
-        const metric = milestoneDefinition?.requirement?.metric ?? milestone?.metric;
-        return awakened ? <>
-          <TierPath tiers={catalog.tiers} level={journey?.level ?? quest.level} />
-          {journey && <dl className="quest-activity" aria-label="Journey activity">
-            <div><dt>Conversation</dt><dd>{activityLabel("mentor_messages", journey.mentor_messages)}</dd></div>
-            <div><dt>Returns</dt><dd>{activityLabel("conversation_sessions", journey.conversation_sessions)}</dd></div>
-            <div><dt>Rhythm</dt><dd>{activityLabel("active_days", journey.active_days)} · {activityLabel("active_weeks", journey.active_weeks)}</dd></div>
-            <div><dt>Skills</dt><dd>{activityLabel("successful_skill_uses", journey.successful_skill_uses)}</dd></div>
-            <div><dt>Memory</dt><dd>{activityLabel("confirmed_memories", journey.confirmed_memories)}</dd></div>
-          </dl>}
-          {milestone && metric && <div className="quest-milestone"><span>{milestoneDefinition?.title ?? milestone.title}</span><progress max={milestone.target} value={milestone.progress} aria-label={`${milestoneDefinition?.title ?? milestone.title} progress`} /><small>{milestone.progress} of {activityLabel(metric, milestone.target)}</small></div>}
-          <ol className="quest-first">{(journey?.first_quests ?? []).map((item) => <li key={item.id} className={item.complete ? "is-complete" : ""}><strong>{item.title}</strong><p>“{item.prompt}”</p><small>{item.complete ? "Complete" : `Unlocks ${catalog.badges.find((badge) => badge.badge === item.milestone)?.title ?? "a badge"}`}</small></li>)}</ol>
+        if (!awakened) return <p>Awaken {definition.name || "your Entity"} to begin their first quests.</p>;
+        if (!catalog) return <p className="genesis-muted" role="status">{catalogError || "Preparing the quest…"}</p>;
+        if (journey) {
+          return <>
+            <JourneyProgressBody journey={journey} catalog={catalog} />
+            <button type="button" className="genesis-primary" disabled={busy} onClick={onMeet}>Meet {definition.name}</button>
+            <p className="genesis-muted">Nothing is sent for you. Copy a prompt, or say whatever feels right.</p>
+          </>;
+        }
+        return <>
+          <TierPath tiers={catalog.tiers} level={quest.level} />
           <button type="button" className="genesis-primary" disabled={busy} onClick={onMeet}>Meet {definition.name}</button>
           <p className="genesis-muted">Nothing is sent for you. Copy a prompt, or say whatever feels right.</p>
-        </> : <p>Awaken {definition.name || "your Entity"} to begin their first quests.</p>;
+        </>;
       }
     }
   };

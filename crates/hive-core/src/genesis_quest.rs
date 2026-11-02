@@ -173,6 +173,61 @@ pub enum JourneyMetric {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LongArcQuestScope {
+    Entity,
+    Family,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct LongArcQuestDefinition {
+    pub id: &'static str,
+    pub title: &'static str,
+    pub summary: &'static str,
+    pub scope: LongArcQuestScope,
+    pub metric: JourneyMetric,
+    pub target: u64,
+    pub minimum_entities: u64,
+}
+
+pub const LONG_ARC_QUEST_DEFINITIONS: [LongArcQuestDefinition; 2] = [
+    LongArcQuestDefinition {
+        id: "seasonal_shared_stories",
+        title: "Shared Stories",
+        summary: "Share twelve mentor messages with this Entity this season.",
+        scope: LongArcQuestScope::Entity,
+        metric: JourneyMetric::MentorMessages,
+        target: 12,
+        minimum_entities: 1,
+    },
+    LongArcQuestDefinition {
+        id: "family_constellation",
+        title: "Family Constellation",
+        summary: "Share thirty mentor messages across at least two family Entities this season.",
+        scope: LongArcQuestScope::Family,
+        metric: JourneyMetric::MentorMessages,
+        target: 30,
+        minimum_entities: 2,
+    },
+];
+
+/// Content-free progress for one canonical long-arc quest in one UTC quarter.
+/// `ends_at_exclusive` makes the season boundary explicit to every client.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LongArcQuestView {
+    pub quest_id: String,
+    pub season_id: String,
+    pub season_label: String,
+    pub starts_at: String,
+    pub ends_at_exclusive: String,
+    pub progress: u64,
+    pub active_entities: u64,
+    pub complete: bool,
+    pub available: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 pub struct ActivityRequirement {
     pub metric: JourneyMetric,
     pub target: u64,
@@ -1841,6 +1896,72 @@ mod tests {
                 .unwrap()["requirement"],
             json!({"metric":"successful_skill_uses","target":5})
         );
+    }
+
+    #[test]
+    fn long_arc_catalog_is_exact_copy_only_and_scoring_free() {
+        assert_eq!(
+            LONG_ARC_QUEST_DEFINITIONS
+                .iter()
+                .map(|definition| (
+                    definition.id,
+                    definition.scope,
+                    definition.metric,
+                    definition.target,
+                    definition.minimum_entities,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "seasonal_shared_stories",
+                    LongArcQuestScope::Entity,
+                    JourneyMetric::MentorMessages,
+                    12,
+                    1,
+                ),
+                (
+                    "family_constellation",
+                    LongArcQuestScope::Family,
+                    JourneyMetric::MentorMessages,
+                    30,
+                    2,
+                ),
+            ]
+        );
+
+        let encoded = serde_json::to_value(LONG_ARC_QUEST_DEFINITIONS).unwrap();
+        let text = encoded.to_string();
+        for forbidden in [
+            "weights",
+            "deontology",
+            "teleology",
+            "areteology",
+            "welfare",
+            "prompt",
+            "message_content",
+            "model_output",
+            "action",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "long-arc catalog leaked forbidden material: {forbidden}"
+            );
+        }
+
+        let unavailable = serde_json::to_value(LongArcQuestView {
+            quest_id: "family_constellation".into(),
+            season_id: "2026-Q4".into(),
+            season_label: "2026 Q4".into(),
+            starts_at: "2026-10-01T00:00:00Z".into(),
+            ends_at_exclusive: "2027-01-01T00:00:00Z".into(),
+            progress: 0,
+            active_entities: 0,
+            complete: false,
+            available: false,
+        })
+        .unwrap();
+        assert_eq!(unavailable["available"], false);
+        assert!(unavailable.get("error").is_none());
     }
 
     #[test]

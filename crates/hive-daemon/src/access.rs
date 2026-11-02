@@ -54,7 +54,8 @@ pub fn policy(method: &Method, route: &str) -> Access {
             "/v1/entities/:id"
             | "/v1/entities/:id/provider-config"
             | "/v1/entities/:id/assignments"
-            | "/v1/entities/:id/forge-approvals",
+            | "/v1/entities/:id/forge-approvals"
+            | "/v1/entities/:id/presence",
         ) => Entity,
         ("POST", "/v1/entities/:id/persistence")
         | ("GET", "/v1/entities/:id/birth" | "/v1/entities/:id/execution/receipts") => {
@@ -64,6 +65,7 @@ pub fn policy(method: &Method, route: &str) -> Access {
         | ("POST", "/v1/runtime/register" | "/v1/runtime/heartbeat" | "/v1/runtime/outbox/sync") => {
             Runtime
         }
+        ("POST", "/v1/entities/:id/journey/legacy-first-signal") => Desktop,
         _ => Desktop,
     }
 }
@@ -447,6 +449,29 @@ mod tests {
         assert_eq!(birth["ok"], true, "{birth}");
         surfaces.push(("generic birth POST", birth));
 
+        let (status, legacy_migration) = f
+            .send(
+                Method::POST,
+                &format!("/v1/entities/{}/journey/legacy-first-signal", f.entity_id),
+                Some(&desktop),
+                Some(serde_json::json!({
+                    "attempt_key": "opaque-old-attempt",
+                    "original_name": "Route Test",
+                    "purpose": "Help our family notice small wonders.",
+                    "boundaries": "Ask before changing shared plans.",
+                    "presence": {
+                        "temperament": "curious",
+                        "identity": "ember",
+                        "crest": "orbit",
+                        "motion": "calm"
+                    }
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(legacy_migration["ok"], true, "{legacy_migration}");
+        surfaces.push(("legacy First Signal migration POST", legacy_migration));
+
         let (status, journey) = f
             .send(
                 Method::GET,
@@ -540,7 +565,12 @@ mod tests {
             ("GET", "/v1/entities/:id/forge-approvals", Entity),
             ("POST", "/v1/entities/:id/forge-approvals", Desktop),
             ("GET", "/v1/entities/:id/journey", Desktop),
-            ("GET", "/v1/entities/:id/presence", Desktop),
+            (
+                "POST",
+                "/v1/entities/:id/journey/legacy-first-signal",
+                Desktop,
+            ),
+            ("GET", "/v1/entities/:id/presence", Entity),
             ("PUT", "/v1/entities/:id/presence", Desktop),
             ("GET", "/v1/genesis/quest/catalog", Desktop),
             ("POST", "/v1/secrets", HiveAdmin),
@@ -660,6 +690,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn legacy_migration_route_accepts_the_maximum_valid_utf8_request() {
+        let f = fixture();
+        let desktop = f.desktop();
+        let body = serde_json::json!({
+            "attempt_key": "😀".repeat(128),
+            "original_name": "Route Test",
+            "purpose": "😀".repeat(hive_core::genesis_quest::PRESENCE_TEXT_CHARS),
+            "boundaries": "🧭".repeat(hive_core::genesis_quest::PRESENCE_TEXT_CHARS),
+            "presence": {
+                "temperament": "gentle",
+                "identity": "aether",
+                "crest": "orbit",
+                "motion": "calm"
+            }
+        });
+        assert!(
+            body.to_string().len() > 16 * 1024,
+            "fixture no longer exercises the former body limit"
+        );
+
+        let (status, response) = f
+            .send(
+                Method::POST,
+                &format!("/v1/entities/{}/journey/legacy-first-signal", f.entity_id),
+                Some(&desktop),
+                Some(body),
+            )
+            .await;
+
+        assert_eq!(status, StatusCode::OK, "{response}");
+        assert_eq!(response["ok"], true, "{response}");
+        assert_eq!(
+            response["data"]["presence"]["purpose"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count(),
+            hive_core::genesis_quest::PRESENCE_TEXT_CHARS
+        );
+    }
+
+    #[tokio::test]
     async fn family_entity_lease_reaches_only_its_own_runtime_routes() {
         let f = fixture();
         let (other_id, _) = f.state.identity_manager.create_agent("Other").unwrap();
@@ -676,6 +748,7 @@ mod tests {
             "/v1/entities/:id/birth",
             "/v1/entities/:id/provider-config",
             "/v1/entities/:id/assignments",
+            "/v1/entities/:id/presence",
             "/v1/entities/:id/execution/receipts",
             "/v1/runtime/sessions/:lease_id",
             "/v1/secrets/list",
@@ -716,7 +789,22 @@ mod tests {
             (Method::GET, "/v1/status", None),
             (Method::GET, "/v1/genesis/sessions", None),
             (Method::GET, "/v1/entities/:id/journey", None),
-            (Method::GET, "/v1/entities/:id/presence", None),
+            (
+                Method::POST,
+                "/v1/entities/:id/journey/legacy-first-signal",
+                Some(serde_json::json!({
+                    "attempt_key": "opaque-old-attempt",
+                    "original_name": "Route Test",
+                    "purpose": "Help the family",
+                    "boundaries": "Ask first",
+                    "presence": {
+                        "temperament": "gentle",
+                        "identity": "aether",
+                        "crest": "orbit",
+                        "motion": "calm"
+                    }
+                })),
+            ),
             (
                 Method::PUT,
                 "/v1/entities/:id/presence",
@@ -735,6 +823,70 @@ mod tests {
             assert_eq!(status, StatusCode::FORBIDDEN, "{method} {route}");
             assert_eq!(body["ok"], false);
         }
+    }
+
+    #[tokio::test]
+    async fn runtime_lease_reads_only_its_own_presence_while_desktop_keeps_write_access() {
+        let f = fixture();
+        let (other_id, _) = f.state.identity_manager.create_agent("Other").unwrap();
+        let desktop = f.desktop();
+        let lease = f.lease_for(&f.entity_id).lease_id;
+        let own_path = format!("/v1/entities/{}/presence", f.entity_id);
+        let other_path = format!("/v1/entities/{other_id}/presence");
+        let choice = serde_json::json!({
+            "temperament": "gentle",
+            "identity": "aether",
+            "crest": "orbit",
+            "motion": "calm"
+        });
+
+        for path in [&own_path, &other_path] {
+            let (status, response) = f
+                .send(Method::PUT, path, Some(&desktop), Some(choice.clone()))
+                .await;
+            assert_eq!(status, StatusCode::OK, "{response}");
+            assert_eq!(response["ok"], true, "{response}");
+        }
+
+        let (status, own) = f.send(Method::GET, &own_path, Some(&lease), None).await;
+        assert_eq!(status, StatusCode::OK, "{own}");
+        assert_eq!(own["data"]["name"], "Route Test");
+        assert_eq!(own["data"]["crest"], "orbit");
+
+        let (status, denied) = f.send(Method::GET, &other_path, Some(&lease), None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+        assert_eq!(denied["ok"], false);
+
+        let (status, denied) = f
+            .send(
+                Method::PUT,
+                &own_path,
+                Some(&lease),
+                Some(serde_json::json!({
+                    "temperament": "gentle",
+                    "identity": "aether",
+                    "crest": "orbit",
+                    "motion": "still"
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+
+        let (status, written) = f
+            .send(
+                Method::PUT,
+                &own_path,
+                Some(&desktop),
+                Some(serde_json::json!({
+                    "temperament": "gentle",
+                    "identity": "aether",
+                    "crest": "orbit",
+                    "motion": "still"
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{written}");
+        assert_eq!(written["data"]["motion"], "still");
     }
 
     #[tokio::test]

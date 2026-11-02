@@ -215,3 +215,32 @@ body {
   0%, 100% { opacity: 0.6; }
   50% { opacity: 1; }
 }
+
+.presence-crest {
+  flex-shrink: 0;
+}
+
+.presence-crest.is-calm .presence-crest-glyph {
+  transform-origin: 32px 32px;
+  animation: presence-breathe 6s ease-in-out infinite;
+}
+
+.presence-crest.is-lively .presence-crest-glyph {
+  transform-origin: 32px 32px;
+  animation: presence-turn 14s linear infinite;
+}
+
+@keyframes presence-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
+@keyframes presence-turn {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .presence-crest .presence-crest-glyph {
+    animation: none !important;
+  }
+}

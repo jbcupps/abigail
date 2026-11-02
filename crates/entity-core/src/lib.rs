@@ -381,12 +381,22 @@ pub struct RuntimeSessionStatusResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityOutboxStatus {
     pub queued_records: usize,
+    pub quarantined_records: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oldest_record_at_utc: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_sync_at_utc: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_sync_error: Option<String>,
+}
+
+/// Redacted mentor-facing diagnostic for one quarantined journey reservation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JourneyQuarantineDiagnostic {
+    pub record_id: String,
+    pub kind: String,
+    pub quarantined_at_utc: String,
+    pub reason: String,
 }
 
 /// Acknowledgement that a skill artifact was applied or reloaded in the runtime.

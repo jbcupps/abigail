@@ -166,6 +166,12 @@
 .quest-checklist li.is-complete, .quest-first li.is-complete { color: var(--color-text); }
 .quest-first strong { color: var(--color-text-bright); }
 .quest-milestone { display: grid; gap: 4px; margin: 12px 0; font-size: 14px; }
+.quest-long-arc > div { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.quest-long-arc article { padding: 12px; border: 1px solid var(--color-border-dim); border-radius: var(--radius-md); background: var(--color-surface-dim); }
+.quest-long-arc article header { display: flex; justify-content: space-between; gap: 8px; }
+.quest-long-arc article header strong { color: var(--color-text-bright); }
+.quest-long-arc article header span { color: var(--color-primary-dim); font-size: 11px; }
+.quest-long-arc article p { color: var(--color-text-dim); font-size: 12px; }
 .quest-nav { border-top: 1px solid var(--color-border-dim); padding-top: 12px; }
 .quest-badges ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; padding: 0; list-style: none; }
 .quest-badges li { display: flex; gap: 8px; align-items: flex-start; padding: 8px; border-radius: var(--radius-md); border: 1px solid var(--color-border-dim); opacity: .6; }
@@ -186,6 +192,110 @@
 @keyframes quest-spark { 0% { transform: translateY(0); opacity: 0; } 20% { opacity: .9; } 100% { transform: translateY(-280px); opacity: 0; } }
 @media (max-width: 700px) { .quest-rail li small { display: none; } }
 @media (prefers-reduced-motion: reduce) { .genesis-celebration-card, .genesis-celebration-glow span { animation: none !important; } .genesis-celebration-glow span { display: none; } }
+
+/* Post-creation Journey lives on Entity cards outside Genesis. */
+.entity-journey-chip-button {
+  width: 100%;
+  border: 1px solid var(--color-border-dim);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-dim);
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+.entity-journey-chip-button:hover,
+.entity-journey-chip-button:focus-visible {
+  border-color: var(--color-primary-dim);
+  color: var(--color-text);
+  outline: none;
+}
+.entity-journey-chip-action {
+  margin-left: auto;
+  color: var(--color-primary-dim);
+  font-weight: 600;
+}
+.entity-journey-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--color-overlay, rgba(0, 0, 0, 0.55));
+}
+.entity-journey-card {
+  width: min(720px, 100%);
+  max-height: min(88vh, 900px);
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-elevated);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+}
+.entity-journey-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.entity-journey-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.entity-journey-identity h2 {
+  margin: 2px 0 0;
+  font-size: 1.35rem;
+  color: var(--color-text-bright);
+}
+.entity-journey-card .quest-level {
+  margin-bottom: 12px;
+}
+.entity-journey-card .quest-activity {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+.entity-journey-card .quest-activity div {
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-dim);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-dim);
+}
+.entity-journey-card .quest-activity dt {
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+.entity-journey-card .quest-activity dd {
+  margin: 2px 0 0;
+  color: var(--color-text-bright);
+  font-size: 13px;
+}
+.quest-activity {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+.quest-activity div {
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-dim);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-dim);
+}
+.quest-activity dt {
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+.quest-activity dd {
+  margin: 2px 0 0;
+  color: var(--color-text-bright);
+  font-size: 13px;
+}
 
 /* Presence crests appear on Entity cards too, so they are not scoped. */
 .presence-crest { flex-shrink: 0; }

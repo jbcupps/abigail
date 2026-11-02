@@ -8,6 +8,24 @@ DEFINE TABLE IF NOT EXISTS genesis_session SCHEMALESS;
 DEFINE INDEX IF NOT EXISTS idx_genesis_session_owner ON TABLE genesis_session COLUMNS owner_id;
 DEFINE TABLE IF NOT EXISTS entity_journey SCHEMALESS;
 DEFINE INDEX IF NOT EXISTS idx_entity_journey_owner ON TABLE entity_journey COLUMNS owner_id;
+DEFINE TABLE OVERWRITE genesis_legacy_migration SCHEMAFULL;
+DEFINE FIELD OVERWRITE owner_id ON TABLE genesis_legacy_migration TYPE string;
+DEFINE FIELD OVERWRITE entity_id ON TABLE genesis_legacy_migration TYPE string;
+DEFINE FIELD OVERWRITE request_digest ON TABLE genesis_legacy_migration TYPE string;
+DEFINE FIELD OVERWRITE state ON TABLE genesis_legacy_migration TYPE string
+    ASSERT $value = 'pending' OR $value = 'complete';
+DEFINE FIELD OVERWRITE created_at ON TABLE genesis_legacy_migration TYPE string;
+DEFINE FIELD OVERWRITE updated_at ON TABLE genesis_legacy_migration TYPE string;
+UPDATE genesis_legacy_migration CONTENT {
+    owner_id: owner_id,
+    entity_id: entity_id,
+    request_digest: request_digest,
+    state: state,
+    created_at: created_at,
+    updated_at: updated_at
+};
+DEFINE INDEX IF NOT EXISTS idx_genesis_legacy_migration_owner ON TABLE genesis_legacy_migration COLUMNS owner_id;
+DEFINE INDEX IF NOT EXISTS idx_genesis_legacy_migration_entity ON TABLE genesis_legacy_migration COLUMNS owner_id, entity_id;
 DEFINE TABLE OVERWRITE entity_journey_event SCHEMAFULL;
 DEFINE FIELD OVERWRITE record_id ON TABLE entity_journey_event TYPE string;
 DEFINE FIELD OVERWRITE owner_id ON TABLE entity_journey_event TYPE string;
@@ -35,6 +53,29 @@ UPDATE entity_journey_event CONTENT {
 };
 DEFINE INDEX IF NOT EXISTS idx_entity_journey_event_owner ON TABLE entity_journey_event COLUMNS owner_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_journey_event_entity ON TABLE entity_journey_event COLUMNS owner_id, entity_id;
+DEFINE TABLE OVERWRITE entity_journey_event_compaction SCHEMAFULL;
+DEFINE FIELD OVERWRITE owner_id ON TABLE entity_journey_event_compaction TYPE string;
+DEFINE FIELD OVERWRITE entity_id ON TABLE entity_journey_event_compaction TYPE string;
+DEFINE FIELD OVERWRITE successful_skill_uses ON TABLE entity_journey_event_compaction TYPE int
+    ASSERT $value >= 0;
+DEFINE FIELD OVERWRITE confirmed_memories ON TABLE entity_journey_event_compaction TYPE int
+    ASSERT $value >= 0;
+DEFINE FIELD OVERWRITE compacted_events ON TABLE entity_journey_event_compaction TYPE array<object>;
+DEFINE FIELD OVERWRITE compacted_events.*.record_id ON TABLE entity_journey_event_compaction TYPE string;
+DEFINE FIELD OVERWRITE compacted_events.*.digest ON TABLE entity_journey_event_compaction TYPE string;
+DEFINE FIELD OVERWRITE created_at ON TABLE entity_journey_event_compaction TYPE string;
+DEFINE FIELD OVERWRITE updated_at ON TABLE entity_journey_event_compaction TYPE string;
+UPDATE entity_journey_event_compaction CONTENT {
+    owner_id: owner_id,
+    entity_id: entity_id,
+    successful_skill_uses: successful_skill_uses,
+    confirmed_memories: confirmed_memories,
+    compacted_events: compacted_events,
+    created_at: created_at,
+    updated_at: updated_at
+};
+DEFINE INDEX IF NOT EXISTS idx_entity_journey_event_compaction_owner ON TABLE entity_journey_event_compaction COLUMNS owner_id;
+DEFINE INDEX IF NOT EXISTS idx_entity_journey_event_compaction_entity ON TABLE entity_journey_event_compaction COLUMNS owner_id, entity_id UNIQUE;
 DEFINE TABLE IF NOT EXISTS migration_log SCHEMALESS;
 DEFINE TABLE IF NOT EXISTS job_record SCHEMALESS;
 DEFINE TABLE IF NOT EXISTS reflection_run SCHEMALESS;
@@ -92,6 +133,21 @@ mod tests {
             "skill_id": "com.abigail.calendar",
             "tool_name": "list_events",
             "successful_skill_count": 3
+        })
+    }
+
+    fn valid_compaction(entity_id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "owner_id": "local",
+            "entity_id": entity_id,
+            "successful_skill_uses": 3,
+            "confirmed_memories": 1,
+            "compacted_events": [{
+                "record_id": uuid::Uuid::new_v4().to_string(),
+                "digest": "ab".repeat(32),
+            }],
+            "created_at": "2026-10-23T00:00:00Z",
+            "updated_at": "2026-10-23T00:00:00Z",
         })
     }
 
@@ -209,5 +265,135 @@ mod tests {
         let mut injected = valid_event(&new_id);
         injected["prompt"] = serde_json::json!("private prompt");
         assert_field_was_rejected_or_removed(&handle, &new_id, &injected, "prompt");
+    }
+
+    #[test]
+    fn journey_compaction_schema_recursively_rejects_content_and_scoring_fields() {
+        let handle = PersistenceHandle::open_ephemeral(EntityScope::Hive).unwrap();
+        let entity_id = uuid::Uuid::new_v4().to_string();
+        let expected = valid_compaction(&entity_id);
+        handle
+            .upsert("entity_journey_event_compaction", &entity_id, &expected)
+            .unwrap();
+        let mut stored = handle
+            .select_record::<serde_json::Value>("entity_journey_event_compaction", &entity_id)
+            .unwrap()
+            .unwrap();
+        stored.as_object_mut().unwrap().remove("id");
+        assert_eq!(stored, expected);
+
+        for field in [
+            "message",
+            "reply",
+            "prompt",
+            "content",
+            "payload",
+            "prose",
+            "model",
+            "model_output",
+            "tool_result",
+            "memory_content",
+            "weights",
+            "deontology",
+            "teleology",
+            "areteology",
+            "welfare",
+            "virtue",
+        ] {
+            let next_entity = uuid::Uuid::new_v4().to_string();
+            let mut injected = valid_compaction(&next_entity);
+            injected[field] = serde_json::json!("private or scoring value");
+            injected["compacted_events"][0][field] =
+                serde_json::json!({"nested": "private or scoring value"});
+            let result = handle.upsert("entity_journey_event_compaction", &next_entity, &injected);
+            if result.is_ok() {
+                let saved = handle
+                    .select_record::<serde_json::Value>(
+                        "entity_journey_event_compaction",
+                        &next_entity,
+                    )
+                    .unwrap()
+                    .unwrap();
+                assert!(
+                    saved.get(field).is_none(),
+                    "SCHEMAFULL journey compaction row retained forbidden field {field}: {saved}"
+                );
+                assert!(
+                    saved["compacted_events"][0].get(field).is_none(),
+                    "SCHEMAFULL journey compaction entry retained forbidden field {field}: {saved}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn journey_legacy_migration_schema_keeps_only_binding_state_and_timestamps() {
+        let handle = PersistenceHandle::open_ephemeral(EntityScope::Hive).unwrap();
+        let record = serde_json::json!({
+            "owner_id": "local",
+            "entity_id": uuid::Uuid::new_v4().to_string(),
+            "request_digest": "ab".repeat(32),
+            "state": "pending",
+            "created_at": "2026-10-23T00:00:00Z",
+            "updated_at": "2026-10-23T00:00:00Z",
+        });
+        let id = "cd".repeat(32);
+        handle
+            .upsert("genesis_legacy_migration", &id, &record)
+            .unwrap();
+        let mut stored = handle
+            .select_record::<serde_json::Value>("genesis_legacy_migration", &id)
+            .unwrap()
+            .unwrap();
+        stored.as_object_mut().unwrap().remove("id");
+        assert_eq!(stored, record);
+
+        let mut invalid_state = record.clone();
+        invalid_state["state"] = serde_json::json!("damaged");
+        assert!(
+            handle
+                .upsert(
+                    "genesis_legacy_migration",
+                    &uuid::Uuid::new_v4().simple().to_string(),
+                    &invalid_state,
+                )
+                .is_err(),
+            "legacy migration persistence accepted an unknown state"
+        );
+
+        for field in [
+            "attempt_key",
+            "name",
+            "purpose",
+            "boundaries",
+            "presence",
+            "weights",
+            "deontology",
+            "teleology",
+            "areteology",
+            "welfare",
+            "message",
+            "reply",
+            "content",
+            "prompt",
+            "model_output",
+            "memory",
+            "payload",
+        ] {
+            let next_id = uuid::Uuid::new_v4().simple().to_string();
+            let mut injected = record.clone();
+            injected[field] = serde_json::json!("private value");
+            let result = handle.upsert("genesis_legacy_migration", &next_id, &injected);
+            if result.is_ok() {
+                let saved = handle
+                    .select_record::<serde_json::Value>("genesis_legacy_migration", &next_id)
+                    .unwrap()
+                    .unwrap();
+                assert!(
+                    saved.get(field).is_none(),
+                    "SCHEMAFULL legacy migration row retained forbidden field {field}: {saved}"
+                );
+            }
+        }
     }
 }
